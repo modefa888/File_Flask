@@ -1,0 +1,2267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>在线项目 IDE</title>
+<link rel="stylesheet" href="/static/vendor/bootstrap-icons/bootstrap-icons.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/codemirror.min.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/addon/dialog/dialog.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/material-darker.min.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    background: #1e1e1e; color: #cccccc; overflow: hidden;
+    /* 固定定位：编辑器内长行/光标会把 overflow:hidden 的页面程序化滚动，
+       导致左侧活动栏、侧边栏被推出视口（整体错位），固定视口后彻底避免 */
+    position: fixed; inset: 0; width: 100%;
+    display: flex; flex-direction: column;
+  }
+  /* ===== 标题栏 ===== */
+  .titlebar {
+    height: 35px; flex: none; background: #323233;
+    display: flex; align-items: center; padding: 0 12px; gap: 14px;
+    -webkit-user-select: none; user-select: none; font-size: 13px;
+    overflow: hidden;
+  }
+  .traffic { display: flex; gap: 8px; }
+  .traffic span { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .traffic .r { background: #ff5f56; } .traffic .y { background: #ffbd2e; } .traffic .g { background: #27c93f; }
+  .menubar { display: flex; gap: 16px; color: #cfcfcf; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+  .menubar span { cursor: default; }
+  .titlebar .tb-title { margin: 0 auto; color: #9aa0a6; font-size: 12px; max-width: 50%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .titlebar .tb-actions { display: flex; gap: 8px; flex: none; }
+  .titlebar .tb-actions button {
+    background: transparent; border: none; color: #cfcfcf; cursor: pointer; font-size: 13px; padding: 2px 8px; border-radius: 4px;
+  }
+  .titlebar .tb-actions button:hover { background: #3a3a3a; }
+
+  /* ===== 工作区 ===== */
+  .workbench { flex: 1; display: flex; min-height: 0; }
+
+  /* 活动栏 */
+  .activitybar {
+    width: 48px; flex: none; background: #333333;
+    display: flex; flex-direction: column; align-items: center; padding-top: 6px; gap: 2px;
+  }
+  .activitybar .act {
+    width: 48px; height: 44px; display: flex; align-items: center; justify-content: center;
+    color: #858585; font-size: 22px; cursor: pointer; border-left: 2px solid transparent;
+  }
+  .activitybar .act:hover { color: #ffffff; }
+  .activitybar .act.active { color: #ffffff; border-left-color: #ffffff; }
+  .activitybar .act.bottom { margin-top: auto; }
+
+  /* 侧边栏 */
+  .sidebar {
+    width: 280px; flex: none; background: #252526; border-right: 1px solid #1a1a1a;
+    display: flex; flex-direction: column; min-height: 0; transition: width .12s ease;
+  }
+  .sidebar.collapsed { display: none; }
+  .side-header {
+    height: 35px; flex: none; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 12px; font-size: 11px; letter-spacing: .6px; text-transform: uppercase; color: #bbbbbb;
+  }
+  .side-header .side-actions { display: flex; gap: 4px; }
+  .side-header .side-actions button {
+    background: transparent; border: none; color: #bbbbbb; cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 4px;
+  }
+  .side-header .side-actions button:hover { background: #2a2d2e; color: #fff; }
+  .side-root {
+    font-size: 13px; color: #e7e7e7; padding: 4px 12px 8px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tree { flex: 1; overflow: auto; padding-bottom: 10px; }
+  .tree-row {
+    display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 4px;
+    font-size: 13px; color: #cccccc; cursor: pointer; white-space: nowrap; user-select: none;
+  }
+  .tree-row:hover { background: #2a2d2e; }
+  .tree-row.selected { background: #094771; }
+  .tree-row .twist { width: 16px; text-align: center; color: #9aa0a6; font-size: 10px; flex: none; }
+  .tree-row .ic { width: 16px; flex: none; text-align: center; }
+  .tree-row .nm { overflow: hidden; text-overflow: ellipsis; }
+  .tree-row.dirty .nm { color: #e2c08a; }
+  .tree-children { display: none; }
+  .tree-children.open { display: block; }
+
+  /* 侧边搜索/占位面板 */
+  .side-panel { flex: 1; overflow: auto; padding: 10px 12px; display: none; }
+  .side-panel.active { display: block; }
+  /* 只作用于文本输入框：否则复选框也会被撑成整行宽（Git 面板的“包含已跟踪改动”会折行） */
+  .side-panel input:not([type="checkbox"]):not([type="radio"]) {
+    width: 100%; background: #3c3c3c; border: 1px solid #3c3c3c; color: #fff; padding: 5px 8px; border-radius: 3px; font-size: 12px;
+  }
+  .side-panel .ph { color: #777; font-size: 12px; padding: 14px 0; }
+
+  /* ===== 搜索面板（内容搜索 / 文件名搜索）===== */
+  #searchPanel { padding: 10px 8px 0; display: none; flex-direction: column; min-height: 0; }
+  #searchPanel.active { display: flex; }
+  .s-modes { display: flex; gap: 0; margin: 0 2px 8px; background: #2d2d2d; border-radius: 4px; overflow: hidden; }
+  .s-mode {
+    flex: 1; background: transparent; border: none; color: #9d9d9d; cursor: pointer;
+    font-size: 12px; padding: 5px 0; font-family: inherit;
+  }
+  .s-mode:hover { color: #ffffff; }
+  .s-mode.active { background: #0d5a8a; color: #ffffff; }
+  .s-replace-row { display: flex; gap: 6px; padding-top: 6px; align-items: center; }
+  .s-replace { flex: 1; min-width: 0; }
+  .s-btn {
+    background: #0d7ec4; border: none; color: #fff; border-radius: 3px;
+    font-size: 12px; padding: 4px 10px; cursor: pointer; flex: none; font-family: inherit;
+  }
+  .s-btn:hover { background: #0a6aa8; }
+  /* 文件名模式：内容搜索专属控件隐藏 */
+  #searchPanel.mode-name #grepWord,
+  #searchPanel.mode-name #grepRegex,
+  #searchPanel.mode-name .s-replace-row { display: none; }
+  .s-tools { display: flex; gap: 6px; padding: 8px 2px 0; }
+  .s-opt {
+    background: #3a3d41; border: 1px solid transparent; color: #b0b0b0; cursor: pointer;
+    border-radius: 10px; font-size: 11px; padding: 2px 9px;
+  }
+  .s-opt:hover { color: #fff; }
+  .s-opt.active { background: #0d5a8a; color: #ffffff; }
+  .s-hint { color: #8a8a8a; font-size: 11px; padding: 8px 2px 6px; line-height: 1.6; }
+  .s-hint.err { color: #e08a8a; }
+  .s-results { flex: 1; overflow: auto; min-height: 0; }
+  .sres {
+    display: flex; align-items: flex-start; gap: 6px; padding: 4px 6px; border-radius: 4px;
+    cursor: pointer; font-size: 13px; color: #d4d4d4;
+  }
+  .sres:hover { background: #2a2d2e; }
+  .sres .ic { color: #9aa0a6; width: 16px; flex: none; text-align: center; margin-top: 1px; }
+  .sres-main { min-width: 0; flex: 1; }
+  .sres-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sres-path { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 内容搜索结果：按文件分组 */
+  .gfile { margin-bottom: 2px; }
+  .gf-head {
+    display: flex; align-items: center; gap: 5px; padding: 4px 6px; cursor: pointer;
+    font-size: 12px; color: #d4d4d4; border-radius: 4px; position: relative;
+  }
+  .gf-head:hover { background: #2a2d2e; }
+  .gf-twist { font-size: 10px; color: #9aa0a6; }
+  .gf-head .ic { color: #9aa0a6; }
+  .gf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gf-rel { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gf-count {
+    margin-left: auto; background: #4d4d4d; color: #ffffff; border-radius: 9px;
+    font-size: 10px; padding: 1px 6px; flex: none;
+  }
+  .gf-rep {
+    background: transparent; border: none; color: #9d9d9d; cursor: pointer;
+    font-size: 12px; padding: 1px 4px; border-radius: 3px; flex: none; display: none;
+  }
+  .gf-head:hover .gf-rep { display: inline-block; }
+  .gf-rep:hover { background: #3a3d41; color: #fff; }
+  .gf-body { display: block; }
+  .gfile.collapsed .gf-body { display: none; }
+  .gm {
+    display: flex; gap: 8px; padding: 2px 6px 2px 22px; cursor: pointer;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; color: #bdbdbd;
+    white-space: pre; overflow: hidden;
+  }
+  .gm:hover { background: #2a2d2e; }
+  .gm-ln { color: #6f6f6f; min-width: 34px; text-align: right; flex: none; }
+  .gm-tx { overflow: hidden; text-overflow: ellipsis; }
+  .gm mark { background: #ff9632; color: #1f1f1f; font-weight: 600; border-radius: 2px; }
+
+  /* ===== 源代码管理（Git）===== */
+  #gitPanel.active { display: flex; flex-direction: column; padding: 8px 0 0; min-height: 0; }
+  .git-head { display: flex; align-items: center; gap: 6px; padding: 0 10px 8px; font-size: 12px; color: #d4d4d4; }
+  .git-head .bi-git { color: #e2a03f; }
+  #gitBranch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-sync { color: #8a8a8a; font-size: 11px; }
+  .git-spacer { flex: 1; }
+  .g-ico { background: transparent; border: none; color: #cccccc; cursor: pointer; border-radius: 3px; padding: 2px 5px; }
+  .g-ico:hover { background: #3a3d41; color: #fff; }
+  .git-commit { padding: 0 10px 8px; }
+  .git-commit textarea {
+    width: 100%; height: 46px; resize: vertical; background: #3c3c3c; border: 1px solid #3c3c3c;
+    border-radius: 3px; color: #fff; font-size: 12px; padding: 5px 8px; outline: none; font-family: inherit;
+  }
+  .git-commit textarea:focus { border-color: #007fd4; }
+  .git-amend {
+    color: #9d9d9d; font-size: 11px; display: flex; align-items: center; gap: 5px;
+    padding-top: 6px; cursor: pointer; white-space: nowrap; overflow: hidden;
+  }
+  .git-amend input[type="checkbox"] { flex: none; width: 13px; height: 13px; margin: 0; }
+  .g-btn.block { display: block; width: 100%; padding: 6px 12px; margin-top: 6px; font-size: 12px; }
+  .g-btn {
+    background: #0d7ec4; border: none; color: #fff; border-radius: 3px;
+    font-size: 12px; padding: 4px 12px; cursor: pointer; font-family: inherit; flex: none;
+  }
+  .g-btn:hover { background: #0a6aa8; }
+  .g-btn.outline { background: #3a3d41; }
+  .g-btn.outline:hover { background: #45494e; }
+  .git-list { flex: 1; overflow: auto; min-height: 0; }
+  .git-sec { padding-bottom: 4px; }
+  .git-sec-head {
+    display: flex; align-items: center; gap: 6px; font-size: 11px; color: #bbbbbb;
+    padding: 3px 10px; cursor: pointer; user-select: none;
+  }
+  .git-sec-head:hover { background: #2a2d2e; }
+  .git-sec-head .bi { font-size: 10px; color: #9aa0a6; }
+  .git-sec-head .git-cnt { margin-left: auto; color: #8a8a8a; }
+  .git-file { display: flex; align-items: center; gap: 6px; padding: 3px 8px 3px 22px; font-size: 12px; color: #cccccc; cursor: pointer; }
+  .git-file:hover { background: #2a2d2e; }
+  .git-file .gf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-file .gf-dir { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-file .gf-st { margin-left: auto; font-size: 11px; color: #e2c08a; flex: none; }
+  .git-file .gf-acts { display: none; gap: 2px; flex: none; }
+  .git-file:hover .gf-acts { display: flex; }
+  .git-file .gf-acts button { background: transparent; border: none; color: #cccccc; cursor: pointer; padding: 0 3px; font-size: 12px; border-radius: 3px; }
+  .git-file .gf-acts button:hover { background: #3a3d41; color: #fff; }
+  .git-empty { color: #777; font-size: 12px; padding: 14px 12px; line-height: 1.9; }
+  /* 分组标题右侧的批量操作按钮 */
+  .git-sec-head .git-acts { display: none; gap: 2px; margin-left: 6px; }
+  .git-sec-head:hover .git-acts { display: flex; }
+  .git-sec-head .git-acts button {
+    background: transparent; border: none; color: #cccccc; cursor: pointer;
+    padding: 0 3px; font-size: 12px; border-radius: 3px;
+  }
+  .git-sec-head .git-acts button:hover { background: #3a3d41; color: #fff; }
+  /* 树形视图：目录行 + 缩进文件行 */
+  .git-dir { display: flex; align-items: center; gap: 5px; padding: 3px 8px; font-size: 12px; color: #cccccc; cursor: pointer; }
+  .git-dir:hover { background: #2a2d2e; }
+  .git-dir .git-dir-tw { font-size: 10px; color: #9aa0a6; }
+  .git-dir .git-dir-ic { color: #dcb67a; }
+  .git-dir .gf-dirname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-dir .gf-dot { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: #6fcf8a; flex: none; }
+  .git-dir .gf-st { margin-left: 6px; font-size: 11px; color: #8a8a8a; flex: none; }
+  /* 图形（提交历史） */
+  .git-graph { border-top: 1px solid #2f2f2f; margin-top: 6px; }
+  .git-commit-row { display: flex; align-items: baseline; gap: 6px; padding: 3px 12px; font-size: 12px; color: #cccccc; }
+  .git-commit-row:hover { background: #2a2d2e; }
+  .git-commit-row .gc-hash { color: #e2a03f; font-family: "SF Mono", Menlo, monospace; font-size: 11px; flex: none; }
+  .git-commit-row .gc-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-commit-row .gc-meta { margin-left: auto; color: #7d7d7d; font-size: 11px; flex: none; }
+  /* 尚未初始化仓库时，只显示提示与初始化按钮，提交区/暂存全部按钮隐藏 */
+  #gitPanel.not-repo .git-commit,
+  #gitPanel.not-repo #gitStageAll { display: none; }
+  /* 差异视图行底色 */
+  .cm-host .diff-add { background: rgba(40, 120, 60, .32); }
+  .cm-host .diff-del { background: rgba(150, 45, 45, .32); }
+  .cm-host .diff-hunk { background: rgba(56, 92, 140, .35); color: #9ecbff; }
+  .cm-host .diff-meta { color: #8a8a8a; }
+  /* 资源管理器中的 Git 状态着色 */
+  .tree-row.git-modified .nm { color: #e2c08a; }
+  .tree-row.git-untracked .nm { color: #6fcf8a; }
+  .tree-row.git-staged .nm { color: #73c991; }
+
+  /* ===== 侧边栏拖动分隔条 ===== */
+  .splitter {
+    width: 5px; flex: none; background: #1a1a1a; cursor: col-resize; position: relative;
+  }
+  .splitter::after {
+    content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 1px;
+    background: transparent; transition: background .12s;
+  }
+  .splitter:hover::after, .splitter.dragging::after { background: #007fd4; }
+  .sidebar.collapsed + .splitter { display: none; }
+  body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none; }
+
+  /* ===== 编辑区 ===== */
+  .editorarea { flex: 1; display: flex; flex-direction: column; min-width: 0; background: #1e1e1e; overflow: hidden; }
+  .breadcrumbs {
+    height: 28px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 14px;
+    font-size: 12px; color: #8a8a8a; border-bottom: 1px solid #1a1a1a; background: #1e1e1e; overflow: hidden; white-space: nowrap;
+  }
+  .breadcrumbs .bc { color: #8a8a8a; }
+  .breadcrumbs .bc.cur { color: #cfcfcf; }
+  .breadcrumbs .sep { color: #555; }
+
+  .tabbar { height: 35px; flex: none; display: flex; align-items: stretch; background: #252526; overflow-x: auto; }
+  .tabbar::-webkit-scrollbar { height: 0; }
+  .tab {
+    display: flex; align-items: center; gap: 8px; padding: 0 10px; max-width: 220px;
+    background: #2d2d2d; border-right: 1px solid #1e1e1e; color: #969696; font-size: 13px; cursor: pointer; white-space: nowrap;
+  }
+  .tab.active { background: #1e1e1e; color: #ffffff; }
+  .tab .t-ic { font-size: 13px; }
+  .tab .t-nm { overflow: hidden; text-overflow: ellipsis; }
+  .tab .t-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; flex: none; display: none; }
+  .tab.dirty .t-dot { display: inline-block; }
+  .tab .t-close { color: #969696; border-radius: 4px; padding: 0 2px; }
+  .tab .t-close:hover { background: #4a4a4a; color: #fff; }
+
+  .editor-host-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+  .cm-host { position: absolute; inset: 0; display: none; }
+  .cm-host.active { display: block; }
+  .cm-host .CodeMirror { height: 100%; font-family: "SF Mono", "Menlo", Consolas, monospace; font-size: 13px; }
+  /* 选中文本 / 当前行：主题默认偏暗，提亮后定位更明显
+     （选择器带上 .cm-s-material-darker 才能压过主题自带的同名规则） */
+  .cm-host .cm-s-material-darker .CodeMirror-selected { background: rgba(38, 79, 120, .72); }
+  .cm-host .cm-s-material-darker .CodeMirror-focused .CodeMirror-selected,
+  .cm-host .cm-s-material-darker.CodeMirror-focused .CodeMirror-selected { background: rgba(58, 118, 175, .80); }
+  .cm-host .cm-s-material-darker .CodeMirror-activeline-background { background: rgba(255, 255, 255, .055); }
+  .cm-host .cm-s-material-darker .CodeMirror-linebackground { border-radius: 2px; }
+
+  /* 查找/替换对话框：默认是贴编辑器左上角整行铺开、会压住代码首行，
+     改为仿 VS Code 的右上角悬浮卡片 */
+  .cm-host .CodeMirror-dialog {
+    position: absolute; top: 8px; bottom: auto; left: auto; right: 20px; z-index: 30;
+    background: #252526; border: 1px solid #454545; border-radius: 6px;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, .6);
+    padding: 7px 10px; color: #d4d4d4; max-width: calc(100% - 56px);
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    font-size: 12px;
+  }
+  .cm-host .CodeMirror-dialog-top, .cm-host .CodeMirror-dialog-bottom { border: 0; }
+  .cm-host .CodeMirror-dialog input,
+  .cm-host .CodeMirror-dialog input.CodeMirror-search-field {
+    background: #3c3c3c; border: 1px solid #565656; border-radius: 3px;
+    color: #ffffff; padding: 3px 8px; font-size: 12px; width: 190px;
+    font-family: inherit; outline: none;
+  }
+  .cm-host .CodeMirror-dialog input:focus { border-color: #007fd4; }
+  .cm-host .CodeMirror-dialog button {
+    background: #0d7ec4; border: none; color: #ffffff; border-radius: 3px;
+    padding: 3px 10px; font-size: 12px; cursor: pointer;
+  }
+  .cm-host .CodeMirror-dialog button:hover { background: #0a6aa8; }
+  .cm-host .CodeMirror-dialog .CodeMirror-search-hint { color: #8a8a8a; font-size: 11px; }
+  .cm-host .CodeMirror-dialog span { color: #cccccc; white-space: nowrap; }
+  .cm-host .cm-searching { background: rgba(255, 196, 0, .35); outline: 1px solid rgba(255, 196, 0, .5); }
+
+  /* ===== 查找/替换（VS Code 风格悬浮组件）===== */
+  .ff-widget {
+    position: absolute; top: 8px; right: 20px; z-index: 40; display: none;
+    background: #252526; border: 1px solid #454545; border-radius: 6px;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, .6);
+    /* 左侧留出固定槽位放展开箭头，查找行与替换行因此左右平齐 */
+    padding: 6px 6px 6px 26px;
+    min-width: 470px; max-width: calc(100% - 40px); color: #cccccc;
+  }
+  .ff-widget.show { display: block; }
+  .ff-row { display: flex; align-items: center; gap: 4px; }
+  .ff-row + .ff-row { margin-top: 6px; }
+  /* 展开替换的箭头：垂直居中在左侧槽位，展开后旋转 90° */
+  .ff-expand {
+    position: absolute; left: 3px; top: 50%; transform: translateY(-50%);
+    padding: 4px 4px; font-size: 15px; line-height: 1;
+  }
+  .ff-widget.expanded .ff-expand { transform: translateY(-50%) rotate(90deg); }
+  .ff-opt i { font-size: 13px; line-height: 1; }
+  .ff-input {
+    flex: 1 1 auto; min-width: 110px; background: #3c3c3c; border: 1px solid #565656;
+    border-radius: 3px; color: #ffffff; padding: 4px 8px; font-size: 12px;
+    outline: none; font-family: inherit;
+  }
+  .ff-input:focus { border-color: #007fd4; }
+  .ff-input.no-match { border-color: #f14c4c; }
+  .ff-opt, .ff-nav, .ff-close, .ff-btn {
+    background: transparent; border: none; color: #cccccc; cursor: pointer;
+    border-radius: 3px; font-size: 12px; padding: 3px 6px; line-height: 1.3; flex: none;
+    font-family: inherit;
+  }
+  .ff-expand {
+    background: transparent; border: none; color: #cccccc; cursor: pointer;
+    border-radius: 3px; font-family: inherit;
+  }
+  .ff-opt:hover, .ff-nav:hover, .ff-close:hover, .ff-btn:hover, .ff-expand:hover { background: #3a3d41; color: #ffffff; }
+  .ff-opt.active { background: #37373d; color: #ffffff; box-shadow: inset 0 -2px 0 #007fd4; }
+  .ff-nav.disabled { opacity: .35; pointer-events: none; }
+  .ff-count { color: #8a8a8a; font-size: 11px; padding: 0 4px; white-space: nowrap; flex: none; }
+  .ff-btn { background: #0d7ec4; color: #ffffff; padding: 3px 10px; }
+  .ff-btn:hover { background: #0a6aa8; }
+  .ff-replace-row { display: none; }
+  .ff-widget.expanded .ff-replace-row { display: flex; }
+  /* 匹配高亮：全部匹配 + 当前匹配（亮橙色，保证在深色主题下醒目） */
+  .CodeMirror .cm-find-hl {
+    background: rgba(234, 92, 0, .48);
+    outline: 1px solid rgba(255, 157, 66, .75);
+    border-radius: 2px;
+  }
+  .CodeMirror .cm-find-cur {
+    background: #ff9632; color: #1f1f1f; font-weight: 600;
+    outline: 1px solid #ffd08a; border-radius: 2px;
+  }
+
+  .welcome {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #5a5a5a; gap: 10px; text-align: center; padding: 0 20px;
+  }
+  .welcome .big { font-size: 64px; color: #3a3a3a; }
+  .welcome .wt { font-size: 18px; color: #9aa0a6; }
+  .welcome .ws { font-size: 13px; color: #666; max-width: 460px; line-height: 1.7; }
+
+  /* ===== 状态栏 ===== */
+  .statusbar {
+    height: 22px; flex: none; background: #007acc; color: #ffffff;
+    display: flex; align-items: center; gap: 16px; padding: 0 12px; font-size: 12px;
+  }
+  .statusbar .sb-item { display: flex; align-items: center; gap: 5px; cursor: default; }
+  .statusbar .sb-item:hover { background: rgba(255,255,255,.1); }
+  .statusbar .sb-right { margin-left: auto; display: flex; gap: 16px; }
+
+  /* 右键菜单 */
+  .ctx-menu {
+    position: fixed; z-index: 1000; background: #252526; border: 1px solid #454545; border-radius: 5px;
+    padding: 4px 0; min-width: 180px; box-shadow: 0 4px 18px rgba(0,0,0,.5); display: none; font-size: 13px;
+  }
+  .ctx-menu .mi { padding: 6px 14px; color: #cccccc; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .ctx-menu .mi:hover { background: #094771; color: #fff; }
+  .ctx-menu .mi.danger:hover { background: #5a1d1d; }
+  .ctx-menu .div { height: 1px; background: #454545; margin: 4px 0; }
+
+  /* ===== 菜单栏下拉 ===== */
+  .menubar span { cursor: default; padding: 3px 9px; border-radius: 4px; }
+  .menubar span:hover, .menubar span.m-open { background: #3a3a3a; color: #ffffff; }
+  .ctx-menu .mi .sc { margin-left: auto; color: #7a7a7a; font-size: 12px; padding-left: 26px; }
+  .ctx-menu .mi.disabled { opacity: .4; pointer-events: none; }
+
+  /* ===== 通用弹窗（替代原生 prompt/confirm） ===== */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none;
+    align-items: center; justify-content: center; z-index: 2500;
+  }
+  .modal-overlay.show { display: flex; }
+  .ide-modal {
+    background: #252526; border: 1px solid #454545; border-radius: 8px; width: 400px; max-width: 92vw;
+    box-shadow: 0 10px 40px rgba(0,0,0,.6); animation: pop .15s ease; overflow: hidden;
+  }
+  .ide-modal .m-title {
+    padding: 12px 16px; font-size: 13px; font-weight: 600; color: #ffffff;
+    border-bottom: 1px solid #333333; display: flex; align-items: center; gap: 8px;
+  }
+  .ide-modal .m-title .bi { color: #4fc1ff; }
+  .ide-modal.danger .m-title .bi { color: #f48771; }
+  .ide-modal .m-body { padding: 16px; font-size: 13px; color: #cccccc; }
+  .ide-modal .m-msg { white-space: pre-wrap; line-height: 1.7; }
+  .ide-modal input {
+    width: 100%; background: #1e1e1e; border: 1px solid #0098ff; color: #ffffff;
+    padding: 7px 10px; border-radius: 4px; font-size: 13px; outline: none; margin-top: 10px;
+  }
+  .ide-modal .m-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 16px; }
+  .ide-modal .m-foot button { padding: 6px 16px; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; }
+  .ide-modal .m-foot .m-cancel { background: #3a3d41; color: #cccccc; }
+  .ide-modal .m-foot .m-cancel:hover { background: #45494e; }
+  .ide-modal .m-foot .m-ok { background: #0d7ec4; color: #ffffff; }
+  .ide-modal .m-foot .m-ok:hover { background: #0a6aa8; }
+  .ide-modal.danger .m-foot .m-ok { background: #a1260d; }
+  .ide-modal.danger .m-foot .m-ok:hover { background: #c13a17; }
+
+  /* 保存确认弹窗 */
+  .preview-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 2000;
+  }
+  .preview-overlay.show { display: flex; }
+  .confirm-modal { background: #fff; border-radius: 10px; width: 360px; max-width: 92vw; overflow: hidden; animation: pop .15s ease; }
+  @keyframes pop { from { transform: scale(.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .confirm-title { padding: 13px 18px; font-weight: 600; color: #1a202c; background: #fff7ed; border-bottom: 1px solid #fed7aa; display: flex; gap: 8px; align-items: center; }
+  .confirm-title .bi { color: #f59e0b; }
+  .confirm-body { padding: 18px; color: #475569; font-size: 14px; }
+  .confirm-stats { display: flex; gap: 14px; margin-top: 10px; font-weight: 700; font-family: "SF Mono", Menlo, monospace; }
+  .confirm-stats .cs-add { color: #15803d; } .confirm-stats .cs-del { color: #b91c1c; }
+  .confirm-sub { margin-top: 8px; color: #94a3b8; font-size: 12px; }
+  .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 13px 18px; background: #f8fafc; border-top: 1px solid #e2e8f0; }
+  .confirm-actions button { padding: 6px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; }
+  .confirm-actions .cancel { background: #e2e8f0; color: #475569; }
+  .confirm-actions .cancel:hover { background: #cbd5e1; }
+  .confirm-actions .ok { background: #2563eb; color: #fff; }
+  .confirm-actions .ok:hover { background: #1d4ed8; }
+
+  /* Toast */
+  .ide-toast {
+    position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+    background: #333; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; z-index: 3000;
+    box-shadow: 0 6px 20px rgba(0,0,0,.4); opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  .ide-toast.show { opacity: 1; }
+  .ide-toast.ok { background: #1f7a3d; } .ide-toast.err { background: #a33; } .ide-toast.warn { background: #9a6700; }
+
+  .scroll-thin::-webkit-scrollbar { width: 10px; height: 10px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #424242; border-radius: 5px; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+
+  /* ===== 窄屏自适应（避免菜单/侧栏被挤出行外） ===== */
+  @media (max-width: 1200px) {
+    .sidebar { width: 232px; }
+    .titlebar .tb-title { max-width: 30%; }
+  }
+  @media (max-width: 1000px) {
+    .sidebar { width: 200px; }
+    .menubar { gap: 8px; }
+    .menubar span { padding: 3px 6px; }
+    .titlebar .tb-title { display: none; }
+    .editorarea .breadcrumbs { padding: 0 8px; }
+  }
+  @media (max-width: 820px) {
+    .traffic { display: none; }
+    .sidebar { width: 168px; }
+    .statusbar .sb-right .sb-item:not(#sbLang) { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="traffic"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+    <div class="menubar" id="menubar"><span data-menu="file">文件</span><span data-menu="edit">编辑</span><span data-menu="sel">选择</span><span data-menu="view">查看</span><span data-menu="goto">转到</span><span data-menu="run">运行</span><span data-menu="help">帮助</span></div>
+    <div class="tb-title" id="tbTitle">在线项目 IDE</div>
+    <div class="tb-actions">
+      <button id="tbNewFile" title="新建文件 (Ctrl+N)"><i class="bi bi-file-earmark-plus"></i></button>
+      <button id="tbNewFolder" title="新建文件夹"><i class="bi bi-folder-plus"></i></button>
+      <button id="tbSave" title="保存 (Ctrl+S)"><i class="bi bi-check-lg"></i></button>
+      <a href="/" title="返回文件管理器"><i class="bi bi-house"></i></a>
+    </div>
+  </div>
+
+  <div class="workbench">
+    <div class="activitybar" id="activitybar">
+      <div class="act active" data-panel="explorer" title="资源管理器"><i class="bi bi-files"></i></div>
+      <div class="act" data-panel="search" title="搜索"><i class="bi bi-search"></i></div>
+      <div class="act" data-panel="git" title="源代码管理"><i class="bi bi-git"></i></div>
+      <div class="act" data-panel="run" title="运行和调试"><i class="bi bi-bug"></i></div>
+      <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
+      <div class="act bottom" id="actSettings" title="设置"><i class="bi bi-gear"></i></div>
+    </div>
+
+    <div class="sidebar" id="sidebar">
+      <div class="side-header">
+        <span id="sideTitle">资源管理器</span>
+        <div class="side-actions">
+          <button id="sideNewFile" title="新建文件"><i class="bi bi-file-earmark-plus"></i></button>
+          <button id="sideNewFolder" title="新建文件夹"><i class="bi bi-folder-plus"></i></button>
+          <button id="sideCollapse" title="折叠侧边栏 (Ctrl+B)"><i class="bi bi-chevron-left"></i></button>
+        </div>
+      </div>
+      <div class="side-root" id="sideRoot">—</div>
+
+      <div class="tree scroll-thin" id="explorerPanel"></div>
+
+      <div class="side-panel mode-content" id="searchPanel">
+        <div class="s-modes">
+          <button class="s-mode active" data-mode="content" title="在文件内容中搜索 (Ctrl+Shift+F)">内容</button>
+          <button class="s-mode" data-mode="name" title="按文件名 / 文件夹名搜索">文件名</button>
+        </div>
+        <input id="searchInput" placeholder="在文件中搜索…" spellcheck="false" autocomplete="off">
+        <div class="s-tools">
+          <button class="s-opt" id="searchCase" title="区分大小写 (Alt+C)，默认不区分">Aa</button>
+          <button class="s-opt" id="grepWord" title="全字匹配 (Alt+W)">ab</button>
+          <button class="s-opt" id="grepRegex" title="使用正则表达式 (Alt+R)">.*</button>
+          <button class="s-opt active" id="searchSkipDep" title="跳过 node_modules、dist、build、__pycache__ 等目录">排除依赖</button>
+        </div>
+        <div class="s-replace-row">
+          <input id="replaceInput" class="s-replace" placeholder="替换（正则模式支持 $1 分组）" spellcheck="false" autocomplete="off">
+          <button class="s-btn" id="grepReplaceAll" title="在所有匹配文件中替换全部匹配">全部替换</button>
+        </div>
+        <div class="s-hint" id="searchHint">输入关键字，在项目所有文件中搜索内容；结果可点击跳转</div>
+        <div class="s-results scroll-thin" id="searchResults"></div>
+      </div>
+      <div class="side-panel not-repo" id="gitPanel">
+        <div class="git-head">
+          <i class="bi bi-git"></i>
+          <span id="gitBranch">—</span>
+          <span class="git-sync" id="gitSync"></span>
+          <span class="git-spacer"></span>
+          <button class="g-ico" id="gitViewToggle" title="切换 树形 / 列表 视图"><i class="bi bi-list-ul"></i></button>
+          <button class="g-ico" id="gitRefresh" title="刷新状态"><i class="bi bi-arrow-clockwise"></i></button>
+          <button class="g-ico" id="gitStageAll" title="暂存所有更改"><i class="bi bi-plus-lg"></i></button>
+        </div>
+        <div class="git-commit">
+          <textarea id="gitCommitMsg" placeholder="消息（Ctrl+Enter 提交）" spellcheck="false"></textarea>
+          <button class="g-btn block" id="gitCommitBtn" title="提交 (Ctrl+Enter)"><i class="bi bi-check-lg"></i> 提交</button>
+          <label class="git-amend" title="提交时自动包含已跟踪文件的改动（git commit -a）">
+            <input type="checkbox" id="gitCommitAll"> 包含已跟踪改动
+          </label>
+        </div>
+        <div class="git-list scroll-thin" id="gitList"></div>
+      </div>
+      <div class="side-panel" id="runPanel"><div class="ph">此页面未启用调试器。</div></div>
+      <div class="side-panel" id="extPanel"><div class="ph">扩展市场暂未开放。</div></div>
+    </div>
+
+    <div class="splitter" id="splitter" title="拖动调整侧边栏宽度（双击恢复默认）"></div>
+
+    <div class="editorarea">
+      <div class="breadcrumbs" id="breadcrumbs"></div>
+      <div class="tabbar scroll-thin" id="tabbar"></div>
+      <div class="editor-host-wrap" id="editorWrap">
+        <div class="welcome" id="welcome">
+          <div class="big"><i class="bi bi-code-square"></i></div>
+          <div class="wt">在线项目 IDE</div>
+          <div class="ws" id="welcomeSub">从左侧资源管理器选择文件开始编辑。支持多标签页、语法高亮、保存对比，整体交互参考 VS Code 设计。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span class="sb-item" id="sbBranch"><i class="bi bi-git"></i> 未启用 Git</span>
+    <span class="sb-item" id="sbPos">行 1, 列 1</span>
+    <span class="sb-item" id="sbSpaces">空格: 4</span>
+    <span class="sb-item" id="sbEnc">UTF-8</span>
+    <div class="sb-right">
+      <span class="sb-item" id="sbLang">纯文本</span>
+      <span class="sb-item" id="sbPath">—</span>
+    </div>
+  </div>
+
+  <div class="ctx-menu" id="ctxMenu"></div>
+  <div class="ctx-menu" id="menuDrop"></div>
+  <div class="modal-overlay" id="modalOverlay"></div>
+  <div class="preview-overlay" id="saveConfirm"></div>
+  <div class="ide-toast" id="toast"></div>
+
+<script src="/static/vendor/codemirror/codemirror.min.js"></script>
+<!-- dialog 插件：search 插件没有它时会退化成原生 prompt() 弹窗 -->
+<script src="/static/vendor/codemirror/addon/dialog/dialog.min.js"></script>
+<script src="/static/vendor/codemirror/addon/selection/active-line.min.js"></script>
+<script src="/static/vendor/codemirror/addon/edit/matchbrackets.min.js"></script>
+<script src="/static/vendor/codemirror/addon/edit/closebrackets.min.js"></script>
+<script src="/static/vendor/codemirror/addon/search/searchcursor.min.js"></script>
+<script src="/static/vendor/codemirror/addon/search/search.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  const BASE = "/static/vendor/codemirror/mode/";
+  const ROOT = new URLSearchParams(location.search).get("path") || "";
+
+  const $ = (id) => document.getElementById(id);
+  const explorerPanel = $("explorerPanel");
+  const tabbar = $("tabbar");
+  const editorWrap = $("editorWrap");
+  const welcome = $("welcome");
+
+  // 打开的标签页
+  const tabs = [];         // {path, name, host, cm, original, dirty}
+  let active = null;
+
+  /* ---------- 工具 ---------- */
+  function toast(msg, type) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.className = "ide-toast show " + (type || "");
+    setTimeout(() => { t.className = "ide-toast " + (type || ""); }, 2200);
+  }
+  function esc(s) { return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function getExt(name) { const i = name.lastIndexOf("."); return i >= 0 ? name.substring(i + 1).toLowerCase() : ""; }
+  function baseName(p) { return p.split("/").pop() || p; }
+  function dirName(p) { const i = p.lastIndexOf("/"); return i > 0 ? p.substring(0, i) : (i === 0 ? "/" : p); }
+
+  /* ---------- 文件树 ---------- */
+  async function apiFiles(path) {
+    const r = await fetch("/api/files?path=" + encodeURIComponent(path));
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    return d;
+  }
+  async function loadChildren(path, container, depth) {
+    const spinner = document.createElement("div");
+    spinner.className = "tree-row"; spinner.style.paddingLeft = (depth * 14 + 8) + "px";
+    spinner.innerHTML = '<span class="twist"></span><span class="ic"><i class="bi bi-hourglass-split"></i></span><span class="nm">加载中…</span>';
+    container.appendChild(spinner);
+    try {
+      const d = await apiFiles(path);
+      spinner.remove();
+      const items = (d.items || []).slice().sort((a, b) => (b.is_dir - a.is_dir) || a.name.localeCompare(b.name, "zh"));
+      if (!items.length) {
+        const e = document.createElement("div");
+        e.className = "tree-row"; e.style.paddingLeft = (depth * 14 + 26) + "px"; e.style.color = "#666";
+        e.innerHTML = '<span class="nm">空文件夹</span>';
+        container.appendChild(e);
+        return;
+      }
+      items.forEach(it => renderNode(it, container, depth + 1));
+      applyGitDecorations(gitState.last);          // 新加载的节点也套用 Git 状态着色
+    } catch (e) {
+      spinner.remove();
+      const er = document.createElement("div");
+      er.className = "tree-row"; er.style.paddingLeft = (depth * 14 + 26) + "px"; er.style.color = "#c66";
+      er.innerHTML = '<span class="nm">' + esc(e.message || "加载失败") + "</span>";
+      container.appendChild(er);
+    }
+  }
+  function iconFor(name, isDir) {
+    if (isDir) return '<i class="bi bi-folder2"></i>';
+    const ext = getExt(name);
+    if (["js","ts","jsx","tsx","mjs","cjs"].includes(ext)) return '<i class="bi bi-filetype-js"></i>';
+    if (["py"].includes(ext)) return '<i class="bi bi-filetype-py"></i>';
+    if (["html","htm"].includes(ext)) return '<i class="bi bi-filetype-html"></i>';
+    if (["css","scss","less"].includes(ext)) return '<i class="bi bi-filetype-css"></i>';
+    if (["json"].includes(ext)) return '<i class="bi bi-filetype-json"></i>';
+    if (["md","markdown"].includes(ext)) return '<i class="bi bi-markdown"></i>';
+    if (["png","jpg","jpeg","gif","svg","webp","bmp"].includes(ext)) return '<i class="bi bi-image"></i>';
+    if (["zip","tar","gz","rar","7z"].includes(ext)) return '<i class="bi bi-file-earmark-zip"></i>';
+    return '<i class="bi bi-file-earmark"></i>';
+  }
+  function renderNode(it, container, depth) {
+    const full = (it.path && it.path.startsWith("/")) ? it.path : container._base + "/" + it.name;
+    const row = document.createElement("div");
+    row.className = "tree-row";
+    row.style.paddingLeft = (depth * 14 + 8) + "px";
+    row.dataset.path = full;
+    row.dataset.name = it.name;
+    row.dataset.isdir = it.is_dir ? "1" : "0";
+    const twist = it.is_dir ? '<span class="twist"><i class="bi bi-chevron-right"></i></span>' : '<span class="twist"></span>';
+    row.innerHTML = twist + '<span class="ic">' + iconFor(it.name, it.is_dir) + '</span><span class="nm">' + esc(it.name) + '</span>';
+    container.appendChild(row);
+
+    const kids = document.createElement("div");
+    kids.className = "tree-children"; kids._base = full; kids._loaded = false;
+    container.appendChild(kids);
+
+    row.addEventListener("click", (e) => {
+      e.stopPropagation();
+      document.querySelectorAll(".tree-row.selected").forEach(r => r.classList.remove("selected"));
+      row.classList.add("selected");
+      if (it.is_dir) {
+        if (kids.classList.contains("open")) { kids.classList.remove("open"); row.querySelector(".twist i").className = "bi bi-chevron-right"; }
+        else {
+          kids.classList.add("open"); row.querySelector(".twist i").className = "bi bi-chevron-down";
+          if (!kids._loaded) { kids._loaded = true; loadChildren(full, kids, depth); }
+        }
+      } else {
+        openFile(full, it.name);
+      }
+    });
+    row.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); showCtxMenu(e.clientX, e.clientY, full, it.name, it.is_dir); });
+  }
+
+  async function initTree() {
+    if (!ROOT) { explorerPanel.innerHTML = '<div class="tree-row"><span class="nm">未指定文件夹路径</span></div>'; return; }
+    $("sideRoot").textContent = baseName(ROOT) || ROOT;
+    $("tbTitle").textContent = "在线项目 IDE — " + baseName(ROOT);
+    $("welcomeSub").textContent = "项目根目录：" + ROOT + "\n从左侧资源管理器选择文件开始编辑。";
+    const root = document.createElement("div");
+    root.className = "tree-children open"; root._base = ROOT; root._loaded = true;
+    explorerPanel.appendChild(root);
+    await loadChildren(ROOT, root, 0);
+  }
+
+  /* ---------- CodeMirror 模式动态加载 ---------- */
+  const MODES = {
+    js: ["javascript", "javascript.min.js"], ts: ["javascript", "javascript.min.js"], jsx: ["javascript", "javascript.min.js"],
+    json: ["javascript", "javascript.min.js"], mjs: ["javascript", "javascript.min.js"], cjs: ["javascript", "javascript.min.js"],
+    py: ["python", "python.min.js"], html: ["htmlmixed", "htmlmixed.min.js"], htm: ["htmlmixed", "htmlmixed.min.js"],
+    xml: ["xml", "xml.min.js"], css: ["css", "css.min.js"], scss: ["css", "css.min.js"], less: ["css", "css.min.js"],
+    md: ["markdown", "markdown.min.js"], c: ["clike", "clike.min.js"], cpp: ["clike", "clike.min.js"], h: ["clike", "clike.min.js"],
+    hpp: ["clike", "clike.min.js"], java: ["clike", "clike.min.js"], cs: ["clike", "clike.min.js"], go: ["go", "go.min.js"],
+    rs: ["clike", "clike.min.js"], php: ["php", "php.min.js"], rb: ["ruby", "ruby.min.js"], sh: ["shell", "shell.min.js"],
+    bash: ["shell", "shell.min.js"], yml: ["yaml", "yaml.min.js"], yaml: ["yaml", "yaml.min.js"],
+    toml: ["properties", "properties.min.js"], ini: ["properties", "properties.min.js"], conf: ["properties", "properties.min.js"],
+    sql: ["sql", "sql.min.js"], lua: ["lua", "lua.min.js"],
+  };
+  const _loaded = new Set(), _promises = {};
+  function ensureMode(ext) {
+    const m = MODES[ext]; if (!m) return Promise.resolve(null);
+    const [mode, rel] = m;
+    if (_loaded.has(mode)) return Promise.resolve(mode);
+    if (_promises[mode]) return _promises[mode];
+    const deps = mode === "htmlmixed" ? ["xml.min.js", "css.min.js", "javascript.min.js"] : [];
+    const p = new Promise((resolve) => {
+      let pending = deps.length + 1;
+      const done = () => { if (--pending === 0) { _loaded.add(mode); resolve(mode); } };
+      const loadOne = (r) => {
+        const s = document.createElement("script");
+        s.src = BASE + r;
+        s.onload = done;
+        s.onerror = () => { pending--; if (pending <= 0) { _loaded.add(mode); resolve(mode); } };
+        document.head.appendChild(s);
+      };
+      loadOne(rel); deps.forEach(loadOne);
+    });
+    _promises[mode] = p; return p;
+  }
+
+  /* ---------- 打开/切换标签 ---------- */
+  function findTab(path) { return tabs.find(t => t.path === path); }
+
+  // 大文件阈值：超过则关闭语法高亮与全量脏值比对，保证流畅
+  const BIG_FILE_BYTES = 400 * 1024;
+
+  // 查找/替换对话框的中文文案（CodeMirror 的 phrases 选项）
+  const CM_PHRASES = {
+    "Search:": "查找：",
+    "Replace:": "替换：",
+    "Replace with:": "替换为：",
+    "Replace all:": "全部替换为：",
+    "Replace?": "是否替换？",
+    "With:": "替换为：",
+    "(Use /re/ syntax for regexp search)": "（支持 /正则/ 语法）",
+    "All": "全部",
+    "Yes": "是",
+    "No": "否",
+    "Stop": "停止",
+  };
+
+  // raw=1：后端直接返回纯文本，省去 base64(膨胀33%) + JSON解析 + atob，大文件快很多
+  async function loadFileText(path, name) {
+    const r = await fetch("/api/preview?path=" + encodeURIComponent(path) + "&raw=1");
+    let body = "";
+    if (r.headers.get("X-Preview-Type") === "text") {
+      body = await r.text();
+      return { text: body, size: parseInt(r.headers.get("X-File-Size") || "0", 10) || 0 };
+    }
+    // 后端未升级（没有 raw 支持）时，回退到老的 JSON + base64 接口，保证仍能打开文件
+    try { body = await r.text(); } catch (_) {}
+    if (r.ok) {
+      try {
+        const d = JSON.parse(body);
+        if (d.type === "text" && d.content) {
+          const bytes = Uint8Array.from(atob(d.content), c => c.charCodeAt(0));
+          return { text: new TextDecoder("utf-8").decode(bytes), size: bytes.length };
+        }
+        if (!d.type) return { unsupported: true };
+      } catch (_) {}
+      return { unsupported: true };
+    }
+    let msg = "服务器响应异常 (HTTP " + r.status + ")";
+    try { const d = JSON.parse(body); if (d && d.error) msg = d.error; } catch (_) {}
+    return { error: msg };
+  }
+
+  // 多次延迟重绘：字体/CSS 延迟就绪或容器刚显示时，避免编辑器空白或行号错位
+  function scheduleRefresh(tab) {
+    if (!tab || !tab.cm) return;
+    const doIt = () => { if (tab.cm) tab.cm.refresh(); };
+    requestAnimationFrame(doIt);
+    setTimeout(doIt, 60);
+    setTimeout(doIt, 300);
+  }
+
+  function fmtSize(n) {
+    if (!n) return "0 B";
+    const u = ["B", "KB", "MB", "GB"];
+    let i = 0, v = n;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return (i === 0 ? v : v.toFixed(1)) + " " + u[i];
+  }
+
+  async function openFile(path, name) {
+    let tab = findTab(path);
+    if (!tab) {
+      const host = document.createElement("div");
+      host.className = "cm-host";
+      editorWrap.appendChild(host);
+      tab = { path, name, host, cm: null, original: "", dirty: false, big: false };
+      tabs.push(tab);
+      renderTab(tab);
+      welcome.style.display = "none";
+      host.classList.add("active");
+      host.innerHTML = '<div style="padding:30px;color:#888;">正在加载 ' + esc(name) + ' …</div>';
+      try {
+        const ext = getExt(name);
+        // 文件内容与语法模式并行加载，减少串行等待
+        const [res, mode] = await Promise.all([loadFileText(path, name), ensureMode(ext)]);
+        if (res.unsupported) { host.innerHTML = '<div style="padding:30px;color:#888;">该文件类型（' + ext + '）不支持文本编辑，预览请用文件管理器。</div>'; return; }
+        if (res.error) { host.innerHTML = '<div style="padding:30px;color:#c66;">无法打开：' + esc(res.error) + '</div>'; return; }
+        const text = res.text;
+        const big = text.length > BIG_FILE_BYTES;
+        tab.original = text;
+        tab.big = big;
+        host.innerHTML = "";
+        // 容器此刻已可见（active），CodeMirror 才能测量正确，避免内容压住行号/错位
+        tab.cm = CodeMirror(host, {
+          value: text, mode: big ? "text/plain" : (mode || "text/plain"), theme: "material-darker",
+          lineNumbers: true, lineWrapping: false, indentUnit: 4, tabSize: 4,
+          styleActiveLine: !big, matchBrackets: !big, autoCloseBrackets: true,
+          phrases: CM_PHRASES,
+        });
+        if (big) toast("文件较大（" + fmtSize(res.size || text.length) + "），已关闭语法高亮以保证编辑流畅", "warn");
+        tab.cm.on("change", () => {
+          if (tab.big) {
+            // 大文件不做全量字符串比对（每次按键 getValue 会卡）
+            if (!tab.dirty) { tab.dirty = true; tab.el.classList.add("dirty"); refreshTreeDirty(); }
+          } else {
+            tab.dirty = tab.cm.getValue() !== tab.original;
+            tab.el.classList.toggle("dirty", tab.dirty);
+          }
+          if (tab === active) { updateStatus(); ffOnDocChange(); }
+        });
+        tab.cm.on("cursorActivity", () => { if (tab === active) updateStatus(); });
+        activate(tab);
+        scheduleRefresh(tab);
+      } catch (e) {
+        host.classList.add("active");
+        host.innerHTML = '<div style="padding:30px;color:#c66;">无法打开：' + esc(e.message || e) + '</div>';
+      }
+    } else {
+      activate(tab);
+    }
+    refreshTreeDirty();
+  }
+  function renderTab(tab) {
+    const el = document.createElement("div");
+    el.className = "tab";
+    const ic = tab.diff ? '<i class="bi bi-file-diff"></i>' : iconFor(tab.name, false);
+    el.innerHTML = '<span class="t-ic">' + ic + '</span><span class="t-nm">' + esc(tab.name) + '</span><span class="t-dot"></span><span class="t-close"><i class="bi bi-x"></i></span>';
+    el.addEventListener("click", (e) => { e.stopPropagation(); if (e.target.closest(".t-close")) closeTab(tab); else activate(tab); });
+    tabbar.appendChild(el); tab.el = el;
+  }
+  function activate(tab) {
+    tabs.forEach(t => { t.host.classList.remove("active"); t.el.classList.remove("active"); });
+    tab.host.classList.add("active"); tab.el.classList.add("active"); active = tab;
+    // 切换显示后重绘，修正隐藏期间创建/变更导致的尺寸测量偏差
+    scheduleRefresh(tab);
+    renderBreadcrumbs(tab.displayPath || tab.path); updateStatus(); refreshTreeDirty(); ffOnTabChange();
+  }
+  async function closeTab(tab) {
+    const i = tabs.indexOf(tab);
+    if (i < 0) return;
+    if (tab.dirty && !(await uiConfirm("关闭标签", "文件 " + tab.name + " 有未保存的修改，确定不保存并关闭？", "不保存并关闭", true))) return;
+    tab.host.remove(); tab.el.remove(); tabs.splice(i, 1);
+    if (active === tab) { active = tabs[tabs.length - 1] || null; if (active) activate(active); else { welcome.style.display = "flex"; $("breadcrumbs").innerHTML = ""; updateStatus(); ffClose(); } }
+  }
+
+  /* ---------- 面包屑 / 状态栏 ---------- */
+  function renderBreadcrumbs(path) {
+    const parts = path.split("/").filter(Boolean);
+    let acc = "", html = "";
+    parts.forEach((p, i) => {
+      acc += "/" + p;
+      const cur = i === parts.length - 1 ? " cur" : "";
+      html += '<span class="bc' + cur + '">' + esc(p) + "</span>";
+      if (i < parts.length - 1) html += '<span class="sep">/</span>';
+    });
+    $("breadcrumbs").innerHTML = html;
+    $("sbPath").textContent = baseName(path);
+  }
+  function updateStatus() {
+    if (!active || !active.cm) {
+      $("sbPos").textContent = "行 1, 列 1"; $("sbLang").textContent = "纯文本"; return;
+    }
+    const c = active.cm.getCursor();
+    $("sbPos").textContent = "行 " + (c.line + 1) + ", 列 " + (c.ch + 1);
+    const ext = getExt(active.name);
+    const names = { js: "JavaScript", py: "Python", html: "HTML", htm: "HTML", css: "CSS", scss: "SCSS", json: "JSON", md: "Markdown", xml: "XML", c: "C", cpp: "C++", h: "C/C++", java: "Java", go: "Go", rs: "Rust", php: "PHP", rb: "Ruby", sh: "Shell", yml: "YAML", sql: "SQL", lua: "Lua" };
+    $("sbLang").textContent = names[ext] || (ext ? ext.toUpperCase() : "纯文本");
+  }
+  function refreshTreeDirty() {
+    document.querySelectorAll(".tree-row").forEach(r => {
+      const t = findTab(r.dataset.path);
+      r.classList.toggle("dirty", !!(t && t.dirty));
+    });
+  }
+
+  /* ==================================================================
+     查找 / 替换（VS Code 风格：Aa 大小写、ab 全字、.* 正则、匹配计数、
+     上一个/下一个、可展开替换行、单个替换/全部替换）
+     ================================================================== */
+  const FF_MAX_MATCHES = 20000;      // 单次最多统计的匹配数，避免超大文件卡顿
+  const FIND = {
+    open: false, expanded: false,
+    caseSensitive: false, wholeWord: false, regex: false,
+    inSelection: false, selRange: null,        // 在选定内容中查找
+    matches: [], index: -1, marks: [], curMark: null, timer: null, suspend: false,
+  };
+
+  const ffWrap = document.createElement("div");
+  ffWrap.className = "ff-widget";
+  ffWrap.innerHTML =
+    '<button class="ff-expand" id="ffExpand" title="展开替换 (Ctrl+H)">›</button>' +
+    '<div class="ff-row">' +
+      '<input class="ff-input" id="ffFind" placeholder="查找" spellcheck="false" autocomplete="off">' +
+      '<button class="ff-opt" data-opt="case" title="区分大小写 (Alt+C)">Aa</button>' +
+      '<button class="ff-opt" data-opt="word" title="全字匹配 (Alt+W)">ab</button>' +
+      '<button class="ff-opt" data-opt="regex" title="使用正则表达式 (Alt+R)">.*</button>' +
+      '<button class="ff-opt" id="ffInSel" title="在选定内容中查找 (Alt+L)"><i class="bi bi-bounding-box"></i></button>' +
+      '<span class="ff-count" id="ffCount"></span>' +
+      '<button class="ff-nav" id="ffPrev" title="上一个 (Shift+Enter)">↑</button>' +
+      '<button class="ff-nav" id="ffNext" title="下一个 (Enter)">↓</button>' +
+      '<button class="ff-close" id="ffClose" title="关闭 (Esc)">×</button>' +
+    '</div>' +
+    '<div class="ff-row ff-replace-row">' +
+      '<input class="ff-input" id="ffReplace" placeholder="替换" spellcheck="false" autocomplete="off">' +
+      '<button class="ff-btn" id="ffReplaceOne" title="替换当前项">替换</button>' +
+      '<button class="ff-btn" id="ffReplaceAll" title="全部替换">全部替换</button>' +
+    '</div>';
+  editorWrap.appendChild(ffWrap);
+
+  const ffFind = $("ffFind"), ffReplace = $("ffReplace"), ffCount = $("ffCount");
+
+  function ffEscape(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+  // 生成查询：字符串 → 正则；正则模式直接用用户输入（非法时返回 "invalid"）
+  function ffQuery() {
+    const src = ffFind.value;
+    if (!src) return null;
+    if (FIND.regex) {
+      try { return new RegExp(src, FIND.caseSensitive ? "g" : "gi"); } catch (_) { return "invalid"; }
+    }
+    let body = ffEscape(src);
+    if (FIND.wholeWord) body = "\\b" + body + "\\b";
+    try { return new RegExp(body, FIND.caseSensitive ? "g" : "gi"); } catch (_) { return "invalid"; }
+  }
+
+  function ffClearMarks() {
+    FIND.marks.forEach(m => { try { m.clear(); } catch (_) {} });
+    FIND.marks = [];
+    if (FIND.curMark) { try { FIND.curMark.clear(); } catch (_) {} FIND.curMark = null; }
+  }
+
+  function ffSetCount(text, noMatch) {
+    ffCount.textContent = text || "";
+    ffFind.classList.toggle("no-match", !!noMatch);
+  }
+
+  // 当前光标之后（含）的第一个匹配，与 VS Code 行为一致
+  function ffNearestIndex() {
+    const cm = active && active.cm;
+    if (!cm || !FIND.matches.length) return -1;
+    const pos = cm.getCursor("start");
+    for (let i = 0; i < FIND.matches.length; i++) {
+      const f = FIND.matches[i].from;
+      if (f.line > pos.line || (f.line === pos.line && f.ch >= pos.ch)) return i;
+    }
+    return 0;
+  }
+
+  function ffFocusCurrent(scroll) {
+    const cm = active && active.cm;
+    if (!cm || FIND.index < 0 || !FIND.matches.length) return;
+    if (FIND.curMark) { try { FIND.curMark.clear(); } catch (_) {} FIND.curMark = null; }
+    const m = FIND.matches[FIND.index];
+    FIND.curMark = cm.markText(m.from, m.to, { className: "cm-find-cur" });
+    ffSetCount("第 " + (FIND.index + 1) + " 项，共 " + FIND.matches.length + (FIND.capped ? "+" : "") + " 项", false);
+    if (scroll !== false) {
+      cm.setSelection(m.from, m.to, { scroll: false });
+      cm.scrollIntoView({ from: m.from, to: m.to }, 80);
+      scrollLineToComfort(cm, m.from.line);     // 匹配行停在视口偏上位置，上方保留上下文
+    }
+    $("ffPrev").classList.toggle("disabled", FIND.matches.length < 2);
+    $("ffNext").classList.toggle("disabled", FIND.matches.length < 2);
+  }
+
+  // 全量搜索 + 高亮 + 计数（keep=true 时尽量保持当前项）
+  function ffRender(keep) {
+    const cm = active && active.cm;
+    const prevFrom = (keep && FIND.index >= 0 && FIND.matches[FIND.index]) ? FIND.matches[FIND.index].from : null;
+    ffClearMarks();
+    FIND.matches = []; FIND.capped = false;
+    if (!cm) { ffSetCount(""); return; }
+    const q = ffQuery();
+    if (!q) { FIND.index = -1; ffSetCount(""); return; }
+    if (q === "invalid") { FIND.index = -1; ffSetCount("正则无效", true); return; }
+    // 限定在选定区域内查找时，只扫描该范围
+    const scope = (FIND.inSelection && FIND.selRange) ? FIND.selRange : null;
+    const cur = cm.getSearchCursor(q, scope ? scope.from : { line: 0, ch: 0 });
+    while (cur.findNext()) {
+      const from = cur.from(), to = cur.to();
+      if (scope && (from.line > scope.to.line || (from.line === scope.to.line && from.ch > scope.to.ch))) break;
+      if (from.line === to.line && from.ch === to.ch) continue;   // 跳过空匹配
+      FIND.matches.push({ from, to });
+      FIND.marks.push(cm.markText(from, to, { className: "cm-find-hl" }));
+      if (FIND.matches.length >= FF_MAX_MATCHES) { FIND.capped = true; break; }
+    }
+    if (!FIND.matches.length) { FIND.index = -1; ffSetCount("无结果", true); $("ffPrev").classList.add("disabled"); $("ffNext").classList.add("disabled"); return; }
+    if (prevFrom) {
+      let i = FIND.matches.findIndex(m => m.from.line === prevFrom.line && m.from.ch === prevFrom.ch);
+      FIND.index = i >= 0 ? i : ffNearestIndex();
+    } else {
+      FIND.index = ffNearestIndex();
+    }
+    ffFocusCurrent(true);
+  }
+
+  function ffDebounced() {
+    clearTimeout(FIND.timer);
+    FIND.timer = setTimeout(() => { if (FIND.open) ffRender(true); }, 140);
+  }
+
+  function ffNext(dir) {
+    if (!FIND.open) { ffOpen(false); return; }
+    if (!FIND.matches.length) { ffRender(false); if (!FIND.matches.length) return; }
+    FIND.index = (FIND.index + dir + FIND.matches.length) % FIND.matches.length;
+    ffFocusCurrent(true);
+  }
+
+  function ffReplacementFor(text) {
+    const rep = ffReplace.value;
+    if (!FIND.regex) return rep;
+    try { return text.replace(new RegExp(ffFind.value, FIND.caseSensitive ? "" : "i"), rep); }
+    catch (_) { return rep; }
+  }
+
+  function ffDoReplaceOne() {
+    const cm = active && active.cm;
+    if (!cm) return;
+    if (!FIND.matches.length || FIND.index < 0) { ffRender(false); if (FIND.index < 0) return; }
+    const m = FIND.matches[FIND.index];
+    const rep = ffReplacementFor(cm.getRange(m.from, m.to));
+    FIND.suspend = true;
+    cm.replaceRange(rep, m.from, m.to, "ff-replace");
+    FIND.suspend = false;
+    cm.setCursor({ line: m.from.line, ch: m.from.ch + rep.length });
+    ffRender(false);
+  }
+
+  function ffDoReplaceAll() {
+    const cm = active && active.cm;
+    if (!cm) return;
+    ffRender(true);
+    if (!FIND.matches.length) { toast("没有可替换的内容", "warn"); return; }
+    const list = FIND.matches.slice();
+    FIND.suspend = true;
+    cm.operation(() => {
+      for (let i = list.length - 1; i >= 0; i--) {
+        const m = list[i];
+        cm.replaceRange(ffReplacementFor(cm.getRange(m.from, m.to)), m.from, m.to, "ff-replace");
+      }
+    });
+    FIND.suspend = false;
+    toast("已替换 " + list.length + " 处", "ok");
+    ffRender(false);
+  }
+
+  // 在选定内容中查找：把搜索范围限制在当前选中的文本区间内
+  function ffToggleInSelection() {
+    const cm = active && active.cm;
+    if (!cm) { toast("请先打开一个文件", "warn"); return; }
+    if (FIND.inSelection) {
+      FIND.inSelection = false; FIND.selRange = null;
+    } else {
+      const sel = cm.listSelections()[0];
+      const from = sel.from(), to = sel.to();
+      if (from.line === to.line && from.ch === to.ch) { toast("请先在编辑器中选中一段文本", "warn"); return; }
+      FIND.inSelection = true; FIND.selRange = { from, to };
+    }
+    $("ffInSel").classList.toggle("active", FIND.inSelection);
+    $("ffInSel").title = FIND.inSelection ? "取消限定范围（当前仅搜索选中区域）(Alt+L)" : "在选定内容中查找 (Alt+L)";
+    if (FIND.open) ffRender(false);
+  }
+
+  function ffExpand(on) {
+    FIND.expanded = (on === undefined) ? !FIND.expanded : !!on;
+    ffWrap.classList.toggle("expanded", FIND.expanded);
+    if (FIND.expanded) ffReplace.focus();
+  }
+
+  function ffOpen(withReplace) {
+    if (!active || !active.cm) { toast("请先打开一个文件", "warn"); return; }
+    const sel = active.cm.getSelection();
+    if (sel && sel.indexOf("\n") < 0 && sel.length < 200) ffFind.value = sel;   // 用选中文本作查询
+    FIND.open = true;
+    ffWrap.classList.add("show");
+    ffExpand(!!withReplace);
+    ffFind.focus(); ffFind.select();
+    ffRender(false);
+  }
+
+  function ffClose() {
+    FIND.open = false; FIND.index = -1;
+    clearTimeout(FIND.timer);
+    ffWrap.classList.remove("show");
+    ffClearMarks();
+    const cm = active && active.cm;
+    if (cm) cm.focus();
+  }
+
+  // 事件绑定
+  ffFind.addEventListener("input", ffDebounced);
+  ffFind.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); ffNext(e.shiftKey ? -1 : 1); }
+    else if (e.key === "Escape") { e.preventDefault(); ffClose(); }
+    else if (e.altKey && e.key.toLowerCase() === "c") { e.preventDefault(); ffToggleOpt("case"); }
+    else if (e.altKey && e.key.toLowerCase() === "w") { e.preventDefault(); ffToggleOpt("word"); }
+    else if (e.altKey && e.key.toLowerCase() === "r") { e.preventDefault(); ffToggleOpt("regex"); }
+    else if (e.altKey && e.key.toLowerCase() === "l") { e.preventDefault(); ffToggleInSelection(); }
+  });
+  ffReplace.addEventListener("input", ffDebounced);
+  ffReplace.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); ffDoReplaceOne(); }
+    else if (e.key === "Escape") { e.preventDefault(); ffClose(); }
+  });
+  const FF_OPT_KEY = { case: "caseSensitive", word: "wholeWord", regex: "regex" };
+  function ffToggleOpt(name) {
+    const key = FF_OPT_KEY[name] || name;
+    FIND[key] = !FIND[key];
+    document.querySelectorAll(".ff-opt[data-opt]").forEach(b => b.classList.toggle("active", !!FIND[FF_OPT_KEY[b.dataset.opt]]));
+    ffFind.focus();
+    ffRender(false);
+  }
+  document.querySelectorAll(".ff-opt[data-opt]").forEach(b => { b.onclick = () => ffToggleOpt(b.dataset.opt); });
+  $("ffInSel").onclick = ffToggleInSelection;
+  $("ffNext").onclick = () => ffNext(1);
+  $("ffPrev").onclick = () => ffNext(-1);
+  $("ffClose").onclick = ffClose;
+  $("ffExpand").onclick = () => ffExpand();
+  $("ffReplaceOne").onclick = ffDoReplaceOne;
+  $("ffReplaceAll").onclick = ffDoReplaceAll;
+
+  // 标签切换 / 文档变化时同步刷新
+  function ffOnTabChange() {
+    // 选区范围属于某个文档，切换标签后失效，自动关闭限定
+    if (FIND.inSelection) {
+      FIND.inSelection = false; FIND.selRange = null;
+      $("ffInSel").classList.remove("active");
+    }
+    if (FIND.open) ffRender(false); else ffClearMarks();
+  }
+  function ffOnDocChange() { if (FIND.open && !FIND.suspend) ffDebounced(); }
+
+  /* ---------- 保存（带二次确认 + 增删行数） ---------- */
+  function computeLineDiff(a, b) {
+    // 文件以换行结尾时 split 会产生一个“幽灵空行”，会让纯删除被统计成 +1/-1，先去掉
+    const strip = (s) => (s.endsWith("\n") ? s.slice(0, -1) : s);
+    const A = strip(a).split("\n"), B = strip(b).split("\n"), n = A.length, m = B.length;
+    if ((n + 1) * (m + 1) > 6000000) return null;
+    const W = m + 1, dp = new Int32Array((n + 1) * W);
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+      dp[i * W + j] = A[i] === B[j] ? dp[(i + 1) * W + j + 1] + 1 : Math.max(dp[(i + 1) * W + j], dp[i * W + j + 1]);
+    let i = 0, j = 0, add = 0, del = 0;
+    // 注意：两个分支都必须推进游标，否则遇到“改动行”会死循环（曾导致 Ctrl+S 卡死页面）
+    while (i < n && j < m) {
+      if (A[i] === B[j]) { i++; j++; }
+      else if (dp[(i + 1) * W + j] >= dp[i * W + j + 1]) { del++; i++; }
+      else { add++; j++; }
+    }
+    while (i < n) { del++; i++; } while (j < m) { add++; j++; }
+    return { add, del };
+  }
+  function showSaveConfirm(tab) {
+    return new Promise((resolve) => {
+      const overlay = $("saveConfirm");
+      const diff = computeLineDiff(tab.original, tab.cm.getValue());
+      const stats = diff
+        ? '<div class="confirm-stats"><span class="cs-add">+ ' + diff.add + ' 行新增</span><span class="cs-del">- ' + diff.del + ' 行删除</span></div><div class="confirm-sub">共 ' + (diff.add + diff.del) + ' 处改动</div>'
+        : '<div class="confirm-sub">文件较大，无法精确统计改动行数，仍要保存吗？</div>';
+      overlay.innerHTML = '<div class="confirm-modal"><div class="confirm-title"><i class="bi bi-exclamation-triangle"></i> 确认保存修改</div><div class="confirm-body">' + esc(tab.name) + stats + '</div><div class="confirm-actions"><button class="cancel" id="scCancel">取消</button><button class="ok" id="scOk"><i class="bi bi-check-lg"></i> 确认保存</button></div></div>';
+      overlay.classList.add("show");
+      $("scCancel").onclick = () => { overlay.classList.remove("show"); resolve(false); };
+      $("scOk").onclick = () => { overlay.classList.remove("show"); resolve(true); };
+    });
+  }
+  async function saveTab(tab) {
+    if (!tab || !tab.cm) return;
+    if (tab.diff) { toast("差异视图为只读，不能保存", "warn"); return; }
+    if (!tab.dirty) { toast("没有改动", "warn"); return; }
+    if (!(await showSaveConfirm(tab))) return;
+    try {
+      const r = await fetch("/api/files/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: tab.path, content: tab.cm.getValue() }) });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      tab.original = tab.cm.getValue(); tab.dirty = false; tab.el.classList.remove("dirty");
+      refreshTreeDirty(); toast("已保存：" + tab.name, "ok");
+    } catch (e) { toast("保存失败：" + (e.message || e), "err"); }
+  }
+
+  /* ---------- 右键菜单（新建/重命名/删除） ---------- */
+  let ctxTarget = null;
+  function showCtxMenu(x, y, path, name, isDir) {
+    ctxTarget = { path, name, isDir };
+    const menu = $("ctxMenu");
+    const items = [];
+    if (isDir) {
+      items.push({ label: "在此新建文件", icon: "bi-file-earmark-plus", act: "newfile" });
+      items.push({ label: "在此新建文件夹", icon: "bi-folder-plus", act: "newfolder" });
+    } else {
+      items.push({ label: "打开", icon: "bi-box-arrow-up-right", act: "open" });
+    }
+    items.push({ label: "重命名", icon: "bi-pencil", act: "rename" });
+    items.push({ divider: true });
+    items.push({ label: "删除", icon: "bi-trash3", act: "delete", danger: true });
+    menu.innerHTML = "";
+    items.forEach(it => {
+      if (it.divider) { const d = document.createElement("div"); d.className = "div"; menu.appendChild(d); return; }
+      const el = document.createElement("div"); el.className = "mi" + (it.danger ? " danger" : "");
+      el.innerHTML = '<i class="bi ' + it.icon + '"></i><span>' + it.label + "</span>";
+      el.onclick = () => { menu.style.display = "none"; ctxAction(it.act); };
+      menu.appendChild(el);
+    });
+    menu.style.left = Math.min(x, window.innerWidth - 200) + "px";
+    menu.style.top = Math.min(y, window.innerHeight - 220) + "px";
+    menu.style.display = "block";
+  }
+  async function ctxAction(act) {
+    if (!ctxTarget) return;
+    const { path, name, isDir } = ctxTarget;
+    if (act === "open") { openFile(path, name); return; }
+    if (act === "newfile" || act === "newfolder") {
+      const nm = await uiPrompt(isDir ? "新建文件夹" : "新建文件", isDir ? "新建文件夹" : "新建文件.txt", "输入名称");
+      if (!nm) return;
+      const fd = isDir ? path : dirName(path);
+      fetch("/api/files/create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: fd, name: nm, is_dir: act === "newfolder" }) })
+        .then(r => r.json()).then(d => { if (d.error) throw new Error(d.error); toast("已创建：" + nm, "ok"); refreshTree(fd); if (act === "newfile") openFile(d.path, nm); })
+        .catch(e => toast("创建失败：" + (e.message || e), "err"));
+      return;
+    }
+    if (act === "rename") {
+      const nn = await uiPrompt("重命名", name, "输入新名称"); if (!nn || nn === name) return;
+      fetch("/api/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, new_name: nn }) })
+        .then(r => r.json()).then(d => { if (d.error) throw new Error(d.error); toast("已重命名", "ok"); refreshTree(dirName(path)); })
+        .catch(e => toast("重命名失败：" + (e.message || e), "err"));
+      return;
+    }
+    if (act === "delete") {
+      if (!(await uiConfirm("删除确认", "确定删除 " + name + " ？此操作不可撤销。", "删除", true))) return;
+      fetch("/api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paths: [path] }) })
+        .then(r => r.json()).then(d => { if (d.error) throw new Error(d.error); toast("已删除：" + name, "ok"); refreshTree(dirName(path)); tabs.filter(t => t.path.startsWith(path)).forEach(closeTabSilent); })
+        .catch(e => toast("删除失败：" + (e.message || e), "err"));
+    }
+  }
+  function closeTabSilent(tab) { tab.host.remove(); tab.el.remove(); const i = tabs.indexOf(tab); if (i >= 0) tabs.splice(i, 1); }
+  function refreshTree(dirPath) {
+    // 重新加载包含该目录那一层：简单起见整树重置
+    explorerPanel.innerHTML = ""; initTree();
+    loadGitStatus();
+  }
+  document.addEventListener("click", () => { $("ctxMenu").style.display = "none"; closeDrop(); });
+
+  /* ---------- 自定义弹窗（Webview 下原生 prompt/confirm 不可用） ---------- */
+  function uiModal(opts) {
+    return new Promise((resolve) => {
+      const ov = $("modalOverlay");
+      const hasInput = opts.input !== undefined;
+      ov.innerHTML =
+        '<div class="ide-modal' + (opts.danger ? " danger" : "") + '">' +
+          '<div class="m-title"><i class="bi ' + (opts.icon || "bi-info-circle") + '"></i><span>' + esc(opts.title || "") + "</span></div>" +
+          '<div class="m-body">' + (opts.html || '<div class="m-msg">' + esc(opts.msg || "") + "</div>") +
+          (hasInput ? '<input id="umInput" spellcheck="false" autocomplete="off">' : "") +
+          "</div>" +
+          '<div class="m-foot">' +
+          (opts.hideCancel ? "" : '<button class="m-cancel" id="umCancel">' + (opts.cancelText || "取消") + "</button>") +
+          '<button class="m-ok" id="umOk">' + (opts.okText || "确定") + "</button></div>" +
+        "</div>";
+      ov.classList.add("show");
+      const inp = $("umInput");
+      if (inp) { inp.value = opts.input || ""; inp.placeholder = opts.placeholder || ""; }
+      const close = (val) => { ov.classList.remove("show"); ov.innerHTML = ""; resolve(val); };
+      $("umOk").onclick = () => close(inp ? inp.value.trim() : true);
+      if (!opts.hideCancel) $("umCancel").onclick = () => close(inp ? null : false);
+      ov.onmousedown = (e) => { if (e.target === ov) close(inp ? null : false); };
+      ov.onkeydown = (e) => {
+        if (e.key === "Escape") { e.preventDefault(); close(inp ? null : false); }
+        else if (e.key === "Enter") { e.preventDefault(); close(inp ? inp.value.trim() : true); }
+      };
+      (inp || $("umOk")).focus();
+      if (inp) inp.select();
+    });
+  }
+  const uiPrompt = (title, value, placeholder) => uiModal({ title, icon: "bi-pencil-square", input: value || "", placeholder: placeholder || "", okText: "确定" });
+  const uiConfirm = (title, msg, okText, danger) => uiModal({ title, icon: danger ? "bi-exclamation-triangle" : "bi-question-circle", msg, okText: okText || "确定", danger: !!danger });
+  const uiAlert = (title, msg) => uiModal({ title, icon: "bi-info-circle", msg, hideCancel: true, okText: "知道了" });
+
+  /* ---------- 菜单栏动作 ---------- */
+  function cmCmd(name) {
+    if (!active || !active.cm) { toast("请先打开一个文件", "warn"); return; }
+    if (!CodeMirror.commands[name]) { toast("该命令当前不可用", "warn"); return; }
+    active.cm.focus();
+    active.cm.execCommand(name);
+  }
+  let fontPx = 13;
+  function chFont(delta) {
+    fontPx = delta === 0 ? 13 : Math.min(28, Math.max(10, fontPx + delta));
+    document.querySelectorAll(".cm-host .CodeMirror").forEach(el => { el.style.fontSize = fontPx + "px"; });
+    tabs.forEach(t => { if (t.cm) t.cm.refresh(); });
+  }
+  function toggleWrap() {
+    if (!active || !active.cm) { toast("请先打开一个文件", "warn"); return; }
+    const w = !active.cm.getOption("lineWrapping");
+    active.cm.setOption("lineWrapping", w);
+    toast(w ? "已开启自动换行" : "已关闭自动换行");
+  }
+  function selCurLine() {
+    if (!active || !active.cm) return;
+    const l = active.cm.getCursor().line;
+    active.cm.setSelection({ line: l, ch: 0 }, { line: l, ch: active.cm.getLine(l).length });
+    active.cm.focus();
+  }
+  async function gotoLine() {
+    if (!active || !active.cm) { toast("请先打开一个文件", "warn"); return; }
+    const s = await uiPrompt("跳转到行（1 - " + active.cm.lineCount() + "）", "", "输入行号");
+    if (s === null) return;
+    const n = parseInt(s, 10);
+    if (!n || n < 1 || n > active.cm.lineCount()) { if (s) toast("行号无效", "warn"); return; }
+    active.cm.setCursor({ line: n - 1, ch: 0 });
+    active.cm.focus();
+  }
+  function openSearch() { showPanel("search"); setSearchMode("name"); $("searchInput").focus(); $("searchInput").select(); }
+  function openGrepSearch() { showPanel("search"); setSearchMode("content"); $("searchInput").focus(); $("searchInput").select(); }
+  function showShortcuts() {
+    uiAlert("键盘快捷方式", "Ctrl+S 保存\nCtrl+W 关闭标签\nCtrl+N 新建文件\nCtrl+B 切换侧边栏\nCtrl+P 搜索文件名\nCtrl+Shift+F 在文件中搜索内容\nCtrl+G 跳转到行\nCtrl+= / Ctrl+- 缩放字体\nAlt+Z 切换自动换行\n\n【查找 / 替换】\nCtrl+F 查找　Ctrl+H 或 Ctrl+Alt+F 替换\nEnter 下一个　Shift+Enter 上一个　F3 / Shift+F3 下一个 / 上一个\nEsc 关闭　Alt+C 区分大小写　Alt+W 全字匹配　Alt+R 正则\nAlt+L 在选定内容中查找 / 取消限定\n替换行内：Enter 替换当前项");
+  }
+
+  /* ---------- 菜单栏下拉（文件/编辑/选择/查看/转到/运行/帮助） ---------- */
+  const MENUS = {
+    file: [
+      { label: "新建文件", sc: "Ctrl+N", icon: "bi-file-earmark-plus", act: () => newInRoot(false) },
+      { label: "新建文件夹", icon: "bi-folder-plus", act: () => newInRoot(true) },
+      { divider: true },
+      { label: "保存", sc: "Ctrl+S", icon: "bi-check-lg", act: () => active && saveTab(active) },
+      { label: "关闭标签", sc: "Ctrl+W", icon: "bi-x-lg", act: () => active && closeTab(active) },
+      { divider: true },
+      { label: "返回文件管理器", icon: "bi-house", act: () => { location.href = "/"; } },
+    ],
+    edit: [
+      { label: "撤销", sc: "Ctrl+Z", icon: "bi-arrow-counterclockwise", act: () => cmCmd("undo") },
+      { label: "重做", sc: "Ctrl+Y", icon: "bi-arrow-clockwise", act: () => cmCmd("redo") },
+      { divider: true },
+      { label: "查找", sc: "Ctrl+F", icon: "bi-search", act: () => ffOpen(false) },
+      { label: "查找下一个", sc: "F3", icon: "bi-arrow-down", act: () => ffNext(1) },
+      { label: "查找上一个", sc: "Shift+F3", icon: "bi-arrow-up", act: () => ffNext(-1) },
+      { divider: true },
+      { label: "替换", sc: "Ctrl+H", icon: "bi-arrow-left-right", act: () => ffOpen(true) },
+    ],
+    sel: [
+      { label: "全选", sc: "Ctrl+A", icon: "bi-textarea-t", act: () => cmCmd("selectAll") },
+      { label: "选中当前行", icon: "bi-list-ul", act: selCurLine },
+    ],
+    view: [
+      { label: "放大字体", sc: "Ctrl+=", icon: "bi-zoom-in", act: () => chFont(1) },
+      { label: "缩小字体", sc: "Ctrl+-", icon: "bi-zoom-out", act: () => chFont(-1) },
+      { label: "重置字体", icon: "bi-aspect-ratio", act: () => chFont(0) },
+      { divider: true },
+      { label: "切换自动换行", sc: "Alt+Z", icon: "bi-text-paragraph", act: toggleWrap },
+      { divider: true },
+      { label: "切换侧边栏", sc: "Ctrl+B", icon: "bi-layout-sidebar", act: toggleSidebar },
+    ],
+    goto: [
+      { label: "跳转到行…", sc: "Ctrl+G", icon: "bi-hash", act: gotoLine },
+      { label: "跳转到文件…", sc: "Ctrl+P", icon: "bi-file-earmark", act: openSearch },
+    ],
+    run: [
+      { label: "运行 / 调试（内置 IDE 暂不支持）", icon: "bi-play-circle", disabled: true },
+    ],
+    help: [
+      { label: "键盘快捷方式", icon: "bi-keyboard", act: showShortcuts },
+      { label: "关于", icon: "bi-info-circle", act: () => uiAlert("关于", "在线项目 IDE\n基于 CodeMirror 的自建轻量代码编辑器\n支持多标签、语法高亮、差异确认保存。") },
+    ],
+  };
+
+  const menuDrop = $("menuDrop");
+  let openMenuKey = null;
+  function closeDrop() {
+    menuDrop.style.display = "none"; openMenuKey = null;
+    document.querySelectorAll(".menubar span").forEach(s => s.classList.remove("m-open"));
+  }
+  function openDrop(key, anchor) {
+    const items = MENUS[key]; if (!items) return;
+    menuDrop.innerHTML = "";
+    items.forEach(it => {
+      if (it.divider) { const d = document.createElement("div"); d.className = "div"; menuDrop.appendChild(d); return; }
+      const el = document.createElement("div");
+      el.className = "mi" + (it.danger ? " danger" : "") + (it.disabled ? " disabled" : "");
+      el.innerHTML = '<i class="bi ' + it.icon + '"></i><span>' + it.label + "</span>" + (it.sc ? '<span class="sc">' + it.sc + "</span>" : "");
+      if (!it.disabled) el.onclick = (ev) => { ev.stopPropagation(); closeDrop(); it.act(); };
+      menuDrop.appendChild(el);
+    });
+    const r = anchor.getBoundingClientRect();
+    menuDrop.style.left = r.left + "px";
+    menuDrop.style.top = r.bottom + 2 + "px";
+    menuDrop.style.display = "block";
+    openMenuKey = key;
+    anchor.classList.add("m-open");
+  }
+  $("menubar").addEventListener("click", (e) => {
+    const sp = e.target.closest("span[data-menu]"); if (!sp) return;
+    e.stopPropagation();
+    const key = sp.dataset.menu;
+    if (openMenuKey === key) closeDrop(); else { closeDrop(); openDrop(key, sp); }
+  });
+  $("menubar").addEventListener("mouseover", (e) => {
+    const sp = e.target.closest("span[data-menu]");
+    if (!sp || !openMenuKey || openMenuKey === sp.dataset.menu) return;
+    closeDrop(); openDrop(sp.dataset.menu, sp);
+  });
+
+  /* ---------- 侧边栏面板切换 ---------- */
+  const panels = { explorer: "explorerPanel", search: "searchPanel", git: "gitPanel", run: "runPanel", ext: "extPanel" };
+  const titles = { explorer: "资源管理器", search: "搜索", git: "源代码管理", run: "运行和调试", ext: "扩展" };
+  function showPanel(name) {
+    // 统一显式设置显示状态：隐藏时置 none，显示时清空内联样式交给 CSS（搜索面板需要 flex 布局）
+    Object.keys(panels).forEach(k => {
+      const el = $(panels[k]), on = (k === name);
+      el.classList.toggle("active", on);
+      el.style.display = on ? "" : "none";
+    });
+    $("sideTitle").textContent = titles[name];
+    document.querySelectorAll(".activitybar .act[data-panel]").forEach(a => a.classList.toggle("active", a.dataset.panel === name));
+  }
+  document.getElementById("activitybar").addEventListener("click", (e) => {
+    const a = e.target.closest(".act[data-panel]"); if (!a) return;
+    const p = a.dataset.panel;
+    // 再点一次当前面板则折叠侧栏
+    if (a.classList.contains("active") && !$("sidebar").classList.contains("collapsed") && p === "explorer") { toggleSidebar(); return; }
+    $("sidebar").classList.remove("collapsed");
+    showPanel(p);
+    if (p === "git") loadGitStatus();
+  });
+  function toggleSidebar() { $("sidebar").classList.toggle("collapsed"); }
+  $("sideCollapse").onclick = toggleSidebar;
+
+  /* ---------- 侧边栏宽度拖动（左搜索区 / 右编辑区） ---------- */
+  const SIDEBAR_DEFAULT_W = 280;
+  function refreshAllEditors() { tabs.forEach(t => { if (t.cm) t.cm.refresh(); }); }
+  function applySidebarWidth(w, save) {
+    const sb = $("sidebar");
+    const max = Math.max(180, window.innerWidth - 340);        // 至少给编辑区留 340px
+    const width = Math.max(140, Math.min(max, Math.round(w)));
+    sb.style.width = width + "px";
+    if (save) { try { localStorage.setItem("ide.sidebarWidth", String(width)); } catch (_) {} }
+    return width;
+  }
+  (function initSplitter() {
+    const sp = $("splitter");
+    try {
+      const saved = parseInt(localStorage.getItem("ide.sidebarWidth") || "0", 10);
+      if (saved > 0) applySidebarWidth(saved, false);
+    } catch (_) {}
+    let dragging = false;
+    const onMove = (e) => {
+      if (!dragging) return;
+      const left = $("activitybar").getBoundingClientRect().right;
+      applySidebarWidth(e.clientX - left, false);
+      e.preventDefault();
+    };
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      sp.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      try { localStorage.setItem("ide.sidebarWidth", String(parseInt($("sidebar").style.width, 10) || SIDEBAR_DEFAULT_W)); } catch (_) {}
+      refreshAllEditors();
+    };
+    sp.addEventListener("mousedown", (e) => {
+      dragging = true;
+      sp.classList.add("dragging");
+      document.body.classList.add("resizing");
+      e.preventDefault();
+    });
+    sp.addEventListener("dblclick", () => { applySidebarWidth(SIDEBAR_DEFAULT_W, true); refreshAllEditors(); });
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  })();
+
+  /* ==================================================================
+     搜索面板
+       · 内容模式：在文件中搜索（/api/grep），结果按文件分组、可跳转/替换
+       · 文件名模式：递归搜索文件名 / 文件夹名（/api/search）
+     ================================================================== */
+  const SEARCH_SKIP_DIRS = "node_modules,dist,build,out,__pycache__,.venv,venv,.git";
+  const SEARCH_MAX_SHOW = 300;        // 文件名模式最多渲染条数
+  const GREP_MAX_FILES = 100;         // 内容模式最多渲染的文件数
+  let searchMode = "content";
+  let searchTimer = null, searchToken = null, searchSeq = 0;
+  let searchSkipping = true, searchCase = false, searchWord = false, searchRegex = false;
+  let grepData = null;                // 最近一次内容搜索结果（供替换使用）
+
+  function searchHint(text, isErr) {
+    const el = $("searchHint");
+    el.textContent = text;
+    el.classList.toggle("err", !!isErr);
+  }
+
+  function renderNameResults(items, duration) {
+    const box = $("searchResults");
+    box.innerHTML = "";
+    const shown = items.slice(0, SEARCH_MAX_SHOW);
+    shown.forEach(it => {
+      const abs = it.abs_path || it.path || "";
+      if (!abs || !abs.startsWith("/")) return;
+      const name = it.name || baseName(abs);
+      const isDir = !!it.is_dir;
+      const rel = abs.startsWith(ROOT + "/") ? abs.substring(ROOT.length + 1) : abs;
+      const parent = rel.indexOf("/") >= 0 ? rel.substring(0, rel.lastIndexOf("/")) : "";
+      const row = document.createElement("div");
+      row.className = "sres";
+      row.innerHTML = '<span class="ic">' + iconFor(name, isDir) + '</span>' +
+        '<span class="sres-main"><span class="sres-name">' + esc(name) + '</span>' +
+        (parent ? '<span class="sres-path">' + esc(parent) + '</span>' : '') + '</span>';
+      row.onclick = () => {
+        if (isDir) revealInTree(abs);
+        else { openFile(abs, name); }
+      };
+      box.appendChild(row);
+    });
+    let msg = "共 " + items.length + " 项";
+    if (items.length > shown.length) msg += "（仅显示前 " + shown.length + " 项）";
+    if (duration) msg += "　用时 " + duration + "s";
+    searchHint(msg);
+  }
+
+  function pollNameSearch(token, seq) {
+    fetch("/api/search/" + encodeURIComponent(token))
+      .then(r => r.json())
+      .then(d => {
+        if (seq !== searchSeq) return;                  // 关键字已变更，丢弃过期结果
+        if (!d.done) { setTimeout(() => pollNameSearch(token, seq), 700); return; }
+        if (d.error) { searchHint("搜索失败：" + d.error, true); return; }
+        renderNameResults(d.items || [], d.duration ? d.duration.toFixed(2) : "");
+      })
+      .catch(e => { if (seq === searchSeq) searchHint("搜索失败：" + (e.message || e), true); });
+  }
+
+  function runNameSearch(kw) {
+    const box = $("searchResults");
+    const seq = ++searchSeq;
+    searchToken = null;
+    if (!kw) { box.innerHTML = ""; searchHint("输入关键字，递归搜索项目内的文件名与文件夹名"); return; }
+    searchHint("搜索中…");
+    // 直接走文件系统遍历：IDE 搜索范围固定在项目根目录，索引对限定 root 的过滤不可靠
+    const params = new URLSearchParams({ root: ROOT, keyword: kw, use_index: "never", timeout: "30" });
+    if (searchSkipping) params.set("skip", SEARCH_SKIP_DIRS);
+    if (searchCase) params.set("case", "1");     // 默认不区分大小写
+    fetch("/api/search?" + params.toString())
+      .then(r => r.json())
+      .then(d => {
+        if (seq !== searchSeq) return;
+        if (d.error) { searchHint("搜索失败：" + d.error, true); return; }
+        if (d.items) { renderNameResults(d.items, d.duration ? d.duration.toFixed(2) : ""); return; }
+        if (d.token) { searchToken = d.token; pollNameSearch(d.token, seq); return; }
+        searchHint("搜索无结果");
+      })
+      .catch(e => { if (seq === searchSeq) searchHint("搜索失败：" + (e.message || e), true); });
+  }
+
+  /* ---------- 内容搜索 ---------- */
+  function isValidRegex(s) { try { new RegExp(s); return true; } catch (_) { return false; } }
+
+  function renderGrepResults(d) {
+    const box = $("searchResults");
+    box.innerHTML = "";
+    grepData = d;
+    const files = d.files || [];
+    if (!files.length) { searchHint("没有找到匹配结果"); return; }
+    files.slice(0, GREP_MAX_FILES).forEach(f => {
+      const name = baseName(f.rel);
+      const relDir = f.rel.indexOf("/") >= 0 ? f.rel.substring(0, f.rel.lastIndexOf("/")) : "";
+      const g = document.createElement("div");
+      g.className = "gfile";
+      const head = document.createElement("div");
+      head.className = "gf-head";
+      head.innerHTML = '<i class="bi bi-chevron-down gf-twist"></i>' +
+        '<span class="ic">' + iconFor(name, false) + '</span>' +
+        '<span class="gf-name">' + esc(name) + '</span>' +
+        (relDir ? '<span class="gf-rel">' + esc(relDir) + '</span>' : '') +
+        '<span class="gf-count">' + (f.total || f.count) + '</span>' +
+        '<button class="gf-rep" title="在本文件全部替换"><i class="bi bi-arrow-repeat"></i></button>';
+      const body = document.createElement("div");
+      body.className = "gf-body";
+      (f.matches || []).forEach(m => {
+        const row = document.createElement("div");
+        row.className = "gm";
+        const off = m.trim || 0;                     // 展示片段相对原始行的偏移
+        const at = Math.max(0, m.col - off);
+        const before = m.text.slice(0, at);
+        const hit = m.text.slice(at, at + m.len);
+        const after = m.text.slice(at + m.len);
+        row.innerHTML = '<span class="gm-ln">' + m.line + '</span>' +
+          '<span class="gm-tx">' + (off > 0 ? '…' : '') + esc(before) +
+          '<mark>' + esc(hit) + '</mark>' + esc(after) + '</span>';
+        row.onclick = () => openFileAt(f.path, name, m.line - 1, m.col, m.len);
+        body.appendChild(row);
+      });
+      head.querySelector(".gf-rep").onclick = (e) => { e.stopPropagation(); grepReplaceFiles([f]); };
+      head.onclick = () => {
+        const collapsed = !g.classList.contains("collapsed");
+        g.classList.toggle("collapsed", collapsed);
+        head.querySelector(".gf-twist").className = "bi " + (collapsed ? "bi-chevron-right" : "bi-chevron-down") + " gf-twist";
+      };
+      g.appendChild(head);
+      g.appendChild(body);
+      box.appendChild(g);
+    });
+    let msg = d.file_count + " 个文件中有 " + d.match_count + " 个结果";
+    if (d.file_count > GREP_MAX_FILES) msg += "（仅显示前 " + GREP_MAX_FILES + " 个文件）";
+    if (d.truncated) msg += "　结果较多，可能不完整";
+    if (d.duration != null) msg += "　用时 " + d.duration + "s";
+    searchHint(msg);
+  }
+
+  function runGrepSearch(kw) {
+    const box = $("searchResults");
+    const seq = ++searchSeq;
+    grepData = null;
+    if (!kw) { box.innerHTML = ""; searchHint("输入关键字，在项目所有文件中搜索内容；结果可点击跳转"); return; }
+    if (searchRegex && !isValidRegex(kw)) { box.innerHTML = ""; searchHint("正则表达式无效", true); return; }
+    searchHint("搜索中…");
+    const params = new URLSearchParams({
+      root: ROOT, keyword: kw, timeout: "20",
+      max_files: String(GREP_MAX_FILES), per_file: "40",
+    });
+    if (searchCase) params.set("case", "1");
+    if (searchWord) params.set("word", "1");
+    if (searchRegex) params.set("regex", "1");
+    if (searchSkipping) params.set("skip", SEARCH_SKIP_DIRS);
+    fetch("/api/grep?" + params.toString())
+      .then(r => r.json())
+      .then(d => {
+        if (seq !== searchSeq) return;
+        if (d.error) { searchHint("搜索失败：" + d.error, true); return; }
+        renderGrepResults(d);
+      })
+      .catch(e => { if (seq === searchSeq) searchHint("搜索失败：" + (e.message || e), true); });
+  }
+
+  function runSearch(kw) {
+    if (searchMode === "content") runGrepSearch(kw); else runNameSearch(kw);
+  }
+
+  /* ---------- 跳转到匹配位置 ---------- */
+  // 把指定行滚到视口约 1/3 高度处，保证匹配行上方留出足够上下文（而不是贴在最上/最下边缘）
+  function scrollLineToComfort(cm, line, ratio) {
+    if (!cm) return;
+    const wrap = cm.getWrapperElement();
+    const wrapRect = wrap.getBoundingClientRect();
+    const lineTop = cm.charCoords({ line: line, ch: 0 }, "window").top;
+    const r = (ratio === undefined ? 0.33 : ratio);
+    const delta = lineTop - wrapRect.top - wrapRect.height * r;   // 相对当前视口需要滚动的距离
+    const info = cm.getScrollInfo();
+    cm.scrollTo(null, Math.max(0, Math.round(info.top + delta)));
+  }
+
+  async function openFileAt(abs, name, line, col, len) {
+    await openFile(abs, name);
+    const tab = findTab(abs);
+    if (!tab || !tab.cm) return;
+    const cm = tab.cm;
+    const l = Math.max(0, Math.min(line, cm.lineCount() - 1));
+    const ch = Math.max(0, Math.min(col, cm.getLine(l).length));
+    const end = Math.min(cm.getLine(l).length, ch + Math.max(1, len || 0));
+    cm.setSelection({ line: l, ch }, { line: l, ch: end });
+    scrollLineToComfort(cm, l);
+    cm.focus();
+  }
+
+  /* ---------- 在文件中替换 ---------- */
+  function grepReplaceRegex() {
+    const kw = $("searchInput").value.trim();
+    if (!kw) return null;
+    const flags = "g" + (searchCase ? "" : "i");
+    try {
+      if (searchRegex) return new RegExp(kw, flags);
+      let body = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (searchWord) body = "\\b" + body + "\\b";
+      return new RegExp(body, flags);
+    } catch (_) { return null; }
+  }
+  function grepReplacementText() {
+    const rep = $("replaceInput").value;
+    // 非正则模式下替换文本按字面量处理（$ 需转义）
+    return searchRegex ? rep : rep.replace(/\$/g, "$$$$");
+  }
+
+  async function grepReplaceFiles(files) {
+    const re = grepReplaceRegex();
+    if (!re) { toast("替换失败：查询条件无效", "err"); return; }
+    const targets = [], dirtySkipped = [];
+    files.forEach(f => {
+      const t = findTab(f.path);
+      if (t && t.dirty) { dirtySkipped.push(f.rel); return; }
+      targets.push(f);
+    });
+    if (!targets.length) { toast("匹配的文件都有未保存修改，已跳过", "warn"); return; }
+    const total = targets.reduce((s, f) => s + (f.total || f.count || 0), 0);
+    const ok = await uiConfirm("全部替换",
+      "将在 " + targets.length + " 个文件中替换 " + total + " 处内容。\n\n替换后立即写入磁盘，不可撤销。",
+      "全部替换", true);
+    if (!ok) return;
+    const rep = grepReplacementText();
+    let doneFiles = 0, doneHits = 0;
+    const failed = [];
+    for (const f of targets) {
+      try {
+        const r = await fetch("/api/preview?path=" + encodeURIComponent(f.path) + "&raw=1");
+        if (!r.ok || r.headers.get("X-Preview-Type") !== "text") { failed.push(f.rel); continue; }
+        const text = await r.text();
+        const hits = (text.match(re) || []).length;
+        if (!hits) continue;
+        const out = text.replace(re, rep);
+        const res = await fetch("/api/files/save", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: f.path, content: out }),
+        });
+        const d = await res.json();
+        if (d.error) { failed.push(f.rel); continue; }
+        doneFiles++; doneHits += hits;
+        const t = findTab(f.path);
+        if (t && t.cm) { t.cm.setValue(out); t.original = out; t.dirty = false; t.el.classList.remove("dirty"); }
+      } catch (e) { failed.push(f.rel); }
+    }
+    refreshTreeDirty();
+    if (doneFiles) toast("已在 " + doneFiles + " 个文件中替换 " + doneHits + " 处" +
+      (dirtySkipped.length ? "，跳过 " + dirtySkipped.length + " 个有未保存修改的文件" : ""), "ok");
+    if (failed.length) toast("失败 " + failed.length + " 个文件：" + failed.slice(0, 3).join("、"), "err");
+    const kw = $("searchInput").value.trim();
+    if (kw) runSearch(kw);
+  }
+
+  /* ---------- 模式切换与事件绑定 ---------- */
+  function setSearchMode(mode) {
+    searchMode = mode === "name" ? "name" : "content";
+    $("searchPanel").classList.toggle("mode-name", searchMode === "name");
+    $("searchPanel").classList.toggle("mode-content", searchMode === "content");
+    document.querySelectorAll(".s-mode").forEach(b => b.classList.toggle("active", b.dataset.mode === searchMode));
+    $("searchInput").placeholder = searchMode === "content" ? "在文件中搜索…" : "搜索文件名 / 文件夹名…";
+    $("searchResults").innerHTML = "";
+    grepData = null;
+    const kw = $("searchInput").value.trim();
+    if (kw) runSearch(kw);
+    else searchHint(searchMode === "content"
+      ? "输入关键字，在项目所有文件中搜索内容；结果可点击跳转"
+      : "输入关键字，递归搜索项目内的文件名与文件夹名");
+  }
+  document.querySelectorAll(".s-mode").forEach(b => { b.onclick = () => { setSearchMode(b.dataset.mode); $("searchInput").focus(); }; });
+  $("searchInput").addEventListener("input", (e) => {
+    const kw = e.target.value.trim();
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => runSearch(kw), 300);
+  });
+  $("searchSkipDep").onclick = () => {
+    searchSkipping = !searchSkipping;
+    $("searchSkipDep").classList.toggle("active", searchSkipping);
+    const kw = $("searchInput").value.trim();
+    if (kw) runSearch(kw);
+  };
+  $("searchCase").onclick = () => {
+    searchCase = !searchCase;
+    $("searchCase").classList.toggle("active", searchCase);
+    const kw = $("searchInput").value.trim();
+    if (kw) runSearch(kw);
+  };
+  $("grepWord").onclick = () => {
+    searchWord = !searchWord;
+    $("grepWord").classList.toggle("active", searchWord);
+    const kw = $("searchInput").value.trim();
+    if (kw) runSearch(kw);
+  };
+  $("grepRegex").onclick = () => {
+    searchRegex = !searchRegex;
+    $("grepRegex").classList.toggle("active", searchRegex);
+    const kw = $("searchInput").value.trim();
+    if (kw) runSearch(kw);
+  };
+  $("grepReplaceAll").onclick = () => {
+    if (searchMode !== "content") return;
+    if (!grepData || !grepData.files || !grepData.files.length) { toast("请先搜索出结果", "warn"); return; }
+    grepReplaceFiles(grepData.files);
+  };
+
+  /* 在资源管理器中逐级展开并定位到指定路径（搜索结果点击文件夹时使用） */
+  async function revealInTree(target) {
+    showPanel("explorer");
+    if (!target.startsWith(ROOT)) return;
+    const segs = target.substring(ROOT.length).split("/").filter(Boolean);
+    let cur = ROOT, container = explorerPanel.querySelector(".tree-children");
+    if (!container) return;
+    for (let i = 0; i < segs.length; i++) {
+      const full = cur + "/" + segs[i];
+      const last = i === segs.length - 1;
+      if (!container._loaded) { container._loaded = true; await loadChildren(cur, container, i); }
+      const row = Array.from(container.querySelectorAll(":scope > .tree-row")).find(r => r.dataset.path === full);
+      if (!row) return;
+      if (last) { row.scrollIntoView({ block: "center" }); row.click(); return; }
+      const kids = row.nextElementSibling;
+      if (!kids || !kids.classList.contains("tree-children")) return;
+      if (!kids.classList.contains("open")) {
+        kids.classList.add("open");
+        const tw = row.querySelector(".twist i");
+        if (tw) tw.className = "bi bi-chevron-down";
+      }
+      if (!kids._loaded) { kids._loaded = true; await loadChildren(full, kids, i + 1); }
+      container = kids; cur = full;
+    }
+  }
+
+  /* ==================================================================
+     源代码管理（Git）：状态 / 暂存 / 取消暂存 / 放弃 / 提交 / 差异视图
+     ================================================================== */
+  const gitState = { isRepo: false, repo: "", branch: "", last: null };
+  let gitViewMode = "tree";      // tree（树形视图，默认）/ list（平铺列表）
+  let gitGraph = [];             // 最近提交（图形区块）
+
+  function gitPost(url, body, okMsg) {
+    return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) throw new Error(d.error);
+        if (okMsg) toast(okMsg, "ok");
+        loadGitStatus();
+        return true;
+      })
+      .catch(e => { toast("操作失败：" + (e.message || e), "err"); return false; });
+  }
+
+  function renderGitMessage(msg, withInit) {
+    $("gitBranch").textContent = "—";
+    $("gitSync").textContent = "";
+    const box = $("gitList");
+    box.innerHTML = "";
+    const e = document.createElement("div");
+    e.className = "git-empty";
+    e.textContent = msg;
+    box.appendChild(e);
+    if (withInit) {
+      const b = document.createElement("button");
+      b.className = "g-btn";
+      b.textContent = "初始化 Git 仓库";
+      b.onclick = async () => {
+        if (!(await uiConfirm("初始化仓库", "将在 " + ROOT + " 下执行 git init 创建仓库。", "初始化", false))) return;
+        gitPost("/api/git/init", { repo: ROOT }, "仓库已初始化");
+      };
+      e.appendChild(document.createElement("div"));
+      e.appendChild(b);
+    }
+  }
+
+  function gitFileRow(sec, f, depth) {
+    const name = f.name || baseName(f.path);
+    const dir = f.path.indexOf("/") >= 0 ? f.path.substring(0, f.path.lastIndexOf("/")) : "";
+    const row = document.createElement("div");
+    row.className = "git-file";
+    row.title = f.path;
+    row.style.paddingLeft = (8 + (depth || 0) * 12) + "px";
+    // 树形视图下层级已经体现目录，不再重复展示目录名
+    row.innerHTML = '<span class="gf-name">' + esc(name) + '</span>' +
+      (gitViewMode === "list" && dir ? '<span class="gf-dir">' + esc(dir) + '</span>' : '') +
+      '<span class="gf-st">' + esc(f.status) + '</span>' +
+      '<span class="gf-acts"></span>';
+    const acts = row.querySelector(".gf-acts");
+    const addBtn = (icon, title, fn) => {
+      const b = document.createElement("button");
+      b.innerHTML = '<i class="bi ' + icon + '"></i>';
+      b.title = title;
+      b.onclick = (e) => { e.stopPropagation(); fn(); };
+      acts.appendChild(b);
+    };
+    if (sec.staged) {
+      addBtn("bi-dash-lg", "取消暂存", () => gitPost("/api/git/unstage", { repo: gitState.repo, files: [f.path] }, "已取消暂存"));
+    } else {
+      addBtn("bi-plus-lg", "暂存更改", () => gitPost("/api/git/stage", { repo: gitState.repo, files: [f.path] }, "已暂存 " + name));
+      if (!sec.untracked) {
+        addBtn("bi-arrow-counterclockwise", "放弃更改", async () => {
+          if (!(await uiConfirm("放弃更改", "将丢弃 " + f.path + " 的未暂存修改，此操作不可撤销。", "放弃更改", true))) return;
+          gitPost("/api/git/discard", { repo: gitState.repo, files: [f.path] }, "已放弃更改");
+        });
+      }
+    }
+    row.onclick = (e) => { if (e.target.closest("button")) return; openDiffTab(f.path, sec.staged, !!sec.untracked); };
+    return row;
+  }
+
+  /* 按目录层级构建树（VS Code 树形视图） */
+  function gitTreeFrom(files) {
+    const root = { dirs: new Map(), files: [] };
+    files.forEach(f => {
+      const parts = f.path.split("/");
+      let node = root;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const dn = parts[i];
+        if (!node.dirs.has(dn)) node.dirs.set(dn, { dirs: new Map(), files: [] });
+        node = node.dirs.get(dn);
+      }
+      node.files.push(Object.assign({}, f, { name: parts[parts.length - 1] }));
+    });
+    return root;
+  }
+  function gitTreeCount(node) {
+    let n = node.files.length;
+    node.dirs.forEach(d => { n += gitTreeCount(d); });
+    return n;
+  }
+  function renderGitTree(node, depth, sec) {
+    const frag = document.createDocumentFragment();
+    Array.from(node.dirs.entries())
+      .sort((a, b) => a[0].localeCompare(b[0], "zh"))
+      .forEach(([dn, child]) => {
+        const head = document.createElement("div");
+        head.className = "git-dir";
+        head.style.paddingLeft = (8 + depth * 12) + "px";
+        head.innerHTML = '<i class="bi bi-chevron-down git-dir-tw"></i><i class="bi bi-folder2 git-dir-ic"></i>' +
+          '<span class="gf-dirname">' + esc(dn) + '</span>' +
+          '<span class="gf-dot"></span><span class="gf-st">' + gitTreeCount(child) + '</span>';
+        const body = document.createElement("div");
+        body.appendChild(renderGitTree(child, depth + 1, sec));
+        head.onclick = () => {
+          const hide = body.style.display !== "none";
+          body.style.display = hide ? "none" : "";
+          head.querySelector(".git-dir-tw").className =
+            "bi " + (hide ? "bi-chevron-right" : "bi-chevron-down") + " git-dir-tw";
+        };
+        frag.appendChild(head);
+        frag.appendChild(body);
+      });
+    node.files.slice()
+      .sort((a, b) => a.name.localeCompare(b.name, "zh"))
+      .forEach(f => frag.appendChild(gitFileRow(sec, f, depth)));
+    return frag;
+  }
+
+  function gitSection(sec) {
+    const wrap = document.createElement("div");
+    wrap.className = "git-sec";
+    const head = document.createElement("div");
+    head.className = "git-sec-head";
+    head.innerHTML = '<i class="bi bi-chevron-down"></i><span>' + sec.title +
+      '</span><span class="git-acts"></span><span class="git-cnt">' + sec.files.length + '</span>';
+    const body = document.createElement("div");
+    if (gitViewMode === "tree") {
+      body.appendChild(renderGitTree(gitTreeFrom(sec.files), 0, sec));
+    } else {
+      sec.files.slice().sort((a, b) => a.path.localeCompare(b.path, "zh"))
+        .forEach(f => body.appendChild(gitFileRow(sec, f, 0)));
+    }
+    // 分组级批量操作
+    const acts = head.querySelector(".git-acts");
+    const addAct = (icon, title, fn) => {
+      const b = document.createElement("button");
+      b.innerHTML = '<i class="bi ' + icon + '"></i>';
+      b.title = title;
+      b.onclick = (e) => { e.stopPropagation(); fn(); };
+      acts.appendChild(b);
+    };
+    if (sec.staged) {
+      addAct("bi-dash-lg", "取消暂存所有更改", () => gitPost("/api/git/unstage", { repo: gitState.repo, all: true }, "已取消暂存所有更改"));
+    } else if (sec.untracked) {
+      addAct("bi-plus-lg", "暂存所有未跟踪文件", () => gitPost("/api/git/stage", { repo: gitState.repo, files: sec.files.map(f => f.path) }, "已暂存所有未跟踪文件"));
+    } else {
+      addAct("bi-arrow-counterclockwise", "放弃所有更改", async () => {
+        if (!(await uiConfirm("放弃所有更改", "将丢弃所有未暂存的修改，此操作不可撤销。", "全部放弃", true))) return;
+        gitPost("/api/git/discard", { repo: gitState.repo, all: true }, "已放弃所有更改");
+      });
+      addAct("bi-plus-lg", "暂存所有更改", () => gitPost("/api/git/stage", { repo: gitState.repo, all: true, tracked_only: true }, "已暂存所有更改"));
+    }
+    head.onclick = () => {
+      const hide = body.style.display !== "none";
+      body.style.display = hide ? "none" : "";
+      head.querySelector("i").className = "bi " + (hide ? "bi-chevron-right" : "bi-chevron-down");
+    };
+    wrap.appendChild(head);
+    wrap.appendChild(body);
+    return wrap;
+  }
+
+  /* 图形：最近提交 */
+  function gitGraphSection() {
+    const wrap = document.createElement("div");
+    wrap.className = "git-sec git-graph";
+    const head = document.createElement("div");
+    head.className = "git-sec-head";
+    head.innerHTML = '<i class="bi bi-chevron-down"></i><span>图形</span><span class="git-cnt">' + (gitGraph.length || "") + '</span>';
+    const body = document.createElement("div");
+    if (!gitGraph.length) {
+      const e = document.createElement("div");
+      e.className = "git-empty";
+      e.textContent = "没有任何源代码管理历史记录项。";
+      body.appendChild(e);
+    } else {
+      gitGraph.forEach(c => {
+        const row = document.createElement("div");
+        row.className = "git-commit-row";
+        row.title = c.hash + "  " + c.subject + "（" + c.author + " " + c.date + "）";
+        row.innerHTML = '<span class="gc-hash">' + esc(c.hash) + '</span>' +
+          '<span class="gc-sub">' + esc(c.subject) + '</span>' +
+          '<span class="gc-meta">' + esc(c.date) + '</span>';
+        body.appendChild(row);
+      });
+    }
+    head.onclick = () => {
+      const hide = body.style.display !== "none";
+      body.style.display = hide ? "none" : "";
+      head.querySelector("i").className = "bi " + (hide ? "bi-chevron-right" : "bi-chevron-down");
+    };
+    wrap.appendChild(head);
+    wrap.appendChild(body);
+    return wrap;
+  }
+
+  function renderGitStatus(d) {
+    $("gitBranch").textContent = d.branch || "（无分支）";
+    $("gitSync").textContent = (d.ahead ? "↑" + d.ahead : "") + (d.behind ? "↓" + d.behind : "");
+    const box = $("gitList");
+    box.innerHTML = "";
+    const sections = [
+      { title: "已暂存的更改", files: d.staged || [], staged: true },
+      { title: "更改", files: d.changed || [], staged: false },
+      { title: "未跟踪", files: d.untracked || [], staged: false, untracked: true },
+    ];
+    const total = sections.reduce((s, x) => s + x.files.length, 0);
+    if (total) {
+      sections.forEach(sec => { if (sec.files.length) box.appendChild(gitSection(sec)); });
+    } else {
+      const e = document.createElement("div");
+      e.className = "git-empty";
+      e.textContent = "没有检测到更改。";
+      box.appendChild(e);
+    }
+    box.appendChild(gitGraphSection());
+  }
+
+  function updateBranchStatus(d) {
+    const el = $("sbBranch");
+    el.style.cursor = "pointer";
+    if (!d || !d.is_repo) {
+      el.innerHTML = '<i class="bi bi-git"></i> 未检测到仓库';
+      el.title = "点击打开源代码管理";
+      return;
+    }
+    const n = (d.counts ? (d.counts.staged + d.counts.changed + d.counts.untracked) : 0);
+    el.innerHTML = '<i class="bi bi-git"></i> ' + esc(d.branch || "HEAD") +
+      (d.ahead ? " ↑" + d.ahead : "") + (d.behind ? " ↓" + d.behind : "") + (n ? "  ●" + n : "");
+    el.title = "分支 " + (d.branch || "") + "，共 " + n + " 个更改";
+  }
+
+  function applyGitDecorations(d) {
+    const map = new Map();
+    if (d && d.is_repo) {
+      (d.staged || []).forEach(f => map.set(f.path, "staged"));
+      (d.changed || []).forEach(f => map.set(f.path, "modified"));
+      (d.untracked || []).forEach(f => { if (!map.has(f.path)) map.set(f.path, "untracked"); });
+    }
+    const repo = (d && d.repo) ? d.repo : "";
+    document.querySelectorAll(".tree-row").forEach(r => {
+      r.classList.remove("git-modified", "git-untracked", "git-staged");
+      if (!map.size || r.dataset.isdir === "1" || !r.dataset.path) return;
+      if (repo && !r.dataset.path.startsWith(repo + "/")) return;
+      const rel = repo ? r.dataset.path.substring(repo.length + 1) : r.dataset.path;
+      const kind = map.get(rel);
+      if (kind) r.classList.add("git-" + kind);
+    });
+  }
+
+  function loadGitStatus(showToast) {
+    // 状态与提交历史并行拉取，一次渲染，避免闪烁
+    return Promise.all([
+      fetch("/api/git/status?path=" + encodeURIComponent(ROOT)).then(r => r.json()),
+      fetch("/api/git/log?path=" + encodeURIComponent(ROOT) + "&limit=30")
+        .then(r => r.json()).catch(() => ({ commits: [] })),
+    ])
+      .then(([d, lg]) => {
+        gitGraph = (lg && lg.commits) || [];
+        gitState.last = d;
+        gitState.isRepo = !!d.is_repo;
+        gitState.repo = d.repo || ROOT;
+        gitState.branch = d.branch || "";
+        $("gitPanel").classList.toggle("not-repo", !d.is_repo);   // 非仓库时隐藏提交区
+        updateBranchStatus(d);
+        applyGitDecorations(d);
+        if (!d.is_repo) { renderGitMessage(d.error || "当前文件夹不是 Git 仓库，可点击下方按钮初始化。", true); return; }
+        if (!d.ok) { renderGitMessage(d.error || "读取 Git 状态失败"); return; }
+        renderGitStatus(d);
+        if (showToast) toast("Git 状态已刷新", "ok");
+      })
+      .catch(e => renderGitMessage("Git 状态读取失败：" + (e.message || e)));
+  }
+
+  /* 差异视图：以只读标签页展示 unified diff，并按增删行着色 */
+  function colorizeDiffLines(cm) {
+    cm.operation(() => {
+      for (let i = 0; i < cm.lineCount(); i++) {
+        const t = cm.getLine(i);
+        let cls = null;
+        if (t.startsWith("+++") || t.startsWith("---") || t.startsWith("diff ") || t.startsWith("index ")) cls = "diff-meta";
+        else if (t.startsWith("@@")) cls = "diff-hunk";
+        else if (t.startsWith("+")) cls = "diff-add";
+        else if (t.startsWith("-")) cls = "diff-del";
+        if (cls) cm.addLineClass(i, "background", cls);
+      }
+    });
+  }
+
+  function openDiffTab(relPath, staged, untracked) {
+    const abs = gitState.repo + "/" + relPath;
+    const key = abs + "\u0001diff" + (staged ? "1" : "0");
+    let tab = findTab(key);
+    if (tab) { activate(tab); return; }
+    const host = document.createElement("div");
+    host.className = "cm-host";
+    editorWrap.appendChild(host);
+    tab = {
+      path: key, name: baseName(relPath), host, cm: null, original: "", dirty: false,
+      big: false, diff: true, displayPath: abs,
+    };
+    tabs.push(tab);
+    renderTab(tab);
+    welcome.style.display = "none";
+    host.classList.add("active");
+    host.innerHTML = '<div style="padding:30px;color:#888;">正在生成差异…</div>';
+    const url = "/api/git/diff?path=" + encodeURIComponent(gitState.repo) +
+      "&file=" + encodeURIComponent(relPath) + (staged ? "&staged=1" : "") + (untracked ? "&untracked=1" : "");
+    fetch(url)
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) { host.innerHTML = '<div style="padding:30px;color:#c66;">无法生成差异：' + esc(d.error) + '</div>'; return; }
+        host.innerHTML = "";
+        tab.cm = CodeMirror(host, {
+          value: d.diff || "（没有差异）", mode: "text/plain", theme: "material-darker",
+          lineNumbers: true, lineWrapping: false, readOnly: true, styleActiveLine: true,
+        });
+        colorizeDiffLines(tab.cm);
+        activate(tab);
+        scheduleRefresh(tab);
+        if (d.truncated) toast("差异内容过大，已截断显示", "warn");
+      })
+      .catch(e => { host.innerHTML = '<div style="padding:30px;color:#c66;">无法生成差异：' + esc(e.message || e) + '</div>'; });
+  }
+
+  $("gitViewToggle").onclick = () => {
+    gitViewMode = gitViewMode === "tree" ? "list" : "tree";
+    $("gitViewToggle").innerHTML = '<i class="bi ' + (gitViewMode === "tree" ? "bi-list-ul" : "bi-diagram-3") + '"></i>';
+    $("gitViewToggle").title = gitViewMode === "tree" ? "切换到列表视图" : "切换到树形视图";
+    if (gitState.isRepo && gitState.last) renderGitStatus(gitState.last);
+  };
+  $("gitRefresh").onclick = () => loadGitStatus(true);
+  $("gitStageAll").onclick = () => {
+    if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
+    gitPost("/api/git/stage", { repo: gitState.repo, all: true }, "已暂存所有更改");
+  };
+  function doGitCommit() {
+    if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
+    const msg = $("gitCommitMsg").value.trim();
+    if (!msg) { toast("请填写提交信息", "warn"); return; }
+    gitPost("/api/git/commit", { repo: gitState.repo, message: msg, all: $("gitCommitAll").checked }, "提交成功")
+      .then(ok => { if (ok) { $("gitCommitMsg").value = ""; refreshTree(ROOT); } });
+  }
+  $("gitCommitBtn").onclick = doGitCommit;
+  $("gitCommitMsg").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doGitCommit(); }
+  });
+  $("sbBranch").onclick = () => { showPanel("git"); loadGitStatus(); };
+
+  /* ---------- 顶部按钮 ---------- */
+  async function newInRoot(isDir) {
+    const nm = await uiPrompt(isDir ? "新建文件夹" : "新建文件", isDir ? "新建文件夹" : "新建文件.txt", "在项目根目录下创建，输入名称");
+    if (!nm) return;
+    fetch("/api/files/create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: ROOT, name: nm, is_dir: isDir }) })
+      .then(r => r.json()).then(d => { if (d.error) throw new Error(d.error); toast("已创建：" + nm, "ok"); refreshTree(ROOT); if (!isDir) openFile(d.path, nm); })
+      .catch(e => toast("创建失败：" + (e.message || e), "err"));
+  }
+  $("tbNewFile").onclick = () => newInRoot(false);
+  $("tbNewFolder").onclick = () => newInRoot(true);
+  $("sideNewFile").onclick = () => newInRoot(false);
+  $("sideNewFolder").onclick = () => newInRoot(true);
+  $("tbSave").onclick = () => { if (active) saveTab(active); };
+
+  /* ---------- 键盘快捷键 ---------- */
+  document.addEventListener("keydown", (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); if (active) saveTab(active); }
+    else if (mod && e.key.toLowerCase() === "b") { e.preventDefault(); toggleSidebar(); }
+    else if (mod && e.key.toLowerCase() === "w") { e.preventDefault(); if (active) closeTab(active); }
+    else if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); newInRoot(false); }
+    else if (mod && e.key.toLowerCase() === "p") { e.preventDefault(); openSearch(); }
+    else if (mod && e.altKey && e.key.toLowerCase() === "f") { e.preventDefault(); ffOpen(true); }
+    else if (mod && e.key.toLowerCase() === "f") { e.preventDefault(); ffOpen(false); }
+    else if (mod && e.key.toLowerCase() === "h") { e.preventDefault(); ffOpen(true); }
+    else if (e.key === "F3") { e.preventDefault(); ffNext(e.shiftKey ? -1 : 1); }
+    else if (mod && (e.key === "=" || e.key === "+")) { e.preventDefault(); chFont(1); }
+    else if (mod && e.key === "-") { e.preventDefault(); chFont(-1); }
+    else if (mod && e.key.toLowerCase() === "g") { e.preventDefault(); gotoLine(); }
+    else if (e.altKey && e.key.toLowerCase() === "z") { e.preventDefault(); toggleWrap(); }
+    else if (e.altKey && e.key.toLowerCase() === "l") { e.preventDefault(); ffToggleInSelection(); }
+  });
+
+  // 窗口尺寸变化时重新测量所有已打开的编辑器，避免行号/内容错位
+  let _resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => {
+      const w = parseInt($("sidebar").style.width, 10);      // 窗口变窄时收敛已拖动的宽度
+      if (w) applySidebarWidth(w, false);
+      refreshAllEditors();
+    }, 150);
+  });
+  // 页面完全加载（字体/CSS 就绪）后再统一重绘一次
+  window.addEventListener("load", () => { refreshAllEditors(); });
+
+  initTree();
+  loadGitStatus();          // 启动时同步分支信息到状态栏
+})();
+</script>
+</body>
+</html>

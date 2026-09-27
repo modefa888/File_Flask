@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 运行产物
+logs/
+*.log
+.DS_Store
+
+# 运行时缓存 / 索引 / 回收站（生成于应用根目录 data/）
+data/
+
+# PyInstaller 构建产物
+build/
+dist/

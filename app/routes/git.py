@@ -218,10 +218,11 @@ def api_git_diff():
     hash_rev = (request.args.get("hash") or "").strip()
     if hash_rev.startswith("-"):
         return _fail("参数不合法")
+    # -U100000：全文件上下文，前端分栏对比需要展示整个文件而非仅变更片段
     if hash_rev:
-        args = ["show", "--no-color", "--no-ext-diff", "--format=", hash_rev, "--", rel]
+        args = ["show", "--no-color", "--no-ext-diff", "-U100000", "--format=", hash_rev, "--", rel]
     else:
-        args = ["diff", "--no-color", "--no-ext-diff"]
+        args = ["diff", "--no-color", "--no-ext-diff", "-U100000"]
         if staged:
             args.append("--cached")
         args += ["--", rel]
@@ -231,7 +232,7 @@ def api_git_diff():
     text = proc.stdout
     # 未跟踪文件 git diff 为空：改用 --no-index 与空文件对比，展示为整文件新增
     if not text.strip() and untracked:
-        proc2, err2 = _git(root, ["diff", "--no-color", "--no-ext-diff", "--no-index",
+        proc2, err2 = _git(root, ["diff", "--no-color", "--no-ext-diff", "-U100000", "--no-index",
                                   "--", os.devnull, rel])
         if not err2 and proc2:
             text = proc2.stdout
@@ -492,8 +493,28 @@ def api_git_show():
             truncated = True
             break
         files.append({"path": path, "status": code[:1]})
+
+    # 变更统计（numstat 聚合；二进制文件计入文件数、不计行数；merge 提交无 diff 时为 0）
+    stats = {"files": 0, "insertions": 0, "deletions": 0}
+    proc3, err3 = _git(root, ["show", "--numstat", "--format=", rev])
+    if not err3 and proc3.returncode == 0:
+        for line in proc3.stdout.splitlines():
+            segs = line.split("\t")
+            if len(segs) < 3 or not segs[0].strip():
+                continue
+            stats["files"] += 1
+            if segs[0] != "-":
+                try:
+                    stats["insertions"] += int(segs[0])
+                except ValueError:
+                    pass
+            if segs[1] != "-":
+                try:
+                    stats["deletions"] += int(segs[1])
+                except ValueError:
+                    pass
     return jsonify({"ok": True, "repo": root, "commit": commit,
-                    "files": files, "truncated": truncated})
+                    "files": files, "truncated": truncated, "stats": stats})
 
 
 @bp.route("/api/git/commit", methods=["POST"])

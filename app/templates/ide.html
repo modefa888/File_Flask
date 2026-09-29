@@ -313,6 +313,22 @@
     .git-graph .git-sec-head .g-auto { display: none; }
   }
   .git-graph .git-acts button.on { color: #4fc1ff; }
+  /* 提交悬停信息卡（模拟 VS Code 图形视图悬停详情） */
+  .git-hover-card {
+    position: fixed; z-index: 9000; max-width: 460px; padding: 10px 12px;
+    background: #252526; border: 1px solid #454545; border-radius: 6px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .5); font-size: 12.5px; color: #cccccc;
+  }
+  .git-hover-card .ghc-author { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: #e8e8e8; font-weight: 600; }
+  .git-hover-card .ghc-author .bi { color: #4fc1ff; font-weight: 400; }
+  .git-hover-card .ghc-time { color: #9d9d9d; font-weight: 400; }
+  .git-hover-card .ghc-msg { margin-top: 6px; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .git-hover-card .ghc-stats { margin-top: 6px; color: #b8b8b8; }
+  .git-hover-card .ghc-stats .ins { color: #81b88b; }
+  .git-hover-card .ghc-stats .del { color: #c74e39; }
+  .git-hover-card .ghc-hash { margin-top: 6px; color: #9d9d9d; cursor: pointer;
+    font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .git-hover-card .ghc-hash:hover { color: #4fc1ff; }
   /* 提交内文件：树形/列表 */
   .git-commit-dir { display: flex; align-items: center; gap: 5px; padding: 2px 8px 2px 34px; font-size: 12px; color: #cccccc; cursor: pointer; }
   .git-commit-dir:hover { background: #2a2d2e; }
@@ -335,11 +351,22 @@
   /* 尚未初始化仓库时，只显示提示与初始化按钮，提交区/暂存全部按钮隐藏 */
   #gitPanel.not-repo .git-commit,
   #gitPanel.not-repo #gitStageAll { display: none; }
-  /* 差异视图行底色 */
-  .cm-host .diff-add { background: rgba(40, 120, 60, .32); }
-  .cm-host .diff-del { background: rgba(150, 45, 45, .32); }
-  .cm-host .diff-hunk { background: rgba(56, 92, 140, .35); color: #9ecbff; }
-  .cm-host .diff-meta { color: #8a8a8a; }
+  /* 分栏差异视图（VS Code 风格：左旧右新、逐行对齐，缺失一侧用斜纹占位） */
+  .sd-wrap { height: 100%; overflow: auto; background: #1e1e1e; }
+  .sd-grid { display: grid; grid-template-columns: 1fr 1fr; min-width: 860px; width: 100%; }
+  .sd-head { position: sticky; top: 0; z-index: 2; padding: 5px 12px; background: #252526;
+    color: #bbbbbb; font-size: 12px; border-bottom: 1px solid #333; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .sd-cell { display: flex; align-items: flex-start; min-width: 0;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.6; }
+  .sd-cell .sd-ln { flex: none; width: 46px; padding-right: 8px; text-align: right; color: #6e7681;
+    background: rgba(255, 255, 255, .03); border-right: 1px solid #2c2c2c; user-select: none; }
+  .sd-cell .sd-tx { flex: 1 1 auto; padding: 0 10px; white-space: pre; overflow: hidden; color: #cccccc; }
+  .sd-cell.add { background: rgba(46, 160, 67, .18); }
+  .sd-cell.add .sd-tx { color: #b3e6b3; }
+  .sd-cell.del { background: rgba(248, 81, 73, .15); }
+  .sd-cell.del .sd-tx { color: #ffb3ab; }
+  .sd-cell.fill { background: #212121; }
   /* 资源管理器中的 Git 状态着色 */
   .tree-row.git-modified .nm { color: #e2c08a; }
   .tree-row.git-untracked .nm { color: #6fcf8a; }
@@ -3897,6 +3924,100 @@
     setTimeout(() => first.classList.remove("flash"), 1200);
   }
 
+  /* 提交悬停信息卡：作者 / 相对时间 / 完整信息 / 变更统计 / 哈希（模拟 VS Code 图形视图） */
+  let gitCard = null, gitCardShow = null, gitCardHide = null;
+  const gitStatsCache = {};
+
+  function gitRelTime(s) {
+    const t = new Date(String(s).replace(" ", "T"));
+    if (isNaN(t.getTime())) return "";
+    const sec = (Date.now() - t.getTime()) / 1000;
+    if (sec < 60) return "刚刚";
+    if (sec < 3600) return Math.floor(sec / 60) + "分钟前";
+    if (sec < 86400) return Math.floor(sec / 3600) + "小时前";
+    if (sec < 86400 * 30) return Math.floor(sec / 86400) + "天前";
+    if (sec < 86400 * 365) return Math.floor(sec / 86400 / 30) + "个月前";
+    return Math.floor(sec / 86400 / 365) + "年前";
+  }
+
+  function hideCommitCard() {
+    clearTimeout(gitCardShow); clearTimeout(gitCardHide);
+    if (gitCard) { gitCard.remove(); gitCard = null; }
+  }
+
+  function showCommitCard(row, c) {
+    hideCommitCard();
+    const card = document.createElement("div");
+    card.className = "git-hover-card";
+    let fullHash = "";
+    const rel = gitRelTime(c.date);
+    card.innerHTML =
+      '<div class="ghc-author"><i class="bi bi-person-circle"></i><span>' + esc(c.author) + '</span>' +
+      (rel ? '<span class="ghc-time">' + esc(rel) + ' (' + esc(c.date) + ')</span>' : "") + "</div>" +
+      '<div class="ghc-msg">' + esc(c.subject) + "</div>" +
+      '<div class="ghc-stats"></div>' +
+      '<div class="ghc-hash" title="点击复制完整哈希">' + esc(c.hash) + "</div>";
+    card.addEventListener("mouseenter", () => clearTimeout(gitCardHide));
+    card.addEventListener("mouseleave", () => { gitCardHide = setTimeout(hideCommitCard, 200); });
+    card.querySelector(".ghc-hash").onclick = (e) => {
+      e.stopPropagation();
+      copyText(fullHash || c.hash);
+      toast("已复制提交哈希", "ok");
+    };
+
+    const statsEl = card.querySelector(".ghc-stats");
+    const fillStats = (st) => {
+      if (!st || !st.files) { statsEl.style.display = "none"; return; }
+      let html = "已更改 " + st.files + " 个文件";
+      if (st.insertions) html += '，<span class="ins">' + st.insertions + ' 行插入(+)</span>';
+      if (st.deletions) html += '，<span class="del">' + st.deletions + ' 行删除(-)</span>';
+      statsEl.innerHTML = html;
+    };
+    if (gitStatsCache[c.hash]) {
+      fillStats(gitStatsCache[c.hash].stats);
+      fullHash = gitStatsCache[c.hash].full || "";
+    } else {
+      statsEl.textContent = "统计加载中…";
+      fetch("/api/git/show?path=" + encodeURIComponent(gitState.repo) + "&hash=" + encodeURIComponent(c.hash))
+        .then(r => r.json())
+        .then(d => {
+          if (d.error || !d.stats) { if (card.isConnected) statsEl.style.display = "none"; return; }
+          gitStatsCache[c.hash] = { stats: d.stats, full: (d.commit && d.commit.full) || "" };
+          if (!card.isConnected) return;
+          fillStats(d.stats);
+          if (d.commit && d.commit.full) fullHash = d.commit.full;
+        })
+        .catch(() => { if (card.isConnected) statsEl.style.display = "none"; });
+    }
+
+    document.body.appendChild(card);
+    const r = row.getBoundingClientRect();
+    const cw = card.offsetWidth, ch = card.offsetHeight;
+    let x = r.right + 10;
+    if (x + cw > window.innerWidth - 8) x = Math.max(8, r.left - cw - 10);
+    if (x + cw > window.innerWidth - 8) x = Math.max(8, window.innerWidth - cw - 8);
+    let y = r.top - 4;
+    if (y + ch > window.innerHeight - 8) y = window.innerHeight - ch - 8;
+    if (y < 8) y = 8;
+    card.style.left = x + "px";
+    card.style.top = y + "px";
+    gitCard = card;
+  }
+
+  function attachCommitHover(row, c) {
+    row.addEventListener("mouseenter", () => {
+      clearTimeout(gitCardHide);
+      gitCardShow = setTimeout(() => showCommitCard(row, c), 300);
+    });
+    row.addEventListener("mouseleave", () => {
+      clearTimeout(gitCardShow);
+      gitCardHide = setTimeout(hideCommitCard, 200);
+    });
+  }
+  document.addEventListener("mousedown", (e) => { if (gitCard && !gitCard.contains(e.target)) hideCommitCard(); });
+  window.addEventListener("scroll", hideCommitCard, true);
+  window.addEventListener("resize", hideCommitCard);
+
   async function setGitRemote() {
     if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
     let current = "";
@@ -3975,7 +4096,6 @@
         const item = document.createElement("div");
         const row = document.createElement("div");
         row.className = "git-commit-row";
-        row.title = c.hash + "  " + c.subject + "（" + c.author + " " + c.date + "）";
         row.innerHTML = '<i class="bi bi-chevron-right gc-tw"></i>' +
           '<span class="gc-sub">' + esc(c.subject) + '</span>' +
           '<span class="gc-hash">' + esc(c.hash) + '</span>' +
@@ -3994,6 +4114,7 @@
         };
         item.appendChild(row);
         item.appendChild(files);
+        attachCommitHover(row, c);
         body.appendChild(item);
       });
     }
@@ -4170,33 +4291,119 @@
       .catch(e => renderGitMessage("Git 状态读取失败：" + (e.message || e)));
   }
 
-  /* 差异视图：以只读标签页展示 unified diff，并按增删行着色 */
-  function colorizeDiffLines(cm) {
-    cm.operation(() => {
-      for (let i = 0; i < cm.lineCount(); i++) {
-        const t = cm.getLine(i);
-        let cls = null;
-        if (t.startsWith("+++") || t.startsWith("---") || t.startsWith("diff ") || t.startsWith("index ")) cls = "diff-meta";
-        else if (t.startsWith("@@")) cls = "diff-hunk";
-        else if (t.startsWith("+")) cls = "diff-add";
-        else if (t.startsWith("-")) cls = "diff-del";
-        if (cls) cm.addLineClass(i, "background", cls);
+  /* 分栏差异：把 unified diff 解析为左右对齐的行对（VS Code 风格） */
+  function buildSplitDiff(diffText) {
+    const lines = String(diffText || "").split("\n");
+    while (lines.length && !lines[lines.length - 1]) lines.pop();   // 去掉尾部空行（避免解析出假行）
+    const rows = [];                             // {l1,t1,l2,t2,k}  k: ctx / add / del
+    let i = 0;
+    while (i < lines.length) {
+      const m = lines[i].match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+      if (!m) { i++; continue; }
+      let l1 = parseInt(m[1], 10), l2 = parseInt(m[3], 10);
+      i++;
+      let block = [];                            // 收集同一块内的行，按序配对 del/add
+      while (i < lines.length) {
+        const t = lines[i];
+        if (t.startsWith("@@") || t.startsWith("diff ")) break;
+        if (t.startsWith("+")) block.push({ l1: null, t1: "", l2: l2++, t2: t.slice(1), k: "add" });
+        else if (t.startsWith("-")) block.push({ l1: l1++, t1: t.slice(1), l2: null, t2: "", k: "del" });
+        else if (t.startsWith("\\")) { /* "\ No newline at end of file" 忽略 */ }
+        else if (t.startsWith(" ") || t === "") block.push({ l1: l1++, t1: t.slice(1), l2: l2++, t2: t.slice(1), k: "ctx" });
+        else break;                              // 其它残片（如截断输出）：结束当前 hunk
+        i++;
       }
-    });
+      // 把连续的 del 块与 add 块按下标配对，使修改行左右对齐；多余一侧留空（fill）
+      let p = 0;
+      while (p < block.length) {
+        if (block[p].k === "del") {
+          const dels = [];
+          while (p < block.length && block[p].k === "del") dels.push(block[p++]);
+          const adds = [];
+          while (p < block.length && block[p].k === "add") adds.push(block[p++]);
+          const n = Math.max(dels.length, adds.length);
+          for (let j = 0; j < n; j++) {
+            const d = dels[j], a = adds[j];
+            rows.push({
+              l1: d ? d.l1 : null, t1: d ? d.t1 : "",
+              l2: a ? a.l2 : null, t2: a ? a.t2 : "",
+              k: d && a ? "mod" : (d ? "del" : "add"),
+            });
+          }
+        } else {
+          rows.push(block[p++]);                 // ctx / add（无配对 del 的纯新增）
+        }
+      }
+    }
+    return rows;
+  }
+
+  function mountSplitDiff(tab) {
+    tab.cmBox.innerHTML = "";
+    const text = tab.diffText || "";
+    const rows = buildSplitDiff(text);
+    const wrap = document.createElement("div");
+    wrap.className = "sd-wrap";
+    if (!rows.length) {
+      wrap.innerHTML = '<div style="padding:30px;color:#888;">' + esc(text || "（没有差异）") + "</div>";
+      tab.cmBox.appendChild(wrap);
+      return;
+    }
+    // 从 diff 头部 index 行取新旧版本号（工作区新版本为 0000000 时显示“工作区”）
+    let oldRev = "旧版本", newRev = "新版本";
+    const im = text.match(/^index ([0-9a-f]+)\.\.([0-9a-f]+)/m);
+    if (im) {
+      oldRev = "旧版本 " + im[1].slice(0, 7);
+      newRev = /^[0]+$/.test(im[2]) ? "新版本（工作区）" : "新版本 " + im[2].slice(0, 7);
+    } else if (tab.untracked) {
+      oldRev = "旧版本（无）"; newRev = "新版本（工作区）";
+    }
+    const hasOld = rows.some(r => r.l1 != null);
+    const hasNew = rows.some(r => r.l2 != null);
+    const single = !hasOld || !hasNew;           // 新文件 / 删除文件：只渲染非空一侧
+    const grid = document.createElement("div");
+    grid.className = "sd-grid";
+    grid.style.gridTemplateColumns = single ? "1fr" : "1fr 1fr";
+    grid.style.minWidth = single ? "480px" : "860px";
+    const cell = (cls, ln, tx) => {
+      const c = document.createElement("div");
+      c.className = "sd-cell " + cls;
+      c.innerHTML = '<span class="sd-ln">' + (ln == null ? "" : ln) + '</span>' +
+        '<span class="sd-tx">' + esc(tx) + "</span>";
+      return c;
+    };
+    if (single) {
+      grid.appendChild(cell("sd-head", null,
+        hasNew ? newRev + "（新文件）" : oldRev + "（文件已删除）"));
+      rows.forEach(r => {
+        if (hasNew) grid.appendChild(cell("add", r.l2, r.t2));
+        else grid.appendChild(cell("del", r.l1, r.t1));
+      });
+    } else {
+      grid.appendChild(cell("sd-head", null, oldRev));
+      grid.appendChild(cell("sd-head", null, newRev));
+      rows.forEach(r => {
+        const kL = r.k === "add" ? "fill" : (r.k === "mod" ? "del" : r.k);
+        const kR = r.k === "del" ? "fill" : (r.k === "mod" ? "add" : r.k);
+        grid.appendChild(cell(kL, r.l1, r.t1));
+        grid.appendChild(cell(kR, r.l2, r.t2));
+      });
+    }
+    wrap.appendChild(grid);
+    tab.cmBox.appendChild(wrap);
   }
 
   /* 把当前视图（差异 / 源码）挂载到标签页 */
   function mountDiffTab(tab) {
     tab.cmBox.innerHTML = "";
-    const isDiff = tab.diffView === "diff";
-    const text = isDiff ? (tab.diffText || "（没有差异）") : (tab.srcText || "");
-    tab.cm = CodeMirror(tab.cmBox, {
-      value: text, mode: "text/plain", theme: "material-darker",
-      lineNumbers: true, lineWrapping: false, readOnly: true, styleActiveLine: true,
-    });
-    if (isDiff) {
-      colorizeDiffLines(tab.cm);
+    if (tab.diffView === "diff") {
+      mountSplitDiff(tab);
     } else {
+      const text = tab.srcText || "";
+      tab.cm = CodeMirror(tab.cmBox, {
+        value: text, mode: "text/plain", theme: "material-darker",
+        lineNumbers: true, lineWrapping: false, readOnly: true, styleActiveLine: true,
+      });
       // 源码视图：套用对应语言的语法高亮
       ensureMode(getExt(tab.relPath)).then(m => {
         if (tab.cm) { tab.cm.setOption("mode", m || "text/plain"); tab.cm.refresh(); }

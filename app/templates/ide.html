@@ -484,26 +484,89 @@
   }
   .diff-tools button:hover { background: #3a3d41; color: #fff; }
   .diff-tools button.active { background: #0d5a8a; color: #ffffff; }
-  .diff-cm { flex: 1; min-height: 0; }
+  .diff-cm { flex: 1; min-height: 0; position: relative; }
   /* 尚未初始化仓库时，只显示提示与初始化按钮，提交区/暂存全部按钮隐藏 */
   #gitPanel.not-repo .git-commit,
   #gitPanel.not-repo #gitStageAll { display: none; }
   /* 分栏差异视图（VS Code 风格：左旧右新、逐行对齐，缺失一侧用斜纹占位） */
-  .sd-wrap { height: 100%; overflow: auto; background: #1e1e1e; }
-  .sd-grid { display: grid; grid-template-columns: 1fr 1fr; min-width: 860px; width: 100%; }
+  /* .sd-wrap 只负责整体布局：上 .sd-body 是代码的滚动容器（右侧预留 14px 给全局显示区块），
+     下 .sd-sbars 是左右两条自定义水平滚动条 */
+  .sd-wrap { height: 100%; background: #212121; margin-right: 14px;
+    display: flex; flex-direction: column; min-width: 0; }
+  .sd-body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+  /* --sd-txl / --sd-txr：左右两侧各自的水平偏移量，由底部自定义滚动条写入 */
+  .sd-grid { display: grid; grid-template-columns: 1fr 1fr; min-width: 860px; width: 100%;
+    --sd-txl: 0px; --sd-txr: 0px; }
   .sd-head { position: sticky; top: 0; z-index: 2; padding: 5px 12px; background: #252526;
     color: #bbbbbb; font-size: 12px; border-bottom: 1px solid #333; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
+  /* 代码样式对齐「源码」视图（CodeMirror + material-darker）：同字体 / 字号 / 行高 / 前景色 */
   .sd-cell { display: flex; align-items: flex-start; min-width: 0;
-    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.6; }
-  .sd-cell .sd-ln { flex: none; width: 46px; padding-right: 8px; text-align: right; color: #6e7681;
-    background: rgba(255, 255, 255, .03); border-right: 1px solid #2c2c2c; user-select: none; }
-  .sd-cell .sd-tx { flex: 1 1 auto; padding: 0 10px; white-space: pre; overflow: hidden; color: #cccccc; }
-  .sd-cell.add { background: rgba(46, 160, 67, .18); }
-  .sd-cell.add .sd-tx { color: #b3e6b3; }
-  .sd-cell.del { background: rgba(248, 81, 73, .15); }
-  .sd-cell.del .sd-tx { color: #ffb3ab; }
-  .sd-cell.fill { background: #212121; }
+    font-family: "SF Mono", "Menlo", Consolas, monospace;
+    font-size: var(--cm-font-size, 13px); line-height: normal; }
+  .sd-cell .sd-ln { flex: none; width: 48px; padding-right: 8px; text-align: right;
+    color: #545454; user-select: none; }
+  .sd-cell .sd-tx { flex: 1 1 auto; padding: 0 5px; white-space: pre; overflow: hidden; color: #eeffff; }
+  /* 配色对齐 VS Code Dark+：insertedLineBackground #9bb95533 / removedLineBackground #ff000033 */
+  .sd-cell.add { background: rgba(155, 185, 85, .2); }
+  .sd-cell.del { background: rgba(255, 0, 0, .2); }
+  .sd-cell.fill { background: rgba(96, 96, 96, .16); }
+  /* 行内词级高亮（对应 VS Code 的 insertedTextBackground / removedTextBackground） */
+  .sd-cell.add .sd-wd { background: rgba(155, 185, 85, .4); border-radius: 2px; }
+  .sd-cell.del .sd-wd { background: rgba(255, 0, 0, .4); border-radius: 2px; }
+  /* 未更改区域折叠条（对应 VS Code 的 unchanged region），点击展开 */
+  .sd-gap { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px;
+    height: 20px; padding: 0 10px; background: #252526; cursor: pointer;
+    border-top: 1px solid #2a2a2a; border-bottom: 1px solid #2a2a2a;
+    color: #8a8a8a; font-size: 11px; user-select: none; }
+  .sd-gap:hover { background: #2d2d2d; color: #e0e0e0; }
+  .sd-gap .gd-ic { font-size: 13px; line-height: 1; letter-spacing: -1px; }
+  .sd-gap .gd-n { display: none; }
+  .sd-gap:hover .gd-n { display: inline; }
+  .sd-cell.sd-current { outline: 1px solid #0d5a8a; outline-offset: -1px;
+    box-shadow: inset 2px 0 0 #2979ff; }
+  /* 差异代码语法高亮：token 级着色，覆盖单元格默认的单色文字。
+     .sd-code 设为块级 max-content 宽度，才能用 transform 做整体水平平移（长行左右滚动） */
+  .sd-cell .sd-tx .sd-code { color: inherit; white-space: pre; display: block; width: max-content; }
+  .sd-cell.sd-cl .sd-tx .sd-code { transform: translateX(var(--sd-txl, 0px)); }
+  .sd-cell.sd-cr .sd-tx .sd-code { transform: translateX(var(--sd-txr, 0px)); }
+  /* 差异行的 .cm-* 配色不再单独定义：.sd-grid 带 cm-s-material-darker 类，
+     直接复用 CodeMirror 主题，与「源码」视图完全一致 */
+  /* 底部自定义水平滚动条：左右各一条，贴住差异区底部，拖动/点击滚动该侧被裁剪的长行 */
+  .sd-sbars { flex: none; position: relative; height: 12px; overflow: hidden;
+    background: #1e1e1e; border-top: 1px solid #333; }
+  .sd-sbar { position: absolute; top: 0; bottom: 0; padding: 3px 4px; cursor: pointer; }
+  .sd-sb-thumb { position: absolute; top: 3px; height: 5px; border-radius: 3px;
+    background: rgba(255, 255, 255, .22); pointer-events: none; }
+  .sd-sbar:hover .sd-sb-thumb { background: rgba(255, 255, 255, .34); }
+  .sd-sbar.dragging .sd-sb-thumb { background: rgba(255, 255, 255, .48); }
+  /* 全局显示区块：贴在差异区最右侧（代码区右侧的自动滚动条在它左边），
+     红/绿色块标记增删位置，点击/拖拽跳转到对应修改处 */
+  .diff-overview { position: absolute; top: 0; right: 0; bottom: 0; width: 14px; z-index: 6;
+    background: #1e1e1e; border-left: 1px solid #333; cursor: pointer;
+    overflow: hidden; }
+  .do-mark { position: absolute; left: 1px; right: 1px; opacity: .9; }
+  .do-mark.add { background: #9bb955; }
+  .do-mark.del { background: #ff5c5c; }
+  .do-mark.mod { background: #d29922; }
+  .do-thumb { position: absolute; left: 0; right: 0; background: rgba(255, 255, 255, .13);
+    border: 1px solid rgba(255, 255, 255, .42); pointer-events: none; }
+  /* 右上角迷你差异总览：可点击 / 拖拽跳转（对应 VS Code 的 diff 导航小部件） */
+  .diff-nav-widget { position: absolute; top: 8px; right: 22px; z-index: 7;
+    width: 34px; padding: 5px 5px 4px; display: flex; flex-direction: column; align-items: center;
+    gap: 4px; background: rgba(40, 40, 40, .97); border: 1px solid #454545; border-radius: 4px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .5); user-select: none; }
+  .dn-track { position: relative; width: 16px; height: 178px; background: #2b2b2b;
+    border: 1px solid #3a3a3a; border-radius: 2px; cursor: pointer; overflow: hidden; }
+  .dn-mark { position: absolute; left: 1px; right: 1px; opacity: .9; }
+  .dn-mark.add { background: #9bb955; }
+  .dn-mark.del { background: #ff5c5c; }
+  .dn-mark.mod { background: #d29922; }
+  .dn-thumb { position: absolute; left: -1px; right: -1px; background: rgba(255, 255, 255, .14);
+    border: 1px solid rgba(255, 255, 255, .46); cursor: grab; }
+  .dn-thumb:active { cursor: grabbing; }
+  .dn-count { font-size: 9px; color: #9a9a9a; line-height: 1; white-space: nowrap;
+    writing-mode: vertical-rl; letter-spacing: .03em; }
   /* 资源管理器中的 Git 状态着色 */
   .tree-row.git-modified .nm { color: #e2c08a; }
   .tree-row.git-untracked .nm { color: #6fcf8a; }
@@ -3052,6 +3115,22 @@
   }
   function closeTabSilent(tab) { tab.host.remove(); const i = tabs.indexOf(tab); if (i >= 0) tabs.splice(i, 1); renderTabsAll(); }
 
+  // 编辑器右键「重命名…」：复用 /api/rename，同步更新标签、树与 Git 状态
+  async function renameCurrentFile(path, name) {
+    const nn = await uiPrompt("重命名", name, "输入新名称");
+    if (!nn || nn === name) return;
+    try {
+      const r = await fetch("/api/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, new_name: nn }) });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      toast("已重命名：" + nn, "ok");
+      const op = tabs.find(t => t.path === path);
+      if (op) closeTabSilent(op);
+      openFile(dirName(path) + "/" + nn, nn);
+      refreshTree(dirName(path));
+    } catch (e) { toast("重命名失败：" + (e.message || e), "err"); }
+  }
+
   /* ---------- 标签拖拽：组内排序 / 跨组移动（分屏） ---------- */
   let dragTab = null;
   function clearDropHints() {
@@ -3503,6 +3582,16 @@
     items.push({ divider: true });
     items.push({ label: "查找所有引用", sc: "Shift+Alt+F12", disabled: ro,
       act: () => { activate(tab); findReferencesOf(tab); } });
+    // 文件级操作：与资源管理器右键菜单能力对齐（编辑器内文件定位/重命名/复制路径/历史）
+    if (!tab.diff && !tab.displayPath) {
+      const p = tab.path, n = tab.name;
+      items.push({ divider: true });
+      items.push({ label: "打开时间线", act: () => openFileTimeline(p, n) });
+      items.push({ label: "复制路径", sc: "Ctrl+Alt+C", act: () => copyText(p) });
+      items.push({ label: "复制相对路径", sc: "Ctrl+Shift+Alt+C", act: () => copyText(relPathOf(p)) });
+      items.push({ divider: true });
+      items.push({ label: "重命名…", sc: "F2", act: () => renameCurrentFile(p, n) });
+    }
     if (!ro) {
       items.push({ label: "保存", sc: "Ctrl+S", act: () => saveTab(tab) });
       items.push({ label: "运行当前文件", sc: "F5", act: () => { activate(tab); runCurrentFile(); } });
@@ -3567,7 +3656,13 @@
 
   /* ---------- 侧边栏宽度拖动（左搜索区 / 右编辑区） ---------- */
   const SIDEBAR_DEFAULT_W = 280;
-  function refreshAllEditors() { tabs.forEach(t => { if (t.cm) t.cm.refresh(); }); }
+  function refreshAllEditors() {
+    tabs.forEach(t => {
+      if (t.cm) t.cm.refresh();
+      // 差异视图：窗口宽度变了要重新测量长行宽度，重算底部自定义水平滚动条
+      if (t.diff && t.diffView === "diff") refreshDiffScrollbars(t);
+    });
+  }
 
   /* ---------- 底部面板高度拖动（输出 / 终端） ---------- */
   const BP_DEFAULT_H = 240;
@@ -3967,32 +4062,6 @@
     if (!grepData || !grepData.files || !grepData.files.length) { toast("请先搜索出结果", "warn"); return; }
     grepReplaceFiles(grepData.files);
   };
-
-  /* 在资源管理器中逐级展开并定位到指定路径（搜索结果点击文件夹时使用） */
-  async function revealInTree(target) {
-    showPanel("explorer");
-    if (!target.startsWith(ROOT)) return;
-    const segs = target.substring(ROOT.length).split("/").filter(Boolean);
-    let cur = ROOT, container = explorerPanel.querySelector(".tree-children");
-    if (!container) return;
-    for (let i = 0; i < segs.length; i++) {
-      const full = cur + "/" + segs[i];
-      const last = i === segs.length - 1;
-      if (!container._loaded) { container._loaded = true; await loadChildren(cur, container, i); }
-      const row = Array.from(container.querySelectorAll(":scope > .tree-row")).find(r => r.dataset.path === full);
-      if (!row) return;
-      if (last) { row.scrollIntoView({ block: "center" }); row.click(); return; }
-      const kids = row.nextElementSibling;
-      if (!kids || !kids.classList.contains("tree-children")) return;
-      if (!kids.classList.contains("open")) {
-        kids.classList.add("open");
-        const tw = row.querySelector(".twist i");
-        if (tw) tw.className = "bi bi-chevron-down";
-      }
-      if (!kids._loaded) { kids._loaded = true; await loadChildren(full, kids, i + 1); }
-      container = kids; cur = full;
-    }
-  }
 
   /* ==================================================================
      源代码管理（Git）：状态 / 暂存 / 取消暂存 / 放弃 / 提交 / 差异视图
@@ -4698,7 +4767,105 @@
         }
       }
     }
-    return rows;
+    return collapseUnchanged(rows);
+  }
+
+  /* 未更改区域两侧保留的上下文行数（对齐 VS Code 折叠未更改区域的行为） */
+  const DIFF_CTX = 3;
+
+  /* 把过长的连续未更改行折叠成一条可展开的 “gap” 行 */
+  function collapseUnchanged(rows) {
+    const out = [];
+    let i = 0;
+    while (i < rows.length) {
+      if (rows[i].k !== "ctx") { out.push(rows[i++]); continue; }
+      let j = i;
+      while (j < rows.length && rows[j].k === "ctx") j++;
+      const run = rows.slice(i, j);
+      if (run.length > DIFF_CTX * 2) {
+        for (let k = 0; k < DIFF_CTX; k++) out.push(run[k]);
+        out.push({ k: "gap", hidden: run.slice(DIFF_CTX, run.length - DIFF_CTX) });
+        for (let k = run.length - DIFF_CTX; k < run.length; k++) out.push(run[k]);
+      } else {
+        run.forEach(r => out.push(r));
+      }
+      i = j;
+    }
+    return out;
+  }
+
+  /* 把一行文本拆成 token 列表（复用 CodeMirror 模式；失败则退回单个纯文本 token） */
+  function syntaxTokens(line, mode) {
+    const plain = [{ t: line, cls: null }];
+    if (!mode || typeof CodeMirror === "undefined" || !CodeMirror.getMode) return plain;
+    /* 用 getMode 拿到带 token/startState 的真实模式对象（CodeMirror.modes[name] 可能是函数或 {mode,indent,...}） */
+    let m = null;
+    try { m = CodeMirror.getMode({ indentUnit: 2 }, mode); } catch (_) { m = null; }
+    if (!m || typeof m.token !== "function") return plain;
+    const out = [];
+    try {
+      let stream = new CodeMirror.StringStream(line), state = CodeMirror.startState(m);
+      while (!stream.eol()) {
+        const tok = m.token(stream, state);
+        const s0 = stream.start, text = line.substring(s0, stream.pos);
+        if (!text) { stream.start = stream.pos; continue; }
+        const cls = tok && tok !== "string" && text.replace(/\s/g, "") !== "" ? tok : null;
+        out.push({ t: text, cls });
+        stream.start = stream.pos;
+      }
+    } catch (_) { return plain; }
+    return out.length ? out : plain;
+  }
+
+  /* 把 token 列表渲染成 HTML；ranges 为需要叠加词级高亮的字符区间 [start,end) */
+  function tokensHTML(tokens, ranges) {
+    const rs = ranges || [];
+    const tok = (tk, text) => !text ? "" :
+      (tk.cls ? '<span class="cm-' + tk.cls + '">' + esc(text) + "</span>" : esc(text));
+    let html = "", pos = 0;
+    for (let n = 0; n < tokens.length; n++) {
+      const tk = tokens[n], s = pos, e = pos + tk.t.length;
+      pos = e;
+      let cur = s;
+      for (let k = 0; k < rs.length; k++) {
+        const a = Math.max(rs[k][0], s), b = Math.min(rs[k][1], e);
+        if (b <= a) continue;
+        if (a > cur) html += tok(tk, tk.t.slice(cur - s, a - s));
+        html += '<span class="sd-wd">' + tok(tk, tk.t.slice(a - s, b - s)) + "</span>";
+        cur = b;
+      }
+      if (cur < e) html += tok(tk, tk.t.slice(cur - s, e - s));
+    }
+    return html;
+  }
+
+  /* 行内词级差异：用公共前后缀裁出改动区间（对齐 VS Code 的行内高亮） */
+  function inlineRanges(a, b) {
+    const A = a || "", B = b || "";
+    let s = 0;
+    const n = Math.min(A.length, B.length);
+    while (s < n && A[s] === B[s]) s++;
+    let ea = A.length, eb = B.length;
+    while (ea > s && eb > s && A[ea - 1] === B[eb - 1]) { ea--; eb--; }
+    return { ra: ea > s ? [[s, ea]] : [], rb: eb > s ? [[s, eb]] : [] };
+  }
+
+  /* 给差异单元格填充内容：token 着色 + 行内词级高亮（语言未就绪时先渲染纯文本，就绪后回填） */
+  function highlightDiffCells(tab, root) {
+    if (!tab || tab.diffView !== "diff") return;
+    const codes = (root || tab.cmBox).querySelectorAll(".sd-code");
+    if (!codes.length) return;
+    const paint = (mode) => {
+      let changed = false;
+      codes.forEach(c => {
+        if (!c._line) return;
+        const h = tokensHTML(syntaxTokens(c._line, mode), c._ranges);
+        if (h) { c.innerHTML = h; changed = true; }
+      });
+      if (changed) refreshDiffNav(tab);
+    };
+    paint(null);
+    ensureMode(getExt(tab.relPath)).then(m => { if (m && tab.diffView === "diff") paint(m); });
   }
 
   function mountSplitDiff(tab) {
@@ -4725,35 +4892,345 @@
     const hasNew = rows.some(r => r.l2 != null);
     const single = !hasOld || !hasNew;           // 新文件 / 删除文件：只渲染非空一侧
     const grid = document.createElement("div");
-    grid.className = "sd-grid";
+    grid.className = "sd-grid cm-s-material-darker";   // 复用 CodeMirror 主题，token 配色与「源码」视图一致
     grid.style.gridTemplateColumns = single ? "1fr" : "1fr 1fr";
     grid.style.minWidth = single ? "480px" : "860px";
-    const cell = (cls, ln, tx) => {
+    const cell = (cls, ln, tx, ranges) => {
       const c = document.createElement("div");
       c.className = "sd-cell " + cls;
+      const codeEl = document.createElement("span");
+      codeEl.className = "sd-code";
+      codeEl._line = tx == null ? "" : tx;
+      codeEl._ranges = ranges || null;
       c.innerHTML = '<span class="sd-ln">' + (ln == null ? "" : ln) + '</span>' +
-        '<span class="sd-tx">' + esc(tx) + "</span>";
+        '<span class="sd-tx"></span>';
+      c.querySelector(".sd-tx").appendChild(codeEl);
+      if (cls === "add" || cls === "del" || cls === "mod") c.className += " cellR";
       return c;
+    };
+    /* 一行 diff 对应的单元格：分栏模式左右各一个，单栏模式只生成非空一侧。
+       sd-cl / sd-cr 标记所属侧，底部自定义水平滚动条按侧统一平移其内容 */
+    const rowCells = (r) => {
+      if (single) {
+        const c = hasNew ? cell("add", r.l2, r.t2, null) : cell("del", r.l1, r.t1, null);
+        c.classList.add("sd-cl");
+        return [c];
+      }
+      const kL = r.k === "add" ? "fill" : (r.k === "mod" ? "del" : r.k);
+      const kR = r.k === "del" ? "fill" : (r.k === "mod" ? "add" : r.k);
+      const ir = r.k === "mod" ? inlineRanges(r.t1, r.t2) : null;
+      const cl = cell(kL, r.l1, r.t1, ir ? ir.ra : null);
+      const cr = cell(kR, r.l2, r.t2, ir ? ir.rb : null);
+      cl.classList.add("sd-cl"); cr.classList.add("sd-cr");
+      return [cl, cr];
+    };
+    /* 折叠的未更改区域：默认只显示一条横条，点击展开（对齐 VS Code） */
+    const gapRow = (r) => {
+      const g = document.createElement("div");
+      g.className = "sd-gap";
+      g.innerHTML = '<span class="gd-ic">⋯</span><span class="gd-n">展开 ' +
+        r.hidden.length + ' 行未更改内容</span>';
+      g.onclick = () => {
+        const frag = document.createDocumentFragment();
+        r.hidden.forEach(rr => rowCells(rr).forEach(c => frag.appendChild(c)));
+        g.replaceWith(frag);
+        highlightDiffCells(tab, grid);
+        refreshDiffNav(tab);
+        requestAnimationFrame(() => refreshDiffScrollbars(tab));
+      };
+      return g;
     };
     if (single) {
       grid.appendChild(cell("sd-head", null,
-        hasNew ? newRev + "（新文件）" : oldRev + "（文件已删除）"));
-      rows.forEach(r => {
-        if (hasNew) grid.appendChild(cell("add", r.l2, r.t2));
-        else grid.appendChild(cell("del", r.l1, r.t1));
-      });
+        hasNew ? newRev + "（新文件）" : oldRev + "（文件已删除）", null));
     } else {
-      grid.appendChild(cell("sd-head", null, oldRev));
-      grid.appendChild(cell("sd-head", null, newRev));
-      rows.forEach(r => {
-        const kL = r.k === "add" ? "fill" : (r.k === "mod" ? "del" : r.k);
-        const kR = r.k === "del" ? "fill" : (r.k === "mod" ? "add" : r.k);
-        grid.appendChild(cell(kL, r.l1, r.t1));
-        grid.appendChild(cell(kR, r.l2, r.t2));
-      });
+      grid.appendChild(cell("sd-head", null, oldRev, null));
+      grid.appendChild(cell("sd-head", null, newRev, null));
     }
-    wrap.appendChild(grid);
+    rows.forEach(r => {
+      if (r.k === "gap") grid.appendChild(gapRow(r));
+      else rowCells(r).forEach(c => grid.appendChild(c));
+    });
+    const body = document.createElement("div");
+    body.className = "sd-body";
+    body.appendChild(grid);
+    wrap.appendChild(body);
+    wrap.appendChild(buildDiffScrollbars(tab, single));   // 底部左右两条自定义水平滚动条
     tab.cmBox.appendChild(wrap);
+    // 语法高亮 + 行内词级高亮（语言未就绪时先渲染纯文本，就绪后回填）
+    highlightDiffCells(tab, grid);
+    // 差异导航小部件（浮在差异视图右上）
+    buildDiffNavWidget(tab);
+    // 布局完成后测量长行宽度，决定自定义水平滚动条滑块大小
+    requestAnimationFrame(() => refreshDiffScrollbars(tab));
+  }
+
+  /* 差异代码所在的网格（底部滚动条、水平平移都基于它） */
+  function diffGrid(tab) {
+    const box = diffScroller(tab);
+    return box ? box.querySelector(".sd-grid") : null;
+  }
+
+  /* 底部左右两条自定义水平滚动条：点击 / 拖动滑块（或轨道）滚动对应一侧的长行 */
+  function buildDiffScrollbars(tab, single) {
+    const row = document.createElement("div");
+    row.className = "sd-sbars";
+    (single ? ["l"] : ["l", "r"]).forEach(side => {
+      const bar = document.createElement("div");
+      bar.className = "sd-sbar";
+      bar.dataset.pane = side;
+      bar.title = "水平滚动代码";
+      bar.innerHTML = '<div class="sd-sb-thumb"></div>';
+      bindDiffHScroll(tab, bar);
+      row.appendChild(bar);
+    });
+    return row;
+  }
+
+  /* 两侧各自水平滚动量的 CSS 变量：改一次变量，该侧所有行一起平移（O(1)） */
+  const DIFF_HVAR = { l: "--sd-txl", r: "--sd-txr" };
+  const SB_PAD = 4;             // .sd-sbar 左右内边距，与 CSS 保持一致
+
+  /* 按当前偏移量摆放滑块位置与长度 */
+  function layoutSbThumb(bar) {
+    const th = bar.querySelector(".sd-sb-thumb");
+    if (!th) return;
+    const max = bar._max || 0;
+    if (max <= 0) { th.style.display = "none"; return; }
+    th.style.display = "";
+    const trackW = Math.max(1, bar.clientWidth - SB_PAD * 2);
+    const ratio = bar._contentW ? bar._viewW / bar._contentW : 1;
+    const tw = Math.max(24, Math.min(trackW, Math.round(trackW * ratio)));
+    const left = SB_PAD + ((bar._off || 0) / max) * (trackW - tw);
+    th.style.width = tw + "px";
+    th.style.left = left.toFixed(1) + "px";
+  }
+
+  /* 设置某一侧的水平偏移量（0 ~ 最大可滚距离） */
+  function setDiffHScroll(tab, side, off) {
+    const grid = diffGrid(tab);
+    if (!grid || !tab.cmBox) return;
+    const bar = tab.cmBox.querySelector('.sd-sbar[data-pane="' + side + '"]');
+    const max = (bar && bar._max) || 0;
+    const v = Math.max(0, Math.min(max, off));
+    grid.style.setProperty(DIFF_HVAR[side], (-v).toFixed(1) + "px");
+    if (bar) { bar._off = v; layoutSbThumb(bar); }
+  }
+
+  /* 点击 / 拖动滚动条：把点击位置换算成水平偏移量（视口中心对准点击点） */
+  function bindDiffHScroll(tab, bar) {
+    const apply = (e) => {
+      if (!bar._max) return;
+      const r = bar.getBoundingClientRect();
+      const trackW = Math.max(1, r.width - SB_PAD * 2);
+      const ratio = (e.clientX - r.left - SB_PAD) / trackW;
+      setDiffHScroll(tab, bar.dataset.pane, ratio * bar._contentW - bar._viewW / 2);
+    };
+    bar.addEventListener("pointerdown", (e) => {
+      if (e.button > 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      bar.classList.add("dragging");
+      apply(e);
+      const move = (ev) => apply(ev);
+      const up = () => {
+        bar.classList.remove("dragging");
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+    });
+  }
+
+  /* 重新测量两侧内容宽度，并对齐/刷新底部自定义水平滚动条的轨道与滑块 */
+  function refreshDiffScrollbars(tab) {
+    const grid = diffGrid(tab);
+    if (!grid) return;
+    const sbars = tab.cmBox ? tab.cmBox.querySelector(".sd-sbars") : null;
+    const baseRect = sbars ? sbars.getBoundingClientRect() : null;
+    (sbars ? sbars.querySelectorAll(".sd-sbar") : []).forEach(bar => {
+      const cells = grid.querySelectorAll(".sd-cell.sd-" +
+        (bar.dataset.pane === "r" ? "cr" : "cl") + " .sd-tx");
+      if (!cells.length) { bar.style.display = "none"; return; }
+      // 轨道对齐到该侧代码列的实际位置与宽度（面板很窄时也能对得上）
+      if (baseRect && cells[0].parentElement) {
+        const r = cells[0].parentElement.getBoundingClientRect();
+        bar.style.left = (r.left - baseRect.left) + "px";
+        bar.style.width = r.width + "px";
+      }
+      let contentW = 0;
+      cells.forEach(tx => { if (tx.scrollWidth > contentW) contentW = tx.scrollWidth; });
+      bar._viewW = cells[0].clientWidth;
+      bar._contentW = contentW;
+      bar._max = Math.max(0, contentW - bar._viewW);
+      bar._off = Math.max(0, Math.min(bar._max, bar._off || 0));
+      grid.style.setProperty(DIFF_HVAR[bar.dataset.pane], (-bar._off).toFixed(1) + "px");
+      layoutSbThumb(bar);
+    });
+  }
+
+  /* 差异代码区真正的滚动容器（.sd-body）；总览定位与跳转都基于它计算 */
+  function diffScroller(tab) {
+    if (!tab.cmBox) return null;
+    return tab.cmBox.querySelector(".sd-body") || tab.cmBox.querySelector(".sd-wrap") || tab.cmBox;
+  }
+
+  /* 取滚动容器相对某个差异单元格顶部的偏移（换算成不随滚动变化的绝对坐标） */
+  function diffCellTop(el, box) {
+    const r = el.getBoundingClientRect(), b = box.getBoundingClientRect();
+    return r.top - b.top + box.scrollTop;
+  }
+
+  /* 合并相邻/紧邻的差异单元格，得到若干连续“差异块”（用于画总览条上的色块） */
+  function calcDiffBlocks(tab, box) {
+    const cells = Array.from(box.querySelectorAll(".sd-cell.cellR"));
+    const out = [];
+    for (const c of cells) {
+      const top = diffCellTop(c, box), h = c.offsetHeight || 20;
+      const last = out[out.length - 1];
+      if (last && top <= last.bottom + 2) last.bottom = Math.max(last.bottom, top + h);
+      else out.push({ kind: c.className.indexOf("del") >= 0 ? "del" : "add", top, bottom: top + h });
+    }
+    return out;
+  }
+
+  /* 刷新右上角迷你总览（差异色块 + 视口滑块）与最右侧整条总览竖条 */
+  function refreshDiffNav(tab) {
+    const box = diffScroller(tab);
+    if (!box || !tab.diffNav) return;
+    const H = box.scrollHeight, vH = box.clientHeight;
+    const blocks = calcDiffBlocks(tab, box);
+    const track = tab.diffNav.querySelector(".dn-track");
+    const ov = tab.diffOv || tab.cmBox.querySelector(".diff-overview");
+    const tH = track.clientHeight || 178, oH = ov.clientHeight || 100;
+    const sc = H > 0 ? tH / H : 0;
+    const so = H > 0 ? oH / H : 0;
+    const thumbH = Math.max(6, vH * sc);
+    const thumbTop = vH > 0 && H > vH ? (box.scrollTop / (H - vH)) * (tH - thumbH) : 0;
+    track.innerHTML = blocks.map(b => {
+      const top = b.top * sc, h = Math.max(2, (b.bottom - b.top) * sc - 0.6);
+      return '<div class="dn-mark ' + b.kind + '" style="top:' + top.toFixed(1) + "px;height:" + h.toFixed(1) + 'px"></div>';
+    }).join("");
+    const thumb = document.createElement("div");
+    thumb.className = "dn-thumb";
+    thumb.style.top = thumbTop.toFixed(1) + "px";
+    thumb.style.height = thumbH.toFixed(1) + "px";
+    track.appendChild(thumb);
+    ov.innerHTML = blocks.map(b => {
+      const top = b.top * so, h = Math.max(2, (b.bottom - b.top) * so - 0.6);
+      return '<div class="do-mark ' + b.kind + '" style="top:' + top.toFixed(1) + "px;height:" + h.toFixed(1) + 'px"></div>';
+    }).join("");
+    const oThumbH = Math.max(6, vH * so);
+    const oTop = vH > 0 && H > vH ? (box.scrollTop / (H - vH)) * (oH - oThumbH) : 0;
+    const oThumb = document.createElement("div");
+    oThumb.className = "do-thumb";
+    oThumb.style.top = oTop.toFixed(1) + "px";
+    oThumb.style.height = oThumbH.toFixed(1) + "px";
+    ov.appendChild(oThumb);
+    tab.diffOThumb = oThumb;
+    tab.diffNav.querySelector(".dn-count").textContent = blocks.length + " 处差异";
+  }
+
+  /* 按比例把总览条/竖条上的点击位置换算成滚动位置并跳转 */
+  function jumpByRatio(tab, el, ratio) {
+    const box = diffScroller(tab);
+    if (!box) return;
+    const H = box.scrollHeight;
+    const top = Math.max(0, Math.min(1, ratio || 0)) * H;
+    const half = Math.max(2, box.clientHeight * 0.28);
+    box.scrollTop = Math.max(0, Math.min(H, top - half));
+    const marks = box.querySelectorAll(".sd-cell.cellR");
+    let best = null, bestD = Infinity;
+    marks.forEach(c => {
+      const d = Math.abs(diffCellTop(c, box) - top);
+      if (d < bestD) { bestD = d; best = c; }
+    });
+    box.querySelectorAll(".sd-current").forEach(x => x.classList.remove("sd-current"));
+    if (best) best.classList.add("sd-current");
+    refreshDiffNav(tab);
+  }
+
+  /* 监听差异视图滚动：同步滑块位置，并清理不再属于当前视口的“当前差异”标记 */
+  function bindDiffScroll(tab) {
+    if (tab._diffScrollFn) tab._diffScrollFn();
+    const box = diffScroller(tab);
+    if (!box) return;
+    let raf = 0;
+    const fn = () => {
+      raf = 0;
+      refreshDiffNav(tab);
+      // 面板很窄时 .sd-body 会整体横向滚动，需重新对齐底部滚动条轨道
+      if (box.scrollLeft !== tab._sdLastLeft) {
+        tab._sdLastLeft = box.scrollLeft;
+        refreshDiffScrollbars(tab);
+      }
+      if (!tab._diffJump) {
+        const box2 = diffScroller(tab), H = box2.scrollHeight;
+        const vTop = box2.scrollTop, vBot = vTop + box2.clientHeight;
+        const cur = box2.querySelector(".sd-current");
+        if (cur) {
+          const t = diffCellTop(cur, box2);
+          if (t + cur.offsetHeight < vTop || t > vBot) cur.classList.remove("sd-current");
+        }
+      }
+    };
+    box.addEventListener("scroll", () => {
+      if (!raf) raf = requestAnimationFrame(fn);
+    }, { passive: true });
+    const unbind = () => {
+      box.removeEventListener("scroll", fn);
+      if (raf) cancelAnimationFrame(raf);
+      tab._diffScrollFn = null;
+    };
+    tab._diffScrollFn = unbind;
+  }
+
+  /* 在总览条 / 竖条上按下并拖拽：实时滚动到对应位置 */
+  function bindDiffDrag(tab, el, getRatio) {
+    const move = (e) => jumpByRatio(tab, el, getRatio(e));
+    const up = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      tab._diffJump = false;
+    };
+    el.addEventListener("pointerdown", (e) => {
+      if (e.button > 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      tab._diffJump = true;
+      move(e);
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+    });
+  }
+
+  /* 构建差异导航：右上角迷你总览（可点击/拖拽跳转）+ 最右侧整条差异总览竖条 */
+  function buildDiffNavWidget(tab) {
+    const box = tab.cmBox;
+    if (!box) return;
+    const host = tab.host;
+    host.querySelector(".diff-nav-widget") && host.querySelector(".diff-nav-widget").remove();
+    box.querySelector(".diff-overview") && box.querySelector(".diff-overview").remove();
+    const w = document.createElement("div");
+    w.className = "diff-nav-widget";
+    w.title = "点击或拖拽跳转到对应差异位置";
+    w.innerHTML =
+      '<div class="dn-track"></div>' +
+      '<div class="dn-count">0 处差异</div>';
+    const ov = document.createElement("div");
+    ov.className = "diff-overview";
+    ov.title = "差异总览：点击或拖拽跳转";
+    box.appendChild(ov);          // 全局显示区块：差异区最右侧（自动滚动条在它左边）
+    host.appendChild(w);          // 迷你导航：悬浮在右上角
+    tab.diffNav = w;
+    tab.diffOv = ov;
+    const track = w.querySelector(".dn-track");
+    bindDiffDrag(tab, track, e => (e.clientY - track.getBoundingClientRect().top) / track.clientHeight);
+    bindDiffDrag(tab, ov, e =>
+      (e.clientY - ov.getBoundingClientRect().top) / ov.clientHeight);
+    bindDiffScroll(tab);
+    refreshDiffNav(tab);
   }
 
   /* 把当前视图（差异 / 源码）挂载到标签页 */
@@ -4762,6 +5239,14 @@
     if (tab.diffView === "diff") {
       mountSplitDiff(tab);
     } else {
+      // 源码视图不显示差异导航控件
+      const nav = tab.host.querySelector(".diff-nav-widget");
+      if (nav) nav.remove();
+      const ov = tab.cmBox.querySelector(".diff-overview");
+      if (ov) ov.remove();
+      tab.diffNav = null;
+      tab.diffOv = null;
+      if (tab._diffScrollFn) tab._diffScrollFn();
       const text = tab.srcText || "";
       tab.cm = CodeMirror(tab.cmBox, {
         value: text, mode: "text/plain", theme: "material-darker",

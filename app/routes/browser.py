@@ -252,6 +252,14 @@ def api_preview():
             resp.headers["X-File-Size"] = str(stat.st_size)
             resp.headers["Cache-Control"] = "no-store"
             return resp
+        # 图片：raw=1 时直接返回图片字节（IDE 内嵌预览使用，前端 <img> 直接引用）
+        if ext in _IMAGE_EXTS and request.args.get("raw") == "1":
+            with open(target_path, "rb") as f:
+                data = f.read()
+            resp = FlaskResponse(data, mimetype=mime_type)
+            resp.headers["X-Preview-Type"] = "image"
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
         # 文本/图片：base64 内联
         with open(target_path, "rb") as f:
             data = f.read()

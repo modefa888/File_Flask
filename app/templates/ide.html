@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>在线项目 IDE</title>
 <link rel="stylesheet" href="/static/vendor/bootstrap-icons/bootstrap-icons.css">
+<style>
+/* Seti 官方图标字体（microsoft/vscode theme-seti，本地化） */
+@font-face { font-family: "seti"; src: url("/static/vendor/seti/seti.woff") format("woff"); font-display: block; }
+.seti-ic { font-family: "seti"; font-style: normal; font-weight: normal; font-size: 1.35em; line-height: 1; display: inline-block; vertical-align: -0.28em; }
+/* IDE 图片预览：棋盘格背景 + 自适应居中，点击切换 1:1 / 适应窗口 */
+.img-preview { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; overflow: auto;
+  background: repeating-conic-gradient(#262626 0 25%, #1e1e1e 0 50%) 0 0 / 20px 20px; }
+.img-preview img { max-width: 92%; max-height: calc(100% - 44px); object-fit: contain; box-shadow: 0 4px 24px rgba(0,0,0,.5); background: #fff; cursor: zoom-in; }
+.img-preview img.zoom { max-width: none; max-height: none; cursor: zoom-out; }
+.img-preview .ip-err { color: #888; }
+</style>
 <link rel="stylesheet" href="/static/vendor/codemirror/codemirror.min.css">
 <link rel="stylesheet" href="/static/vendor/codemirror/addon/dialog/dialog.css">
 <link rel="stylesheet" href="/static/vendor/codemirror/material-darker.min.css">
@@ -75,6 +86,8 @@
     color: #e6e6e6; font-size: 11px; padding: 3px 6px; outline: none; transition: width .15s;
   }
   .side-header .side-actions input:focus { width: 90px; border-color: #0a6aa8; }
+  /* 端口搜索框只在「后台任务」面板显示：默认隐藏，由 showPanel() 控制显隐（启动时默认面板是资源管理器） */
+  #sidePortSearch { display: none; }
   .side-root {
     font-size: 13px; color: #e7e7e7; padding: 4px 12px 8px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
@@ -1356,18 +1369,76 @@
       container.appendChild(er);
     }
   }
+  /* Seti 官方文件图标（microsoft/vscode theme-seti，本地化于 /static/vendor/seti/）：
+     文件按官方映射渲染字形+官方配色；文件夹用 bootstrap 近似 VS Code 默认样式 */
+  const _si = (cls, color) => '<i class="bi ' + cls + '" style="color:' + color + '"></i>';
+  let SETI = null;
+  fetch("/static/vendor/seti/seti-icons.json").then(r => r.ok ? r.json() : Promise.reject(new Error("http " + r.status))).then(j => {
+    if (!j || !j.iconDefinitions) return;
+    SETI = { defs: j.iconDefinitions, names: j.fileNames || {}, exts: j.fileExtensions || {},
+             langs: j.languageIds || {}, fileDef: j.file || "_default" };
+    // 仅当树已渲染（首屏用了兜底图标）时才重绘；启动早期 ROOT/树未就绪则跳过，
+    // 否则会与 initTree 并发建树（这正是树显示两遍的根因）
+    if (typeof refreshTree === "function" && typeof ROOT !== "undefined" && ROOT &&
+        explorerPanel.querySelector(".tree-children")) {
+      try { refreshTree(); } catch (e) {}
+    }
+  }).catch(() => {});
+  const SETI_LANG = {   // 常见扩展名 → 语言 ID（vs-seti 主题按 languageId 映射）
+    py: "python", pyw: "python", ipy: "python",
+    js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript",
+    ts: "typescript", tsx: "typescript",
+    html: "html", htm: "html", css: "css", scss: "scss", sass: "sass", less: "less",
+    json: "json", md: "markdown", markdown: "markdown",
+    yml: "yaml", yaml: "yaml", sh: "shellscript", bash: "shellscript", zsh: "shellscript",
+    xml: "xml", xsl: "xml",
+    gitignore: "ignore", gitattributes: "ignore", gitmodules: "ignore", dockerignore: "ignore"
+  };
   function iconFor(name, isDir) {
-    if (isDir) return '<i class="bi bi-folder2"></i>';
-    const ext = getExt(name);
-    if (["js","ts","jsx","tsx","mjs","cjs"].includes(ext)) return '<i class="bi bi-filetype-js"></i>';
-    if (["py"].includes(ext)) return '<i class="bi bi-filetype-py"></i>';
-    if (["html","htm"].includes(ext)) return '<i class="bi bi-filetype-html"></i>';
-    if (["css","scss","less"].includes(ext)) return '<i class="bi bi-filetype-css"></i>';
-    if (["json"].includes(ext)) return '<i class="bi bi-filetype-json"></i>';
-    if (["md","markdown"].includes(ext)) return '<i class="bi bi-markdown"></i>';
-    if (["png","jpg","jpeg","gif","svg","webp","bmp"].includes(ext)) return '<i class="bi bi-image"></i>';
-    if (["zip","tar","gz","rar","7z"].includes(ext)) return '<i class="bi bi-file-earmark-zip"></i>';
-    return '<i class="bi bi-file-earmark"></i>';
+    if (isDir) return _si("bi-folder2", "#c09553");
+    const lower = name.toLowerCase();
+    const ext = getExt(lower);
+    if (SETI) {
+      let def = SETI.defs[SETI.names[lower]] || SETI.defs[SETI.exts[ext]];
+      if (!def && SETI_LANG[ext]) def = SETI.defs[SETI.langs[SETI_LANG[ext]]];
+      if (def && def.fontCharacter) {
+        const code = String(def.fontCharacter).replace(/\\+/g, "");
+        return '<span class="seti-ic" style="color:' + (def.fontColor || "#9da8ab") + '">&#x' + code + ";</span>";
+      }
+    }
+    // bootstrap 兜底（映射未加载或未命中时）
+    if (lower.endsWith("requirements.txt")) return _si("bi-file-earmark-text", "#6d8086");
+    if (lower.startsWith("dockerfile")) return _si("bi-file-earmark-code", "#438eec");
+    if (ext === "spec") return _si("bi-gear", "#a074c4");
+    const map = {
+      py:    ["bi-filetype-py", "#519aba"],
+      html:  ["bi-filetype-html", "#e37933"], htm: ["bi-filetype-html", "#e37933"],
+      css:   ["bi-filetype-css", "#519aba"], scss: ["bi-filetype-css", "#e37933"], less: ["bi-filetype-css", "#519aba"],
+      js:    ["bi-filetype-js", "#cbcb41"], mjs: ["bi-filetype-js", "#cbcb41"], cjs: ["bi-filetype-js", "#cbcb41"],
+      jsx:   ["bi-filetype-js", "#519aba"], ts: ["bi-filetype-js", "#519aba"], tsx: ["bi-filetype-js", "#519aba"],
+      json:  ["bi-filetype-json", "#cbcb41"],
+      md:    ["bi-filetype-md", "#519aba"], markdown: ["bi-filetype-md", "#519aba"],
+      yml:   ["bi-filetype-yml", "#a074c4"], yaml: ["bi-filetype-yml", "#a074c4"],
+      txt:   ["bi-filetype-txt", "#6d8086"], log: ["bi-file-text", "#6d8086"], lrc: ["bi-file-text", "#6d8086"],
+      ini:   ["bi-gear", "#6d8086"], cfg: ["bi-gear", "#6d8086"], conf: ["bi-gear", "#6d8086"],
+      env:   ["bi-gear", "#6d8086"], toml: ["bi-gear", "#6d8086"],
+      sh:    ["bi-terminal", "#4ec9b0"], bash: ["bi-terminal", "#4ec9b0"], zsh: ["bi-terminal", "#4ec9b0"],
+      bat:   ["bi-terminal", "#4ec9b0"], cmd: ["bi-terminal", "#4ec9b0"], ps1: ["bi-terminal", "#4ec9b0"],
+      sql:   ["bi-database", "#519aba"],
+      png:   ["bi-image", "#a074c4"], jpg: ["bi-image", "#a074c4"], jpeg: ["bi-image", "#a074c4"],
+      gif:   ["bi-image", "#a074c4"], svg: ["bi-image", "#a074c4"], webp: ["bi-image", "#a074c4"],
+      bmp:   ["bi-image", "#a074c4"], ico: ["bi-image", "#a074c4"],
+      mp4:   ["bi-film", "#dd7e2e"], webm: ["bi-film", "#dd7e2e"], mkv: ["bi-film", "#dd7e2e"],
+      avi:   ["bi-film", "#dd7e2e"], mov: ["bi-film", "#dd7e2e"],
+      mp3:   ["bi-music-note", "#519aba"], wav: ["bi-music-note", "#519aba"], flac: ["bi-music-note", "#519aba"],
+      aac:   ["bi-music-note", "#519aba"], m4a: ["bi-music-note", "#519aba"], ogg: ["bi-music-note", "#519aba"],
+      zip:   ["bi-file-earmark-zip", "#b5895f"], tar: ["bi-file-earmark-zip", "#b5895f"],
+      gz:    ["bi-file-earmark-zip", "#b5895f"], rar: ["bi-file-earmark-zip", "#b5895f"], "7z": ["bi-file-earmark-zip", "#b5895f"],
+    };
+    const hit = map[ext];
+    if (hit) return _si(hit[0], hit[1]);
+    if (name.startsWith(".")) return _si("bi-file-earmark", "#6d8086");   // 其它隐藏文件
+    return _si("bi-file-earmark", "#8a8a8a");
   }
   function renderNode(it, container, depth) {
     const full = (it.path && it.path.startsWith("/")) ? it.path : container._base + "/" + it.name;
@@ -1517,6 +1588,7 @@
     $("sideRoot").textContent = baseName(ROOT) || ROOT;
     $("tbTitle").textContent = "在线项目 IDE — " + baseName(ROOT);
     $("welcomeSub").textContent = "项目根目录：" + ROOT + "\n从左侧资源管理器选择文件开始编辑。";
+    explorerPanel.innerHTML = "";                 // 防御重复建树：先清空再追加（并发触发时只保留最后一次）
     const root = document.createElement("div");
     root.className = "tree-children open"; root._base = ROOT; root._loaded = true;
     explorerPanel.appendChild(root);
@@ -1652,6 +1724,22 @@
       host.innerHTML = '<div style="padding:30px;color:#888;">正在加载 ' + esc(name) + ' …</div>';
       try {
         const ext = getExt(name);
+        // 图片类型：内嵌图片预览（后端 raw=1 直接返回图片字节），点击图片切换 1:1 / 适应窗口
+        if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"].includes(ext)) {
+          tab.isImage = true;
+          const url = "/api/preview?path=" + encodeURIComponent(path) + "&raw=1";
+          host.innerHTML =
+            '<div class="img-preview"><img alt="' + esc(name) + '" src="' + url + '">' +
+            '<div class="ip-err" style="display:none;">图片加载失败（可能超出 5MB 预览限制）</div></div>';
+          const im = host.querySelector("img");
+          im.addEventListener("error", () => {
+            im.style.display = "none";
+            host.querySelector(".ip-err").style.display = "block";
+          });
+          im.addEventListener("click", () => im.classList.toggle("zoom"));
+          activate(tab);   // 挂载编辑组容器并高亮标签（与文本文件打开行为一致）
+          return;
+        }
         // 文件内容与语法模式并行加载，减少串行等待
         const [res, mode] = await Promise.all([loadFileText(path, name), ensureMode(ext)]);
         if (res.unsupported) { host.innerHTML = '<div style="padding:30px;color:#888;">该文件类型（' + ext + '）不支持文本编辑，预览请用文件管理器。</div>'; return; }
@@ -3212,7 +3300,7 @@
     // 「新建文件 / 新建文件夹」与项目根目录行只在资源管理器面板显示，其他面板不显示；
     // 端口搜索框只在「后台任务」面板显示
     [$("sideNewFile"), $("sideNewFolder"), $("sideTreeToggle"), $("sideShowAll"), $("sideRefresh"), $("sideRoot")].forEach(b => { if (b) b.style.display = (name === "explorer") ? "" : "none"; });
-    if ($("sidePortSearch")) $("sidePortSearch").style.display = (name === "runner") ? "" : "none";
+    if ($("sidePortSearch")) $("sidePortSearch").style.display = (name === "runner") ? "block" : "none";   // CSS 默认隐藏，runner 面板显式放开
     if (name !== "runner") clearTimeout(RUNNER.timer);      // 面板不可见时停止自动刷新
   }
   document.getElementById("activitybar").addEventListener("click", (e) => {

@@ -69,8 +69,10 @@ def _save_list_cache():
 
 
 def _invalidate_list_cache(path):
-    """删除指定目录的列表缓存（文件操作后调用）"""
-    _LIST_CACHE.pop(path, None)
+    """删除指定目录的列表缓存（文件操作后调用），同时清理两种 show_hidden 变体。"""
+    for _f in (True, False):
+        _LIST_CACHE.pop(_list_cache_key(path, _f), None)
+    _LIST_CACHE.pop(path, None)  # 兼容旧版（无 show_hidden 后缀）缓存
     _save_list_cache()
 
 
@@ -220,7 +222,9 @@ def _bg_compute_dir_size(dir_path):
     finally:
         with _SIZE_PENDING_LOCK:
             _SIZE_PENDING.discard(dir_path)
-        # 失效父目录的列表缓存，下次加载列表即可带上真实大小
+        # 失效父目录的列表缓存（含两种 show_hidden 变体），下次加载列表即可带上真实大小
+        for _f in (True, False):
+            _LIST_CACHE.pop(_list_cache_key(os.path.dirname(dir_path), _f), None)
         _LIST_CACHE.pop(os.path.dirname(dir_path), None)
 
 
@@ -308,22 +312,30 @@ def get_file_info(file_path, base_path, compute_size=True):
         return None
 
 
-def list_directory(path, get_sizes=False):
+def _list_cache_key(path, show_hidden):
+    """列表缓存键：show_hidden 不同视为不同快照；用字符串键以便 JSON 持久化。"""
+    return path + "\x00" + ("1" if show_hidden else "0")
+
+
+def list_directory(path, get_sizes=False, show_hidden=False):
     """带缓存的目录列表：目录 mtime 未变则秒回。
 
     get_sizes 控制是否对每个目录条目计算大小。
     - get_sizes=True：遍历每个子目录计算 du（慢，用于单点查询）。
     - get_sizes=False（默认）：目录大小走缓存 / 索引，未命中则标"大小未知"（快，用于列表加载）。
+
+    show_hidden 控制是否列出以点开头的隐藏文件（.gitignore、.env 等）。
     """
     try:
         dir_mtime = os.stat(path).st_mtime
     except OSError:
         return []
 
-    cached = _LIST_CACHE.get(path)
+    ckey = _list_cache_key(path, show_hidden)
     # v3：条目含 n_dirs/n_files 子项计数与 ctime；旧版本缓存视为失效
     # 列表缓存命中即返回：目录大小由后台 du 异步补齐，无需重建列表，
     # 否则大目录（如 /home/zhangjie/Desktop）每次请求都重新遍历所有条目 + 查索引，极易超时
+    cached = _LIST_CACHE.get(ckey)
     if cached and cached.get("v") == 3 and abs(cached.get("mtime", 0) - dir_mtime) < 0.1:
         return cached["items"]
 
@@ -333,7 +345,7 @@ def list_directory(path, get_sizes=False):
     except (OSError, PermissionError):
         return items
     for entry in entries:
-        if entry.startswith("."):
+        if entry.startswith(".") and not show_hidden:
             continue
         full_path = os.path.join(path, entry)
         info = get_file_info(full_path, path, compute_size=get_sizes)
@@ -343,7 +355,7 @@ def list_directory(path, get_sizes=False):
 
     # 凡列表中仍有"计算中…/大小未知"的目录，视为不完整快照：
     # get_sizes=True 时忽略缓存重建，以补齐大小（重建仅 scandir+缓存查询，毫秒级）
-    _LIST_CACHE[path] = {
+    _LIST_CACHE[ckey] = {
         "v": 3, "mtime": dir_mtime, "items": items,
         "partial": any(x["is_dir"] and x.get("size_str") in ("大小未知", "计算中…") for x in items),
     }

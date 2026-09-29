@@ -388,6 +388,8 @@ def api_files():
 
 # 支持的文本预览扩展
 _TEXT_EXTS = {"txt", "md", "py", "js", "ts", "jsx", "tsx", "html", "htm", "css", "scss", "less", "json", "xml", "yml", "yaml", "ini", "cfg", "conf", "env", "sh", "bat", "ps1", "rs", "go", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php", "sql", "log", "csv", "toml"}
+# 无扩展名但应按文本打开的文件名（小写）
+_TEXT_FILENAMES = {".gitignore", ".editorconfig", ".dockerignore", "makefile", "dockerfile"}
 _IMAGE_EXTS = {"png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"}
 _VIDEO_EXTS = {"mp4", "webm", "mkv", "avi", "mov", "m4v", "ogg", "flv"}
 # 可内嵌预览的扩展
@@ -407,6 +409,8 @@ def api_preview():
     try:
         stat = os.stat(target_path)
         ext = os.path.splitext(target_path)[1].lower().lstrip(".")
+        filename = os.path.basename(target_path).lower()
+        is_text = ext in _TEXT_EXTS or filename in _TEXT_FILENAMES
         mime_type, _ = mimetypes.guess_type(target_path)
         if not mime_type:
             mime_type = "application/octet-stream"
@@ -426,7 +430,7 @@ def api_preview():
         # 文本/图片：base64 内联
         with open(target_path, "rb") as f:
             data = f.read()
-        if ext in _TEXT_EXTS:
+        if is_text:
             import base64
             return jsonify({
                 "type": "text",

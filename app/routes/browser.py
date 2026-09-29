@@ -7,14 +7,14 @@ import threading
 import mimetypes
 import base64
 
-from flask import Blueprint, request, jsonify, send_file, Response as FlaskResponse
+from flask import Blueprint, request, jsonify, send_file, render_template, Response as FlaskResponse
 from urllib.parse import quote
 
 from ..config import (
     _TEXT_EXTS, _IMAGE_EXTS, _VIDEO_EXTS,
     _AUDIO_EXTS,
     _PREVIEW_MAX_BYTES, _TEXT_PREVIEW_MAX_BYTES,
-    _THUMB_CACHE_DIR,
+    _THUMB_CACHE_DIR, _TEXT_FILENAMES,
 )
 from ..log import get_logger
 from ..services.filecore import (
@@ -31,6 +31,86 @@ bp = Blueprint("browser", __name__)
 
 
 
+
+
+# ======================================================================
+# 最近打开的文件夹（服务端持久化，跨设备 / 跨浏览器共享）
+# ======================================================================
+_RECENT_DIR_FILE = ".file_recent_folders.json"
+_RECENT_MAX = 8                              # 最多保留的条数
+_RECENT_LOCK = threading.Lock()
+
+
+def _recent_path() -> str:
+    from ..config import _DATA_ROOT
+    return os.path.join(_DATA_ROOT, _RECENT_DIR_FILE)
+
+
+def _recent_load() -> list:
+    try:
+        with open(_recent_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    out = []
+    for it in data:
+        if isinstance(it, dict) and it.get("path"):
+            out.append({"path": str(it["path"]), "opened_at": float(it.get("opened_at") or 0)})
+    return out
+
+
+def _recent_save(items: list) -> None:
+    tmp = _recent_path() + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, _recent_path())
+    except OSError as e:
+        _log.warning("保存最近打开记录失败：%s", e)
+
+
+@bp.route("/api/recent/folders")
+def api_recent_folders():
+    """最近打开的文件夹列表（含是否存在，便于前端标记失效项）。"""
+    with _RECENT_LOCK:
+        items = _recent_load()
+    for it in items:
+        it["exists"] = os.path.isdir(it["path"])
+        it["name"] = os.path.basename(it["path"].rstrip("/")) or it["path"]
+    return jsonify({"ok": True, "folders": items})
+
+
+@bp.route("/api/recent/folders", methods=["POST"])
+def api_recent_folders_add():
+    """记录一次打开：去重置顶，最多保留 _RECENT_MAX 条。"""
+    data = request.get_json(silent=True) or {}
+    path = (data.get("path") or "").strip()
+    if not path:
+        return jsonify({"error": "缺少路径"}), 400
+    path = os.path.abspath(os.path.normpath(path))
+    with _RECENT_LOCK:
+        items = _recent_load()
+        items = [x for x in items if x["path"] != path]
+        items.insert(0, {"path": path, "opened_at": time.time()})
+        items = items[:_RECENT_MAX]
+        _recent_save(items)
+    return jsonify({"ok": True, "folders": items})
+
+
+@bp.route("/api/recent/folders/remove", methods=["POST"])
+def api_recent_folders_remove():
+    """移除一条记录（路径失效时使用）。"""
+    data = request.get_json(silent=True) or {}
+    path = (data.get("path") or "").strip()
+    if not path:
+        return jsonify({"error": "缺少路径"}), 400
+    path = os.path.abspath(os.path.normpath(path))
+    with _RECENT_LOCK:
+        items = [x for x in _recent_load() if x["path"] != path]
+        _recent_save(items)
+    return jsonify({"ok": True, "folders": items})
 
 
 @bp.route("/api/system")
@@ -59,7 +139,8 @@ def api_size_status():
     target_path = safe_path(request.args.get("path", ""))
     if not os.path.isdir(target_path):
         return jsonify({"error": "路径不存在"}), 400
-    items = list_directory(target_path, get_sizes=False)
+    show_hidden = request.args.get("hidden", "0") == "1"
+    items = list_directory(target_path, get_sizes=False, show_hidden=show_hidden)
     # 直接查全局后台计算集合，避免依赖列表缓存快照
     target_abs = os.path.abspath(target_path)
     with _SIZE_PENDING_LOCK:
@@ -98,9 +179,10 @@ def api_files():
     except (TypeError, ValueError):
         offset = 0
 
+    show_hidden = request.args.get("hidden", "0") == "1"
     # 目录列表：浏览时不同步计算目录大小（避免挂载盘 du 拖慢请求，已缓存/索引命中的仍带回）。
     # 未命中缓存的目录标记为 size_pending，下面启动后台 du，前端轮询 /api/size-status 异步补全。
-    items = list_directory(target_path, get_sizes=False)
+    items = list_directory(target_path, get_sizes=False, show_hidden=show_hidden)
     target_abs_dir = abs_path = os.path.abspath(target_path)
     for it in items:
         if it.get("is_dir") and it.get("size_pending"):
@@ -141,11 +223,13 @@ def api_preview():
     try:
         stat = os.stat(target_path)
         ext = os.path.splitext(target_path)[1].lower().lstrip(".")
+        filename = os.path.basename(target_path).lower()
+        is_text = ext in _TEXT_EXTS or filename in _TEXT_FILENAMES
         mime_type, _ = mimetypes.guess_type(target_path)
         if not mime_type:
             mime_type = "application/octet-stream"
         # 文本/图片限制：文本放宽到 20MB，图片 5MB
-        _limit = _TEXT_PREVIEW_MAX_BYTES if ext in _TEXT_EXTS else _PREVIEW_MAX_BYTES
+        _limit = _TEXT_PREVIEW_MAX_BYTES if is_text else _PREVIEW_MAX_BYTES
         if ext not in _VIDEO_EXTS and stat.st_size > _limit:
             return jsonify({"error": f"文件过大，最大支持 {format_size(_limit)}"}), 413
         # 视频：不限制大小，用流式传输，返回 stream URL
@@ -159,7 +243,7 @@ def api_preview():
                 "size_str": format_size(stat.st_size),
             })
         # 文本：raw=1 时直接返回纯文本（不套 JSON/base64），大文件加载快很多（IDE 使用）
-        if ext in _TEXT_EXTS and request.args.get("raw") == "1":
+        if is_text and request.args.get("raw") == "1":
             with open(target_path, "r", encoding="utf-8", errors="replace", newline="") as f:
                 text = f.read()
             resp = FlaskResponse(text, status=200, mimetype="text/plain")
@@ -171,7 +255,7 @@ def api_preview():
         # 文本/图片：base64 内联
         with open(target_path, "rb") as f:
             data = f.read()
-        if ext in _TEXT_EXTS:
+        if is_text:
             import base64
             return jsonify({
                 "type": "text",
@@ -189,6 +273,50 @@ def api_preview():
             })
         else:
             return jsonify({"error": f"不支持的预览类型: {ext}"}), 400
+    except (OSError, PermissionError) as e:
+        return jsonify({"error": f"无法读取文件: {str(e)}"}), 500
+
+
+@bp.route("/api/raw/<path:fspath>")
+def api_raw_path(fspath):
+    """按原始内容与正确 MIME 返回文件。
+
+    供 IDE 的 HTML 预览使用：iframe 内注入 <base href="/api/raw/<目录>/">，
+    页面里的相对资源（js/css/img）就会请求 /api/raw/... 而被正确加载。
+    fspath 为绝对路径去掉开头斜杠的形式（每段已在前端做 URL 编码）。
+
+    例外：Markdown 文件直接返回渲染好的居中预览页（分享链接在浏览器里
+    打开即是排版效果）；需要纯文本时加 ?raw=1。
+    """
+    full = os.path.abspath(os.sep + fspath)
+    if not os.path.isfile(full):
+        return jsonify({"error": "文件不存在"}), 404
+    ext = os.path.splitext(full)[1].lower().lstrip(".")
+    if ext in ("md", "markdown"):
+        try:
+            with open(full, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except (OSError, PermissionError) as e:
+            return jsonify({"error": f"无法读取文件: {str(e)}"}), 500
+        # ?raw=1 → 纯文本；否则返回渲染好的居中预览页
+        if request.args.get("raw") == "1":
+            resp = FlaskResponse(text, status=200, mimetype="text/plain")
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
+        resp = FlaskResponse(render_template(
+            "markdown_view.html",
+            content=text,
+            title=os.path.basename(full),
+        ), status=200, mimetype="text/html")
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+    mime, _ = mimetypes.guess_type(full)
+    if not mime:
+        mime = "application/octet-stream"
+    try:
+        resp = send_file(full, mimetype=mime, as_attachment=False, conditional=True)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
     except (OSError, PermissionError) as e:
         return jsonify({"error": f"无法读取文件: {str(e)}"}), 500
 

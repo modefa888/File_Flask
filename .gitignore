@@ -15,3 +15,6 @@ data/
 # PyInstaller 构建产物
 build/
 dist/
+
+# 构建环境 / PyInstaller 运行时生成的虚拟环境
+.buildenv/

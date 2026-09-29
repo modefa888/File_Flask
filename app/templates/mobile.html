@@ -173,85 +173,240 @@
   .mp-btn:active { background: rgba(0,0,0,.06); }
   .mp-btn.close { color: var(--sub); }
 
+  /* ===== 全屏播放器：氛围背景 + 毛玻璃抽屉 ===== */
   .player-page {
     position: fixed; inset: 0; z-index: 96; display: none; flex-direction: column;
-    padding: calc(16px + var(--safe-top)) 22px calc(22px + var(--safe-bottom));
-    color: #fff; background: linear-gradient(165deg, #2b5876, #4e4376);
+    overflow: hidden;
+    padding: calc(14px + var(--safe-top)) 16px calc(14px + var(--safe-bottom));
+    color: #fff; background: linear-gradient(165deg, #2b5876, #4e4376);   /* JS 会按曲目覆盖 */
     transition: opacity .25s ease;
   }
   .player-page.show { display: flex; }
-  .pp-top { display: flex; align-items: center; gap: 12px; }
-  .pp-collapse, .pp-list-btn {
-    border: none; background: rgba(255,255,255,.15); color: #fff;
-    width: 38px; height: 38px; border-radius: 50%; font-size: 18px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; flex: none;
+  /* 氛围层：模糊放大的封面，让上层的毛玻璃有内容可透 */
+  .pp-bg {
+    position: absolute; inset: -14%; z-index: 0; pointer-events: none;
+    background: center/cover no-repeat;
+    filter: blur(40px) saturate(155%) brightness(.85);
+    transform: scale(1.15); opacity: 0; transition: opacity .6s ease;
   }
-  .pp-collapse:active, .pp-list-btn:active { background: rgba(255,255,255,.28); }
+  .pp-bg.has-cover { opacity: .9; }
+  /* 顶部提亮 + 底部压暗，保证白字和玻璃面板的对比度 */
+  .player-page::after {
+    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(130% 60% at 50% 0%, rgba(255,255,255,.12), transparent 62%),
+      linear-gradient(180deg, rgba(0,0,0,.30), rgba(0,0,0,.06) 34%, rgba(0,0,0,.46));
+  }
+  .pp-top, .pp-disc-wrap, .pp-sheet { position: relative; z-index: 1; }
+  .pp-top { display: flex; align-items: center; gap: 10px; }
+  /* 顶部圆形按钮：毛玻璃胶囊 */
+  .pp-collapse, .pp-list-btn, .pp-fav-btn {
+    border: 1px solid rgba(255,255,255,.18); color: #fff; cursor: pointer;
+    background: rgba(255,255,255,.13);
+    -webkit-backdrop-filter: blur(16px) saturate(170%);
+    backdrop-filter: blur(16px) saturate(170%);
+    box-shadow: 0 6px 18px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.24);
+    display: flex; align-items: center; justify-content: center; flex: none;
+    transition: transform .18s ease, background .18s ease;
+  }
+  .pp-collapse, .pp-list-btn { width: 40px; height: 40px; border-radius: 50%; font-size: 18px; }
+  .pp-fav-btn { width: 40px; height: 40px; border-radius: 50%; }
+  .pp-collapse:active, .pp-list-btn:active, .pp-fav-btn:active { transform: scale(.93); background: rgba(255,255,255,.28); }
   .pp-title-wrap { flex: 1; min-width: 0; text-align: center; }
-  .pp-title-wrap .pp-name { font-size: 16px; }
-  .pp-title-wrap .pp-artist { margin-top: 2px; font-size: 11px; }
-  .pp-disc-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 8px 0; min-height: 0; }
+  .pp-title-wrap::before {
+    content: "NOW PLAYING"; display: block; margin-bottom: 3px;
+    font-size: 9px; font-weight: 600; letter-spacing: 2.4px; opacity: .55;
+  }
+  .pp-title-wrap .pp-name { font-size: 16px; letter-spacing: .3px; text-shadow: 0 1px 10px rgba(0,0,0,.35); }
+  .pp-title-wrap .pp-artist { margin-top: 2px; font-size: 11px; color: rgba(255,255,255,.72); }
+  /* 唱片：居中展示，背后一层柔光让封面从背景里浮起来 */
+  .pp-disc-wrap {
+    flex: 1 1 auto; min-height: 0; position: relative;
+    display: flex; align-items: center; justify-content: center; padding: 6px 0 10px;
+  }
+  .pp-disc-wrap::before {
+    content: ""; position: absolute; border-radius: 50%;
+    width: min(66vw, 290px); height: min(66vw, 290px);
+    background: radial-gradient(circle, rgba(255,255,255,.26), rgba(255,255,255,0) 70%);
+    filter: blur(22px);
+  }
+  /* 喜欢：收进进度行右端，做成图标式（不再是漂浮圆钮），和「当前时间─时长」成为一条信息带
+     外框 32px 保留手指热区，视觉上只有一个心形；负外边距让它不撑高这一行 */
+  .pp-progress .pp-fav-btn {
+    flex: none; width: 32px; height: 32px; margin: -6px -2px -6px 0;
+    border: none; background: transparent; box-shadow: none;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    color: rgba(255,255,255,.62);
+  }
+  .pp-progress .pp-fav-btn svg { width: 20px; height: 20px; }
+  .pp-progress .pp-fav-btn:active { background: transparent; color: #fff; box-shadow: none; }
+  .pp-progress .pp-fav-btn.on { color: #ff6a97; background: transparent; }
   .pp-disc {
-    width: min(56vw, 250px); height: min(56vw, 250px); border-radius: 50%;
+    width: min(56vw, 240px, 30vh); height: min(56vw, 240px, 30vh); border-radius: 50%;
     background:
       radial-gradient(circle at 50% 50%, rgba(255,255,255,.95) 0 18%, transparent 19%),
       conic-gradient(from 0deg, #1f6feb, #7c3aed, #ec4899, #f59e0b, #1f6feb);
-    box-shadow: 0 12px 30px rgba(0,0,0,.4), inset 0 0 0 6px rgba(255,255,255,.08);
+    box-shadow:
+      0 22px 52px rgba(0,0,0,.45),
+      0 0 0 1px rgba(255,255,255,.18),
+      inset 0 0 0 6px rgba(255,255,255,.08),
+      inset 0 10px 26px rgba(255,255,255,.16);
     display: flex; align-items: center; justify-content: center;
     animation: discspin 9s linear infinite; position: relative;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   .pp-disc.paused { animation-play-state: paused; }
+  /* 按下时提亮一下（用 filter 避免和旋转动画的 transform 打架） */
+  .pp-disc:active { filter: brightness(1.18); }
   .pp-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pp-artist { font-size: 13px; opacity: .82; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .pp-progress { display: flex; align-items: center; gap: 9px; margin-top: 16px; font-size: 11px; opacity: .9; }
+  /* ===== 毛玻璃抽屉：歌词 + 进度 + 控制都收进这块玻璃里 ===== */
+  .pp-sheet {
+    flex: 0 1 auto; max-height: 54vh; min-height: 0;
+    display: flex; flex-direction: column;
+    margin-top: 6px; padding: 14px 16px 16px; border-radius: 26px;
+    background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.07));
+    -webkit-backdrop-filter: blur(26px) saturate(175%);
+    backdrop-filter: blur(26px) saturate(175%);
+    border: 1px solid rgba(255,255,255,.17);
+    box-shadow: 0 -10px 42px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.26);
+    animation: sheetUp .42s cubic-bezier(.22,.61,.36,1) both;
+  }
+  .pp-sheet::before {   /* 顶部把手：抽屉感 */
+    content: ""; display: block; width: 40px; height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,.3); margin: -4px auto 10px; flex: none;
+  }
+  @keyframes sheetUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+  /* 进度条：玻璃轨道 + 高亮已播放段（--p 由 JS 更新） */
+  .pp-progress {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    margin-top: 12px; font-size: 11px; color: rgba(255,255,255,.78);
+    font-variant-numeric: tabular-nums;
+  }
   .pp-seek {
-    flex: 1; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 3px;
-    background: rgba(255,255,255,.28); outline: none; cursor: pointer;
+    flex: 1; -webkit-appearance: none; appearance: none; height: 5px; border-radius: 4px;
+    outline: none; cursor: pointer; border: none;
+    background: linear-gradient(90deg,
+      rgba(255,255,255,.95) 0 calc(var(--p, 0) * 100%),
+      rgba(255,255,255,.22) calc(var(--p, 0) * 100%) 100%);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.22);
   }
   .pp-seek::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
-    background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4);
+    background: #fff; border: 2px solid rgba(255,255,255,.5);
+    box-shadow: 0 2px 8px rgba(0,0,0,.45);
   }
-  .pp-seek::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: none; }
-  .pp-controls { display: flex; align-items: center; justify-content: center; gap: 22px; margin-top: 20px; }
+  .pp-seek::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%; background: #fff;
+    border: 2px solid rgba(255,255,255,.5);
+  }
+  /* 控制区：两侧玻璃圆钮 + 中间白色主按钮 */
+  .pp-controls {
+    position: relative;   /* 音量悬浮条的定位基准 */
+    flex: none; display: flex; align-items: center; justify-content: space-between;
+    gap: 4px; margin-top: 14px; padding: 0 2px;
+  }
+  /* 极窄屏：再收一档，保证 6 个按钮始终一行放得下 */
+  @media (max-width: 345px) {
+    .pp-controls { gap: 2px; padding: 0; }
+    .pp-controls button:not(.pp-play-big) { width: 36px; height: 36px; }
+    .pp-controls button.pp-play-big { width: 52px; height: 52px; }
+    .pp-controls button svg { width: 18px; height: 18px; }
+    .pp-controls button.pp-play-big svg { width: 22px; height: 22px; }
+  }
   .pp-controls button {
-    border: none; background: transparent; color: #fff; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; font-size: 24px;
+    border: 1px solid rgba(255,255,255,.15); color: #fff; cursor: pointer;
+    background: rgba(255,255,255,.1);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    backdrop-filter: blur(12px) saturate(160%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 6px 16px rgba(0,0,0,.2);
+    display: flex; align-items: center; justify-content: center; padding: 0;
+    transition: transform .18s ease, background .18s ease;
   }
-  .pp-controls button:not(.pp-play-big) {
-    width: 44px; height: 44px; padding: 0; flex: none;
+  .pp-controls button:not(.pp-play-big) { width: 42px; height: 42px; border-radius: 50%; flex: none; font-size: 22px; }
+  .pp-controls button:active { transform: scale(.9); background: rgba(255,255,255,.26); }
+  /* 主按钮：白色实心（选择器需盖过 .pp-controls button，否则会退回玻璃底色） */
+  .pp-controls button.pp-play-big {
+    width: 60px; height: 60px; border-radius: 50%; flex: none; padding: 0; font-size: 26px;
+    color: #17171f; border: none;
+    background: linear-gradient(180deg, #ffffff, #e6e6ef);
+    box-shadow: 0 12px 30px rgba(0,0,0,.42), inset 0 1px 0 #fff;
   }
-  .pp-controls button:active { opacity: .6; }
-  .pp-play-big {
-    width: 66px; height: 66px; border-radius: 50%; background: #fff; color: #333;
-    font-size: 26px; box-shadow: 0 6px 18px rgba(0,0,0,.35); flex: none; padding: 0;
+  .pp-controls button.pp-play-big:active {
+    background: linear-gradient(180deg, #f1f1f7, #d9d9e4);
+  }
+  /* 音量工具：垂直悬浮玻璃条（挂在喇叭按钮正上方，不占布局） */
+  .pp-vol {
+    /* 抬到进度条上方，避免遮住左侧时间 */
+    position: absolute; left: -2px; bottom: calc(100% + 36px); z-index: 5;
+    display: none; flex-direction: column; align-items: center; gap: 8px;
+    padding: 12px 8px 10px; border-radius: 20px;
+    background: rgba(28,26,42,.42);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: blur(18px) saturate(170%);
+    border: 1px solid rgba(255,255,255,.16);
+    box-shadow: 0 14px 34px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.22);
+    transform-origin: 22px 100%;
+    animation: volPop .22s cubic-bezier(.22,.61,.36,1) both;
+  }
+  .pp-vol.show { display: flex; }
+  @keyframes volPop {
+    from { opacity: 0; transform: translateY(8px) scale(.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .pp-vol-slot { position: relative; width: 34px; height: 132px; }
+  .pp-vol-range {
+    position: absolute; left: 50%; top: 50%; width: 132px; height: 5px; margin: 0;
+    transform: translate(-50%,-50%) rotate(-90deg);   /* 旋转成竖直滑杆：向上=变大 */
+    -webkit-appearance: none; appearance: none; border-radius: 3px;
+    outline: none; cursor: pointer; border: none;
+    background: linear-gradient(90deg,
+      rgba(255,255,255,.95) 0 calc(var(--v, 1) * 100%),
+      rgba(255,255,255,.22) calc(var(--v, 1) * 100%) 100%);
+  }
+  .pp-vol-range::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.45);
+  }
+  .pp-vol-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: none; }
+  .pp-vol-val {
+    flex: none; font-size: 11px; color: rgba(255,255,255,.85);
+    font-variant-numeric: tabular-nums;
   }
   /* SVG 图标尺寸 */
   .pp-collapse svg, .pp-list-btn svg { width: 20px; height: 20px; }
-  .pp-controls button svg { width: 26px; height: 26px; }
-  .pp-play-big svg { width: 30px; height: 30px; }
+  .pp-controls button svg { width: 20px; height: 20px; }
+  .pp-controls button.pp-play-big svg { width: 26px; height: 26px; }
   .pp-badge svg { width: 20px; height: 20px; }
   .mp-btn svg { width: 18px; height: 18px; }
   .pp-pl-close svg { width: 14px; height: 14px; }
 
-  /* 播放列表：右侧悬浮抽屉 */
+  /* 播放列表：右侧悬浮抽屉（半透明毛玻璃，浮在画面上，三个 tab 共用） */
   .pp-pl-mask {
-    position: fixed; inset: 0; z-index: 96; background: rgba(0,0,0,.35);
+    position: fixed; inset: 0; z-index: 96; background: rgba(0,0,0,.24);
     opacity: 0; pointer-events: none; transition: opacity .25s;
   }
   .pp-pl-mask.show { opacity: 1; pointer-events: auto; }
   .pp-playlist {
-    position: fixed; top: 0; right: 0; bottom: 0; z-index: 97;
-    width: min(78vw, 320px); max-height: none; overflow-y: auto;
+    /* 四周留出间距 + 投影 + 描边：做成真正“悬浮”在画面上的卡片 */
+    position: fixed; top: 8px; right: 8px; bottom: calc(8px + var(--safe-bottom)); z-index: 97;
+    width: min(78vw, 320px); max-height: none; overflow: hidden;   /* 整块不滚动：只有中间列表滚动 */
     display: flex; flex-direction: column;
-    background: rgba(24,22,44,.92); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
-    border-radius: 18px 0 0 18px; padding: 12px 8px calc(14px + var(--safe-bottom));
-    transform: translateX(105%); transition: transform .3s cubic-bezier(.22,.61,.36,1);
+    /* 更透明、模糊更强（.92 → .55、blur 18 → 30），让背后画面明显透出来 */
+    background: rgba(20,18,38,.55);
+    -webkit-backdrop-filter: blur(30px) saturate(170%);
+    backdrop-filter: blur(30px) saturate(170%);
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 18px; padding: 12px 8px 14px;
+    box-shadow: 0 18px 44px rgba(0,0,0,.45);
+    transform: translateX(116%); transition: transform .3s cubic-bezier(.22,.61,.36,1);
     scrollbar-width: none;
   }
   .pp-playlist::-webkit-scrollbar { display: none; }
   .pp-playlist.show { transform: translateX(0); }
+  /* 顶部标签行固定：列表滚动时不会跟着消失 */
   .pp-pl-head {
+    flex: none;
     display: flex; align-items: center; gap: 6px;
     padding: 4px 10px 10px;
   }
@@ -268,13 +423,31 @@
     display: flex; align-items: center; justify-content: center; flex: none;
   }
   .pp-pl-head .pp-pl-close:active { background: rgba(255,255,255,.25); }
-  #ppPlItems { flex: 1 0 auto; }
-  .pp-pl-clear {
-    display: block; width: calc(100% - 8px); margin: 12px 4px 0; flex: none;
-    border: none; background: rgba(255,255,255,.1); color: rgba(255,255,255,.85);
-    font-size: 13px; padding: 10px 0; border-radius: 12px; cursor: pointer;
+  /* 中间列表是唯一滚动区（顶部标签行、底部按钮都固定不动） */
+  #ppPlItems {
+    flex: 1 1 auto; min-height: 0;
+    overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    padding-bottom: 58px;      /* 给悬浮按钮留出空间，列表末尾不会被永久遮住 */
+    scrollbar-width: none;
   }
-  .pp-pl-clear:active { background: rgba(255,255,255,.22); }
+  #ppPlItems::-webkit-scrollbar { display: none; width: 0; }
+  /* 底部按钮：固定在面板底部并悬浮在列表之上 */
+  .pp-pl-foot {
+    position: absolute; left: 10px; right: 10px;
+    bottom: 10px;      /* 面板本身已避开安全区，这里不再重复叠加 */
+    display: flex; gap: 8px; pointer-events: none;   /* 空白区域仍可点到下面的列表 */
+  }
+  .pp-pl-clear {
+    display: block; width: 100%; margin: 0; flex: 1 1 auto;
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.14); color: rgba(255,255,255,.92);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    backdrop-filter: blur(12px) saturate(160%);
+    box-shadow: 0 8px 22px rgba(0,0,0,.38);
+    font-size: 13px; padding: 11px 0; border-radius: 14px; cursor: pointer;
+    pointer-events: auto;
+  }
+  .pp-pl-clear:active { background: rgba(255,255,255,.3); }
   .pl-empty { padding: 26px 12px; text-align: center; opacity: .5; font-size: 13px; }
   .pl-group {
     padding: 10px 12px 4px; font-size: 11px; color: rgba(255,255,255,.45);
@@ -289,14 +462,8 @@
   }
   .pl-fav svg { width: 16px; height: 16px; }
   .pl-fav.on { color: #ff5f8f; }
-  .pp-fav-btn {
-    border: none; background: rgba(255,255,255,.15); color: rgba(255,255,255,.85);
-    width: 36px; height: 36px; border-radius: 50%; cursor: pointer; flex: none;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .pp-fav-btn svg { width: 20px; height: 20px; }
-  .pp-fav-btn:active { background: rgba(255,255,255,.28); }
-  .pp-fav-btn.on { color: #ff5f8f; }
+  .pp-fav-btn svg { width: 19px; height: 19px; }
+  .pp-fav-btn.on { color: #ff5f8f; background: rgba(255,95,143,.24); border-color: rgba(255,95,143,.5); }
   .pp-playlist .pl-item {
     display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
     font-size: 14px; cursor: pointer;
@@ -305,23 +472,25 @@
   .pp-playlist .pl-item.cur { background: rgba(255,255,255,.2); font-weight: 600; }
   .pp-playlist .pl-item .pl-ico { opacity: .8; }
   .pp-playlist .pl-item .pl-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  /* 歌词面板：与唱片互斥切换 */
+  /* 歌词：在抽屉内滚动，当前句高亮成玻璃胶囊 */
   .pp-lyrics {
-    flex: 1; display: flex; flex-direction: column; align-items: stretch;
-    overflow-y: auto; margin-top: 10px; min-height: 0; position: relative;
-    -webkit-mask-image: linear-gradient(transparent, #000 14%, #000 86%, transparent);
-    mask-image: linear-gradient(transparent, #000 14%, #000 86%, transparent);
+    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: stretch;
+    overflow-y: auto; margin-top: 2px; padding: 4px 0; position: relative;
+    -webkit-mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent);
+    mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent);
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;              /* Firefox 隐藏滚动条 */
   }
   .pp-lyrics::-webkit-scrollbar { display: none; width: 0; }   /* Chrome/Safari 隐藏滚动条 */
   .pp-line {
-    text-align: center; font-size: 15px; line-height: 2.1; opacity: .55;
-    padding: 2px 6px; transition: opacity .25s, transform .25s;
+    text-align: center; font-size: 14.5px; line-height: 1.95; opacity: .5;
+    padding: 3px 10px; border-radius: 12px;
+    transition: opacity .25s, background .25s;
   }
   .pp-line.cur {
-    opacity: 1; font-weight: 600; color: #fff; transform: scale(1.06);
-    text-shadow: 0 0 12px rgba(255,255,255,.35);
+    opacity: 1; font-weight: 600; color: #fff;
+    background: rgba(255,255,255,.1);
+    text-shadow: 0 0 14px rgba(255,255,255,.45);
   }
   .pp-lyr-empty { margin: auto; opacity: .6; font-size: 14px; text-align: center; }
 
@@ -613,9 +782,10 @@
     padding: 9px 14px; font-size: 16px; background: #fff; color: var(--text);
   }
   .sp-tools {
+    position: relative;   /* 搜索历史下拉面板的定位基准 */
     display: flex; align-items: center; gap: 8px; padding: 8px 10px;
     background: var(--card); border-bottom: 1px solid var(--border);
-    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
   }
   .sp-chip {
     border: 1px solid var(--border); background: #fff; color: var(--sub);
@@ -629,23 +799,76 @@
     font-size: 12px; color: var(--sub); margin-left: auto;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .sp-histwrap { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+  /* 搜索历史：下拉面板（表头固定 + 列表滚动，全部列出） */
+  .sp-histwrap {
+    position: absolute; left: 8px; right: 8px; top: calc(100% + 6px); z-index: 30;
+    display: flex; flex-direction: column;
+    border-radius: 14px; overflow: hidden;   /* 圆角裁切内部滚动区 */
+    background: #fff; border: 1px solid var(--border);
+    box-shadow: 0 16px 36px rgba(15,23,42,.18);
+    max-height: 62vh;
+  }
   .sp-histwrap.hidden { display: none; }
+  .sp-hist-head {
+    flex: none; display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px 8px; font-size: 12px; color: var(--sub);
+    border-bottom: 1px solid #eef2f7;
+  }
+  /* 列表是唯一的滚动区，滚动条按平台能力显示；另加底部渐隐箭头做兜底提示 */
+  .sp-hist-list {
+    flex: 1 1 auto; min-height: 0;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 6px 4px 8px 8px;
+    overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+    scrollbar-width: thin;                                  /* Firefox */
+    scrollbar-color: rgba(100,116,139,.5) transparent;
+  }
+  .sp-hist-list::-webkit-scrollbar { width: 6px; }
+  .sp-hist-list::-webkit-scrollbar-track { background: transparent; }
+  .sp-hist-list::-webkit-scrollbar-thumb {
+    background: rgba(100,116,139,.5); border-radius: 3px;
+  }
+  /* 还有更多时：底部渐隐 + 向下箭头（不依赖平台滚动条） */
+  .sp-histwrap.has-more::after {
+    content: "⌄"; position: absolute; left: 0; right: 0; bottom: 0; height: 26px;
+    display: flex; align-items: flex-end; justify-content: center; padding-bottom: 1px;
+    font-size: 14px; color: #94a3b8;
+    background: linear-gradient(rgba(255,255,255,0), #fff 76%);
+    pointer-events: none;
+  }
+  .sp-hist-clear { color: #e05656; cursor: pointer; padding: 2px 6px; border-radius: 8px; }
+  .sp-hist-clear:active { background: #fee2e2; }
+  .sp-hist-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 8px; border-radius: 10px; cursor: pointer;
+  }
+  .sp-hist-item:active { background: #f1f5f9; }
+  .sp-hist-ico {
+    flex: none; width: 30px; height: 30px; border-radius: 9px; font-size: 14px;
+    background: #f1f5f9; display: flex; align-items: center; justify-content: center;
+  }
+  .sp-hist-q {
+    flex: 1 1 auto; min-width: 0; font-size: 14px; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sp-hist-where {
+    flex: 0 1 auto; max-width: 42%; font-size: 12px; color: var(--sub);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sp-hist-del {
+    flex: none; width: 24px; height: 24px; border-radius: 50%; border: none; padding: 0;
+    background: transparent; color: var(--sub); font-size: 12px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .sp-hist-del:active { background: #fee2e2; color: #e05656; }
+  .sp-hist-empty { padding: 16px 8px; text-align: center; font-size: 13px; color: var(--sub); }
   .sp-histbtn {
-    position: sticky; right: 0; flex: 0 0 auto;
+    flex: 0 0 auto;
     width: 30px; height: 30px; border-radius: 50%;
     border: 1px solid var(--border); background: #fff; font-size: 14px;
     display: flex; align-items: center; justify-content: center; cursor: pointer;
-    margin-left: 2px;
   }
   .sp-histbtn:active { background: #f1f5f9; }
-  .sp-hist-chip {
-    border: 1px dashed var(--border); background: #f8fafc; color: var(--text);
-    border-radius: 12px; padding: 3px 10px; font-size: 12px; cursor: pointer; flex: 0 0 auto;
-    max-width: 150px; overflow: hidden; text-overflow: ellipsis;
-  }
-  .sp-hist-clear { font-size: 12px; color: #e05656; cursor: pointer; flex: 0 0 auto; margin-left: 2px; }
-  .sp-hist-empty { font-size: 12px; color: var(--sub); flex: 0 0 auto; }
   .sp-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .sp-results { padding: 8px; }
   .sp-note { text-align: center; color: var(--sub); font-size: 12px; padding: 10px; }
@@ -840,6 +1063,287 @@
   .tr-sub { margin-top: 2px; font-size: 11px; color: var(--sub); }
   .tr-item.gone { opacity: .55; }
   .tr-empty { text-align: center; color: var(--sub); padding: 48px 0; font-size: 13px; line-height: 1.8; }
+
+  /* ================= 新版视频播放器（与毛玻璃音乐播放器同一套视觉语言） ================= */
+  .vp-page {
+    position: fixed; inset: 0; z-index: 99; display: none; flex-direction: column;
+    overflow: hidden;
+    padding: calc(14px + var(--safe-top)) 16px calc(14px + var(--safe-bottom));
+    color: #fff; background: linear-gradient(165deg, #16121f, #0b0a12);
+  }
+  .vp-page.show { display: flex; }
+  /* 氛围层：用视频抽帧缩略图模糊放大铺底 */
+  .vp-bg {
+    position: absolute; inset: -14%; z-index: 0; pointer-events: none;
+    background: center/cover no-repeat;
+    filter: blur(44px) saturate(150%) brightness(.58);
+    transform: scale(1.15); opacity: 0; transition: opacity .6s ease;
+  }
+  .vp-bg.has-cover { opacity: .85; }
+  .vp-page::after {
+    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(130% 60% at 50% 0%, rgba(255,255,255,.10), transparent 62%),
+      linear-gradient(180deg, rgba(0,0,0,.34), rgba(0,0,0,.08) 34%, rgba(0,0,0,.5));
+  }
+  .vp-top, .vp-stage, .vp-sheet { position: relative; z-index: 1; }
+  .vp-top { display: flex; align-items: center; gap: 10px; }
+  .vp-collapse, .vp-list-btn {
+    border: 1px solid rgba(255,255,255,.18); color: #fff; cursor: pointer;
+    background: rgba(255,255,255,.13);
+    -webkit-backdrop-filter: blur(16px) saturate(170%);
+    backdrop-filter: blur(16px) saturate(170%);
+    box-shadow: 0 6px 18px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.24);
+    width: 40px; height: 40px; border-radius: 50%; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .18s ease, background .18s ease;
+  }
+  .vp-collapse:active, .vp-list-btn:active { transform: scale(.93); background: rgba(255,255,255,.28); }
+  .vp-list-btn.on { background: rgba(255,255,255,.3); }   /* 播放列表已打开时高亮，点击有明确反馈 */
+  .vp-collapse svg, .vp-list-btn svg { width: 20px; height: 20px; }
+  /* 播放列表：右侧毛玻璃抽屉（与音乐播放器一致） */
+  .vp-pl-mask {
+    position: fixed; inset: 0; z-index: 96; background: rgba(0,0,0,.24);
+    opacity: 0; pointer-events: none; transition: opacity .25s;
+  }
+  .vp-pl-mask.show { opacity: 1; pointer-events: auto; }
+  .vp-pl {
+    /* 从顶栏下方开始：不盖住 ☰，开着时点 ☰ 区域也能收起（不会"点了没反应"） */
+    position: fixed; top: calc(62px + var(--safe-top)); right: 8px; bottom: calc(8px + var(--safe-bottom)); z-index: 97;
+    width: min(80vw, 330px); display: flex; flex-direction: column; overflow: hidden;
+    background: rgba(20,18,38,.55);
+    -webkit-backdrop-filter: blur(30px) saturate(170%);
+    backdrop-filter: blur(30px) saturate(170%);
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 18px; padding: 12px 10px;
+    box-shadow: 0 18px 44px rgba(0,0,0,.45);
+    transform: translateX(116%); transition: transform .3s cubic-bezier(.22,.61,.36,1);
+  }
+  .vp-pl.show { transform: translateX(0); }
+  .vp-pl-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 2px 4px 10px; }
+  .vp-pl-tabs { flex: 1; display: flex; gap: 4px; min-width: 0; }   /* 复用 .pp-tab 的胶囊样式 */
+  .vp-pl-empty { padding: 28px 10px; text-align: center; font-size: 13px; color: rgba(255,255,255,.6); }
+  .vp-pl-rm {
+    flex: none; border: none; background: transparent; color: #ff6a97;
+    font-size: 13px; padding: 4px 6px; border-radius: 8px; cursor: pointer;
+  }
+  .vp-pl-rm:active { background: rgba(255,106,151,.2); }
+  .vp-pl-close {
+    flex: none; width: 28px; height: 28px; border-radius: 50%; border: none; cursor: pointer;
+    background: rgba(255,255,255,.12); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .vp-pl-close:active { background: rgba(255,255,255,.25); }
+  .vp-pl-list {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .vp-pl-list::-webkit-scrollbar { display: none; width: 0; }
+  .vp-pl-row { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 12px; cursor: pointer; }
+  .vp-pl-row:active { background: rgba(255,255,255,.12); }
+  .vp-pl-row.cur { background: rgba(255,255,255,.2); }
+  /* 缩略图容器：图片加载失败时露出 🎬 兜底占位（不再是裂图图标） */
+  .vp-pl-thumb {
+    position: relative; flex: none; width: 64px; height: 38px; border-radius: 8px; overflow: hidden;
+    background: rgba(255,255,255,.08); color: rgba(255,255,255,.5); font-size: 15px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .vp-pl-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .vp-pl-fav { flex: none; font-size: 12px; color: #ff6a97; }
+  .vp-pl-meta { flex: 1; min-width: 0; }
+  .vp-pl-name { font-size: 13px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .vp-pl-tag { margin-top: 2px; font-size: 11px; color: rgba(255,255,255,.6); }
+  .vp-title-wrap { flex: 1; min-width: 0; text-align: center; }
+  .vp-title-wrap::before {
+    content: "NOW PLAYING"; display: block; margin-bottom: 3px;
+    font-size: 9px; font-weight: 600; letter-spacing: 2.4px; opacity: .55;
+  }
+  .vp-name {
+    font-size: 15px; font-weight: 600; letter-spacing: .3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-shadow: 0 1px 10px rgba(0,0,0,.35);
+  }
+  /* 视频舞台：圆角卡片；点画面 = 播放/暂停 */
+  .vp-stage {
+    flex: 1 1 auto; min-height: 0; position: relative;
+    display: flex; align-items: center; justify-content: center;
+    margin-top: 10px; border-radius: 18px; overflow: hidden;
+    background: rgba(255,255,255,.06);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid rgba(255,255,255,.16);
+    box-shadow: 0 22px 52px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.16);
+  }
+  /* 视频元素不加黑底，letterbox 区域才露出上面的毛玻璃 */
+  .vp-stage video { width: 100%; height: 100%; object-fit: contain; background: transparent; display: block; }
+  /* 中央大播放键：毛玻璃（压在画面上，深色玻璃 + 白图标，亮暗画面都看得清） */
+  .vp-big {
+    position: absolute; left: 50%; top: 50%; margin: -34px 0 0 -34px;
+    width: 68px; height: 68px; border-radius: 50%; cursor: pointer;
+    color: #fff; background: rgba(24,22,34,.42);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    backdrop-filter: blur(16px) saturate(160%);
+    border: 1px solid rgba(255,255,255,.3);
+    box-shadow: 0 12px 30px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.32);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none; transition: opacity .22s ease;
+  }
+  .vp-page.paused .vp-big { opacity: 1; pointer-events: auto; }
+  .vp-big:active { transform: scale(.94); }
+  .vp-big svg { width: 30px; height: 30px; }
+  /* 毛玻璃抽屉 */
+  .vp-sheet {
+    flex: none; display: flex; flex-direction: column;
+    margin-top: 10px; padding: 12px 14px; border-radius: 24px;
+    background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.07));
+    -webkit-backdrop-filter: blur(26px) saturate(175%);
+    backdrop-filter: blur(26px) saturate(175%);
+    border: 1px solid rgba(255,255,255,.17);
+    box-shadow: 0 -10px 42px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.26);
+  }
+  .vp-sheet::before {
+    content: ""; display: block; width: 40px; height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,.3); margin: -2px auto 8px; flex: none;
+  }
+  .vp-progress {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    font-size: 11px; color: rgba(255,255,255,.78); font-variant-numeric: tabular-nums;
+  }
+  .vp-seek {
+    flex: 1; -webkit-appearance: none; appearance: none; height: 5px; border-radius: 4px;
+    outline: none; cursor: pointer; border: none;
+    background: linear-gradient(90deg,
+      rgba(255,255,255,.95) 0 calc(var(--p, 0) * 100%),
+      rgba(255,255,255,.22) calc(var(--p, 0) * 100%) 100%);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.22);
+  }
+  .vp-seek::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: #fff; border: 2px solid rgba(255,255,255,.5); box-shadow: 0 2px 8px rgba(0,0,0,.45);
+  }
+  .vp-seek::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid rgba(255,255,255,.5);
+  }
+  /* 倍速（快进播放）：点一下切换 1→1.25→1.5→2→0.75 循环，非 1 倍时高亮 */
+  .vp-rate {
+    flex: none; margin: -6px -2px -6px 0; padding: 5px 8px; min-width: 46px;
+    border: 1px solid rgba(255,255,255,.18); border-radius: 999px;
+    background: rgba(255,255,255,.1); color: #fff; cursor: pointer;
+    font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    transition: background .18s ease, transform .18s ease;
+  }
+  .vp-rate:active { transform: scale(.94); background: rgba(255,255,255,.26); }
+  .vp-rate.fast { background: rgba(255,255,255,.26); border-color: rgba(255,255,255,.42); }
+  .vp-rate.on { background: rgba(255,255,255,.32); border-color: rgba(255,255,255,.5); }
+  /* 倍速菜单：从倍速按钮向上弹出的竖向玻璃列表 */
+  .vp-rate-pop {
+    position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 6;
+    display: none; flex-direction: column;
+    min-width: 92px; max-height: 52vh; overflow-y: auto; overscroll-behavior: contain;
+    padding: 6px; border-radius: 16px;
+    background: rgba(28,26,42,.5);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    backdrop-filter: blur(20px) saturate(170%);
+    border: 1px solid rgba(255,255,255,.16);
+    box-shadow: 0 14px 34px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.2);
+    animation: ratePop .2s cubic-bezier(.22,.61,.36,1) both;
+    scrollbar-width: none;
+  }
+  .vp-rate-pop.show { display: flex; }
+  .vp-rate-pop::-webkit-scrollbar { display: none; width: 0; }
+  @keyframes ratePop {
+    from { opacity: 0; transform: translateY(8px) scale(.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .vp-rate-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 8px 10px; border: none; border-radius: 10px; cursor: pointer;
+    background: transparent; color: rgba(255,255,255,.82);
+    font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap;
+    transition: background .15s ease;
+  }
+  .vp-rate-item:active { background: rgba(255,255,255,.14); }
+  .vp-rate-item .rp-tick { visibility: hidden; font-size: 12px; color: #fff; }
+  .vp-rate-item.cur { background: rgba(255,255,255,.18); color: #fff; font-weight: 600; }
+  .vp-rate-item.cur .rp-tick { visibility: visible; }
+  /* 喜欢：进度行右端的图标式按钮（与音乐播放器同款） */
+  .vp-progress .vp-fav-btn {
+    flex: none; width: 32px; height: 32px; margin: -6px 0 -6px 0;
+    border: none; background: transparent; box-shadow: none;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    color: rgba(255,255,255,.62); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .18s ease, color .18s ease;
+  }
+  .vp-progress .vp-fav-btn svg { width: 20px; height: 20px; }
+  .vp-progress .vp-fav-btn:active { transform: scale(.9); color: #fff; }
+  .vp-progress .vp-fav-btn.on { color: #ff6a97; }
+  .vp-controls {
+    position: relative; flex: none;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 4px; margin-top: 12px; padding: 0 2px;
+  }
+  .vp-controls button {
+    border: 1px solid rgba(255,255,255,.15); color: #fff; cursor: pointer;
+    background: rgba(255,255,255,.1);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    backdrop-filter: blur(12px) saturate(160%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 6px 16px rgba(0,0,0,.2);
+    display: flex; align-items: center; justify-content: center; padding: 0;
+    transition: transform .18s ease, background .18s ease;
+  }
+  .vp-controls button:not(.vp-play-big) { width: 42px; height: 42px; border-radius: 50%; flex: none; }
+  .vp-controls button:active { transform: scale(.9); background: rgba(255,255,255,.26); }
+  /* 主播放键：毛玻璃（比侧键更亮一点，保持主次区分） */
+  .vp-controls button.vp-play-big {
+    width: 60px; height: 60px; border-radius: 50%; flex: none; padding: 0;
+    color: #fff; border: 1px solid rgba(255,255,255,.4);
+    background: rgba(255,255,255,.24);
+    -webkit-backdrop-filter: blur(14px) saturate(170%);
+    backdrop-filter: blur(14px) saturate(170%);
+    box-shadow: 0 10px 26px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.45);
+  }
+  .vp-controls button.vp-play-big:active { background: rgba(255,255,255,.38); }
+  .vp-controls button svg { width: 20px; height: 20px; }
+  .vp-controls button.vp-play-big svg { width: 26px; height: 26px; }
+  /* 播放列表只在右侧抽屉里（底部横向缩略图条已移除，把高度让给画面） */
+  /* 音量：竖向悬浮玻璃条（与音乐播放器同款） */
+  .vp-vol {
+    position: absolute; left: -2px; bottom: calc(100% + 36px); z-index: 5;
+    display: none; flex-direction: column; align-items: center; gap: 8px;
+    padding: 12px 8px 10px; border-radius: 20px;
+    background: rgba(28,26,42,.42);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: blur(18px) saturate(170%);
+    border: 1px solid rgba(255,255,255,.16);
+    box-shadow: 0 14px 34px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.22);
+    animation: volPop .22s cubic-bezier(.22,.61,.36,1) both;
+  }
+  .vp-vol.show { display: flex; }
+  .vp-vol-slot { position: relative; width: 34px; height: 120px; }
+  .vp-vol-range {
+    position: absolute; left: 50%; top: 50%; width: 120px; height: 5px; margin: 0;
+    transform: translate(-50%,-50%) rotate(-90deg);   /* 竖直：向上=变大 */
+    -webkit-appearance: none; appearance: none; border-radius: 3px;
+    outline: none; cursor: pointer; border: none;
+    background: linear-gradient(90deg,
+      rgba(255,255,255,.95) 0 calc(var(--v, 1) * 100%),
+      rgba(255,255,255,.22) calc(var(--v, 1) * 100%) 100%);
+  }
+  .vp-vol-range::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.45);
+  }
+  .vp-vol-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: none; }
+  .vp-vol-val { font-size: 11px; color: rgba(255,255,255,.85); font-variant-numeric: tabular-nums; }
+  /* 旧视频预览卡片上的入口按钮 */
+  .pv-head .pv-new {
+    flex: none; border: 1px solid rgba(31,111,235,.35); background: rgba(31,111,235,.08);
+    color: var(--primary); border-radius: 999px; padding: 6px 10px; font-size: 12px;
+    font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .pv-head .pv-new:active { background: rgba(31,111,235,.18); }
 </style>
 </head>
 <body>
@@ -886,29 +1390,42 @@
 
   <!-- 音乐播放器：全屏页 -->
   <div class="player-page" id="playerPage">
+    <div class="pp-bg" id="ppBg"></div>
     <div class="pp-top">
       <button class="pp-collapse" id="ppCollapse" title="收起"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg></button>
       <div class="pp-title-wrap">
         <div class="pp-name" id="ppName">—</div>
         <div class="pp-artist" id="ppArtist"></div>
       </div>
-      <button class="pp-fav-btn" id="ppFavBtn" title="喜欢"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></button>
       <button class="pp-list-btn" id="ppListBtn" title="播放列表"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg></button>
     </div>
     <div class="pp-disc-wrap">
       <div class="pp-disc paused" id="ppDisc"></div>
     </div>
-    <div class="pp-lyrics" id="ppLyrics"><div class="pp-lyr-empty">暂无歌词</div></div>
-    <div class="pp-progress">
-      <span id="ppCur">0:00</span>
-      <input type="range" class="pp-seek" id="ppSeek" min="0" max="1000" value="0" step="1" />
-      <span id="ppDur">0:00</span>
-    </div>
-    <div class="pp-controls">
-      <button id="ppPrev" title="上一首"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6V6zm3.5 6l8.5 6V6l-8.5 6z"/></svg></button>
-      <button class="pp-play-big" id="ppPlayBig" title="播放/暂停"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
-      <button id="ppNext" title="下一首"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
-      <button id="ppMode" title="播放模式"></button>
+    <!-- 毛玻璃抽屉：歌词 + 进度 + 控制 -->
+    <div class="pp-sheet">
+      <div class="pp-lyrics" id="ppLyrics"><div class="pp-lyr-empty">暂无歌词</div></div>
+      <div class="pp-progress">
+        <span id="ppCur">0:00</span>
+        <input type="range" class="pp-seek" id="ppSeek" min="0" max="1000" value="0" step="1" />
+        <span id="ppDur">0:00</span>
+        <!-- 喜欢：收在进度行右端，跟时间一起成为一条信息带 -->
+        <button class="pp-fav-btn" id="ppFavBtn" title="喜欢"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></button>
+      </div>
+      <div class="pp-controls">
+        <!-- 音量工具：垂直悬浮玻璃条，挂在喇叭按钮正上方（默认收起） -->
+        <div class="pp-vol" id="ppVolBar">
+          <span class="pp-vol-val" id="ppVolVal">100%</span>
+          <div class="pp-vol-slot">
+            <input type="range" class="pp-vol-range" id="ppVol" min="0" max="100" step="1" value="100" />
+          </div>
+        </div>
+        <button id="ppVolBtn" title="音量调节"></button>
+        <button id="ppPrev" title="上一首"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6V6zm3.5 6l8.5 6V6l-8.5 6z"/></svg></button>
+        <button class="pp-play-big" id="ppPlayBig" title="播放/暂停"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
+        <button id="ppNext" title="下一首"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+        <button id="ppMode" title="播放模式"></button>
+      </div>
     </div>
     <div class="pp-pl-mask" id="ppPlMask"></div>
     <div class="pp-playlist" id="ppPlaylist">
@@ -921,8 +1438,67 @@
         <button class="pp-pl-close" id="ppPlClose" title="收起列表"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
       </div>
       <div id="ppPlItems"></div>
-      <button class="pp-pl-clear" id="ppPlAdd" title="添加文件夹">＋ 添加文件夹</button>
-      <button class="pp-pl-clear" id="ppPlClear" style="display:none">清空</button>
+      <!-- 底部按钮：固定在面板底部、悬浮在列表之上（列表滚动时它不动） -->
+      <div class="pp-pl-foot">
+        <button class="pp-pl-clear" id="ppPlAdd" title="添加文件夹">＋ 添加文件夹</button>
+        <button class="pp-pl-clear" id="ppPlClear" style="display:none">清空</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新版视频播放器（毛玻璃抽屉式，入口在视频预览卡片上） -->
+  <div class="vp-page paused" id="vpPage">
+    <div class="vp-bg" id="vpBg"></div>
+    <div class="vp-top">
+      <button class="vp-collapse" id="vpCollapse" title="收起"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg></button>
+      <div class="vp-title-wrap">
+        <div class="vp-name" id="vpName">—</div>
+      </div>
+      <button class="vp-list-btn" id="vpListBtn" title="播放列表"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg></button>
+    </div>
+    <div class="vp-stage">
+      <video id="vpVideo" playsinline webkit-playsinline preload="metadata"></video>
+      <button class="vp-big" id="vpBig" title="播放/暂停"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
+    </div>
+    <div class="vp-sheet" id="vpSheet">
+      <div class="vp-progress">
+        <span id="vpCur">0:00</span>
+        <input type="range" class="vp-seek" id="vpSeek" min="0" max="1000" value="0" step="1" />
+        <span id="vpDur">0:00</span>
+        <button class="vp-rate" id="vpRate" title="播放速度（快进播放）">1.0×</button>
+        <button class="vp-fav-btn" id="vpFavBtn" title="喜欢"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></button>
+        <!-- 倍速菜单：点倍速按钮向上弹出 -->
+        <div class="vp-rate-pop" id="vpRatePop">
+          <div class="vp-rate-list" id="vpRateList"></div>
+        </div>
+      </div>
+      <div class="vp-controls">
+        <!-- 音量：竖向悬浮玻璃条 -->
+        <div class="vp-vol" id="vpVolBar">
+          <span class="vp-vol-val" id="vpVolVal">100%</span>
+          <div class="vp-vol-slot">
+            <input type="range" class="vp-vol-range" id="vpVol" min="0" max="100" step="1" value="100" />
+          </div>
+        </div>
+        <button id="vpVolBtn" title="音量调节"></button>
+        <button id="vpPrev" title="上一个"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6V6zm3.5 6l8.5 6V6l-8.5 6z"/></svg></button>
+        <button class="vp-play-big" id="vpPlay" title="播放/暂停"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
+        <button id="vpNext" title="下一个"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+        <button id="vpFs" title="全屏"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg></button>
+      </div>
+    </div>
+    <!-- 播放列表：右侧毛玻璃抽屉 -->
+    <div class="vp-pl-mask" id="vpPlMask"></div>
+    <div class="vp-pl" id="vpPl">
+      <div class="vp-pl-head">
+        <!-- 两个 tab：当前播放队列 / 喜欢的视频 -->
+        <div class="vp-pl-tabs">
+          <button class="pp-tab active" data-tab="pl">播放列表<span class="t-cnt" id="vpCntPl"></span></button>
+          <button class="pp-tab" data-tab="fav">喜欢<span class="t-cnt" id="vpCntFav"></span></button>
+        </div>
+        <button class="vp-pl-close" id="vpPlClose" title="收起列表">✕</button>
+      </div>
+      <div class="vp-pl-list" id="vpPlList"></div>
     </div>
   </div>
 
@@ -937,7 +1513,7 @@
       <span class="sp-chip active" id="spScopeGlobal">🌐 全局</span>
       <span class="sp-chip" id="spScopeLocal">📁 当前目录</span>
       <span class="sp-status" id="spStatus"></span>
-      <span class="sp-histwrap hidden" id="spHistWrap"></span>
+      <div class="sp-histwrap hidden" id="spHistWrap"></div>
       <button class="sp-histbtn" id="spHistBtn" title="搜索历史">🕘</button>
     </div>
     <div class="sp-body">
@@ -1250,14 +1826,23 @@
   function showLoading(on) {
     document.getElementById("loading").classList.toggle("show", !!on);
   }
+  // 提示条同时只显示一条：新提示先顶掉旧的（含旧定时器），不堆叠
+  var _toastEl = null, _toastFade = null, _toastKill = null;
   function toast(msg, type) {
     var wrap = document.getElementById("toastWrap");
+    if (_toastFade) { clearTimeout(_toastFade); _toastFade = null; }
+    if (_toastKill) { clearTimeout(_toastKill); _toastKill = null; }
+    if (_toastEl && _toastEl.parentNode) _toastEl.parentNode.removeChild(_toastEl);
     var el = document.createElement("div");
     el.className = "toast" + (type ? " " + type : "");
     el.textContent = msg;
     wrap.appendChild(el);
-    setTimeout(function () { el.style.opacity = "0"; el.style.transition = "opacity .3s"; }, 1800);
-    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 2200);
+    _toastEl = el;
+    _toastFade = setTimeout(function () { el.style.opacity = "0"; el.style.transition = "opacity .3s"; }, 1800);
+    _toastKill = setTimeout(function () {
+      if (el.parentNode) el.parentNode.removeChild(el);
+      if (_toastEl === el) _toastEl = null;
+    }, 2200);
   }
 
   // ---------- 多选模式 ----------
@@ -1875,8 +2460,12 @@
         else addFav(abs, g);
       });
     });
-    if (isDir(item)) {
-      addBtn("添加到音乐播放列表", "🎶", "", function () { _addDirToPlaylist(abs); });
+    // 只在「＋ 添加文件夹」触发后出现，且一触发只能用一次
+    if (isDir(item) && _plAddPending) {
+      addBtn("添加到音乐播放列表", "🎶", "", function () {
+        _plAddPending = false;          // 用完即失效：想再添加需再次点播放器里的「＋ 添加文件夹」
+        _addDirToPlaylist(abs);
+      });
     }
     if (AUDIO_EXT.indexOf(ext) >= 0) {
       addBtn("播放", "🎵", "", function () { openAudioPlayer(item, contextItems); });
@@ -1992,6 +2581,7 @@
     card.innerHTML =
       '<div class="pv-head">' +
         '<span class="pv-title">' + esc(item.name) + '</span>' +
+        '<button type="button" class="pv-new" data-op="newplayer" title="在新版播放器中打开">✨ 新版播放器</button>' +
         '<button type="button" class="pv-close" data-op="close">✕</button>' +
       '</div>' +
       '<div class="pv-vidarea"><video controls playsinline src="/api/stream?path=' +
@@ -2005,6 +2595,7 @@
     var video = card.querySelector("video");
     var listEl = card.querySelector(".pv-vlist");
     var dirAbs = abs.slice(0, abs.lastIndexOf("/")) || "/";
+    var curVids = [], curIdx = 0;      // 传给新版播放器的列表与当前项
 
     function renderVlist(items) {
       var vids = (items || []).filter(function (it) {
@@ -2015,7 +2606,11 @@
         return;
       }
       listEl.innerHTML = "";
-      vids.forEach(function (it) {
+      // 同步给新版播放器用的列表（含当前项下标）
+      curVids = vids.map(function (it) { return { name: it.name, abs: it.abs_path || joinPath(dirAbs, it.name) }; });
+      curIdx = 0;
+      curVids.forEach(function (v, k) { if (v.name === item.name) curIdx = k; });
+      vids.forEach(function (it, vi) {
         var p = it.abs_path || joinPath(dirAbs, it.name);
         var row = document.createElement("div");
         row.className = "pv-vitem" + (it.name === item.name ? " cur" : "");
@@ -2034,6 +2629,7 @@
           video.src = "/api/stream?path=" + encodeURIComponent(p);
           var pp = video.play(); if (pp && pp.catch) pp.catch(function () {});
           title.textContent = it.name;
+          curIdx = vi;                 // 新版播放器要从这里继续
           Array.prototype.forEach.call(listEl.children, function (n) { n.classList.remove("cur"); });
           row.classList.add("cur");
           try { row.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" }); } catch (e) {}
@@ -2063,6 +2659,11 @@
       mask.classList.remove("show");
       document.getElementById("previewBody").innerHTML = "";
       document.getElementById("previewClose").style.display = "";
+    });
+    // 前往新版播放器（暂停旧播放器，避免两个声音叠加）
+    card.querySelector('[data-op="newplayer"]').addEventListener("click", function () {
+      video.pause();
+      openVPlayer(curVids.length ? curVids : [{ name: item.name, abs: abs }], curIdx);
     });
   }
   // 图片预览卡片：文件名 + 可缩放看图区（双指捏合/双击/滚轮）+ 同级图片列表
@@ -4464,47 +5065,109 @@
     list.unshift(entry);
     spLsSet(SP_HIST_KEY, list.slice(0, SP_HIST_MAX));
   }
+  // 历史面板：固定表头（标题 + 条数 + 清空）+ 可滚动列表，每条一行「图标 / 关键词 / 范围 / 删除」
+  var spHistListEl = null;
+  function updateHistMore() {
+    if (!spHistListEl) return;
+    var rest = spHistListEl.scrollHeight - spHistListEl.clientHeight - spHistListEl.scrollTop;
+    spHistWrap.classList.toggle("has-more", rest > 4);   // 还有更多 → 显示底部渐隐箭头
+  }
   function renderHistChips() {
     spHistWrap.innerHTML = "";
+    spHistWrap.classList.remove("has-more");
     var list = spLsGet(SP_HIST_KEY, []);
+
+    var head = document.createElement("div");
+    head.className = "sp-hist-head";
+    var title = document.createElement("span");
+    title.textContent = list.length ? "搜索历史 · 共 " + list.length + " 条" : "搜索历史";
+    head.appendChild(title);
+    if (list.length) {
+      var clear = document.createElement("span");
+      clear.className = "sp-hist-clear";
+      clear.textContent = "清空";
+      clear.addEventListener("click", function (e) {
+        e.stopPropagation();
+        try { localStorage.removeItem(SP_HIST_KEY); } catch (err) {}
+        renderHistChips();
+        updateHistMore();
+      });
+      head.appendChild(clear);
+    }
+    spHistWrap.appendChild(head);
+
+    var box = document.createElement("div");
+    box.className = "sp-hist-list";
+    spHistListEl = box;
+    box.addEventListener("scroll", updateHistMore, { passive: true });
+
     if (!list.length) {
-      var empty = document.createElement("span");
+      var empty = document.createElement("div");
       empty.className = "sp-hist-empty";
       empty.textContent = "暂无搜索历史";
-      spHistWrap.appendChild(empty);
+      box.appendChild(empty);
+      spHistWrap.appendChild(box);
       return;
     }
-    list.forEach(function (h) {
-      var chip = document.createElement("span");
-      chip.className = "sp-hist-chip";
-      chip.textContent = h.q + " · " + (h.scope === "local" ? (pathBaseName(h.root) || "/") : "🌐");
-      chip.title = h.scope === "local" ? (h.root || "/") : "全局搜索";
-      chip.addEventListener("click", function () {
+
+    list.forEach(function (h) {   // 全部列出（存储上限 10 条），超出部分滚动查看
+      var isLocal = h.scope !== "global";
+      var dirName = isLocal ? (pathBaseName(h.root) || "/") : "";
+
+      var row = document.createElement("div");
+      row.className = "sp-hist-item";
+      row.title = (isLocal ? (h.root || "/") : "全部目录") + " · " + h.q;
+
+      var ico = document.createElement("span");
+      ico.className = "sp-hist-ico";
+      ico.textContent = isLocal ? "📁" : "🌐";
+
+      var q = document.createElement("span");
+      q.className = "sp-hist-q";
+      q.textContent = h.q;
+
+      var where = document.createElement("span");
+      where.className = "sp-hist-where";
+      where.textContent = isLocal ? "在 " + dirName + " 内" : "全部目录";
+
+      var del = document.createElement("button");
+      del.type = "button";
+      del.className = "sp-hist-del";
+      del.title = "删除这条历史";
+      del.textContent = "✕";
+      del.addEventListener("click", function (e) {   // 只删这条，不触发搜索
+        e.stopPropagation();
+        spLsSet(SP_HIST_KEY, spLsGet(SP_HIST_KEY, []).filter(function (x) {
+          return !(x.q === h.q && x.scope === h.scope && x.root === h.root);
+        }));
+        renderHistChips();
+        updateHistMore();
+      });
+
+      row.append(ico, q, where, del);
+      row.addEventListener("click", function () {
         spHistWrap.classList.add("hidden");
         spInput.value = h.q;
-        setScope(h.scope === "global" ? "global" : "local");
-        runSearch(h.scope === "local" ? (h.root || "") : "");
+        setScope(isLocal ? "local" : "global");
+        runSearch(isLocal ? (h.root || "") : "");
       });
-      spHistWrap.appendChild(chip);
+      box.appendChild(row);
     });
-    var clear = document.createElement("span");
-    clear.className = "sp-hist-clear";
-    clear.textContent = "清空";
-    clear.addEventListener("click", function () {
-      try { localStorage.removeItem(SP_HIST_KEY); } catch (e) {}
-      renderHistChips();
-    });
-    spHistWrap.appendChild(clear);
+    spHistWrap.appendChild(box);
+    updateHistMore();
   }
   function toggleHist() {
     if (spHistWrap.classList.contains("hidden")) {
+      spHistWrap.classList.remove("hidden");   // 先显示再渲染，才能量出是否需要滚动提示
       renderHistChips();
-      spHistWrap.classList.remove("hidden");
     } else {
       spHistWrap.classList.add("hidden");
     }
   }
   spHistBtn.addEventListener("click", toggleHist);
+  // 点结果区/页面别处自动收起历史面板
+  var spBodyEl = document.querySelector("#searchPage .sp-body");
+  if (spBodyEl) spBodyEl.addEventListener("click", function () { spHistWrap.classList.add("hidden"); });
   function openSearchPage() {
     setScope("local");            // 每次打开记录当前目录，默认搜索当前文件夹
     document.getElementById("searchPage").classList.add("show");
@@ -4735,6 +5398,9 @@
   var _plItems = [];      // 播放列表（当前目录下的音频文件）[{name, abs}]
   var _plIndex = -1;
   var _plFolder = "";
+  // 「添加到音乐播放列表」只在点了播放器列表里的「＋ 添加文件夹」后才出现，
+  // 且一次触发只能用一次（加完即失效），想再添加需要再次触发
+  var _plAddPending = false;
   var _seeking = false;
   var _ctxItems = [];     // 封面/歌词匹配用的目录文件列表
   var _ctxDir = null;     // _ctxItems 对应的目录；null 表示需按曲目目录拉取
@@ -4856,6 +5522,12 @@
       mpDisc.style.background = "";
       ppDisc.style.background = "";
       mpDisc.textContent = "🎵";
+    }
+    // 氛围背景：模糊放大的封面（无封面时回落到按曲目生成的渐变底色）
+    var ppBg = document.getElementById("ppBg");
+    if (ppBg) {
+      ppBg.style.backgroundImage = coverUrl ? 'url("' + coverUrl + '")' : "";
+      ppBg.classList.toggle("has-cover", !!coverUrl);
     }
     if (coverUrl && navigator.mediaSession && navigator.mediaSession.metadata) {
       try {
@@ -5074,6 +5746,8 @@
     document.getElementById("ppName").textContent = tr.title;
     document.getElementById("ppArtist").textContent = tr.artist || "未知艺术家";
     document.getElementById("playerPage").style.background = _coverColor(it.name);
+    var sk0 = document.getElementById("ppSeek");   // 换曲后进度归零，填充比例同步重置
+    sk0.value = 0; sk0.style.setProperty("--p", "0");
     _lrcIdx = -1;
     _loadExtras(abs);          // 匹配同名封面 + .lrc 歌词
     _highlightPlaylist();
@@ -5402,10 +6076,12 @@
       .catch(function () { toast("添加失败", "error"); });
   }
   // 抽屉按钮：关闭播放器回到文件浏览页，由用户在文件夹菜单里添加
+  // 点它才「激活」文件夹菜单里的「添加到音乐播放列表」，而且只生效一次
   document.getElementById("ppPlAdd").addEventListener("click", function () {
+    _plAddPending = true;
     _closePlaylist();
     closePlayerPage();
-    toast("找到音乐文件夹后，点它选「添加到音乐播放列表」", "info");
+    toast("请选择一个文件夹，点「添加到音乐播放列表」（本次只显示一次）", "info");
   });
 
   function _syncFavBtn() {
@@ -5428,7 +6104,11 @@
     _syncLrc(cur);
     document.getElementById("ppCur").textContent = _fmtTime(cur);
     document.getElementById("ppDur").textContent = _fmtTime(dur);
-    if (isFinite(dur) && dur > 0) document.getElementById("ppSeek").value = Math.round(cur / dur * 1000);
+    if (isFinite(dur) && dur > 0) {
+      var sk1 = document.getElementById("ppSeek");
+      sk1.value = Math.round(cur / dur * 1000);
+      sk1.style.setProperty("--p", (cur / dur).toFixed(4));   // 驱动轨道已播放段填充
+    }
   });
   _audio.addEventListener("loadedmetadata", function () {
     document.getElementById("ppDur").textContent = _fmtTime(_audio.duration);
@@ -5516,6 +6196,9 @@
 
   document.getElementById("mpToggle").addEventListener("click", _toggle);
   document.getElementById("ppPlayBig").addEventListener("click", _toggle);
+  // 点封面唱片也能播放/暂停，与中间主按钮同一套逻辑
+  // （迷你条的 mpDisc 在「点开播放页」的点击区内，不绑这里，避免一次点击做两件事）
+  document.getElementById("ppDisc").addEventListener("click", _toggle);
   document.getElementById("mpNext").addEventListener("click", _manualNext);
   document.getElementById("ppNext").addEventListener("click", _manualNext);
   document.getElementById("ppPrev").addEventListener("click", function () {
@@ -5576,12 +6259,45 @@
   ppSeek.addEventListener("input", function () {
     _seeking = true;
     var dur = _audio.duration;
+    ppSeek.style.setProperty("--p", (ppSeek.value / 1000).toFixed(4));   // 拖动时实时更新填充
     if (isFinite(dur) && dur > 0) document.getElementById("ppCur").textContent = _fmtTime(dur * ppSeek.value / 1000);
   });
   ppSeek.addEventListener("change", function () {
     var dur = _audio.duration;
     if (isFinite(dur) && dur > 0) _audio.currentTime = dur * ppSeek.value / 1000;
     _seeking = false;
+  });
+
+  // ===== 音量工具：喇叭按钮展开滑杆（取值持久化，0 时切换为静音图标） =====
+  var _svgVolOn = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>';
+  var _svgVolOff = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 4v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>';
+  var _volBar = document.getElementById("ppVolBar");
+  var _volRange = document.getElementById("ppVol");
+  var _volVal = document.getElementById("ppVolVal");
+  var _volBtn = document.getElementById("ppVolBtn");
+  function _syncVol(save) {
+    var v = _audio.volume;
+    _volRange.value = Math.round(v * 100);
+    _volRange.style.setProperty("--v", v.toFixed(3));
+    _volVal.textContent = Math.round(v * 100) + "%";
+    _volBtn.innerHTML = v > 0 ? _svgVolOn : _svgVolOff;
+    if (save) { try { localStorage.setItem("ff_music_vol", String(Math.round(v * 100))); } catch (e) {} }
+  }
+  try {
+    var _sv = parseInt(localStorage.getItem("ff_music_vol"), 10);
+    if (isFinite(_sv)) _audio.volume = Math.max(0, Math.min(1, _sv / 100));
+  } catch (e) {}
+  _syncVol(false);
+  _volBtn.addEventListener("click", function () { _volBar.classList.toggle("show"); });
+  _volRange.addEventListener("input", function () {
+    _audio.volume = Math.max(0, Math.min(1, _volRange.value / 100));
+    _syncVol(true);
+  });
+  // 点空白处收起音量悬浮条（点喇叭或其内部不算）
+  document.addEventListener("click", function (e) {
+    if (!_volBar.classList.contains("show")) return;
+    if (e.target.closest("#ppVolBar") || e.target.closest("#ppVolBtn")) return;
+    _volBar.classList.remove("show");
   });
 
   if (navigator.mediaSession) {
@@ -5592,6 +6308,375 @@
       navigator.mediaSession.setActionHandler("nexttrack", function () { if (_plIndex < _plItems.length - 1) playIndex(_plIndex + 1, true); });
     } catch (e) {}
   }
+
+  // ================= 新版视频播放器：毛玻璃页面 =================
+  var vpPage = document.getElementById("vpPage");
+  var vpVideo = document.getElementById("vpVideo");
+  var vpList = [];        // [{name, abs}]
+  var vpIndex = -1;
+
+  function vpSyncPlayIcon() {
+    var paused = vpVideo.paused;
+    document.getElementById("vpPlay").innerHTML = paused ? _svgPlay : _svgPause;
+    document.getElementById("vpBig").innerHTML = paused ? _svgPlay : _svgPause;
+    vpPage.classList.toggle("paused", paused);
+  }
+  function vpPlayIndex(i, autoplay) {
+    if (i < 0 || i >= vpList.length) return;
+    vpIndex = i;
+    var it = vpList[i];
+    vpVideo.src = "/api/stream?path=" + encodeURIComponent(it.abs);
+    document.getElementById("vpName").textContent = it.name;
+    var sk = document.getElementById("vpSeek");
+    sk.value = 0; sk.style.setProperty("--p", "0");
+    document.getElementById("vpCur").textContent = "0:00";
+    document.getElementById("vpDur").textContent = "0:00";
+    // 氛围背景：抽帧缩略图模糊放大
+    var bg = document.getElementById("vpBg");
+    bg.style.backgroundImage = 'url("/api/thumbnail?path=' + encodeURIComponent(it.abs) + '")';
+    bg.classList.add("has-cover");
+    vpSeeking = false;
+    vpCloseRatePop();                      // 换视频时收起倍速菜单
+    vpApplyRate();                         // 换视频后重新套用当前倍速
+    vpSyncFavBtn();                        // 同步喜欢状态
+    if (autoplay) { var pp = vpVideo.play(); if (pp && pp.catch) pp.catch(function () {}); }
+    vpSyncPlayIcon();
+    // 播放列表抽屉开着时同步高亮
+    if (document.getElementById("vpPl").classList.contains("show")) vpRenderPlaylist();
+  }
+  function vpToggle() {
+    if (vpVideo.paused) { var pp = vpVideo.play(); if (pp && pp.catch) pp.catch(function () {}); }
+    else vpVideo.pause();
+  }
+  function vpApplyVolume(save) {
+    var v = vpVideo.volume;
+    var range = document.getElementById("vpVol");
+    range.value = Math.round(v * 100);
+    range.style.setProperty("--v", v.toFixed(3));
+    document.getElementById("vpVolVal").textContent = Math.round(v * 100) + "%";
+    document.getElementById("vpVolBtn").innerHTML = v > 0 ? _svgVolOn : _svgVolOff;
+    if (save) { try { localStorage.setItem("ff_music_vol", String(Math.round(v * 100))); } catch (e) {} }
+  }
+  function vpRestoreVolume() {
+    try {
+      var lv = parseInt(localStorage.getItem("ff_music_vol"), 10);
+      if (isFinite(lv)) vpVideo.volume = Math.max(0, Math.min(1, lv / 100));
+    } catch (e) {}
+    vpApplyVolume(false);
+  }
+  // items: [{name, abs}]，idx 为当前播放项
+  function openVPlayer(items, idx) {
+    if (!items || !items.length) return;
+    vpList = items.map(function (x) { return { name: x.name, abs: x.abs || x.abs_path }; });
+    vpIndex = Math.max(0, Math.min(idx || 0, vpList.length - 1));
+    vpPage.classList.add("show");
+    vpRestoreVolume();
+    vpRestoreRate();
+    vpPlayIndex(vpIndex, true);
+  }
+  function closeVPlayer() {
+    vpVideo.pause();
+    try { vpVideo.removeAttribute("src"); vpVideo.load(); } catch (e) {}
+    vpPage.classList.remove("show");
+    document.getElementById("vpVolBar").classList.remove("show");
+    vpCloseRatePop();
+    vpClosePlaylist();
+    if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (e) {} }
+  }
+
+  document.getElementById("vpCollapse").addEventListener("click", closeVPlayer);
+  document.getElementById("vpPlay").addEventListener("click", vpToggle);
+  document.getElementById("vpBig").addEventListener("click", vpToggle);
+  vpVideo.addEventListener("click", vpToggle);        // 点画面也能播放/暂停
+  document.getElementById("vpPrev").addEventListener("click", function () {
+    if (vpIndex > 0) vpPlayIndex(vpIndex - 1, true);
+    else { vpVideo.currentTime = 0; var pp = vpVideo.play(); if (pp && pp.catch) pp.catch(function () {}); }
+  });
+  document.getElementById("vpNext").addEventListener("click", function () {
+    if (vpIndex < vpList.length - 1) vpPlayIndex(vpIndex + 1, true);
+  });
+  // 播放列表抽屉：☰ 打开/收起，按钮有高亮状态反馈
+  // 缩略图：封面拉不到时露出 🎬 兜底，不出现裂图
+  function vpThumbEl(abs) {
+    var thumb = document.createElement("span");
+    thumb.className = "vp-pl-thumb";
+    thumb.textContent = "🎬";
+    var img = document.createElement("img");
+    img.loading = "lazy";
+    img.alt = "";
+    img.src = "/api/thumbnail?path=" + encodeURIComponent(abs);
+    img.onerror = function () { img.remove(); };
+    thumb.appendChild(img);
+    return thumb;
+  }
+  function vpPlCounts() {
+    document.getElementById("vpCntPl").textContent = vpList.length || "";
+    document.getElementById("vpCntFav").textContent = vpFavList().length || "";
+  }
+  function vpSetTab(t) {
+    vpPlTab = t;
+    Array.prototype.forEach.call(document.querySelectorAll("#vpPl .pp-tab"), function (b) {
+      b.classList.toggle("active", b.getAttribute("data-tab") === t);
+    });
+    vpRenderPlaylist();
+  }
+  var vpPlTab = "pl";
+  function vpRenderPlaylist() {
+    var box = document.getElementById("vpPlList");
+    box.innerHTML = "";
+    vpPlCounts();
+    if (vpPlTab === "fav") { vpRenderFavList(box); return; }
+    // ---- 播放列表 tab：当前播放队列 ----
+    vpList.forEach(function (it, i) {
+      var row = document.createElement("div");
+      row.className = "vp-pl-row" + (i === vpIndex ? " cur" : "");
+      var meta = document.createElement("div");
+      meta.className = "vp-pl-meta";
+      var nm = document.createElement("div");
+      nm.className = "vp-pl-name";
+      nm.textContent = it.name;
+      nm.title = it.name;
+      var tag = document.createElement("div");
+      tag.className = "vp-pl-tag";
+      tag.textContent = (i === vpIndex) ? "正在播放" : ("第 " + (i + 1) + " 个");
+      meta.append(nm, tag);
+      row.append(vpThumbEl(it.abs), meta);
+      if (vpIsFav(it.abs)) {
+        var h = document.createElement("span");
+        h.className = "vp-pl-fav";
+        h.textContent = "♥";
+        h.title = "已喜欢";
+        row.appendChild(h);
+      }
+      row.addEventListener("click", function () {
+        vpClosePlaylist();
+        if (i !== vpIndex) vpPlayIndex(i, true);
+      });
+      box.appendChild(row);
+    });
+    var cur = box.querySelector(".vp-pl-row.cur");
+    if (cur) try { cur.scrollIntoView({ block: "center" }); } catch (e) {}
+  }
+  // ---- 喜欢 tab：收藏的视频（点一行以「喜欢」为播放队列续播；右侧 ♥ 取消收藏）----
+  function vpRenderFavList(box) {
+    var favs = vpFavList();
+    if (!favs.length) {
+      var empty = document.createElement("div");
+      empty.className = "vp-pl-empty";
+      empty.textContent = "还没有喜欢的视频（播放页点 ♥ 收藏）";
+      box.appendChild(empty);
+      return;
+    }
+    var curAbs = (vpIndex >= 0 && vpList[vpIndex]) ? vpList[vpIndex].abs : "";
+    favs.forEach(function (f, i) {
+      var row = document.createElement("div");
+      row.className = "vp-pl-row" + (f.p === curAbs ? " cur" : "");
+      var meta = document.createElement("div");
+      meta.className = "vp-pl-meta";
+      var nm = document.createElement("div");
+      nm.className = "vp-pl-name";
+      nm.textContent = f.n || pathBaseName(f.p);
+      nm.title = f.p;
+      var tag = document.createElement("div");
+      tag.className = "vp-pl-tag";
+      tag.textContent = f.d ? (pathBaseName(f.d) || "/") : "/";
+      meta.append(nm, tag);
+      var rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "vp-pl-rm";
+      rm.title = "取消喜欢";
+      rm.textContent = "♥";
+      rm.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        try {
+          localStorage.setItem(VP_FAV_KEY, JSON.stringify(
+            vpFavList().filter(function (x) { return x.p !== f.p; })));
+        } catch (e2) {}
+        vpSyncFavBtn();
+        vpRenderPlaylist();
+        toast("已取消喜欢");
+      });
+      row.append(vpThumbEl(f.p), meta, rm);
+      row.addEventListener("click", function () {
+        vpClosePlaylist();
+        // 以「喜欢」作为播放队列，方便在收藏里上下切换
+        vpList = favs.map(function (x) { return { name: x.n || pathBaseName(x.p), abs: x.p }; });
+        vpPlayIndex(i, true);
+      });
+      box.appendChild(row);
+    });
+    var cur = box.querySelector(".vp-pl-row.cur");
+    if (cur) try { cur.scrollIntoView({ block: "center" }); } catch (e) {}
+  }
+  function vpOpenPlaylist() {
+    vpRenderPlaylist();
+    document.getElementById("vpPlMask").classList.add("show");
+    document.getElementById("vpPl").classList.add("show");
+    document.getElementById("vpListBtn").classList.add("on");
+  }
+  function vpClosePlaylist() {
+    document.getElementById("vpPlMask").classList.remove("show");
+    document.getElementById("vpPl").classList.remove("show");
+    document.getElementById("vpListBtn").classList.remove("on");
+  }
+  document.getElementById("vpListBtn").addEventListener("click", function () {
+    if (document.getElementById("vpPl").classList.contains("show")) vpClosePlaylist();
+    else vpOpenPlaylist();
+  });
+  document.getElementById("vpPlClose").addEventListener("click", vpClosePlaylist);
+  document.getElementById("vpPlMask").addEventListener("click", vpClosePlaylist);
+  // 两个 tab：播放列表 / 喜欢
+  Array.prototype.forEach.call(document.querySelectorAll("#vpPl .pp-tab"), function (b) {
+    b.addEventListener("click", function () { vpSetTab(b.getAttribute("data-tab")); });
+  });
+
+  // 喜欢：视频独立收藏列表（localStorage 持久化，键 ff_video_favs）
+  var VP_FAV_KEY = "ff_video_favs";
+  function vpFavList() {
+    try { return JSON.parse(localStorage.getItem(VP_FAV_KEY) || "[]"); } catch (e) { return []; }
+  }
+  function vpIsFav(abs) {
+    return vpFavList().some(function (r) { return r.p === abs; });
+  }
+  function vpSyncFavBtn() {
+    var on = vpIndex >= 0 && vpList[vpIndex] && vpIsFav(vpList[vpIndex].abs);
+    document.getElementById("vpFavBtn").classList.toggle("on", !!on);
+  }
+  document.getElementById("vpFavBtn").addEventListener("click", function () {
+    if (vpIndex < 0 || !vpList[vpIndex]) return;
+    var it = vpList[vpIndex], abs = it.abs;
+    var hit = vpIsFav(abs);
+    var list = vpFavList().filter(function (r) { return r.p !== abs; });
+    if (!hit) list.unshift({ p: abs, n: it.name, d: abs.slice(0, abs.lastIndexOf("/")) || "/" });
+    try { localStorage.setItem(VP_FAV_KEY, JSON.stringify(list)); } catch (e) {}
+    vpSyncFavBtn();
+    if (document.getElementById("vpPl").classList.contains("show")) vpRenderPlaylist();
+    toast(hit ? "已取消喜欢" : "已加入喜欢");
+  });
+  document.getElementById("vpFs").addEventListener("click", function () {
+    if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (e) {} return; }
+    if (vpVideo.requestFullscreen) vpVideo.requestFullscreen().catch(function () {});
+    else if (vpVideo.webkitEnterFullscreen) { try { vpVideo.webkitEnterFullscreen(); } catch (e) {} }  // iOS Safari
+  });
+  vpVideo.addEventListener("play", vpSyncPlayIcon);
+  vpVideo.addEventListener("pause", vpSyncPlayIcon);
+  vpVideo.addEventListener("loadedmetadata", function () {
+    document.getElementById("vpDur").textContent = _fmtTime(vpVideo.duration);
+  });
+  var vpSeeking = false;      // 手指按在进度条上时不回写滑块，避免和播放进度"抢"
+  vpVideo.addEventListener("timeupdate", function () {
+    if (vpSeeking) return;
+    var d = vpVideo.duration, c = vpVideo.currentTime;
+    document.getElementById("vpCur").textContent = _fmtTime(c);
+    if (isFinite(d) && d > 0) {
+      var sk = document.getElementById("vpSeek");
+      sk.value = Math.round(c / d * 1000);
+      sk.style.setProperty("--p", (c / d).toFixed(4));
+    }
+  });
+  vpVideo.addEventListener("ended", function () {       // 播完接下一个
+    if (vpIndex >= 0 && vpIndex < vpList.length - 1) vpPlayIndex(vpIndex + 1, true);
+    else vpSyncPlayIcon();
+  });
+  var vpSeekEl = document.getElementById("vpSeek");
+  vpSeekEl.addEventListener("input", function () {
+    vpSeeking = true;
+    var d = vpVideo.duration;
+    vpSeekEl.style.setProperty("--p", (vpSeekEl.value / 1000).toFixed(4));
+    if (isFinite(d) && d > 0) document.getElementById("vpCur").textContent = _fmtTime(d * vpSeekEl.value / 1000);
+  });
+  vpSeekEl.addEventListener("change", function () {
+    var d = vpVideo.duration;
+    if (isFinite(d) && d > 0) {
+      var t = d * vpSeekEl.value / 1000;
+      vpVideo.currentTime = t;
+      document.getElementById("vpCur").textContent = _fmtTime(t);
+      vpSeekEl.style.setProperty("--p", (vpSeekEl.value / 1000).toFixed(4));
+    }
+    vpSeeking = false;
+  });
+  // 兜底：某些浏览器松手不一定触发 change，抬起手指后解除保护
+  ["pointerup", "touchend", "mouseup"].forEach(function (ev) {
+    vpSeekEl.addEventListener(ev, function () {
+      setTimeout(function () { vpSeeking = false; }, 0);
+    });
+  });
+  // 倍速（快进播放）：点按钮向上弹出竖向菜单选择；换视频后重新套用；取值持久化
+  var VP_RATES = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 8];
+  var vpRate = 1;
+  function vpRateLabel(r) { return (Number.isInteger(r) ? r.toFixed(1) : String(r)) + "×"; }
+  function vpApplyRate() {
+    try { vpVideo.playbackRate = vpRate; } catch (e) {}
+    var btn = document.getElementById("vpRate");
+    btn.textContent = vpRateLabel(vpRate);
+    btn.classList.toggle("fast", vpRate !== 1);
+  }
+  function vpRenderRatePop() {
+    var box = document.getElementById("vpRateList");
+    box.innerHTML = "";
+    VP_RATES.forEach(function (r) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "vp-rate-item" + (r === vpRate ? " cur" : "");
+      var t = document.createElement("span");
+      t.textContent = vpRateLabel(r);
+      var tick = document.createElement("span");
+      tick.className = "rp-tick";
+      tick.textContent = "✓";
+      b.append(t, tick);
+      b.addEventListener("click", function () {
+        vpRate = r;
+        vpApplyRate();
+        try { localStorage.setItem("ff_video_rate", String(r)); } catch (e) {}
+        vpCloseRatePop();
+      });
+      box.appendChild(b);
+    });
+    var cur = box.querySelector(".vp-rate-item.cur");
+    if (cur) try { cur.scrollIntoView({ block: "nearest" }); } catch (e) {}
+  }
+  function vpOpenRatePop() {
+    vpRenderRatePop();
+    document.getElementById("vpRatePop").classList.add("show");
+    document.getElementById("vpRate").classList.add("on");
+  }
+  function vpCloseRatePop() {
+    document.getElementById("vpRatePop").classList.remove("show");
+    document.getElementById("vpRate").classList.remove("on");
+  }
+  function vpRestoreRate() {
+    try {
+      var r = parseFloat(localStorage.getItem("ff_video_rate"));
+      if (isFinite(r) && r > 0) vpRate = r;
+    } catch (e) {}
+    vpApplyRate();
+  }
+  document.getElementById("vpRate").addEventListener("click", function () {
+    var pop = document.getElementById("vpRatePop");
+    if (pop.classList.contains("show")) vpCloseRatePop();
+    else vpOpenRatePop();
+  });
+  document.addEventListener("click", function (e) {   // 点别处收起菜单
+    var pop = document.getElementById("vpRatePop");
+    if (!pop.classList.contains("show")) return;
+    if (e.target.closest("#vpRatePop") || e.target.closest("#vpRate")) return;
+    vpCloseRatePop();
+  });
+  var vpVolBar = document.getElementById("vpVolBar");
+  var vpVolRange = document.getElementById("vpVol");
+  document.getElementById("vpVolBtn").addEventListener("click", function () {
+    vpVolBar.classList.toggle("show");
+  });
+  vpVolRange.addEventListener("input", function () {
+    vpVideo.volume = Math.max(0, Math.min(1, vpVolRange.value / 100));
+    vpApplyVolume(true);
+  });
+  document.addEventListener("click", function (e) {
+    if (!vpVolBar.classList.contains("show")) return;
+    if (e.target.closest("#vpVolBar") || e.target.closest("#vpVolBtn")) return;
+    vpVolBar.classList.remove("show");
+  });
+  vpSyncPlayIcon();
 
   var initPath = readHashPath();
   updateViewBtn();

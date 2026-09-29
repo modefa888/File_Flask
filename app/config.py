@@ -20,6 +20,108 @@ PORT = 5001
 # 默认起始路径
 DEFAULT_START_PATH = os.path.sep if os.name != "nt" else os.environ.get("SystemDrive", "C:") + "\\"
 
+# ===== 执行权限（IDE 的“运行”与“终端”会在服务器上执行命令）=====
+# 仅在本机 / 内网受信任环境使用；若服务要暴露到公网，请改为 False 关闭执行能力。
+ENABLE_EXEC = True
+# 终端命令安全校验：True=拦截危险命令（可在此调整规则），False=不校验（有风险）
+EXEC_ENFORCE_SAFETY = True
+# 「运行环境」面板的一键安装：True=允许通过内置白名单方案下载官方包安装到 ~/.local（无需管理员）
+# 关闭后，面板仍会显示安装方案与系统包命令，但不会自动下载执行。
+ENABLE_AUTO_INSTALL = True
+
+# ===== 「运行当前文件」(F5) 的超时设置 =====
+# 前台运行会实时推送日志。超过下面的秒数后按 RUN_TIMEOUT_ACTION 处理：
+#   "background" —— 进程仍在运行（多为 Web 服务 / 常驻程序）时自动转为后台运行，
+#                   不再计时，不会把刚启动好、能正常访问的服务杀掉（推荐，默认）；
+#   "kill"       —— 直接终止整个进程组（适合避免写飞的脚本一直占着资源）。
+# 想彻底不超时，直接用 Ctrl+F5「后台运行（服务模式）」。
+RUN_TIMEOUT = 30            # 默认超时（秒）
+RUN_TIMEOUT_MAX = 300       # 允许前端传入的最大超时（秒）
+RUN_TIMEOUT_ACTION = "background"   # 超时后：background=转为后台继续跑 / kill=终止
+
+# 系统关键目录（删除/改权限时直接拦截）
+_SYS_DIRS = r"(/etc|/usr|/boot|/bin|/sbin|/lib|/lib64|/var|/opt|/proc|/sys|/dev|/root|/srv|/System|/Volumes|/Applications)"
+
+# 直接拒绝执行的命令（正则，忽略大小写；reason 会显示给用户）
+EXEC_BLOCK_PATTERNS = [
+    # —— 关机 / 重启 / 内核 / 系统状态 ——
+    (r"\b(shutdown|reboot|halt|poweroff|kexec)\b", "禁止关机 / 重启服务器"),
+    (r"\bsystemctl\s+(reboot|poweroff|halt|suspend|hibernate|hybrid-sleep|kexec|"
+     r"default|rescue|emergency|isolate)\b", "禁止关机 / 重启 / 切换系统状态"),
+    (r"\bsystemctl\s+\w+\s+(ctrl-alt-del|reboot|poweroff|halt|suspend|emergency|rescue)\.target\b",
+     "禁止操作系统关键 systemd 目标"),
+    (r"\binit\s+[0-9]\b|\btelinit\s+[0-9]\b", "禁止切换系统运行级别"),
+    (r"\bsystemd-crash|>\s*/proc/sysrq-trigger", "禁止触发 SysRq / 触发内核崩溃"),
+    (r">\s*/proc/|>\s*/sys/", "禁止直接写入内核参数"),
+    (r"\bsysctl\s+(-w|--write|-)", "禁止修改内核参数"),
+    (r"\b(insmod|rmmod|modprobe)\b", "禁止加载 / 卸载内核模块"),
+    (r"\bswapoff\b|\bswapon\b", "禁止开关交换分区"),
+    (r"\b(setenforce|semanage|setcap|capsh)\b", "禁止修改安全策略 / 进程能力"),
+    (r"\b(bpftrace|perf\s+trace)\b", "禁止使用内核跟踪工具（影响系统）"),
+    # —— 进程 ——
+    (r"\bkill(all)?\b[^\n]*(\s-1\b|\s1\s*$)", "禁止杀死 init / 全部进程"),
+    (r"\bkillall5\b|\bpkill\b[^\n]*\binit\b", "禁止杀死 init / 全部进程"),
+    (r"\binit\s+[06]\b", "禁止切换系统运行级别"),
+    # —— 磁盘 / 文件系统 ——
+    (r"\bmkfs(\.\w+)?\b|\bmke2fs\b|\bfdisk\b|\bparted\b|\bsgdisk\b|\bgdisk\b", "禁止格式化 / 分区磁盘"),
+    (r"\bdd\b[^\n]*\bof=/dev/|>\s*/dev/(sd|hd|nvme|vd|mmcblk|disk|loop)", "禁止直接写入块设备"),
+    (r"\b(lvremove|vgremove|pvremove|blkdiscard|wipefs|mdadm\s+--stop|mdadm\s+--zero)\b",
+     "禁止破坏逻辑卷 / 磁盘阵列 / 块设备签名"),
+    (r"\brm\s+(-[a-zA-Z]+\s+)*-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+"
+     r"(/|/\*|~|~/|\$HOME)\s*$", "禁止递归强制删除根目录 / 家目录"),
+    (r"\brm\s+(-[a-zA-Z]+\s+)*-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*\s+"
+     r"(/|/\*|~|~/|\$HOME)\s*$", "禁止递归强制删除根目录 / 家目录"),
+    (r"\brm\s+(-[a-zA-Z]+\s+)*-[a-zA-Z]*r[a-zA-Z]*f?[a-zA-Z]*\s+" + _SYS_DIRS + r"(/\*?)?\s*$",
+     "禁止删除系统关键目录"),
+    (r"\brm\s+-rf?\s+--no-preserve-root", "禁止删除根目录"),
+    (r"\bfind\s+/[^\s]*\s[^\n]*(-delete|-exec\s+rm)", "禁止用 find 批量删除文件"),
+    (r"\bchmod\s+(-[a-zA-Z]+\s+)*777\s+/(\s|$)", "禁止把根目录权限改为 777"),
+    (r"\bchmod\s+-R\s+[0-7]+\s+" + _SYS_DIRS, "禁止递归修改系统目录权限"),
+    (r"\bchown\s+-R\b[^\n]*\s/(\s|$)", "禁止递归修改根目录属主"),
+    (r"\bchattr\b", "禁止修改文件系统属性（chattr）"),
+    (r"\b(debugfs|tune2fs|e2fsck\s+-y)\b", "禁止直接操作文件系统元数据"),
+    # —— 提权 / 逃逸 ——
+    (r"\b(sudo|su|doas|pkexec|nsenter|unshare)\b", "禁止提权 / 进入其它命名空间"),
+    (r"\bdocker\s+(run|exec)\b[^\n]*--privileged", "禁止启动特权容器"),
+    (r"\bmount\b[^\n]*\s/\s", "禁止挂载到根目录"),
+    # —— 其它高危 ——
+    (r":\s*\(\s*\)\s*\{.*\}\s*;\s*:", "禁止 fork 炸弹"),
+    (r"\bhistory\s+-c\b", "禁止清空命令历史"),
+]
+
+# 需要用户二次确认才执行的命令（reason 会显示给用户）
+EXEC_CONFIRM_PATTERNS = [
+    # —— 文件删除 / 覆盖 ——
+    (r"\brm\s+(-[a-zA-Z]+\s+)*-[a-zA-Z]*[rf][a-zA-Z]*", "递归 / 强制删除文件"),
+    (r"\bmv\b[^\n]*\s/(\s|$)", "移动文件到根目录"),
+    (r"\btruncate\b|\bshred\b", "截断 / 粉碎文件内容"),
+    (r">\s*" + _SYS_DIRS, "写入系统目录"),
+    (r"\b(cp|rsync|install)\b[^\n]*\s" + _SYS_DIRS, "写入系统目录"),
+    # —— 服务 / 进程管理 ——
+    (r"\bsystemctl\s+(start|stop|restart|reload|try-restart|enable|disable|mask|unmask|"
+     r"daemon-reload|daemon-reexec)\b", "启停 / 修改系统服务"),
+    (r"\bservice\s+\S+\s+(start|stop|restart|reload)\b", "启停系统服务"),
+    # 锚定到命令开头，避免把 `cat /etc/passwd`、`grep "kill"` 这类误判为危险操作
+    (r"^\s*(sudo\s+)?(kill|pkill|killall)\b", "终止进程"),
+    (r"^\s*(systemd-run|at|batch|nice|renice)\b", "以后台 / 计划方式或改优先级运行"),
+    # —— 系统配置 ——
+    (r"\b(iptables|ip6tables|nft|ufw|firewall-cmd)\b", "修改防火墙规则"),
+    (r"^\s*(sudo\s+)?(mount|umount)\b", "挂载 / 卸载文件系统"),
+    (r"^\s*(sudo\s+)?crontab\b", "修改定时任务"),
+    (r"^\s*(sudo\s+)?(useradd|userdel|groupadd|groupdel|passwd|chpasswd|usermod|chsh)\b", "修改系统用户"),
+    (r"\b(hostnamectl|timedatectl|localectl)\b", "修改系统主机 / 时间 / 区域设置"),
+    # —— 开发类操作 ——
+    (r"\bgit\s+reset\s+--hard\b", "丢弃所有未提交改动"),
+    (r"\bgit\s+clean\s+-[a-zA-Z]*f", "删除未跟踪文件"),
+    (r"\bgit\s+push\s+.*--force\b|\bgit\s+push\s+-f\b", "强制推送（可能覆盖远端历史）"),
+    (r"\b(npm|yarn|pnpm)\s+(publish|install|i|add|remove|uninstall)\b|\bpip3?\s+(install|uninstall)\b",
+     "安装 / 卸载 / 发布依赖包"),
+    (r"\b(curl|wget)\b[^\n]*\|\s*(sudo\s+)?(ba|z|k)?sh\b", "从网络下载脚本并直接执行"),
+    (r"\bdocker\s+(rm|rmi|system\s+prune|volume\s+rm|network\s+rm)\b|\bkubectl\s+delete\b",
+     "删除容器 / 镜像 / 集群资源"),
+    (r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*\s+\.\.", "删除上级目录内容"),
+]
+
 # ===== 登录认证 =====
 AUTH_USERNAME = "admin"
 AUTH_PASSWORD = "admin123"
@@ -65,6 +167,12 @@ _TEXT_EXTS = {
     "json", "xml", "yml", "yaml", "ini", "cfg", "conf", "env", "sh", "bat", "ps1", "rs",
     "go", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php", "sql", "log", "csv", "toml",
     "lrc",
+}
+# 无扩展名但应按文本打开的文件名（小写）
+_TEXT_FILENAMES = {
+    ".gitignore", ".editorconfig", ".dockerignore",
+    "makefile", "dockerfile", "dockerfile.dev", "dockerfile.prod",
+    "readme", "license", "copying", "changelog", "changes",
 }
 _IMAGE_EXTS = {"png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"}
 _VIDEO_EXTS = {"mp4", "webm", "mkv", "avi", "mov", "m4v", "ogg", "flv"}

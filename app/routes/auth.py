@@ -20,7 +20,8 @@ def is_logged_in() -> bool:
 
 
 # 无需登录即可访问的路径（前缀）
-_PUBLIC_PATHS = ("/login", "/static")
+# /share/<token>：token 本身就是随机不可猜测的访问凭证
+_PUBLIC_PATHS = ("/login", "/static", "/share/")
 
 
 def _is_public_path(path: str) -> bool:

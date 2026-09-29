@@ -855,7 +855,7 @@
   .ide-modal.danger .m-title .bi { color: #f48771; }
   .ide-modal .m-body { padding: 16px; font-size: 13px; color: #cccccc; }
   .ide-modal .m-msg { white-space: pre-wrap; line-height: 1.7; }
-  .ide-modal input {
+  .ide-modal input:not([type="checkbox"]) {
     width: 100%; background: #1e1e1e; border: 1px solid #0098ff; color: #ffffff;
     padding: 7px 10px; border-radius: 4px; font-size: 13px; outline: none; margin-top: 10px;
   }
@@ -2066,8 +2066,26 @@
     btn.addEventListener("click", () => showGitignorePicker(tab));
     tab.host.appendChild(tb);
   }
+  // 解析 .gitignore 内容为归一化规则列表（去掉注释 / 空行 / 前后斜杠 / 取反规则）
+  function parseGitignoreRules(text) {
+    return (text || "").split(/\r?\n/).map(l => l.trim())
+      .filter(l => l && !l.startsWith("#") && !l.startsWith("!"))
+      .map(l => l.replace(/^\/+/, "").replace(/\/+$/, ""))
+      .filter(l => l.length > 0);
+  }
+  // 判断某个文件/目录是否已被现有规则覆盖
+  function giRuleMatches(rule, rel, name) {
+    if (rule === rel || rule === name) return true;          // 全路径或文件名精确匹配
+    if (rule.indexOf("*") >= 0) {                            // 通配符（* 不跨路径段）
+      const re = new RegExp("^" + rule.split("*")
+        .map(s => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join("[^/]*") + "$");
+      if (re.test(rel) || re.test(name)) return true;
+    }
+    return rel.startsWith(rule + "/");                       // 目录规则覆盖其下所有内容
+  }
   async function showGitignorePicker(tab) {
     const selected = new Set();
+    const existingRules = parseGitignoreRules(tab.cm ? tab.cm.getValue() : "");
     const tree = document.createElement("div");
     tree.className = "gi-tree";
     const loading = document.createElement("div");
@@ -2081,7 +2099,7 @@
     const body = document.querySelector("#modalOverlay .ide-modal .m-body");
     if (!body) return;
     body.querySelector(".gi-tree").replaceWith(tree);
-    await renderGiTree(tree, ROOT, 0, selected);
+    await renderGiTree(tree, ROOT, 0, selected, existingRules);
     const res = await modal;
     if (!res) return;
     if (!selected.size) { toast("未选择任何文件/文件夹", "warn"); return; }
@@ -2095,19 +2113,13 @@
     }
     insertAtCursor(tab.cm, Array.from(keep).join("\n") + "\n");
   }
-  async function renderGiTree(container, path, depth, selected) {
+  async function renderGiTree(container, path, depth, selected, existingRules) {
     try {
       const d = await apiFiles(path, true);
       const items = (d.items || [])
         .filter(it => !(path === ROOT && it.name === ".gitignore"))
         .sort((a, b) => (b.is_dir - a.is_dir) || a.name.localeCompare(b.name, "zh"));
       container.textContent = "";
-      if (depth === 0) {
-        const dbg = document.createElement("div");
-        dbg.style.cssText = "background:#ffeb3b;color:#000;padding:6px 8px;font-weight:bold;border-bottom:2px solid #f00;";
-        dbg.textContent = "DEBUG: items=" + items.length + " first=" + (items[0] ? JSON.stringify({name: items[0].name, is_dir: items[0].is_dir}) : "none");
-        container.appendChild(dbg);
-      }
       if (!items.length) { container.innerHTML = '<div class="gi-empty">空文件夹</div>'; return; }
       for (const it of items) {
         const rel = path === ROOT ? it.name : path.substring(ROOT.length + 1) + "/" + it.name;
@@ -2129,27 +2141,17 @@
         cb.type = "checkbox";
         row.appendChild(cb);
 
-        const ic = document.createElement("i");
-        ic.className = "bi " + (it.is_dir ? "bi-folder" : "bi-file-earmark") + " gi-ic";
-        row.appendChild(ic);
-
         const nm = document.createElement("span");
         nm.className = "gi-name";
-        nm.textContent = it.name || "(未命名)";
-        nm.title = it.name || "";
-        // debug: 强制可见，定位空白原因
-        nm.style.color = "#ffffff";
-        nm.style.backgroundColor = "#b02a2a";
-        nm.style.minWidth = "100px";
-        nm.style.padding = "2px 6px";
-        nm.style.display = "inline-block";
-        nm.style.flex = "none";
+        nm.textContent = it.name;
         row.appendChild(nm);
 
-        if (SPECIAL_NAME_HINTS[it.name]) {
+        // 已存在于 .gitignore 的规则自动勾选；不计入待插入集合，避免重复写入
+        if (existingRules && existingRules.some(r => giRuleMatches(r, rel, it.name))) {
+          cb.checked = true;
           const hint = document.createElement("span");
           hint.className = "gi-hint";
-          hint.textContent = SPECIAL_NAME_HINTS[it.name];
+          hint.textContent = "已在文件中";
           row.appendChild(hint);
         }
 
@@ -2166,7 +2168,7 @@
             body.style.display = "none";
             row._body = body;
             row.after(body);
-            renderGiTree(body, path + "/" + it.name, depth + 1, selected);
+            renderGiTree(body, path + "/" + it.name, depth + 1, selected, existingRules);
           }
           const open = body.style.display === "none";
           body.style.display = open ? "" : "none";

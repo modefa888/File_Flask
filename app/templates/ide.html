@@ -15,6 +15,69 @@
 .img-preview img { max-width: 92%; max-height: calc(100% - 44px); object-fit: contain; box-shadow: 0 4px 24px rgba(0,0,0,.5); background: #fff; cursor: zoom-in; }
 .img-preview img.zoom { max-width: none; max-height: none; cursor: zoom-out; }
 .img-preview .ip-err { color: #888; }
+/* Quick Open 命令面板（Ctrl+P，仿 VS Code / Trae） */
+#qopen-mask { position: fixed; inset: 0; z-index: 9000; display: none; background: rgba(0,0,0,.25); }
+#qopen-mask.open { display: block; }
+#qopen { position: absolute; top: 9%; left: 50%; transform: translateX(-50%); width: 620px; max-width: 92vw;
+  background: #252526; border: 1px solid #454545; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.55); overflow: hidden; }
+#qopen-input { display: block; box-sizing: border-box; width: calc(100% - 20px); margin: 10px 10px 8px;
+  background: #3c3c3c; color: #e6e6e6; border: 1px solid #555; border-radius: 4px; font-size: 13px; padding: 7px 10px; outline: none; }
+#qopen-input:focus { border-color: #0a6aa8; }
+#qopen-list { max-height: 46vh; overflow: auto; padding: 0 6px 6px; }
+.qo-sec { font-size: 11px; color: #8a8a8a; padding: 7px 8px 2px; }
+.qo-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px; cursor: pointer; color: #ccc; font-size: 13px; }
+.qo-row.sel { background: #04395e; color: #fff; }
+.qo-row .ic { width: 18px; text-align: center; flex: none; }
+.qo-row .qo-main { flex: none; max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.qo-row .qo-path { color: #888; font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.qo-row .qo-kbd { margin-left: auto; flex: none; font-family: inherit; font-size: 11px; color: #999;
+  background: #2a2d2e; border: 1px solid #3c3c3c; border-radius: 3px; padding: 1px 5px; }
+.qo-empty { color: #777; padding: 8px; font-size: 12px; }
+/* 设置页（仿 Trae / VS Code：以标签页形式打开在编辑器区域内，可与文件标签并存） */
+.set-host { display: flex; }
+.set-host .set-layout { height: 100%; }
+.set-layout { flex: 1; display: flex; min-width: 0; }
+.set-nav { width: 240px; flex: none; background: #1f1f20; border-right: 1px solid #2c2c2d; padding: 22px 18px; overflow-y: auto; }
+.set-nav h1 { font-size: 15px; color: #e8e8e8; margin: 0 0 14px; }
+.set-search { width: 100%; box-sizing: border-box; background: #2a2a2b; border: 1px solid #3c3c3d; border-radius: 6px;
+  color: #d6d6d6; font-size: 12px; padding: 6px 10px; outline: none; margin-bottom: 16px; }
+.set-search:focus { border-color: #0a6aa8; }
+.set-navitem { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px;
+  color: #b8b8b8; font-size: 13px; cursor: pointer; margin-bottom: 2px; }
+.set-navitem:hover { background: #2a2a2b; }
+.set-navitem.on { background: #2f2f30; color: #fff; }
+.set-content { flex: 1; min-width: 0; overflow-y: auto; padding: 26px 36px 60px; }
+.set-sec { max-width: 760px; margin-bottom: 30px; scroll-margin-top: 10px; }
+.set-sec > h2 { font-size: 17px; color: #ececec; margin: 0 0 14px; font-weight: 600; }
+.set-row { display: flex; align-items: center; gap: 14px; background: #242425; border: 1px solid #303031;
+  border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; }
+.set-row .set-info { flex: 1; min-width: 0; }
+.set-row .set-label { color: #e2e2e2; font-size: 13px; }
+.set-row .set-desc { color: #8a8a8a; font-size: 12px; margin-top: 3px; }
+.set-row select, .set-row input[type="number"] {
+  background: #2f2f30; color: #e2e2e2; border: 1px solid #3c3c3d; border-radius: 5px;
+  font-size: 12px; padding: 4px 8px; outline: none; flex: none; }
+.set-row input[type="number"] { width: 74px; }
+.set-row input[type="checkbox"] { width: 15px; height: 15px; accent-color: #0a6aa8; flex: none; cursor: pointer; }
+.set-btn { background: #2f2f30; color: #dcdcdc; border: 1px solid #3c3c3d; border-radius: 5px;
+  font-size: 12px; padding: 5px 12px; cursor: pointer; flex: none; }
+.set-btn:hover { background: #3a3a3b; }
+.set-keys { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 22px; }
+.set-key { display: flex; align-items: center; justify-content: space-between; color: #c8c8c8; font-size: 12.5px;
+  background: #242425; border: 1px solid #303031; border-radius: 6px; padding: 8px 12px; }
+.set-key kbd { font-family: inherit; font-size: 11px; color: #9a9a9a; background: #2a2d2e;
+  border: 1px solid #3c3c3c; border-radius: 3px; padding: 1px 6px; }
+/* 快捷键自定义行 */
+.kb-row { display: flex; align-items: center; gap: 10px; background: #242425; border: 1px solid #303031;
+  border-radius: 8px; padding: 8px 14px; margin-bottom: 6px; }
+.kb-row.capturing { border-color: #0a6aa8; }
+.kb-row .set-label { flex: 1; color: #e2e2e2; font-size: 13px; }
+.kb-keys { display: flex; gap: 4px; align-items: center; }
+.kb-keys kbd { font-family: inherit; font-size: 11px; color: #cfcfcf; background: #2a2d2e;
+  border: 1px solid #3c3c3c; border-radius: 3px; padding: 1px 7px; }
+.kb-btn { background: #2f2f30; color: #bcbcbc; border: 1px solid #3c3c3d; border-radius: 5px;
+  font-size: 11px; padding: 3px 10px; cursor: pointer; flex: none; }
+.kb-btn:hover { background: #3a3a3b; color: #fff; }
 </style>
 <link rel="stylesheet" href="/static/vendor/codemirror/codemirror.min.css">
 <link rel="stylesheet" href="/static/vendor/codemirror/addon/dialog/dialog.css">
@@ -43,11 +106,14 @@
   .menubar { display: flex; gap: 16px; color: #cfcfcf; flex: 0 1 auto; min-width: 0; overflow: hidden; }
   .menubar span { cursor: default; }
   .titlebar .tb-title { margin: 0 auto; color: #9aa0a6; font-size: 12px; max-width: 50%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .titlebar .tb-actions { display: flex; gap: 8px; flex: none; }
+  .titlebar .tb-actions { display: flex; gap: 8px; flex: none; align-items: center; }
+  .titlebar .tb-sep { width: 1px; height: 16px; background: #3c3c3c; margin: 0 2px; }
+  .titlebar .tb-actions button:disabled { opacity: .35; cursor: default; }
   .titlebar .tb-actions button {
     background: transparent; border: none; color: #cfcfcf; cursor: pointer; font-size: 13px; padding: 2px 8px; border-radius: 4px;
   }
   .titlebar .tb-actions button:hover { background: #3a3a3a; }
+  .titlebar .tb-actions button.on { color: #4daafc; }   /* 对应面板处于打开状态 */
 
   /* ===== 工作区 ===== */
   .workbench { flex: 1; display: flex; min-height: 0; }
@@ -58,6 +124,7 @@
     display: flex; flex-direction: column; align-items: center; padding-top: 6px; gap: 2px;
   }
   .activitybar .act {
+    position: relative;   /* 让 runner-badge（后台任务数）定位在本图标上，而非飘到窗口右上角 */
     width: 48px; height: 44px; display: flex; align-items: center; justify-content: center;
     color: #858585; font-size: 22px; cursor: pointer; border-left: 2px solid transparent;
   }
@@ -238,7 +305,16 @@
   .g-btn:hover { background: #0a6aa8; }
   .g-btn.outline { background: #3a3d41; }
   .g-btn.outline:hover { background: #45494e; }
-  .git-list { flex: 1; overflow: auto; min-height: 0; }
+  .git-list { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; display: flex; flex-direction: column; }
+  /* 更改区始终完整显示（不压缩、无内部滚动条），与参考图一致；
+     内容超出面板时由 .git-list 整体滚动。图形区占满剩余空间，最矮 140px */
+  .git-list > .git-empty, .git-list > .changes-sec { flex: 0 0 auto; }
+  .git-list > .git-graph { flex: 1 1 auto; min-height: 140px; display: flex; flex-direction: column; overflow: hidden; }
+  .git-list > .git-graph.collapsed { flex: 0 0 auto; min-height: 0; margin-top: auto; }
+  /* 折叠时隐藏工具按钮，只留 ▶ 图形 标题 + 计数 */
+  .git-list .git-graph.collapsed .g-auto, .git-list .git-graph.collapsed .git-acts { display: none; }
+  .git-graph .git-sec-head { flex: none; }
+  .git-graph .git-sec-body, .git-graph > :not(.git-sec-head) { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; min-height: 0; }
   .git-sec { padding-bottom: 4px; }
   .git-sec-head {
     display: flex; align-items: center; gap: 6px; font-size: 12px; color: #cccccc;
@@ -262,8 +338,11 @@
   .git-file:hover .gf-acts { visibility: visible; }
   .git-file .gf-acts button {
     background: transparent; border: none; color: #cccccc; cursor: pointer;
-    padding: 0 5px; font-size: 13px; line-height: 1.15; border-radius: 4px;
+    padding: 0 5px; font-size: 13px; border-radius: 4px;
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 17px; line-height: 1;
   }
+  .git-file .gf-acts button .bi { line-height: 1; vertical-align: baseline; }
   .git-file .gf-acts button:hover { background: #3a3d41; color: #fff; }
   .git-empty { color: #777; font-size: 12px; padding: 14px 12px; line-height: 1.9; }
   /* 分组标题右侧的批量操作按钮 */
@@ -276,8 +355,11 @@
   .git-sec-head:hover .git-acts, .git-graph .git-sec-head .git-acts { visibility: visible; }
   .git-sec-head .git-acts button {
     background: transparent; border: none; color: #cccccc; cursor: pointer;
-    padding: 2px 6px; font-size: 14px; line-height: 1.15; border-radius: 4px;
+    padding: 0 6px; font-size: 14px; border-radius: 4px;
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 18px; line-height: 1;
   }
+  .git-sec-head .git-acts button .bi { line-height: 1; vertical-align: baseline; }
   .git-sec-head .git-acts button:hover { background: #3a3d41; color: #fff; }
   /* 树形视图：目录行 + 缩进文件行 */
   .git-dir { display: flex; align-items: center; gap: 5px; padding: 5px 8px; font-size: 12.5px; color: #cccccc; cursor: pointer; }
@@ -287,22 +369,64 @@
   .git-dir .gf-dirname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-dir .gf-dot { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: #6fcf8a; flex: none; }
   .git-dir .gf-st { margin-left: 6px; font-size: 11px; color: #8a8a8a; flex: none; }
-  /* 图形（提交历史） */
-  .git-graph { border-top: 1px solid #2f2f2f; margin-top: 6px; }
-  .git-commit-row { display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 12.5px; color: #cccccc; cursor: pointer; }
+  /* 图形（提交历史）：VS Code 源代码管理 Graph 样式 —— 左侧垂直时间线串起提交节点 */
+  .git-commit-item { position: relative; }
+  .git-commit-row {
+    position: relative; display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px 6px 30px; font-size: 12.5px; color: #cccccc; cursor: pointer;
+  }
   .git-commit-row:hover { background: #2a2d2e; }
-  .git-commit-row .gc-hash { color: #e2a03f; font-family: "SF Mono", Menlo, monospace; font-size: 11px; flex: none; }
+  /* 时间线：每行画上下两段，首行从节点圆心开始、末行到节点圆心结束；
+     伪元素绘制在行背景之上（::before/::after 会盖过元素自身背景），悬停高亮不会遮挡线条 */
+  .git-commit-row::before, .git-commit-row::after {
+    content: ""; position: absolute; left: 19px; width: 2px; transform: translateX(-50%);
+    background: #3794ff; opacity: .9; pointer-events: none; z-index: 1;
+  }
+  .git-commit-row::before { top: 0; height: 50%; }
+  .git-commit-row::after { top: 50%; bottom: 0; }
+  .git-commit-item.first .git-commit-row::before { display: none; }
+  .git-commit-item.last .git-commit-row::after { display: none; }
+  /* HEAD 到父提交的一段加粗高亮（当前分支游标） */
+  .git-commit-item.head .git-commit-row::after { width: 3px; opacity: 1; }
+  /* 提交节点圆点；box-shadow 用面板底色挖出与线条之间的间隙 */
+  .gc-node {
+    position: absolute; left: 19px; top: 50%; transform: translate(-50%, -50%);
+    width: 9px; height: 9px; border-radius: 50%; background: #3794ff;
+    box-shadow: 0 0 0 3px #252526; z-index: 2; flex: none; pointer-events: none;
+  }
+  /* 当前提交（HEAD）：空心圆 */
+  .git-commit-item.head .gc-node {
+    width: 12px; height: 12px; background: #252526; border: 2px solid #3794ff;
+  }
   .git-commit-row .gc-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .git-commit-row .gc-meta { margin-left: auto; color: #7d7d7d; font-size: 11px; flex: none; }
-  .git-commit-row .gc-tw { font-size: 10px; color: #9aa0a6; flex: none; }
+  .git-commit-row .gc-author { color: #9d9d9d; font-size: 11.5px; flex: none; max-width: 45%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-commit-row.flash { background: rgba(13, 90, 138, .55); }
   .gc-ref {
     background: #0d5a8a; color: #ffffff; border-radius: 3px;
-    font-size: 10px; padding: 0 5px; flex: none; white-space: nowrap;
+    font-size: 10px; padding: 1px 6px; flex: none; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 3px; line-height: 1.4;
   }
+  .git-commit-row .gc-ref { margin-left: auto; }
+  .gc-ref .bi { font-size: 10px; line-height: 1; }
   .gc-ref.tag { background: #5a4f0d; }
-  /* 展开提交后：该提交的变更文件清单 */
-  .git-commit-files { padding-bottom: 4px; }
+  /* 提交行悬停动作：复制哈希 */
+  .git-commit-row .gc-acts { margin-left: auto; display: flex; visibility: hidden; flex: none; }
+  .git-commit-row .gc-ref + .gc-acts { margin-left: 4px; }
+  .git-commit-row:hover .gc-acts { visibility: visible; }
+  .git-commit-row .gc-acts button {
+    background: transparent; border: none; color: #cccccc; cursor: pointer;
+    padding: 0 4px; font-size: 13px; border-radius: 4px; height: 18px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .git-commit-row .gc-acts button:hover { background: #3a3d41; color: #fff; }
+  /* 展开提交后：该提交的变更文件清单（时间线从左侧穿过） */
+  .git-commit-files { position: relative; padding-bottom: 4px; }
+  .git-commit-files::before {
+    content: ""; position: absolute; left: 19px; top: 0; bottom: 0; width: 2px; transform: translateX(-50%);
+    background: #3794ff; opacity: .9; pointer-events: none; z-index: 1;
+  }
+  .git-commit-item.last .git-commit-files::before { display: none; }
   .git-commit-file { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 34px; font-size: 12.5px; color: #cccccc; cursor: pointer; }
   .git-commit-file:hover { background: #2a2d2e; }
   .git-commit-file .gcf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -480,7 +604,8 @@
   .logview .log-line.op-err { color: #f48771; }
   .logview .log-line.op-ok { color: #6fcf8a; }
   .logview .log-line.op-dim { color: #8a8a8a; }
-  .cm-host .CodeMirror { height: 100%; font-family: "SF Mono", "Menlo", Consolas, monospace; font-size: 13px; }
+  .cm-host .CodeMirror { height: 100%; font-family: "SF Mono", "Menlo", Consolas, monospace; font-size: var(--cm-font-size, 13px); }
+  body.hide-nm-hints .nm-hint { display: none; }   /* 设置页：关闭文件树命名提示 */
   /* 选中文本 / 当前行：主题默认偏暗，提亮后定位更明显
      （选择器带上 .cm-s-material-darker 才能压过主题自带的同名规则） */
   .cm-host .cm-s-material-darker .CodeMirror-selected { background: rgba(38, 79, 120, .72); }
@@ -675,16 +800,17 @@
     padding: 0 4px; border-radius: 8px; background: #3fb950; color: #0d0d0d;
     font-size: 10px; font-weight: 700; text-align: center;
   }
+  .activitybar .act .runner-badge.git-badge { background: #c9514d; color: #fff; }
   .runner-head { display: flex; gap: 6px; margin-bottom: 8px; }
   .runner-head .g-btn { margin: 0; }
-  .runner-list { display: flex; flex-direction: column; gap: 8px; }
+  .runner-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
   .runner-item { background: #2a2d2e; border: 1px solid #37373d; border-left: 2px solid #6a6a6a;
-                 border-radius: 4px; padding: 8px; }
+                 border-radius: 4px; padding: 8px; min-width: 0; overflow: hidden; }
   .runner-item.running { border-left-color: #3fb950; }
-  .runner-item .ri-top { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #cccccc; }
+  .runner-item .ri-top { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #cccccc; min-width: 0; }
   .runner-item .ri-top .dot { width: 7px; height: 7px; border-radius: 50%; background: #6fcf8a; flex: none; }
   .runner-item .ri-top .dot.off { background: #6a6a6a; }
-  .runner-item .ri-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6e6e6; }
+  .runner-item .ri-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6e6e6; }
   .runner-item .ri-tag { font-size: 10px; color: #9d9d9d; border: 1px solid #454545; border-radius: 3px; padding: 0 4px; flex: none; }
   .runner-item .ri-cmd { margin-top: 4px; font-family: "SF Mono", Menlo, monospace; font-size: 11px;
                          color: #9d9d9d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -708,17 +834,17 @@
   .port-row { padding: 6px 9px; border-bottom: 1px solid #2d2d2d; font-size: 12px; }
   .port-row:last-child { border-bottom: none; }
   .port-row:hover { background: #2b2d2f; }
-  .port-row .pr-top { display: flex; align-items: center; gap: 6px; }
+  .port-row .pr-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .port-row .pr-port { font-family: "SF Mono", Menlo, monospace; font-weight: 600; color: #4fc1ff;
                        min-width: 46px; flex: none; }
   .port-row .pr-proto { font-size: 10px; color: #9d9d9d; border: 1px solid #454545; border-radius: 3px;
                         padding: 0 4px; flex: none; text-transform: uppercase; }
-  .port-row .pr-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6e6e6; }
+  .port-row .pr-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6e6e6; }
   .port-row .pr-other { color: #8a8a8a; font-size: 11px; flex: none; }
   .port-row .pr-cmd { margin-top: 2px; font-family: "SF Mono", Menlo, monospace; font-size: 11px;
                       color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .port-row .pr-foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-  .port-row .pr-foot .pr-cmd { flex: 1; margin: 0; }
+  .port-row .pr-foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; min-width: 0; }
+  .port-row .pr-foot .pr-cmd { flex: 1; margin: 0; min-width: 0; }
   .port-row .pr-kill { flex: none; background: #3a3d41; color: #f14c4c; border: 1px solid #454545;
                        border-radius: 4px; font-size: 11px; padding: 1px 8px; cursor: pointer; }
   .port-row .pr-kill:hover { background: #5a2b2b; color: #ffb0b0; }
@@ -1098,6 +1224,13 @@
     <div class="menubar" id="menubar"><span data-menu="file">文件</span><span data-menu="edit">编辑</span><span data-menu="sel">选择</span><span data-menu="view">查看</span><span data-menu="goto">转到</span><span data-menu="run">运行</span><span data-menu="term">终端</span><span data-menu="help">帮助</span></div>
     <div class="tb-title" id="tbTitle">在线项目 IDE</div>
     <div class="tb-actions">
+      <button id="tbNavBack" title="后退 (Alt+←)"><i class="bi bi-arrow-left"></i></button>
+      <button id="tbNavFwd" title="前进 (Alt+→)"><i class="bi bi-arrow-right"></i></button>
+      <span class="tb-sep"></span>
+      <button id="tbSide" title="切换侧边栏 (Ctrl+B)"><i class="bi bi-layout-sidebar"></i></button>
+      <button id="tbBottom" title="切换底部面板 (Ctrl+J)"><i class="bi bi-terminal"></i></button>
+      <button id="tbZen" title="专注模式（隐藏侧边栏与底部面板）"><i class="bi bi-arrows-angle-expand"></i></button>
+      <span class="tb-sep"></span>
       <button id="tbNewFile" title="新建文件 (Ctrl+N)"><i class="bi bi-file-earmark-plus"></i></button>
       <button id="tbNewFolder" title="新建文件夹"><i class="bi bi-folder-plus"></i></button>
       <button id="tbSave" title="保存 (Ctrl+S)"><i class="bi bi-check-lg"></i></button>
@@ -1109,12 +1242,12 @@
     <div class="activitybar" id="activitybar">
       <div class="act active" data-panel="explorer" title="资源管理器"><i class="bi bi-files"></i></div>
       <div class="act" data-panel="search" title="搜索"><i class="bi bi-search"></i></div>
-      <div class="act" data-panel="git" title="源代码管理"><i class="bi bi-git"></i></div>
+      <div class="act" data-panel="git" title="源代码管理"><i class="bi bi-git"></i><span class="runner-badge git-badge" id="actGitBadge" style="display:none">0</span></div>
       <div class="act" data-panel="run" title="运行和调试"><i class="bi bi-bug"></i></div>
       <div class="act" data-panel="runner" title="后台任务（保持运行 / 查看日志 / 停止）"><i class="bi bi-play-btn"></i><span class="runner-badge" id="actRunnerBadge" style="display:none">0</span></div>
       <div class="act" data-panel="env" title="运行环境（Node / Python / PHP 等）"><i class="bi bi-cpu"></i></div>
       <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
-      <div class="act bottom" id="actSettings" title="设置"><i class="bi bi-gear"></i></div>
+      <div class="act bottom" id="actSettings" title="设置 (Ctrl+,)"><i class="bi bi-gear"></i></div>
     </div>
 
     <div class="sidebar" id="sidebar">
@@ -1159,7 +1292,7 @@
           <span id="gitBranch">—</span>
           <span class="git-sync" id="gitSync"></span>
           <span class="git-spacer"></span>
-          <button class="g-ico" id="gitViewToggle" title="切换 树形 / 列表 视图"><i class="bi bi-list-ul"></i></button>
+          <button class="g-ico" id="gitViewToggle" title="切换到树形视图"><i class="bi bi-diagram-3"></i></button>
           <button class="g-ico" id="gitRefresh" title="刷新状态"><i class="bi bi-arrow-clockwise"></i></button>
           <button class="g-ico" id="gitStageAll" title="暂存所有更改"><i class="bi bi-plus-lg"></i></button>
         </div>
@@ -1440,6 +1573,72 @@
     if (name.startsWith(".")) return _si("bi-file-earmark", "#6d8086");   // 其它隐藏文件
     return _si("bi-file-earmark", "#8a8a8a");
   }
+  /* ---------- .gitignore 规则引擎（文件树中被忽略的条目灰色显示） ---------- */
+  let giRules = null;                              // null=未加载；[]=无 .gitignore 或为空
+  function giGlobRe(pat) {
+    let p = pat, pre = "", post = "";
+    if (p.startsWith("**/")) { pre = "(?:[^/]*/)*"; p = p.slice(3); }
+    if (p.endsWith("/**")) { post = "(?:/.*)?"; p = p.slice(0, -3); }
+    p = p.replace(/\/\*\*\//g, "/(?:[^/]*/)*");    // a/**/b
+    let re = "";
+    for (const c of p) {
+      if (c === "*") re += "[^/]*";
+      else if (c === "?") re += "[^/]";
+      else re += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+    return new RegExp("^" + pre + re + post + "$");
+  }
+  function parseGitignoreFull(text) {
+    const rules = [];
+    String(text || "").split("\n").forEach(raw => {
+      let s = raw.replace(/\r$/, "").trim();
+      if (!s || s.startsWith("#")) return;
+      let negated = false;
+      if (s.startsWith("!")) { negated = true; s = s.slice(1); }
+      let dirOnly = false;
+      if (s.endsWith("/")) { dirOnly = true; s = s.slice(0, -1); }
+      if (!s) return;
+      const anchored = s.includes("/");            // 含 / 的模式锚定到根，否则匹配任意层级的同名
+      if (s.startsWith("/")) s = s.slice(1);
+      if (!s) return;
+      rules.push({ negated, dirOnly, anchored, re: giGlobRe(s) });
+    });
+    return rules;
+  }
+  function giMatchOne(rule, rel, isDir) {
+    if (rule.dirOnly && !isDir) return false;      // 目录规则只作用于目录（文件经由祖先目录被忽略）
+    return rule.re.test(rule.anchored ? rel : rel.substring(rel.lastIndexOf("/") + 1));
+  }
+  function isGitIgnored(rel, isDir) {              // rel：相对 ROOT 的路径
+    if (!giRules || !giRules.length || !rel) return false;
+    const segs = rel.split("/");
+    let ignored = false, prefix = "";
+    for (let i = 0; i < segs.length; i++) {        // 逐段下溯：祖先目录被忽略 → 子项同样忽略
+      prefix = prefix ? prefix + "/" + segs[i] : segs[i];
+      for (const r of giRules) {
+        if (giMatchOne(r, prefix, i < segs.length - 1 ? true : isDir)) ignored = !r.negated;
+      }
+    }
+    return ignored;
+  }
+  function loadGitignoreRules() {                  // 读取根 .gitignore 并重算树中灰色状态
+    return loadFileText(ROOT + "/.gitignore", ".gitignore")
+      .then(d => { giRules = parseGitignoreFull(d.text); })
+      .catch(() => { giRules = []; })
+      .then(() => applyGiDecorations());
+  }
+  function applyGiDecorations() {                  // 对已渲染的树行重算灰色状态（无需重新拉目录）
+    if (!giRules) return;
+    document.querySelectorAll(".tree-row").forEach(r => {
+      const full = r.dataset.path;
+      if (!full) return;
+      const isDir = r.dataset.isdir === "1";
+      const dim = (isDir && TREE_IGNORE.has(r.dataset.name)) ||
+        isGitIgnored(full.startsWith(ROOT + "/") ? full.slice(ROOT.length + 1) : full, isDir);
+      r.classList.toggle("tree-ignored", dim);
+    });
+  }
+
   function renderNode(it, container, depth) {
     const full = (it.path && it.path.startsWith("/")) ? it.path : container._base + "/" + it.name;
     const row = document.createElement("div");
@@ -1449,8 +1648,9 @@
     row.dataset.path = full;
     row.dataset.name = it.name;
     row.dataset.isdir = it.is_dir ? "1" : "0";
-    // 依赖目录弱化显示，可手动展开（仅「全部展开」会跳过）
-    const isIgnored = it.is_dir && TREE_IGNORE.has(it.name);
+    // 依赖目录弱化显示，可手动展开（仅「全部展开」会跳过）；.gitignore 命中的条目同样灰色
+    const isIgnored = (it.is_dir && TREE_IGNORE.has(it.name)) ||
+      (giRules && giRules.length && isGitIgnored(full.startsWith(ROOT + "/") ? full.slice(ROOT.length + 1) : full, !!it.is_dir));
     if (isIgnored) row.classList.add("tree-ignored");
     const twist = it.is_dir ? '<span class="twist"><i class="bi bi-chevron-right"></i></span>' : '<span class="twist"></span>';
     const hint = SPECIAL_NAME_HINTS[it.name] ? '<span class="nm-hint">' + esc(SPECIAL_NAME_HINTS[it.name]) + '</span>' : "";
@@ -1752,8 +1952,8 @@
         // 容器此刻已可见（active），CodeMirror 才能测量正确，避免内容压住行号/错位
         tab.cm = CodeMirror(host, {
           value: text, mode: big ? "text/plain" : (mode || "text/plain"), theme: "material-darker",
-          lineNumbers: true, lineWrapping: false, indentUnit: 4, tabSize: 4,
-          styleActiveLine: !big, matchBrackets: !big, autoCloseBrackets: true,
+          lineNumbers: true, lineWrapping: IDE_SETTINGS.lineWrap, indentUnit: IDE_SETTINGS.indent, tabSize: IDE_SETTINGS.indent,
+          styleActiveLine: IDE_SETTINGS.activeLine && !big, matchBrackets: !big, autoCloseBrackets: true,
           phrases: CM_PHRASES,
         });
         if (big) toast("文件较大（" + fmtSize(res.size || text.length) + "），已关闭语法高亮以保证编辑流畅", "warn");
@@ -1784,6 +1984,13 @@
       activate(tab);
     }
     refreshTreeDirty();
+    navPush(path, name);   // 右上角 ← → 导航历史
+    // 记录最近打开（Quick Open 面板「最近打开」数据源）
+    try {
+      const rec = JSON.parse(localStorage.getItem("ide.recentFiles") || "[]").filter(f => f.path !== path);
+      rec.unshift({ path, name });
+      localStorage.setItem("ide.recentFiles", JSON.stringify(rec.slice(0, 12)));
+    } catch (_) {}
     return tab;   // 调用方（如 openFileAt 定位行）可直接拿到标签，避免再按路径查一遍
   }
   // 把标签的编辑器容器挂到所属编辑组；组布局重建时的兜底挂载也走这里
@@ -1988,6 +2195,40 @@
     if (r.left < br.left) bar.scrollLeft -= (br.left - r.left);
     else if (r.right > br.right) bar.scrollLeft += (r.right - br.right);
   }
+  /* 资源管理器联动：激活标签时在树中选中对应文件，并逐级展开未打开的祖先目录 */
+  let revealSeq = 0;
+  async function revealInTree(abs) {
+    if (!ROOT || !abs || !abs.startsWith(ROOT + "/")) return;
+    const seq = ++revealSeq;
+    const segs = abs.slice(ROOT.length + 1).split("/");
+    let base = ROOT;
+    for (let i = 0; i < segs.length - 1; i++) {       // 逐级展开祖先目录
+      base += "/" + segs[i];
+      const row = [...explorerPanel.querySelectorAll(".tree-row")]
+        .find(r => r.dataset.path === base && r.dataset.isdir === "1");
+      if (!row) return;
+      const kids = row.nextElementSibling;
+      if (!kids || !kids.classList.contains("tree-children")) return;
+      if (!kids.classList.contains("open")) {
+        const twist = row.querySelector(".twist i");
+        if (twist) twist.className = "bi bi-chevron-down";
+        kids.classList.add("open");
+        if (!kids._loaded) {
+          kids._loaded = true;
+          try { await loadChildren(kids._base, kids, (parseFloat(row.style.paddingLeft) - 8) / 14); }
+          catch (_) { kids._loaded = false; return; }
+        }
+      }
+      if (seq !== revealSeq) return;                    // 期间用户已切换其它文件，放弃本次
+    }
+    const target = [...explorerPanel.querySelectorAll(".tree-row")].find(r => r.dataset.path === abs);
+    if (!target) return;
+    document.querySelectorAll(".tree-row.selected").forEach(r => r.classList.remove("selected"));
+    target.classList.add("selected");
+    treeSel = { path: abs, name: segs[segs.length - 1], isDir: false };
+    target.scrollIntoView({ block: "nearest" });
+  }
+
   function activate(tab) {
     mountHost(tab);   // 编辑器容器必须先在所属组里，切换才会真正显示内容
     tabs.forEach(t => { if (t.group === tab.group) { t.host.classList.remove("active"); t.el.classList.remove("active"); } });
@@ -1999,6 +2240,7 @@
     scheduleRefresh(tab);
     renderBreadcrumbs(tab.displayPath || tab.path); updateStatus();
     refreshTreeDirty(); ffOnTabChange();
+    revealInTree(tab.path);          // 树列表跟随当前打开的文件高亮
     scrollTabIntoView(tab);
   }
   async function closeTab(tab) {
@@ -2681,6 +2923,7 @@
       if (d.error) throw new Error(d.error);
       tab.original = tab.cm.getValue(); tab.dirty = false; tab.el.classList.remove("dirty");
       refreshTreeDirty(); toast("已保存：" + tab.name, "ok");
+      if (tab.path === ROOT + "/.gitignore") loadGitignoreRules();   // 保存 .gitignore → 文件树灰色状态实时刷新
     } catch (e) { toast("保存失败：" + (e.message || e), "err"); }
   }
 
@@ -3315,7 +3558,11 @@
     if (p === "runner") loadRunnerList().then(runnerTick);
     if (p === "env") loadEnv(false);
   });
-  function toggleSidebar() { $("sidebar").classList.toggle("collapsed"); }
+  function toggleSidebar() {
+    $("sidebar").classList.toggle("collapsed");
+    const b = $("tbSide");
+    if (b) b.classList.toggle("on", !$("sidebar").classList.contains("collapsed"));
+  }
   $("sideCollapse").onclick = toggleSidebar;
 
   /* ---------- 侧边栏宽度拖动（左搜索区 / 右编辑区） ---------- */
@@ -3751,7 +3998,7 @@
      源代码管理（Git）：状态 / 暂存 / 取消暂存 / 放弃 / 提交 / 差异视图
      ================================================================== */
   const gitState = { isRepo: false, repo: "", branch: "", last: null };
-  let gitViewMode = "tree";      // tree（树形视图，默认）/ list（平铺列表）
+  let gitViewMode = "list";      // tree（树形视图）/ list（平铺列表，默认，与源代码管理参考样式一致）
   let gitGraph = [];             // 最近提交（图形区块）
 
   function gitPost(url, body, okMsg) {
@@ -3896,7 +4143,7 @@
 
   function gitSection(sec) {
     const wrap = document.createElement("div");
-    wrap.className = "git-sec";
+    wrap.className = "git-sec changes-sec";
     const head = document.createElement("div");
     head.className = "git-sec-head";
     head.innerHTML = '<i class="bi bi-chevron-down git-sec-tw"></i><span class="git-sec-title">' + sec.title +
@@ -3974,7 +4221,7 @@
   }
 
   /* 图形：最近提交（含工具栏：转到当前 / 抓取 / 拉取 / 发布 / 刷新 / 更多） */
-  let gitCommitFileMode = "list";        // 提交内文件清单：list / tree
+  let gitCommitFileMode = "tree";        // 提交内文件清单：list / tree（默认树形，与图形视图一致）
 
   function showGitMoreMenu(anchor) {
     let menu = $("gitMoreMenu");
@@ -4000,8 +4247,16 @@
     });
     const r = anchor.getBoundingClientRect();
     menu.style.left = Math.min(r.left, window.innerWidth - 200) + "px";
-    menu.style.top = (r.bottom + 2) + "px";
+    // 默认向下弹；若下方空间不够（图形区在面板底部时），改为向上弹出
+    menu.style.top = "";
+    menu.style.bottom = "";
     menu.style.display = "block";
+    const mh = menu.offsetHeight || 110;
+    if (r.bottom + 2 + mh > window.innerHeight - 4) {
+      menu.style.bottom = (window.innerHeight - r.top + 2) + "px";
+    } else {
+      menu.style.top = (r.bottom + 2) + "px";
+    }
   }
 
   function gotoCurrentCommit() {
@@ -4176,20 +4431,29 @@
       e.textContent = "没有任何源代码管理历史记录项。";
       body.appendChild(e);
     } else {
-      gitGraph.forEach(c => {
+      gitGraph.forEach((c, i) => {
         const refs = (c.refs || [])
           .map(r => r.replace(/^HEAD -> /, ""))
           .filter(r => r && r !== "HEAD")
           .slice(0, 2);
         const item = document.createElement("div");
+        // first/head：首行时间线从圆心开始且加粗；last：末行时间线在圆心结束
+        item.className = "git-commit-item" +
+          (i === 0 ? " first head" : "") + (i === gitGraph.length - 1 ? " last" : "");
         const row = document.createElement("div");
         row.className = "git-commit-row";
-        row.innerHTML = '<i class="bi bi-chevron-right gc-tw"></i>' +
+        row.innerHTML = '<span class="gc-node"></span>' +
           '<span class="gc-sub">' + esc(c.subject) + '</span>' +
-          '<span class="gc-hash">' + esc(c.hash) + '</span>' +
+          '<span class="gc-author">' + esc(c.author) + '</span>' +
           refs.map(r => '<span class="gc-ref' + (r.startsWith("tag:") ? " tag" : "") + '">' +
+            (r.startsWith("tag:") ? "" : '<i class="bi bi-diagram-2-fill"></i>') +
             esc(r.replace(/^tag: /, "")) + '</span>').join("") +
-          '<span class="gc-meta">' + esc(c.date) + '</span>';
+          '<span class="gc-acts"><button title="复制提交哈希"><i class="bi bi-copy"></i></button></span>';
+        row.querySelector(".gc-acts button").onclick = (e) => {
+          e.stopPropagation();
+          copyText((gitStatsCache[c.hash] && gitStatsCache[c.hash].full) || c.hash);
+          toast("已复制提交哈希", "ok");
+        };
         const files = document.createElement("div");
         files.className = "git-commit-files";
         files.style.display = "none";
@@ -4197,7 +4461,6 @@
         row.onclick = () => {
           const show = files.style.display === "none";
           files.style.display = show ? "" : "none";
-          row.querySelector(".gc-tw").className = "bi " + (show ? "bi-chevron-down" : "bi-chevron-right") + " gc-tw";
           if (show && !loaded) { loaded = true; loadCommitFiles(c.hash, files); }
         };
         item.appendChild(row);
@@ -4208,6 +4471,8 @@
     }
     const setCollapsed = (collapsed) => {
       body.style.display = collapsed ? "none" : "";
+      // 折叠时收成一行并贴到面板最底部（与 Trae 一致）；展开时占满剩余空间
+      wrap.classList.toggle("collapsed", collapsed);
       const iconClass = collapsed ? "bi-chevron-right" : "bi-chevron-down";
       head.querySelector(".git-sec-tw").className = "bi " + iconClass + " git-sec-tw";
       try { localStorage.setItem("gitSecCollapsed:图形", collapsed ? "1" : "0"); } catch (e) {}
@@ -4355,6 +4620,15 @@
     });
   }
 
+  /* git 活动栏角标：显示未提交变更总数（暂存 + 修改 + 未跟踪） */
+  function setGitBadge(d) {
+    const gb = $("actGitBadge");
+    if (!gb) return;
+    const n = d && d.is_repo ? ((d.staged || []).length + (d.changed || []).length + (d.untracked || []).length) : 0;
+    if (n > 0) { gb.textContent = n > 99 ? "99+" : n; gb.style.display = ""; }
+    else gb.style.display = "none";
+  }
+
   function loadGitStatus(showToast) {
     // 状态与提交历史并行拉取，一次渲染，避免闪烁
     return Promise.all([
@@ -4371,6 +4645,7 @@
         $("gitPanel").classList.toggle("not-repo", !d.is_repo);   // 非仓库时隐藏提交区
         updateBranchStatus(d);
         applyGitDecorations(d);
+        setGitBadge(d);
         if (!d.is_repo) { renderGitMessage(d.error || "当前文件夹不是 Git 仓库，可点击下方按钮初始化。", true); return; }
         if (!d.ok) { renderGitMessage(d.error || "读取 Git 状态失败"); return; }
         renderGitStatus(d);
@@ -4698,6 +4973,8 @@
     const show = (force === undefined) ? !p.classList.contains("show") : !!force;
     if (pane) setBottomPane(pane);
     p.classList.toggle("show", show);
+    const bb = $("tbBottom");
+    if (bb) bb.classList.toggle("on", show);   // 顶栏底部面板按钮同步高亮
     const sp = $("bpSplitter");
     if (sp) sp.classList.toggle("hidden", !show);      // 分割条随面板一起显隐
     if (show) applyBottomHeight(p.offsetHeight || BP_DEFAULT_H, false);
@@ -6320,6 +6597,502 @@
   };
   $("tbSave").onclick = () => { if (active) saveTab(active); };
 
+  /* ================================================================
+     Quick Open 悬浮命令面板（Ctrl+P，仿 VS Code / Trae）
+       · 空输入：功能列表 + 最近打开
+       · 纯文本：模糊搜索文件名（/api/search），回车打开；支持 路径:行号
+       · :123    跳转当前文件行
+       · @符号   跳转当前文件的函数 / 类定义
+       · >命令   运行常用命令
+     ================================================================ */
+  const qoMask = document.createElement("div");
+  qoMask.id = "qopen-mask";
+  qoMask.innerHTML = '<div id="qopen"><input id="qopen-input" spellcheck="false" autocomplete="off">' +
+    '<div id="qopen-list"></div></div>';
+  document.body.appendChild(qoMask);
+  const qoInput = qoMask.querySelector("#qopen-input");
+  const qoList = qoMask.querySelector("#qopen-list");
+  qoInput.placeholder = "按名称搜索文件（添加 :行号 转到行，@ 转到符号，> 运行命令）";
+  let qoRows = [], qoSel = 0, qoSeq = 0;
+
+  const QO_COMMANDS = [
+    ["新建文件", () => newInRoot(false)],
+    ["新建文件夹", () => newInRoot(true)],
+    ["保存当前文件", () => { if (active) saveTab(active); }],
+    ["保存全部", saveAllTabs],
+    ["关闭当前标签", () => { if (active) closeTab(active); }],
+    ["右侧拆分编辑器", () => splitEditor(null, "right")],
+    ["下方拆分编辑器", () => splitEditor(null, "down")],
+    ["折叠 / 展开侧边栏", toggleSidebar],
+    ["跳转到行", gotoLine],
+    ["打开搜索面板", openSearch],
+    ["搜索文件内容", () => { showPanel("search"); setSearchMode("content"); $("searchInput").focus(); }],
+    ["按文件名搜索", () => { showPanel("search"); setSearchMode("name"); $("searchInput").focus(); }],
+    ["打开设置", openSettingsTab],
+  ];
+
+  function quickOpen(pre) {
+    if (qoMask.classList.contains("open")) { qoClose(); return; }
+    qoMask.classList.add("open");
+    qoInput.value = pre || "";
+    qoRender();
+    qoInput.focus();
+  }
+  function qoClose() { qoMask.classList.remove("open"); qoInput.blur(); }
+
+  function qoSec(title) {
+    const d = document.createElement("div");
+    d.className = "qo-sec"; d.textContent = title;
+    qoList.appendChild(d);
+  }
+  function qoMsg(text) {
+    const d = document.createElement("div");
+    d.className = "qo-empty"; d.textContent = text;
+    qoList.appendChild(d);
+  }
+  /* 可选中的行：ic=图标HTML, main=主文本HTML, rest=右侧附加HTML, run=执行 */
+  function qoRowEl(ic, main, rest, run) {
+    const row = document.createElement("div");
+    row.className = "qo-row";
+    row.innerHTML = '<span class="ic">' + ic + '</span><span class="qo-main">' + main + '</span>' + (rest || "");
+    row.onmouseenter = () => qoSetSel(qoRows.indexOf(qoEntry(row)));
+    row.onclick = () => run();
+    qoList.appendChild(row);                       // 挂到面板列表（否则行永远不显示）
+    const entry = { el: row, run };
+    qoRows.push(entry);
+    return row;
+  }
+  function qoEntry(el) { return qoRows.find(r => r.el === el) || { el, run() {} }; }
+  function qoSetSel(i) {
+    if (!qoRows.length) { qoSel = 0; return; }
+    qoSel = Math.max(0, Math.min(i, qoRows.length - 1));
+    qoRows.forEach((r, j) => r.el.classList.toggle("sel", j === qoSel));
+    qoRows[qoSel].el.scrollIntoView({ block: "nearest" });
+  }
+  function qoFinish() { qoSetSel(0); }
+
+  /* 空状态：功能列表 + 最近打开 */
+  function qoEmptyState() {
+    qoSec("功能");
+    qoRowEl('<i class="bi bi-search"></i>', "跳转至文件", '<span class="qo-kbd">Ctrl P</span>',
+      () => { qoInput.value = ""; qoRender(); qoInput.focus(); });   // 进入文件名搜索模式
+    qoRowEl('<i class="bi bi-text-left"></i>', "搜索文件内容", '<span class="qo-kbd">Ctrl Shift F</span>',
+      () => { qoClose(); showPanel("search"); setSearchMode("content"); $("searchInput").focus(); });
+    qoRowEl('<i class="bi bi-file-text"></i>', "搜索文件名",
+      "",
+      () => { qoClose(); showPanel("search"); setSearchMode("name"); $("searchInput").focus(); });
+    qoRowEl('<i class="bi bi-arrow-right"></i>', "转到行（输入 : 行号）", '<span class="qo-kbd">Ctrl G</span>', () => { qoClose(); gotoLine(); });
+    qoRowEl('<i class="bi bi-braces"></i>', "转到符号（输入 @）", "", () => { qoInput.value = "@"; qoRender(); qoInput.focus(); });
+    qoRowEl('<i class="bi bi-terminal"></i>', "运行命令（输入 >）", "", () => { qoInput.value = ">"; qoRender(); qoInput.focus(); });
+    let rec = [];
+    try { rec = JSON.parse(localStorage.getItem("ide.recentFiles") || "[]"); } catch (_) {}
+    if (!rec.length) rec = tabs.filter(t => !t.diff).slice(-8).reverse().map(t => ({ path: t.path, name: t.name }));
+    if (rec.length) {
+      qoSec("最近打开");
+      rec.slice(0, 8).forEach(f => qoFileRow(f.path, f.name, null));
+    }
+    qoFinish();
+  }
+
+  function qoFileRow(abs, name, lineNo) {
+    const rel = (ROOT && abs.startsWith(ROOT + "/")) ? abs.substring(ROOT.length + 1) : abs;
+    const dir = rel.indexOf("/") >= 0 ? rel.substring(0, rel.lastIndexOf("/")) : "";
+    const rest = (dir ? '<span class="qo-path">' + esc(dir) + "</span>" : "") +
+      (lineNo ? '<span class="qo-kbd">: ' + lineNo + "</span>" : "");
+    const row = qoRowEl(iconFor(name, false), esc(name), rest,
+      () => { qoClose(); if (lineNo) openFileAt(abs, name, lineNo - 1, 0, 0); else openFile(abs, name); });
+    return row;
+  }
+
+  /* 文件名模糊搜索（独立 seq 防抖，支持后端 token 轮询） */
+  function qoFiles(kw, lineNo) {
+    const seq = ++qoSeq;
+    if (!kw) { qoEmptyState(); return; }
+    qoMsg("搜索中…");
+    const params = new URLSearchParams({ root: ROOT, keyword: kw, use_index: "never", timeout: "15", skip: SEARCH_SKIP_DIRS });
+    fetch("/api/search?" + params.toString()).then(r => r.json()).then(d => {
+      if (seq !== qoSeq) return;
+      if (d.error) { qoList.innerHTML = ""; qoRows = []; qoMsg("搜索失败：" + d.error); return; }
+      if (d.items) { qoRenderFiles(d.items, lineNo); return; }
+      if (d.token) { qoPoll(d.token, seq, lineNo); return; }
+      qoRenderFiles([], lineNo);
+    }).catch(() => { if (seq === qoSeq) { qoList.innerHTML = ""; qoRows = []; qoMsg("搜索请求失败"); } });
+  }
+  function qoPoll(token, seq, lineNo) {
+    fetch("/api/search/" + encodeURIComponent(token)).then(r => r.json()).then(d => {
+      if (seq !== qoSeq || !qoMask.classList.contains("open")) return;
+      if (!d.done) { setTimeout(() => qoPoll(token, seq, lineNo), 500); return; }
+      if (d.error) { qoList.innerHTML = ""; qoRows = []; qoMsg("搜索失败：" + d.error); return; }
+      qoRenderFiles(d.items || [], lineNo);
+    }).catch(() => {});
+  }
+  function qoRenderFiles(items, lineNo) {
+    qoList.innerHTML = ""; qoRows = []; qoSel = 0;
+    const files = items.filter(it => !it.is_dir && (it.abs_path || it.path));
+    if (!files.length) qoMsg("没有匹配的文件");
+    files.slice(0, 50).forEach(it => {
+      const abs = it.abs_path || it.path;
+      qoFileRow(abs, it.name || baseName(abs), lineNo);
+    });
+    qoFinish();
+  }
+
+  /* 当前文件符号（def/class/function） */
+  function qoSymbols(kw) {
+    const tab = active;
+    if (!tab || !tab.cm) { qoMsg("没有已打开的编辑器文件"); return; }
+    const re = /^\s*(?:async\s+)?(?:def|class|function)\s+([A-Za-z_]\w*)/;
+    const found = [];
+    tab.cm.eachLine(l => {
+      const m = l.text.match(re);
+      if (m) found.push({ name: m[1], line: tab.cm.getLineNumber(l) });
+    });
+    const hit = found.filter(s => !kw || s.name.toLowerCase().includes(kw));
+    if (!hit.length) { qoMsg(kw ? "没有匹配的符号" : "当前文件没有 def / class / function"); qoFinish(); return; }
+    hit.slice(0, 100).forEach(s => {
+      qoRowEl('<i class="bi bi-braces"></i>', esc(s.name),
+        '<span class="qo-path">第 ' + (s.line + 1) + " 行</span>",
+        () => { qoClose(); tab.cm.setCursor({ line: s.line, ch: 0 }); tab.cm.focus(); scrollLineToComfort(tab.cm, s.line); });
+    });
+    qoFinish();
+  }
+
+  /* 命令模式 */
+  function qoCmds(kw) {
+    QO_COMMANDS.filter(c => !kw || c[0].toLowerCase().includes(kw))
+      .forEach(c => qoRowEl('<i class="bi bi-arrow-right"></i>', esc(c[0]), "", () => { qoClose(); c[1](); }));
+    if (!qoRows.length) qoMsg("没有匹配的命令");
+    qoFinish();
+  }
+
+  /* 行号模式 */
+  function qoLine(str) {
+    const n = parseInt(str, 10);
+    if (!n || n < 1) { qoMsg("输入行号，如 :42"); return; }
+    if (!active) { qoMsg("没有已打开的文件"); return; }
+    qoClose();
+    openFileAt(active.path, active.name, n - 1, 0, 0);
+  }
+
+  function qoRender() {
+    const q = qoInput.value;
+    qoList.innerHTML = ""; qoRows = []; qoSel = 0;
+    if (q.startsWith(">")) { qoCmds(q.slice(1).trim().toLowerCase()); return; }
+    if (q.startsWith("@")) { qoSymbols(q.slice(1).trim().toLowerCase()); return; }
+    if (q.startsWith(":")) { qoLine(q.slice(1).trim()); return; }
+    if (!q.trim()) { qoEmptyState(); return; }
+    let kw = q.trim(), lineNo = null;
+    const m = kw.match(/^(\S[\s\S]*?)\s*:(\d+)$/);          // 路径:行号
+    if (m) { kw = m[1]; lineNo = parseInt(m[2], 10); }
+    qoFiles(kw, lineNo);
+  }
+
+  qoInput.addEventListener("input", () => qoRender());
+  qoInput.addEventListener("keydown", (e) => {
+    e.stopPropagation();                       // 面板打开期间屏蔽全局快捷键
+    if (e.key === "Escape") { e.preventDefault(); qoClose(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); qoSetSel(qoSel + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); qoSetSel(qoSel - 1); }
+    else if (e.key === "Enter") { e.preventDefault(); const r = qoRows[qoSel]; if (r) r.run(); }
+  });
+  qoMask.addEventListener("mousedown", (e) => { if (e.target === qoMask) qoClose(); });
+
+  /* ---------- 编辑器导航历史（右上角 ← →） ---------- */
+  const navHist = { list: [], idx: -1, lock: false };
+  function navBtns() {
+    $("tbNavBack").disabled = navHist.idx <= 0;
+    $("tbNavFwd").disabled = navHist.idx >= navHist.list.length - 1;
+  }
+  function navPush(path, name) {
+    if (navHist.lock) return;
+    const cur = navHist.list[navHist.idx];
+    if (cur && cur.path === path) return;
+    if (cur && active && active.cm) cur.line = active.cm.getCursor().line;   // 记录离开时位置
+    navHist.list = navHist.list.slice(0, navHist.idx + 1);
+    navHist.list.push({ path, name, line: 0 });
+    if (navHist.list.length > 100) navHist.list.shift();
+    navHist.idx = navHist.list.length - 1;
+    navBtns();
+  }
+  async function navGo(delta) {
+    const target = navHist.list[navHist.idx + delta];
+    if (!target) return;
+    navHist.idx += delta;
+    navHist.lock = true;
+    try { await openFileAt(target.path, target.name, target.line || 0, 0, 0); }
+    finally { navHist.lock = false; }
+    navBtns();
+  }
+  /* ---------- 专注模式 ---------- */
+  let zenSaved = null;
+  function toggleZen() {
+    const sideVisible = !$("sidebar").classList.contains("collapsed");
+    const bottomVisible = $("bottomPanel").classList.contains("show");
+    if (!zenSaved) {
+      zenSaved = { side: sideVisible, bottom: bottomVisible };
+      if (sideVisible) toggleSidebar();
+      if (bottomVisible) toggleBottom();
+    } else {
+      if (zenSaved.side) toggleSidebar();
+      if (zenSaved.bottom) toggleBottom();
+      zenSaved = null;
+    }
+  }
+  $("tbNavBack").onclick = () => navGo(-1);
+  $("tbNavFwd").onclick = () => navGo(1);
+  $("tbSide").onclick = () => toggleSidebar();
+  $("tbBottom").onclick = () => toggleBottom();
+  $("tbZen").onclick = () => toggleZen();
+  $("actSettings").onclick = () => openSettingsTab();   // 左下角活动栏齿轮 → 设置标签页
+
+  /* ================================================================
+     设置页（仿 Trae / VS Code：以「设置」标签页形式打开，可与文件标签并存）
+     ================================================================ */
+  const IDE_SETTINGS = Object.assign(
+    { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true },
+    (() => { try { return JSON.parse(localStorage.getItem("ide.settings") || "{}"); } catch (_) { return {}; } })()
+  );
+  function saveIdeSettings() { localStorage.setItem("ide.settings", JSON.stringify(IDE_SETTINGS)); }
+  function applyIdeSettings() {
+    document.documentElement.style.setProperty("--cm-font-size", IDE_SETTINGS.fontSize + "px");
+    document.body.classList.toggle("hide-nm-hints", !IDE_SETTINGS.hints);
+    tabs.forEach(t => {
+      if (!t.cm) return;
+      t.cm.setOption("lineWrapping", IDE_SETTINGS.lineWrap);
+      t.cm.setOption("styleActiveLine", IDE_SETTINGS.activeLine && !t.big);
+      t.cm.setOption("indentUnit", IDE_SETTINGS.indent);
+      t.cm.setOption("tabSize", IDE_SETTINGS.indent);
+      t.cm.refresh();
+    });
+  }
+
+  const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真实文件冲突）
+  function openSettingsTab() {
+    let tab = findTab(SETTINGS_PATH);
+    if (!tab) {
+      const host = document.createElement("div");
+      host.className = "cm-host set-host";
+      tab = { path: SETTINGS_PATH, displayPath: "设置", name: "设置", host, cm: null,
+              original: "", dirty: false, big: false, group: curGroup, isSettings: true };
+      tabs.push(tab);
+      renderTabsAll();
+      buildSettingsContent(host);
+    }
+    activate(tab);   // 已打开则直接聚焦；正常文件仍可随时打开
+  }
+  function buildSettingsContent(host) {
+    host.innerHTML =
+    '<div class="set-layout">' +
+      '<div class="set-nav"><h1>设置</h1><input class="set-search" placeholder="搜索设置项" autocomplete="off" spellcheck="false">' +
+        '<div class="set-navitem" data-sec="sec-editor"><i class="bi bi-sliders"></i>编辑器</div>' +
+        '<div class="set-navitem" data-sec="sec-files"><i class="bi bi-folder2"></i>文件</div>' +
+        '<div class="set-navitem" data-sec="sec-keys"><i class="bi bi-keyboard"></i>快捷键</div>' +
+        '<div class="set-navitem" data-sec="sec-data"><i class="bi bi-database"></i>数据</div>' +
+      '</div>' +
+      '<div class="set-content">' +
+        '<div class="set-sec" id="sec-editor"><h2>编辑器</h2>' +
+          '<div class="set-row" data-kw="字体 字号 font size"><div class="set-info"><div class="set-label">字体大小</div><div class="set-desc">编辑器代码字体大小（10–24）</div></div><input type="number" min="10" max="24" id="setFontSize"></div>' +
+          '<div class="set-row" data-kw="换行 wrap line"><div class="set-info"><div class="set-label">自动换行</div><div class="set-desc">过长的行折行显示，不出现横向滚动条</div></div><input type="checkbox" id="setLineWrap"></div>' +
+          '<div class="set-row" data-kw="高亮 当前行 active line"><div class="set-info"><div class="set-label">高亮当前行</div><div class="set-desc">光标所在行加背景色</div></div><input type="checkbox" id="setActiveLine"></div>' +
+          '<div class="set-row" data-kw="缩进 tab indent"><div class="set-info"><div class="set-label">缩进空格数</div><div class="set-desc">Tab 与自动缩进的空格宽度</div></div><select id="setIndent"><option value="2">2</option><option value="4">4</option><option value="8">8</option></select></div>' +
+        '</div>' +
+        '<div class="set-sec" id="sec-files"><h2>文件</h2>' +
+          '<div class="set-row" data-kw="提示 注释 命名 hint"><div class="set-info"><div class="set-label">文件树命名提示</div><div class="set-desc">在文件名后显示说明注释（如 README → 项目说明）</div></div><input type="checkbox" id="setHints"></div>' +
+        '</div>' +
+        '<div class="set-sec" id="sec-keys"><h2 class="set-extra">快捷键</h2>' +
+          '<div class="set-desc set-extra" style="margin-bottom:10px;">点击「修改」后按下新组合键即可重新绑定；「清除」禁用该快捷键；冲突时原命令自动禁用。</div>' +
+          '<div id="setKeybinds"></div>' +
+          '<button class="set-btn set-extra" id="setKbReset" style="margin-top:8px;">恢复默认快捷键</button>' +
+          '<h2 style="font-size:15px;margin-top:26px;">系统快捷键（固定）</h2>' +
+          '<div class="set-desc" style="margin-bottom:10px;">以下在左侧文件树获得焦点（点击文件树后）时生效：</div>' +
+          '<div class="set-keys" id="setSysKeys"></div>' +
+        '</div>' +
+        '<div class="set-sec" id="sec-data"><h2>数据</h2>' +
+          '<div class="set-row" data-kw="最近 打开 记录 清除 recent"><div class="set-info"><div class="set-label">清除最近打开记录</div><div class="set-desc">清空 Quick Open 面板的「最近打开」列表</div></div><button class="set-btn" id="setClearRecent">清除</button></div>' +
+          '<div class="set-row" data-kw="默认 重置 设置 reset"><div class="set-info"><div class="set-label">恢复默认设置</div><div class="set-desc">将所有设置项恢复为默认值</div></div><button class="set-btn" id="setReset">重置</button></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    const q = (s) => host.querySelector(s);
+    const setSearchInput = q(".set-search");
+
+  const SYS_KEYS = [
+    ["重命名", "F2"], ["删除", "Delete"],
+    ["打开 / 展开目录", "Enter"], ["在侧边打开", "Ctrl Enter"],
+    ["复制文件", "Ctrl C"], ["剪切文件", "Ctrl X"], ["粘贴", "Ctrl V"],
+    ["复制绝对路径", "Ctrl Alt C"], ["复制相对路径", "Ctrl Alt Shift C"],
+    ["关闭下拉菜单", "Esc"],
+  ];
+
+    function filterSettingsRows(kw) {
+      const k = kw.trim().toLowerCase();
+      host.querySelectorAll(".set-row").forEach(r => {
+        r.style.display = (!k || (r.dataset.kw || "").includes(k) || r.textContent.toLowerCase().includes(k)) ? "" : "none";
+      });
+      host.querySelectorAll(".set-key, .kb-row").forEach(r => {
+        r.style.display = (!k || (r.dataset.kw || "").includes(k) || r.textContent.toLowerCase().includes(k)) ? "" : "none";
+      });
+      host.querySelectorAll(".set-extra").forEach(r => {
+        r.style.display = (!k || r.textContent.toLowerCase().includes(k)) ? "" : "none";
+      });
+      host.querySelectorAll(".set-sec").forEach(sec => {
+        const any = [...sec.querySelectorAll(".set-row, .set-key, .kb-row")].some(el => el.style.display !== "none");
+        sec.style.display = any ? "" : "none";
+      });
+    }
+    function setNavActive(secId) {
+      host.querySelectorAll(".set-navitem").forEach(n => n.classList.toggle("on", n.dataset.sec === secId));
+    }
+    host.querySelectorAll(".set-navitem").forEach(n => {
+      n.onclick = () => {
+        const sec = q("#" + n.dataset.sec);   // q 是选择器查询，必须带 #
+        if (sec) sec.scrollIntoView({ behavior: "smooth", block: "start" });
+        setNavActive(n.dataset.sec);
+      };
+    });
+    setSearchInput.addEventListener("input", () => filterSettingsRows(setSearchInput.value));
+    setSearchInput.addEventListener("keydown", e => e.stopPropagation());   // 面板内按键不触发全局快捷键；关闭走标签页 ×
+    // 当前值填入（每次重建标签页内容时都会刷新）
+    q("#setFontSize").value = IDE_SETTINGS.fontSize;
+    q("#setLineWrap").checked = IDE_SETTINGS.lineWrap;
+    q("#setActiveLine").checked = IDE_SETTINGS.activeLine;
+    q("#setIndent").value = IDE_SETTINGS.indent;
+    q("#setHints").checked = IDE_SETTINGS.hints;
+    q("#setFontSize").addEventListener("change", e => {
+      const v = Math.max(10, Math.min(24, parseInt(e.target.value, 10) || 13));
+      IDE_SETTINGS.fontSize = v; e.target.value = v; saveIdeSettings(); applyIdeSettings();
+    });
+    q("#setLineWrap").addEventListener("change", e => { IDE_SETTINGS.lineWrap = e.target.checked; saveIdeSettings(); applyIdeSettings(); });
+    q("#setActiveLine").addEventListener("change", e => { IDE_SETTINGS.activeLine = e.target.checked; saveIdeSettings(); applyIdeSettings(); });
+    q("#setIndent").addEventListener("change", e => { IDE_SETTINGS.indent = parseInt(e.target.value, 10) || 4; saveIdeSettings(); applyIdeSettings(); });
+    q("#setHints").addEventListener("change", e => { IDE_SETTINGS.hints = e.target.checked; saveIdeSettings(); applyIdeSettings(); });
+    q("#setClearRecent").onclick = () => { localStorage.removeItem("ide.recentFiles"); toast("已清除最近打开记录", "ok"); };
+    q("#setReset").onclick = () => {
+      Object.assign(IDE_SETTINGS, { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true });
+      saveIdeSettings(); applyIdeSettings();
+      q("#setFontSize").value = 13; q("#setLineWrap").checked = false; q("#setActiveLine").checked = true;
+      q("#setIndent").value = 4; q("#setHints").checked = true;
+      toast("已恢复默认设置", "ok");
+    };
+    // ---- 自定义快捷键：渲染 + 捕获新组合键 ----
+    let kbCapture = null;
+    const KB_MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "Cmd" : "Ctrl";   // Mod 仅内部存储，展示时按平台翻译
+    const fmtBind = (b) => b.split(" ").map(p => p === "Mod" ? KB_MOD_KEY : p.replace(/^Mod\+/, KB_MOD_KEY + "+")).join(" ");
+    function renderKeybinds() {
+      const box = q("#setKeybinds");
+      box.innerHTML = KEY_COMMANDS.map(c => {
+        const cur = effBind(c);
+        const cap = kbCapture === c.id;
+        const keysHtml = cap ? '<kbd style="color:#7ab8ff;">按下新组合键…</kbd>'
+          : (cur ? fmtBind(cur).split(" ").map(p => "<kbd>" + esc(p) + "</kbd>").join("")
+                 : '<span style="color:#777;font-size:11px;">未设置</span>');
+        return '<div class="kb-row' + (cap ? " capturing" : "") + '" data-kw="快捷键 ' + esc(c.label) + '">' +
+          '<span class="set-label">' + esc(c.label) + '</span><span class="kb-keys">' + keysHtml + '</span>' +
+          '<button class="kb-btn" data-kb="' + c.id + '">' + (cap ? "取消" : "修改") + '</button>' +
+          (cur ? '<button class="kb-btn" data-kbclr="' + c.id + '">清除</button>' : '') +
+        '</div>';
+      }).join("");
+      box.querySelectorAll("[data-kb]").forEach(b => { b.onclick = () => startKbCapture(b.dataset.kb); });
+      box.querySelectorAll("[data-kbclr]").forEach(b => {
+        b.onclick = () => { kbCustom[b.dataset.kbclr] = ""; saveKeybinds(); applyKeybinds(); renderKeybinds(); toast("已禁用该快捷键", "ok"); };
+      });
+    }
+    function stopKbCapture() {
+      kbCapture = null;
+      document.removeEventListener("keydown", kbCaptureHandler, true);
+    }
+    function kbCaptureHandler(e) {
+      e.preventDefault(); e.stopPropagation();
+      if (e.key === "Escape") { stopKbCapture(); renderKeybinds(); return; }
+      if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return;   // 只按了修饰键，继续等待
+      const parts = [];
+      if (e.ctrlKey || e.metaKey) parts.push("Mod");
+      if (e.altKey) parts.push("Alt");
+      if (e.shiftKey) parts.push("Shift");
+      let k = e.key;
+      if (k === "+") k = "=";
+      if (k === "~") k = "`";
+      parts.push(k.toLowerCase());
+      const sig = parts.join("+");
+      const clash = KEY_COMMANDS.find(c => c.id !== kbCapture && effBind(c) && effBind(c).toLowerCase() === sig.toLowerCase());
+      if (clash) { kbCustom[clash.id] = ""; toast("与「" + clash.label + "」冲突，原命令快捷键已禁用", "err"); }
+      const target = KEY_COMMANDS.find(c => c.id === kbCapture);
+      kbCustom[kbCapture] = sig;
+      stopKbCapture(); saveKeybinds(); applyKeybinds(); renderKeybinds();
+      toast("「" + target.label + "」已绑定 " + fmtBind(sig), "ok");
+    }
+    function startKbCapture(id) {
+      if (kbCapture === id) { stopKbCapture(); renderKeybinds(); return; }   // 再次点击 = 取消
+      if (kbCapture) stopKbCapture();
+      kbCapture = id;
+      renderKeybinds();
+      document.addEventListener("keydown", kbCaptureHandler, true);
+    }
+    q("#setKbReset").onclick = () => {
+      kbCustom = {}; saveKeybinds(); applyKeybinds(); renderKeybinds();
+      toast("已恢复默认快捷键", "ok");
+    };
+    renderKeybinds();
+    q("#setSysKeys").innerHTML = SYS_KEYS.map(k => '<div class="set-key"><span>' + k[0] + "</span><kbd>" + k[1] + "</kbd></div>").join("");
+  }
+  /* ---------- 命令注册表 + 自定义快捷键（设置 → 快捷键 可视化修改，localStorage 持久化） ---------- */
+  const KEY_COMMANDS = [
+    { id: "kb-save",        label: "保存当前文件",       def: "Mod+S",        run: () => { if (active) saveTab(active); } },
+    { id: "kb-save-all",    label: "保存全部",           def: "Mod+K S",      run: () => saveAllTabs() },
+    { id: "kb-close-all",   label: "关闭所有标签",       def: "Mod+K W",      run: () => closeGroupTabs(curGroup) },
+    { id: "kb-close-saved", label: "关闭已保存标签",     def: "Mod+K U",      run: () => closeGroupTabs(curGroup, true) },
+    { id: "kb-cmd",         label: "命令面板",           def: "Mod+P",        run: () => quickOpen() },
+    { id: "kb-search",      label: "搜索文件内容",       def: "Mod+Shift+F",  run: () => openSearch() },
+    { id: "kb-goto",        label: "跳转到行",           def: "Mod+G",        run: () => gotoLine() },
+    { id: "kb-find",        label: "文件内查找",         def: "Mod+F",        run: () => ffOpen(false) },
+    { id: "kb-replace",     label: "文件内替换",         def: "Mod+H",        run: () => ffOpen(true) },
+    { id: "kb-find-next",   label: "查找下一个",         def: "F3",           run: () => ffNext(1) },
+    { id: "kb-find-prev",   label: "查找上一个",         def: "Shift+F3",     run: () => ffNext(-1) },
+    { id: "kb-new",         label: "新建文件",           def: "Mod+N",        run: () => newInRoot(false) },
+    { id: "kb-close-tab",   label: "关闭标签",           def: "Mod+W",        run: () => { if (active) closeTab(active); } },
+    { id: "kb-sidebar",     label: "切换侧边栏",         def: "Mod+B",        run: () => toggleSidebar() },
+    { id: "kb-bottom",      label: "切换底部面板",       def: "Mod+J",        run: () => toggleBottom() },
+    { id: "kb-back",        label: "后退",               def: "Alt+ArrowLeft",  run: () => navGo(-1) },
+    { id: "kb-fwd",         label: "前进",               def: "Alt+ArrowRight", run: () => navGo(1) },
+    { id: "kb-split-r",     label: "向右拆分编辑器",     def: "Mod+\\",       run: () => splitEditor(null, "right") },
+    { id: "kb-split-d",     label: "向下拆分编辑器",     def: "Alt+\\",       run: () => splitEditor(null, "down") },
+    { id: "kb-wrap",        label: "切换自动换行",       def: "Alt+Z",        run: () => toggleWrap() },
+    { id: "kb-font-up",     label: "放大字体",           def: "Mod+=",        run: () => chFont(1) },
+    { id: "kb-font-down",   label: "缩小字体",           def: "Mod+-",        run: () => chFont(-1) },
+    { id: "kb-sel-match",   label: "查找：匹配选定内容", def: "Alt+L",        run: () => ffToggleInSelection() },
+    { id: "kb-run",         label: "运行当前文件",       def: "F5",           run: () => runCurrentFile() },
+    { id: "kb-run-bg",      label: "后台运行当前文件",   def: "Mod+F5",       run: () => runBackground() },
+    { id: "kb-md-preview",  label: "Markdown 预览",      def: "Mod+Shift+V",  run: () => mdTogglePreview() },
+    { id: "kb-md-split",    label: "Markdown 分屏",      def: "Mod+Shift+M",  run: () => mdSetMode("split") },
+    { id: "kb-term-new",    label: "新建终端",           def: "Mod+Shift+`",  run: () => { if (curTerm) selectTerm(curTerm); else termNew(); } },
+    { id: "kb-output",      label: "切换输出面板",       def: "Mod+`",        run: () => toggleOutput() },
+    { id: "kb-settings",    label: "打开设置",           def: "Mod+,",        run: () => openSettingsTab() },
+  ];
+  let kbCustom = (() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("ide.keybinds") || "{}");
+      const out = {};
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        for (const k in raw) if (typeof raw[k] === "string" && raw[k]) out[k] = raw[k];
+      }
+      return out;
+    } catch (_) { return {}; }
+  })();
+  function saveKeybinds() { localStorage.setItem("ide.keybinds", JSON.stringify(kbCustom)); }
+  function effBind(c) { const v = kbCustom[c.id]; return typeof v === "string" && v ? v : c.def; }
+  let kbMap = new Map();
+  function applyKeybinds() {
+    kbMap = new Map();
+    for (const c of KEY_COMMANDS) {
+      // 统一为分发器的空格分隔格式："Mod+K S" → "mod k s"，"Alt+ArrowLeft" → "alt arrowleft"
+      const b = (effBind(c) || "").trim().toLowerCase().replace(/\+/g, " ").replace(/\s+/g, " ");
+      if (b && !kbMap.has(b)) kbMap.set(b, c);   // 重复组合时按注册顺序优先
+    }
+  }
+  applyKeybinds();
+
+  applyIdeSettings();   // 启动时应用一次（新开编辑器读取 IDE_SETTINGS 默认值）
+
   /* ---------- 键盘快捷键 ---------- */
   let chordK = false;   // Ctrl+K 两段式快捷键（仿 VS Code）
   document.addEventListener("keydown", (e) => {
@@ -6339,38 +7112,25 @@
       if (mod && k === "x" && !treeSel.isDir) { e.preventDefault(); ctxTarget = treeSel; ctxAction("cut"); return; }
       if (mod && k === "v") { e.preventDefault(); ctxTarget = treeSel; ctxAction("paste"); return; }
     }
-    if (chordK) {
+    if (chordK) {   // Ctrl+K 两段式的第二段
       chordK = false;
       if (mod || e.altKey) return;
-      const k = e.key.toLowerCase();
-      if (k === "w") { e.preventDefault(); closeGroupTabs(curGroup); }
-      else if (k === "u") { e.preventDefault(); closeGroupTabs(curGroup, true); }
-      else if (k === "s") { e.preventDefault(); saveAllTabs(); }
+      const ccmd = kbMap.get("mod k " + e.key.toLowerCase());
+      if (ccmd) { e.preventDefault(); ccmd.run(); }
       return;
     }
     if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); chordK = true; return; }
-    if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); if (active) saveTab(active); }
-    else if (mod && e.key.toLowerCase() === "b") { e.preventDefault(); toggleSidebar(); }
-    else if (mod && e.key === "\\") { e.preventDefault(); splitEditor(null, "right"); }
-    else if (e.altKey && e.key === "\\") { e.preventDefault(); splitEditor(null, "down"); }
-    else if (mod && e.key.toLowerCase() === "w") { e.preventDefault(); if (active) closeTab(active); }
-    else if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); newInRoot(false); }
-    else if (mod && e.key.toLowerCase() === "p") { e.preventDefault(); openSearch(); }
-    else if (mod && e.altKey && e.key.toLowerCase() === "f") { e.preventDefault(); ffOpen(true); }
-    else if (mod && e.key.toLowerCase() === "f") { e.preventDefault(); ffOpen(false); }
-    else if (mod && e.key.toLowerCase() === "h") { e.preventDefault(); ffOpen(true); }
-    else if (e.key === "F3") { e.preventDefault(); ffNext(e.shiftKey ? -1 : 1); }
-    else if (mod && (e.key === "=" || e.key === "+")) { e.preventDefault(); chFont(1); }
-    else if (mod && e.key === "-") { e.preventDefault(); chFont(-1); }
-    else if (mod && e.key.toLowerCase() === "g") { e.preventDefault(); gotoLine(); }
-    else if (e.altKey && e.key.toLowerCase() === "z") { e.preventDefault(); toggleWrap(); }
-    else if (e.altKey && e.key.toLowerCase() === "l") { e.preventDefault(); ffToggleInSelection(); }
-    else if (e.key === "F5" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runBackground(); }  // 后台运行（服务模式）
-    else if (e.key === "F5") { e.preventDefault(); runCurrentFile(); }          // 运行当前文件（阻止浏览器刷新）
-    else if (mod && e.shiftKey && e.key.toLowerCase() === "v") { e.preventDefault(); mdTogglePreview(); }   // Markdown 预览 / 返回编辑
-    else if (mod && e.shiftKey && e.key.toLowerCase() === "m") { e.preventDefault(); mdSetMode("split"); }  // Markdown 分屏
-    else if (e.key === "`" && (e.ctrlKey || e.metaKey) && e.shiftKey) { e.preventDefault(); if (curTerm) selectTerm(curTerm); else termNew(); }
-    else if (e.key === "`" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); toggleOutput(); }
+    // 通用命令分发（组合键签名 → 设置页可自定义）
+    const parts = [];
+    if (mod) parts.push("mod");
+    if (e.altKey) parts.push("alt");
+    if (e.shiftKey) parts.push("shift");
+    let kk = e.key;
+    if (kk === "+") kk = "=";   // Ctrl+= 与 Ctrl++ 视为同一组合
+    if (kk === "~") kk = "`";   // Shift+` 在多数键盘布局产生 ~
+    parts.push(kk.toLowerCase());
+    const cmd = kbMap.get(parts.join(" "));
+    if (cmd) { e.preventDefault(); cmd.run(); }
   });
 
   // 窗口尺寸变化时重新测量所有已打开的编辑器，避免行号/内容错位
@@ -6450,6 +7210,7 @@
   loadRecentFolders().then(() => loadSpecialHints()).then(() => {  // 先取最近打开，再加载命名说明
     initTree();
     loadGitStatus();          // 启动时同步分支信息到状态栏
+    loadGitignoreRules();     // 启动时加载 .gitignore 规则，文件树忽略条目置灰
   });
 })();
 </script>

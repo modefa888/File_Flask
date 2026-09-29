@@ -224,7 +224,12 @@ def api_preview():
         stat = os.stat(target_path)
         ext = os.path.splitext(target_path)[1].lower().lstrip(".")
         filename = os.path.basename(target_path).lower()
-        is_text = ext in _TEXT_EXTS or filename in _TEXT_FILENAMES
+        # 链式扩展名匹配：app.log.20260826 / debug.json.bak 这类多段后缀，
+        # 只要任一段是已知文本/图片类型就按对应类型处理（日志按天轮转场景）
+        segments = [s for s in filename.split(".") if s]
+        is_text = (ext in _TEXT_EXTS or filename in _TEXT_FILENAMES
+                   or any(seg in _TEXT_EXTS for seg in segments[1:]))
+        is_image = ext in _IMAGE_EXTS or any(seg in _IMAGE_EXTS for seg in segments[1:])
         mime_type, _ = mimetypes.guess_type(target_path)
         if not mime_type:
             mime_type = "application/octet-stream"
@@ -253,7 +258,7 @@ def api_preview():
             resp.headers["Cache-Control"] = "no-store"
             return resp
         # 图片：raw=1 时直接返回图片字节（IDE 内嵌预览使用，前端 <img> 直接引用）
-        if ext in _IMAGE_EXTS and request.args.get("raw") == "1":
+        if is_image and request.args.get("raw") == "1":
             with open(target_path, "rb") as f:
                 data = f.read()
             resp = FlaskResponse(data, mimetype=mime_type)
@@ -271,7 +276,7 @@ def api_preview():
                 "content": base64.b64encode(data).decode("utf-8"),
                 "content_type": mime_type,
             })
-        elif ext in _IMAGE_EXTS:
+        elif is_image:
             import base64
             return jsonify({
                 "type": "image",

@@ -914,6 +914,66 @@
   .ai-perm-opt.on .t { color: #cfe3f7; }
   /* 只读权限下「插入到项目」不可用 */
   .ai-panel[data-perm="readonly"] .ai-md-ins { opacity: .38; cursor: not-allowed; }
+  /* 智能体开关 */
+  .ai-agent-btn {
+    display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; flex: none;
+    background: #2d2d31; border: 1px solid #3c3c3c; border-radius: 5px; color: #9aa4b2; font-size: 11px; cursor: pointer;
+  }
+  .ai-agent-btn:hover { border-color: #555; color: #dbe6f2; }
+  .ai-agent-btn.on { background: #234a2e; border-color: #3d7a4d; color: #9fe0b0; }
+  .ai-agent-btn .bi { font-size: 12px; }
+  /* 上下文占用：模型选择前的空心圆环（进度 = 已用 / 模型上下文窗口） */
+  .ai-ctx-ring { flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 22px; cursor: default; }
+  .ai-ctx-ring svg { transform: rotate(-90deg); display: block; }
+  .ai-ctx-ring circle { fill: none; stroke-width: 2.2; }
+  .ai-ctx-ring .cr-bg { stroke: #43434a; }
+  .ai-ctx-ring .cr-fg { stroke: #6cb6ff; stroke-linecap: round;
+    transition: stroke-dashoffset .25s ease, stroke .25s ease; }
+  .ai-ctx-ring.warn .cr-fg { stroke: #e2c08a; }
+  .ai-ctx-ring.bad .cr-fg { stroke: #e08a8a; }
+  /* 智能体的工具调用步骤 */
+  .ai-step { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: #9aa4b2;
+    background: #232327; border: 1px solid #33333a; border-radius: 6px; padding: 4px 8px; cursor: pointer;
+    align-self: flex-start; max-width: 100%; }
+  .ai-step .st-ic { color: #7fb3e0; display: inline-flex; }
+  .ai-step .st-name { color: #cfe3f7; }
+  .ai-step .st-arg { color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
+  .ai-step .st-res { margin-left: auto; }
+  .ai-step .st-res .ok { color: #7fd88f; }
+  .ai-step .st-res .bad { color: #e08a8a; }
+  .ai-step .st-res .deny { color: #e2c08a; }
+  .ai-step .st-detail { flex: 1 0 100%; display: none; margin: 4px 0 0; padding: 6px 8px; max-height: 260px;
+    overflow: auto; background: #17171a; border: 1px solid #2c2c33; border-radius: 5px; color: #cfe3d8;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; line-height: 16px; white-space: pre-wrap; }
+  .ai-step .st-detail.open { display: block; }
+  /* 工具调用步骤整体收进一个可折叠区域（默认只占一行，点击展开） */
+  .ai-steps { align-self: stretch; margin-top: 5px; border: 1px solid #33333a; border-radius: 6px;
+    background: #1f1f23; overflow: hidden; }
+  .ai-steps-head { display: flex; align-items: center; gap: 6px; padding: 4px 8px; cursor: pointer;
+    font-size: 11px; color: #9aa4b2; user-select: none; }
+  .ai-steps-head:hover { background: #26262b; }
+  .ai-steps-head .tw { font-size: 10px; color: #7d7d7d; flex: none; }
+  .ai-steps-head .ttl { color: #b9c6d4; flex: none; }
+  .ai-steps-head .sum { color: #767676; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-steps-head .spin { color: #7fb3e0; }
+  .ai-steps-body { display: flex; flex-direction: column; gap: 4px; padding: 2px 6px 6px; }
+  .ai-steps.collapsed .ai-steps-body { display: none; }
+  .ai-steps-body .ai-step { align-self: stretch; }
+  /* 命令确认卡片 */
+  .ai-ask { align-self: flex-start; max-width: 100%; background: #2c2718; border: 1px solid #5a4a26;
+    border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #e2c08a; }
+  .ai-ask .q code { background: #1c1a12; border: 1px solid #4a3f28; border-radius: 4px; padding: 1px 6px;
+    color: #ffd479; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .ai-ask .r { color: #b9a97f; font-size: 11px; margin-top: 4px; }
+  .ai-ask .btns { display: flex; gap: 6px; margin-top: 8px; }
+  .ai-ask .btns button { background: #3a3d41; border: 1px solid #4a4a4a; color: #dcdcdc; border-radius: 4px;
+    font-size: 11.5px; padding: 3px 10px; cursor: pointer; font-family: inherit; }
+  .ai-ask .btns button:hover { background: #45494e; }
+  .ai-ask .btns button.ok { background: #2b5c39; border-color: #3d7a4d; color: #d8f5df; }
+  .ai-ask .btns button.no:hover { background: #5a2b2b; border-color: #7a3d3d; color: #ffd7d7; }
+  .ai-ask.allowed { border-color: #3d7a4d; color: #9fe0b0; }
+  .ai-ask.denied { border-color: #7a3d3d; color: #e08a8a; }
   .ai-send {
     width: 28px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
     background: #0a6aa8; border: none; border-radius: 6px; color: #fff; font-size: 12px; cursor: pointer;
@@ -1813,8 +1873,15 @@
             <button class="ai-perm" id="aiPermBtn" title="AI 操作权限"><i class="bi bi-pencil-square"></i><span id="aiPermName">工作区内修改</span><i class="bi bi-chevron-up"></i></button>
             <div class="ai-perm-pop" id="aiPermPop" style="display:none"></div>
           </div>
+          <button class="ai-agent-btn" id="aiAgentBtn" title="智能体模式：让 AI 自动读文件、改文件、执行命令（需在设置里配置接口）"><i class="bi bi-robot"></i><span>智能体</span></button>
           <span class="ai-ctx-flag" id="aiCtxFlag" style="display:none"><i class="bi bi-file-earmark-text"></i> 附带当前文件</span>
           <span class="ai-spacer"></span>
+          <span class="ai-ctx-ring" id="aiCtxRing" title="上下文占用">
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+              <circle class="cr-bg" cx="8" cy="8" r="6.2"></circle>
+              <circle class="cr-fg" id="aiCtxArc" cx="8" cy="8" r="6.2"></circle>
+            </svg>
+          </span>
           <div class="ai-msel">
             <button class="ai-msel-btn" id="aiMselBtn" title="选择接口 / 模型"><i class="bi bi-cpu"></i><span id="aiMselName">加载模型…</span><i class="bi bi-chevron-up"></i></button>
             <div class="ai-msel-pop" id="aiMselPop" style="display:none"></div>
@@ -4278,6 +4345,10 @@
     perm: (() => {                                     // AI 操作权限：readonly / workspace / full
       try { return localStorage.getItem("ide.ai.perm") || "workspace"; } catch (_) { return "workspace"; }
     })(),
+    agent: (() => {                                    // 智能体模式：AI 自动读写文件 / 执行命令
+      try { return localStorage.getItem("ide.ai.agent") === "1"; } catch (_) { return false; }
+    })(),
+    ctxUsed: 0,                                        // 最近一次请求的上下文占用（token 估算）
     sessions: [], curId: "",                           // 对话列表（localStorage 持久化）
   };
   function aiRootKey() { return (typeof ROOT !== "undefined" ? ROOT : "default"); }
@@ -4322,6 +4393,11 @@
           role: m.role, text: m.text || m.content || "",
           imgs: m.imgs || (m.images ? m.images.length : 0) || undefined,
           reasoning: m.reasoning, ms: m.ms, ts: m.ts,
+          files: m.files,                                  // 附带过哪些文件（只存文件名）
+          steps: m.steps && m.steps.length ? m.steps.slice(0, 20).map(s => ({
+            tool: s.tool, args: s.args, ok: s.ok, denied: s.denied, ms: s.ms,
+            summary: s.summary, detail: (s.detail || "").slice(0, 600),
+          })) : undefined,                                 // 智能体的工具调用步骤（截断后落盘）
         })),
       }));
       localStorage.setItem(aiSessKey(), JSON.stringify(slim));
@@ -4348,7 +4424,8 @@
       applyAiWidth(saved > 0 ? saved : AI_DEFAULT_W, false);
       $("aiHist").style.display = "none";
       const mp = $("aiMselPop"); mp && (mp.style.display = "none");
-      aiRenderAll(); aiRenderConv(); aiRenderPerm();
+      aiRenderAll(); aiRenderConv(); aiRenderPerm(); aiRenderAgentToggle();
+      aiUpdateCtxRing();                 // 上下文占用圆环（按当前模型窗口）
       aiLoadCfg();                       // 打开面板即拉取配置，填充底部模型下拉
       if (!AI.busy) $("aiText").focus();
     } else {
@@ -4603,6 +4680,9 @@
       const extra = (!imgs.length && m.imgs) ? "\n[图片 ×" + m.imgs + "]" : "";
       if (m.reasoning) aiBubble("assistant", m.reasoning, "ai-think");
       const b = aiBubble(m.role, text + extra, "", imgs, m.role === "assistant", m.files);
+      if (m.steps && m.steps.length) {                 // 智能体：过程记录收进消息下方的折叠区域
+        b.parentElement.appendChild(aiBuildStepsBox(m.steps));
+      }
       if (m.role === "assistant") {
         const meta = aiMetaHtml(m, mi);
         if (meta) b.insertAdjacentHTML("afterend", meta);
@@ -4629,9 +4709,42 @@
       ? AI.active.model : (prov && prov.models && prov.models[0] || "");
     return { prov, model };
   }
+  /* ---------- 上下文占用指示：模型下拉前的空心圆环 ---------- */
+  function aiCtxWindow(model) {                        // 按模型名粗略估算上下文窗口
+    const m = String(model || "").toLowerCase();
+    let hit = m.match(/(\d+(?:\.\d+)?)\s*k(?:\s*(?:tok|tokens|context))?\b/);
+    if (hit) return Math.round(parseFloat(hit[1]) * 1000);
+    hit = m.match(/(\d+(?:\.\d+)?)\s*m(?:\s*(?:tok|tokens|context))?\b/);
+    if (hit) return Math.round(parseFloat(hit[1]) * 1000000);
+    return 128000;                                     // 未知时按 128K 估计
+  }
+  function aiFmtTok(n) {
+    n = Math.max(0, Math.round(n || 0));
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+    if (n >= 1000) return (n / 1000).toFixed(n >= 100000 ? 0 : 1) + "K";
+    return String(n);
+  }
+  function aiUpdateCtxRing(used) {
+    const arc = $("aiCtxArc"), ring = $("aiCtxRing");
+    if (!arc || !ring) return;
+    if (typeof used === "number") AI.ctxUsed = used;
+    const pick = aiCurrentPick();
+    const total = aiCtxWindow(pick.model);
+    const ratio = total > 0 ? Math.min(1, (AI.ctxUsed || 0) / total) : 0;
+    const C = 2 * Math.PI * 6.2;
+    arc.setAttribute("stroke-dasharray", C.toFixed(2));
+    arc.setAttribute("stroke-dashoffset", (C * (1 - ratio)).toFixed(2));
+    const pct = Math.round(ratio * 100);
+    ring.classList.toggle("warn", pct >= 60 && pct < 85);
+    ring.classList.toggle("bad", pct >= 85);
+    ring.title = "上下文占用：约 " + aiFmtTok(AI.ctxUsed || 0) + " / " + aiFmtTok(total) + " tokens（" + pct + "%）\n" +
+      "模型：" + (pick.model || "未选择") + "\n（窗口大小按模型名估算，输入输出合计，仅供参考）";
+  }
+
   function aiFillModelSelect() {
     const btnName = $("aiMselName"), btn = $("aiMselBtn"), pop = $("aiMselPop");
     if (!btnName) return;
+    aiUpdateCtxRing();                                 // 换模型后按新窗口重算占用比例
     const provs = AI.providers || [];
     if (!provs.length) {
       btnName.textContent = "未配置接口"; btn.title = "先到 设置 → AI 助手 添加接口";
@@ -4944,6 +5057,7 @@
     if (ok) st.outSum = (st.outSum || 0) + st.tokLast;
     aiPersistCurrent();
     aiRenderStats();
+    aiUpdateCtxRing(Math.round(inTok || 0) + Math.ceil((chars || 0) / 2));   // 上下文占用圆环
   }
   function aiRenderStats() {                              // 面板最底部总览状态栏
     const el = $("aiStats");
@@ -5106,6 +5220,207 @@
     const pop = $("aiPermPop");
     if (pop && pop.style.display !== "none" && !e.target.closest(".ai-perm-wrap")) pop.style.display = "none";
   });
+
+  /* ---------- 智能体（Agent）：AI 自动读文件 / 改文件 / 执行命令 ---------- */
+  const AI_TOOL_LABEL = {
+    read_file: "读取文件", write_file: "写入文件", edit_file: "修改文件",
+    list_dir: "列出目录", search_files: "搜索代码", run_command: "执行命令",
+  };
+  const AI_TOOL_ICON = {
+    read_file: "bi-file-earmark-text", write_file: "bi-file-earmark-plus", edit_file: "bi-pencil-square",
+    list_dir: "bi-folder2-open", search_files: "bi-search", run_command: "bi-terminal",
+  };
+  function aiRenderAgentToggle() {
+    const btn = $("aiAgentBtn");
+    if (!btn) return;
+    btn.classList.toggle("on", !!AI.agent);
+    btn.title = AI.agent
+      ? "智能体模式已开启：AI 会自动读文件、改文件、执行命令（当前权限：" + aiPermDef().label + "）"
+      : "智能体模式已关闭：点击开启后，AI 可以自动读写文件、执行命令";
+  }
+  $("aiAgentBtn").addEventListener("click", () => {
+    AI.agent = !AI.agent;
+    try { localStorage.setItem("ide.ai.agent", AI.agent ? "1" : "0"); } catch (_) {}
+    aiRenderAgentToggle();
+    toast(AI.agent ? "已开启智能体模式（权限：" + aiPermDef().label + "）" : "已关闭智能体模式", "ok");
+  });
+
+  /* 工具调用步骤卡片 */
+  function aiStepRow(ev) {
+    const row = document.createElement("div");
+    row.className = "ai-step";
+    const args = ev.args || {};
+    row.innerHTML = '<span class="st-ic"><i class="bi ' + (AI_TOOL_ICON[ev.tool] || "bi-gear") + '"></i></span>' +
+      '<span class="st-name"></span><span class="st-arg"></span>' +
+      '<span class="st-res"><span class="d">执行中…</span></span>';
+    row.querySelector(".st-name").textContent = AI_TOOL_LABEL[ev.tool] || ev.tool;
+    const argEl = row.querySelector(".st-arg");
+    argEl.textContent = args.path || args.command || args.pattern || "";
+    argEl.title = JSON.stringify(args, null, 1);
+    row.addEventListener("click", () => {
+      const d = row.querySelector(".st-detail");
+      if (d) d.classList.toggle("open");
+    });
+    return row;
+  }
+  function aiStepDone(row, ev) {
+    if (!row) return;
+    const d = row.querySelector(".st-res .d");
+    if (!d) return;
+    d.className = ev.ok ? "ok" : (ev.denied ? "deny" : "bad");
+    d.textContent = ev.ok ? "完成 " + (ev.ms || 0) + "ms" : (ev.denied ? "已拦截" : "失败");
+    row.title = (ev.summary || "") + (ev.detail ? "\n（点击查看详情）" : "");
+    let pre = row.querySelector(".st-detail");
+    if (!pre) { pre = document.createElement("pre"); pre.className = "st-detail"; row.appendChild(pre); }
+    pre.textContent = [ev.summary ? "结果：" + ev.summary : "", ev.detail || ""].filter(Boolean).join("\n\n");
+  }
+
+  /* 工具步骤汇总文案：列出目录 ×2 · 读取文件 ×3 · 1 项被拦截 */
+  function aiStepsSummary(steps) {
+    const cnt = {};
+    let denied = 0;
+    (steps || []).forEach(s => {
+      const k = AI_TOOL_LABEL[s.tool] || s.tool;
+      cnt[k] = (cnt[k] || 0) + 1;
+      if (s.denied) denied++;
+    });
+    return Object.keys(cnt).map(k => k + " ×" + cnt[k]).join(" · ") + (denied ? " · " + denied + " 项被拦截" : "");
+  }
+  /* 把一次智能体执行的所有工具步骤收进一个可折叠区域（默认折叠，只占一行） */
+  function aiBuildStepsBox(steps) {
+    const box = document.createElement("div");
+    box.className = "ai-steps collapsed";
+    box.innerHTML =
+      '<div class="ai-steps-head"><i class="bi bi-chevron-right tw"></i>' +
+      '<span class="ttl"></span><span class="sum"></span></div>' +
+      '<div class="ai-steps-body"></div>';
+    box._list = [];
+    box._body = box.querySelector(".ai-steps-body");
+    box._head = box.querySelector(".ai-steps-head");
+    box._live = "";
+    box._paint = function () {
+      const running = !!box._live;
+      box._head.querySelector(".ttl").innerHTML = running
+        ? '<i class="bi bi-arrow-repeat spin"></i> 正在执行… <span style="color:#9aa4b2">' + esc(box._live) + "</span>"
+        : "已执行 " + box._list.length + " 步";
+      box._head.querySelector(".sum").textContent = aiStepsSummary(box._list);
+    };
+    box._head.onclick = () => {
+      const collapsed = box.classList.toggle("collapsed");
+      box._head.querySelector(".tw").className =
+        "bi " + (collapsed ? "bi-chevron-right" : "bi-chevron-down") + " tw";
+    };
+    (steps || []).forEach(s => {                       // 回放历史时一次性填充
+      const row = aiStepRow(s);
+      aiStepDone(row, s);
+      box._body.appendChild(row);
+      box._list.push(s);
+    });
+    box._paint();
+    return box;
+  }
+
+  /* 需要用户确认的调用（例如执行命令） */
+  function aiAskCard(ev, runId) {
+    const row = document.createElement("div");
+    row.className = "ai-ask";
+    row.innerHTML = '<div class="q"><i class="bi bi-terminal"></i> <code></code></div>' +
+      '<div class="r"></div><div class="btns">' +
+      '<button class="ok">允许执行</button>' +
+      '<button class="all">本次会话都允许</button>' +
+      '<button class="no">拒绝</button></div>';
+    const args = ev.args || {};
+    row.querySelector("code").textContent = args.command || args.path || JSON.stringify(args);
+    row.querySelector(".r").textContent = ev.reason || "需要你确认后才会执行";
+    const decide = (allow, always) => {
+      fetch("/api/ai/agent/approve", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ run_id: runId, call_id: ev.call_id, allow: allow, always: always }),
+      }).catch(() => {});
+      row.classList.add(allow ? "allowed" : "denied");
+      row.querySelector(".btns").remove();
+      row.querySelector(".r").textContent = allow ? "已允许执行" : "已拒绝执行";
+    };
+    row.querySelector(".ok").onclick = () => decide(true, false);
+    row.querySelector(".all").onclick = () => decide(true, true);
+    row.querySelector(".no").onclick = () => decide(false, false);
+    return row;
+  }
+
+  /* 运行智能体：解析 SSE（步骤 / 确认 / 流式回答），返回 { text, steps }
+     过程记录统一收进「AI 消息下方」的一个折叠区域，默认只占一行。 */
+  async function aiRunAgent(payload, bodyB, onDelta) {
+    const msgsBox = $("aiMsgs");
+    const bodyRow = bodyB.parentElement;
+    const stepMeta = new Map();          // call_id -> {tool, args}
+    const rows = new Map();              // call_id -> 步骤行
+    const steps = [];
+    let stepsBox = null;
+    const ensureStepsBox = () => {
+      if (!stepsBox) {
+        stepsBox = aiBuildStepsBox([]);
+        bodyRow.appendChild(stepsBox);               // 追加在 AI 气泡/元信息之后（即消息下面）
+      }
+      return stepsBox;
+    };
+    let runId = "", text = "";
+    const r = await fetch("/api/ai/agent", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload), signal: AI.ctrl.signal,
+    });
+    if (!r.ok) {
+      let msg = "HTTP " + r.status;
+      try { msg = (await r.json()).error || msg; } catch (_) {}
+      throw new Error(msg);
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const evt = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        for (const line of evt.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          let e;
+          try { e = JSON.parse(line.slice(5).trim()); } catch (_) { continue; }
+          if (e.type === "run") { runId = e.run_id; }
+          else if (e.type === "delta") {
+            text += e.text;
+            if (onDelta) onDelta(text);
+          } else if (e.type === "step") {
+            stepMeta.set(e.call_id, { tool: e.tool, args: e.args });
+            const box = ensureStepsBox();
+            const row = aiStepRow(e);
+            box._body.appendChild(row);
+            rows.set(e.call_id, row);
+            const a = e.args || {};
+            box._live = (AI_TOOL_LABEL[e.tool] || e.tool) +
+              (a.path || a.command || a.pattern ? " " + (a.path || a.command || a.pattern) : "");
+            box._paint();
+          } else if (e.type === "ask") {
+            ensureStepsBox()._body.appendChild(aiAskCard(e, runId));
+          } else if (e.type === "result") {
+            const meta = stepMeta.get(e.call_id) || { tool: e.tool, args: {} };
+            aiStepDone(rows.get(e.call_id), e);
+            const rec = { tool: meta.tool, args: meta.args, ok: !!e.ok, denied: !!e.denied,
+                          ms: e.ms, summary: e.summary || "", detail: e.detail || "" };
+            steps.push(rec);
+            if (stepsBox) { stepsBox._list.push(rec); stepsBox._live = ""; stepsBox._paint(); }
+          } else if (e.type === "error") {
+            throw new Error(e.error);
+          }
+        }
+      }
+      msgsBox.scrollTop = msgsBox.scrollHeight;
+    }
+    if (stepsBox) { stepsBox._live = ""; stepsBox._paint(); }
+    return { text: text, steps: steps };
+  }
 
   /* ---------- 附加文件到对话：资源管理器右键「添加到 AI 对话」→ 输入框上方出现小卡片 ---------- */
   const AI_FILE_LIMIT = 6;          // 最多同时附加几个文件
@@ -5320,6 +5635,30 @@
     let acc = "", thinking = "", ttft = 0;                // ttft：首 token 到达耗时
     AI.ctrl = new AbortController();
     try {
+      if (AI.agent) {                                     // 智能体模式：走带工具的 Agent 接口
+        const res = await aiRunAgent({
+          repo: (typeof ROOT !== "undefined" ? ROOT : ""),
+          perm: AI.perm,
+          provider_id: prov.id,
+          model: pick.model,
+          messages: [
+            ...usedHist.map(m => ({ role: m.role, content: m.text || m.content || "" })),
+            { role: "user", content: curContent },
+          ],
+        }, bodyB, (t) => {
+          acc = t;
+          bodyB.innerHTML = aiMd(t) + '<span class="ai-cursor"></span>';
+        });
+        acc = res.text || "";
+        bodyB.innerHTML = aiMd(acc) || "（已完成，未产生文字说明）";
+        const aMeta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
+        AI.msgs.push({ role: "assistant", text: acc, ms: aMeta.ms, ts: aMeta.ts,
+                       steps: res.steps.length ? res.steps : undefined });
+        bodyB.insertAdjacentHTML("afterend", aiMetaHtml({ text: acc, ms: aMeta.ms, ts: aMeta.ts }, AI.msgs.length - 1));
+        aiPersistCurrent(); aiRenderConv();
+        aiRecordStat(true, aMeta.ms, acc.length, ttft, inTok);
+        return;
+      }
       const r = await fetch("/api/ai/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload), signal: AI.ctrl.signal,

@@ -21,6 +21,7 @@ import json
 import os
 import re
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -34,13 +35,14 @@ from flask import Blueprint, jsonify, request, Response
 from .. import config
 from ..log import get_logger
 from ..services.safety import check_command
-from .ai import _clean_content, _load_cfg, _sse
+from .ai import _clean_content, _load_cfg, _open_stream, _sse
 
 _log = get_logger()
 bp = Blueprint("agent", __name__)
 
 _MAX_ROUNDS = 12                     # 最多工具轮数（防止死循环）
-_CONNECT_TIMEOUT = 60                # 模型接口超时
+_CONNECT_TIMEOUT = 15                # 建立连接超时（快速报错）
+_READ_TIMEOUT = 300                  # 连上后等模型吐字的超时（慢模型首字可能要几十秒）
 _TOOL_CHARS = 20000                  # 单个工具结果回填给模型的字符上限
 _ASK_TIMEOUT = 600                   # 等待用户确认的最长时间（秒）
 _READ_CHARS = 40000                  # read_file 最多返回多少字符
@@ -418,6 +420,41 @@ def _agent_system(root, perm):
     )
 
 
+# 有些模型（商汤 SenseNova、部分开源权重）不走标准 tool_calls 字段，而是把调用写在
+# 正文里：<tool_call><function=list_dir><parameter=path>app</parameter></function></tool_call>
+# 这里做一层兼容解析，否则会出现「看着像在调工具、实际一步都没执行」。
+_TEXT_CALL_RE = re.compile(r"<tool_call>(.*?)(?:</tool_call>|$)", re.S | re.I)
+_TEXT_FUNC_RE = re.compile(r"<function[=:\s]+[\"']?([\w.\-]+)[\"']?\s*>(.*?)(?:</function>|$)", re.S | re.I)
+_TEXT_ARG_RE = re.compile(r"<parameter[=:\s]+[\"']?([\w.\-]+)[\"']?\s*>(.*?)(?:</parameter>|(?=<parameter)|$)", re.S | re.I)
+_TEXT_NAME_ATTR = re.compile(r"<(parameter|function)\s+name\s*=\s*[\"']([^\"']+)[\"']\s*>", re.I)
+_TEXT_CALL_HINT = re.compile(r"<tool_calls?>|<function[=:\s]|<parameter[=:\s]", re.I)
+
+
+def _parse_text_calls(text):
+    """从正文里解析文本格式的工具调用；解析不到返回 []。"""
+    if not text or not _TEXT_CALL_HINT.search(text):
+        return []
+    blocks = _TEXT_CALL_RE.findall(text) or [text]
+    out = []
+    for b in blocks:
+        b = _TEXT_NAME_ATTR.sub(r"<\1=\2>", b)          # <parameter name="x"> → <parameter=x>
+        for fm in _TEXT_FUNC_RE.finditer(b):
+            name, body = fm.group(1).strip(), fm.group(2) or ""
+            args = {}
+            for am in _TEXT_ARG_RE.finditer(body):
+                key, raw = am.group(1).strip(), (am.group(2) or "").strip()
+                if not key:
+                    continue
+                try:
+                    args[key] = json.loads(raw)          # 数字/布尔/对象按 JSON 解析
+                except ValueError:
+                    args[key] = raw.strip().strip("\"'").strip()
+            if name:
+                out.append({"id": "textcall_%d" % len(out), "name": name, "args": args,
+                            "args_raw": json.dumps(args, ensure_ascii=False)})
+    return out
+
+
 def _stream_model(provider, model, convo):
     """调用模型（流式，带工具定义）：yield SSE 事件，返回 (文本, 工具调用列表)。"""
     base = provider["base_url"].rstrip("/")
@@ -431,13 +468,16 @@ def _stream_model(provider, model, convo):
     })
     text, calls = "", {}
     try:
-        resp = urllib.request.urlopen(req, timeout=_CONNECT_TIMEOUT)
+        resp = _open_stream(req, url, _CONNECT_TIMEOUT, _READ_TIMEOUT)
     except urllib.error.HTTPError as e:
         try:
             detail = e.read().decode("utf-8", "replace")[:400]
         except OSError:
             detail = ""
         yield _sse({"type": "error", "error": "接口返回 %s：%s" % (e.code, detail or e.reason)})
+        return text, []
+    except (socket.timeout, TimeoutError):
+        yield _sse({"type": "error", "error": "连接 AI 接口超时（%d 秒）：请检查接口地址与网络" % _CONNECT_TIMEOUT})
         return text, []
     except (urllib.error.URLError, OSError) as e:
         yield _sse({"type": "error", "error": "无法连接 AI 接口：%s" % e})
@@ -494,6 +534,10 @@ def _stream_model(provider, model, convo):
             args = {}
         out.append({"id": c["id"] or ("call_%s" % idx), "name": c["name"], "args": args,
                     "args_raw": c["args_raw"] or "{}"})
+    if not out:                                   # 兼容：有些模型把调用写在正文里
+        out = _parse_text_calls(text)
+        if out:
+            _log.info("Agent：模型用文本格式返回了 %d 个工具调用，已按兼容模式解析", len(out))
     return text, out
 
 

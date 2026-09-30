@@ -4743,7 +4743,11 @@
     return m[1];
   }
   function aiMd(src) {
-    const lines = String(src || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").split("\n");
+    // 有些模型把工具调用写在正文里（<tool_call>…</tool_call>）：后端已按兼容模式解析执行，
+    // 这里把原始文本折叠成一行提示，避免整屏 XML 污染消息
+    const clean = String(src || "").replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/g,
+      "\n\n> 已按兼容模式解析为工具调用\n\n");
+    const lines = clean.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").split("\n");
     const flushP = (buf) => buf.length ? "<p>" + buf.map(aiMdInline).join("<br>") + "</p>" : "";
     let html = "", pbuf = [], i = 0, lastFile = "";
     while (i < lines.length) {

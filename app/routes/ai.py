@@ -17,9 +17,11 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from flask import Blueprint, request, jsonify, Response
@@ -31,8 +33,35 @@ _log = get_logger()
 bp = Blueprint("ai", __name__)
 
 _LOCK = threading.Lock()
-_CONNECT_TIMEOUT = 15
-_READ_TIMEOUT = 300
+_CONNECT_TIMEOUT = 15                 # 建立连接的超时（快速报错）
+_READ_TIMEOUT = 300                   # 连上之后等模型吐字的超时（慢模型首字可能要几十秒）
+
+
+def _preflight(url, timeout=_CONNECT_TIMEOUT):
+    """先快速探一次端口：连不上立刻报错，避免把长读超时耗在不可达的地址上。
+
+    走代理时跳过（预检直连会绕过代理，反而误判）。"""
+    if os.environ.get("http_proxy") or os.environ.get("https_proxy") or os.environ.get("all_proxy"):
+        return
+    u = urllib.parse.urlsplit(url)
+    host = u.hostname
+    if not host:
+        return
+    port = u.port or (443 if u.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            pass
+    except OSError as e:
+        raise OSError("连接 %s:%s 失败：%s" % (host, port, e))
+
+
+def _open_stream(req, url, connect_timeout=_CONNECT_TIMEOUT, read_timeout=_READ_TIMEOUT):
+    """打开模型接口请求：连接阶段短超时，连上后读超时放宽。
+
+    注意 urlopen 的 timeout 对连接和读取都生效：只给 15 秒会把「首字慢」的
+    模型判成「无法连接 AI 接口：The read operation timed out」。"""
+    _preflight(url, connect_timeout)
+    return urllib.request.urlopen(req, timeout=read_timeout)
 _MAX_IMAGE_DATAURL = 9_000_000        # 单张图片 data URL 上限（约 6.7MB 原图）
 _MAX_IMAGE_PARTS = 8                  # 单次请求最多图片部件数
 
@@ -245,13 +274,17 @@ def api_ai_chat():
 
     def gen():
         try:
-            resp = urllib.request.urlopen(req, timeout=_CONNECT_TIMEOUT)
+            resp = _open_stream(req, url)
         except urllib.error.HTTPError as e:
             try:
                 detail = e.read().decode("utf-8", "replace")[:500]
             except OSError:
                 detail = ""
             yield _sse({"error": f"接口返回 {e.code}：{detail or e.reason}"})
+            yield b"data: [DONE]\n\n"
+            return
+        except (socket.timeout, TimeoutError):
+            yield _sse({"error": "连接 AI 接口超时（%d 秒）：请检查接口地址与网络" % _CONNECT_TIMEOUT})
             yield b"data: [DONE]\n\n"
             return
         except (urllib.error.URLError, OSError) as e:
@@ -283,6 +316,10 @@ def api_ai_chat():
                 reasoning = delta.get("reasoning_content")
                 if piece or reasoning:
                     yield _sse({"delta": piece or "", "reasoning": reasoning or ""})
+            yield b"data: [DONE]\n\n"
+        except (socket.timeout, TimeoutError):
+            yield _sse({"error": "模型 %d 秒没有返回新内容（响应超时），可重试或换个更快的模型"
+                                % _READ_TIMEOUT})
             yield b"data: [DONE]\n\n"
         except (OSError, urllib.error.URLError) as e:
             yield _sse({"error": f"读取流中断：{e}"})

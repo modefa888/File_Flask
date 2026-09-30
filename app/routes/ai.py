@@ -292,3 +292,54 @@ def api_ai_chat():
 
     return Response(gen(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+_SUMMARY_TIMEOUT = 60
+_SUMMARY_SYS = ("你是记忆压缩器。请把对话历史压缩成一份简洁的「记忆摘要」，保留：用户的目标与需求、已得出的结论、"
+                "涉及的文件名与关键代码要点、尚未完成的事项。不要寒暄，直接输出摘要正文，不超过 300 字。")
+
+
+@bp.route("/api/ai/summarize", methods=["POST"])
+def api_ai_summarize():
+    """dsh 式记忆压缩：把旧对话历史（可带旧摘要增量合并）压缩成简短记忆（非流式）。"""
+    cfg = _load_cfg()
+    if not cfg["providers"] or not cfg["active"].get("model"):
+        return jsonify({"error": "AI 助手尚未配置"}), 400
+    data = request.get_json(silent=True) or {}
+    msgs = data.get("messages") or []
+    prev = str(data.get("prev") or "")[:2000]
+    if not isinstance(msgs, list) or not msgs:
+        return jsonify({"error": "messages 不能为空"}), 400
+
+    want_pid = str(data.get("provider_id") or "")
+    want_model = str(data.get("model") or "")
+    provider = next((p for p in cfg["providers"] if p["id"] == want_pid), None)
+    if provider is None:
+        provider = next((p for p in cfg["providers"] if p["id"] == cfg["active"].get("provider")),
+                        cfg["providers"][0])
+    model = want_model or cfg["active"].get("model") or (provider["models"][0] if provider["models"] else "")
+
+    convo = []
+    for m in msgs[:80]:
+        role = "用户" if str(m.get("role")) == "user" else "AI"
+        convo.append(role + ": " + str(m.get("text") or m.get("content") or "")[:3000])
+    content = ("[已有记忆摘要]\n" + prev + "\n\n[新增对话]\n" if prev else "") + "\n".join(convo)
+    content = content[:24000]
+
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    payload = json.dumps({"model": model, "stream": False, "messages": [
+        {"role": "system", "content": _SUMMARY_SYS}, {"role": "user", "content": content}]}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, method="POST", headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+    try:
+        resp = urllib.request.urlopen(req, timeout=_SUMMARY_TIMEOUT)
+        obj = json.loads(resp.read().decode("utf-8"))
+        choices = obj.get("choices") or [{}]
+        text = ((choices[0] or {}).get("message") or {}).get("content") or ""
+        _log.info("AI 记忆压缩：model=%s msgs=%d 摘要=%d字", model, len(msgs), len(text))
+        return jsonify({"summary": text.strip()[:2000]})
+    except urllib.error.HTTPError as e:
+        return jsonify({"error": f"接口返回 {e.code}"}), 502
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return jsonify({"error": f"压缩失败：{e}"}), 502

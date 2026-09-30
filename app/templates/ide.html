@@ -745,16 +745,46 @@
   .ai-md-pre { background: #141417; border: 1px solid #33333a; border-radius: 8px; margin: 8px 0; overflow: hidden; }
   .ai-md-ch { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px;
     background: #1d1d21; border-bottom: 1px solid #33333a; font-size: 10.5px; color: #767676; }
-  .ai-md-copy { background: transparent; border: none; color: #8a8a8a; cursor: pointer; font-size: 11px; padding: 0 2px; }
-  .ai-md-copy:hover { color: #fff; }
-  .ai-md-pre pre { margin: 0; padding: 9px 11px; overflow-x: auto; }
-  .ai-md-pre code { background: transparent; border: none; padding: 0; color: #cfe3d8;
-    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.55; }
+  .ai-md-btns { display: inline-flex; align-items: center; gap: 8px; }
+  .ai-md-copy, .ai-md-ins { background: transparent; border: none; color: #8a8a8a; cursor: pointer; font-size: 12px; padding: 0 2px; }
+  .ai-md-copy:hover, .ai-md-ins:hover { color: #fff; }
+  .ai-md-ins:hover { color: #7fd88f; }
+  .bubble.ai-md .ai-md-pre pre { margin: 0; padding: 9px 12px 9px 10px; white-space: pre; word-break: normal; flex: 1; }
+  .bubble.ai-md .ai-md-pre code { background: transparent; border: none; border-radius: 0; padding: 0; color: #cfe3d8;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 18px; white-space: pre; }
+  .ai-md-code { display: flex; align-items: stretch; overflow-x: auto; }
+  .ai-md-ln { flex: none; position: sticky; left: 0; z-index: 1; padding: 9px 8px 9px 12px; text-align: right;
+    min-width: 2.2em; color: #525258; background: #141417; border-right: 1px solid #2a2a2e; user-select: none;
+    white-space: pre; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; }
+  .ai-md-ln div { height: 18px; line-height: 18px; }   /* 与代码行盒一一对应，杜绝累积错位 */
+  /* 代码高亮配色（One Dark 风格） */
+  .hl-k { color: #c678dd; }
+  .hl-s { color: #98c379; }
+  .hl-n { color: #d19a66; }
+  .hl-c { color: #7a7a7f; font-style: italic; }
+  .hl-f { color: #61afef; }
+  .hl-a { color: #e5c07b; }
+  .hl-o { color: #56b6c2; }
+  /* 表格 */
+  .bubble.ai-md table { border-collapse: collapse; margin: 8px 0; font-size: 12px; max-width: 100%; display: block; overflow-x: auto; }
+  .bubble.ai-md th, .bubble.ai-md td { border: 1px solid #3a3a3e; padding: 5px 9px; text-align: left; vertical-align: top; }
+  .bubble.ai-md th { background: #1d1d21; color: #e8e8e8; font-weight: 600; white-space: nowrap; }
+  .bubble.ai-md tr:nth-child(even) td { background: rgba(255,255,255,.02); }
   .ai-row .bubble.err { color: #e08a8a; background: #312525; }
   .ai-bimgs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; justify-content: flex-end; }
   .ai-row.assistant .ai-bimgs { justify-content: flex-start; }
   .ai-bimgs img { max-width: 140px; max-height: 100px; border-radius: 6px; border: 1px solid #3c3c3c; object-fit: cover; cursor: zoom-in; }
   .ai-imgs { flex: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 0 10px 6px; background: #232326; }
+  .ai-stats { flex: none; padding: 5px 12px 6px; font-size: 10.5px; line-height: 1.5; color: #6e7681;
+    background: #1b1b1f; border-top: 1px solid #26262b; user-select: none; }
+  .ai-sep { color: #3a3a40; margin: 0 2px; }
+  .ai-rate.good { color: #7fd88f; }
+  .ai-rate.mid { color: #e8c07a; }
+  .ai-rate.bad { color: #e08a8a; }
+  .ai-meta { display: flex; align-items: center; gap: 5px; margin-top: 5px; font-size: 10.5px; color: #6e7681; user-select: none; }
+  .ai-meta .ai-mcopy, .ai-meta .ai-mregen { background: none; border: none; color: #8a8a8a; cursor: pointer; font-size: 11.5px; padding: 0 2px; }
+  .ai-meta .ai-mcopy:hover, .ai-meta .ai-mregen:hover { color: #d7dce2; }
+  .ai-meta .ai-mregen:hover { color: #7fb3e0; }
   .ai-img-thumb { position: relative; width: 54px; height: 54px; border-radius: 6px; overflow: hidden; border: 1px solid #3c3c3c; }
   .ai-img-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .ai-img-thumb .rm {
@@ -1655,6 +1685,7 @@
         </div>
         <input type="file" id="aiFile" accept="image/png,image/jpeg,image/webp,image/gif" multiple style="display:none">
       </div>
+      <div class="ai-stats" id="aiStats" style="display:none"></div>
     </div>
   </div>
 
@@ -4063,10 +4094,11 @@
       // 图片 dataURL 不落 localStorage（会爆配额），只记录张数，回放时显示 [图片 ×N]
       const slim = AI.sessions.map(v => ({
         id: v.id, title: v.title, time: v.time,
+        mem: v.mem || "", cmp: v.cmp || 0, cmpLen: v.cmpLen || 0, savedTok: v.savedTok || 0, stats: v.stats,
         msgs: (v.msgs || []).slice(-60).map(m => ({
           role: m.role, text: m.text || m.content || "",
           imgs: m.imgs || (m.images ? m.images.length : 0) || undefined,
-          reasoning: m.reasoning,
+          reasoning: m.reasoning, ms: m.ms, ts: m.ts,
         })),
       }));
       localStorage.setItem(aiSessKey(), JSON.stringify(slim));
@@ -4129,12 +4161,92 @@
       .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
       .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   }
+  /* ---------- 代码高亮（零依赖，One Dark 配色） ---------- */
+  function aiHlHtml(code) {
+    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    let html = "", i = 0, m;
+    // 注释正则用字符串拼接，避免源码里出现 HTML 注释序列干扰解析
+    const re = new RegExp("(<!" + "--[\\s\\S]*?--" + ">)|(<\\/?)([A-Za-z][\\w-]*)((?:[^>\"']|\"[^\"]*\"|'[^']*')*)(>|\\/>)", "g");
+    while ((m = re.exec(code))) {
+      html += esc(code.slice(i, m.index));
+      if (m[1]) html += '<span class="hl-c">' + esc(m[1]) + "</span>";
+      else {
+        html += '<span class="hl-o">' + esc(m[2]) + '</span><span class="hl-k">' + m[3] + "</span>";
+        const are = /([A-Za-z_:@][\w:.-]*)(\s*=\s*)?("[^"]*"|'[^']*')|(\s+)/g;
+        let am;
+        while ((am = are.exec(m[4]))) {
+          if (am[1]) html += '<span class="hl-a">' + am[1] + "</span>" +
+            (am[2] ? '<span class="hl-o">' + esc(am[2]) + "</span>" : "") +
+            (am[3] ? '<span class="hl-s">' + esc(am[3]) + "</span>" : "");
+          else html += am[4];
+        }
+        html += '<span class="hl-o">' + esc(m[5]) + "</span>";
+      }
+      i = re.lastIndex;
+    }
+    return html + esc(code.slice(i));
+  }
+  function aiHl(code, lang) {
+    lang = (lang || "").toLowerCase();
+    const alias = { py: "python", js: "javascript", ts: "javascript", jsx: "javascript", tsx: "javascript",
+      node: "javascript", sh: "shell", bash: "shell", zsh: "shell", console: "shell",
+      yml: "yaml", htm: "html", xml: "html", svg: "html", vue: "html" };
+    lang = alias[lang] || lang;
+    if (lang === "html") return aiHlHtml(code);
+    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const defs = {
+      python: { c: "#", kw: ["False","None","True","and","as","assert","async","await","break","class","continue","def","del","elif","else","except","finally","for","from","global","if","import","in","is","lambda","nonlocal","not","or","pass","raise","return","try","while","with","yield"],
+        bi: ["print","range","len","str","int","float","list","dict","set","tuple","open","enumerate","zip","map","sorted","abs","min","max","sum","round","isinstance","type","super","self","format"] },
+      javascript: { c: "//", kw: ["const","let","var","function","return","if","else","for","while","class","new","this","typeof","instanceof","import","export","from","async","await","try","catch","finally","throw","break","continue","switch","case","default","do","extends","super","yield","delete","of","null","undefined","true","false"],
+        bi: ["console","document","window","JSON","Math","Object","Array","String","Number","Boolean","Promise","Map","Set","fetch","setTimeout","setInterval","require","alert"] },
+      json: { c: null, kw: ["true","false","null"], bi: [] },
+      shell: { c: "#", kw: ["if","then","else","elif","fi","for","in","do","done","while","case","esac","function","return","export","local","echo","exit","source"], bi: ["cd","ls","grep","cat","rm","cp","mv","mkdir","touch","chmod","chown","curl","wget","git","python","pip","node","npm","sed","awk","find","sudo","apt"] },
+      css: { c: null, kw: ["important","media","keyframes","import","supports"], bi: ["color","background","margin","padding","border","display","flex","width","height","font-size","position","top","left","right","bottom"] },
+      yaml: { c: "#", kw: ["true","false","null","yes","no"], bi: [] },
+      sql: { c: "--", kw: ["SELECT","FROM","WHERE","INSERT","INTO","VALUES","UPDATE","SET","DELETE","CREATE","TABLE","DROP","ALTER","JOIN","LEFT","RIGHT","INNER","OUTER","ON","GROUP","BY","ORDER","HAVING","LIMIT","AND","OR","NOT","NULL","AS","DISTINCT","COUNT","SUM","AVG","MIN","MAX"], bi: [] },
+    };
+    const d = defs[lang] || { c: null, kw: [], bi: [] };
+    const kwSet = {}, biSet = {};
+    d.kw.forEach(w => kwSet[w] = 1);
+    d.bi.forEach(w => biSet[w] = 1);
+    const re = /('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_$][\w$]*)|(\s+)|(.)/g;
+    let html = "", m;
+    while ((m = re.exec(code))) {
+      if (m[1] !== undefined) html += '<span class="hl-s">' + esc(m[1]) + "</span>";
+      else if (m[2] !== undefined) html += '<span class="hl-n">' + esc(m[2]) + "</span>";
+      else if (m[3] !== undefined) {
+        const w = m[3], isKw = kwSet[w] || (d.kw.length && kwSet[w.toUpperCase()] && lang === "sql");
+        if (isKw) html += '<span class="hl-k">' + w + "</span>";
+        else if (biSet[w]) html += '<span class="hl-f">' + w + "</span>";
+        else if (code[re.lastIndex] === "(") html += '<span class="hl-f">' + w + "</span>";
+        else html += w;
+      }
+      else if (m[4] !== undefined) html += m[4];
+      else if (d.c && code.startsWith(d.c, re.lastIndex - 1)) {
+        let end = code.indexOf("\n", re.lastIndex);
+        if (end < 0) end = code.length;
+        html += '<span class="hl-c">' + esc(code.slice(re.lastIndex - 1, end)) + "</span>";
+        re.lastIndex = end;
+      }
+      else html += esc(m[5]);
+    }
+    return html;
+  }
+  function aiFileHint(rawLine) {                          // 识别“文件名行”（如 **main.py**）
+    const t = rawLine.replace(/[`*~#>\s]+/g, " ").trim();
+    const m = t.match(/([A-Za-z0-9_\-]+(?:[\/.][A-Za-z0-9_\-]+)*\.[A-Za-z0-9]{1,10})$/);
+    if (!m) return "";
+    if (t.length - m[1].length > 12) return "";           // 除文件名外还有较多文字 → 不是文件名行
+    return m[1];
+  }
   function aiMd(src) {
     const lines = String(src || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").split("\n");
     const flushP = (buf) => buf.length ? "<p>" + buf.map(aiMdInline).join("<br>") + "</p>" : "";
-    let html = "", pbuf = [], i = 0;
+    let html = "", pbuf = [], i = 0, lastFile = "";
     while (i < lines.length) {
       const L = lines[i];
+      const fh = aiFileHint(L);
+      if (fh) lastFile = fh;                                // 记录最近的文件名提示，供代码块插入用
       const fence = L.match(/^\s*```\s*(\S*)\s*$/);          // 围栏代码块
       if (fence) {
         html += flushP(pbuf); pbuf = [];
@@ -4143,9 +4255,16 @@
         while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { body.push(lines[i]); i++; }
         i++;                                                  // 跳过结束 ```
         const lang = fence[1] || "代码";
-        html += '<div class="ai-md-pre"><div class="ai-md-ch"><span>' + lang + '</span>' +
-          '<button class="ai-md-copy" title="复制代码"><i class="bi bi-clipboard"></i></button></div>' +
-          "<pre><code>" + body.join("\n") + "</code></pre></div>";
+        const n = Math.max(1, body.length);
+        html += '<div class="ai-md-pre" data-file="' + lastFile.replace(/"/g, "&quot;") + '">' +
+          '<div class="ai-md-ch"><span>' + lang + '</span>' +
+          '<span class="ai-md-btns">' +
+          '<button class="ai-md-ins" title="插入到项目：保存到当前项目并打开"><i class="bi bi-file-earmark-plus"></i></button>' +
+          '<button class="ai-md-copy" title="复制代码"><i class="bi bi-clipboard"></i></button>' +
+          '</span></div>' +
+          '<div class="ai-md-code"><div class="ai-md-ln">' +
+          Array.from({ length: n }, (_, k) => '<div>' + (k + 1) + '</div>').join("") + "</div>" +
+          "<pre><code>" + aiHl(body.join("\n"), fence[1]) + "</code></pre></div></div>";
         continue;
       }
       const h = L.match(/^(#{1,4})\s+(.*)$/);                 // 标题
@@ -4176,11 +4295,43 @@
         html += (isUl ? "<ul>" : "<ol>") + items.join("") + (isUl ? "</ul>" : "</ol>");
         continue;
       }
+      const isRow = /^\s*\|.*\|\s*$/.test(L);                 // 表格行
+      if (isRow && i + 1 < lines.length &&
+          /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(lines[i + 1])) {   // 表头 + 分隔行
+        html += flushP(pbuf); pbuf = [];
+        const cells = (row) => row.trim().replace(/^\|/, "").replace(/\|$/, "")
+          .split("|").map(c => aiMdInline(c.trim()));
+        const ths = cells(L);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { rows.push(cells(lines[i])); i++; }
+        html += "<table><thead><tr>" + ths.map(t => "<th>" + t + "</th>").join("") + "</tr></thead><tbody>" +
+          rows.map(r => "<tr>" + r.map(c => "<td>" + c + "</td>").join("") + "</tr>").join("") +
+          "</tbody></table>";
+        continue;
+      }
       if (!L.trim()) { html += flushP(pbuf); pbuf = []; i++; continue; }
       pbuf.push(L); i++;
     }
     html += flushP(pbuf);
     return html;
+  }
+  function aiMetaHtml(m, mi) {                            // 回复下方元信息行：复制/重答 + tok · 用时 · 日期
+    const parts = [];
+    const tok = Math.ceil((m.text || "").length / 2);
+    if (tok) parts.push('~' + tok + ' tok');
+    if (m.ms) {
+      const s = m.ms / 1000;
+      parts.push('用时 ' + (s >= 60 ? Math.floor(s / 60) + '分' + Math.round(s % 60) + '秒' : s.toFixed(1) + 's'));
+    }
+    if (m.ts) {
+      const d = new Date(m.ts), p2 = n => String(n).padStart(2, "0");
+      parts.push((d.getMonth() + 1) + '月' + d.getDate() + '日 ' + p2(d.getHours()) + ':' + p2(d.getMinutes()));
+    }
+    return '<div class="ai-meta">' +
+      '<button class="ai-mcopy" data-mi="' + mi + '" title="复制回复全文"><i class="bi bi-clipboard"></i></button>' +
+      '<button class="ai-mregen" data-mi="' + mi + '" title="删除此回复并重新生成"><i class="bi bi-arrow-clockwise"></i></button>' +
+      '<span>' + parts.join(' · ') + '</span></div>';
   }
   function aiBubble(role, text, cls, imgs, md) {
     const row = document.createElement("div");
@@ -4208,12 +4359,16 @@
     box.innerHTML = '<div class="ai-empty" id="aiEmpty" style="display:' + (AI.msgs.length ? "none" : "") + '">' +
       '<i class="bi bi-stars"></i><div class="t">AI 助手</div>' +
       '<div class="s">支持解释代码、排查报错、生成片段。可附带当前文件与图片提问。</div></div>';
-    AI.msgs.forEach(m => {
+    AI.msgs.forEach((m, mi) => {
       const text = m.text || m.content || "";
       const imgs = m.images || [];
       const extra = (!imgs.length && m.imgs) ? "\n[图片 ×" + m.imgs + "]" : "";
       if (m.reasoning) aiBubble("assistant", m.reasoning, "ai-think");
-      aiBubble(m.role, text + extra, "", imgs, m.role === "assistant");
+      const b = aiBubble(m.role, text + extra, "", imgs, m.role === "assistant");
+      if (m.role === "assistant") {
+        const meta = aiMetaHtml(m, mi);
+        if (meta) b.insertAdjacentHTML("afterend", meta);
+      }
     });
   }
   async function aiLoadCfg() {
@@ -4278,15 +4433,80 @@
     const pop = $("aiMselPop");
     if (pop && pop.style.display !== "none" && !pop.contains(e.target)) pop.style.display = "none";
   });
-  $("aiMsgs").addEventListener("click", (e) => {          // 代码块复制按钮
+  function aiCopyText(t) {                                // 兼容 http 非安全上下文
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(t);
+    return new Promise((res, rej) => {
+      const ta = document.createElement("textarea");
+      ta.value = t;
+      ta.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0";
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      try { document.execCommand("copy") ? res() : rej(new Error("copy failed")); }
+      catch (e) { rej(e); } finally { ta.remove(); }
+    });
+  }
+  $("aiMsgs").addEventListener("click", (e) => {          // 代码块：插入到项目 / 复制；回复：复制 / 重新生成
+    const mc = e.target.closest(".ai-mcopy");             // 复制整条回复
+    if (mc) {
+      const m = AI.msgs[+mc.dataset.mi];
+      if (!m) return;
+      aiCopyText(m.text || "").then(() => {
+        mc.innerHTML = '<i class="bi bi-check2"></i>';
+        setTimeout(() => { mc.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500);
+      }).catch(() => { toast("复制失败", "warn"); });
+      return;
+    }
+    const rg = e.target.closest(".ai-mregen");            // 删除此回复并重新生成
+    if (rg) {
+      if (AI.busy) { toast("正在回复中，请先停止", "warn"); return; }
+      const mi = +rg.dataset.mi;
+      const u = AI.msgs[mi - 1];
+      if (!u || u.role !== "user") { toast("找不到原始提问，无法重新生成", "warn"); return; }
+      AI.msgs.splice(mi);                                 // 移除该回复及其后所有消息
+      aiPersistCurrent(); aiRenderAll();
+      aiSend({ text: u.text || "", imgs: (u.images || []).slice() });
+      return;
+    }
+    const ins = e.target.closest(".ai-md-ins");
+    if (ins) {
+      (async () => {
+        const pre = ins.closest(".ai-md-pre");
+        const code = pre && pre.querySelector("code");
+        if (!code) return;
+        let name = (pre.dataset.file || "").trim();
+        if (!name) {                                      // 无文件名提示 → 按语言生成默认名
+          const lang = (pre.querySelector(".ai-md-ch span") || {}).textContent || "";
+          const extMap = { python: "py", javascript: "js", html: "html", css: "css", json: "json", shell: "sh", sql: "sql", yaml: "yml", 代码: "txt" };
+          name = "ai_snippet_" + Date.now().toString(36) + "." + (extMap[lang.trim().toLowerCase()] || "txt");
+        }
+        if (name.startsWith("/") || name.split("/").includes("..")) { toast("文件名不合法：" + name, "warn"); return; }
+        const abs = canonPath(ROOT + "/" + name);
+        try {
+          const r = await fetch("/api/files/save", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: abs, content: code.textContent }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok || d.error) { toast("插入失败：" + (d.error || ("HTTP " + r.status)), "warn"); return; }
+          toast("已保存 " + name + "，正在打开…");
+          refreshTree(ROOT);
+          openFile(abs, name.split("/").pop());
+        } catch (err) { toast("插入失败：" + err.message, "warn"); }
+      })();
+      return;
+    }
     const btn = e.target.closest(".ai-md-copy");
     if (!btn) return;
-    const code = btn.closest(".ai-md-pre") && btn.closest(".ai-md-pre").querySelector("code");
+    const pre = btn.closest(".ai-md-pre");
+    const code = pre && pre.querySelector("code");
     if (!code) return;
-    navigator.clipboard.writeText(code.textContent).then(() => {
+    aiCopyText(code.textContent).then(() => {
       btn.innerHTML = '<i class="bi bi-check2"></i>';
       setTimeout(() => { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500);
-    }).catch(() => {});
+    }).catch(() => {
+      btn.innerHTML = '<i class="bi bi-x"></i>';
+      setTimeout(() => { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500);
+    });
   });
   function aiRenderProvSettings() {
     const list = $("aiProvList");
@@ -4363,9 +4583,53 @@
       models: card.querySelector(".ms").value.split(/[，,]/).map(s => s.trim()).filter(Boolean),
     }));
   }
+  function aiRecordStat(ok, ms, chars, ttft, inTok) {     // 每次请求统计（参考 Trae 底部状态栏）
+    const s = AI.sessions.find(x => x.id === AI.curId);
+    if (!s) return;
+    s.stats = s.stats || { total: 0, ok: 0, msSum: 0, msLast: 0, tokLast: 0, ttftSum: 0, ttftN: 0, inSum: 0, outSum: 0 };
+    const st = s.stats;
+    st.total++;
+    if (ok) st.ok++;
+    st.msSum = (st.msSum || 0) + Math.round(ms || 0);      // || 0 兜底：旧版 stats 无这些字段（undefined/NaN）也能自愈
+    st.msLast = Math.round(ms || 0);
+    st.tokLast = Math.ceil((chars || 0) / 2);
+    if (ttft > 0) { st.ttftSum = (st.ttftSum || 0) + ttft; st.ttftN = (st.ttftN || 0) + 1; }
+    st.inSum = (st.inSum || 0) + Math.round(inTok || 0);
+    if (ok) st.outSum = (st.outSum || 0) + st.tokLast;
+    aiPersistCurrent();
+    aiRenderStats();
+  }
+  function aiRenderStats() {                              // 面板最底部总览状态栏
+    const el = $("aiStats");
+    if (!el) return;
+    const s = AI.sessions.find(x => x.id === AI.curId);
+    const st = s && s.stats;
+    const memLen = (s && s.mem || "").length;
+    if ((!st || !st.total) && !memLen) { el.style.display = "none"; return; }
+    const fmtT = ms => { const v = ms / 1000; return v >= 60 ? Math.floor(v / 60) + "分" + Math.round(v % 60) + "秒" : v.toFixed(1) + "s"; };
+    const fmtK = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? (n / 1000).toFixed(1) + "K" : String(Math.round(n));
+    const parts = [];
+    if (st && st.total) {
+      const rate = Math.round(st.ok / st.total * 100);
+      const rc = rate >= 80 ? "good" : (rate >= 50 ? "mid" : "bad");
+      parts.push(st.total + ' 轮 · <span class="ai-rate ' + rc + '">成功率 ' + rate + '%</span>');
+      parts.push('LLM ' + fmtT(st.msSum || 0));
+      if (st.ttftN) {
+        const avgTtft = (st.ttftSum / st.ttftN) / 1000;
+        const genMs = (st.msSum || 0) - (st.ttftSum || 0);
+        const speed = genMs > 0 && st.outSum > 0 ? Math.round(st.outSum / (genMs / 1000)) : 0;
+        parts.push('首 token 平均 ' + avgTtft.toFixed(1) + 's' + (speed ? ' · ' + speed + ' tok/s' : ''));
+      }
+      parts.push('输入 ~' + fmtK(st.inSum || 0) + ' tok · 输出 ~' + fmtK(st.outSum || 0) + ' tok');
+    }
+    if (memLen) parts.push('记忆 ' + memLen + ' 字' + (s.cmp ? '（压缩×' + s.cmp + ' 省~' + (s.savedTok || 0) + ' tok）' : ''));
+    el.innerHTML = parts.join(' <span class="ai-sep">|</span> ');
+    el.style.display = "";
+  }
   function aiRenderConv() {
     const s = AI.sessions.find(x => x.id === AI.curId);
     $("aiConvTitle").textContent = (s && s.title) || "新对话";
+    aiRenderStats();                                      // 统计条跟随当前会话
   }
   function aiRenderHist() {
     const box = $("aiHist");
@@ -4423,6 +4687,12 @@
     const show = box.style.display === "none";
     if (show) aiRenderHist();
     box.style.display = show ? "" : "none";
+  });
+  document.addEventListener("click", (e) => {           // 点击面板其他位置自动收起历史列表
+    const box = $("aiHist");
+    if (box.style.display !== "none" && !e.target.closest("#aiHist") && !e.target.closest("#aiConvBtn")) {
+      box.style.display = "none";
+    }
   });
   $("aiCtxBtn").addEventListener("click", () => {
     AI.ctx = !AI.ctx;
@@ -4486,11 +4756,15 @@
     if (fs && fs.length) { e.preventDefault(); aiAddImgs(fs); }
   });
 
-  async function aiSend() {
+  async function aiSend(reuse) {                          // reuse={text,imgs}：重新生成，不重复 push 用户消息
     if (AI.busy) return;
-    const text = $("aiText").value.trim();
-    const imgs = AI.pending.slice();
-    if (!text && !imgs.length) return;
+    let text, imgs;
+    if (reuse) { text = reuse.text || "（见图）"; imgs = (reuse.imgs || []).slice(); }
+    else {
+      text = $("aiText").value.trim();
+      imgs = AI.pending.slice();
+      if (!text && !imgs.length) return;
+    }
     await aiLoadCfg();
     const pick = aiCurrentPick();
     const prov = pick.prov;
@@ -4500,13 +4774,46 @@
       return;
     }
     $("aiEmpty") && ($("aiEmpty").style.display = "none");
-    const userText = text || "（见图）";
-    AI.msgs.push({ role: "user", text: userText, imgs: imgs.length || undefined, images: imgs.length ? imgs : undefined });
-    aiBubble("user", userText, "", imgs);
-    $("aiText").value = "";
-    AI.pending = [];
-    aiRenderPending();
+    if (!reuse) {
+      const userText = text || "（见图）";
+      AI.msgs.push({ role: "user", text: userText, imgs: imgs.length || undefined, images: imgs.length ? imgs : undefined });
+      aiBubble("user", userText, "", imgs);
+      $("aiText").value = "";
+      AI.pending = [];
+      aiRenderPending();
+    }
     aiPersistCurrent(); aiRenderConv();
+
+    // ---- dsh 式记忆压缩：旧历史攒够就压成摘要，之后只带 摘要 + 最近几条 发送 ----
+    const sess = AI.sessions.find(x => x.id === AI.curId);
+    const curIdx = AI.msgs.length - 1;                    // 刚 push 的当前消息索引
+    if (sess) {
+      const start = sess.cmpLen || 0;
+      const toSum = AI.msgs.slice(start, curIdx);
+      const needCmp = start === 0 ? toSum.length >= 12 : toSum.length >= 8;
+      if (needCmp) {
+        try {
+          const sr = await fetch("/api/ai/summarize", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prev: sess.mem || "",
+              messages: toSum.map(m => ({ role: m.role, text: m.text || "" })),
+            }),
+          });
+          const sd = await sr.json();
+          if (sr.ok && sd.summary) {
+            const savedChars = toSum.reduce((a, m) => a + (m.text || "").length, 0);
+            sess.mem = sd.summary;
+            sess.cmp = (sess.cmp || 0) + 1;
+            sess.cmpLen = curIdx;
+            sess.savedTok = (sess.savedTok || 0) + Math.round(savedChars / 2);
+            aiPersistCurrent();
+          }
+        } catch (_) { /* 压缩失败静默：不影响本轮发送 */ }
+      }
+    }
+    const mem = (sess && sess.mem) || "";
+    const t0 = performance.now();
 
     AI.busy = true;
     $("aiSend").style.display = "none";
@@ -4519,12 +4826,17 @@
     const curContent = imgs.length
       ? [{ type: "text", text: curText }, ...imgs.map(u => ({ type: "image_url", image_url: { url: u } }))]
       : curText;
+    // 有记忆摘要时只发最近 6 条历史 + 摘要注入 system；无记忆则全量（dsh 行为）
+    const hist = AI.msgs.slice(0, -1);
+    const usedHist = mem ? hist.slice(-6) : hist;
+    const inTok = Math.ceil((sysPrompt.length + mem.length +
+      usedHist.reduce((a, m) => a + (m.text || "").length, 0) + curText.length) / 2);   // 输入 token 估算
     const payload = {
       provider_id: prov.id,
       model: pick.model,
       messages: [
-        { role: "system", content: sysPrompt },
-        ...AI.msgs.slice(0, -1).map(m => ({ role: m.role, content: m.text || m.content || "" })),
+        { role: "system", content: sysPrompt + (mem ? "\n\n[本对话早期内容记忆摘要]\n" + mem : "") },
+        ...usedHist.map(m => ({ role: m.role, content: m.text || m.content || "" })),
         { role: "user", content: curContent },
       ],
     };
@@ -4532,7 +4844,7 @@
     thinkB.parentElement.style.display = "none";        // 无思考内容时不占位
     const bodyB = aiBubble("assistant", "", "", null, true);
     bodyB.innerHTML = '<span class="ai-cursor"></span>';
-    let acc = "", thinking = "";
+    let acc = "", thinking = "", ttft = 0;                // ttft：首 token 到达耗时
     AI.ctrl = new AbortController();
     try {
       const r = await fetch("/api/ai/chat", {
@@ -4560,6 +4872,7 @@
             if (data === "[DONE]") continue;
             let obj; try { obj = JSON.parse(data); } catch (_) { continue; }
             if (obj.error) throw new Error(obj.error);
+            if ((obj.reasoning || obj.delta) && !ttft) ttft = performance.now() - t0;
             if (obj.reasoning) thinking += obj.reasoning;
             if (obj.delta) acc += obj.delta;
           }
@@ -4574,17 +4887,27 @@
       const out = acc.replace(/^\s+/, "");
       bodyB.innerHTML = aiMd(out) || "（空回复）";
       thinkB.parentElement.style.display = thinking.trim() ? "" : "none";
-      AI.msgs.push({ role: "assistant", text: out, reasoning: thinking.trim() || undefined });
+      const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
+      AI.msgs.push({ role: "assistant", text: out, reasoning: thinking.trim() || undefined, ms: meta.ms, ts: meta.ts });
+      bodyB.insertAdjacentHTML("afterend", aiMetaHtml({ text: out, ms: meta.ms, ts: meta.ts }, AI.msgs.length - 1));
       aiPersistCurrent(); aiRenderConv();
+      aiRecordStat(true, performance.now() - t0, out.length, ttft, inTok);
     } catch (e) {
       if (e.name === "AbortError") {
         bodyB.innerHTML = aiMd(acc.replace(/^\s+/, "")) + "\n（已停止）";
         const out = acc.trim();
-        if (out) { AI.msgs.push({ role: "assistant", text: out }); aiPersistCurrent(); aiRenderConv(); }
+        if (out) {
+          const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
+          AI.msgs.push({ role: "assistant", text: out, ms: meta.ms, ts: meta.ts });
+          bodyB.insertAdjacentHTML("afterend", aiMetaHtml({ text: out, ms: meta.ms, ts: meta.ts }, AI.msgs.length - 1));
+          aiPersistCurrent(); aiRenderConv();
+        }
+        aiRecordStat(false, performance.now() - t0, acc.length, ttft, inTok);
       } else {
         bodyB.classList.remove("ai-md");
         bodyB.textContent = "出错了：" + e.message;
         bodyB.classList.add("err");
+        aiRecordStat(false, performance.now() - t0, 0, ttft, inTok);
       }
     } finally {
       AI.busy = false; AI.ctrl = null;
@@ -4947,7 +5270,7 @@
 
   function gitStatusMean(status) {
     const m = {
-      "U": "未跟踪", "?": "未跟踪",
+      "U": "新增", "?": "新增",
       "M": "已修改",
       "A": "已暂存",
       "D": "已删除",
@@ -4980,18 +5303,19 @@
       b.onclick = (e) => { e.stopPropagation(); fn(); };
       acts.appendChild(b);
     };
+    const isU = !!sec.untracked || f.status === "U" || f.status === "?";   // 未跟踪文件（合并进“更改”后按文件判断）
     if (sec.staged) {
       addBtn("bi-dash-lg", "取消暂存", () => gitPost("/api/git/unstage", { repo: gitState.repo, files: [f.path] }, "已取消暂存"));
     } else {
       addBtn("bi-plus-lg", "暂存更改", () => gitPost("/api/git/stage", { repo: gitState.repo, files: [f.path] }, "已暂存 " + name));
-      if (!sec.untracked) {
+      if (!isU) {
         addBtn("bi-arrow-counterclockwise", "放弃更改", async () => {
           if (!(await uiConfirm("放弃更改", "将丢弃 " + f.path + " 的未暂存修改，此操作不可撤销。", "放弃更改", true))) return;
           gitPost("/api/git/discard", { repo: gitState.repo, files: [f.path] }, "已放弃更改");
         });
       }
     }
-    row.onclick = (e) => { if (e.target.closest("button")) return; openDiffTab(f.path, sec.staged, !!sec.untracked); };
+    row.onclick = (e) => { if (e.target.closest("button")) return; openDiffTab(f.path, sec.staged, isU); };
     return row;
   }
 
@@ -5077,14 +5401,12 @@
     };
     if (sec.staged) {
       addAct("bi-dash-lg", "取消暂存所有更改", () => gitPost("/api/git/unstage", { repo: gitState.repo, all: true }, "已取消暂存所有更改"));
-    } else if (sec.untracked) {
-      addAct("bi-plus-lg", "暂存所有未跟踪文件", () => gitPost("/api/git/stage", { repo: gitState.repo, files: sec.files.map(f => f.path) }, "已暂存所有未跟踪文件"));
     } else {
-      addAct("bi-arrow-counterclockwise", "放弃所有更改", async () => {
-        if (!(await uiConfirm("放弃所有更改", "将丢弃所有未暂存的修改，此操作不可撤销。", "全部放弃", true))) return;
+      addAct("bi-arrow-counterclockwise", "放弃所有更改（仅已跟踪文件）", async () => {
+        if (!(await uiConfirm("放弃所有更改", "将丢弃所有未暂存的修改（未跟踪的新文件不受影响），此操作不可撤销。", "全部放弃", true))) return;
         gitPost("/api/git/discard", { repo: gitState.repo, all: true }, "已放弃所有更改");
       });
-      addAct("bi-plus-lg", "暂存所有更改", () => gitPost("/api/git/stage", { repo: gitState.repo, all: true, tracked_only: true }, "已暂存所有更改"));
+      addAct("bi-plus-lg", "暂存所有更改（含未跟踪文件）", () => gitPost("/api/git/stage", { repo: gitState.repo, all: true }, "已暂存所有更改"));
     }
     // 树形视图：折叠/展开全部目录
     const dirBodies = () => body.querySelectorAll(".git-dir-body");
@@ -5484,8 +5806,7 @@
     box.innerHTML = "";
     const sections = [
       { title: "已暂存的更改", files: d.staged || [], staged: true },
-      { title: "更改", files: d.changed || [], staged: false },
-      { title: "未跟踪", files: d.untracked || [], staged: false, untracked: true },
+      { title: "更改", files: (d.changed || []).concat(d.untracked || []), staged: false },
     ];
     const total = sections.reduce((s, x) => s + x.files.length, 0);
     if (total) {

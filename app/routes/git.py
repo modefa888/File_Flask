@@ -245,6 +245,93 @@ def api_git_diff():
     })
 
 
+# ---- 「打开更改」：一次请求返回所有变更文件的差异（前端在一个标签页里汇总展示）----
+_ALL_DIFF_MAX_FILES = 100
+_ALL_DIFF_TOTAL_BYTES = 3 * 1024 * 1024
+
+
+def _diff_stat(text):
+    """统计 unified diff 的增删行数（跳过 +++ / --- 文件头）。"""
+    adds = dels = 0
+    for line in text.splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            adds += 1
+        elif line.startswith("-"):
+            dels += 1
+    return adds, dels
+
+
+@bp.route("/api/git/all-diff")
+def api_git_all_diff():
+    """当前仓库全部变更文件的差异（「打开更改」按钮：在一个标签页中查看多个更改文件）。"""
+    repo = request.args.get("path", "")
+    _log.info("GET /api/git/all-diff path=%s", repo)
+    root, err = _repo_root(repo)
+    if err:
+        return _fail(err)
+    if not root:
+        return _fail("不是 Git 仓库")
+
+    proc, err = _git(root, ["status", "--porcelain=v1", "-z", "-b", "--untracked-files=all"])
+    if err:
+        return _fail(err, 500)
+    if proc.returncode != 0:
+        return _fail(proc.stderr.strip() or "读取状态失败", 500)
+    _branch, entries = _parse_status(proc.stdout)
+
+    # 顺序与源代码管理面板保持一致：先「已暂存的更改」，再「更改」（含未跟踪）
+    staged, work = [], []
+    for f in entries:
+        rel, x, y = f["path"], f["x"], f["y"]
+        if x == "?" and y == "?":                      # 未跟踪（过滤掉缓存/构建产物）
+            if _noisy(rel):
+                continue
+            work.append({"path": rel, "status": "U", "staged": False, "untracked": True})
+            continue
+        if x not in (" ", "?"):
+            staged.append({"path": rel, "status": x, "staged": True, "untracked": False})
+        if y not in (" ", "?"):
+            work.append({"path": rel, "status": y, "staged": False, "untracked": False})
+
+    files, truncated = [], False
+    remaining = _ALL_DIFF_TOTAL_BYTES
+    total_add = total_del = 0
+    for e in staged + work:
+        if len(files) >= _ALL_DIFF_MAX_FILES or remaining <= 0:
+            truncated = True
+            break
+        # -U100000：整文件上下文，前端和单文件差异一样可折叠未更改区域
+        if e["staged"]:
+            args = ["diff", "--no-color", "--no-ext-diff", "-U100000", "--cached", "--", e["path"]]
+        else:
+            args = ["diff", "--no-color", "--no-ext-diff", "-U100000", "--", e["path"]]
+        proc2, err2 = _git(root, args)
+        text = (proc2.stdout if (proc2 and not err2) else "") or ""
+        # 未跟踪文件 git diff 为空：改用 --no-index 与空文件对比，展示为整文件新增
+        if not text.strip() and e["untracked"]:
+            proc3, err3 = _git(root, ["diff", "--no-color", "--no-ext-diff", "-U100000",
+                                      "--no-index", "--", os.devnull, e["path"]])
+            if not err3 and proc3:
+                text = proc3.stdout or ""
+        if len(text) > remaining:
+            text = text[:remaining]
+            truncated = True
+        remaining -= len(text)
+        adds, dels = _diff_stat(text)
+        total_add += adds
+        total_del += dels
+        files.append({"path": e["path"], "status": e["status"], "staged": e["staged"],
+                      "untracked": e["untracked"], "diff": text,
+                      "additions": adds, "deletions": dels})
+
+    return jsonify({
+        "ok": True, "repo": root, "files": files, "truncated": truncated,
+        "counts": {"files": len(files), "insertions": total_add, "deletions": total_del},
+    })
+
+
 @bp.route("/api/git/file-log")
 def api_git_file_log():
     """单个文件的提交历史（「打开时间线」）：git log --follow"""
@@ -526,14 +613,16 @@ def api_git_commit():
     if not root:
         return _fail("不是 Git 仓库")
     message = (data.get("message") or "").strip()
-    if not message:
+    amend = bool(data.get("amend"))          # 提交（修改）：git commit --amend
+    if not message and not amend:
         return _fail("提交信息不能为空")
     commit_all = data.get("all")
 
     # 提交前给出可操作的友好提示，避免直接抛出 git 原生长文本错误
+    # （amend 模式允许暂存区为空：仅修改上次提交信息也算合法操作）
     status_proc, status_err = _git(root, ["status", "--porcelain=v1", "-z", "-b", "--untracked-files=all"])
-    if not status_err and status_proc.returncode == 0:
-        branch_line, files = _parse_status(status_proc.stdout)
+    if not status_err and status_proc.returncode == 0 and not amend:
+        _branch, files = _parse_status(status_proc.stdout)
         has_staged = any(f["x"] not in (" ", "?") for f in files)
         has_changed = any(f["y"] not in (" ", "?") and f["x"] in (" ", "?") for f in files)
         has_untracked = any(f["x"] == "?" and f["y"] == "?" for f in files)
@@ -544,7 +633,12 @@ def api_git_commit():
                 return _fail("存在未暂存的已跟踪改动。请先暂存文件，或勾选「包含已跟踪改动」后直接提交。", 400)
             return _fail("没有要提交的更改。", 400)
 
-    args = ["commit", "-m", message]
+    if amend and not message:
+        args = ["commit", "--amend", "--no-edit"]
+    elif amend:
+        args = ["commit", "-m", message, "--amend"]
+    else:
+        args = ["commit", "-m", message]
     if commit_all:
         args.insert(1, "-a")
     proc, err = _git(root, args)

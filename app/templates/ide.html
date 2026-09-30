@@ -308,6 +308,16 @@
   .g-btn:hover { background: #0a6aa8; }
   .g-btn.outline { background: #3a3d41; }
   .g-btn.outline:hover { background: #45494e; }
+  /* VS Code 式提交拆分按钮：主按钮 + 下拉箭头 */
+  .git-commit-btns { display: flex; margin-top: 6px; align-items: stretch; }
+  .git-commit-btns .g-btn { height: 30px; }
+  .g-btn.split-main { flex: 1 1 auto; border-radius: 3px 0 0 3px; font-size: 12.5px; min-width: 0; }
+  .g-btn.split-main span { display: inline; }
+  .g-btn.split-arrow { flex: 0 0 26px; border-radius: 0 3px 3px 0; padding: 0 6px;
+    background: #0a6aa8; border-left: 1px solid rgba(255,255,255,.25); display: flex; align-items: center; justify-content: center; }
+  .g-btn.split-arrow:hover { background: #0d7cc4; }
+  .g-btn.split-arrow i { transition: transform .12s ease; }
+  .g-btn.split-arrow.open i { transform: rotate(180deg); }
   .git-list { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; display: flex; flex-direction: column; }
   /* 更改区始终完整显示（不压缩、无内部滚动条），与参考图一致；
      内容超出面板时由 .git-list 整体滚动。图形区占满剩余空间，最矮 140px */
@@ -336,6 +346,10 @@
   .git-file .ic { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
   .git-file .ic .bi, .git-file .ic .seti-ic { font-size: 1.4em; line-height: 1; }
   .git-file .gf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 文件名按 Git 状态着色：删除=红+中划线，修改=绿，新增=蓝 */
+  .git-file.st-D .gf-name { color: #e06c75; text-decoration: line-through; }
+  .git-file.st-M .gf-name { color: #98c379; }
+  .git-file.st-U .gf-name { color: #61afef; }
   .git-file .gf-dir { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-file .gf-st-mean { margin-left: 4px; font-size: 11px; color: #8a8a8a; flex: none; }
   .git-file .gf-st { margin-left: auto; font-size: 11px; color: #e2c08a; flex: none; }
@@ -491,6 +505,11 @@
   }
   .diff-tools button:hover { background: #3a3d41; color: #fff; }
   .diff-tools button.active { background: #0d5a8a; color: #ffffff; }
+  /* 工具条右侧：本次差异的增删行数（+新增 / −删除） */
+  .diff-tools .dt-stat { margin-left: auto; padding-left: 10px; font-size: 11.5px;
+    white-space: nowrap; color: #8a8a8a; font-variant-numeric: tabular-nums; }
+  .diff-tools .dt-stat .dt-add { color: #73c991; }
+  .diff-tools .dt-stat .dt-del { color: #e06c75; }
   .diff-cm { flex: 1; min-height: 0; position: relative; }
   /* 尚未初始化仓库时，只显示提示与初始化按钮，提交区/暂存全部按钮隐藏 */
   #gitPanel.not-repo .git-commit,
@@ -558,22 +577,38 @@
   .do-mark.mod { background: #d29922; }
   .do-thumb { position: absolute; left: 0; right: 0; background: rgba(255, 255, 255, .13);
     border: 1px solid rgba(255, 255, 255, .42); pointer-events: none; }
-  /* 右上角迷你差异总览：可点击 / 拖拽跳转（对应 VS Code 的 diff 导航小部件） */
-  .diff-nav-widget { position: absolute; top: 8px; right: 22px; z-index: 7;
-    width: 34px; padding: 5px 5px 4px; display: flex; flex-direction: column; align-items: center;
-    gap: 4px; background: rgba(40, 40, 40, .97); border: 1px solid #454545; border-radius: 4px;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, .5); user-select: none; }
-  .dn-track { position: relative; width: 16px; height: 178px; background: #2b2b2b;
-    border: 1px solid #3a3a3a; border-radius: 2px; cursor: pointer; overflow: hidden; }
-  .dn-mark { position: absolute; left: 1px; right: 1px; opacity: .9; }
-  .dn-mark.add { background: #9bb955; }
-  .dn-mark.del { background: #ff5c5c; }
-  .dn-mark.mod { background: #d29922; }
-  .dn-thumb { position: absolute; left: -1px; right: -1px; background: rgba(255, 255, 255, .14);
-    border: 1px solid rgba(255, 255, 255, .46); cursor: grab; }
-  .dn-thumb:active { cursor: grabbing; }
-  .dn-count { font-size: 9px; color: #9a9a9a; line-height: 1; white-space: nowrap;
-    writing-mode: vertical-rl; letter-spacing: .03em; }
+  /* ===== 打开更改：一个标签页中汇总展示多个变更文件的差异 ===== */
+  .all-diff-body { overflow: auto; background: #1e1e1e; }
+  .ad-loading { padding: 30px; color: #888; }
+  .ad-wrap { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+  .ad-file { border: 1px solid #333; border-radius: 4px; overflow: hidden; background: #212121; }
+  .ad-file-head { display: flex; align-items: center; gap: 6px; padding: 5px 8px;
+    background: #252526; cursor: pointer; font-size: 12.5px; color: #cccccc; }
+  .ad-file-head:hover { background: #2d2d2d; }
+  .ad-file-head .ad-tw { font-size: 11px; color: #9aa0a6; flex: none; }
+  .ad-file-head .ic { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .ad-file-head .ic .bi, .ad-file-head .ic .seti-ic { font-size: 1.4em; line-height: 1; }
+  .ad-file-head .ad-name { color: #e6e6e6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ad-file-head .ad-dir { color: #7d7d7d; font-size: 11px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+  .ad-file-head .ad-tag { font-size: 10px; padding: 0 5px; border-radius: 8px; flex: none;
+    background: #3a3d41; color: #bdbdbd; }
+  .ad-file-head .ad-tag.staged { background: #14532d; color: #8fd694; }
+  .ad-file-head .ad-tag.new { background: #123a5c; color: #7fc4ff; }
+  .ad-file-head .ad-stat { margin-left: auto; font-size: 11px; flex: none; color: #9d9d9d; }
+  .ad-file-head .ad-stat .ad-add { color: #73c991; }
+  .ad-file-head .ad-stat .ad-del { color: #e06c75; }
+  .ad-file-head .ad-open { flex: none; color: #9aa0a6; padding: 0 2px; visibility: hidden; }
+  .ad-file-head:hover .ad-open { visibility: visible; }
+  .ad-file-head .ad-open:hover { color: #fff; }
+  .ad-file.collapsed .ad-file-body { display: none; }
+  /* 汇总视图里每个文件块自适应高度（不再是整屏一个文件），并各自内部滚动 */
+  .ad-file-body .sd-wrap { height: auto; margin-right: 0; }
+  .ad-file-body .sd-body { max-height: 60vh; }
+  /* 顶部工具条中的统计信息 */
+  .ad-tools .ad-count { margin-left: auto; color: #8a8a8a; font-size: 11px; white-space: nowrap; }
+  .ad-tools .ad-count .ad-add { color: #73c991; }
+  .ad-tools .ad-count .ad-del { color: #e06c75; }
   /* 资源管理器中的 Git 状态着色 */
   .tree-row.git-modified .nm { color: #e2c08a; }
   .tree-row.git-untracked .nm { color: #6fcf8a; }
@@ -1283,6 +1318,22 @@
   }
   .ide-modal.wide { width: 760px; }
   .ide-modal.wide .m-body { max-height: 62vh; overflow: auto; }
+  /* 轻量二次确认悬浮框（Git 面板等高频危险操作） */
+  .ui-pop-confirm { position: fixed; z-index: 10060; width: 250px; background: #252526; border: 1px solid #454545;
+    border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.55); padding: 10px 12px; animation: pop .12s ease; }
+  .ui-pop-confirm .upc-t { font-size: 12.5px; font-weight: 600; color: #e2e2e2; display: flex; align-items: center; gap: 6px; }
+  .ui-pop-confirm .upc-t i { flex: none; }
+  .ui-pop-confirm.danger .upc-t i { color: #e06c75; }
+  .ui-pop-confirm .upc-m { font-size: 11.5px; color: #9d9d9d; margin: 6px 0 10px; line-height: 1.55; word-break: break-all; }
+  .ui-pop-confirm .upc-f { display: flex; justify-content: flex-end; gap: 8px; }
+  .ui-pop-confirm .upc-no { background: transparent; border: 1px solid #3c3c3c; color: #bbbbbb; border-radius: 5px;
+    padding: 3px 12px; font-size: 11.5px; cursor: pointer; }
+  .ui-pop-confirm .upc-no:hover { border-color: #565656; color: #dddddd; }
+  .ui-pop-confirm .upc-ok { background: #0a6aa8; border: none; color: #ffffff; border-radius: 5px;
+    padding: 3px 12px; font-size: 11.5px; cursor: pointer; }
+  .ui-pop-confirm .upc-ok:hover { background: #0d7cc4; }
+  .ui-pop-confirm.danger .upc-ok { background: #a33b3b; }
+  .ui-pop-confirm.danger .upc-ok:hover { background: #c04646; }
   /* 规则列表多列排版 */
   .rule-head { font-size: 12px; font-weight: 600; color: #dddddd; margin: 12px 0 4px; }
   .rule-block:first-child .rule-head { margin-top: 0; }
@@ -1585,7 +1636,10 @@
         </div>
         <div class="git-commit">
           <textarea id="gitCommitMsg" placeholder="消息（Ctrl+Enter 提交）" spellcheck="false"></textarea>
-          <button class="g-btn block" id="gitCommitBtn" title="提交 (Ctrl+Enter)"><i class="bi bi-check-lg"></i> 提交</button>
+          <div class="git-commit-btns">
+            <button class="g-btn split-main" id="gitCommitBtn" title="提交 (Ctrl+Enter)"><i class="bi bi-check-lg"></i> <span id="gitCommitBtnLabel">提交</span></button>
+            <button class="g-btn split-arrow" id="gitCommitMore" title="更多提交操作"><i class="bi bi-chevron-down"></i></button>
+          </div>
           <label class="git-amend" title="提交时自动包含已跟踪文件的改动（git commit -a）">
             <input type="checkbox" id="gitCommitAll"> 包含已跟踪改动
           </label>
@@ -2371,7 +2425,7 @@
     // 差异标签的 name 带 "@提交哈希" 后缀（如 ide.html@895cd54），直接匹配取不到类型图标，
     // 用 relPath 的真实文件名来取图标；大小 1.4em 由 .t-ic 规则统一控制
     const iconName = (tab.diff && tab.relPath) ? baseName(tab.relPath) : tab.name;
-    const ic = iconFor(iconName, false);
+    const ic = tab.iconHtml || iconFor(iconName, false);   // 汇总标签页可自带图标
     el.innerHTML = '<span class="t-ic">' + ic + '</span><span class="t-nm">' + esc(tab.name) + '</span><span class="t-dot"></span><span class="t-close"><i class="bi bi-x"></i></span>';
     el.addEventListener("click", (e) => { e.stopPropagation(); if (e.target.closest(".t-close")) closeTab(tab); else activate(tab); });
     setupTabDrag(el, tab);
@@ -3554,6 +3608,42 @@
   const uiPrompt = (title, value, placeholder) => uiModal({ title, icon: "bi-pencil-square", input: value || "", placeholder: placeholder || "", okText: "确定" });
   const uiConfirm = (title, msg, okText, danger) => uiModal({ title, icon: danger ? "bi-exclamation-triangle" : "bi-question-circle", msg, okText: okText || "确定", danger: !!danger });
   const uiAlert = (title, msg) => uiModal({ title, icon: "bi-info-circle", msg, hideCancel: true, okText: "知道了" });
+
+  /* 轻量二次确认悬浮框：贴着触发元素弹出（下方空间不足自动改上方）。
+     点击弹窗外部 / Esc = 取消；返回 Promise<boolean>，用于 Git 面板等高频危险操作 */
+  function uiConfirmPop(anchor, opts) {
+    return new Promise((resolve) => {
+      const old = document.getElementById("uiPopConfirm");
+      if (old) old.remove();
+      const pop = document.createElement("div");
+      pop.className = "ui-pop-confirm" + (opts.danger ? " danger" : "");
+      pop.id = "uiPopConfirm";
+      pop.innerHTML =
+        '<div class="upc-t"><i class="bi ' + (opts.danger ? "bi-exclamation-triangle" : "bi-question-circle") + '"></i><span>' + esc(opts.title || "确认操作") + '</span></div>' +
+        '<div class="upc-m">' + esc(opts.msg || "") + '</div>' +
+        '<div class="upc-f"><button class="upc-no">取消</button><button class="upc-ok">' + esc(opts.okText || "确定") + '</button></div>';
+      document.body.appendChild(pop);
+      const r = anchor.getBoundingClientRect();
+      const pw = pop.offsetWidth, ph = pop.offsetHeight;
+      let left = Math.max(6, Math.min(r.left, window.innerWidth - pw - 8));
+      let top = r.bottom + 6;
+      if (top + ph > window.innerHeight - 6) top = r.top - ph - 6;
+      pop.style.left = left + "px";
+      pop.style.top = Math.max(6, top) + "px";
+      const done = (v) => {
+        pop.remove();
+        document.removeEventListener("mousedown", onDoc, true);
+        document.removeEventListener("keydown", onKey, true);
+        resolve(v);
+      };
+      const onDoc = (e) => { if (!pop.contains(e.target) && !anchor.contains(e.target)) done(false); };
+      const onKey = (e) => { if (e.key === "Escape") done(false); };
+      document.addEventListener("mousedown", onDoc, true);
+      document.addEventListener("keydown", onKey, true);
+      pop.querySelector(".upc-no").onclick = () => done(false);
+      pop.querySelector(".upc-ok").onclick = () => done(true);
+    });
+  }
 
   /* ---------- 菜单栏动作 ---------- */
   function cmCmd(name) {
@@ -5361,9 +5451,13 @@
   function gitFileRow(sec, f, depth) {
     const name = f.name || baseName(f.path);
     const dir = f.path.indexOf("/") >= 0 ? f.path.substring(0, f.path.lastIndexOf("/")) : "";
+    const st = f.status === "?" ? "U" : f.status;                        // 归一化未跟踪标记
+    // 文件名按状态着色：删除=红（中划线），修改/重命名/类型变更=绿，新增=蓝
+    const stCls = st === "D" ? "st-D" : (st === "M" || st === "R" || st === "C" || st === "T" ? "st-M" : "st-U");
     const row = document.createElement("div");
-    row.className = "git-file";
-    row.title = f.path;
+    row.className = "git-file " + stCls;
+    const full = (gitState.repo || ROOT || "") + "/" + f.path;           // 悬浮显示完整路径 · 状态
+    row.title = full + (gitStatusMean(f.status) ? " · " + gitStatusMean(f.status) : "");
     row.style.paddingLeft = (8 + (depth || 0) * 12) + "px";
     // 树形视图下层级已经体现目录，不再重复展示目录名
     row.innerHTML = '<span class="ic">' + iconFor(name, false) + '</span>' +
@@ -5377,7 +5471,7 @@
       const b = document.createElement("button");
       b.innerHTML = '<i class="bi ' + icon + '"></i>';
       b.title = title;
-      b.onclick = (e) => { e.stopPropagation(); fn(); };
+      b.onclick = (e) => { e.stopPropagation(); fn(e); };
       acts.appendChild(b);
     };
     const isU = !!sec.untracked || f.status === "U" || f.status === "?";   // 未跟踪文件（合并进“更改”后按文件判断）
@@ -5386,9 +5480,10 @@
     } else {
       addBtn("bi-plus-lg", "暂存更改", () => gitPost("/api/git/stage", { repo: gitState.repo, files: [f.path] }, "已暂存 " + name));
       if (!isU) {
-        addBtn("bi-arrow-counterclockwise", "放弃更改", async () => {
-          if (!(await uiConfirm("放弃更改", "将丢弃 " + f.path + " 的未暂存修改，此操作不可撤销。", "放弃更改", true))) return;
-          gitPost("/api/git/discard", { repo: gitState.repo, files: [f.path] }, "已放弃更改");
+        addBtn("bi-arrow-counterclockwise", "放弃更改", async (e) => {
+          const ok = await uiConfirmPop(e.currentTarget.closest(".gf-acts") || acts,
+            { title: "放弃更改", msg: "将丢弃 " + f.path + " 的未暂存修改，此操作不可撤销。", okText: "放弃更改", danger: true });
+          if (ok) gitPost("/api/git/discard", { repo: gitState.repo, files: [f.path] }, "已放弃更改");
         });
       }
     }
@@ -5473,15 +5568,25 @@
       const b = document.createElement("button");
       b.innerHTML = '<i class="bi ' + icon + '"></i>';
       b.title = title;
-      b.onclick = (e) => { e.stopPropagation(); fn(); };
+      b.onclick = (e) => { e.stopPropagation(); fn(e); };
       acts.appendChild(b);
+      return b;
     };
     if (sec.staged) {
-      addAct("bi-dash-lg", "取消暂存所有更改", () => gitPost("/api/git/unstage", { repo: gitState.repo, all: true }, "已取消暂存所有更改"));
+      // 「打开更改」：同样放在分组标题的操作区，避免全部暂存后找不到入口
+      addAct("bi-file-diff", "打开更改（在一个标签页中查看所有变更文件）", () => openAllChangesTab());
+      addAct("bi-dash-lg", "取消暂存所有更改", async (e) => {
+        const ok = await uiConfirmPop(e.currentTarget,
+          { title: "取消暂存所有更改", msg: "将把暂存区的全部文件退回未暂存状态。", okText: "全部取消暂存", danger: false });
+        if (ok) gitPost("/api/git/unstage", { repo: gitState.repo, all: true }, "已取消暂存所有更改");
+      });
     } else {
-      addAct("bi-arrow-counterclockwise", "放弃所有更改（仅已跟踪文件）", async () => {
-        if (!(await uiConfirm("放弃所有更改", "将丢弃所有未暂存的修改（未跟踪的新文件不受影响），此操作不可撤销。", "全部放弃", true))) return;
-        gitPost("/api/git/discard", { repo: gitState.repo, all: true }, "已放弃所有更改");
+      // 「打开更改」：把全部变更文件汇总到同一个标签页中查看
+      addAct("bi-file-diff", "打开更改（在一个标签页中查看所有变更文件）", () => openAllChangesTab());
+      addAct("bi-arrow-counterclockwise", "放弃所有更改（仅已跟踪文件）", async (e) => {
+        const ok = await uiConfirmPop(e.currentTarget,
+          { title: "放弃所有更改", msg: "将丢弃所有未暂存的修改（未跟踪的新文件不受影响），此操作不可撤销。", okText: "全部放弃", danger: true });
+        if (ok) gitPost("/api/git/discard", { repo: gitState.repo, all: true }, "已放弃所有更改");
       });
       addAct("bi-plus-lg", "暂存所有更改（含未跟踪文件）", () => gitPost("/api/git/stage", { repo: gitState.repo, all: true }, "已暂存所有更改"));
     }
@@ -5693,7 +5798,7 @@
       .catch(e => toast("设置失败：" + (e.message || e), "err"));
   }
 
-  function remoteOp(verb, label) {
+  function remoteOp(verb, label, done) {
     if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
     toast(label + "中…");
     fetch("/api/git/" + verb, {
@@ -5705,6 +5810,7 @@
         if (d.error) throw new Error(d.error);
         toast(label + "完成", "ok");
         if (verb === "pull") refreshTree(ROOT); else loadGitStatus();
+        if (done) done(d);
       })
       .catch(e => toast(label + "失败：" + String(e.message || e).replace(/\s+/g, " ").slice(0, 120), "err"));
   }
@@ -5958,6 +6064,7 @@
         if (!d.is_repo) { renderGitMessage(d.error || "当前文件夹不是 Git 仓库，可点击下方按钮初始化。", true); return; }
         if (!d.ok) { renderGitMessage(d.error || "读取 Git 状态失败"); return; }
         renderGitStatus(d);
+        scheduleReloadAllChanges();          // 已打开的「更改」汇总标签页跟随刷新
         if (showToast) toast("Git 状态已刷新", "ok");
       })
       .catch(e => renderGitMessage("Git 状态读取失败：" + (e.message || e)));
@@ -6199,8 +6306,9 @@
     tab.cmBox.appendChild(wrap);
     // 语法高亮 + 行内词级高亮（语言未就绪时先渲染纯文本，就绪后回填）
     highlightDiffCells(tab, grid);
-    // 差异导航小部件（浮在差异视图右上）
-    buildDiffNavWidget(tab);
+    // 差异导航：只在最右侧显示总览条（不再显示右上角的迷你悬浮部件）。
+    // 汇总视图每个文件块共用一个滚动条，右条会相互叠加，故只给独占标签页渲染
+    if (tab.host) buildDiffNavWidget(tab);
     // 布局完成后测量长行宽度，决定自定义水平滚动条滑块大小
     requestAnimationFrame(() => refreshDiffScrollbars(tab));
   }
@@ -6335,28 +6443,16 @@
     return out;
   }
 
-  /* 刷新右上角迷你总览（差异色块 + 视口滑块）与最右侧整条总览竖条 */
+  /* 刷新最右侧的总览竖条：差异色块 + 当前视口滑块（可点击/拖拽跳转） */
   function refreshDiffNav(tab) {
     const box = diffScroller(tab);
-    if (!box || !tab.diffNav) return;
+    if (!box) return;
+    const ov = tab.diffOv || (tab.cmBox && tab.cmBox.querySelector(".diff-overview"));
+    if (!ov) return;
     const H = box.scrollHeight, vH = box.clientHeight;
     const blocks = calcDiffBlocks(tab, box);
-    const track = tab.diffNav.querySelector(".dn-track");
-    const ov = tab.diffOv || tab.cmBox.querySelector(".diff-overview");
-    const tH = track.clientHeight || 178, oH = ov.clientHeight || 100;
-    const sc = H > 0 ? tH / H : 0;
+    const oH = ov.clientHeight || 100;
     const so = H > 0 ? oH / H : 0;
-    const thumbH = Math.max(6, vH * sc);
-    const thumbTop = vH > 0 && H > vH ? (box.scrollTop / (H - vH)) * (tH - thumbH) : 0;
-    track.innerHTML = blocks.map(b => {
-      const top = b.top * sc, h = Math.max(2, (b.bottom - b.top) * sc - 0.6);
-      return '<div class="dn-mark ' + b.kind + '" style="top:' + top.toFixed(1) + "px;height:" + h.toFixed(1) + 'px"></div>';
-    }).join("");
-    const thumb = document.createElement("div");
-    thumb.className = "dn-thumb";
-    thumb.style.top = thumbTop.toFixed(1) + "px";
-    thumb.style.height = thumbH.toFixed(1) + "px";
-    track.appendChild(thumb);
     ov.innerHTML = blocks.map(b => {
       const top = b.top * so, h = Math.max(2, (b.bottom - b.top) * so - 0.6);
       return '<div class="do-mark ' + b.kind + '" style="top:' + top.toFixed(1) + "px;height:" + h.toFixed(1) + 'px"></div>';
@@ -6369,7 +6465,6 @@
     oThumb.style.height = oThumbH.toFixed(1) + "px";
     ov.appendChild(oThumb);
     tab.diffOThumb = oThumb;
-    tab.diffNav.querySelector(".dn-count").textContent = blocks.length + " 处差异";
   }
 
   /* 按比例把总览条/竖条上的点击位置换算成滚动位置并跳转 */
@@ -6445,28 +6540,17 @@
     });
   }
 
-  /* 构建差异导航：右上角迷你总览（可点击/拖拽跳转）+ 最右侧整条差异总览竖条 */
+  /* 构建差异导航：只在差异区最右侧显示一条总览竖条（红/绿标记 + 点击或拖拽跳转） */
   function buildDiffNavWidget(tab) {
     const box = tab.cmBox;
     if (!box) return;
-    const host = tab.host;
-    host.querySelector(".diff-nav-widget") && host.querySelector(".diff-nav-widget").remove();
-    box.querySelector(".diff-overview") && box.querySelector(".diff-overview").remove();
-    const w = document.createElement("div");
-    w.className = "diff-nav-widget";
-    w.title = "点击或拖拽跳转到对应差异位置";
-    w.innerHTML =
-      '<div class="dn-track"></div>' +
-      '<div class="dn-count">0 处差异</div>';
+    box.querySelectorAll(".diff-overview").forEach(n => n.remove());
     const ov = document.createElement("div");
     ov.className = "diff-overview";
     ov.title = "差异总览：点击或拖拽跳转";
     box.appendChild(ov);          // 全局显示区块：差异区最右侧（自动滚动条在它左边）
-    host.appendChild(w);          // 迷你导航：悬浮在右上角
-    tab.diffNav = w;
+    tab.diffNav = null;
     tab.diffOv = ov;
-    const track = w.querySelector(".dn-track");
-    bindDiffDrag(tab, track, e => (e.clientY - track.getBoundingClientRect().top) / track.clientHeight);
     bindDiffDrag(tab, ov, e =>
       (e.clientY - ov.getBoundingClientRect().top) / ov.clientHeight);
     bindDiffScroll(tab);
@@ -6480,8 +6564,6 @@
       mountSplitDiff(tab);
     } else {
       // 源码视图不显示差异导航控件
-      const nav = tab.host.querySelector(".diff-nav-widget");
-      if (nav) nav.remove();
       const ov = tab.cmBox.querySelector(".diff-overview");
       if (ov) ov.remove();
       tab.diffNav = null;
@@ -6525,6 +6607,21 @@
     mountDiffTab(tab);
   }
 
+  /* 差异工具条右侧显示本次更改的行数（+新增 / −删除） */
+  function setDiffToolStat(tab) {
+    if (!tab || !tab.tools) return;
+    if (!tab.diffStatEl) {
+      const el = document.createElement("span");
+      el.className = "dt-stat";
+      tab.tools.appendChild(el);
+      tab.diffStatEl = el;
+    }
+    const c = countDiffLines(tab.diffText || "");
+    tab.diffStatEl.innerHTML = (c.adds || c.dels)
+      ? '<span class="dt-add">+' + c.adds + '</span> <span class="dt-del">−' + c.dels + "</span>"
+      : "";
+  }
+
   function openDiffTab(relPath, staged, untracked, hash) {
     const abs = gitState.repo + "/" + relPath;
     const key = abs + "\u0001diff" + (staged ? "1" : "0") + (hash ? ":" + hash : "");
@@ -6559,6 +6656,7 @@
       .then(d => {
         if (d.error) { tab.cmBox.innerHTML = '<div style="padding:30px;color:#c66;">无法生成差异：' + esc(d.error) + '</div>'; return; }
         tab.diffText = d.diff || "（没有差异）";
+        setDiffToolStat(tab);
         mountDiffTab(tab);
         if (d.truncated) toast("差异内容过大，已截断显示", "warn");
       })
@@ -6593,10 +6691,201 @@
       .then(d => {
         if (d.error) { tab.cmBox.innerHTML = '<div style="padding:30px;color:#c66;">无法比较：' + esc(d.error) + '</div>'; return; }
         tab.diffText = d.empty ? "两个文件内容相同。" : d.diff;
+        setDiffToolStat(tab);
         mountDiffTab(tab);
         if (d.truncated) toast("差异内容过大，已截断显示", "warn");
       })
       .catch(e => { tab.cmBox.innerHTML = '<div style="padding:30px;color:#c66;">无法比较：' + esc(e.message || e) + '</div>'; });
+  }
+
+  /* ---------- 打开更改：在一个标签页中汇总查看多个变更文件的差异 ----------
+     复用单文件差异的渲染管线（mountSplitDiff）：每个文件块用一个轻量上下文
+     {cmBox, relPath, diffText, diffView} 渲染，因此配色 / 折叠未更改区域 /
+     语法高亮 / 行内词级高亮与逐个打开文件时的差异视图完全一致。 */
+  const ALL_DIFF_ICON = '<i class="bi bi-file-diff" style="color:#e2a03f"></i>';
+
+  function openAllChangesTab() {
+    if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return null; }
+    const key = gitState.repo + "\u0001diff-all";
+    const exist = findTab(key);
+    if (exist) { activate(exist); loadAllChanges(exist); return exist; }
+
+    const host = document.createElement("div");
+    host.className = "cm-host diff-host";
+    host.innerHTML =
+      '<div class="diff-tools ad-tools"><span class="dt-label">Git: 更改</span>' +
+      '<button class="ad-expand">全部展开</button>' +
+      '<button class="ad-collapse">全部折叠</button>' +
+      '<button class="ad-reload" title="重新加载所有变更"><i class="bi bi-arrow-clockwise"></i></button>' +
+      '<span class="ad-count"></span></div><div class="diff-cm all-diff-body"></div>';
+    const dw = currentWrap();
+    (dw || edGroups).appendChild(host);
+    const tab = {
+      path: key, host, cm: null, original: "", dirty: false, group: curGroup,
+      name: "更改", big: false, diff: true, allDiff: true, diffView: "diff",
+      displayPath: gitState.repo, relPath: "", iconHtml: ALL_DIFF_ICON,
+      cmBox: host.querySelector(".all-diff-body"),
+      tools: host.querySelector(".diff-tools"),
+    };
+    tabs.push(tab);
+    renderTabsAll();
+    host.classList.add("active");
+    tab.tools.querySelector(".ad-expand").onclick = (e) => { e.stopPropagation(); setAllChangesCollapsed(tab, false); };
+    tab.tools.querySelector(".ad-collapse").onclick = (e) => { e.stopPropagation(); setAllChangesCollapsed(tab, true); };
+    tab.tools.querySelector(".ad-reload").onclick = (e) => { e.stopPropagation(); loadAllChanges(tab); };
+    loadAllChanges(tab);
+    return tab;
+  }
+
+  function loadAllChanges(tab) {
+    if (!tab || !tab.allDiff) return;
+    tab.cmBox.innerHTML = '<div class="ad-loading">正在收集变更…</div>';
+    const seq = (tab._loadSeq = (tab._loadSeq || 0) + 1);
+    fetch("/api/git/all-diff?path=" + encodeURIComponent(gitState.repo))
+      .then(r => r.text().then(body => ({
+        ok: r.ok,
+        isJson: (r.headers.get("Content-Type") || "").indexOf("json") >= 0,
+        body: body,
+      })))
+      .then(res => {
+        let d = null;
+        if (res.ok && res.isJson) { try { d = JSON.parse(res.body); } catch (_) { d = null; } }
+        if (seq !== tab._loadSeq) return;             // 已有更新的请求，丢弃旧结果
+        // 旧版后端没有聚合接口（请求返回 404 的 HTML 页面）：退回逐个文件取差异，功能照常可用
+        if (!d) { loadAllChangesPerFile(tab, seq); return; }
+        if (d.error) { tab.cmBox.innerHTML = '<div style="padding:30px;color:#c66;">无法打开更改：' + esc(d.error) + '</div>'; return; }
+        renderAllChanges(tab, d);
+      })
+      .catch(e => {
+        if (seq !== tab._loadSeq) return;
+        tab.cmBox.innerHTML = '<div style="padding:30px;color:#c66;">无法打开更改：' + esc(e.message || e) + '</div>';
+      });
+  }
+
+  /* 统计 unified diff 的增删行数（跳过 +++/--- 文件头） */
+  function countDiffLines(text) {
+    let adds = 0, dels = 0;
+    String(text || "").split("\n").forEach(line => {
+      if (line.startsWith("+++") || line.startsWith("---")) return;
+      if (line.charAt(0) === "+") adds++;
+      else if (line.charAt(0) === "-") dels++;
+    });
+    return { adds: adds, dels: dels };
+  }
+
+  /* 兜底路径：后端没有 /api/git/all-diff 时，按当前状态逐个文件请求 /api/git/diff 再汇总 */
+  function loadAllChangesPerFile(tab, seq) {
+    const st = gitState.last || {};
+    const list = [];
+    (st.staged || []).forEach(f => list.push({ path: f.path, status: f.status, staged: true, untracked: false }));
+    (st.changed || []).forEach(f => list.push({ path: f.path, status: f.status, staged: false, untracked: false }));
+    (st.untracked || []).forEach(f => list.push({ path: f.path, status: "U", staged: false, untracked: true }));
+    if (!list.length) { renderAllChanges(tab, { files: [], counts: {} }); return; }
+    Promise.all(list.map(f => {
+      const url = "/api/git/diff?path=" + encodeURIComponent(gitState.repo) +
+        "&file=" + encodeURIComponent(f.path) + (f.staged ? "&staged=1" : "") +
+        (f.untracked ? "&untracked=1" : "");
+      return fetch(url).then(r => r.json()).then(d => ({ f: f, diff: d.diff || "" }))
+        .catch(() => ({ f: f, diff: "" }));
+    })).then(items => {
+      if (seq !== tab._loadSeq) return;
+      let ins = 0, del = 0;
+      const files = items.map(it => {
+        const c = countDiffLines(it.diff);
+        ins += c.adds; del += c.dels;
+        return { path: it.f.path, status: it.f.status, staged: it.f.staged,
+                 untracked: it.f.untracked, diff: it.diff, additions: c.adds, deletions: c.dels };
+      });
+      renderAllChanges(tab, { ok: true, files: files,
+        counts: { files: files.length, insertions: ins, deletions: del } });
+    });
+  }
+
+  function renderAllChanges(tab, d) {
+    const files = d.files || [];
+    const counts = d.counts || {};
+    // 标签名带上文件数，与 VS Code 的「Git: 更改 (N 个文件)」一致
+    tab.name = files.length ? "更改 (" + files.length + " 个文件)" : "更改";
+    if (tab.el) { const nm = tab.el.querySelector(".t-nm"); if (nm) nm.textContent = tab.name; }
+    const cnt = tab.tools.querySelector(".ad-count");
+    if (cnt) {
+      cnt.innerHTML = files.length
+        ? files.length + " 个文件" +
+          (counts.insertions ? ' <span class="ad-add">+' + counts.insertions + "</span>" : "") +
+          (counts.deletions ? ' <span class="ad-del">−' + counts.deletions + "</span>" : "")
+        : "";
+    }
+    const box = tab.cmBox;
+    box.innerHTML = "";
+    tab.allBlocks = [];
+    if (!files.length) {
+      box.innerHTML = '<div class="ad-loading">没有检测到更改。</div>';
+      return;
+    }
+    const wrap = document.createElement("div");
+    wrap.className = "ad-wrap";
+    files.forEach(f => wrap.appendChild(allChangeFileBlock(tab, f)));
+    box.appendChild(wrap);
+    if (d.truncated) toast("变更内容较多，已截断显示", "warn");
+  }
+
+  function allChangeFileBlock(tab, f) {
+    const name = baseName(f.path);
+    const dir = f.path.indexOf("/") >= 0 ? f.path.substring(0, f.path.lastIndexOf("/")) : "";
+    const sec = document.createElement("div");
+    sec.className = "ad-file";
+    const head = document.createElement("div");
+    head.className = "ad-file-head";
+    head.innerHTML =
+      '<i class="bi bi-chevron-down ad-tw"></i>' +
+      '<span class="ic">' + iconFor(name, false) + '</span>' +
+      '<span class="ad-name">' + esc(name) + '</span>' +
+      (dir ? '<span class="ad-dir">' + esc(dir) + '</span>' : "") +
+      (f.staged ? '<span class="ad-tag staged">已暂存</span>'
+                : (f.untracked ? '<span class="ad-tag new">新文件</span>' : "")) +
+      '<span class="ad-stat">' +
+        (f.additions ? '<span class="ad-add">+' + f.additions + "</span> " : "") +
+        (f.deletions ? '<span class="ad-del">−' + f.deletions + "</span>" : "") +
+      '</span>' +
+      '<span class="ad-open" title="在单独标签页中打开"><i class="bi bi-box-arrow-up-right"></i></span>';
+    const body = document.createElement("div");
+    body.className = "ad-file-body";
+    sec.appendChild(head);
+    sec.appendChild(body);
+    head.onclick = (e) => {
+      // 点右侧「在单独标签页中打开」时，打开该文件的独立差异标签
+      if (e.target.closest(".ad-open")) { e.stopPropagation(); openDiffTab(f.path, f.staged, f.untracked); return; }
+      const collapsed = sec.classList.toggle("collapsed");
+      head.querySelector(".ad-tw").className = "bi " + (collapsed ? "bi-chevron-right" : "bi-chevron-down") + " ad-tw";
+    };
+    tab.allBlocks.push({ sec: sec, head: head });
+    if (!f.diff || !f.diff.trim()) {
+      body.innerHTML = '<div class="ad-loading">（没有差异）</div>';
+      return sec;
+    }
+    try {
+      mountSplitDiff({ cmBox: body, relPath: f.path, untracked: f.untracked,
+                       diffText: f.diff, diffView: "diff" });
+    } catch (e) {
+      body.innerHTML = '<div class="ad-loading">无法生成差异：' + esc(e.message || e) + "</div>";
+    }
+    return sec;
+  }
+
+  function setAllChangesCollapsed(tab, collapsed) {
+    (tab.allBlocks || []).forEach(b => {
+      b.sec.classList.toggle("collapsed", collapsed);
+      b.head.querySelector(".ad-tw").className = "bi " + (collapsed ? "bi-chevron-right" : "bi-chevron-down") + " ad-tw";
+    });
+  }
+
+  /* Git 状态变化后（暂存 / 取消暂存 / 放弃 / 提交等），自动刷新已打开的汇总标签页 */
+  let _allDiffReloadTimer = 0;
+  function scheduleReloadAllChanges() {
+    const tab = tabs.find(t => t.allDiff);
+    if (!tab || !tab.cmBox) return;
+    clearTimeout(_allDiffReloadTimer);
+    _allDiffReloadTimer = setTimeout(() => loadAllChanges(tab), 150);
   }
 
   /* ---------- 打开时间线：该文件的提交历史（点击条目看那次改动） ---------- */
@@ -6641,16 +6930,28 @@
     if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
     gitPost("/api/git/stage", { repo: gitState.repo, all: true }, "已暂存所有更改");
   };
-  function doGitCommit() {
+  /* 提交模式：commit=提交 / amend=提交(修改上次) / push=提交并推送 / sync=提交并同步(拉取+推送) */
+  let gitCommitMode = "commit";
+  const COMMIT_MODES = [
+    { id: "commit", label: "提交" },
+    { id: "amend", label: "提交（修改）" },
+    { id: "push", label: "提交和推送" },
+    { id: "sync", label: "提交和同步" },
+  ];
+  const commitModeLabel = (id) => (COMMIT_MODES.find(m => m.id === id) || COMMIT_MODES[0]).label;
+  function updateCommitBtnLabel() { $("gitCommitBtnLabel").textContent = commitModeLabel(gitCommitMode); }
+  function doGitCommit(mode) {
+    mode = mode || gitCommitMode;
     if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
     const msg = $("gitCommitMsg").value.trim();
-    if (!msg) { toast("请填写提交信息", "warn"); return; }
+    const amend = mode === "amend";
+    if (!msg && !amend) { toast("请填写提交信息", "warn"); return; }   // amend 留空 = 沿用上次信息
     const all = $("gitCommitAll").checked;
     const d = gitState.last || {};
     const hasStaged = (d.staged || []).length > 0;
     const hasChanged = (d.changed || []).length > 0;
     const hasUntracked = (d.untracked || []).length > 0;
-    if (!hasStaged) {
+    if (!hasStaged && !amend) {
       if (hasUntracked) {
         toast("没有已暂存的文件。请先在下方文件右侧点击 + 暂存，或点击分组标题右侧的 + 暂存全部，然后再提交。", "warn");
       } else if (hasChanged && !all) {
@@ -6660,10 +6961,50 @@
       }
       return;
     }
-    gitPost("/api/git/commit", { repo: gitState.repo, message: msg, all: all }, "提交成功")
-      .then(ok => { if (ok) { $("gitCommitMsg").value = ""; refreshTree(ROOT); } });
+    gitPost("/api/git/commit", { repo: gitState.repo, message: msg, all: all, amend: amend },
+        commitModeLabel(mode) + "成功")
+      .then(ok => {
+        if (!ok) return;
+        $("gitCommitMsg").value = "";
+        refreshTree(ROOT);
+        if (mode === "push") remoteOp("push", "推送");
+        if (mode === "sync") remoteOp("pull", "拉取", () => remoteOp("push", "推送"));
+      });
   }
-  $("gitCommitBtn").onclick = doGitCommit;
+  /* 提交按钮下拉菜单（VS Code 式拆分按钮） */
+  function showCommitMenu(anchor) {
+    let menu = $("gitCommitMenu");
+    if (!menu) {
+      menu = document.createElement("div");
+      menu.className = "ctx-menu";
+      menu.id = "gitCommitMenu";
+      document.body.appendChild(menu);
+      document.addEventListener("click", () => { menu.style.display = "none"; });
+    }
+    menu.innerHTML = "";
+    COMMIT_MODES.forEach(m => {
+      const el = document.createElement("div");
+      el.className = "mi";
+      el.innerHTML = '<span style="width:14px;display:inline-block">' + (m.id === gitCommitMode ? "✓" : "") + "</span><span>" + m.label + "</span>";
+      el.onclick = (e) => { e.stopPropagation(); menu.style.display = "none"; gitCommitMode = m.id; updateCommitBtnLabel(); doGitCommit(m.id); };
+      menu.appendChild(el);
+    });
+    const r = anchor.getBoundingClientRect();
+    menu.style.left = Math.min(r.left, window.innerWidth - 180) + "px";
+    menu.style.top = "";
+    menu.style.bottom = "";
+    menu.style.display = "block";
+    const mh = menu.offsetHeight || 120;
+    if (r.bottom + 2 + mh > window.innerHeight - 4) menu.style.bottom = (window.innerHeight - r.top + 2) + "px";
+    else menu.style.top = (r.bottom + 2) + "px";
+  }
+  $("gitCommitBtn").onclick = () => doGitCommit();
+  $("gitCommitMore").onclick = (e) => {
+    e.stopPropagation();
+    const menu = $("gitCommitMenu");
+    if (menu && menu.style.display === "block") { menu.style.display = "none"; return; }  // 再点一次箭头收起
+    showCommitMenu(e.currentTarget);
+  };
   $("gitCommitMsg").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doGitCommit(); }
   });

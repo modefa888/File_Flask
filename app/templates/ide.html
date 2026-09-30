@@ -8,7 +8,7 @@
 <style>
 /* Seti 官方图标字体（microsoft/vscode theme-seti，本地化） */
 @font-face { font-family: "seti"; src: url("/static/vendor/seti/seti.woff") format("woff"); font-display: block; }
-.seti-ic { font-family: "seti"; font-style: normal; font-weight: normal; font-size: 1.35em; line-height: 1; display: inline-block; vertical-align: -0.28em; }
+.seti-ic { font-family: "seti"; font-style: normal; font-weight: normal; font-size: 1em; line-height: 1; display: inline-block; vertical-align: baseline; }
 /* IDE 图片预览：棋盘格背景 + 自适应居中，点击切换 1:1 / 适应窗口 */
 .img-preview { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; overflow: auto;
   background: repeating-conic-gradient(#262626 0 25%, #1e1e1e 0 50%) 0 0 / 20px 20px; }
@@ -330,6 +330,8 @@
   }
   .git-file { display: flex; align-items: center; gap: 6px; padding: 5px 8px 5px 22px; font-size: 12.5px; color: #cccccc; cursor: pointer; }
   .git-file:hover { background: #2a2d2e; }
+  .git-file .ic { width: 16px; flex: none; text-align: center; font-size: 1em; }
+  .git-file .ic .bi, .git-file .ic .seti-ic { font-size: 1em; vertical-align: baseline; line-height: 1; }
   .git-file .gf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-file .gf-dir { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-file .gf-st-mean { margin-left: 4px; font-size: 11px; color: #8a8a8a; flex: none; }
@@ -4125,7 +4127,8 @@
     row.title = f.path;
     row.style.paddingLeft = (8 + (depth || 0) * 12) + "px";
     // 树形视图下层级已经体现目录，不再重复展示目录名
-    row.innerHTML = '<span class="gf-name">' + esc(name) + '</span>' +
+    row.innerHTML = '<span class="ic">' + iconFor(name, false) + '</span>' +
+      '<span class="gf-name">' + esc(name) + '</span>' +
       '<span class="gf-st-mean">' + esc(gitStatusMean(f.status)) + '</span>' +
       (gitViewMode === "list" && dir ? '<span class="gf-dir">' + esc(dir) + '</span>' : '') +
       '<span class="gf-st">' + esc(f.status) + '</span>' +
@@ -4565,7 +4568,7 @@
     row.className = "git-commit-file";
     row.style.paddingLeft = (34 + (depth || 0) * 12) + "px";
     row.title = f.path + "（" + f.status + "）— 点击查看该提交中的差异/源码";
-    row.innerHTML = iconFor(name, false) +
+    row.innerHTML = '<span class="ic">' + iconFor(name, false) + '</span>' +
       '<span class="gcf-name">' + esc(name) + '</span>' +
       (gitCommitFileMode === "list" && dir ? '<span class="gcf-dir">' + esc(dir) + '</span>' : '') +
       '<span class="gf-st">' + esc(f.status) + '</span>';

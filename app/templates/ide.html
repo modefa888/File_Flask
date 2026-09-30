@@ -292,11 +292,26 @@
   }
   .g-ico:hover { background: #3a3d41; color: #fff; }
   .git-commit { padding: 0 10px 8px; }
-  .git-commit textarea {
-    width: 100%; height: 46px; resize: vertical; background: #3c3c3c; border: 1px solid #3c3c3c;
-    border-radius: 3px; color: #fff; font-size: 12px; padding: 5px 8px; outline: none; font-family: inherit;
+  /* 提交信息：单行输入框 + 右侧 AI「生成提交内容」按钮（两段按钮与输入框等高） */
+  .git-commit-msg { display: flex; gap: 6px; align-items: stretch; }
+  .git-commit-msg #gitCommitMsg {
+    flex: 1 1 auto; min-width: 0; height: 30px; background: #3c3c3c; border: 1px solid #3c3c3c;
+    border-radius: 3px; color: #fff; font-size: 12px; padding: 0 8px; outline: none; font-family: inherit;
   }
-  .git-commit textarea:focus { border-color: #007fd4; }
+  .git-commit-msg #gitCommitMsg:focus { border-color: #007fd4; }
+  .git-commit-msg #gitCommitMsg::placeholder { color: #8a8a8a; }
+  .g-ai-split { flex: none; display: flex; gap: 2px; }
+  .g-ai-split button {
+    height: 30px; padding: 0; cursor: pointer; background: #3a3d41; border: 1px solid #4a4a4a;
+    border-radius: 3px; color: #d7ba7d; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; line-height: 1;
+  }
+  .g-ai-split #gitGenMsg { width: 30px; }
+  .g-ai-split #gitGenMsgMore { width: 16px; font-size: 8px; color: #9aa0a6; }
+  .g-ai-split button:hover { background: #45494e; color: #ffd479; }
+  .g-ai-split button:disabled { opacity: .55; cursor: default; }
+  .g-ai-split.busy #gitGenMsg i { animation: gspin .9s linear infinite; }
+  @keyframes gspin { to { transform: rotate(360deg); } }
   .g-btn.block { display: block; width: 100%; padding: 8px 12px; margin-top: 6px; font-size: 13px; }
   .g-btn {
     background: #0d7ec4; border: none; color: #fff; border-radius: 3px;
@@ -1632,7 +1647,13 @@
           <button class="g-ico" id="gitStageAll" title="暂存所有更改"><i class="bi bi-plus-lg"></i></button>
         </div>
         <div class="git-commit">
-          <textarea id="gitCommitMsg" placeholder="消息（Ctrl+Enter 提交）" spellcheck="false"></textarea>
+          <div class="git-commit-msg">
+            <input id="gitCommitMsg" type="text" placeholder="提交变更内容（Ctrl+Enter 提交）" spellcheck="false" autocomplete="off">
+            <div class="g-ai-split">
+              <button id="gitGenMsg" title="生成提交内容 (Ctrl+Alt+G)"><i class="bi bi-stars"></i></button>
+              <button id="gitGenMsgMore" title="更多生成选项"><i class="bi bi-caret-down-fill"></i></button>
+            </div>
+          </div>
           <div class="git-commit-btns">
             <button class="g-btn split-main" id="gitCommitBtn" title="提交 (Ctrl+Enter)"><i class="bi bi-check-lg"></i> <span id="gitCommitBtnLabel">提交</span></button>
             <button class="g-btn split-arrow" id="gitCommitMore" title="更多提交操作"><i class="bi bi-chevron-down"></i></button>
@@ -4199,7 +4220,7 @@
   const AI = {
     open: false, busy: false, ctx: false, ctrl: null,
     msgs: [],                                          // 当前会话消息 [{role, text, images?, imgs?, reasoning?}]
-    providers: [], active: {},                         // 多接口配置（服务端持久化）
+    providers: [], active: {}, sys: {},                // 多接口配置（服务端持久化）；sys = 系统功能使用的接口
     pending: [],                                       // 待发送图片 dataURL 列表
     sessions: [], curId: "",                           // 对话列表（localStorage 持久化）
   };
@@ -4523,8 +4544,10 @@
       const d = await r.json();
       AI.providers = Array.isArray(d.providers) ? d.providers : [];
       AI.active = d.active || {};
+      AI.sys = d.sys || {};
       aiFillModelSelect();
       if (document.getElementById("aiProvList")) aiRenderProvSettings();   // 设置页已打开则刷新卡片
+      if (document.getElementById("sysAiPick")) sysAiMountSettings();      // 设置页已打开则刷新下拉
       return d;
     } catch (_) { return {}; }
   }
@@ -4727,10 +4750,10 @@
       list.appendChild(card);
     });
   }
-  function aiOpenSettings() {
+  function aiOpenSettings(secId) {
     openSettingsTab();          // 打开 / 聚焦「设置」标签页（内容已含 AI 分区）
-    setTimeout(() => {          // 定位到 AI 助手分区
-      const item = document.querySelector('.set-navitem[data-sec="sec-ai"]');
+    setTimeout(() => {          // 定位到指定分区（默认 AI 助手）
+      const item = document.querySelector('.set-navitem[data-sec="' + (secId || "sec-ai") + '"]');
       if (item) item.click();
     }, 60);
   }
@@ -4763,6 +4786,51 @@
         setTimeout(() => { tip.textContent = ""; }, 2500);
       } catch (e) { tip.textContent = "保存失败：" + e; }
     };
+  }
+  /* ---------- 设置 → 系统 AI：选择「生成提交内容」等系统功能使用的接口与模型 ---------- */
+  function sysAiMountSettings() {
+    const sel = document.getElementById("sysAiPick");
+    if (!sel) return;
+    const provs = AI.providers || [];
+    const cur = AI.sys || {};
+    const act = AI.active || {};
+    const actProv = provs.find(p => p.id === act.provider);
+    sel.innerHTML = "";
+    const follow = document.createElement("option");
+    follow.value = "";
+    follow.textContent = "跟随 AI 助手" + (actProv ? "（" + actProv.name + " · " + (act.model || "未选模型") + "）" : "");
+    sel.appendChild(follow);
+    provs.forEach(p => (p.models || []).forEach(m => {
+      const o = document.createElement("option");
+      o.value = p.id + "\u0001" + m;
+      o.textContent = p.name + " · " + m;
+      sel.appendChild(o);
+    }));
+    sel.value = (cur.provider && cur.model) ? (cur.provider + "\u0001" + cur.model) : "";
+    sel.disabled = !provs.length;
+    const tip = document.getElementById("sysAiTip");
+    if (tip && !provs.length) { tip.className = "ai-set-tip"; tip.textContent = "还没有接口：请先到「AI 助手」分区添加接口。"; }
+    const btn = document.getElementById("sysAiSave");
+    if (btn) btn.onclick = async () => {
+      const v = sel.value;
+      const sys = v ? { provider: v.split("\u0001")[0], model: v.split("\u0001").slice(1).join("\u0001") }
+                    : { provider: "", model: "" };
+      if (tip) { tip.className = "ai-set-tip"; tip.textContent = "保存中…"; }
+      try {
+        const r = await fetch("/api/ai/config", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sys: sys }) });
+        const d = await r.json();
+        if (d.error) { if (tip) tip.textContent = d.error; return; }
+        AI.sys = d.sys || {};
+        if (tip) { tip.className = "ai-set-tip ok"; tip.textContent = "已保存 ✓"; setTimeout(() => { tip.textContent = ""; }, 2500); }
+        toast("系统 AI 设置已保存", "ok");
+      } catch (e) { if (tip) tip.textContent = "保存失败：" + e; }
+    };
+  }
+  // 设置页打开时：确保配置已加载再渲染下拉（避免与 aiLoadCfg 互相递归）
+  async function sysAiEnsure() {
+    if (!(AI.providers || []).length) await aiLoadCfg();
+    sysAiMountSettings();
   }
   function aiCollectProviders() {
     return Array.from($("aiProvList").querySelectorAll(".ai-prov")).map(card => ({
@@ -6007,6 +6075,8 @@
 
   function renderGitStatus(d) {
     $("gitBranch").textContent = d.branch || "（无分支）";
+    const msgEl = $("gitCommitMsg");                 // 占位文案带上当前分支（对齐 VS Code）
+    if (msgEl) msgEl.placeholder = "提交变更内容（Ctrl+Enter 在 “" + (d.branch || "HEAD") + "” 上提交）";
     $("gitSync").textContent = (d.ahead ? "↑" + d.ahead : "") + (d.behind ? "↓" + d.behind : "");
     const box = $("gitList");
     box.innerHTML = "";
@@ -7030,6 +7100,86 @@
   $("gitCommitMsg").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doGitCommit(); }
   });
+  /* ---------- AI 生成提交内容（提交框右侧按钮 / Ctrl+Alt+G） ---------- */
+  let gitGenRunning = false;
+  function gitGenBusy(busy) {
+    const box = document.querySelector(".g-ai-split");
+    if (box) box.classList.toggle("busy", !!busy);
+    const b = $("gitGenMsg");
+    if (b) b.disabled = !!busy;
+  }
+  async function gitGenerateCommitMsg() {
+    if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
+    if (gitGenRunning) return;                       // 防止连点重复请求
+    gitGenRunning = true;
+    gitGenBusy(true);
+    const btn = $("gitGenMsg");
+    if (btn) btn.innerHTML = '<i class="bi bi-arrow-repeat"></i>';
+    try {
+      const r = await fetch("/api/ai/commit-message", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo: gitState.repo }),
+      });
+      const isJson = (r.headers.get("Content-Type") || "").indexOf("json") >= 0;
+      const d = isJson ? await r.json().catch(() => ({})) : {};
+      if (!r.ok || d.error) {
+        if (d.need_config) {                         // 未配置接口：引导去设置
+          const ok = await uiConfirm("需要配置 AI 接口", d.error + "\n\n现在打开「设置 → 系统 AI」吗？", "打开设置", false);
+          if (ok) aiOpenSettings("sec-sysai");
+          return;
+        }
+        if (!isJson) throw new Error("服务端接口不可用（可能仍是旧版本），请重启服务后重试");
+        throw new Error(d.error || ("HTTP " + r.status));
+      }
+      $("gitCommitMsg").value = d.message || "";
+      $("gitCommitMsg").focus();
+      toast("已生成提交内容（" + (d.model || "AI") + " · " + (d.files || 0) + " 个文件），可继续编辑", "ok");
+    } catch (e) {
+      toast("生成失败：" + (e.message || e), "err");
+    } finally {
+      gitGenRunning = false;
+      gitGenBusy(false);
+      if (btn) btn.innerHTML = '<i class="bi bi-stars"></i>';
+    }
+  }
+  /* 生成按钮右侧的小箭头：更多生成相关操作 */
+  function showGenMsgMenu(anchor) {
+    let menu = $("gitGenMenu");
+    if (!menu) {
+      menu = document.createElement("div");
+      menu.className = "ctx-menu";
+      menu.id = "gitGenMenu";
+      document.body.appendChild(menu);
+      document.addEventListener("click", () => { menu.style.display = "none"; });
+    }
+    const items = [
+      { label: "生成提交内容", act: () => gitGenerateCommitMsg() },
+      { label: "配置 AI 接口…", act: () => aiOpenSettings("sec-sysai") },
+    ];
+    menu.innerHTML = "";
+    items.forEach(it => {
+      const el = document.createElement("div");
+      el.className = "mi";
+      el.innerHTML = "<span>" + it.label + "</span>";
+      el.onclick = (e) => { e.stopPropagation(); menu.style.display = "none"; it.act(); };
+      menu.appendChild(el);
+    });
+    const r = anchor.getBoundingClientRect();
+    menu.style.left = Math.min(r.left, window.innerWidth - 220) + "px";
+    menu.style.top = "";
+    menu.style.bottom = "";
+    menu.style.display = "block";
+    const mh = menu.offsetHeight || 60;
+    if (r.bottom + 2 + mh > window.innerHeight - 4) menu.style.bottom = (window.innerHeight - r.top + 2) + "px";
+    else menu.style.top = (r.bottom + 2) + "px";
+  }
+  $("gitGenMsg").onclick = () => gitGenerateCommitMsg();
+  $("gitGenMsgMore").onclick = (e) => {
+    e.stopPropagation();
+    const menu = $("gitGenMenu");
+    if (menu && menu.style.display === "block") { menu.style.display = "none"; return; }
+    showGenMsgMenu(e.currentTarget);
+  };
   $("sbBranch").onclick = () => { showPanel("git"); loadGitStatus(); };
 
   /* ==================================================================
@@ -8978,6 +9128,7 @@
         '<div class="set-navitem" data-sec="sec-keys"><i class="bi bi-keyboard"></i>快捷键</div>' +
         '<div class="set-navitem" data-sec="sec-data"><i class="bi bi-database"></i>数据</div>' +
         '<div class="set-navitem" data-sec="sec-ai"><i class="bi bi-stars"></i>AI 助手</div>' +
+        '<div class="set-navitem" data-sec="sec-sysai"><i class="bi bi-cpu"></i>系统 AI</div>' +
       '</div>' +
       '<div class="set-content">' +
         '<div class="set-sec" id="sec-editor"><h2>编辑器</h2>' +
@@ -9006,6 +9157,12 @@
           '<div class="ai-prov-list" id="aiProvList" data-kw="ai 助手 接口 token 模型 api"></div>' +
           '<div class="ai-set-acts" data-kw="ai 助手 接口 token 模型 api"><button class="ai-set-btn" id="aiProvAdd">+ 添加接口</button><span class="ai-spacer"></span><button class="ai-set-btn primary" id="aiCfgSave">保存全部</button></div>' +
           '<div class="ai-set-tip" id="aiCfgTip"></div>' +
+        '</div>' +
+        '<div class="set-sec" id="sec-sysai"><h2 data-kw="系统 ai token 接口 模型 提交信息 生成">系统 AI</h2>' +
+          '<div class="set-desc" data-kw="系统 ai token 接口 模型 提交信息 生成" style="margin-bottom:10px;">供「生成提交内容」等系统功能使用。与 AI 助手共用同一份接口配置（API Key 只保存在服务器本地），这里只选择用哪个接口与模型；选「跟随 AI 助手」时使用 AI 面板当前选中的接口。</div>' +
+          '<div class="set-row" data-kw="系统 ai token 接口 模型 提交信息 生成"><div class="set-info"><div class="set-label">使用的接口 / 模型</div><div class="set-desc">生成提交信息时调用的接口与模型</div></div><select id="sysAiPick"></select></div>' +
+          '<div class="ai-set-acts" data-kw="系统 ai token 接口 模型 保存"><span class="ai-spacer"></span><button class="ai-set-btn primary" id="sysAiSave">保存</button></div>' +
+          '<div class="ai-set-tip" id="sysAiTip"></div>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -9131,6 +9288,7 @@
     renderKeybinds();
     q("#setSysKeys").innerHTML = SYS_KEYS.map(k => '<div class="set-key"><span>' + k[0] + "</span><kbd>" + k[1] + "</kbd></div>").join("");
     aiMountSettings();   // 挂载 AI 助手接口配置（设置 → AI 助手）
+    sysAiEnsure();       // 挂载「系统 AI」分区（设置 → 系统 AI）
   }
   /* ---------- 命令注册表 + 自定义快捷键（设置 → 快捷键 可视化修改，localStorage 持久化） ---------- */
   const KEY_COMMANDS = [
@@ -9141,6 +9299,7 @@
     { id: "kb-cmd",         label: "命令面板",           def: "Mod+P",        run: () => quickOpen() },
     { id: "kb-search",      label: "搜索文件内容",       def: "Mod+Shift+F",  run: () => openSearch() },
     { id: "kb-goto",        label: "跳转到行",           def: "Mod+G",        run: () => gotoLine() },
+    { id: "kb-gen-commit",  label: "生成提交内容",       def: "Mod+Alt+G",    run: () => gitGenerateCommitMsg() },
     { id: "kb-find",        label: "文件内查找",         def: "Mod+F",        run: () => ffOpen(false) },
     { id: "kb-replace",     label: "文件内替换",         def: "Mod+H",        run: () => ffOpen(true) },
     { id: "kb-find-next",   label: "查找下一个",         def: "F3",           run: () => ffNext(1) },

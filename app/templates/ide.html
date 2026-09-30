@@ -199,7 +199,7 @@
   .empty-workspace .ew-sub { color: #777; font-size: 12px; margin-bottom: 8px; }
   .empty-workspace .g-btn { margin: 0; padding: 6px 14px; }
   .side-panel.active { display: block; }
-  /* 只作用于文本输入框：否则复选框也会被撑成整行宽（Git 面板的“包含已跟踪改动”会折行） */
+  /* 只作用于文本输入框：否则复选框 / 单选框也会被撑成整行宽 */
   .side-panel input:not([type="checkbox"]):not([type="radio"]) {
     width: 100%; background: #3c3c3c; border: 1px solid #3c3c3c; color: #fff; padding: 5px 8px; border-radius: 3px; font-size: 12px;
   }
@@ -297,11 +297,6 @@
     border-radius: 3px; color: #fff; font-size: 12px; padding: 5px 8px; outline: none; font-family: inherit;
   }
   .git-commit textarea:focus { border-color: #007fd4; }
-  .git-amend {
-    color: #9d9d9d; font-size: 11px; display: flex; align-items: center; gap: 5px;
-    padding-top: 6px; cursor: pointer; white-space: nowrap; overflow: hidden;
-  }
-  .git-amend input[type="checkbox"] { flex: none; width: 13px; height: 13px; margin: 0; }
   .g-btn.block { display: block; width: 100%; padding: 8px 12px; margin-top: 6px; font-size: 13px; }
   .g-btn {
     background: #0d7ec4; border: none; color: #fff; border-radius: 3px;
@@ -353,9 +348,9 @@
   .git-file.st-M .gf-name { color: #98c379; }
   .git-file.st-U .gf-name { color: #61afef; }
   .git-file .gf-dir { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .git-file .gf-st-mean { margin-left: 4px; font-size: 11px; color: #8a8a8a; flex: none; }
-  .git-file .gf-st { margin-left: auto; font-size: 11px; color: #e2c08a; flex: none; }
-  .git-file .gf-acts { display: flex; gap: 2px; flex: none; visibility: hidden; }
+  /* 行尾：操作按钮占用弹性空隙（靠右），状态字母固定在最右侧 */
+  .git-file .gf-acts { display: flex; gap: 2px; flex: none; visibility: hidden; margin-left: auto; }
+  .git-file .gf-st { font-size: 11px; color: #e2c08a; flex: none; }
   .git-file:hover .gf-acts { visibility: visible; }
   .git-file .gf-acts button {
     background: transparent; border: none; color: #cccccc; cursor: pointer;
@@ -1642,9 +1637,6 @@
             <button class="g-btn split-main" id="gitCommitBtn" title="提交 (Ctrl+Enter)"><i class="bi bi-check-lg"></i> <span id="gitCommitBtnLabel">提交</span></button>
             <button class="g-btn split-arrow" id="gitCommitMore" title="更多提交操作"><i class="bi bi-chevron-down"></i></button>
           </div>
-          <label class="git-amend" title="提交时自动包含已跟踪文件的改动（git commit -a）">
-            <input type="checkbox" id="gitCommitAll"> 包含已跟踪改动
-          </label>
         </div>
         <div class="git-list scroll-thin" id="gitList"></div>
       </div>
@@ -5490,13 +5482,13 @@
     const full = (gitState.repo || ROOT || "") + "/" + f.path;           // 悬浮显示完整路径 · 状态
     row.title = full + (gitStatusMean(f.status) ? " · " + gitStatusMean(f.status) : "");
     row.style.paddingLeft = (8 + (depth || 0) * 12) + "px";
-    // 树形视图下层级已经体现目录，不再重复展示目录名
+    // 树形视图下层级已经体现目录，不再重复展示目录名；
+    // 行尾顺序：操作按钮在前、状态字母在最右（状态含义仍保留在悬浮提示里）
     row.innerHTML = '<span class="ic">' + iconFor(name, false) + '</span>' +
       '<span class="gf-name">' + esc(name) + '</span>' +
-      '<span class="gf-st-mean">' + esc(gitStatusMean(f.status)) + '</span>' +
       (gitViewMode === "list" && dir ? '<span class="gf-dir">' + esc(dir) + '</span>' : '') +
-      '<span class="gf-st">' + esc(f.status) + '</span>' +
-      '<span class="gf-acts"></span>';
+      '<span class="gf-acts"></span>' +
+      '<span class="gf-st">' + esc(f.status) + '</span>';
     const acts = row.querySelector(".gf-acts");
     const addBtn = (icon, title, fn) => {
       const b = document.createElement("button");
@@ -6977,7 +6969,6 @@
     const msg = $("gitCommitMsg").value.trim();
     const amend = mode === "amend";
     if (!msg && !amend) { toast("请填写提交信息", "warn"); return; }   // amend 留空 = 沿用上次信息
-    const all = $("gitCommitAll").checked;
     const d = gitState.last || {};
     const hasStaged = (d.staged || []).length > 0;
     const hasChanged = (d.changed || []).length > 0;
@@ -6985,14 +6976,14 @@
     if (!hasStaged && !amend) {
       if (hasUntracked) {
         toast("没有已暂存的文件。请先在下方文件右侧点击 + 暂存，或点击分组标题右侧的 + 暂存全部，然后再提交。", "warn");
-      } else if (hasChanged && !all) {
-        toast("存在未暂存的已跟踪改动。请先暂存文件，或勾选「包含已跟踪改动」后直接提交。", "warn");
+      } else if (hasChanged) {
+        toast("存在未暂存的已跟踪改动。请先暂存文件后再提交。", "warn");
       } else {
         toast("没有要提交的更改。", "warn");
       }
       return;
     }
-    gitPost("/api/git/commit", { repo: gitState.repo, message: msg, all: all, amend: amend },
+    gitPost("/api/git/commit", { repo: gitState.repo, message: msg, amend: amend },
         commitModeLabel(mode) + "成功")
       .then(ok => {
         if (!ok) return;

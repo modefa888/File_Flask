@@ -147,6 +147,9 @@ os.makedirs(_TRASH_DIR, exist_ok=True)
 # 删除历史
 _DELETE_HISTORY_FILE = os.path.join(_DATA_ROOT, ".file_manager_delete_history.json")
 
+# AI 助手配置（OpenAI 兼容接口：base_url / api_key / model）
+AI_CONFIG_FILE = os.path.join(_DATA_ROOT, ".file_manager_ai.json")
+
 # 持久化索引数据库
 _INDEX_DB_FILE = os.path.join(_CACHE_DIR, ".file_manager_index.db")
 _INDEX_DB_NEW = _INDEX_DB_FILE + ".new"

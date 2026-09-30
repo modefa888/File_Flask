@@ -53,9 +53,10 @@ def _register_blueprints(app: Flask) -> None:
     from .routes.term import bp as term_bp
     from .routes.env import bp as env_bp
     from .routes.shares import bp as shares_bp
+    from .routes.ai import bp as ai_bp
     for bp in (auth_bp, pages_bp, browser_bp, zip_bp, delete_bp, archive_history_bp,
                fileops_bp, index_bp, progress_stream_bp, grep_bp, git_bp, run_bp, port_bp,
-               term_bp, env_bp, shares_bp):
+               term_bp, env_bp, shares_bp, ai_bp):
         app.register_blueprint(bp)
 
 

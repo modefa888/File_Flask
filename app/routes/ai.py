@@ -343,3 +343,38 @@ def api_ai_summarize():
         return jsonify({"error": f"接口返回 {e.code}"}), 502
     except (urllib.error.URLError, OSError, ValueError) as e:
         return jsonify({"error": f"压缩失败：{e}"}), 502
+
+
+@bp.route("/api/ai/models", methods=["POST"])
+def api_ai_models():
+    """从 OpenAI 兼容接口拉取可用模型列表（GET /models），供设置页勾选。"""
+    cfg = _load_cfg()
+    data = request.get_json(silent=True) or {}
+    base = str(data.get("base_url") or "").strip().rstrip("/")
+    key = str(data.get("api_key") or "")
+    pid = str(data.get("provider_id") or "")
+    if not base:
+        return jsonify({"error": "请先填写接口地址"}), 400
+    if not key:                                   # key 留空 → 沿用已保存的
+        provider = next((p for p in cfg["providers"] if p["id"] == pid), None)
+        key = (provider or {}).get("api_key", "")
+    url = base + "/models"
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        resp = urllib.request.urlopen(req, timeout=30)
+        obj = json.loads(resp.read().decode("utf-8"))
+        items = obj.get("data") if isinstance(obj, dict) else obj if isinstance(obj, list) else None
+        ids = []
+        for it in items or []:
+            mid = (it.get("id") or it.get("name") or "") if isinstance(it, dict) else str(it)
+            if mid and mid not in ids:
+                ids.append(mid)
+        _log.info("AI 模型列表：base=%s 获取到 %d 个模型", base, len(ids))
+        return jsonify({"models": ids[:200]})
+    except urllib.error.HTTPError as e:
+        return jsonify({"error": f"接口返回 {e.code}（可能不支持 /models，请手动填写）"}), 502
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return jsonify({"error": f"获取失败：{e}"}), 502

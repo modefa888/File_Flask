@@ -707,6 +707,20 @@
   .ai-prov textarea { resize: vertical; min-height: 34px; line-height: 1.5; }
   .ai-prov input:focus, .ai-prov textarea:focus { border-color: #0a6aa8; }
   .ai-prov .lbl { font-size: 10px; color: #767676; }
+  .ai-lbl-row { display: flex; align-items: center; justify-content: space-between; }
+  .ai-prov-fetch { display: inline-flex; align-items: center; gap: 4px; background: #2b2b31; border: 1px solid #3a3a42;
+    color: #9aa4b2; font-size: 10.5px; border-radius: 5px; padding: 2px 8px; cursor: pointer; }
+  .ai-prov-fetch:hover { color: #d7dce2; border-color: #4a4a55; }
+  .ai-prov-fetch[disabled] { opacity: .5; cursor: default; }
+  .ai-prov-mlist { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; margin-top: 6px; max-height: 148px;
+    overflow: auto; border: 1px solid #2f2f36; border-radius: 6px; padding: 6px 10px; background: #202024; }
+  .ai-prov-mopt { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #c2c8d0; cursor: pointer; min-width: 0; }
+  .ai-prov-mopt span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 覆盖 .ai-prov input 的通用输入框规则，否则 checkbox 会被拉成 100% 宽的大方块 */
+  .ai-prov .ai-prov-mopt input {
+    appearance: checkbox; -webkit-appearance: checkbox; width: 13px; height: 13px; min-height: 0;
+    padding: 0; background: transparent; border: none; accent-color: #3b82f6; flex: none; margin: 0;
+  }
   .ai-prov-del { background: transparent; border: none; color: #8a6a6a; cursor: pointer; font-size: 12px; width: 22px; height: 22px; border-radius: 5px; flex: none; }
   .ai-prov-del:hover { background: #3a2626; color: #e08a8a; }
   .ai-prov-empty { font-size: 11.5px; color: #767676; text-align: center; padding: 8px 0; }
@@ -792,7 +806,13 @@
     background: rgba(0,0,0,.65); color: #fff; border: none; border-radius: 50%; font-size: 10px; cursor: pointer; padding: 0;
   }
   .ai-img-thumb .rm:hover { background: #a33; }
-  .ai-cursor { display: inline-block; width: 7px; height: 13px; background: #9da8ab; vertical-align: -2px; animation: aiBlink 1s steps(2) infinite; }
+  .ai-cursor { display: inline-block; width: 7px; height: 13px; background: #9ecbff; vertical-align: -2px; animation: aiBlink 1s steps(1) infinite; }
+  /* 等待首 token 的半透明「思考中…」占位（收到内容后被流式渲染自动覆盖） */
+  .ai-waiting { display: inline-flex; align-items: center; gap: 4px; color: #9aa4b2; opacity: .6; font-size: 12px; user-select: none; }
+  .ai-waiting .d { width: 4px; height: 4px; border-radius: 50%; background: #9aa4b2; display: inline-block; animation: aiWaitDot 1.2s infinite; }
+  .ai-waiting .d:nth-of-type(2) { animation-delay: .18s; }
+  .ai-waiting .d:nth-of-type(3) { animation-delay: .36s; }
+  @keyframes aiWaitDot { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
   @keyframes aiBlink { 50% { opacity: 0; } }
   .ai-input { flex: none; border-top: 1px solid #2c2c2c; padding: 8px 10px; background: #232326; }
   .ai-input textarea {
@@ -3394,7 +3414,20 @@
     if (act === "delete") {
       if (!(await uiConfirm("删除确认", "确定删除 " + name + " ？此操作不可撤销。", "删除", true))) return;
       fetch("/api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paths: [path] }) })
-        .then(r => r.json()).then(d => { if (d.error) throw new Error(d.error); toast("已删除：" + name, "ok"); refreshTree(dirName(path)); tabs.filter(t => t.path.startsWith(path)).forEach(closeTabSilent); })
+        .then(r => r.json()).then(d => {
+          if (d.error) throw new Error(d.error);
+          toast("已删除：" + name, "ok");
+          // 直接从树里移除该节点（目录连子容器），不重拉整棵树，避免展开状态/滚动位置抖动
+          // 注意：带引号的属性选择器值不能套 CSS.escape（会把 . 转成 \. 导致匹配失败），直接拼接即可
+          const row = document.querySelector('.tree-row[data-path="' + path.replace(/"/g, '\\"') + '"]');
+          if (row) {
+            const kids = row.nextElementSibling;
+            if (kids && kids.classList.contains("tree-children")) kids.remove();
+            row.remove();
+          }
+          loadGitStatus();                                    // 只刷新 Git 角标/更改列表，不动树
+          tabs.filter(t => t.path === path || t.path.startsWith(path + "/")).forEach(closeTabSilent);
+        })
         .catch(e => toast("删除失败：" + (e.message || e), "err"));
     }
   }
@@ -4524,11 +4557,55 @@
         '<input class="u" placeholder="https://api.deepseek.com" spellcheck="false">' +
         '<div class="lbl">API Key（留空沿用已保存的）</div>' +
         '<input class="k" type="password" placeholder="' + (p.api_key ? "已保存 " + p.api_key : "sk-...") + '" spellcheck="false" autocomplete="off">' +
-        '<div class="lbl">模型列表（逗号分隔，可多个）</div>' +
-        '<textarea class="ms" rows="2" spellcheck="false" placeholder="deepseek-chat, deepseek-reasoner"></textarea>';
+        '<div class="lbl ai-lbl-row"><span>模型列表（可手动填写或自动获取）</span>' +
+        '<button class="ai-prov-fetch" type="button" title="从接口拉取可用模型列表"><i class="bi bi-arrow-repeat"></i> 自动获取</button></div>' +
+        '<textarea class="ms" rows="2" spellcheck="false" placeholder="deepseek-chat, deepseek-reasoner"></textarea>' +
+        '<div class="ai-prov-mlist" style="display:none"></div>';
       card.querySelector(".nm").value = p.name || "";
       card.querySelector(".u").value = p.base_url || "";
       card.querySelector(".ms").value = (p.models || []).join(", ");
+      const msEl = card.querySelector(".ms"), mlList = card.querySelector(".ai-prov-mlist");
+      /* 「自动获取」：调后端拉取 /models，返回的模型渲染成复选框，勾选同步进 textarea */
+      card.querySelector(".ai-prov-fetch").addEventListener("click", async () => {
+        const btn = card.querySelector(".ai-prov-fetch");
+        if (btn.disabled) return;
+        btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split"></i> 获取中…';
+        try {
+          const r = await fetch("/api/ai/models", { method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ base_url: card.querySelector(".u").value.trim(), api_key: card.querySelector(".k").value, provider_id: p.id }) });
+          const d = await r.json();
+          if (!r.ok || d.error) throw new Error(d.error || "获取失败");
+          const cur = msEl.value.split(/[，,]/).map(s => s.trim()).filter(Boolean);
+          mlList.innerHTML = "";
+          d.models.forEach(m => {
+            const lab = document.createElement("label");
+            lab.className = "ai-prov-mopt";
+            const cb = document.createElement("input");
+            cb.type = "checkbox"; cb.checked = cur.includes(m);
+            const sp = document.createElement("span");
+            sp.textContent = m; sp.title = m;
+            cb.addEventListener("change", () => {
+              const sel = Array.from(mlList.querySelectorAll("input:checked")).map(x => x.closest("label").querySelector("span").textContent);
+              const manual = msEl.value.split(/[，,]/).map(s => s.trim()).filter(Boolean).filter(x => !d.models.includes(x));
+              msEl.value = manual.concat(sel).join(", ");
+            });
+            lab.appendChild(cb); lab.appendChild(sp);
+            mlList.appendChild(lab);
+          });
+          if (!d.models.length) { mlList.style.display = "none"; toast("接口未返回任何模型", "warn"); }
+          else mlList.style.display = "";
+          /* 手动编辑 textarea 时反向同步勾选状态 */
+          msEl.oninput = () => {
+            if (mlList.style.display === "none") return;
+            const now = msEl.value.split(/[，,]/).map(s => s.trim());
+            mlList.querySelectorAll(".ai-prov-mopt").forEach(lab => {
+              lab.querySelector("input").checked = now.includes(lab.querySelector("span").textContent);
+            });
+          };
+        } catch (err) { toast("自动获取模型失败：" + err.message, "warn"); }
+        finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> 自动获取'; }
+      });
       card.querySelector(".ai-prov-del").addEventListener("click", () => {
         AI.providers = AI.providers.filter(x => x.id !== p.id);
         aiRenderProvSettings();
@@ -4843,7 +4920,7 @@
     const thinkB = aiBubble("assistant", "", "ai-think");
     thinkB.parentElement.style.display = "none";        // 无思考内容时不占位
     const bodyB = aiBubble("assistant", "", "", null, true);
-    bodyB.innerHTML = '<span class="ai-cursor"></span>';
+    bodyB.innerHTML = '<span class="ai-waiting">思考中<span class="d"></span><span class="d"></span><span class="d"></span></span>';
     let acc = "", thinking = "", ttft = 0;                // ttft：首 token 到达耗时
     AI.ctrl = new AbortController();
     try {

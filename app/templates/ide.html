@@ -8,7 +8,7 @@
 <style>
 /* Seti 官方图标字体（microsoft/vscode theme-seti，本地化） */
 @font-face { font-family: "seti"; src: url("/static/vendor/seti/seti.woff") format("woff"); font-display: block; }
-.seti-ic { font-family: "seti"; font-style: normal; font-weight: normal; font-size: 1em; line-height: 1; display: inline-block; vertical-align: baseline; }
+.seti-ic { font-family: "seti"; font-style: normal; font-weight: normal; font-size: 1.4em; line-height: 1; display: inline-block; vertical-align: baseline; }
 /* IDE 图片预览：棋盘格背景 + 自适应居中，点击切换 1:1 / 适应窗口 */
 .img-preview { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; overflow: auto;
   background: repeating-conic-gradient(#262626 0 25%, #1e1e1e 0 50%) 0 0 / 20px 20px; }
@@ -160,17 +160,20 @@
   }
   .tree { flex: 1; overflow: auto; padding-bottom: 10px; }
   .tree-row {
-    display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 4px;
-    font-size: 13px; color: #cccccc; cursor: pointer; white-space: nowrap; user-select: none;
+    display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 1px 8px 1px 4px;
+    font-size: 13px; line-height: 1.5; color: #cccccc; cursor: pointer; white-space: nowrap; user-select: none;
   }
   .tree-row:hover { background: #2a2d2e; }
   .tree-row.selected { background: #094771; }
   .tree-row:focus { outline: none; }        /* 选中态用底色表示，不要浏览器默认聚焦框 */
   .tree-row.selected:focus { box-shadow: inset 0 0 0 1px #0a6aa8; }
   .tree-row .twist { width: 16px; text-align: center; color: #9aa0a6; font-size: 10px; flex: none; }
-  .tree-row .ic { width: 16px; flex: none; text-align: center; }
+  /* 图标统一 1.4em，flex 居中保证与文字在同一水平线 */
+  .tree-row .ic { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .tree-row .ic .bi, .tree-row .ic .seti-ic { font-size: 1.4em; line-height: 1; }
+  /* 行高随 .tree-row 的 1.5：不能压成 1，否则 overflow:hidden 会裁掉中文字形的下半部 */
   .tree-row .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-  .tree-row .nm-hint { color: #8a8a8a; font-size: 0.85em; margin-left: 4px; flex: none; }
+  .tree-row .nm-hint { color: #8a8a8a; font-size: 11px; margin-left: 4px; flex: none; }
   .tree-row.dirty .nm { color: #e2c08a; }
   .tree-children { display: none; }
   .tree-children.open { display: block; }
@@ -330,8 +333,8 @@
   }
   .git-file { display: flex; align-items: center; gap: 6px; padding: 5px 8px 5px 22px; font-size: 12.5px; color: #cccccc; cursor: pointer; }
   .git-file:hover { background: #2a2d2e; }
-  .git-file .ic { width: 16px; flex: none; text-align: center; font-size: 1em; }
-  .git-file .ic .bi, .git-file .ic .seti-ic { font-size: 1em; vertical-align: baseline; line-height: 1; }
+  .git-file .ic { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .git-file .ic .bi, .git-file .ic .seti-ic { font-size: 1.4em; line-height: 1; }
   .git-file .gf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-file .gf-dir { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-file .gf-st-mean { margin-left: 4px; font-size: 11px; color: #8a8a8a; flex: none; }
@@ -431,6 +434,8 @@
   .git-commit-item.last .git-commit-files::before { display: none; }
   .git-commit-file { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 34px; font-size: 12.5px; color: #cccccc; cursor: pointer; }
   .git-commit-file:hover { background: #2a2d2e; }
+  .git-commit-file .ic { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .git-commit-file .ic .bi, .git-commit-file .ic .seti-ic { font-size: 1.4em; line-height: 1; }
   .git-commit-file .gcf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-commit-file .gcf-dir { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-commit-file .gf-st { margin-left: auto; font-size: 11px; color: #e2c08a; flex: none; }
@@ -620,7 +625,8 @@
     background: #2d2d2d; border-right: 1px solid #1e1e1e; color: #969696; font-size: 13px; cursor: pointer; white-space: nowrap;
   }
   .tab.active { background: #1e1e1e; color: #ffffff; }
-  .tab .t-ic { font-size: 13px; }
+  .tab .t-ic { font-size: 13px; display: flex; align-items: center; }
+  .tab .t-ic .bi, .tab .t-ic .seti-ic { font-size: 1.4em; line-height: 1; }
   .tab .t-nm { overflow: hidden; text-overflow: ellipsis; }
   .tab .t-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; flex: none; display: none; }
   .tab.dirty .t-dot { display: inline-block; }
@@ -1473,12 +1479,47 @@
 (function () {
   "use strict";
   const BASE = "/static/vendor/codemirror/mode/";
-  // 工作区根目录：去掉尾部斜杠，否则文件树会拼出 "a//b" 这种路径，
-  // 与搜索/新建等入口的标准路径对不上，同一个文件会被当成两个文件重复打开
+  /* ---------- 路径混淆 + 本地持久化 ----------
+     1) 用 ?path=<明文> 打开 IDE 后，把明文 URL 立即替换成 ?id=<混淆token>，地址栏不再暴露路径；
+     2) 明文路径写入 localStorage，下次访问 /ide 不带参数时自动恢复上次的文件夹。
+     混淆方式：字符 code 加 XOR 偏移 + Base64。纯前端、无密钥，仅用于视觉遮挡。 */
+  const LAST_PATH_KEY = "ide_last_path";
+  const PATH_OBFUS_KEY = 0x5f;
+  function obfuscatePath(raw) {
+    try {
+      const s = String(raw || "").replace(/\/+$/, "");
+      if (!s) return "";
+      const bytes = new Uint8Array(s.length);
+      for (let i = 0; i < s.length; i++) { bytes[i] = (s.charCodeAt(i) ^ PATH_OBFUS_KEY) & 0xff; }
+      return btoa(String.fromCharCode.apply(null, Array.from(bytes)));
+    } catch (e) { return ""; }
+  }
+  function deobfuscatePath(id) {
+    try {
+      const bytes = Uint8Array.from(atob(String(id || "")), c => c.charCodeAt(0));
+      let s = "";
+      for (let i = 0; i < bytes.length; i++) { s += String.fromCharCode(bytes[i] ^ PATH_OBFUS_KEY); }
+      return s.replace(/\/+$/, "");
+    } catch (e) { return ""; }
+  }
+  // 工作区根目录：?path 优先，其次 localStorage（不带参数访问时自动恢复上次项目）；
+  // 去掉尾部斜杠，否则文件树会拼出 "a//b" 这种路径，与搜索/新建等入口的标准路径对不上，
+  // 同一个文件会被当成两个文件重复打开
   const ROOT = (() => {
-    const raw = (new URLSearchParams(location.search).get("path") || "").trim();
+    let raw = (new URLSearchParams(location.search).get("path") || "").trim();
+    if (!raw) {
+      try { raw = localStorage.getItem(LAST_PATH_KEY) || ""; } catch (e) {}
+    }
     return raw.length > 1 ? raw.replace(/\/+$/, "") : raw;
   })();
+  // 打开 IDE 后：把路径持久化到 localStorage，并把 URL 替换成 ?id=<token>（不显示明文路径）
+  if (ROOT) {
+    try { localStorage.setItem(LAST_PATH_KEY, ROOT); } catch (e) {}
+    try {
+      const tok = obfuscatePath(ROOT);
+      if (tok) history.replaceState(null, "", "/ide?id=" + encodeURIComponent(tok));
+    } catch (e) {}
+  }
 
   const $ = (id) => document.getElementById(id);
   const explorerPanel = $("explorerPanel");
@@ -2068,7 +2109,10 @@
     if (tab.el && tab.el.parentNode) tab.el.parentNode.removeChild(tab.el);
     const el = document.createElement("div");
     el.className = "tab" + (tab.dirty ? " dirty" : "");
-    const ic = tab.diff ? '<i class="bi bi-file-diff"></i>' : iconFor(tab.name, false);
+    // 差异标签的 name 带 "@提交哈希" 后缀（如 ide.html@895cd54），直接匹配取不到类型图标，
+    // 用 relPath 的真实文件名来取图标；大小 1.4em 由 .t-ic 规则统一控制
+    const iconName = (tab.diff && tab.relPath) ? baseName(tab.relPath) : tab.name;
+    const ic = iconFor(iconName, false);
     el.innerHTML = '<span class="t-ic">' + ic + '</span><span class="t-nm">' + esc(tab.name) + '</span><span class="t-dot"></span><span class="t-close"><i class="bi bi-x"></i></span>';
     el.addEventListener("click", (e) => { e.stopPropagation(); if (e.target.closest(".t-close")) closeTab(tab); else activate(tab); });
     setupTabDrag(el, tab);
@@ -6781,7 +6825,7 @@
     if (TERMS.length >= TERM_MAX) { toast("最多同时打开 " + TERM_MAX + " 个终端", "warn"); return Promise.resolve(null); }
     return fetch("/api/term/open", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cwd: ROOT }),
+      body: JSON.stringify({ cwd: ROOT, scope: ROOT }),
     })
       .then(r => r.json())
       .then(d => {
@@ -6814,9 +6858,10 @@
         $("bpTermTabs").style.display = "";
         TERMS.push(s);
         termAppendTo(s, "内置终端（命令模式）· " + d.cwd + "\n" +
-          "支持 git / npm / ls 等命令；cd 会保持目录；Ctrl+C 终止当前命令，Ctrl+L 清屏。\n" +
-          "（不支持 vim、top 等需要 TTY 的全屏程序）\n" +
-          "安全策略：危险命令自动拦截，高风险命令执行前二次确认（终端菜单 → 命令安全策略）。\n\n", "term-dim");
+        "支持 git / npm / ls 等命令；cd 会保持目录；Ctrl+C 终止当前命令，Ctrl+L 清屏。\n" +
+        "（不支持 vim、top 等需要 TTY 的全屏程序）\n" +
+        (d.scope ? "操作范围：" + d.scope + "（仅允许在此目录下执行文件操作，越界路径会被拦截）\n" : "") +
+        "安全策略：危险命令自动拦截，高风险命令执行前二次确认（终端菜单 → 命令安全策略）。\n\n", "term-dim");
         selectTerm(s);
         toggleBottom(true, "term");
         $("termInput").focus();

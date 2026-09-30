@@ -2973,14 +2973,33 @@
     if (!tab.mdPreview || !tab.cm) return;
     tab.mdPreview.innerHTML = renderMarkdown(tab.cm.getValue());
   }
-  // 组装 HTML 预览文档：注入 <base> 指向 raw 服务；根相对路径 /xxx
-  // 在本地静态预览里没有“站点根”，按文件所在目录解析（常见静态站约定）
-  function buildHtmlPreviewDoc(tab) {
+  // 根相对路径（/xxx）在 HTML 预览里怎么解析：
+  //   1) 页面所在目录下确实存在同名条目 → 按“站点根 = 页面所在目录”解析（静态站常见约定）
+  //   2) 否则保持站点根语义（例如 Flask 项目里的 /static/... 由应用根提供，
+  //      若一律改写成 /api/raw/<页面目录>/... 会让所有样式与脚本 404、预览变成裸页面）
+  const _previewRootCache = new Map();          // "dir\u0001seg" -> Promise<boolean>
+  function previewUseDirAsRoot(dir, seg) {
+    const key = dir + "\u0001" + seg;
+    if (!_previewRootCache.has(key)) {
+      _previewRootCache.set(key,
+        fetch("/api/files?path=" + encodeURIComponent(dir))
+          .then(r => r.json())
+          .then(d => !d.error && (d.items || []).some(x => x.name === seg))
+          .catch(() => false));
+    }
+    return _previewRootCache.get(key);
+  }
+
+  // 组装 HTML 预览文档：注入 <base> 指向 raw 服务（相对路径按页面目录解析）；
+  // useDir=true 时再把根相对路径 /xxx 也按页面目录改写
+  function buildHtmlPreviewDoc(tab, useDir) {
     let src = tab.cm.getValue();
     const dir = tab.path.slice(0, tab.path.lastIndexOf("/")) || "/";
     const base = rawFileUrl(dir) + "/";
-    src = src.replace(/(\s(?:href|src|action|poster)\s*=\s*)(["'])\/(?!\/)([^"']*)\2/gi,
-      (m, pre, q, rest) => pre + q + base + rest + q);
+    if (useDir) {
+      src = src.replace(/(\s(?:href|src|action|poster)\s*=\s*)(["'])\/(?!\/)([^"']*)\2/gi,
+        (m, pre, q, rest) => pre + q + base + rest + q);
+    }
     const baseTag = '<base href="' + base + '">';
     if (/<head[^>]*>/i.test(src)) src = src.replace(/<head[^>]*>/i, (m) => m + "\n" + baseTag);
     else src = baseTag + src;
@@ -2988,7 +3007,17 @@
   }
   function renderHtmlPreview(tab) {
     if (!tab.mdFrame || !tab.cm) return;
-    tab.mdFrame.srcdoc = buildHtmlPreviewDoc(tab);
+    const src = tab.cm.getValue();
+    const dir = tab.path.slice(0, tab.path.lastIndexOf("/")) || "/";
+    const m = src.match(/(?:\s(?:href|src|action|poster)\s*=\s*)(["'])\/(?!\/)([^"'?#]*)/i);
+    const seg = m ? m[2].split("/")[0] : "";
+    const seq = (tab._hpSeq = (tab._hpSeq || 0) + 1);
+    const paint = (useDir) => {
+      if (seq !== tab._hpSeq || !tab.mdFrame) return;   // 期间已重新刷新 / 标签已关闭
+      tab.mdFrame.srcdoc = buildHtmlPreviewDoc(tab, useDir);
+    };
+    if (!seg) { paint(true); return; }
+    previewUseDirAsRoot(dir, seg).then(paint, () => paint(true));
   }
   function renderPreviewNow(tab) {
     if (tab.mdFrame) renderHtmlPreview(tab);

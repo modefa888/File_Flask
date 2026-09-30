@@ -803,21 +803,24 @@
   .bubble.ai-md a { color: #6cb6ff; }
   .bubble.ai-md blockquote { margin: 6px 0; padding: 4px 10px; border-left: 3px solid #3c4a5a; color: #9aa5b1; background: rgba(255,255,255,.03); }
   .bubble.ai-md hr { border: none; border-top: 1px solid #3a3a3e; margin: 10px 0; }
-  .ai-md-pre { background: #141417; border: 1px solid #33333a; border-radius: 8px; margin: 8px 0; overflow: hidden; }
+  .ai-md-pre { background: #141417; border: 1px solid #33333a; border-radius: 8px; margin: 8px 0; overflow: hidden;
+    --ai-code-lh: 18px; }   /* 代码行高：行号栏与代码行必须同源，否则逐行累积错位 */
   .ai-md-ch { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px;
     background: #1d1d21; border-bottom: 1px solid #33333a; font-size: 10.5px; color: #767676; }
   .ai-md-btns { display: inline-flex; align-items: center; gap: 8px; }
   .ai-md-copy, .ai-md-ins { background: transparent; border: none; color: #8a8a8a; cursor: pointer; font-size: 12px; padding: 0 2px; }
   .ai-md-copy:hover, .ai-md-ins:hover { color: #fff; }
   .ai-md-ins:hover { color: #7fd88f; }
-  .bubble.ai-md .ai-md-pre pre { margin: 0; padding: 9px 12px 9px 10px; white-space: pre; word-break: normal; flex: 1; }
+  /* 注意：<pre> 自身的行高会形成「strut」，若与 <code> 不一致，行盒会取较大值导致行号逐行错位 */
+  .bubble.ai-md .ai-md-pre pre { margin: 0; padding: 9px 12px 9px 10px; white-space: pre; word-break: normal; flex: 1;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; line-height: var(--ai-code-lh, 18px); }
   .bubble.ai-md .ai-md-pre code { background: transparent; border: none; border-radius: 0; padding: 0; color: #cfe3d8;
-    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 18px; white-space: pre; }
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; line-height: var(--ai-code-lh, 18px); white-space: pre; }
   .ai-md-code { display: flex; align-items: stretch; overflow-x: auto; }
   .ai-md-ln { flex: none; position: sticky; left: 0; z-index: 1; padding: 9px 8px 9px 12px; text-align: right;
     min-width: 2.2em; color: #525258; background: #141417; border-right: 1px solid #2a2a2e; user-select: none;
     white-space: pre; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; }
-  .ai-md-ln div { height: 18px; line-height: 18px; }   /* 与代码行盒一一对应，杜绝累积错位 */
+  .ai-md-ln div { height: var(--ai-code-lh, 18px); line-height: var(--ai-code-lh, 18px); }   /* 与代码行盒一一对应 */
   /* 代码高亮配色（One Dark 风格） */
   .hl-k { color: #c678dd; }
   .hl-s { color: #98c379; }

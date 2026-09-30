@@ -887,6 +887,33 @@
   .ai-input textarea:focus { border-color: #0a6aa8; }
   .ai-input-acts { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
   .ai-ctx-flag { font-size: 10.5px; color: #e2c08a; background: #332c1e; border-radius: 4px; padding: 2px 6px; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* AI 操作权限（仅可查看 / 工作区内修改 / 完全权限） */
+  .ai-perm-wrap { position: relative; flex: none; }
+  .ai-perm {
+    display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; max-width: 150px;
+    background: #2d2d31; border: 1px solid #3c3c3c; border-radius: 5px; color: #b9c6d4; font-size: 11px; cursor: pointer;
+  }
+  .ai-perm:hover { border-color: #555; background: #333338; color: #dbe6f2; }
+  .ai-perm span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-perm .bi { font-size: 11px; flex: none; }
+  .ai-perm .bi-chevron-up { font-size: 9px; }
+  .ai-perm.ro { color: #e2c08a; }
+  .ai-perm.full { color: #e08a8a; border-color: #5a3a3a; }
+  .ai-perm-pop {
+    position: absolute; bottom: 30px; left: 0; z-index: 40; width: max-content; min-width: 226px;
+    background: #26262b; border: 1px solid #3c3c42; border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: 4px; display: flex; flex-direction: column; gap: 1px;
+  }
+  .ai-perm-opt { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; border-radius: 6px; cursor: pointer; color: #d4d4d4; }
+  .ai-perm-opt:hover { background: #33333a; }
+  .ai-perm-opt .bi { font-size: 13px; margin-top: 1px; color: #9aa4b2; }
+  .ai-perm-opt .t { font-size: 12px; }
+  .ai-perm-opt .d { font-size: 10.5px; color: #7d7d7d; margin-top: 2px; line-height: 1.45; }
+  .ai-perm-opt .bi-check2 { margin-left: auto; visibility: hidden; color: #7fb3e0; }
+  .ai-perm-opt.on .bi-check2 { visibility: visible; }
+  .ai-perm-opt.on .t { color: #cfe3f7; }
+  /* 只读权限下「插入到项目」不可用 */
+  .ai-panel[data-perm="readonly"] .ai-md-ins { opacity: .38; cursor: not-allowed; }
   .ai-send {
     width: 28px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
     background: #0a6aa8; border: none; border-radius: 6px; color: #fff; font-size: 12px; cursor: pointer;
@@ -1782,6 +1809,10 @@
         <textarea id="aiText" rows="2" spellcheck="false" placeholder="向 AI 提问…（Enter 发送，Shift+Enter 换行，可粘贴/添加图片）"></textarea>
         <div class="ai-input-acts">
           <button class="ai-hbtn" id="aiImgBtn" title="添加图片（支持多选）"><i class="bi bi-image"></i></button>
+          <div class="ai-perm-wrap">
+            <button class="ai-perm" id="aiPermBtn" title="AI 操作权限"><i class="bi bi-pencil-square"></i><span id="aiPermName">工作区内修改</span><i class="bi bi-chevron-up"></i></button>
+            <div class="ai-perm-pop" id="aiPermPop" style="display:none"></div>
+          </div>
           <span class="ai-ctx-flag" id="aiCtxFlag" style="display:none"><i class="bi bi-file-earmark-text"></i> 附带当前文件</span>
           <span class="ai-spacer"></span>
           <div class="ai-msel">
@@ -4244,6 +4275,9 @@
     providers: [], active: {}, sys: {},                // 多接口配置（服务端持久化）；sys = 系统功能使用的接口
     pending: [],                                       // 待发送图片 dataURL 列表
     files: [],                                         // 附加到对话的文件 [{path, name, text}]（右键「添加到 AI 对话」）
+    perm: (() => {                                     // AI 操作权限：readonly / workspace / full
+      try { return localStorage.getItem("ide.ai.perm") || "workspace"; } catch (_) { return "workspace"; }
+    })(),
     sessions: [], curId: "",                           // 对话列表（localStorage 持久化）
   };
   function aiRootKey() { return (typeof ROOT !== "undefined" ? ROOT : "default"); }
@@ -4314,7 +4348,7 @@
       applyAiWidth(saved > 0 ? saved : AI_DEFAULT_W, false);
       $("aiHist").style.display = "none";
       const mp = $("aiMselPop"); mp && (mp.style.display = "none");
-      aiRenderAll(); aiRenderConv();
+      aiRenderAll(); aiRenderConv(); aiRenderPerm();
       aiLoadCfg();                       // 打开面板即拉取配置，填充底部模型下拉
       if (!AI.busy) $("aiText").focus();
     } else {
@@ -4676,6 +4710,10 @@
     const ins = e.target.closest(".ai-md-ins");
     if (ins) {
       (async () => {
+        if (AI.perm === "readonly") {                     // 仅可查看：禁止写入
+          toast("当前权限为「仅可查看」，AI 不能写入文件。可在输入框左下角切换为「工作区内修改」。", "warn");
+          return;
+        }
         const pre = ins.closest(".ai-md-pre");
         const code = pre && pre.querySelector("code");
         if (!code) return;
@@ -4685,8 +4723,21 @@
           const extMap = { python: "py", javascript: "js", html: "html", css: "css", json: "json", shell: "sh", sql: "sql", yaml: "yml", 代码: "txt" };
           name = "ai_snippet_" + Date.now().toString(36) + "." + (extMap[lang.trim().toLowerCase()] || "txt");
         }
-        if (name.startsWith("/") || name.split("/").includes("..")) { toast("文件名不合法：" + name, "warn"); return; }
-        const abs = canonPath(ROOT + "/" + name);
+        let abs;
+        if (AI.perm === "full") {                         // 完全权限：允许绝对路径与 ..
+          abs = name.startsWith("/") ? canonPath(name) : canonPath(ROOT + "/" + name);
+        } else {                                          // 工作区内：只允许项目内的相对路径
+          name = name.replace(/^\.\//, "");
+          if (name.startsWith("/") || name.split("/").includes("..")) {
+            toast("工作区权限下只允许项目内的相对路径：" + name, "warn");
+            return;
+          }
+          abs = canonPath(ROOT + "/" + name);
+          if (ROOT && abs !== ROOT && !abs.startsWith(ROOT + "/")) {
+            toast("超出工作区范围：" + abs, "warn");
+            return;
+          }
+        }
         try {
           const r = await fetch("/api/files/save", {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -4997,6 +5048,65 @@
   });
   $("aiStop").addEventListener("click", () => { if (AI.ctrl) AI.ctrl.abort(); });
 
+  /* ---------- AI 操作权限：仅可查看 / 工作区内修改 / 完全权限 ---------- */
+  const AI_PERMS = [
+    { id: "readonly", label: "仅可查看", icon: "bi-eye",
+      desc: "只做解释与答疑，不写入任何文件" },
+    { id: "workspace", label: "工作区内修改", icon: "bi-pencil-square",
+      desc: "生成的代码可保存到当前项目内的文件" },
+    { id: "full", label: "完全权限", icon: "bi-exclamation-triangle",
+      desc: "可写入任意路径（含项目外部），请谨慎使用" },
+  ];
+  function aiPermDef() { return AI_PERMS.find(p => p.id === AI.perm) || AI_PERMS[1]; }
+  function aiSetPerm(id) {
+    if (!AI_PERMS.some(p => p.id === id)) return;
+    AI.perm = id;
+    try { localStorage.setItem("ide.ai.perm", id); } catch (_) {}
+    aiRenderPerm();
+    toast("AI 权限已切换为「" + aiPermDef().label + "」", "ok");
+  }
+  function aiRenderPerm() {
+    const panel = $("aiPanel");
+    if (panel) panel.dataset.perm = AI.perm;            // 只读时把「插入到项目」置灰
+    const btn = $("aiPermBtn"), nm = $("aiPermName");
+    if (!btn || !nm) return;
+    const p = aiPermDef();
+    nm.textContent = p.label;
+    btn.querySelector("i.bi").className = "bi " + p.icon;
+    btn.classList.toggle("ro", p.id === "readonly");
+    btn.classList.toggle("full", p.id === "full");
+    btn.title = "AI 操作权限：" + p.label + " —— " + p.desc;
+  }
+  function aiShowPermMenu() {
+    const pop = $("aiPermPop");
+    if (!pop) return;
+    pop.innerHTML = "";
+    AI_PERMS.forEach(p => {
+      const el = document.createElement("div");
+      el.className = "ai-perm-opt" + (p.id === AI.perm ? " on" : "");
+      el.innerHTML = '<i class="bi ' + p.icon + '"></i><span><div class="t">' + p.label +
+        '</div><div class="d">' + p.desc + '</div></span><i class="bi bi-check2"></i>';
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pop.style.display = "none";
+        aiSetPerm(p.id);
+      });
+      pop.appendChild(el);
+    });
+    pop.style.display = "";
+  }
+  $("aiPermBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const pop = $("aiPermPop");
+    if (!pop) return;
+    if (pop.style.display !== "none") { pop.style.display = "none"; return; }
+    aiShowPermMenu();
+  });
+  document.addEventListener("click", (e) => {           // 点面板其他位置收起
+    const pop = $("aiPermPop");
+    if (pop && pop.style.display !== "none" && !e.target.closest(".ai-perm-wrap")) pop.style.display = "none";
+  });
+
   /* ---------- 附加文件到对话：资源管理器右键「添加到 AI 对话」→ 输入框上方出现小卡片 ---------- */
   const AI_FILE_LIMIT = 6;          // 最多同时附加几个文件
   const AI_FILE_CHARS = 8000;       // 单个文件最多带入多少字符
@@ -5172,9 +5282,14 @@
     AI.busy = true;
     $("aiSend").style.display = "none";
     $("aiStop").style.display = "";
+    const permHint = AI.perm === "readonly"
+      ? "当前权限「仅可查看」：只做解释与建议，不要声称自己已经修改了文件。"
+      : (AI.perm === "full"
+        ? "当前权限「完全权限」：可以给出任意路径下的完整文件内容。"
+        : "当前权限「工作区内修改」：给出可直接保存到项目内的完整文件内容。");
     const sysPrompt = "你是一个自托管文件管理器内置的 AI 编程助手。当前项目根目录：" +
       (typeof ROOT !== "undefined" ? ROOT : "/") +
-      "。回答使用简体中文，代码块标注语言，简洁直接。";
+      "。" + permHint + "回答使用简体中文，代码块标注语言，简洁直接。";
     // 当前这条消息：带图片/上下文时用多模态数组，否则纯文本
     const curText = text + aiBuildContext();
     if (!reuse) {                            // 上下文已抓取进本条消息，发送后清空输入区的附加文件卡片

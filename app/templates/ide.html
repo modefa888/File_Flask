@@ -292,11 +292,13 @@
   }
   .g-ico:hover { background: #3a3d41; color: #fff; }
   .git-commit { padding: 0 10px 8px; }
-  /* 提交信息：单行输入框 + 右侧 AI「生成提交内容」按钮（两段按钮与输入框等高） */
-  .git-commit-msg { display: flex; gap: 6px; align-items: stretch; }
+  /* 提交信息：可自增高的多行输入框 + 右侧 AI「生成提交内容」按钮（按钮贴底，与最后一行对齐） */
+  .git-commit-msg { display: flex; gap: 6px; align-items: flex-end; }
   .git-commit-msg #gitCommitMsg {
-    flex: 1 1 auto; min-width: 0; height: 30px; background: #3c3c3c; border: 1px solid #3c3c3c;
-    border-radius: 3px; color: #fff; font-size: 12px; padding: 0 8px; outline: none; font-family: inherit;
+    flex: 1 1 auto; min-width: 0; min-height: 30px; max-height: 132px; box-sizing: border-box;
+    background: #3c3c3c; border: 1px solid #3c3c3c; border-radius: 3px; color: #fff; font-size: 12px;
+    padding: 5px 8px; line-height: 1.5; outline: none; font-family: inherit; resize: none;
+    overflow-y: auto; white-space: pre-wrap; word-break: break-word;
   }
   .git-commit-msg #gitCommitMsg:focus { border-color: #007fd4; }
   .git-commit-msg #gitCommitMsg::placeholder { color: #8a8a8a; }
@@ -801,6 +803,14 @@
   .bubble.ai-md code { background: #1b1b1e; border: 1px solid #333; border-radius: 4px; padding: 1px 5px;
     font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; color: #e8c07a; }
   .bubble.ai-md a { color: #6cb6ff; }
+  /* 消息里的文件路径：可点击，直接跳转打开（或定位目录） */
+  .bubble.ai-md a.ai-path { color: #e8c07a; background: #1b1b1e; border: 1px solid #333; border-radius: 4px;
+    padding: 1px 5px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px;
+    cursor: pointer; text-decoration: none; white-space: nowrap; }
+  .bubble.ai-md a.ai-path:hover { background: #26262b; border-color: #4a4a52; color: #ffd894;
+    text-decoration: underline; text-underline-offset: 2px; }
+  .bubble.ai-md a.ai-path:active { background: #303036; }
+  .ai-path.ask { border-color: #5a4a26; background: #2c2718; color: #e2c08a; }
   .bubble.ai-md blockquote { margin: 6px 0; padding: 4px 10px; border-left: 3px solid #3c4a5a; color: #9aa5b1; background: rgba(255,255,255,.03); }
   .bubble.ai-md hr { border: none; border-top: 1px solid #3a3a3e; margin: 10px 0; }
   .ai-md-pre { background: #141417; border: 1px solid #33333a; border-radius: 8px; margin: 8px 0; overflow: hidden;
@@ -1753,7 +1763,7 @@
         </div>
         <div class="git-commit">
           <div class="git-commit-msg">
-            <input id="gitCommitMsg" type="text" placeholder="提交变更内容（Ctrl+Enter 提交）" spellcheck="false" autocomplete="off">
+            <textarea id="gitCommitMsg" rows="1" placeholder="提交变更内容（Ctrl+Enter 提交）" spellcheck="false" autocomplete="off"></textarea>
             <div class="g-ai-split">
               <button id="gitGenMsg" title="生成提交内容 (Ctrl+Alt+G)"><i class="bi bi-stars"></i></button>
               <button id="gitGenMsgMore" title="更多生成选项"><i class="bi bi-caret-down-fill"></i></button>
@@ -4454,13 +4464,206 @@
   })();
 
   /* ---------- 轻量 Markdown 渲染（先整体转义防 XSS，再按行解析） ---------- */
+  /* ---------- 消息里的文件路径：可点击跳转打开对应文件 ---------- */
+  const AI_PATH_EXT = new Set(("py pyi pyw js mjs cjs jsx ts tsx json json5 jsonc md markdown mdx " +
+    "txt text rst html htm xhtml css scss sass less styl yml yaml toml ini cfg conf config " +
+    "properties env spec sh bash zsh fish bat cmd ps1 sql xml svg png jpg jpeg gif webp bmp ico " +
+    "csv tsv log lock ipynb vue svelte astro lua pl rb go rs java kt kts scala php swift dart cs " +
+    "c cc cpp cxx h hpp m mm ex exs erl clj tpl ejs hbs pug jade db sqlite sqlite3 whl tar gz tgz " +
+    "bz2 xz zip rar exe dll so dylib bin dat bak pid map patch diff").split(" "));
+  const AI_PATH_NAMES = new Set(["dockerfile", "makefile", "license", "licence", "procfile",
+    "vagrantfile", "gemfile", "rakefile", "cmakelists.txt", ".gitignore", ".gitattributes",
+    ".dockerignore", ".editorconfig", ".env", ".env.example", ".npmrc", ".babelrc"]);
+
+  /* 判断一段行内代码是否像「文件/目录路径」（宁可少识别，也不要误伤普通代码片段） */
+  function aiPathLike(s) {
+    const t = String(s || "").trim();
+    if (!t || t.length > 220 || /\s/.test(t)) return false;           // 含空格：命令、说明文字
+    if (/^(https?:|mailto:|www\.)/i.test(t)) return false;
+    if (/^[\d.\/]+$/.test(t)) return false;                           // 纯数字/版本号，如 1/2、1.0
+    // 只接受路径常见字符（\p{L} 兼容中文等非 ASCII 文件名）
+    if (!/^[\p{L}\p{N}_.@~+\-\/]+$/u.test(t)) return false;
+    const base = t.replace(/\/+$/, "");
+    if (!base || base === "." || base === "..") return false;
+    const name = base.slice(base.lastIndexOf("/") + 1).toLowerCase();
+    if (AI_PATH_NAMES.has(name)) return true;
+    if (t.indexOf("/") >= 0) return true;                             // 带斜杠：目录或路径
+    const ext = name.lastIndexOf(".") > 0 ? name.slice(name.lastIndexOf(".") + 1) : "";
+    return !!ext && AI_PATH_EXT.has(ext);
+  }
+  /* 从路径文本里拆出行号/列号：run.py:12:5、README.md#L10 */
+  function aiPathSplit(s) {
+    const t = String(s || "");
+    let m = t.match(/^(.*?):(\d+)(?::(\d+))?$/);
+    if (!m) m = t.match(/^(.*?)#L?(\d+)(?:-L?\d+)?$/);
+    if (!m || !m[1]) return { path: t, line: 0, col: 0 };
+    return { path: m[1], line: parseInt(m[2], 10) || 0, col: parseInt(m[3], 10) || 0 };
+  }
+  /* 正文里没有反引号的裸路径：判定更严格，避免把 node.js、1.2.3 之类也变成标签 */
+  const AI_PATH_STOP = new Set(["node.js", "npm.js", "vue.js", "react.js", "jquery.js",
+    "next.js", "nuxt.js", "vue3.js", "vite.js", "express.js"]);
+  function aiBarePathLike(t) {
+    if (!aiPathLike(t)) return false;
+    if (AI_PATH_STOP.has(t.toLowerCase())) return false;
+    if (t.indexOf("/") < 0) {                            // 单个文件名：必须是 名字.已知扩展名
+      const low = t.toLowerCase(), dot = low.lastIndexOf(".");
+      return dot > 0 && !!low.slice(dot + 1) && AI_PATH_EXT.has(low.slice(dot + 1));
+    }
+    const segs = t.split("/").filter(Boolean);
+    const last = (segs[segs.length - 1] || "").toLowerCase();
+    const dot = last.lastIndexOf(".");
+    const ext = dot > 0 ? last.slice(dot + 1) : "";
+    if (ext) return AI_PATH_EXT.has(ext);
+    return t.endsWith("/");                              // 无扩展名时只认以 / 结尾的目录
+  }
+  function aiPathChip(text, sp) {                        // 生成可点击的路径标签
+    const q = String(sp.path).replace(/"/g, "&quot;");
+    const attr = ' data-path="' + q + '"' +
+      (sp.line ? ' data-line="' + sp.line + '"' : "") +
+      (sp.col ? ' data-col="' + sp.col + '"' : "");
+    const tip = "点击打开 " + q + (sp.line ? "（第 " + sp.line + " 行）" : "");
+    return '<a class="ai-path"' + attr + ' title="' + tip + '">' + text + "</a>";
+  }
+  function aiMdCode(code) {                              // 行内代码：规则宽松
+    const sp = aiPathSplit(code);
+    return aiPathLike(sp.path) ? aiPathChip(code, sp) : "<code>" + code + "</code>";
+  }
+  /* 一次性扫描：URL / 行内代码 / 正文裸路径。URL 先被吃掉，
+     否则链接里的路径（http://x.com/a.py）也会被当成文件。 */
+  const AI_PATH_TOK = "(?:[\\p{L}\\p{N}_.@~+\\-]+/)+[\\p{L}\\p{N}_.@~+\\-/]*" +
+    "|[\\p{L}\\p{N}_@~+\\-]+(?:\\.[\\p{L}\\p{N}]+)+";
+  const AI_PATH_RE = new RegExp("(https?://[^\\s<>\"'`\\]]+)|`([^`]+)`|(" +
+    AI_PATH_TOK + ")(?::\\d+(?::\\d+)?|#L?\\d+)?", "gu");
   function aiMdInline(s) {
     return s
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(AI_PATH_RE, (m, url, code, tok) => {
+        if (url) return m;
+        if (code !== undefined) return aiMdCode(code);
+        const sp = aiPathSplit(m);                       // 正文裸路径：规则严格
+        return aiBarePathLike(sp.path) ? aiPathChip(m, sp) : m;
+      })
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
       .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
       .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   }
+
+  async function aiListDir(dir) {                    // 列目录：用来精确判断某个路径是否存在
+    try {
+      const r = await fetch("/api/files?path=" + encodeURIComponent(dir));
+      const d = await r.json();
+      return d && !d.error ? (d.items || []) : null;
+    } catch (_) { return null; }
+  }
+  function aiPollSearch(token, n) {
+    n = n || 0;
+    return fetch("/api/search/" + encodeURIComponent(token))
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) return [];
+        if (!d.done && n < 20) {
+          return new Promise(res => setTimeout(res, 500)).then(() => aiPollSearch(token, n + 1));
+        }
+        return d.items || [];
+      })
+      .catch(() => []);
+  }
+  /* 回退：AI 只写了文件名或省略了一级目录时，在项目内按名字搜一次 */
+  function aiSearchPath(q) {
+    if (!ROOT) return Promise.resolve(null);
+    const name = q.slice(q.lastIndexOf("/") + 1) || q;
+    const params = new URLSearchParams({ root: ROOT, keyword: name, use_index: "never", timeout: "20" });
+    if (typeof SEARCH_SKIP_DIRS !== "undefined" && SEARCH_SKIP_DIRS) params.set("skip", SEARCH_SKIP_DIRS);
+    const rel = (it) => String(it.abs_path || it.path || "").replace(/\\/g, "/");
+    const pick = (items) => {
+      const list = (items || []).filter(it => rel(it).startsWith("/"));
+      const tail = "/" + q.replace(/^\/+|\/+$/g, "");
+      const best = list.find(it => rel(it) === ROOT + tail) ||
+        list.find(it => rel(it).endsWith(tail)) ||
+        list.filter(it => (it.name || "").toLowerCase() === name.toLowerCase())
+            .sort((a, b) => rel(a).length - rel(b).length)[0];
+      return best ? { abs: rel(best), is_dir: !!best.is_dir } : null;
+    };
+    return fetch("/api/search?" + params.toString())
+      .then(r => r.json())
+      .then(d => {
+        if (d.items) return pick(d.items);
+        if (d.token) return aiPollSearch(d.token).then(pick);
+        return null;
+      })
+      .catch(() => null);
+  }
+  /* 把消息里的路径解析为项目内的真实路径（先精确命中，再按名字搜索回退） */
+  async function aiResolvePath(q) {
+    q = String(q || "").trim().replace(/^`|`$/g, "").replace(/^\.\//, "").replace(/:\d+(?::\d+)?$/, "");
+    if (!q) return null;
+    const cands = [];
+    if (q.startsWith("/")) cands.push(q.replace(/\/+$/, ""));
+    else if (ROOT) cands.push(ROOT + "/" + q.replace(/\/+$/, ""));
+    for (const c of cands) {
+      const parent = c.slice(0, c.lastIndexOf("/")) || "/";
+      const name = c.slice(c.lastIndexOf("/") + 1);
+      const items = await aiListDir(parent);
+      if (!items) continue;
+      const hit = items.find(x => x.name === name);
+      if (hit) return { abs: c, is_dir: !!hit.is_dir, exact: true };
+    }
+    return await aiSearchPath(q);
+  }
+  /* 点击消息里的路径：文件→在编辑器打开（带行号则直接跳到该行）；目录→在资源管理器定位 */
+  async function aiOpenPath(q, el, line, col) {
+    if (el) el.classList.add("ask");
+    let hit = null;
+    try { hit = await aiResolvePath(q); } catch (_) {}
+    if (!hit || !hit.abs) {
+      if (el) el.classList.remove("ask");
+      toast("未找到 " + q + (ROOT ? "" : "（当前没有打开项目）"), "warn");
+      return;
+    }
+    if (el) el.classList.remove("ask");
+    if (hit.is_dir) {
+      const sb = $("sidebar");
+      if (sb && sb.classList.contains("collapsed")) toggleSidebar();
+      showPanel("explorer");
+      revealInTree(hit.abs);
+      toast("已定位目录：" + (ROOT && hit.abs.startsWith(ROOT + "/") ? hit.abs.slice(ROOT.length + 1) : hit.abs), "ok");
+    } else {
+      const name = baseName(hit.abs);
+      const tab = await openFile(hit.abs, name);
+      if (line > 0) aiGotoLine(tab, line, col);       // 带行号：打开文件后跳到该行
+    }
+  }
+  /* 跳到指定行（1 基）：给了列号就选中该列的字符，没给就把光标放在行首 */
+  function aiGotoLine(tab, line, col) {
+    const go = () => {
+      const cm = tab && tab.cm;
+      if (!cm || !cm.lineCount()) return false;
+      const l = Math.max(0, Math.min(line - 1, cm.lineCount() - 1));
+      if (col > 0) {
+        const ch = Math.max(0, Math.min(col - 1, cm.getLine(l).length));
+        cm.setSelection({ line: l, ch: ch },
+                        { line: l, ch: Math.min(cm.getLine(l).length, ch + 1) });
+      } else {
+        cm.setCursor({ line: l, ch: 0 });
+      }
+      scrollLineToComfort(cm, l);
+      cm.focus();
+      return true;
+    };
+    if (!go()) {                                       // 内容还没就绪时重试一小会儿
+      let n = 0;
+      const t = setInterval(() => { if (go() || ++n > 40) clearInterval(t); }, 100);
+    }
+  }
+  /* 事件委托：点击消息里的路径标签即跳转（流式输出中新生成的标签同样生效） */
+  $("aiMsgs").addEventListener("click", (e) => {
+    const a = e.target.closest("a.ai-path");
+    if (!a) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const q = String(a.dataset.path || a.textContent || "")
+      .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+    aiOpenPath(q, a, parseInt(a.dataset.line, 10) || 0, parseInt(a.dataset.col, 10) || 0);
+  });
   /* ---------- 代码高亮（零依赖，One Dark 配色） ---------- */
   function aiHlHtml(code) {
     const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -5298,10 +5501,13 @@
     box._body = box.querySelector(".ai-steps-body");
     box._head = box.querySelector(".ai-steps-head");
     box._live = "";
+    box._pending = 0;                 // 同时进行中的步骤数（同一轮多个工具会并行，可能 >1）
     box._paint = function () {
-      const running = !!box._live;
-      box._head.querySelector(".ttl").innerHTML = running
-        ? '<i class="bi bi-arrow-repeat spin"></i> 正在执行… <span style="color:#9aa4b2">' + esc(box._live) + "</span>"
+      const running = box._pending > 0;
+      const ttl = box._head.querySelector(".ttl");
+      ttl.innerHTML = running
+        ? '<i class="bi bi-arrow-repeat spin"></i> 正在执行… <span style="color:#9aa4b2">' +
+          esc(box._live) + (box._pending > 1 ? " 等 " + box._pending + " 项" : "") + "</span>"
         : "已执行 " + box._list.length + " 步";
       box._head.querySelector(".sum").textContent = aiStepsSummary(box._list);
     };
@@ -5401,6 +5607,7 @@
             const a = e.args || {};
             box._live = (AI_TOOL_LABEL[e.tool] || e.tool) +
               (a.path || a.command || a.pattern ? " " + (a.path || a.command || a.pattern) : "");
+            box._pending++;
             box._paint();
           } else if (e.type === "ask") {
             ensureStepsBox()._body.appendChild(aiAskCard(e, runId));
@@ -5410,7 +5617,11 @@
             const rec = { tool: meta.tool, args: meta.args, ok: !!e.ok, denied: !!e.denied,
                           ms: e.ms, summary: e.summary || "", detail: e.detail || "" };
             steps.push(rec);
-            if (stepsBox) { stepsBox._list.push(rec); stepsBox._live = ""; stepsBox._paint(); }
+            if (stepsBox) {
+              stepsBox._list.push(rec);
+              stepsBox._pending = Math.max(0, stepsBox._pending - 1);
+              stepsBox._paint();
+            }
           } else if (e.type === "error") {
             throw new Error(e.error);
           }
@@ -5418,7 +5629,7 @@
       }
       msgsBox.scrollTop = msgsBox.scrollHeight;
     }
-    if (stepsBox) { stepsBox._live = ""; stepsBox._paint(); }
+    if (stepsBox) { stepsBox._pending = 0; stepsBox._paint(); }
     return { text: text, steps: steps };
   }
 
@@ -7614,6 +7825,7 @@
       .then(ok => {
         if (!ok) return;
         $("gitCommitMsg").value = "";
+        gitAutoGrowMsg();                              // 清空后收回单行高度
         refreshTree(ROOT);
         if (mode === "push") remoteOp("push", "推送");
         if (mode === "sync") remoteOp("pull", "拉取", () => remoteOp("push", "推送"));
@@ -7656,6 +7868,14 @@
   $("gitCommitMsg").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doGitCommit(); }
   });
+  /* 提交框随内容自增高（约 1~5 行），AI 生成的多行提交信息能完整显示 */
+  function gitAutoGrowMsg() {
+    const el = $("gitCommitMsg");
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.max(30, Math.min(el.scrollHeight, 132)) + "px";
+  }
+  $("gitCommitMsg").addEventListener("input", gitAutoGrowMsg);
   /* ---------- AI 生成提交内容（提交框右侧按钮 / Ctrl+Alt+G） ---------- */
   let gitGenRunning = false;
   function gitGenBusy(busy) {
@@ -7688,6 +7908,7 @@
         throw new Error(d.error || ("HTTP " + r.status));
       }
       $("gitCommitMsg").value = d.message || "";
+      gitAutoGrowMsg();                              // 多行提交信息：输入框自动长高
       $("gitCommitMsg").focus();
       toast("已生成提交内容（" + (d.model || "AI") + " · " + (d.files || 0) + " 个文件），可继续编辑", "ok");
     } catch (e) {

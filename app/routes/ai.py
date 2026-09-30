@@ -15,6 +15,9 @@ API Key 只存服务端、不下发给前端（GET 只回脱敏形式）；POST 
 """
 import json
 import os
+import re
+import shutil
+import subprocess
 import threading
 import urllib.error
 import urllib.request
@@ -343,6 +346,289 @@ def api_ai_summarize():
         return jsonify({"error": f"接口返回 {e.code}"}), 502
     except (urllib.error.URLError, OSError, ValueError) as e:
         return jsonify({"error": f"压缩失败：{e}"}), 502
+
+
+# ---------------------------------------------------------------- Git 提交信息生成
+_COMMIT_TIMEOUT = 60                  # 生成提交信息的接口超时（秒）
+_COMMIT_MAX_NOTES = 3000              # 发给模型的「改动摘要」字符上限（不含任何代码）
+_COMMIT_MAX_LINE = 20                 # 生成的说明（不含图标）不超过 20 个中文字符
+# 注意：这里刻意不传 max_tokens —— 思考型模型会把额度全花在推理上，
+# 导致 content 为空（表现为「模型没有返回内容」）。正文长度靠提示词 + 下面硬截断保证。
+_COMMIT_SYS = (
+    "你是 Git 提交信息生成器。用户只给你「变更文件清单」和「改动处的中文注释」，"
+    "不会给你代码，请据此概括这次改动：\n"
+    "1. 只输出一行，格式为「图标 空格 说明」，说明部分不超过 20 个汉字；\n"
+    "2. 图标只用一个，按改动性质选：新增功能 ✨、修复缺陷 🐛、性能/提速 ⚡、重构 ♻️、"
+    "文档 📝、测试 🧪、配置或依赖 🔧、界面样式 💄\n"
+    "3. 说明用「动词 + 对象」，例如「✨ 新增提交信息生成接口」「⚡ 智能体并行提速」；\n"
+    "4. 不要标点结尾、不要引号、不要换行、不要代码块、不要额外解释；\n"
+    "5. 信息不足时按文件名和注释合理推断，不要编造无关内容。")
+
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_COMMENT_PATTERNS = (
+    re.compile(r"<!--(.*?)-->"),          # HTML / Vue
+    re.compile(r"/\*(.*?)\*/"),           # C 风格块注释
+    re.compile(r"//\s?(.*)$"),            # // 行注释
+    re.compile(r"#\s?(.*)$"),             # Python / Shell / YAML / TOML
+    re.compile(r"^\s*\*+\s?(.*)$"),       # 块注释续行
+)
+_TRIM_CHARS = "。.!！?？；;，,、\"'“”"
+_MSG_TRIM = "。.!！?？；;，,、\"'“”「」『』"          # 最终提交说明额外去掉书名号/引号
+_DECOR_RE = re.compile(r"^(?:[=\-*_#~+·•\s]+)|(?:[=\-*_#~+·•\s]+)$")
+
+
+def _tidy_note(seg):
+    """去掉分隔线装饰、首尾标点；剩余不足 2 字或没有中文则丢弃。"""
+    seg = _DECOR_RE.sub("", re.sub(r"\s+", " ", seg or "").strip())
+    seg = seg.strip(_TRIM_CHARS + " ")
+    if len(seg) < 2 or not _CJK_RE.search(seg):
+        return ""
+    return seg[:60]
+
+
+def _line_notes(text):
+    """从一行源码里取出中文说明（注释优先，其次中文提示语）。取不到返回空串。"""
+    t = (text or "").strip()
+    if not t or not _CJK_RE.search(t):
+        return ""
+    for rx in _COMMENT_PATTERNS:
+        m = rx.search(t)
+        if m and _CJK_RE.search(m.group(1) or ""):
+            seg = _tidy_note(m.group(1))
+            if seg:
+                return seg
+    first = _CJK_RE.search(t).start()                    # 无注释：取这一行里的中文片段
+    last = max(m.end() for m in _CJK_RE.finditer(t))
+    return _tidy_note(t[first:last])
+
+
+def _notes_from_diff(diff):
+    """从 diff 里只提取「改动处的中文注释」，按文件分组（不保留任何代码）。"""
+    added, removed = {}, {}
+    cur = ""
+    for raw in (diff or "").split("\n"):
+        if raw.startswith("+++ "):
+            p = raw[4:].strip()
+            cur = p[2:] if p.startswith("b/") else p
+            continue
+        if raw[:1] not in ("+", "-") or raw.startswith(("+++", "---")):
+            continue
+        note = _line_notes(raw[1:])
+        if not note or not cur:
+            continue
+        if raw[0] == "+":
+            lst = added.setdefault(cur, [])
+            if note not in lst and len(lst) < 8:
+                lst.append(note)
+        else:
+            lst = removed.setdefault(cur, [])
+            if note not in lst and len(lst) < 8:
+                lst.append(note)
+    out = {}
+    for f in list(added) + [f for f in removed if f not in added]:
+        out[f] = added.get(f) or removed.get(f) or []     # 优先新增行的注释
+    return {f: v for f, v in out.items() if v}
+
+
+def _git_run(cwd, args, timeout=20):
+    """执行 git 命令，返回 (stdout, error)。"""
+    exe = shutil.which("git")
+    if not exe:
+        return "", "未找到 git 命令，请先安装 Git"
+    try:
+        p = subprocess.run([exe, "-c", "safe.directory=*"] + args, cwd=cwd, capture_output=True,
+                           text=True, errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        return "", "git 命令执行超时"
+    except OSError as e:
+        return "", "git 执行失败：%s" % e
+    if p.returncode != 0:
+        return "", (p.stderr or "").strip() or ("退出码 %d" % p.returncode)
+    return p.stdout or "", ""
+
+
+def _git_root(path):
+    """返回仓库根目录（cwd 用），失败时返回错误文本。"""
+    out, err = _git_run(path, ["rev-parse", "--show-toplevel"])
+    if err:
+        low = err.lower()
+        if "not a git repository" in low or "不是 git 仓库" in err:
+            return None, "该目录不是 Git 仓库（可先在「源代码管理」面板初始化仓库）"
+        return None, err
+    root = (out or "").strip()
+    return (root, None) if root else (None, "该目录不是 Git 仓库")
+
+
+def _collect_changes(root):
+    """收集「改动摘要」：变更文件清单 + 改动处的中文注释。
+
+    刻意**不上传代码/diff 全文**：请求体只有几百字，接口首字延迟和成本都低很多；
+    注释里已经写清「改了什么」，足以生成一句 20 字以内的提交说明。"""
+    staged_diff, err = _git_run(root, ["diff", "--cached", "--no-color", "-U0"])
+    if err:
+        return None, "读取暂存区差异失败：" + err
+    work_diff, _ = _git_run(root, ["diff", "--no-color", "-U0"])
+    status, _ = _git_run(root, ["status", "--porcelain=v1", "--untracked-files=all"])
+    branch, _ = _git_run(root, ["rev-parse", "--abbrev-ref", "HEAD"])
+    untracked, _ = _git_run(root, ["ls-files", "--others", "--exclude-standard"])
+    staged_diff, work_diff = staged_diff.strip(), work_diff.strip()
+    lines = [ln for ln in (status or "").split("\n") if ln.strip()]
+    new_files = [x.strip() for x in (untracked or "").split("\n") if x.strip()]
+    notes = _notes_from_diff(staged_diff or work_diff)
+    parts = ["【变更文件】"] + ["  " + ln[:160] for ln in lines[:60]]
+    if new_files:
+        parts += ["【新增未跟踪文件】"] + ["  " + x for x in new_files[:40]]
+    if notes:
+        parts += ["", "【改动处的中文注释（按文件）】"]
+        for f, lst in list(notes.items())[:30]:
+            parts.append(f + ":")
+            parts += ["  - " + n for n in lst]
+    else:
+        parts += ["", "（改动处没有中文注释，请仅根据文件名与状态推断）"]
+    body = "\n".join(parts).strip()
+    if len(body) > _COMMIT_MAX_NOTES:
+        body = body[:_COMMIT_MAX_NOTES] + "\n…（已截断）"
+    return {"body": body, "branch": (branch or "").strip(), "staged": bool(staged_diff),
+            "files": len(lines)}, None
+
+
+_ICON_ONLY = "[\u2190-\u2BFF\u2600-\u27BF\uFE0F\u200D\U0001F000-\U0001FAFF]"
+
+
+def _pick_content(choice):
+    """兼容各家返回形态：content 字符串 / content 数组（[{type,text}]）/ completion 的 text。"""
+    msg = (choice or {}).get("message") or {}
+    c = msg.get("content")
+    if isinstance(c, list):
+        c = "".join(str(p.get("text") or "") for p in c if isinstance(p, dict))
+    if not c:
+        c = (choice or {}).get("text") or ""
+    return c or ""
+
+
+def _commit_call(url, api_key, model, messages, stream):
+    """调用模型生成提交说明；返回 (文本, choice, 错误)。流式与非流式两种返回都能解析。"""
+    payload = json.dumps({"model": model, "stream": bool(stream), "temperature": 0.2,
+                          "messages": messages}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, method="POST", headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + api_key})
+    try:
+        resp = urllib.request.urlopen(req, timeout=_COMMIT_TIMEOUT)
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", "replace")[:200]
+        except OSError:
+            detail = ""
+        return "", None, "接口返回 %s：%s" % (e.code, detail or e.reason)
+    except (urllib.error.URLError, OSError) as e:
+        return "", None, "无法连接 AI 接口：%s" % e
+    try:
+        if not stream:
+            obj = json.loads(resp.read().decode("utf-8"))
+            choice = (obj.get("choices") or [{}])[0] or {}
+            return _pick_content(choice), choice, ""
+        text = ""
+        for raw in resp:                                  # 流式：把增量拼起来
+            line = raw.strip()
+            if not line.startswith(b"data:"):
+                continue
+            body = line[5:].strip()
+            if body == b"[DONE]":
+                break
+            try:
+                obj = json.loads(body.decode("utf-8"))
+            except ValueError:
+                continue
+            ch = (obj.get("choices") or [{}])[0] or {}
+            piece = (ch.get("delta") or {}).get("content") or ""
+            if piece:
+                text += piece
+        return text, None, ""
+    except (OSError, urllib.error.URLError, ValueError) as e:
+        return "", None, "读取返回失败：%s" % e
+    finally:
+        try:
+            resp.close()
+        except OSError:
+            pass
+
+
+def _clean_message(text, limit=_COMMIT_MAX_LINE):
+    """取第一行、去掉围栏/引号/结尾标点；保留开头的图标，说明部分硬性限制在 20 个字以内。"""
+    t = (text or "").strip()
+    t = re.sub(r"^```[a-zA-Z0-9_-]*\s*\n?", "", t)
+    t = re.sub(r"\n?```\s*$", "", t).strip()
+    t = re.split(r"[\r\n]+", t)[0].strip()               # 说明只保留一行
+    if len(t) >= 2 and t[0] == t[-1] and t[0] in _MSG_TRIM:
+        t = t[1:-1].strip()
+    t = t.lstrip("#-*·• \t").strip()
+    m = re.match("^(" + _ICON_ONLY + r"+[\s:：\-]*)(.*)$", t)     # 开头的图标单独取出
+    icon, rest = (m.group(1).strip(), m.group(2).strip()) if m else ("", t)
+    rest = rest.strip(_MSG_TRIM + " ")
+    if len(rest) > limit:
+        head = rest[:limit]
+        cut = max(head.rfind(p) for p in "，,、；; ")
+        if cut >= limit // 2:                            # 尽量不在词中间截断
+            head = head[:cut]
+        rest = head.strip(_MSG_TRIM + " ")
+    if not rest:
+        return ""
+    return (icon + " " + rest).strip() if icon else rest
+
+
+@bp.route("/api/ai/commit-message", methods=["POST"])
+def api_ai_commit_message():
+    """根据当前改动生成 Git 提交信息（非流式）。{repo} → {message, model, files}"""
+    cfg = _load_cfg()
+    if not cfg["providers"] or not cfg["active"].get("model"):
+        return jsonify({"error": "尚未配置 AI 接口：请到「设置 → AI 助手」添加接口",
+                        "need_config": True}), 400
+    data = request.get_json(silent=True) or {}
+    repo = str(data.get("repo") or "").strip()
+    if not repo or not os.path.isdir(repo):
+        return jsonify({"error": "项目目录不存在，请先打开一个项目"}), 400
+    root, err = _git_root(repo)
+    if err:
+        return jsonify({"error": err}), 400
+
+    info, err = _collect_changes(root)
+    if err:
+        return jsonify({"error": err}), 500
+    if not info["body"]:
+        return jsonify({"error": "没有检测到任何改动（暂存区与工作区都是空的）"}), 400
+
+    want_pid = str(data.get("provider_id") or "")
+    want_model = str(data.get("model") or "")
+    provider = next((p for p in cfg["providers"] if p["id"] == want_pid), None)
+    if provider is None:
+        provider = next((p for p in cfg["providers"] if p["id"] == cfg["active"].get("provider")),
+                        cfg["providers"][0])
+    model = want_model or cfg["active"].get("model") or (provider["models"][0] if provider["models"] else "")
+
+    head = "[当前分支] " + (info["branch"] or "-") + "\n[变更文件数] %d\n\n" % info["files"]
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    messages = [{"role": "system", "content": _COMMIT_SYS},
+                {"role": "user", "content": (head + info["body"])[:_COMMIT_MAX_NOTES]}]
+    text, choice, err = _commit_call(url, provider["api_key"], model, messages, False)
+    if err:
+        return jsonify({"error": err}), 502
+    msg = _clean_message(text)
+    if not msg:                                    # 部分接口/模型非流式下返回空：改用流式再试一次
+        _log.info("AI 提交信息：非流式返回为空，改用流式重试")
+        text, _choice2, err2 = _commit_call(url, provider["api_key"], model, messages, True)
+        msg = _clean_message(text)
+        if not msg and err2:
+            return jsonify({"error": err2}), 502
+    if not msg:
+        reason = str((choice or {}).get("finish_reason") or "")
+        thinking = bool(((choice or {}).get("message") or {}).get("reasoning_content"))
+        hint = ("：模型只输出了思考过程，请换个模型（或关闭深度思考）后重试" if thinking else
+                ("（finish_reason=%s）" % reason if reason else "，请重试或换个模型"))
+        return jsonify({"error": "模型没有返回可用内容" + hint}), 502
+    _log.info("AI 提交信息：model=%s files=%d 结果=%s", model, info["files"], msg)
+    return jsonify({"message": msg, "model": model, "files": info["files"],
+                    "staged": info["staged"], "branch": info["branch"]})
 
 
 @bp.route("/api/ai/models", methods=["POST"])

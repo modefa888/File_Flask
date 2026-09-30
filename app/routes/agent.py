@@ -27,6 +27,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from flask import Blueprint, jsonify, request, Response
 
@@ -46,6 +47,11 @@ _READ_CHARS = 40000                  # read_file 最多返回多少字符
 _SEARCH_FILES = 4000                 # 搜索最多扫描多少文件
 _SEARCH_HITS = 60                    # 搜索最多返回多少条命中
 _LIST_MAX = 200                      # 目录最多列出多少项
+_MAX_PARALLEL = 8                    # 同一轮内并行执行的只读工具上限
+_RECENT_ROUNDS = 2                   # 最近几轮的工具结果在上下文里保留全文
+_OLD_TOOL_CHARS = 400                # 更早轮次的结果压缩后保留的字符数
+_TREE_LINES = 120                    # 系统提示里项目结构的最大行数
+_TREE_DEPTH = 2                      # 项目结构展开的层级
 
 _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "env", "dist", "build",
               "out", ".idea", ".vscode", ".next", ".nuxt", ".cache", "target", "vendor",
@@ -357,24 +363,58 @@ def _gate(perm, name, args, root):
 
 
 # ---------------------------------------------------------------- Agent 主流程
+def _repo_tree(root, max_lines=_TREE_LINES, depth=_TREE_DEPTH):
+    """生成项目结构摘要（放进系统提示）。模型据此直接定位文件，
+    可以省掉任务开头那几轮「列目录 → 再列子目录」的探索往返。"""
+    if not root or not os.path.isdir(root):
+        return ""
+    out = []
+    queue = [(root, 0)]
+    while queue and len(out) < max_lines:
+        d, level = queue.pop(0)
+        if level >= depth:
+            continue
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        dirs = sorted(n for n in names if not n.startswith(".") and n not in _SKIP_DIRS
+                      and os.path.isdir(os.path.join(d, n)))
+        files = sorted(n for n in names if not n.startswith(".") and os.path.isfile(os.path.join(d, n)))
+        for n in dirs + files:
+            full = os.path.join(d, n)
+            out.append("  " * level + n + ("/" if n in dirs else ""))
+            if os.path.isdir(full):
+                queue.append((full, level + 1))
+            if len(out) >= max_lines:
+                out.append("…（更多内容已省略）")
+                break
+    return "\n".join(out)
+
+
 def _agent_system(root, perm):
     perm_desc = {
         "readonly": "仅可查看 —— 只能读文件与搜索，写入和执行会被拒绝（可提示用户切换权限）",
         "workspace": "工作区内修改 —— 可以读写项目内的文件；执行命令前会先征求用户确认",
         "full": "完全权限 —— 可以读写任意路径；执行命令不再确认（危险命令仍会被安全规则拦截）",
     }.get(perm, "工作区内修改")
+    tree = _repo_tree(root)
     return (
         "你是一个自托管文件管理器内置的编程智能体，可以通过工具自动读取文件、修改文件、搜索代码、执行命令来完成任务。\n"
         "当前项目根目录：%s\n"
         "当前权限：%s\n"
+        "项目结构（%d 层，忽略 .git/node_modules 等无关目录，供直接定位文件）：\n%s\n\n"
         "工作方式：\n"
-        "1. 先读文件或搜索确认现状，再动手修改，不要凭空猜测文件内容；\n"
-        "2. 局部修改优先用 edit_file（old_text 必须与原文完全一致，含缩进），整篇重写才用 write_file；\n"
-        "3. 路径优先使用相对项目根的相对路径；\n"
-        "4. 每次工具调用后根据真实结果决定下一步，不要编造工具结果；\n"
-        "5. 任务完成后用简体中文简洁说明做了什么、涉及哪些文件、有无遗留问题；\n"
-        "6. 需要用户提供信息（如密钥、路径偏好）时直接提问，不要臆造。"
-        % (root or "/", perm_desc)
+        "1. 项目结构里已经能看到路径的文件，直接 read_file 打开，不要重复逐层 list_dir 探索；\n"
+        "2. 需要读多个文件时，在同一条回复里一次性发起多个 read_file / search_files 调用"
+        "（系统会并行执行，比逐个来回快得多）；\n"
+        "3. 先读文件或搜索确认现状，再动手修改，不要凭空猜测文件内容；\n"
+        "4. 局部修改优先用 edit_file（old_text 必须与原文完全一致，含缩进），整篇重写才用 write_file；\n"
+        "5. 路径优先使用相对项目根的相对路径；\n"
+        "6. 每次工具调用后根据真实结果决定下一步，不要编造工具结果；\n"
+        "7. 任务完成后用简体中文简洁说明做了什么、涉及哪些文件、有无遗留问题；\n"
+        "8. 需要用户提供信息（如密钥、路径偏好）时直接提问，不要臆造。"
+        % (root or "/", perm_desc, _TREE_DEPTH, tree or "（无法读取项目结构，请用 list_dir 自行查看）")
     )
 
 
@@ -457,9 +497,43 @@ def _stream_model(provider, model, convo):
     return text, out
 
 
+def _run_tool_job(name, args, root, perm):
+    """执行单个工具（会被线程池并发调用，只做纯函数式处理）。"""
+    fn = _TOOL_FUNCS.get(name)
+    if fn is None:
+        return False, "未知工具：%s" % name, "", "未知工具：%s" % name
+    try:
+        return fn(args, root, perm)
+    except Exception as e:  # noqa: BLE001
+        return False, "工具执行异常：%s" % e, "", "工具执行异常：%s" % e
+
+
+def _trim_convo(convo, rounds_tool_idx):
+    """上下文裁剪：只保留最近几轮工具结果的全文，更早的压缩成摘要。
+
+    多轮任务里历史结果会越堆越多，导致每一轮请求的 prompt 越来越大、
+    首字延迟越来越长；这里让旧的工具结果只留开头一小段，模型仍知道
+    「当时读了哪个文件、大致是什么」，但不必每轮重发几万字。"""
+    keep = set()
+    for idxs in rounds_tool_idx[-_RECENT_ROUNDS:]:
+        keep.update(idxs)
+    trimmed = 0
+    for i, m in enumerate(convo):
+        if m.get("role") != "tool" or i in keep:
+            continue
+        body = m.get("content") or ""
+        if len(body) <= _OLD_TOOL_CHARS:
+            continue
+        m["content"] = (body[:_OLD_TOOL_CHARS] +
+                        "\n…（较早轮次的结果已省略 %d 字符）" % (len(body) - _OLD_TOOL_CHARS))
+        trimmed += 1
+    return trimmed
+
+
 def _run_agent(run_id, provider, model, root, perm, msgs):
     convo = [{"role": "system", "content": _agent_system(root, perm)}] + msgs
     always_allow = set()
+    rounds_tool_idx = []                 # 每轮追加的 tool 消息下标，用于上下文裁剪
     for _round in range(_MAX_ROUNDS):
         result = yield from _stream_model(provider, model, convo)
         text, tool_calls = result
@@ -469,49 +543,88 @@ def _run_agent(run_id, provider, model, root, perm, msgs):
                       "tool_calls": [{"id": c["id"], "type": "function",
                                       "function": {"name": c["name"], "arguments": c["args_raw"]}}
                                      for c in tool_calls]})
+        done = {}                        # call_id -> (ok, summary, detail, model_text, ms, denied)
+        parallel, serial = [], []
+        # ① 逐个发 step 事件 + 权限判定（需要确认的稍后仍按顺序处理）
         for c in tool_calls:
             name, args = c["name"], c["args"]
             yield _sse({"type": "step", "call_id": c["id"], "tool": name, "args": args})
-            t0 = time.time()
             allowed, refuse, need_ask, ask_reason = _gate(perm, name, args, root)
-            if allowed and need_ask and name not in always_allow:
+            if not allowed:
+                done[c["id"]] = (False, refuse, "", "调用被拒绝：%s" % refuse, 0, True)
+                yield _sse({"type": "result", "call_id": c["id"], "tool": name, "ok": False,
+                            "summary": refuse, "detail": "", "ms": 0, "denied": True})
+                continue
+            if need_ask and name not in always_allow:
+                serial.append({"c": c, "ask": ask_reason})       # 需要用户确认：串行
+            elif name in _READ_TOOLS:
+                parallel.append({"c": c})                        # 只读工具：可并行
+            else:
+                serial.append({"c": c, "ask": ""})               # 写入 / 执行命令：串行，保证顺序
+        # ② 只读工具并行执行（同一轮里读多个文件不再一个个排队）
+        if parallel:
+            with ThreadPoolExecutor(max_workers=min(_MAX_PARALLEL, len(parallel))) as pool:
+                futs = {}
+                for job in parallel:
+                    futs[pool.submit(_run_tool_job, job["c"]["name"], job["c"]["args"], root, perm)] = (
+                        job, time.time())
+                for fut in as_completed(futs):
+                    job, t_start = futs[fut]
+                    c = job["c"]
+                    ok, summary, detail, model_text = fut.result()
+                    ms = int((time.time() - t_start) * 1000)
+                    done[c["id"]] = (ok, summary, detail, model_text, ms, False)
+                    _log.info("Agent 工具（并行）：%s %s → %s（%dms）", c["name"],
+                              json.dumps(c["args"], ensure_ascii=False)[:200], "ok" if ok else "fail", ms)
+                    yield _sse({"type": "result", "call_id": c["id"], "tool": c["name"], "ok": ok,
+                                "summary": summary, "detail": detail, "ms": ms})
+        # ③ 写文件 / 执行命令 / 需确认的调用：按模型给出的顺序串行执行
+        for job in serial:
+            c = job["c"]
+            name, args = c["name"], c["args"]
+            t_start = time.time()
+            if job["ask"] and name not in always_allow:
                 key = (run_id, c["id"])
                 ev = threading.Event()
                 box = {"allow": False, "always": False}
                 with _PENDING_LOCK:
                     _PENDING[key] = {"ev": ev, "box": box}
-                yield _sse({"type": "ask", "call_id": c["id"], "tool": name, "args": args, "reason": ask_reason})
-                done = ev.wait(timeout=_ASK_TIMEOUT)
+                yield _sse({"type": "ask", "call_id": c["id"], "tool": name, "args": args,
+                            "reason": job["ask"]})
+                answered = ev.wait(timeout=_ASK_TIMEOUT)
                 with _PENDING_LOCK:
                     _PENDING.pop(key, None)
-                if done and box["allow"]:
-                    if box["always"]:
-                        always_allow.add(name)
-                else:
-                    allowed = False
-                    refuse = "用户拒绝了该命令" if done else "等待用户确认超时（%d 秒）" % _ASK_TIMEOUT
-            if not allowed:
-                ms = int((time.time() - t0) * 1000)
-                yield _sse({"type": "result", "call_id": c["id"], "tool": name, "ok": False,
-                            "summary": refuse, "detail": "", "ms": ms, "denied": True})
-                convo.append({"role": "tool", "tool_call_id": c["id"],
-                              "content": "调用被拒绝：%s" % refuse})
-                continue
-            fn = _TOOL_FUNCS.get(name)
-            if fn is None:
-                ok, summary, detail, model_text = False, "未知工具：%s" % name, "", "未知工具：%s" % name
-            else:
-                try:
-                    ok, summary, detail, model_text = fn(args, root, perm)
-                except Exception as e:  # noqa: BLE001
-                    ok, summary, detail, model_text = False, "工具执行异常：%s" % e, "", "工具执行异常：%s" % e
-            ms = int((time.time() - t0) * 1000)
+                if not (answered and box["allow"]):
+                    refuse = ("用户拒绝了该命令" if answered
+                              else "等待用户确认超时（%d 秒）" % _ASK_TIMEOUT)
+                    ms = int((time.time() - t_start) * 1000)
+                    done[c["id"]] = (False, refuse, "", "调用被拒绝：%s" % refuse, ms, True)
+                    yield _sse({"type": "result", "call_id": c["id"], "tool": name, "ok": False,
+                                "summary": refuse, "detail": "", "ms": ms, "denied": True})
+                    continue
+                if box["always"]:
+                    always_allow.add(name)
+            ok, summary, detail, model_text = _run_tool_job(name, args, root, perm)
+            ms = int((time.time() - t_start) * 1000)
+            done[c["id"]] = (ok, summary, detail, model_text, ms, False)
             _log.info("Agent 工具：%s %s → %s（%dms）", name, json.dumps(args, ensure_ascii=False)[:200],
                       "ok" if ok else "fail", ms)
             yield _sse({"type": "result", "call_id": c["id"], "tool": name, "ok": ok,
                         "summary": summary, "detail": detail, "ms": ms})
+        # ④ 按模型给出的顺序回填工具结果，并裁剪较早轮次的上下文
+        idxs = []
+        for c in tool_calls:
+            rec = done.get(c["id"])
+            if rec is None:
+                continue
+            idxs.append(len(convo))
             convo.append({"role": "tool", "tool_call_id": c["id"],
-                          "content": (model_text or summary or "")[:_TOOL_CHARS]})
+                          "content": (rec[3] or rec[1] or "")[:_TOOL_CHARS]})
+        rounds_tool_idx.append(idxs)
+        n_trim = _trim_convo(convo, rounds_tool_idx)
+        if n_trim:
+            _log.info("Agent 上下文裁剪：压缩了 %d 条较早轮次的工具结果（保留最近 %d 轮全文）",
+                      n_trim, _RECENT_ROUNDS)
     yield _sse({"type": "error", "error": "已达到最大工具调用轮数（%d），已停止" % _MAX_ROUNDS})
 
 

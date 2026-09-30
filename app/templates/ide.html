@@ -8,7 +8,9 @@
 <style>
 /* Seti 官方图标字体（microsoft/vscode theme-seti，本地化） */
 @font-face { font-family: "seti"; src: url("/static/vendor/seti/seti.woff") format("woff"); font-display: block; }
-.seti-ic { font-family: "seti"; font-style: normal; font-weight: normal; font-size: 1.4em; line-height: 1; display: inline-block; vertical-align: baseline; }
+/* seti 图标的字形在自身 em 盒里偏上，靠 align-items:center 对齐时会比文件名高出约 2px，
+   这里按字号做等比的视觉下沉，让图标与文件名的字形中心真正水平对齐 */
+.seti-ic { font-family: "seti"; font-style: normal; font-weight: normal; font-size: 1.4em; line-height: 1; display: inline-block; vertical-align: baseline; transform: translateY(.11em); }
 /* IDE 图片预览：棋盘格背景 + 自适应居中，点击切换 1:1 / 适应窗口 */
 .img-preview { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; overflow: auto;
   background: repeating-conic-gradient(#262626 0 25%, #1e1e1e 0 50%) 0 0 / 20px 20px; }

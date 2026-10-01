@@ -37,7 +37,8 @@ from ..log import get_logger
 from ..services.safety import check_command
 from ..services.web_search import search_web, format_results
 from .ai import (_clean_content, _load_cfg, _open_stream, _sse, _inject_system_time,
-                 _inject_web_search, _SKILL_PROMPTS)
+                 _inject_web_search, _SKILL_PROMPTS, _is_retryable_status, _is_retryable_text,
+                 _retry_wait, _RETRY_MAX)
 
 _log = get_logger()
 bp = Blueprint("agent", __name__)
@@ -724,60 +725,111 @@ def _stream_model(provider, model, convo):
         "Accept": "text/event-stream",
     })
     text, calls = "", {}
-    try:
-        resp = _open_stream(req, url, _CONNECT_TIMEOUT, _READ_TIMEOUT)
-    except urllib.error.HTTPError as e:
+    attempt = 0
+    while True:                                   # 限流 / 临时错误自动等待重试
         try:
-            detail = e.read().decode("utf-8", "replace")[:400]
-        except OSError:
-            detail = ""
-        yield _sse({"type": "error", "error": "接口返回 %s：%s" % (e.code, detail or e.reason)})
-        return text, []
-    except (socket.timeout, TimeoutError):
-        yield _sse({"type": "error", "error": "连接 AI 接口超时（%d 秒）：请检查接口地址与网络" % _CONNECT_TIMEOUT})
-        return text, []
-    except (urllib.error.URLError, OSError) as e:
-        yield _sse({"type": "error", "error": "无法连接 AI 接口：%s" % e})
-        return text, []
-    try:
-        for raw in resp:
-            line = raw.strip()
-            if not line.startswith(b"data:"):
-                continue
-            body = line[5:].strip()
-            if body == b"[DONE]":
-                break
+            resp = _open_stream(req, url, _CONNECT_TIMEOUT, _READ_TIMEOUT)
+        except urllib.error.HTTPError as e:
             try:
-                obj = json.loads(body.decode("utf-8"))
-            except ValueError:
+                detail = e.read().decode("utf-8", "replace")[:400]
+            except OSError:
+                detail = ""
+            if _is_retryable_status(e.code) and attempt < _RETRY_MAX:
+                wait = _retry_wait(attempt, e)
+                attempt += 1
+                text, calls = "", {}
+                yield _sse({"type": "retry", "attempt": attempt, "wait": round(wait, 1), "reset": True,
+                            "reason": "接口限流/暂不可用（HTTP %s）" % e.code})
+                time.sleep(wait)
                 continue
-            if obj.get("error"):
-                yield _sse({"type": "error", "error": str(obj["error"])})
+            if _is_retryable_status(e.code):
+                yield _sse({"type": "error", "error": "接口返回 %s：已自动重试 %d 次仍未成功，可稍后重试；"
+                                                     "若为 tpm/rpm 限流，请减少上下文后重试。详情：%s"
+                                                     % (e.code, _RETRY_MAX, detail or e.reason)})
+            else:
+                yield _sse({"type": "error", "error": "接口返回 %s：%s" % (e.code, detail or e.reason)})
+            return text, []
+        except (socket.timeout, TimeoutError):
+            if attempt < _RETRY_MAX:
+                wait = _retry_wait(attempt)
+                attempt += 1
+                text, calls = "", {}
+                yield _sse({"type": "retry", "attempt": attempt, "wait": round(wait, 1), "reset": True,
+                            "reason": "连接接口超时"})
+                time.sleep(wait)
                 continue
-            choices = obj.get("choices") or []
-            if not choices:
+            yield _sse({"type": "error", "error": "连接 AI 接口超时（%d 秒）：请检查接口地址与网络" % _CONNECT_TIMEOUT})
+            return text, []
+        except (urllib.error.URLError, OSError) as e:
+            if attempt < _RETRY_MAX:
+                wait = _retry_wait(attempt)
+                attempt += 1
+                text, calls = "", {}
+                yield _sse({"type": "retry", "attempt": attempt, "wait": round(wait, 1), "reset": True,
+                            "reason": "网络异常，重试中"})
+                time.sleep(wait)
                 continue
-            delta = (choices[0] or {}).get("delta") or {}
-            piece = delta.get("content")
-            if piece:
-                text += piece
-                yield _sse({"type": "delta", "text": piece})
-            for tc in (delta.get("tool_calls") or []):
-                slot = calls.setdefault(tc.get("index", 0), {"id": "", "name": "", "args_raw": ""})
-                if tc.get("id"):
-                    slot["id"] = tc["id"]
-                fn = tc.get("function") or {}
-                if fn.get("name"):
-                    slot["name"] += fn["name"]
-                if fn.get("arguments"):
-                    slot["args_raw"] += fn["arguments"]
-    except (OSError, urllib.error.URLError) as e:
-        yield _sse({"type": "error", "error": "读取流中断：%s" % e})
-    finally:
+            yield _sse({"type": "error", "error": "无法连接 AI 接口：%s" % e})
+            return text, []
+        broken = None
         try:
-            resp.close()
-        except OSError:
-            pass
+            for raw in resp:
+                line = raw.strip()
+                if not line.startswith(b"data:"):
+                    continue
+                body = line[5:].strip()
+                if body == b"[DONE]":
+                    break
+                try:
+                    obj = json.loads(body.decode("utf-8"))
+                except ValueError:
+                    continue
+                if obj.get("error"):
+                    emsg = str(obj["error"])
+                    if _is_retryable_text(emsg):
+                        broken = RuntimeError(emsg)
+                        break
+                    yield _sse({"type": "error", "error": emsg})
+                    continue
+                choices = obj.get("choices") or []
+                if not choices:
+                    continue
+                delta = (choices[0] or {}).get("delta") or {}
+                piece = delta.get("content")
+                if piece:
+                    text += piece
+                    yield _sse({"type": "delta", "text": piece})
+                for tc in (delta.get("tool_calls") or []):
+                    slot = calls.setdefault(tc.get("index", 0), {"id": "", "name": "", "args_raw": ""})
+                    if tc.get("id"):
+                        slot["id"] = tc["id"]
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        slot["name"] += fn["name"]
+                    if fn.get("arguments"):
+                        slot["args_raw"] += fn["arguments"]
+        except (socket.timeout, TimeoutError) as e:
+            broken = e or RuntimeError("读取超时")
+        except (OSError, urllib.error.URLError) as e:
+            broken = e
+        finally:
+            try:
+                resp.close()
+            except OSError:
+                pass
+        if broken is not None:
+            if attempt < _RETRY_MAX:
+                wait = _retry_wait(attempt)
+                attempt += 1
+                text, calls = "", {}
+                yield _sse({"type": "retry", "attempt": attempt, "wait": round(wait, 1), "reset": True,
+                            "reason": "接口限流/连接中断，自动重试"})
+                time.sleep(wait)
+                continue
+            yield _sse({"type": "error",
+                        "error": "接口限流或连接中断，已自动重试 %d 次仍未成功：%s" % (_RETRY_MAX, broken)})
+            return text, []
+        break
     out = []
     for idx in sorted(calls):
         c = calls[idx]

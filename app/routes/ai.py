@@ -40,6 +40,40 @@ _READ_TIMEOUT = 300                   # 连上之后等模型吐字的超时（�
 _CHAT_MAX_ROUNDS = 6                  # 普通对话里工具调用的最大轮数（防止死循环）
 _CHAT_TOOL_CHARS = 20000              # 单个工具结果回填给模型的字符上限
 
+# 限流 / 临时故障自动重试
+_RETRY_MAX = 5                        # 最多重试次数
+_RETRY_BASE = 3.0                     # 首次等待秒数，之后指数退避
+_RETRY_CAP = 60.0                     # 单次等待上限（秒）
+_RETRY_STATUS = {408, 409, 425, 429, 500, 502, 503, 504, 520, 522, 524}
+_RETRY_HINTS = ("429", "rate limit", "rate_limit", "too many requests", "requests per",
+                "tpm", "rpm", "quota", "overload", "overloaded", "busy", "temporarily")
+
+
+def _is_retryable_status(code):
+    try:
+        return int(code) in _RETRY_STATUS
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_retryable_text(s):
+    t = str(s or "").lower()
+    return any(h in t for h in _RETRY_HINTS)
+
+
+def _retry_wait(attempt, err=None):
+    """按指数退避计算等待秒数；若响应带 Retry-After 优先使用。"""
+    if isinstance(err, urllib.error.HTTPError):
+        try:
+            ra = err.headers.get("Retry-After") if err.headers else None
+            if ra:
+                v = float(ra)
+                if v > 0:
+                    return min(v, _RETRY_CAP)
+        except (TypeError, ValueError, AttributeError):
+            pass
+    return min(_RETRY_BASE * (2 ** max(0, attempt)), _RETRY_CAP)
+
 
 def _preflight(url, timeout=_CONNECT_TIMEOUT):
     """先快速探一次端口：连不上立刻报错，避免把长读超时耗在不可达的地址上。
@@ -440,91 +474,138 @@ def api_ai_chat():
         rounds = 0
         while rounds < _CHAT_MAX_ROUNDS:
             rounds += 1
-            body = {"model": model, "messages": convo, "stream": True}
-            if tools:
-                body["tools"] = tools
-                body["tool_choice"] = "auto"
-            req = urllib.request.Request(
-                url, data=json.dumps(body).encode("utf-8"), method="POST", headers=_chat_headers())
-            text, calls, resp = "", {}, None
-            try:
-                resp = _open_stream(req, url)
-            except urllib.error.HTTPError as e:
+            text, calls = "", {}
+            attempt = 0
+            while True:                                     # 限流 / 临时错误自动等待重试
+                body = {"model": model, "messages": convo, "stream": True}
+                if tools:
+                    body["tools"] = tools
+                    body["tool_choice"] = "auto"
+                req = urllib.request.Request(
+                    url, data=json.dumps(body).encode("utf-8"), method="POST", headers=_chat_headers())
+                # ① 建立连接
                 try:
-                    detail = e.read().decode("utf-8", "replace")[:500]
-                except OSError:
-                    detail = ""
-                if tools:                                   # 接口不认 tools：降级为纯文本 + 提示词方式
-                    _log.info("AI 对话：接口不支持 tools，改用提示词模式（%s）", detail[:200])
-                    tools = []
-                    rounds -= 1
-                    if not any("可用工具" in str(m.get("content") or "") for m in convo):
-                        note = _text_tool_note(perm, bool(data.get("web_search")))
-                        if convo and convo[0].get("role") == "system":
-                            convo[0]["content"] = str(convo[0].get("content") or "") + note
-                        else:
-                            convo.insert(0, {"role": "system", "content": note.strip()})
-                    continue
-                yield _sse({"error": f"接口返回 {e.code}：{detail or e.reason}"})
-                yield b"data: [DONE]\n\n"
-                return
-            except (socket.timeout, TimeoutError):
-                yield _sse({"error": "连接 AI 接口超时（%d 秒）：请检查接口地址与网络" % _CONNECT_TIMEOUT})
-                yield b"data: [DONE]\n\n"
-                return
-            except (urllib.error.URLError, OSError) as e:
-                yield _sse({"error": f"无法连接 AI 接口：{e}"})
-                yield b"data: [DONE]\n\n"
-                return
-            try:
-                # SSE 按行迭代：上游每 flush 一行就能立刻转发，保证打字机效果
-                for raw in resp:
-                    line = raw.strip()
-                    if not line.startswith(b"data:"):
-                        continue
-                    chunk = line[5:].strip()
-                    if chunk == b"[DONE]":
-                        break
+                    resp = _open_stream(req, url)
+                except urllib.error.HTTPError as e:
                     try:
-                        obj = json.loads(chunk.decode("utf-8"))
-                    except ValueError:
+                        detail = e.read().decode("utf-8", "replace")[:500]
+                    except OSError:
+                        detail = ""
+                    if _is_retryable_status(e.code) and attempt < _RETRY_MAX:
+                        wait = _retry_wait(attempt, e)
+                        attempt += 1
+                        text, calls = "", {}
+                        yield _sse({"type": "retry", "attempt": attempt, "wait": round(wait, 1),
+                                    "reason": "接口限流/暂不可用（HTTP %d）" % e.code})
+                        time.sleep(wait)
                         continue
-                    if obj.get("error"):
-                        yield _sse({"error": str(obj["error"])})
+                    if tools:                               # 接口不认 tools：降级为纯文本 + 提示词方式
+                        _log.info("AI 对话：接口不支持 tools，改用提示词模式（%s）", detail[:200])
+                        tools = []
+                        rounds -= 1
+                        if not any("可用工具" in str(m.get("content") or "") for m in convo):
+                            note = _text_tool_note(perm, bool(data.get("web_search")))
+                            if convo and convo[0].get("role") == "system":
+                                convo[0]["content"] = str(convo[0].get("content") or "") + note
+                            else:
+                                convo.insert(0, {"role": "system", "content": note.strip()})
                         continue
-                    choices = obj.get("choices") or []
-                    if not choices:
+                    if _is_retryable_status(e.code):
+                        yield _sse({"error": "接口返回 %s：已自动重试 %d 次仍未成功，可稍后重试；"
+                                            "若为 tpm/rpm 限流，请减少附带文件/图片或缩短上下文。详情：%s"
+                                            % (e.code, _RETRY_MAX, detail or e.reason)})
+                    else:
+                        yield _sse({"error": f"接口返回 {e.code}：{detail or e.reason}"})
+                    yield b"data: [DONE]\n\n"
+                    return
+                except (socket.timeout, TimeoutError):
+                    if attempt < _RETRY_MAX:
+                        wait = _retry_wait(attempt)
+                        attempt += 1
+                        text, calls = "", {}
+                        yield _sse({"type": "retry", "attempt": attempt, "wait": round(wait, 1),
+                                    "reason": "连接接口超时"})
+                        time.sleep(wait)
                         continue
-                    delta = (choices[0] or {}).get("delta") or {}
-                    piece = delta.get("content")
-                    reasoning = delta.get("reasoning_content")
-                    if piece or reasoning:
-                        yield _sse({"delta": piece or "", "reasoning": reasoning or ""})
-                    if piece:
-                        text += piece
-                    for tc in (delta.get("tool_calls") or []):
-                        slot = calls.setdefault(tc.get("index", 0), {"id": "", "name": "", "args_raw": ""})
-                        if tc.get("id"):
-                            slot["id"] = tc["id"]
-                        fn = tc.get("function") or {}
-                        if fn.get("name"):
-                            slot["name"] += fn["name"]
-                        if fn.get("arguments"):
-                            slot["args_raw"] += fn["arguments"]
-            except (socket.timeout, TimeoutError):
-                yield _sse({"error": "模型 %d 秒没有返回新内容（响应超时），可重试或换个更快的模型"
-                                    % _READ_TIMEOUT})
-                yield b"data: [DONE]\n\n"
-                return
-            except (OSError, urllib.error.URLError) as e:
-                yield _sse({"error": f"读取流中断：{e}"})
-                yield b"data: [DONE]\n\n"
-                return
-            finally:
+                    yield _sse({"error": "连接 AI 接口超时（%d 秒）：请检查接口地址与网络" % _CONNECT_TIMEOUT})
+                    yield b"data: [DONE]\n\n"
+                    return
+                except (urllib.error.URLError, OSError) as e:
+                    if attempt < _RETRY_MAX:
+                        wait = _retry_wait(attempt)
+                        attempt += 1
+                        text, calls = "", {}
+                        yield _sse({"type": "retry", "attempt": attempt, "wait": round(wait, 1),
+                                    "reason": "网络异常，重试中"})
+                        time.sleep(wait)
+                        continue
+                    yield _sse({"error": f"无法连接 AI 接口：{e}"})
+                    yield b"data: [DONE]\n\n"
+                    return
+                # ② 读取流
+                broken = None
                 try:
-                    resp.close()
-                except OSError:
-                    pass
+                    # SSE 按行迭代：上游每 flush 一行就能立刻转发，保证打字机效果
+                    for raw in resp:
+                        line = raw.strip()
+                        if not line.startswith(b"data:"):
+                            continue
+                        chunk = line[5:].strip()
+                        if chunk == b"[DONE]":
+                            break
+                        try:
+                            obj = json.loads(chunk.decode("utf-8"))
+                        except ValueError:
+                            continue
+                        if obj.get("error"):
+                            emsg = str(obj["error"])
+                            if _is_retryable_text(emsg):
+                                broken = RuntimeError(emsg)
+                                break
+                            yield _sse({"error": emsg})
+                            continue
+                        choices = obj.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = (choices[0] or {}).get("delta") or {}
+                        piece = delta.get("content")
+                        reasoning = delta.get("reasoning_content")
+                        if piece or reasoning:
+                            yield _sse({"delta": piece or "", "reasoning": reasoning or ""})
+                        if piece:
+                            text += piece
+                        for tc in (delta.get("tool_calls") or []):
+                            slot = calls.setdefault(tc.get("index", 0), {"id": "", "name": "", "args_raw": ""})
+                            if tc.get("id"):
+                                slot["id"] = tc["id"]
+                            fn = tc.get("function") or {}
+                            if fn.get("name"):
+                                slot["name"] += fn["name"]
+                            if fn.get("arguments"):
+                                slot["args_raw"] += fn["arguments"]
+                except (socket.timeout, TimeoutError) as e:
+                    broken = e or RuntimeError("读取超时")
+                except (OSError, urllib.error.URLError) as e:
+                    broken = e
+                finally:
+                    try:
+                        resp.close()
+                    except OSError:
+                        pass
+                if broken is not None:
+                    if attempt < _RETRY_MAX:
+                        wait = _retry_wait(attempt)
+                        attempt += 1
+                        text, calls = "", {}
+                        yield _sse({"type": "retry", "attempt": attempt, "wait": round(wait, 1),
+                                    "reason": "接口限流/连接中断，自动重试"})
+                        time.sleep(wait)
+                        continue
+                    yield _sse({"error": "接口限流或连接中断，已自动重试 %d 次仍未成功：%s"
+                                        % (_RETRY_MAX, broken)})
+                    yield b"data: [DONE]\n\n"
+                    return
+                break
             # 收集本轮工具调用（原生 tool_calls 优先，其次正文里的文本格式）
             call_list = []
             for idx in sorted(calls):

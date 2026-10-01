@@ -6571,6 +6571,13 @@
   aiRenderWebToggle();
 
   /* 工具调用步骤卡片 */
+  function aiRetryHint(ev) {
+    const reason = (ev && ev.reason) || "接口限流";
+    const wait = ev && ev.wait != null ? ev.wait : 0;
+    const n = (ev && ev.attempt) || 1;
+    return '<span class="ai-waiting">' + esc(reason) + '，' + wait + ' 秒后自动重试（第 ' + n +
+      ' 次）<span class="d"></span><span class="d"></span><span class="d"></span></span>';
+  }
   function aiStepRow(ev) {
     const row = document.createElement("div");
     row.className = "ai-step";
@@ -6717,7 +6724,11 @@
           let e;
           try { e = JSON.parse(line.slice(5).trim()); } catch (_) { continue; }
           if (e.type === "run") { runId = e.run_id; }
-          else if (e.type === "delta") {
+          else if (e.type === "retry") {
+            text = "";                                        // 限流重试：清空本轮已显示内容
+            if (onDelta) onDelta("");
+            if (bodyB) bodyB.innerHTML = aiRetryHint(e);
+          } else if (e.type === "delta") {
             text += e.text;
             if (onDelta) onDelta(text);
           } else if (e.type === "step") {
@@ -7076,6 +7087,12 @@
             const data = line.slice(5).trim();
             if (data === "[DONE]") continue;
             let obj; try { obj = JSON.parse(data); } catch (_) { continue; }
+            if (obj.type === "retry") {                       // 限流：清空已显示内容，提示后自动重试
+              acc = ""; thinking = "";
+              thinkB.parentElement.style.display = "none"; thinkB.textContent = "";
+              bodyB.innerHTML = aiRetryHint(obj);
+              continue;
+            }
             if (obj.error) throw new Error(obj.error);
             if (obj.type === "step") {
               chatStepMeta.set(obj.call_id, { tool: obj.tool, args: obj.args });

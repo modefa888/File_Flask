@@ -35,12 +35,17 @@ def _git(cwd, args, timeout=_TIMEOUT):
     普通用户，Git 会以 "detected dubious ownership" 拒绝读取（表现为
     `git init` 成功、但紧接着 status/log 仍报「不是 Git 仓库」）。
     这里放行，仅作用于本机自身的仓库目录。
+
+    统一带上 `-c core.quotepath=false`：Git 默认把非 ASCII 路径转义成
+    `"01_\346\240\207....css"` 形式（并包上引号），导致提交文件列表、
+    差异等处中文文件名显示为乱码。关闭后直接输出 UTF-8 原文。
     """
     exe = _git_exe()
     if not exe:
         return None, "未找到 git 命令，请先安装 Git"
     try:
-        proc = subprocess.run([exe, "-c", "safe.directory=*"] + args, cwd=cwd, capture_output=True,
+        proc = subprocess.run([exe, "-c", "safe.directory=*", "-c", "core.quotepath=false"] + args,
+                              cwd=cwd, capture_output=True,
                               text=True, errors="replace", timeout=timeout,
                               stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:

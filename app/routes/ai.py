@@ -823,7 +823,8 @@ def _git_run(cwd, args, timeout=20):
     if not exe:
         return "", "未找到 git 命令，请先安装 Git"
     try:
-        p = subprocess.run([exe, "-c", "safe.directory=*"] + args, cwd=cwd, capture_output=True,
+        p = subprocess.run([exe, "-c", "safe.directory=*", "-c", "core.quotepath=false"] + args,
+                           cwd=cwd, capture_output=True,
                            text=True, errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return "", "git 命令执行超时"

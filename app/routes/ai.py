@@ -30,6 +30,7 @@ from flask import Blueprint, request, jsonify, Response
 from .. import config
 from ..log import get_logger
 from ..services.web_search import search_web, format_results
+from ..services import undo
 
 _log = get_logger()
 bp = Blueprint("ai", __name__)
@@ -630,6 +631,7 @@ def api_ai_chat():
                                          for c in call_list]})
             for c in call_list:
                 yield _sse({"type": "step", "call_id": c["id"], "tool": c["name"], "args": c["args"]})
+                tool_changes = None
                 if c["name"] not in offered_names:            # 模型可能伪造了未开放的工具（如 run_command）
                     ok, summary, detail = False, "该工具在普通对话中不可用：%s" % c["name"], ""
                     model_text = "调用被拒绝：普通对话不允许使用 %s（可在智能体模式下执行命令）" % c["name"]
@@ -642,15 +644,31 @@ def api_ai_chat():
                         ok, summary, detail = False, "该操作需要确认，普通对话不支持", ""
                         model_text = "该操作需要用户确认，请提示用户切换到智能体模式执行"
                     else:
+                        undo.begin()
                         ok, summary, detail, model_text = _run_tool_job(c["name"], c["args"], root, perm)
+                        tool_changes = undo.collect()
                 yield _sse({"type": "result", "call_id": c["id"], "tool": c["name"], "ok": bool(ok),
-                            "summary": summary, "detail": detail, "ms": 0})
+                            "summary": summary, "detail": detail, "ms": 0,
+                            "changes": (tool_changes or None)})
                 convo.append({"role": "tool", "tool_call_id": c["id"],
                               "content": (model_text or summary or detail or "")[:_CHAT_TOOL_CHARS]})
         yield b"data: [DONE]\n\n"
 
     return Response(gen(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@bp.route("/api/ai/undo", methods=["POST"])
+def api_ai_undo():
+    """回撤 AI 某条回复造成的文件改动（写入 / 修改 / 新建）。"""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "ids 不能为空"}), 400
+    results = undo.restore([str(i) for i in ids][:500])
+    ok = sum(1 for r in results if r.get("ok"))
+    _log.info("AI 回撤：请求 %d 项，成功 %d 项", len(results), ok)
+    return jsonify({"ok": True, "restored": ok, "total": len(results), "results": results})
 
 
 _SUMMARY_TIMEOUT = 60

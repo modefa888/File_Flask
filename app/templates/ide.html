@@ -868,6 +868,11 @@
   .ai-meta .ai-mcopy:hover, .ai-meta .ai-mregen:hover, .ai-meta .ai-mretry:hover { color: #d7dce2; }
   .ai-meta .ai-mregen:hover { color: #7fb3e0; }
   .ai-meta .ai-mretry:hover { color: #e8c07a; }
+  .ai-meta .ai-mundo { background: none; border: none; color: #8a8a8a; cursor: pointer; font-size: 11.5px; padding: 0 2px; }
+  .ai-meta .ai-mundo:hover { color: #7fd88f; }
+  .ai-meta .ai-mundo:disabled { opacity: .5; cursor: default; }
+  .ai-meta .ai-undone { color: #6e7681; font-size: 10.5px; display: inline-flex; align-items: center; gap: 3px; }
+  .ai-meta.user { justify-content: flex-end; }
   .ai-img-thumb { position: relative; width: 54px; height: 54px; border-radius: 6px; overflow: hidden; border: 1px solid #3c3c3c; }
   .ai-img-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .ai-img-thumb .rm {
@@ -5314,7 +5319,37 @@
     html += flushP(pbuf);
     return html;
   }
-  function aiMetaHtml(m, mi) {                            // 回复下方元信息行：复制/重答/重试 + tok · 用时 · 日期
+  function aiFmtTime(ts) {
+    if (!ts) return "";
+    const d = new Date(ts), p2 = n => String(n).padStart(2, "0");
+    return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+  }
+  /* 复制一条消息：文字 + 图片一起复制（不支持多类型剪贴板时退回纯文本） */
+  async function aiCopyMessage(m) {
+    const text = m.text || m.content || "";
+    const imgs = (m.images || []).slice(0, 8);
+    if (imgs.length && navigator.clipboard && window.ClipboardItem) {
+      try {
+        const items = [new ClipboardItem({ "text/plain": new Blob([text], { type: "text/plain" }) })];
+        for (const u of imgs) {
+          const blob = await (await fetch(u)).blob();
+          items.push(new ClipboardItem({ [blob.type || "image/png"]: blob }));
+        }
+        await navigator.clipboard.write(items);
+        return true;
+      } catch (_) { /* 继续退回纯文本 */ }
+    }
+    await aiCopyText(text);
+    return true;
+  }
+  function aiUserMetaHtml(m, mi) {                        // 用户消息：时间 + 复制（含图片）
+    const t = aiFmtTime(m.ts);
+    return '<div class="ai-meta user">' +
+      (t ? '<span>' + t + '</span>' : '') +
+      '<button class="ai-mcopy" data-mi="' + mi + '" title="复制（文字与图片一起复制）"><i class="bi bi-clipboard"></i></button>' +
+      '</div>';
+  }
+  function aiMetaHtml(m, mi) {                            // 回复下方元信息行：复制/重答/重试/回撤 + tok · 用时 · 日期
     const parts = [];
     const tok = Math.ceil((m.text || "").length / 2);
     if (tok) parts.push('~' + tok + ' tok');
@@ -5322,18 +5357,60 @@
       const s = m.ms / 1000;
       parts.push('用时 ' + (s >= 60 ? Math.floor(s / 60) + '分' + Math.round(s % 60) + '秒' : s.toFixed(1) + 's'));
     }
-    if (m.ts) {
-      const d = new Date(m.ts), p2 = n => String(n).padStart(2, "0");
-      parts.push((d.getMonth() + 1) + '月' + d.getDate() + '日 ' + p2(d.getHours()) + ':' + p2(d.getMinutes()));
-    }
+    if (m.ts) parts.push(aiFmtTime(m.ts));
     const retryBtn = m.role === "assistant" && m.err
       ? '<button class="ai-mretry" data-mi="' + mi + '" title="重新提问"><i class="bi bi-arrow-repeat"></i></button>'
       : '';
+    let undoBtn = '';
+    if (m.role === "assistant" && m.changes && m.changes.length) {
+      undoBtn = '<button class="ai-mundo" data-mi="' + mi + '" title="回撤本次 AI 改动（' + m.changes.length +
+        ' 个文件操作）"><i class="bi bi-arrow-counterclockwise"></i></button>';
+    } else if (m.role === "assistant" && m.undone) {
+      undoBtn = '<span class="ai-undone" title="本次改动已回撤"><i class="bi bi-check2-circle"></i> 已回撤</span>';
+    }
     return '<div class="ai-meta">' +
       '<button class="ai-mcopy" data-mi="' + mi + '" title="复制回复全文"><i class="bi bi-clipboard"></i></button>' +
       '<button class="ai-mregen" data-mi="' + mi + '" title="删除此回复并重新生成"><i class="bi bi-arrow-clockwise"></i></button>' +
-      retryBtn +
+      retryBtn + undoBtn +
       '<span>' + parts.join(' · ') + '</span></div>';
+  }
+  /* 回撤某条 AI 回复造成的文件改动 */
+  function aiUndoChanges(mi, btn) {
+    const m = AI.msgs[mi];
+    if (!m || !m.changes || !m.changes.length) return;
+    if (!confirm("回撤这次 AI 的改动？将把 " + m.changes.length + " 个文件操作恢复到修改前的状态。")) return;
+    const old = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+    fetch("/api/ai/undo", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: m.changes.slice() }),
+    }).then(async (r) => ({ ok: r.ok, d: await r.json().catch(() => ({})) }))
+      .then(({ ok, d }) => {
+        if (!ok || d.error) throw new Error(d.error || "回撤接口不可用（请重启服务）");
+        const results = d.results || [];
+        const failed = results.filter(x => !x.ok);
+        m.undone = true; m.changes = [];
+        aiReloadAfterUndo(results);
+        aiPersistCurrent(); aiRenderAll();
+        toast("已回撤 " + (d.restored || 0) + "/" + (d.total || results.length) + " 项改动" +
+              (failed.length ? "（" + failed.length + " 项失败）" : ""), failed.length ? "warn" : "ok");
+      })
+      .catch((err) => {
+        btn.disabled = false;
+        btn.innerHTML = old;
+        toast("回撤失败：" + err.message, "err");
+      });
+  }
+  function aiReloadAfterUndo(results) {
+    (results || []).forEach(r => {
+      const p = r && r.path;
+      if (!p) return;
+      const t = findTab(p);
+      if (r.action === "removed") { if (t) closeTabSilent(t); return; }
+      if (t) { closeTabSilent(t); openFile(p, baseName(p)); }
+    });
+    try { refreshTree(); } catch (_) {}
   }
   function aiBubble(role, text, cls, imgs, md, files) {
     const row = document.createElement("div");
@@ -5407,6 +5484,8 @@
       if (m.role === "assistant") {
         const meta = aiMetaHtml(m, mi);
         if (meta) b.insertAdjacentHTML("afterend", meta);
+      } else {
+        b.parentElement.insertAdjacentHTML("beforeend", aiUserMetaHtml(m, mi));   // 用户消息：时间 + 复制
       }
     });
   }
@@ -6085,14 +6164,22 @@
       aiOpenSkillEditPop(chip.dataset.skillId, chip);
       return;
     }
-    const mc = e.target.closest(".ai-mcopy");             // 复制整条回复
+    const mc = e.target.closest(".ai-mcopy");             // 复制整条消息（文字 + 图片）
     if (mc) {
       const m = AI.msgs[+mc.dataset.mi];
       if (!m) return;
-      aiCopyText(m.text || "").then(() => {
+      aiCopyMessage(m).then(() => {
         mc.innerHTML = '<i class="bi bi-check2"></i>';
         setTimeout(() => { mc.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500);
       }).catch(() => { toast("复制失败", "warn"); });
+      return;
+    }
+    const un = e.target.closest(".ai-mundo");             // 回撤本次 AI 改动
+    if (un) {
+      const mi = +un.dataset.mi;
+      const m = AI.msgs[mi];
+      if (!m || !m.changes || !m.changes.length) return;
+      aiUndoChanges(mi, un);
       return;
     }
     const rg = e.target.closest(".ai-mregen");            // 删除此回复并重新生成
@@ -6690,6 +6777,7 @@
     const stepMeta = new Map();          // call_id -> {tool, args}
     const rows = new Map();              // call_id -> 步骤行
     const steps = [];
+    const changes = [];                  // 本次 AI 回复产生的文件改动 id（供回撤）
     let stepsBox = null;
     const ensureStepsBox = () => {
       if (!stepsBox) {
@@ -6747,6 +6835,7 @@
           } else if (e.type === "result") {
             const meta = stepMeta.get(e.call_id) || { tool: e.tool, args: {} };
             aiStepDone(rows.get(e.call_id), e);
+            if (e.changes && e.changes.length) changes.push(...e.changes);
             const rec = { tool: meta.tool, args: meta.args, ok: !!e.ok, denied: !!e.denied,
                           ms: e.ms, summary: e.summary || "", detail: e.detail || "" };
             steps.push(rec);
@@ -6763,7 +6852,7 @@
       aiScrollToBottom(true);
     }
     if (stepsBox) { stepsBox._pending = 0; stepsBox._paint(); }
-    return { text: text, steps: steps };
+    return { text: text, steps: steps, changes: changes };
   }
 
   /* ---------- 附加文件到对话：资源管理器右键「添加到 AI 对话」→ 输入框上方出现小卡片 ---------- */
@@ -6915,11 +7004,13 @@
     if (!reuse) {
       const userText = text || (imgs.length ? "（见图）" : "");
       const attFiles = (AI.files || []).map(f => f.name);          // 本条消息附带的文件（消息上方显示）
-      AI.msgs.push({ role: "user", pid: aiNewPid(), text: userText, imgs: imgs.length || undefined,
+      AI.msgs.push({ role: "user", pid: aiNewPid(), text: userText, ts: Date.now(),
+                     imgs: imgs.length || undefined,
                      images: imgs.length ? imgs : undefined,
                      files: attFiles.length ? attFiles : undefined,
                      skills: skillIds.length ? skillIds : undefined });
-      aiBubble("user", userText, "", imgs, false, attFiles);
+      const ub = aiBubble("user", userText, "", imgs, false, attFiles);
+      ub.parentElement.insertAdjacentHTML("beforeend", aiUserMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
       $("aiText").innerHTML = "";
       AI.pending = [];
       aiRenderPending();
@@ -7050,8 +7141,9 @@
         bodyB.innerHTML = aiMd(acc) || "（已完成，未产生文字说明）";
         const aMeta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
         AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: acc, ms: aMeta.ms, ts: aMeta.ts,
-                       steps: res.steps.length ? res.steps : undefined });
-        bodyB.insertAdjacentHTML("afterend", aiMetaHtml({ text: acc, ms: aMeta.ms, ts: aMeta.ts }, AI.msgs.length - 1));
+                       steps: res.steps.length ? res.steps : undefined,
+                       changes: (res.changes && res.changes.length) ? res.changes : undefined });
+        bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
         aiPersistCurrent(); aiRenderConv();
         aiRecordStat(true, aMeta.ms, acc.length, ttft, inTok);
         return;
@@ -7069,7 +7161,7 @@
       const dec = new TextDecoder();
       let buf = "";
       // 普通对话也会调用读取类工具：把过程记录渲染在消息下方
-      const chatSteps = [], chatStepRows = new Map(), chatStepMeta = new Map();
+      const chatSteps = [], chatStepRows = new Map(), chatStepMeta = new Map(), chatChanges = [];
       let chatStepsBox = null;
       const ensureChatSteps = () => {
         if (!chatStepsBox) { chatStepsBox = aiBuildStepsBox([]); bodyB.parentElement.appendChild(chatStepsBox); }
@@ -7109,6 +7201,7 @@
             if (obj.type === "result") {
               const md = chatStepMeta.get(obj.call_id) || { tool: obj.tool, args: {} };
               aiStepDone(chatStepRows.get(obj.call_id), obj);
+              if (obj.changes && obj.changes.length) chatChanges.push(...obj.changes);
               const rec = { tool: md.tool, args: md.args, ok: !!obj.ok, denied: !!obj.denied,
                             ms: obj.ms, summary: obj.summary || "", detail: obj.detail || "" };
               chatSteps.push(rec);
@@ -7137,8 +7230,9 @@
       thinkB.parentElement.style.display = thinking.trim() ? "" : "none";
       const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
       AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, reasoning: thinking.trim() || undefined,
-                     ms: meta.ms, ts: meta.ts, steps: chatSteps.length ? chatSteps : undefined });
-      bodyB.insertAdjacentHTML("afterend", aiMetaHtml({ text: out, ms: meta.ms, ts: meta.ts }, AI.msgs.length - 1));
+                     ms: meta.ms, ts: meta.ts, steps: chatSteps.length ? chatSteps : undefined,
+                     changes: chatChanges.length ? chatChanges : undefined });
+      bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
       aiPersistCurrent(); aiRenderConv();
       aiRecordStat(true, performance.now() - t0, out.length, ttft, inTok);
     } catch (e) {

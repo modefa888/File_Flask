@@ -36,6 +36,7 @@ from .. import config
 from ..log import get_logger
 from ..services.safety import check_command
 from ..services.web_search import search_web, format_results
+from ..services import undo
 from .ai import (_clean_content, _load_cfg, _open_stream, _sse, _inject_system_time,
                  _inject_web_search, _SKILL_PROMPTS, _is_retryable_status, _is_retryable_text,
                  _retry_wait, _RETRY_MAX)
@@ -367,6 +368,7 @@ def _tool_write_file(args, root, perm):
         d = os.path.dirname(path)
         if d:
             os.makedirs(d, exist_ok=True)
+        undo.snapshot(path)                   # 写入前记录原状，供回撤
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
     except OSError as e:
@@ -395,6 +397,7 @@ def _tool_edit_file(args, root, perm):
         return False, "未在文件中找到待替换内容（必须与原文完全一致，含缩进）", "", "未找到待替换内容"
     new_text = text.replace(old, new, 1)
     try:
+        undo.snapshot(path)                   # 修改前记录原状，供回撤
         with open(path, "w", encoding="utf-8") as f:
             f.write(new_text)
     except OSError as e:
@@ -957,13 +960,16 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
                     continue
                 if box["always"]:
                     always_allow.add(name)
+            undo.begin()
             ok, summary, detail, model_text = _run_tool_job(name, args, root, perm)
+            changes = undo.collect()
             ms = int((time.time() - t_start) * 1000)
             done[c["id"]] = (ok, summary, detail, model_text, ms, False)
             _log.info("Agent 工具：%s %s → %s（%dms）", name, json.dumps(args, ensure_ascii=False)[:200],
                       "ok" if ok else "fail", ms)
             yield _sse({"type": "result", "call_id": c["id"], "tool": name, "ok": ok,
-                        "summary": summary, "detail": detail, "ms": ms})
+                        "summary": summary, "detail": detail, "ms": ms,
+                        "changes": changes or None})
         # ④ 按模型给出的顺序回填工具结果，并裁剪较早轮次的上下文
         idxs = []
         for c in tool_calls:

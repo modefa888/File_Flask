@@ -281,6 +281,62 @@ def _inject_web_search(clean):
     clean.insert(len(clean) - 1, {"role": "system", "content": "[联网搜索结果]\n" + text})
 
 
+# 内置 Skill 提示词：前端选择对应 id 后，会在 system 消息里追加这段说明。
+_SKILL_PROMPTS = {
+    "lsp-code-analysis": (
+        "[当前激活技能：代码语义分析]\n"
+        "当用户询问代码结构、符号定义、调用关系、类型信息时，优先引导使用 LSP/IDE 的「转到定义」「查找引用」「实现」等功能定位，"
+        "避免凭空猜测文件内容。需要时建议具体的文件路径和行号范围。"
+    ),
+    "multi-modal": (
+        "[当前激活技能：多模态内容生成]\n"
+        "当用户请求生成/创建/处理图片、视频、3D 模型，或给图片/视频加特效时，给出可调用多模态生成接口（如 image_gen）的实施方案，"
+        "包括 prompt 写法、尺寸/风格/数量参数与保存路径。"
+    ),
+    "skill-creator": (
+        "[当前激活技能：Skill 创建]\n"
+        "当用户想扩展助手能力、创建新 Skill 时，引导其明确触发条件、能力描述、所需工具/脚本与输入输出格式，"
+        "并生成对应的 skill 定义文件（如 TOML/JSON）与示例实现。"
+    ),
+    "pptx": (
+        "[当前激活技能：PPT 处理]\n"
+        "当用户需要创建、编辑、合并、拆分、提取 PowerPoint 时，优先使用 python-pptx 库，给出完整可运行代码，并说明每页版式与占位符。"
+    ),
+    "pdf": (
+        "[当前激活技能：PDF 处理]\n"
+        "当用户需要读取、合并、拆分、旋转、加水印、OCR、填表 PDF 时，优先使用 PyPDF2/pikepdf/pdfplumber 等库，给出完整可运行代码。"
+    ),
+    "docx": (
+        "[当前激活技能：Word 处理]\n"
+        "当用户需要创建、编辑、提取 Word 文档时，优先使用 python-docx 库，给出完整可运行代码，包括段落、表格、样式与页眉页脚。"
+    ),
+    "xlsx": (
+        "[当前激活技能：表格处理]\n"
+        "当用户需要创建、编辑、公式、图表、清洗 Excel/CSV 数据时，优先使用 openpyxl/pandas 库，给出完整可运行代码与数据示例。"
+    ),
+}
+
+
+def _inject_skill(clean, skill):
+    """如果请求中指定了 skill（字符串或列表），在第一条 system 消息里追加对应提示词。"""
+    if not skill:
+        return
+    sids = skill if isinstance(skill, list) else [skill]
+    prompts = []
+    for sid in sids:
+        if not sid:
+            continue
+        prompt = _SKILL_PROMPTS.get(str(sid))
+        if prompt:
+            prompts.append(prompt)
+    if not prompts:
+        return
+    if clean and clean[0].get("role") == "system":
+        clean[0]["content"] = str(clean[0].get("content") or "") + "\n\n" + "\n\n".join(prompts)
+    else:
+        clean.insert(0, {"role": "system", "content": "\n\n".join(prompts)})
+
+
 def _clean_content(c):
     """清洗消息 content：字符串直接透传；数组只保留 text / data-URL 图片部件。"""
     if isinstance(c, str):
@@ -334,10 +390,13 @@ def api_ai_chat():
     _inject_system_time(clean)                       # 自动注入当前系统时间
     if data.get("web_search"):
         _inject_web_search(clean)                    # 联网搜索并注入结果
+    skills = data.get("skills") or data.get("skill")            # 支持多个 skill
+    _inject_skill(clean, skills)                                # 注入技能提示词
     n_imgs = sum(1 for m in clean for part in (m["content"] if isinstance(m["content"], list) else [])
                  if isinstance(part, dict) and part.get("type") == "image_url")
-    _log.info("AI 对话：provider=%s model=%s msgs=%d images=%d web_search=%s",
-              provider["name"], model, len(clean), n_imgs, bool(data.get("web_search")))
+    _log.info("AI 对话：provider=%s model=%s msgs=%d images=%d web_search=%s skills=%s",
+              provider["name"], model, len(clean), n_imgs, bool(data.get("web_search")),
+              ",".join(skills) if isinstance(skills, list) else (skills or "-"))
 
     base = provider["base_url"].rstrip("/")
     url = base if base.endswith("/chat/completions") else base + "/chat/completions"

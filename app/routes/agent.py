@@ -36,7 +36,8 @@ from .. import config
 from ..log import get_logger
 from ..services.safety import check_command
 from ..services.web_search import search_web, format_results
-from .ai import _clean_content, _load_cfg, _open_stream, _sse, _inject_system_time, _inject_web_search
+from .ai import (_clean_content, _load_cfg, _open_stream, _sse, _inject_system_time,
+                 _inject_web_search, _SKILL_PROMPTS)
 
 _log = get_logger()
 bp = Blueprint("agent", __name__)
@@ -421,14 +422,14 @@ def _repo_tree(root, max_lines=_TREE_LINES, depth=_TREE_DEPTH):
     return "\n".join(out)
 
 
-def _agent_system(root, perm):
+def _agent_system(root, perm, skill=None):
     perm_desc = {
         "readonly": "仅可查看 —— 只能读文件与搜索，写入和执行会被拒绝（可提示用户切换权限）",
         "workspace": "工作区内修改 —— 可以读写项目内的文件；执行命令前会先征求用户确认",
         "full": "完全权限 —— 可以读写任意路径；执行命令不再确认（危险命令仍会被安全规则拦截）",
     }.get(perm, "工作区内修改")
     tree = _repo_tree(root)
-    return (
+    base = (
         "你是一个自托管文件管理器内置的编程智能体，可以通过工具自动读取文件、修改文件、搜索代码、执行命令来完成任务。\n"
         "当前项目根目录：%s\n"
         "当前权限：%s\n"
@@ -445,6 +446,12 @@ def _agent_system(root, perm):
         "8. 需要用户提供信息（如密钥、路径偏好）时直接提问，不要臆造。"
         % (root or "/", perm_desc, _TREE_DEPTH, tree or "（无法读取项目结构，请用 list_dir 自行查看）")
     )
+    if skill:
+        sids = skill if isinstance(skill, list) else [skill]
+        prompts = [_SKILL_PROMPTS.get(str(sid)) for sid in sids if _SKILL_PROMPTS.get(str(sid))]
+        if prompts:
+            base += "\n\n" + "\n\n".join(prompts)
+    return base
 
 
 # 有些模型（商汤 SenseNova、部分开源权重）不走标准 tool_calls 字段，而是把调用写在
@@ -601,8 +608,8 @@ def _trim_convo(convo, rounds_tool_idx):
     return trimmed
 
 
-def _run_agent(run_id, provider, model, root, perm, msgs):
-    convo = [{"role": "system", "content": _agent_system(root, perm)}] + msgs
+def _run_agent(run_id, provider, model, root, perm, msgs, skills=None):
+    convo = [{"role": "system", "content": _agent_system(root, perm, skills)}] + msgs
     always_allow = set()
     rounds_tool_idx = []                 # 每轮追加的 tool 消息下标，用于上下文裁剪
     for _round in range(_MAX_ROUNDS):
@@ -728,13 +735,16 @@ def api_ai_agent():
     perm = str(data.get("perm") or "workspace")
     if perm not in ("readonly", "workspace", "full"):
         perm = "workspace"
+    skills = data.get("skills") or data.get("skill") or None
     run_id = uuid.uuid4().hex[:12]
-    _log.info("Agent 启动：run=%s model=%s perm=%s root=%s msgs=%d", run_id, model, perm, root, len(clean))
+    _log.info("Agent 启动：run=%s model=%s perm=%s root=%s msgs=%d skills=%s",
+              run_id, model, perm, root, len(clean),
+              ",".join(skills) if isinstance(skills, list) else (skills or "-"))
 
     def gen():
         yield _sse({"type": "run", "run_id": run_id, "perm": perm, "model": model, "root": root})
         try:
-            yield from _run_agent(run_id, provider, model, root, perm, clean)
+            yield from _run_agent(run_id, provider, model, root, perm, clean, skills)
         except Exception as e:  # noqa: BLE001
             _log.warning("Agent 异常：%s", e)
             yield _sse({"type": "error", "error": "智能体执行失败：%s" % e})

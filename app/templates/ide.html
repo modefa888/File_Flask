@@ -678,7 +678,7 @@
     width: 0; min-width: 0; flex: none; display: none; flex-direction: column; min-height: 0;
     background: #1f1f22; border-left: 1px solid #2c2c2c; overflow: hidden;
   }
-  .ai-panel.open { display: flex; width: 400px; min-width: 260px; }
+  .ai-panel.open { display: flex; width: 400px; min-width: 260px; container-type: inline-size; }
   .workbench:not(.ai-open) #aiSplitter { display: none; }
   .ai-head {
     height: 35px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px;
@@ -890,12 +890,20 @@
   @keyframes aiWaitDot { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
   @keyframes aiBlink { 50% { opacity: 0; } }
   .ai-input { flex: none; border-top: 1px solid #2c2c2c; padding: 8px 10px; background: #232326; }
-  .ai-input textarea {
-    width: 100%; resize: none; background: #1b1b1e; border: 1px solid #3c3c3c; border-radius: 8px;
-    color: #d4d4d4; font-size: 12.5px; line-height: 1.5; padding: 7px 9px; outline: none; font-family: inherit;
+  .ai-input #aiText {
+    width: 100%; min-height: 44px; max-height: 220px; overflow-y: auto; resize: none; background: #1b1b1e;
+    border: 1px solid #3c3c3c; border-radius: 8px; color: #d4d4d4; font-size: 12.5px; line-height: 1.5;
+    padding: 7px 9px; outline: none; font-family: inherit; white-space: pre-wrap; word-wrap: break-word;
   }
-  .ai-input textarea:focus { border-color: #0a6aa8; }
-  .ai-input-acts { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .ai-input #aiText:empty:before { content: attr(data-placeholder); color: #888; pointer-events: none; }
+  .ai-input #aiText:focus { border-color: #0a6aa8; }
+  .ai-input #aiText .ai-tag {
+    display: inline-block; vertical-align: middle; background: #2d3e50; color: #7ec4ff;
+    border: 1px solid #3a5a7c; border-radius: 4px; padding: 0 5px; margin: 0 1px; font-size: 12px;
+    line-height: 1.4; cursor: default; user-select: none;
+  }
+  .ai-input #aiText .ai-tag.custom { background: #3a2d50; color: #d0aaff; border-color: #5a3a7c; }
+  .ai-input-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; row-gap: 4px; margin-top: 6px; }
   .ai-ctx-flag { font-size: 10.5px; color: #e2c08a; background: #332c1e; border-radius: 4px; padding: 2px 6px; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* AI 操作权限（仅可查看 / 工作区内修改 / 完全权限） */
   .ai-perm-wrap { position: relative; flex: none; }
@@ -940,6 +948,49 @@
   .ai-web-btn:hover { border-color: #555; color: #dbe6f2; }
   .ai-web-btn.on { background: #1e3a5f; border-color: #4a8fd8; color: #9fd4ff; }
   .ai-web-btn .bi { font-size: 12px; }
+  /* Skill 选择器 */
+  .ai-skill-wrap { position: relative; flex: none; }
+  .ai-skill-btn {
+    display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px;
+    background: #2d2d31; border: 1px solid #3c3c3c; border-radius: 5px; color: #9aa4b2; font-size: 11px; cursor: pointer;
+  }
+  .ai-skill-btn:hover { border-color: #555; color: #dbe6f2; background: #333338; }
+  .ai-skill-btn.on { background: #3a2a5a; border-color: #8b6fd8; color: #d9c6ff; }
+  .ai-skill-btn .bi { font-size: 11px; flex: none; }
+  .ai-skill-btn .bi-chevron-up { font-size: 9px; flex: none; }
+  .ai-skill-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-skill-pop {
+    position: absolute; bottom: calc(100% + 6px); right: 0;
+    min-width: 220px; max-width: 300px; max-height: 360px; overflow-y: auto;
+    background: #252528; border: 1px solid #3c3c3c; border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: 6px 0; display: none; z-index: 100;
+  }
+  .ai-skill-g { font-size: 10px; color: #767676; padding: 6px 10px 3px; letter-spacing: .3px; }
+  .ai-skill-opt {
+    display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; cursor: pointer; color: #d4d4d4;
+    border-left: 3px solid transparent;
+  }
+  .ai-skill-opt:hover { background: #33333a; }
+  .ai-skill-opt.on { background: #2b3a4d; border-left-color: #7fb3e0; color: #a8c7e8; }
+  .ai-skill-opt .bi { font-size: 13px; margin-top: 1px; flex: none; }
+  .ai-skill-opt .t { font-size: 12px; font-weight: 500; }
+  .ai-skill-opt .d { font-size: 10.5px; color: #7d7d7d; margin-top: 2px; line-height: 1.45; }
+  .ai-skill-opt .bi-check2 { margin-left: auto; visibility: hidden; font-size: 11px; }
+  .ai-skill-opt.on .bi-check2 { visibility: visible; color: #7fb3e0; }
+  .ai-skill-import { border-top: 1px solid #3c3c3c; margin-top: 4px; padding-top: 4px; }
+  /* 窄面板自动隐藏按钮文字，优先保证图标可见；发送/模型等核心按钮始终保留 */
+  @container (max-width: 320px) {
+    .ai-input-acts { gap: 4px; }
+    .ai-spacer { display: none; }
+    .ai-ctx-ring { margin-left: auto; }
+    .ai-perm span, .ai-agent-btn span, .ai-web-btn span, .ai-skill-btn span, .ai-msel-btn span { display: none; }
+    .ai-perm, .ai-agent-btn, .ai-web-btn, .ai-skill-btn, .ai-msel-btn { padding: 0 5px; gap: 4px; }
+    .ai-send { padding: 0 6px; }
+    /* 顶部头部：窄面板下隐藏文字，仅保留图标 */
+    .ai-title { display: none; }
+    .ai-conv span { display: none; }
+    .ai-conv { padding: 0 6px; }
+  }
   /* 上下文占用：模型选择前的空心圆环（进度 = 已用 / 模型上下文窗口） */
   .ai-ctx-ring { flex: none; display: inline-flex; align-items: center; justify-content: center;
     width: 20px; height: 22px; cursor: default; }
@@ -1494,18 +1545,30 @@
   .ide-modal.danger .m-title .bi { color: #f48771; }
   .ide-modal .m-body { padding: 16px; font-size: 13px; color: #cccccc; }
   .ide-modal .m-msg { white-space: pre-wrap; line-height: 1.7; }
-  .ide-modal input:not([type="checkbox"]) {
-    width: 100%; background: #1e1e1e; border: 1px solid #0098ff; color: #ffffff;
-    padding: 7px 10px; border-radius: 4px; font-size: 13px; outline: none; margin-top: 10px;
+  .ide-modal input:not([type="checkbox"]),
+  .ide-modal textarea {
+    width: 100%; background: #1e1e1e; border: 1px solid #454545; color: #ffffff;
+    padding: 7px 10px; border-radius: 4px; font-size: 13px; outline: none; font-family: inherit;
   }
+  .ide-modal input:not([type="checkbox"]):focus,
+  .ide-modal textarea:focus { border-color: #0098ff; }
+  .ide-modal textarea { min-height: 120px; resize: vertical; margin-top: 10px; }
+  .ide-modal .m-row { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+  .ide-modal .m-row:first-child { margin-top: 0; }
+  .ide-modal .m-row label { font-size: 12px; color: #aaaaaa; }
+  .ide-modal .m-row .hint { font-size: 11px; color: #777; margin-top: 2px; }
   .ide-modal .m-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 16px; }
   .ide-modal .m-foot button { padding: 6px 16px; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; }
   .ide-modal .m-foot .m-cancel { background: #3a3d41; color: #cccccc; }
   .ide-modal .m-foot .m-cancel:hover { background: #45494e; }
   .ide-modal .m-foot .m-ok { background: #0d7ec4; color: #ffffff; }
   .ide-modal .m-foot .m-ok:hover { background: #0a6aa8; }
+  .ide-modal .m-foot .m-gen { background: #2d8a4e; color: #ffffff; }
+  .ide-modal .m-foot .m-gen:hover { background: #237240; }
+  .ide-modal .m-foot .m-gen:disabled { background: #3d5c47; color: #a0a0a0; cursor: not-allowed; }
   .ide-modal.danger .m-foot .m-ok { background: #a1260d; }
   .ide-modal.danger .m-foot .m-ok:hover { background: #c13a17; }
+  .ide-modal textarea.req { min-height: 56px; }
   /* ===== 文件时间线（打开时间线） ===== */
   .timeline { display: flex; flex-direction: column; gap: 2px; }
   .tl-item { display: flex; gap: 10px; padding: 7px 10px; border-radius: 5px; cursor: pointer; }
@@ -1922,7 +1985,7 @@
       <div class="ai-imgs" id="aiImgs" style="display:none"></div>
       <div class="ai-input">
         <div class="ai-files" id="aiFiles" style="display:none"></div>
-        <textarea id="aiText" rows="2" spellcheck="false" placeholder="向 AI 提问…（Enter 发送，Shift+Enter 换行，可粘贴/添加图片）"></textarea>
+        <div id="aiText" contenteditable="true" spellcheck="false" data-placeholder="向 AI 提问…（Enter 发送，Shift+Enter 换行，可粘贴/添加图片）"></div>
         <div class="ai-input-acts">
           <button class="ai-hbtn" id="aiImgBtn" title="添加图片（支持多选）"><i class="bi bi-image"></i></button>
           <div class="ai-perm-wrap">
@@ -1939,6 +2002,10 @@
               <circle class="cr-fg" id="aiCtxArc" cx="8" cy="8" r="6.2"></circle>
             </svg>
           </span>
+          <div class="ai-skill-wrap">
+            <button class="ai-skill-btn" id="aiSkillBtn" title="选择 Skill（点击插入到输入框，可同时使用多个）"><i class="bi bi-magic"></i><span id="aiSkillName">技能</span><i class="bi bi-chevron-up"></i></button>
+            <div class="ai-skill-pop" id="aiSkillPop" style="display:none"></div>
+          </div>
           <div class="ai-msel">
             <button class="ai-msel-btn" id="aiMselBtn" title="选择接口 / 模型"><i class="bi bi-cpu"></i><span id="aiMselName">加载模型…</span><i class="bi bi-chevron-up"></i></button>
             <div class="ai-msel-pop" id="aiMselPop" style="display:none"></div>
@@ -4580,6 +4647,17 @@
      会话历史存 localStorage（按项目根目录区分）。
      ================================================================== */
   const AI_DEFAULT_W = 400;
+  // 内置 Skill 列表（与后端 _SKILL_PROMPTS 的 key 保持一致）
+  const AI_SKILLS = [
+    { id: "lsp-code-analysis", name: "代码分析", icon: "bi-search", desc: "用 LSP 语义分析定位定义、引用与实现", prompt: "你擅长代码语义分析，优先使用 LSP/IDE 的「转到定义」「查找引用」等功能定位代码，避免凭空猜测。" },
+    { id: "multi-modal", name: "多模态生成", icon: "bi-image", desc: "生成/处理图片、视频、3D 等媒体内容", prompt: "你具备多模态内容生成能力。当用户请求生成/创建/处理图片、视频、3D 模型或给图片/视频加特效时，给出可调用 image_gen 等多模态接口的实施方案。" },
+    { id: "skill-creator", name: "Skill 创建", icon: "bi-stars", desc: "引导并生成新的 Skill 扩展", prompt: "你擅长指导用户创建和扩展 CodeBuddy Skill。引导其明确触发条件、能力描述、所需工具/脚本，并生成对应的 skill 定义文件与示例实现。" },
+    { id: "pptx", name: "PPT", icon: "bi-file-slides", desc: "创建、编辑、提取 PowerPoint 文件", prompt: "你擅长处理 PowerPoint 文件。当用户需要创建、编辑、合并、拆分、提取 PPTX 时，优先使用 python-pptx 库，给出完整可运行代码。" },
+    { id: "pdf", name: "PDF", icon: "bi-file-earmark-pdf", desc: "读取、合并、拆分、OCR 等 PDF 处理", prompt: "你擅长处理 PDF 文件。当用户需要读取、合并、拆分、旋转、加水印、OCR、填表 PDF 时，优先使用 PyPDF2/pikepdf/pdfplumber 等库，给出完整可运行代码。" },
+    { id: "docx", name: "Word", icon: "bi-file-earmark-word", desc: "创建、编辑、提取 Word 文档", prompt: "你擅长处理 Word 文档。当用户需要创建、编辑、提取 docx 时，优先使用 python-docx 库，给出完整可运行代码。" },
+    { id: "xlsx", name: "Excel", icon: "bi-file-earmark-spreadsheet", desc: "处理表格、公式、图表、数据清洗", prompt: "你擅长处理 Excel/CSV 表格。当用户需要创建、编辑、公式、图表、清洗数据时，优先使用 openpyxl/pandas 库，给出完整可运行代码。" },
+  ];
+
   const AI = {
     open: false, busy: false, ctx: false, ctrl: null,
     msgs: [],                                          // 当前会话消息 [{role, text, images?, imgs?, reasoning?}]
@@ -5252,6 +5330,7 @@
       AI.active = d.active || {};
       AI.sys = d.sys || {};
       aiFillModelSelect();
+      aiRenderSkillBtn();
       if (document.getElementById("aiProvList")) aiRenderProvSettings();   // 设置页已打开则刷新卡片
       if (document.getElementById("sysAiPick")) sysAiMountSettings();      // 设置页已打开则刷新下拉
       return d;
@@ -5341,6 +5420,250 @@
     const pop = $("aiMselPop");
     if (pop && pop.style.display !== "none" && !pop.contains(e.target)) pop.style.display = "none";
   });
+
+  function aiGetCustomSkills() {
+    try { return JSON.parse(localStorage.getItem("ide.ai.customSkills") || "[]"); }
+    catch (_) { return []; }
+  }
+  function aiSaveCustomSkills(list) {
+    try { localStorage.setItem("ide.ai.customSkills", JSON.stringify(list)); } catch (_) {}
+  }
+  /* 自定义 Skill 导入弹窗：名称 / 描述 / 提示词，结果 {id,name,desc,prompt} 或 null */
+  /* 让 AI 根据一句话需求生成 {name, desc, prompt} */
+  async function aiGenerateSkill(requirement) {
+    const pick = aiCurrentPick();
+    if (!pick.prov) throw new Error("尚未配置 AI 接口，无法生成");
+    const sys = (
+      "你是一名 CodeBuddy Skill 设计师。根据用户的需求，设计一个 Skill 并返回 JSON，不要任何解释或 Markdown 代码块外的内容。" +
+      "JSON 必须包含 name（Skill 名称，简短中文）、desc（下拉列表展示用的一句话描述）、prompt（激活该 Skill 时追加到 system prompt 的指令）。" +
+      "prompt 应清晰说明 AI 在该 Skill 激活时如何回答，长度适中。"
+    );
+    const payload = {
+      provider_id: pick.prov.id,
+      model: pick.model,
+      web_search: false,
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: requirement },
+      ],
+    };
+    const r = await fetch("/api/ai/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      let msg = "HTTP " + r.status;
+      try { msg = (await r.json()).error || msg; } catch (_) {}
+      throw new Error(msg);
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "", acc = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const evt = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        for (const line of evt.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (data === "[DONE]") continue;
+          let obj; try { obj = JSON.parse(data); } catch (_) { continue; }
+          if (obj.error) throw new Error(obj.error);
+          if (obj.delta) acc += obj.delta;
+        }
+      }
+    }
+    const text = acc.trim();
+    if (!text) throw new Error("AI 未返回内容");
+    let jsonText = text;
+    const fence = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (fence) jsonText = fence[1];
+    else {
+      const m = text.match(/\{[\s\S]*\}/);
+      if (m) jsonText = m[0];
+    }
+    let parsed;
+    try { parsed = JSON.parse(jsonText); } catch (e) { throw new Error("AI 返回的内容不是有效 JSON：" + e.message); }
+    const name = (parsed.name || "").trim();
+    const desc = (parsed.desc || "").trim();
+    const prompt = (parsed.prompt || "").trim();
+    if (!name || !prompt) throw new Error("AI 返回的 JSON 缺少 name 或 prompt");
+    return { name, desc: desc || prompt.slice(0, 40), prompt };
+  }
+
+  function uiImportSkill() {
+    return new Promise((resolve) => {
+      const ov = $("modalOverlay");
+      ov.innerHTML =
+        '<div class="ide-modal">' +
+          '<div class="m-title"><i class="bi bi-plus-circle"></i><span>导入自定义 Skill</span></div>' +
+          '<div class="m-body">' +
+            '<div class="m-row"><label>需求</label><textarea id="skReq" class="req" placeholder="描述你想让 AI 以什么专长帮你，例如：帮我根据图片生成 3D 模型"></textarea><div class="hint">一句话描述需求，点击「AI 生成」自动填写下方字段。</div></div>' +
+            '<div class="m-row"><label>名称</label><input id="skName" placeholder="例如：图片转 3D" autocomplete="off"></div>' +
+            '<div class="m-row"><label>描述（可选）</label><input id="skDesc" placeholder="简短描述，用于下拉列表展示" autocomplete="off"></div>' +
+            '<div class="m-row"><label>提示词</label><textarea id="skPrompt" placeholder="激活该 Skill 时注入给 AI 的指令…"></textarea><div class="hint">提示词会追加到 system prompt，用于告诉模型当前应具备什么专长。</div></div>' +
+          '</div>' +
+          '<div class="m-foot"><button class="m-gen" id="skGen">AI 生成</button><button class="m-cancel" id="skCancel">取消</button><button class="m-ok" id="skOk">确定</button></div>' +
+        '</div>';
+      ov.classList.add("show");
+      const rq = $("skReq"), nm = $("skName"), dc = $("skDesc"), pt = $("skPrompt");
+      const gen = $("skGen"), ok = $("skOk"), cancel = $("skCancel");
+      (rq || ok).focus();
+      const close = (v) => { ov.classList.remove("show"); ov.innerHTML = ""; resolve(v); };
+      const doOk = () => {
+        const name = (nm.value || "").trim();
+        const prompt = (pt.value || "").trim();
+        if (!name) { toast("请输入 Skill 名称", "warn"); nm.focus(); return; }
+        if (!prompt) { toast("请输入提示词", "warn"); pt.focus(); return; }
+        const id = "custom_" + Date.now().toString(36);
+        const desc = (dc.value || "").trim() || prompt.slice(0, 40);
+        close({ id, name, prompt, desc });
+      };
+      ok.onclick = doOk;
+      cancel.onclick = () => close(null);
+      gen.onclick = () => {
+        const requirement = (rq.value || "").trim();
+        if (!requirement) { toast("请先输入需求", "warn"); rq.focus(); return; }
+        const pick = aiCurrentPick();
+        if (!pick.prov) { toast("尚未配置 AI 接口，无法生成", "warn"); return; }
+        gen.disabled = true; gen.textContent = "生成中…";
+        ok.disabled = true; cancel.disabled = true;
+        aiGenerateSkill(requirement).then((s) => {
+          nm.value = s.name; dc.value = s.desc; pt.value = s.prompt;
+          toast("已根据需求生成 Skill，请检查后点击确定", "ok");
+        }).catch((e) => {
+          toast("生成失败：" + e.message, "err");
+        }).finally(() => {
+          gen.disabled = false; gen.textContent = "AI 生成";
+          ok.disabled = false; cancel.disabled = false;
+        });
+      };
+      ov.onmousedown = (e) => { if (e.target === ov) close(null); };
+      ov.onkeydown = (e) => {
+        if (e.key === "Escape") { e.preventDefault(); close(null); }
+        else if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); doOk(); }
+      };
+    });
+  }
+  function aiSkillPrompt(sid) {
+    if (!sid) return "";
+    const builtin = AI_SKILLS.find(s => s.id === sid);
+    if (builtin) return builtin.prompt;
+    const custom = aiGetCustomSkills().find(s => s.id === sid);
+    return custom ? (custom.prompt || "") : "";
+  }
+  function _escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+  /* 把 @技能名 以带颜色的小标签形式插入到输入框光标处 */
+  function aiInsertSkillTag(skill) {
+    const ta = $("aiText");
+    if (!ta || !skill || !skill.name) return;
+    const isCustom = String(skill.id).startsWith("custom_");
+    const cls = "ai-tag" + (isCustom ? " custom" : "");
+    const html = '<span class="' + cls + '" contenteditable="false" data-id="' + esc(skill.id).replace(/"/g, "&quot;") + '">@' + esc(skill.name) + '</span>&nbsp;';
+    ta.focus();
+    const sel = window.getSelection();
+    let range;
+    if (AI._skillRange && ta.contains(AI._skillRange.commonAncestorContainer)) {
+      range = AI._skillRange.cloneRange();
+      AI._skillRange = null;
+    } else if (sel.rangeCount > 0 && ta.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      range = sel.getRangeAt(0);
+    } else {
+      range = document.createRange();
+      range.selectNodeContents(ta);
+      range.collapse(false);
+    }
+    range.deleteContents();
+    range.insertNode(range.createContextualFragment(html));
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  /* 从文本中解析出所有已知的 @技能名，返回 { ids: [...], cleanText: 去掉标签后的文本 } */
+  function aiParseSkillTags(raw) {
+    const ids = [];
+    const allSkills = AI_SKILLS.concat(aiGetCustomSkills());
+    const byName = new Map(allSkills.map(s => [s.name, s]));
+    const names = allSkills.map(s => s.name).sort((a, b) => b.length - a.length);
+    if (!names.length) return { ids, cleanText: raw.replace(/^\s+|\s+$/g, "") };
+    const re = new RegExp("(^|\\s)@(" + names.map(_escapeRegExp).join("|") + ")(?=\\s|$)", "g");
+    let m;
+    while ((m = re.exec(raw)) !== null) {
+      const skill = byName.get(m[2]);
+      if (skill && !ids.includes(skill.id)) ids.push(skill.id);
+    }
+    let clean = raw.replace(re, "$1");
+    clean = clean.replace(/[ \t]{2,}/g, " ").replace(/^\s+|\s+$/g, "");
+    return { ids, cleanText: clean };
+  }
+  function aiRenderSkillBtn() {
+    const btn = $("aiSkillBtn"), nm = $("aiSkillName");
+    if (!btn || !nm) return;
+    nm.textContent = "技能";
+    btn.classList.remove("on");
+  }
+  function aiBuildSkillPop() {
+    const pop = $("aiSkillPop");
+    if (!pop) return;
+    pop.innerHTML = '<div class="ai-skill-g">点击插入到输入框（可同时使用多个）</div>';
+    AI_SKILLS.forEach(s => {
+      const o = document.createElement("div");
+      o.className = "ai-skill-opt";
+      o.innerHTML = '<i class="bi ' + s.icon + '"></i><div><div class="t"></div><div class="d"></div></div><i class="bi bi-plus"></i>';
+      o.querySelector(".t").textContent = s.name; o.querySelector(".d").textContent = s.desc;
+      o.addEventListener("click", () => { aiInsertSkillTag(s); pop.style.display = "none"; });
+      pop.appendChild(o);
+    });
+    const customs = aiGetCustomSkills();
+    if (customs.length) {
+      pop.appendChild(document.createElement("div")).className = "ai-skill-g";
+      pop.lastChild.textContent = "自定义";
+      customs.forEach(s => {
+        const o = document.createElement("div");
+        o.className = "ai-skill-opt";
+        o.innerHTML = '<i class="bi bi-lightning"></i><div><div class="t"></div><div class="d"></div></div><i class="bi bi-plus"></i>';
+        o.querySelector(".t").textContent = s.name; o.querySelector(".d").textContent = s.desc || "自定义 Skill";
+        o.addEventListener("click", () => { aiInsertSkillTag(s); pop.style.display = "none"; });
+        pop.appendChild(o);
+      });
+    }
+    const imp = document.createElement("div");
+    imp.className = "ai-skill-opt ai-skill-import";
+    imp.innerHTML = '<i class="bi bi-plus-circle"></i><div><div class="t">导入技能</div><div class="d">自定义名称和提示词</div></div>';
+    imp.addEventListener("click", () => {
+      uiImportSkill().then((s) => {
+        if (!s) return;
+        const list = aiGetCustomSkills();
+        list.push(s);
+        aiSaveCustomSkills(list);
+        aiInsertSkillTag(s);
+        pop.style.display = "none";
+      });
+    });
+    pop.appendChild(imp);
+  }
+  $("aiSkillBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const ta = $("aiText");
+    const sel = window.getSelection();
+    if (ta && sel.rangeCount > 0 && ta.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      AI._skillRange = sel.getRangeAt(0).cloneRange();
+    } else {
+      AI._skillRange = null;
+    }
+    const pop = $("aiSkillPop");
+    const show = pop.style.display === "none";
+    if (show) aiBuildSkillPop();
+    pop.style.display = show ? "block" : "none";
+  });
+  document.addEventListener("click", (e) => {
+    const pop = $("aiSkillPop");
+    if (pop && pop.style.display !== "none" && !e.target.closest(".ai-skill-wrap")) pop.style.display = "none";
+  });
+
   function aiCopyText(t) {                                // 兼容 http 非安全上下文
     if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(t);
     return new Promise((res, rej) => {
@@ -6120,15 +6443,23 @@
   $("aiFile").addEventListener("change", () => { aiAddImgs($("aiFile").files); $("aiFile").value = ""; });
   $("aiText").addEventListener("paste", (e) => {
     const fs = e.clipboardData && e.clipboardData.files;
-    if (fs && fs.length) { e.preventDefault(); aiAddImgs(fs); }
+    if (fs && fs.length) { e.preventDefault(); aiAddImgs(fs); return; }
+    const txt = e.clipboardData && e.clipboardData.getData("text/plain");
+    if (txt != null) {
+      e.preventDefault();
+      document.execCommand("insertText", false, txt);
+    }
   });
 
   async function aiSend(reuse) {                          // reuse={text,imgs}：重新生成，不重复 push 用户消息
     if (AI.busy) return;
-    let text, imgs;
-    if (reuse) { text = reuse.text || "（见图）"; imgs = (reuse.imgs || []).slice(); }
+    let rawText, text, imgs, skillIds = [];
+    if (reuse) { rawText = reuse.text || ""; text = rawText; imgs = (reuse.imgs || []).slice(); }
     else {
-      text = $("aiText").value.trim();
+      rawText = $("aiText").innerText || "";
+      const parsed = aiParseSkillTags(rawText);
+      skillIds = parsed.ids;
+      text = parsed.cleanText;
       imgs = AI.pending.slice();
       if (!text && !imgs.length) return;
     }
@@ -6142,13 +6473,14 @@
     }
     $("aiEmpty") && ($("aiEmpty").style.display = "none");
     if (!reuse) {
-      const userText = text || "（见图）";
+      const userText = text || (imgs.length ? "（见图）" : "");
       const attFiles = (AI.files || []).map(f => f.name);          // 本条消息附带的文件（消息上方显示）
       AI.msgs.push({ role: "user", pid: aiNewPid(), text: userText, imgs: imgs.length || undefined,
                      images: imgs.length ? imgs : undefined,
-                     files: attFiles.length ? attFiles : undefined });
+                     files: attFiles.length ? attFiles : undefined,
+                     skills: skillIds.length ? skillIds : undefined });
       aiBubble("user", userText, "", imgs, false, attFiles);
-      $("aiText").value = "";
+      $("aiText").innerHTML = "";
       AI.pending = [];
       aiRenderPending();
     }
@@ -6193,9 +6525,15 @@
       : (AI.perm === "full"
         ? "当前权限「完全权限」：可以给出任意路径下的完整文件内容。"
         : "当前权限「工作区内修改」：给出可直接保存到项目内的完整文件内容。");
+    // 内置 skill 由后端根据 skills 列表注入；自定义 skill 的 prompt 在这里追加到 system
+    const customSkillPrompts = skillIds
+      .filter(id => !AI_SKILLS.some(s => s.id === id))
+      .map(id => aiSkillPrompt(id))
+      .filter(Boolean);
     const sysPrompt = "你是一个自托管文件管理器内置的 AI 编程助手。当前项目根目录：" +
       (typeof ROOT !== "undefined" ? ROOT : "/") +
-      "。" + permHint + "回答使用简体中文，代码块标注语言，简洁直接。";
+      "。" + permHint + "回答使用简体中文，代码块标注语言，简洁直接。" +
+      (customSkillPrompts.length ? "\n\n[Skill 激活说明]\n" + customSkillPrompts.join("\n\n") : "");
     // 当前这条消息：带图片/上下文时用多模态数组，否则纯文本
     const curText = text + aiBuildContext();
     if (!reuse) {                            // 上下文已抓取进本条消息，发送后清空输入区的附加文件卡片
@@ -6214,6 +6552,7 @@
       provider_id: prov.id,
       model: pick.model,
       web_search: AI.webSearch,
+      skills: skillIds,
       messages: [
         { role: "system", content: sysPrompt + (mem ? "\n\n[本对话早期内容记忆摘要]\n" + mem : "") },
         ...usedHist.map(m => ({ role: m.role, content: m.text || m.content || "" })),
@@ -6234,6 +6573,7 @@
           provider_id: prov.id,
           model: pick.model,
           web_search: AI.webSearch,
+          skills: skillIds,
           messages: [
             ...usedHist.map(m => ({ role: m.role, content: m.text || m.content || "" })),
             { role: "user", content: curContent },

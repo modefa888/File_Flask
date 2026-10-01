@@ -1,0 +1,176 @@
+    <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+    <div id="customToastContainer"></div>
+    <div id="customModalContainer"></div>
+    <div id="previewContainer"></div>
+    <div id="searchContainer"></div>
+    <div id="indexDetailPanel"></div>
+    <div id="deleteHistoryPanel"></div>
+    <div id="favoritePanel"></div>
+    <div id="undoToastContainer" class="undo-toast-container"></div>
+    <div id="editorContainer"></div>
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm sticky-top">
+        <div class="container-fluid px-4">
+            <span class="navbar-brand"><i class="bi bi-folder2-open text-primary"></i> 文件管理可视化</span>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-light text-dark border" id="fileCountBadge">加载中...</span>
+                <span class="badge bg-light text-dark border" id="indexBadge" title="点击重建索引"><i
+                        class="bi bi-database"></i> <span id="indexBadgeText">索引: --</span></span>
+                <span class="live-clock-pill" id="liveClockBadge" title="当前时间">
+                    <i class="bi bi-clock"></i>
+                    <span id="liveClockDate">--</span>
+                    <span id="liveClockTime" class="time">--</span>
+                </span>
+                <button class="btn btn-outline-secondary btn-sm trash-btn-wrap" id="deleteHistoryBtn" title="删除历史">
+                    <i class="bi bi-clock-history"></i> 回收站
+                    <span class="delhist-count-badge empty" id="delhistCountBadge">0</span>
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" id="favPanelBtn" title="收藏夹"><i class="bi bi-star"></i>
+                    收藏夹</button>
+                <button class="btn btn-outline-secondary btn-sm" id="refreshBtn" title="刷新"><i
+                        class="bi bi-arrow-clockwise"></i></button>
+                <a class="btn btn-outline-dark btn-sm" href="/logout" title="退出登录"><i class="bi bi-box-arrow-right"></i>
+                    退出</a>
+            </div>
+        </div>
+    </nav>
+    <div class="container-fluid px-4 py-3">
+        <div class="row g-2 mb-3 align-items-center topbar-row">
+            <div class="col-md-7">
+                <div class="toolbar-left">
+                    <div class="input-group input-group-sm path-input-group">
+                        <input type="text" class="form-control" id="pathInput" placeholder="输入绝对路径，如 C:/ 或 /home"
+                            style="min-width:0;" />
+                        <button class="btn btn-outline-primary" id="goPathBtn" type="button">进入</button>
+                    </div>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-outline-secondary btn-sm quick-btn" id="homeBtn" title="主页">🏠<span
+                                class="btn-txt"> 主页</span></button>
+                        <button class="btn btn-outline-secondary btn-sm quick-btn" id="favCurBtn" title="收藏本目录">⭐<span
+                                class="btn-txt"> 收藏本目录</span></button>
+                    </div>
+                    <div class="view-toggle-group" title="切换视图">
+                        <button class="btn-view active" data-view="list" title="列表视图"><i
+                                class="bi bi-list-ul"></i></button>
+                        <button class="btn-view" data-view="icon" title="图标视图"><i
+                                class="bi bi-grid-3x3-gap"></i></button>
+                        <button class="btn-view" data-view="tree" title="树型视图"><i class="bi bi-diagram-3"></i></button>
+                    </div>
+                    <div class="icon-size-group" id="iconSizeGroup" title="图标大小（仅图标视图生效）">
+                        <button class="icon-size-btn active" data-size="sm" title="小"><i
+                                class="bi bi-arrows-angle-contract"></i><span>小</span></button>
+                        <button class="icon-size-btn" data-size="md" title="中"><i
+                                class="bi bi-arrows-fullscreen"></i><span>中</span></button>
+                        <button class="icon-size-btn" data-size="lg" title="大"><i
+                                class="bi bi-arrows-angle-expand"></i><span>大</span></button>
+                    </div>
+                    <button class="btn-select-mode" id="selectModeBtn" title="选择模式"><i class="bi bi-check2-square"></i>
+                        选择</button>
+                    <div class="btn-group" title="新建">
+                        <button class="btn btn-select-mode btn-create-new" id="createNewBtn" data-bs-toggle="dropdown"
+                            aria-expanded="false">
+                            <i class="bi bi-plus-circle"></i> 新建
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" style="min-width:140px;">
+                            <li><a class="dropdown-item" href="#" id="newFileMenuItem"><i
+                                        class="bi bi-file-earmark-plus"></i> 文件</a></li>
+                            <li><a class="dropdown-item" href="#" id="newFolderMenuItem"><i
+                                        class="bi bi-folder-plus"></i> 文件夹</a></li>
+                        </ul>
+                    </div>
+                    <button class="btn-select-mode" id="searchBtn" title="全盘搜索"><i class="bi bi-search"></i> 搜索</button>
+                    <button id="pasteFab" title="粘贴到当前目录（右键取消）">📋 <span id="pasteFabText">粘贴</span></button>
+                </div>
+            </div>
+            <div class="col-md-5 d-flex gap-2 flex-wrap justify-content-md-end">
+                <input type="text" class="form-control form-control-sm filter-input" id="filterInput"
+                    placeholder="🔍 筛选文件名" />
+                <select class="form-select form-select-sm" id="typeFilter">
+                    <option value="">所有类型</option>
+                    <option value="目录">📁 目录</option>
+                </select>
+            </div>
+        </div>
+        <div class="stats-bar mb-3 d-flex flex-wrap align-items-center">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-0" id="breadcrumb">
+                    <li class="breadcrumb-item"><a href="#" data-path="loading">加载中...</a></li>
+                </ol>
+            </nav>
+            <span class="ms-auto d-flex flex-wrap align-items-center">
+                <span class="stat-item"><span class="stat-label">📄 文件</span><span class="stat-value"
+                        id="totalFiles">0</span></span>
+                <span class="stat-item"><span class="stat-label">📁 目录</span><span class="stat-value"
+                        id="totalDirs">0</span></span>
+                <span class="stat-item"><span class="stat-label">💾 总大小</span><span class="stat-value"
+                        id="totalSize">0</span></span>
+                <button class="btn btn-outline-secondary btn-sm" id="parentDirBtn" title="返回上级目录"
+                    style="margin-left:12px;"><i class="bi bi-arrow-up"></i> 上级目录</button>
+            </span>
+        </div>
+        <div class="file-table">
+            <div class="table-container">
+                <!-- 列表视图 -->
+                <div class="view-list" id="viewList">
+                    <table class="table table-hover mb-0" id="fileTable">
+                        <thead>
+                            <tr>
+                                <th class="checkbox-col"><input class="form-check-input" type="checkbox" id="selectAll"
+                                        title="全选" /></th>
+                                <th data-sort="name" class="sortable">名称 <span class="sort-indicator"
+                                        id="sort-name">⇅</span></th>
+                                <th data-sort="size" class="sortable text-end" style="width:100px;">大小 <span
+                                        class="sort-indicator" id="sort-size">⇅</span></th>
+                                <th data-sort="type" class="sortable" style="width:170px;">类型 <span
+                                        class="sort-indicator" id="sort-type">⇅</span></th>
+                                <th data-sort="mtime" class="sortable" style="width:160px;">修改时间 <span
+                                        class="sort-indicator" id="sort-mtime">⇅</span></th>
+                                <th class="action-col text-center">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fileBody">
+                            <tr>
+                                <td colspan="6">
+                                    <div class="empty-state"><i class="bi bi-inbox"></i>
+                                        <p class="mb-0">加载中...</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- 图标视图 -->
+                <div class="view-icon" id="viewIcon">
+                    <!-- 排序工具栏（图标/树型视图共用） -->
+                    <div class="view-sortbar" id="iconSortBar"></div>
+                    <div class="icon-grid" id="iconGrid"></div>
+                </div>
+                <!-- 树型视图 -->
+                <div class="view-tree" id="viewTree">
+                    <!-- 排序工具栏（图标/树型视图共用） -->
+                    <div class="view-sortbar" id="treeSortBar"></div>
+                    <div class="tree-view" id="treeContainer"></div>
+                </div>
+            </div>
+        </div>
+        <!-- 目录切换加载遮罩：加载中拦截所有点击，避免并发切换文件夹触发请求中断 -->
+        <div id="fmLoadingOverlay" class="fm-loading-overlay" style="display:none;">
+            <div class="fm-loading-box">
+                <div class="spinner-border text-primary" role="status"></div>
+                <div class="fm-loading-text" id="fmLoadingText">正在加载目录…</div>
+            </div>
+        </div>
+        <div class="mt-2 text-muted small d-flex justify-content-between">
+            <span>💡 点击表头排序 · 勾选文件后可使用底部多选操作栏（移动 / 复制 / 删除 / 压缩）</span>
+            <span id="selectedCount">已选 0 个</span>
+        </div>
+    </div>
+
+    <!-- 底部多选操作栏（参考移动版） -->
+    <div class="sel-bar" id="selBar">
+        <button id="selAllBtn">全选</button>
+        <button id="selMoveBtn" class="primary">移动</button>
+        <button id="selCopyBtn">复制</button>
+        <button id="selDelBtn" class="danger">删除</button>
+        <button id="selZipBtn">压缩</button>
+        <button id="selCancelBtn">取消</button>
+    </div>

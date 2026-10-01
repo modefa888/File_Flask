@@ -1,0 +1,213 @@
+        /* ========== 图标/树型视图排序工具栏 ========== */
+        .view-sortbar {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 8px 10px;
+            margin-bottom: 8px;
+            background: #f1f4f9;
+            border-bottom: 2px solid #e2e8f0;
+            border-radius: 8px 8px 0 0;
+            position: sticky;
+            top: 0;
+            z-index: 11;
+        }
+
+        .view-sortbar .sortbar-label {
+            font-size: 0.78rem;
+            color: #4a5568;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-right: 2px;
+            flex-shrink: 0;
+        }
+
+        .view-sortbar .sortbar-arrow {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            margin: 0 1px;
+        }
+
+        .view-sortbar .sortbar-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            background: white;
+            color: #4a5568;
+            font-size: 0.78rem;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+
+        .view-sortbar .sortbar-btn:hover {
+            border-color: #93c5fd;
+            color: #2563eb;
+        }
+
+        .view-sortbar .sortbar-btn.active {
+            background: #2563eb;
+            border-color: #2563eb;
+            color: white;
+            font-weight: 600;
+        }
+
+        .view-sortbar .sortbar-btn .sortbar-dir {
+            font-size: 0.72rem;
+            opacity: 0.75;
+        }
+
+        .view-sortbar .sortbar-btn.active .sortbar-dir {
+            opacity: 1;
+        }
+
+        .view-sortbar .sortbar-count {
+            margin-left: auto;
+            font-size: 0.72rem;
+            color: #718096;
+            flex-shrink: 0;
+        }
+
+        /* 图标网格视图 */
+        .icon-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            gap: 10px;
+            padding: 10px 2px;
+        }
+
+        .icon-item {
+            position: relative;
+            padding: 16px 10px 12px;
+            border-radius: 12px;
+            background: #ffffff;
+            border: 1px solid #edf0f4;
+            text-align: center;
+            cursor: pointer;
+            transition: box-shadow 0.18s ease, border-color 0.18s ease, transform 0.18s ease, background 0.18s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .icon-item:hover {
+            border-color: #cbd5e1;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+            transform: translateY(-2px);
+        }
+
+        .icon-item.selected {
+            border-color: #3b82f6;
+            background: #f0f7ff;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.16);
+        }
+
+        .icon-item .icon-preview {
+            font-size: 2.4rem;
+            line-height: 1;
+            margin-bottom: 4px;
+        }
+
+        .icon-item .icon-name {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: #334155;
+            display: -webkit-box;
+            line-clamp: 1;
+            -webkit-line-clamp: 1;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            word-break: break-all;
+            line-height: 1.35;
+            max-width: 100%;
+        }
+
+        .icon-item .icon-meta {
+            font-size: 0.7rem;
+            color: #94a3b8;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            width: 100%;
+            align-items: center;
+        }
+
+        .icon-item .icon-meta .icon-size {
+            color: #64748b;
+            font-weight: 500;
+        }
+
+        .icon-item .icon-meta .icon-mtime {
+            font-size: 0.92em;
+            color: #b3bfcc;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 100%;
+        }
+
+        /* 空的元信息行自动收起（部分文件夹没有大小统计，不保留空白行） */
+        .icon-item .icon-meta .icon-size:empty,
+        .icon-item .icon-meta .icon-mtime:empty { display: none; }
+
+        .icon-item .icon-check {
+            position: absolute;
+            top: 7px;
+            left: 7px;
+            width: 15px;
+            height: 15px;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+
+        .icon-item:hover .icon-check,
+        .icon-item.selected .icon-check { opacity: 1; }
+
+        .icon-item .icon-delete {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 22px;
+            height: 22px;
+            border: none;
+            background: #fee2e2;
+            color: #dc2626;
+            border-radius: 50%;
+            font-size: 0.7rem;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .icon-item:hover .icon-delete {
+            opacity: 1;
+        }
+
+        .icon-item .icon-delete:hover {
+            background: #dc2626;
+            color: white;
+        }
+
+        .icon-item.clickable {
+            cursor: pointer;
+        }
+
+        .icon-item.clickable .icon-name {
+            color: #2563eb;
+        }
+
+        .icon-item.clickable:hover .icon-name {
+            text-decoration: underline;
+        }

@@ -1,0 +1,183 @@
+        /* ===== 底部多选操作栏（参考移动版） ===== */
+        .sel-bar {
+            position: fixed;
+            left: 50%;
+            transform: translateX(-50%);
+            bottom: 18px;
+            z-index: 1040;
+            display: none;
+            gap: 8px;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            padding: 10px 14px;
+            box-shadow: 0 8px 30px rgba(15, 23, 42, .18);
+        }
+
+        .sel-bar.show {
+            display: flex;
+        }
+
+        .sel-bar button {
+            border: 1px solid #e2e8f0;
+            background: #fff;
+            color: #1a202c;
+            padding: 6px 18px;
+            border-radius: 10px;
+            font-size: .88rem;
+            cursor: pointer;
+            transition: all .15s;
+        }
+
+        .sel-bar button:hover {
+            background: #f1f5f9;
+        }
+
+        .sel-bar button.primary {
+            background: #2563eb;
+            border-color: #2563eb;
+            color: #fff;
+        }
+
+        .sel-bar button.primary:hover {
+            background: #1d4ed8;
+        }
+
+        .sel-bar button.danger {
+            border-color: #fecaca;
+            color: #dc2626;
+        }
+
+        .sel-bar button.danger:hover {
+            background: #fee2e2;
+        }
+
+        /* 移动/复制待执行按钮（位于顶部工具栏） */
+        #pasteFab {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 20px;
+            padding: 6px 16px;
+            font-size: .85rem;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, .35);
+            transition: all .15s;
+        }
+
+        #pasteFab.show {
+            display: inline-flex;
+        }
+
+        #pasteFab:hover {
+            background: #1d4ed8;
+        }
+
+        /* 加载态：整个表格变灰，等待光标，顶部显示进度条 */
+        .fm-loading-bar {
+            background: #f8fafc;
+        }
+
+        tbody.is-loading,
+        tbody.is-loading td,
+        tbody.is-loading a,
+        tbody.is-loading span,
+        tbody.is-loading input:not([type=checkbox]),
+        tbody.is-loading button {
+            cursor: wait !important;
+            color: #64748b !important;
+        }
+
+        tbody.is-loading a:hover,
+        tbody.is-loading .file-name-clickable:hover,
+        tbody.is-loading .dir-link:hover {
+            text-decoration: none !important;
+            color: #64748b !important;
+        }
+
+        .table-container {
+            max-height: calc(100vh - 280px);
+            overflow-y: auto;
+            scrollbar-gutter: stable;
+        }
+
+        .table-container::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        .table-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        .table-container::-webkit-scrollbar-thumb {
+            background: #c1c9d6;
+            border-radius: 4px;
+        }
+
+        .table-container::-webkit-scrollbar-thumb:hover {
+            background: #a0aec0;
+        }
+
+        /* 路径输入框：默认固定长度，不随路径内容/视图切换变化（电脑版下改为自适应，见下方单行布局） */
+        .path-input-group {
+            flex: 0 0 auto;
+            width: 520px;
+            min-width: 520px;
+            max-width: 520px;
+        }
+
+        .path-input-group .form-control {
+            flex: 1 1 auto;
+        }
+
+        .path-input-group .btn {
+            flex-shrink: 0;
+        }
+
+        #typeFilter {
+            max-width: 120px;
+        }
+
+        .toolbar-left {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            min-width: 0;
+        }
+
+        .toolbar-left .path-input-group {
+            flex: 0 0 auto;
+        }
+
+        .toast-container {
+            z-index: 9999;
+        }
+
+        .checkbox-col {
+            width: 40px;
+        }
+
+        .action-col {
+            width: 80px;
+        }
+
+        .sort-indicator {
+            font-size: 0.7rem;
+            margin-left: 4px;
+            opacity: 0.5;
+        }
+
+        .sort-indicator.active {
+            opacity: 1;
+            color: #2b6cb0;
+        }
+
+        .quick-btn {
+            white-space: nowrap;
+        }

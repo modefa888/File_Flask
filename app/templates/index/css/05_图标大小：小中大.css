@@ -1,0 +1,149 @@
+        /* ========== 图标大小：小/中/大 ========== */
+        .icon-grid.sm {
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            gap: 8px;
+        }
+
+        .icon-grid.md {
+            grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+            gap: 10px;
+        }
+
+        .icon-grid.lg {
+            grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+            gap: 12px;
+        }
+
+        .icon-item.sm {
+            padding: 12px 8px 10px;
+            gap: 6px;
+        }
+
+        .icon-item.sm .icon-thumb {
+            width: 64px;
+            height: 52px;
+        }
+
+        .icon-item.sm .icon-thumb .thumb-icon {
+            font-size: 1.6rem;
+        }
+
+        .icon-item.sm .icon-name {
+            font-size: 0.78rem;
+        }
+
+        .icon-item.sm .icon-meta {
+            font-size: 0.68rem;
+        }
+
+        .icon-item.md {
+            padding: 16px 10px 12px;
+            gap: 8px;
+        }
+
+        .icon-item.md .icon-thumb {
+            width: 88px;
+            height: 72px;
+        }
+
+        .icon-item.md .icon-thumb .thumb-icon {
+            font-size: 2rem;
+        }
+
+        .icon-item.md .icon-name {
+            font-size: 0.88rem;
+        }
+
+        .icon-item.md .icon-meta {
+            font-size: 0.75rem;
+        }
+
+        .icon-item.lg {
+            padding: 20px 12px 16px;
+            gap: 10px;
+        }
+
+        .icon-item.lg .icon-thumb {
+            width: 116px;
+            height: 92px;
+        }
+
+        .icon-item.lg .icon-thumb .thumb-icon {
+            font-size: 2.5rem;
+        }
+
+        .icon-item.lg .icon-name {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .icon-item.lg .icon-meta {
+            font-size: 0.85rem;
+        }
+
+        .icon-item.lg .icon-check {
+            width: 18px;
+            height: 18px;
+        }
+
+        /* 图标大小切换按钮组（仅图标视图可用）
+           电脑版：始终占位，仅切换可见性 —— 否则切视图时按钮组消失，地址栏和右侧按钮会左右跳动 */
+        .icon-size-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            padding: 3px;
+            border-radius: 8px;
+            background: #f1f5f9;
+            border: 1px solid #e2e8f0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .icon-size-group.show-icon-size {
+            visibility: visible;
+            pointer-events: auto;
+        }
+
+        @media (max-width: 991.98px) {
+
+            /* 窄屏优先省空间：不占位，按需显示 */
+            .icon-size-group {
+                display: none;
+            }
+
+            .icon-size-group.show-icon-size {
+                display: inline-flex;
+                visibility: visible;
+            }
+        }
+
+        .icon-size-group .icon-size-btn {
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            border: none;
+            cursor: pointer;
+            background: transparent;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            transition: all 0.15s;
+        }
+
+        .icon-size-group .icon-size-btn:hover {
+            background: white;
+            color: #1a202c;
+        }
+
+        .icon-size-group .icon-size-btn.active {
+            background: white;
+            color: #2563eb;
+            font-weight: 600;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+        }
+
+        .icon-size-group .icon-size-btn i {
+            font-size: 0.85rem;
+        }

@@ -1,0 +1,445 @@
+        /* ========== 压缩包查看器 ========== */
+        .zip-modal {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.25);
+            width: 92vw;
+            max-width: 960px;
+            height: 86vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            animation: modalPop 0.2s ease;
+        }
+
+        .zip-header {
+            display: flex;
+            flex-direction: column;
+            padding: 12px 20px;
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
+            flex-shrink: 0;
+        }
+
+        .zip-header .zip-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .zip-header .zip-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #1a202c;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            overflow: hidden;
+        }
+
+        .zip-header .zip-meta {
+            color: #718096;
+            font-size: 0.78rem;
+            font-family: monospace;
+            margin: 4px 0 0 26px;
+            display: block;
+            min-height: 17px;
+        }
+
+        .zip-header .zip-actions {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .zip-header .zip-actions .btn {
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            border: none;
+            cursor: pointer;
+        }
+
+        .zip-header .zip-actions .btn-extract {
+            background: #059669;
+            color: white;
+        }
+
+        .zip-header .zip-actions .btn-extract:hover {
+            background: #047857;
+        }
+
+        .zip-header .zip-actions .btn-close-zip {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
+        .zip-header .zip-actions .btn-close-zip:hover {
+            background: #fecaca;
+        }
+
+        .zip-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 20px;
+            border-bottom: 1px solid #e2e8f0;
+            background: #ffffff;
+            flex-shrink: 0;
+            min-height: 37px;
+            box-sizing: border-box;
+        }
+
+        .zip-toolbar .breadcrumb-item {
+            font-size: 0.78rem;
+            color: #718096;
+            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            line-height: 1;
+        }
+
+        .zip-toolbar .breadcrumb-item i {
+            line-height: 1;
+            vertical-align: middle;
+        }
+
+        .zip-toolbar .breadcrumb-path {
+            display: inline-flex;
+            align-items: center;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+        }
+
+        .zip-toolbar .breadcrumb-item a {
+            color: #2563eb;
+            text-decoration: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .zip-toolbar .breadcrumb-item.active {
+            color: #1a202c;
+            font-weight: 600;
+        }
+
+        .zip-toolbar .breadcrumb-sep {
+            color: #cbd5e0;
+            line-height: 1;
+        }
+
+        .zip-body {
+            flex: 1;
+            overflow: auto;
+            padding: 0;
+            scrollbar-gutter: stable;
+        }
+
+        /* 后台任务胶囊（左下角，同移动版） */
+        #bgTaskDock {
+            position: fixed;
+            left: 12px;
+            bottom: 44px;
+            z-index: 10005;
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #bgTaskDock.show {
+            display: flex;
+        }
+
+        .bg-task {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(20, 20, 24, .88);
+            color: #fff;
+            border-radius: 999px;
+            padding: 8px 14px;
+            font-size: 0.78rem;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, .25);
+            cursor: pointer;
+            max-width: 360px;
+        }
+
+        .bg-task.done {
+            background: rgba(22, 120, 70, .92);
+        }
+
+        .bg-task .bg-task-txt {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .bg-task i {
+            flex-shrink: 0;
+        }
+
+        .zip-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .zip-table thead th {
+            background: #f1f4f9;
+            font-size: 0.78rem;
+            color: #4a5568;
+            font-weight: 600;
+            padding: 8px 12px;
+            border-bottom: 1px solid #e2e8f0;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            text-align: left;
+        }
+
+        .zip-table .zip-sortable {
+            cursor: pointer;
+            user-select: none;
+            transition: color 0.15s;
+        }
+
+        .zip-table .zip-sortable:hover {
+            color: #2563eb;
+        }
+
+        .zip-table .zip-sortable.sort-asc {
+            color: #2563eb;
+        }
+
+        .zip-table .zip-sortable.sort-desc {
+            color: #2563eb;
+        }
+
+        .zip-table tbody tr {
+            transition: background 0.12s;
+        }
+
+        .zip-table tbody tr:hover {
+            background: #f7fafc;
+        }
+
+        .zip-table td {
+            padding: 6px 12px;
+            font-size: 0.83rem;
+            border-bottom: 1px solid #f1f5f9;
+            vertical-align: middle;
+        }
+
+        .zip-table .zip-name-cell {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .zip-table .zip-name-cell .name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-weight: 500;
+            color: #1a202c;
+            cursor: pointer;
+        }
+
+        .zip-table .zip-name-cell .name:hover {
+            color: #2563eb;
+        }
+
+        .zip-table .zip-name-cell .name.dir-name {
+            color: #2b6cb0;
+        }
+
+        .zip-table .zip-name-cell .name.dir-empty {
+            color: #94a3b8;
+            cursor: default;
+            font-style: italic;
+        }
+
+        .zip-table .zip-name-cell .name.dir-empty::after {
+            content: '（空）';
+            color: #94a3b8;
+            font-size: 0.72rem;
+            margin-left: 4px;
+        }
+
+        .zip-table .zip-name-cell .name.clickable-name {
+            color: #1a202c;
+            border-bottom: 1px dashed #cbd5e0;
+            padding-bottom: 1px;
+        }
+
+        .zip-table .zip-name-cell .name.clickable-name:hover {
+            color: #2563eb;
+            border-bottom-color: #2563eb;
+        }
+
+        .zip-table .zip-size {
+            font-family: monospace;
+            color: #4a5568;
+            font-size: 0.78rem;
+        }
+
+        .zip-table .zip-actions-cell {
+            display: flex;
+            gap: 4px;
+            justify-content: flex-end;
+        }
+
+        .zip-table .zip-actions-cell .btn {
+            padding: 2px 8px;
+            font-size: 0.72rem;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+        }
+
+        .zip-table .btn-zip-preview {
+            background: #f1f5f9;
+            color: #2563eb;
+        }
+
+        .zip-table .btn-zip-preview:hover {
+            background: #e2e8f0;
+        }
+
+        .zip-table .btn-zip-download {
+            background: #f0fdf4;
+            color: #059669;
+        }
+
+        .zip-table .btn-zip-download:hover {
+            background: #dcfce7;
+        }
+
+        .zip-table .btn-zip-open {
+            background: #eff6ff;
+            color: #2563eb;
+        }
+
+        .zip-table .btn-zip-open:hover {
+            background: #dbeafe;
+        }
+
+        .zip-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: #a0aec0;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .zip-empty i {
+            font-size: 2.5rem;
+        }
+
+        .zip-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: #2563eb;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .zip-error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: #dc2626;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        /* 压缩文件输入弹窗 */
+        .zip-name-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        .zip-name-input:focus {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        }
+
+        .zip-name-hint {
+            font-size: 0.75rem;
+            color: #718096;
+            margin-top: 4px;
+        }
+
+        .file-name-clickable {
+            cursor: pointer;
+        }
+
+        .file-name-clickable:hover {
+            color: #2b6cb0;
+        }
+
+        /* 视图切换按钮 */
+        .view-toggle-group {
+            display: inline-flex;
+            gap: 2px;
+            background: #f1f5f9;
+            border-radius: 8px;
+            padding: 2px;
+        }
+
+        .view-toggle-group .btn-view {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            border: none;
+            cursor: pointer;
+            background: transparent;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .view-toggle-group .btn-view:hover {
+            background: white;
+            color: #1a202c;
+        }
+
+        .view-toggle-group .btn-view.active {
+            background: white;
+            color: #2563eb;
+            font-weight: 600;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .view-toggle-group .btn-view i {
+            font-size: 0.85rem;
+        }
+
+        /* 列表视图（默认，已有） */
+        .view-list {
+            display: block;
+        }
+
+        .view-icon {
+            display: none;
+        }
+
+        .view-tree {
+            display: none;
+        }

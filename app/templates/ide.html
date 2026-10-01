@@ -1635,6 +1635,44 @@
     display: flex; align-items: center; gap: 4px; white-space: nowrap;
   }
   .gitignore-toolbar button:hover { background: #3a3d41; color: #ffffff; }
+
+  /* requirements.txt 专用依赖检查工具栏 */
+  .req-toolbar {
+    position: absolute; top: 8px; right: 16px; z-index: 20;
+    display: flex; align-items: center; gap: 8px; padding: 4px 10px;
+    background: #252526; border: 1px solid #454545; border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+    font-size: 12px; color: #cccccc; opacity: .85; transition: opacity .15s;
+  }
+  .req-toolbar:hover, .req-toolbar:focus-within { opacity: 1; }
+  .req-toolbar .status { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .req-toolbar .status i { font-size: 13px; }
+  .req-toolbar .status.ok i { color: #6fcf8a; }
+  .req-toolbar .status.warn i { color: #e0a06a; }
+  .req-toolbar .status.err i { color: #e06c75; }
+  .req-toolbar select.index-select {
+    background: #1e1e1e; color: #cccccc; border: 1px solid #454545; border-radius: 4px;
+    font-family: inherit; font-size: 12px; padding: 2px 6px; cursor: pointer;
+    outline: none; max-width: 110px;
+  }
+  .req-toolbar select.index-select:hover { border-color: #5a5a5a; }
+  .req-toolbar button {
+    background: #0d7ec4; border: none; color: #ffffff; border-radius: 4px;
+    font-family: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer;
+    display: flex; align-items: center; gap: 4px; white-space: nowrap;
+  }
+  .req-toolbar button:disabled { background: #3a3a3a; color: #888; cursor: not-allowed; }
+  .req-toolbar button:hover:not(:disabled) { background: #0a6aa8; }
+  .req-toolbar .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: reqSpin .8s linear infinite; }
+  @keyframes reqSpin { to { transform: rotate(360deg); } }
+  /* 行号 gutter 里的安装状态 */
+  .CodeMirror-gutter.pip-status-gutter { width: 22px; }
+  .cm-pip-ok, .cm-pip-miss, .cm-pip-skip { display: flex; align-items: center; justify-content: center; width: 100%; font-size: 11px; }
+  .cm-pip-ok { color: #6fcf8a; }
+  .cm-pip-miss { color: #e0a06a; cursor: pointer; }
+  .cm-pip-miss:hover { color: #f0b070; }
+  .cm-pip-skip { color: #555; }
+
   /* .gitignore 选择器 */
   .gi-picker { display: flex; flex-direction: column; gap: 8px; width: 100%; }
   .gi-picker .gi-tree {
@@ -2544,6 +2582,7 @@
         if (["md", "markdown"].includes(ext)) setupMarkdownView(tab);
         else if (["html", "htm"].includes(ext)) setupHtmlView(tab);
         else if (name === ".gitignore") setupGitignoreView(tab);
+        else if (name.toLowerCase() === "requirements.txt") setupRequirementsView(tab);
         activate(tab);
         scheduleRefresh(tab);
       } catch (e) {
@@ -2996,6 +3035,192 @@
     btn.addEventListener("click", () => showGitignorePicker(tab));
     tab.host.appendChild(tb);
   }
+
+  /* requirements.txt：检测当前独立 venv 中哪些包已安装，在编辑器内显示并支持一键安装 */
+  function setupRequirementsView(tab) {
+    if (tab.host.querySelector(".req-toolbar")) return;
+
+    // 添加自定义 gutter（保留原有行号）
+    tab.cm.setOption("gutters", ["CodeMirror-linenumbers", "pip-status-gutter"]);
+    tab.cm.refresh();
+
+    const tb = document.createElement("div");
+    tb.className = "req-toolbar";
+    tb.innerHTML = '<span class="status"><i class="bi bi-info-circle"></i><span class="t">准备检测…</span></span>' +
+      '<select class="index-select" title="安装时使用的 PyPI 镜像源">' +
+      '<option value="">默认源</option>' +
+      '<option value="tsinghua">清华</option>' +
+      '<option value="aliyun">阿里云</option>' +
+      '<option value="douban">豆瓣</option>' +
+      '<option value="ustc">中科大</option>' +
+      '<option value="tencent">腾讯</option>' +
+      '<option value="huawei">华为</option>' +
+      '<option value="pypi">PyPI 官方</option>' +
+      '</select>' +
+      '<button class="refresh" title="重新检测"><i class="bi bi-arrow-clockwise"></i>刷新</button>' +
+      '<button class="install" title="安装所有缺失包" disabled><i class="bi bi-box-arrow-in-down"></i>一键安装缺失</button>';
+    tab.host.appendChild(tb);
+
+    tab.reqState = { checking: false, items: [], venv: null, error: null };
+
+    const statusEl = tb.querySelector(".status");
+    const textEl = tb.querySelector(".status .t");
+    const indexSelect = tb.querySelector(".index-select");
+    const refreshBtn = tb.querySelector("button.refresh");
+    const installBtn = tb.querySelector("button.install");
+
+    const savedIndex = localStorage.getItem("cb-pip-index");
+    if (savedIndex && indexSelect.querySelector('option[value="' + savedIndex + '"]')) {
+      indexSelect.value = savedIndex;
+    }
+    indexSelect.addEventListener("change", () => {
+      localStorage.setItem("cb-pip-index", indexSelect.value);
+    });
+
+    function setSpin(el, on) {
+      if (on) { if (!el.querySelector(".spin")) el.insertBefore(makeSpan('<i class="spin"></i>'), el.firstChild); }
+      else { const s = el.querySelector(".spin"); if (s) s.remove(); }
+    }
+
+    function makeSpan(html) { const e = document.createElement("span"); e.innerHTML = html; return e; }
+
+    function makeMarker(cls, title, handler) {
+      const el = document.createElement("div");
+      el.className = "cm-pip-" + cls;
+      el.title = title;
+      el.innerHTML = cls === "ok" ? "<i class=\"bi bi-check-circle\"></i>" :
+                   cls === "miss" ? "<i class=\"bi bi-exclamation-triangle\"></i>" :
+                   "<i class=\"bi bi-dot\"></i>";
+      if (handler) el.addEventListener("click", handler);
+      return el;
+    }
+
+    function render() {
+      const st = tab.reqState;
+      // 清空旧标记
+      const last = tab.cm.lineCount();
+      for (let i = 0; i < last; i++) tab.cm.setGutterMarker(i, "pip-status-gutter", null);
+
+      if (st.error) {
+        statusEl.className = "status err";
+        textEl.textContent = st.error;
+        installBtn.disabled = true;
+        return;
+      }
+      if (st.checking) {
+        statusEl.className = "status";
+        textEl.textContent = "检测中…";
+        installBtn.disabled = true;
+        return;
+      }
+
+      const installed = st.items.filter(it => it.type === "req" && it.installed).length;
+      const missing = st.items.filter(it => it.type === "req" && !it.installed).length;
+      const skip = st.items.filter(it => it.type === "skip").length;
+      statusEl.className = "status " + (missing ? "warn" : "ok");
+      textEl.textContent = `venv：${baseName(st.venv || "未找到")} · ${installed} 已安装 / ${missing} 未安装` +
+        (skip ? ` · ${skip} 行已跳过` : "");
+      installBtn.disabled = missing === 0;
+
+      st.items.forEach(it => {
+        if (it.type === "skip") {
+          tab.cm.setGutterMarker(it.line, "pip-status-gutter",
+            makeMarker("skip", "注释 / 空行 / 选项"));
+          return;
+        }
+        if (it.installed) {
+          tab.cm.setGutterMarker(it.line, "pip-status-gutter",
+            makeMarker("ok", `${it.name}${it.version ? " " + it.version : ""} 已安装`));
+        } else {
+          tab.cm.setGutterMarker(it.line, "pip-status-gutter",
+            makeMarker("miss", `${it.name}${it.spec ? " " + it.spec : ""} 未安装\n点击安装单个包`,
+              () => installPackages([it.name])));
+        }
+      });
+    }
+
+    async function check() {
+      if (!tab.cm) return;
+      tab.reqState.checking = true;
+      tab.reqState.error = null;
+      render();
+      try {
+        const r = await fetch("/api/pip/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: tab.path, content: tab.cm.getValue() })
+        });
+        const raw = await r.text();
+        let d;
+        try {
+          d = JSON.parse(raw);
+        } catch (parseErr) {
+          if (raw.trim().startsWith("<")) {
+            throw new Error("接口返回 HTML，说明后端还没加载新路由，请重启服务后刷新页面");
+          }
+          throw parseErr;
+        }
+        tab.reqState.checking = false;
+        if (d.error) { tab.reqState.error = d.error; tab.reqState.items = []; tab.reqState.venv = null; }
+        else { tab.reqState.items = d.items || []; tab.reqState.venv = d.venv; tab.reqState.error = null; }
+      } catch (e) {
+        tab.reqState.checking = false;
+        tab.reqState.error = "检测失败：" + (e.message || e);
+      }
+      render();
+    }
+
+    async function installPackages(packages, allMissing) {
+      if (tab.reqState.installing) return;
+      tab.reqState.installing = true;
+      installBtn.disabled = true;
+      refreshBtn.disabled = true;
+      setSpin(installBtn, true);
+      const oldHtml = installBtn.innerHTML;
+      installBtn.innerHTML = '<i class="spin"></i>安装中…';
+      try {
+        const body = { path: tab.path, index: indexSelect.value };
+        if (allMissing) body.all_missing = true;
+        else if (packages && packages.length) body.packages = packages;
+        const r = await fetch("/api/pip/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const raw = await r.text();
+        let d;
+        try {
+          d = JSON.parse(raw);
+        } catch (parseErr) {
+          if (raw.trim().startsWith("<")) {
+            throw new Error("接口返回 HTML，请重启服务后刷新页面");
+          }
+          throw parseErr;
+        }
+        if (d.ok && d.returncode === 0) toast("安装完成", "ok");
+        else toast("安装失败：" + (d.error || d.stderr || "未知错误"), "err");
+      } catch (e) {
+        toast("安装失败：" + (e.message || e), "err");
+      } finally {
+        tab.reqState.installing = false;
+        installBtn.innerHTML = oldHtml;
+        refreshBtn.disabled = false;
+        setSpin(installBtn, false);
+        render();
+        check();
+      }
+    }
+
+    refreshBtn.addEventListener("click", () => check());
+    installBtn.addEventListener("click", () => installPackages(null, true));
+    tab.cm.on("change", () => {
+      if (tab.reqTimer) clearTimeout(tab.reqTimer);
+      tab.reqTimer = setTimeout(() => check(), 800);
+    });
+
+    check();
+  }
+
   // 解析 .gitignore 内容为归一化规则列表（去掉注释 / 空行 / 前后斜杠 / 取反规则）
   function parseGitignoreRules(text) {
     return (text || "").split(/\r?\n/).map(l => l.trim())

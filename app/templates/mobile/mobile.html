@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#1f6feb" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📁</text></svg>">
+<title>文件管理 · 移动版</title>
+<style>{% include "mobile/css/00_基础与变量.css" %}</style>
+<style>{% include "mobile/css/01_顶部栏.css" %}</style>
+<style>{% include "mobile/css/02_面包屑.css" %}</style>
+<style>{% include "mobile/css/03_列表.css" %}</style>
+<style>{% include "mobile/css/04_底部统计.css" %}</style>
+<style>{% include "mobile/css/05_音乐播放器.css" %}</style>
+<style>{% include "mobile/css/06_全屏播放器：氛围背景 + 毛玻璃抽屉.css" %}</style>
+<style>{% include "mobile/css/07_毛玻璃抽屉：歌词 + 进度 + 控制都收进这块玻璃里.css" %}</style>
+<style>{% include "mobile/css/08_加载.css" %}</style>
+<style>{% include "mobile/css/09_底部弹窗.css" %}</style>
+<style>{% include "mobile/css/10_模态框（预览_输入）.css" %}</style>
+<style>{% include "mobile/css/11_输入弹窗.css" %}</style>
+<style>{% include "mobile/css/12_自定义确认框.css" %}</style>
+<style>{% include "mobile/css/13_全局搜索页.css" %}</style>
+<style>{% include "mobile/css/14_文件信息弹层.css" %}</style>
+<style>{% include "mobile/css/15_新建下拉菜单.css" %}</style>
+<style>{% include "mobile/css/16_多选 _ 待执行移动复制.css" %}</style>
+<style>{% include "mobile/css/17_图标（网格）视图.css" %}</style>
+<style>{% include "mobile/css/18_Toast.css" %}</style>
+<style>{% include "mobile/css/19_压缩包查看页.css" %}</style>
+<style>{% include "mobile/css/20_回收站页.css" %}</style>
+<style>{% include "mobile/css/21_索引页.css" %}</style>
+<style>{% include "mobile/css/22_新版视频播放器（与毛玻璃音乐播放器同一套视觉语言）.css" %}</style>
+</head>
+<body>
+{% include 'mobile/partials/body.html' %}
+</body>
+<script>
+{% include "mobile/js/00_基础与状态.js" %}
+{% include "mobile/js/01_加载目录.js" %}
+{% include "mobile/js/02_多选模式.js" %}
+{% include "mobile/js/03_待执行的移动_复制（全局记录）.js" %}
+{% include "mobile/js/04_连接状态指示：定期轻量探测服务器可达性.js" %}
+{% include "mobile/js/05_本地增量更新列表（删除_压缩_解压完成后不重新请求 _api_files，避免大目录超时）.js" %}
+{% include "mobile/js/06_目录大小后台补齐：有目录在算就轮询，算完自动刷新一次.js" %}
+{% include "mobile/js/07_排序.js" %}
+{% include "mobile/js/08_操作弹窗.js" %}
+{% include "mobile/js/09_预览.js" %}
+{% include "mobile/js/10_下载（流式接口 + 实时进度）.js" %}
+{% include "mobile/js/11_删除.js" %}
+{% include "mobile/js/12_后台任务通用进度（删除 _ 解压 等，可挂后台胶囊）.js" %}
+{% include "mobile/js/13_删除（走后台任务进度）.js" %}
+{% include "mobile/js/14_重命名.js" %}
+{% include "mobile/js/15_新建文件夹 _ 文件.js" %}
+{% include "mobile/js/16_复制到剪贴板.js" %}
+{% include "mobile/js/17_压缩为 ZIP.js" %}
+{% include "mobile/js/18_压缩包查看器（不解压浏览内容）.js" %}
+{% include "mobile/js/19_解压 ZIP（走后台任务进度，可挂后台）.js" %}
+{% include "mobile/js/20_回收站.js" %}
+{% include "mobile/js/21_压缩 _ 解压记录.js" %}
+{% include "mobile/js/22_索引.js" %}
+{% include "mobile/js/23_文件信息.js" %}
+{% include "mobile/js/24_输入弹窗.js" %}
+{% include "mobile/js/25_自定义悬浮确认框.js" %}
+{% include "mobile/js/26_顶部按钮.js" %}
+{% include "mobile/js/27_⋯ 更多菜单.js" %}
+{% include "mobile/js/28_➕ 新建下拉菜单.js" %}
+{% include "mobile/js/29_⭐ 收藏夹.js" %}
+{% include "mobile/js/30_全局搜索页.js" %}
+{% include "mobile/js/31_音频播放器.js" %}
+{% include "mobile/js/32_封面 _ 歌词关联（同名匹配）.js" %}
+{% include "mobile/js/33_播放历史 _ 喜欢列表（localStorage 持久化）.js" %}
+{% include "mobile/js/34_播放列表分组：按「添加进列表时的根文件夹」分组.js" %}
+{% include "mobile/js/35_从文件浏览页选择文件夹添加到播放列表.js" %}
+{% include "mobile/js/36_播放模式：顺序 _ 单曲循环 _ 随机.js" %}
+{% include "mobile/js/37_音量工具：喇叭按钮展开滑杆（取值持久化，0 时切换为静音图标）.js" %}
+{% include "mobile/js/38_新版视频播放器：毛玻璃页面.js" %}
+{% include "mobile/js/39_喜欢 tab：收藏的视频（点一行以「喜欢」为播放队列续播；右侧 ♥ 取消收藏）.js" %}
+</script>
+</html>

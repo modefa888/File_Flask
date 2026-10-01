@@ -29,7 +29,7 @@ def index():
         is_mobile = False
     elif force == "mobile":
         is_mobile = True
-    template = "mobile.html" if is_mobile else "index.html"
+    template = "mobile/mobile.html" if is_mobile else "index/index.html"
     return _render_page(template)
 
 
@@ -46,18 +46,18 @@ def _render_page(template):
 @bp.route("/mobile")
 def mobile_entry():
     _log.info("GET /m (mobile entry)")
-    return _render_page("mobile.html")
+    return _render_page("mobile/mobile.html")
 
 
 # 电脑版独立入口：访问 /desktop 强制打开桌面版
 @bp.route("/desktop")
 def desktop_entry():
     _log.info("GET /desktop (desktop entry)")
-    return _render_page("index.html")
+    return _render_page("index/index.html")
 
 
 # 在线项目开发（类 VSCode）页面：访问 /ide?path=<文件夹绝对路径>
 @bp.route("/ide")
 def ide_entry():
     _log.info("GET /ide path=%s", request.args.get("path", ""))
-    return _render_page("ide.html")
+    return _render_page("ide/ide.html")

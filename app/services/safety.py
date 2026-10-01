@@ -32,6 +32,38 @@ def split_commands(command: str):
     return [p.strip() for p in parts if p and p.strip()]
 
 
+# 删除 / 破坏性命令：即使没命中 EXEC_CONFIRM_PATTERNS，也一律要求用户确认
+_DELETE_PATTERNS = [
+    (re.compile(p, re.IGNORECASE), r) for p, r in [
+        (r"\brm\b", "删除文件"),
+        (r"\brmdir\b", "删除目录"),
+        (r"\bunlink\b", "删除文件"),
+        (r"\bshred\b", "粉碎删除文件"),
+        (r"\btruncate\b", "清空文件内容"),
+        (r"\bfind\b[^\n]*\s-delete\b", "批量删除文件"),
+        (r"\bfind\b[^\n]*\s-exec\s+rm\b", "批量删除文件"),
+        (r"\bgit\s+clean\b", "删除未跟踪文件"),
+        (r"\bgit\s+reset\s+--hard\b", "丢弃未提交的改动"),
+        (r"\bdocker\s+(rm|rmi|system\s+prune|volume\s+rm|network\s+rm)\b", "删除容器 / 镜像"),
+        (r"\bkubectl\s+delete\b", "删除集群资源"),
+        (r"\bswapoff\b", "关闭交换分区"),
+        (r"\bmv\b", "移动文件（原位置将被移除）"),
+    ]
+]
+
+
+def is_delete_command(command: str):
+    """判断是否是删除 / 破坏性命令，返回 (bool, reason)。"""
+    text = (command or "").strip()
+    if not text:
+        return False, ""
+    for part in [text] + split_commands(text):
+        for regex, reason in _DELETE_PATTERNS:
+            if regex.search(part):
+                return True, reason
+    return False, ""
+
+
 def check_command(command: str) -> dict:
     """返回 {"level": "ok"|"confirm"|"blocked", "reason": str, "part": str}。"""
     if not getattr(config, "EXEC_ENFORCE_SAFETY", True):

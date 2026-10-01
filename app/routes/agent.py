@@ -34,7 +34,7 @@ from flask import Blueprint, jsonify, request, Response
 
 from .. import config
 from ..log import get_logger
-from ..services.safety import check_command
+from ..services.safety import check_command, is_delete_command
 from ..services.web_search import search_web, format_results
 from ..services import undo
 from .ai import (_clean_content, _load_cfg, _open_stream, _sse, _inject_system_time,
@@ -470,6 +470,11 @@ def _tool_run_command(args, root, perm):
         timeout = max(1, min(300, int(args.get("timeout") or 60)))
     except (TypeError, ValueError):
         timeout = 60
+    try:                                        # 执行前按命令里的路径做快照，供回撤
+        _cmd_ids, _cmd_complete = undo.snapshot_for_command(cmd, root)
+    except Exception:  # noqa: BLE001
+        _cmd_complete = True
+    _undo_note = "" if _cmd_complete else "（部分路径过大，未记录回撤快照）"
     try:
         proc = subprocess.Popen(["bash", "-lc", cmd], cwd=root or None,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -492,6 +497,8 @@ def _tool_run_command(args, root, perm):
             cmd, timeout, out[:_TOOL_CHARS])
     body = out[:_TOOL_CHARS]
     summary = "退出码 %d · %d 行输出" % (code, body.count("\n"))
+    if _undo_note:
+        summary += _undo_note
     return code == 0, summary, body[-3000:], "$ %s\n%s" % (cmd, body)
 
 
@@ -546,13 +553,18 @@ def _gate(perm, name, args, root):
     if name == "run_command":
         if not getattr(config, "ENABLE_EXEC", True):
             return False, "已禁用命令执行（config.ENABLE_EXEC = False）", False, ""
-        verdict = check_command(str(args.get("command") or ""))
+        cmd = str(args.get("command") or "")
+        verdict = check_command(cmd)
         if verdict["level"] == "blocked":
             return False, "已拦截危险命令：%s" % verdict["reason"], False, ""
         if perm == "full":
-            return True, "", False, ""
-        reason = "该命令有一定风险：%s" % verdict["reason"] if verdict["level"] == "confirm" else "执行命令前需要你确认"
-        return True, "", True, reason
+            return True, "", False, ""                 # 完全权限：命令不再逐条确认
+        is_del, del_reason = is_delete_command(cmd)
+        if verdict["level"] == "confirm":
+            return True, "", True, "该命令有一定风险：%s" % verdict["reason"]
+        if is_del:
+            return True, "", True, "%s：需要你确认后才会执行" % del_reason
+        return True, "", False, ""                     # 安全命令直接执行
     return True, "", False, ""
 
 
@@ -589,7 +601,7 @@ def _repo_tree(root, max_lines=_TREE_LINES, depth=_TREE_DEPTH):
 def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None):
     perm_desc = {
         "readonly": "仅可查看 —— 只能读文件与搜索，写入和执行会被拒绝（可提示用户切换权限）",
-        "workspace": "工作区内修改 —— 可以读写项目内的文件；执行命令前会先征求用户确认",
+        "workspace": "工作区内修改 —— 可以读写项目内的文件；普通命令直接执行，删除 / 高风险命令执行前会先征求用户确认",
         "full": "完全权限 —— 可以读写任意路径；执行命令不再确认（危险命令仍会被安全规则拦截）",
     }.get(perm, "工作区内修改")
     tree = _repo_tree(root)

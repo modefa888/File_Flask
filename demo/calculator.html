@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>简单计算器 · Calculator Demo</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: linear-gradient(135deg, #1e1e2e 0%, #2b2b3d 100%);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #fff;
+  }
+  body { display: flex; justify-content: center; align-items: center; }
+  .calc {
+    width: 340px;
+    background: #2b2b3d;
+    border-radius: 18px;
+    padding: 22px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
+  .history {
+    height: 24px;
+    color: #8b8ba7;
+    font-size: 14px;
+    text-align: right;
+    padding: 0 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #display {
+    width: 100%;
+    height: 76px;
+    border: none;
+    background: #1a1a26;
+    color: #fff;
+    font-size: 34px;
+    text-align: right;
+    padding: 0 14px;
+    border-radius: 10px;
+    margin-bottom: 16px;
+    outline: none;
+  }
+  #display.error { color: #ff6b5b; }
+  .keys {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  button {
+    height: 60px;
+    border: none;
+    border-radius: 12px;
+    font-size: 20px;
+    background: #3d3d55;
+    color: #fff;
+    cursor: pointer;
+    transition: transform .1s ease, background .15s ease;
+    user-select: none;
+  }
+  button:hover  { background: #4a4a66; }
+  button:active { transform: scale(.94); }
+  .op  { background: #ff9f43; }
+  .op:hover { background: #ffb066; }
+  .eq  { background: #27ae60; grid-column: span 2; }
+  .eq:hover { background: #2ecc71; }
+  .clr { background: #e74c3c; }
+  .clr:hover { background: #ff6b5b; }
+  .hint {
+    margin-top: 14px;
+    color: #8b8ba7;
+    font-size: 12px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+  <div class="calc">
+    <div class="history" id="history"></div>
+    <input id="display" type="text" value="0" readonly aria-label="display">
+    <div class="keys">
+      <button class="clr" data-act="clear">C</button>
+      <button data-act="back">⌫</button>
+      <button data-key="("> (</button>
+      <button class="op" data-key="/">÷</button>
+
+      <button data-key="7">7</button>
+      <button data-key="8">8</button>
+      <button data-key="9">9</button>
+      <button class="op" data-key="*">×</button>
+
+      <button data-key="4">4</button>
+      <button data-key="5">5</button>
+      <button data-key="6">6</button>
+      <button class="op" data-key="-">-</button>
+
+      <button data-key="1">1</button>
+      <button data-key="2">2</button>
+      <button data-key="3">3</button>
+      <button class="op" data-key="+">+</button>
+
+      <button data-act="sign">±</button>
+      <button data-key="0">0</button>
+      <button data-key=".">.</button>
+      <button class="eq" data-act="eq">=</button>
+    </div>
+    <div class="hint">支持键盘输入 · Enter 计算 · Backspace 删除 · Esc 清空</div>
+  </div>
+
+<script>
+(function () {
+  const display = document.getElementById('display');
+  const history = document.getElementById('history');
+  let expr = '';
+  let justEvaluated = false;
+
+  // 数字格式化：去掉浮点尾巴；过长自动切到科学计数法
+  function fmt(n) {
+    if (!isFinite(n)) return 'Infinity';
+    if (Object.is(n, -0)) n = 0;
+    let s = Number(n.toPrecision(12)).toString();
+    if (Math.abs(n) >= 1e12 || (Math.abs(n) > 0 && Math.abs(n) < 1e-9)) {
+      s = n.toExponential(6).replace(/\.?0+e/, 'e');
+    }
+    return s;
+  }
+
+  // 安全求值：白名单字符 + Function 构造器
+  function evaluate(input) {
+    if (!/^[0-9+\-*/().\s]+$/.test(input)) throw new Error('非法字符');
+    // 隐式乘法：2(3+4) -> 2*(3+4)
+    const normalized = input
+      .replace(/(\d|\))\s*(\()/g, '$1*$2')
+      .replace(/(\))\s*(\d)/g, '$1*$2');
+    return Function('"use strict";return (' + normalized + ')')();
+  }
+
+  function render(text) {
+    display.textContent = text;
+    display.classList.remove('error');
+  }
+  function showError(msg) {
+    display.textContent = msg;
+    display.classList.add('error');
+  }
+
+  function appendKey(k) {
+    if (justEvaluated) {
+      // 计算后按数字 -> 开新算式；按运算符 -> 用上一个结果继续算
+      expr = /[0-9.]/.test(k) ? k : display.textContent;
+      justEvaluated = false;
+    }
+    expr += k;
+    render(expr);
+    history.textContent = '';
+  }
+
+  function doEval() {
+    if (!expr) return;
+    try {
+      const result = evaluate(expr);
+      if (typeof result !== 'number' || isNaN(result)) throw new Error('无效');
+      history.textContent = expr + ' =';
+      render(fmt(result));
+      expr = fmt(result);
+      justEvaluated = true;
+    } catch (e) {
+      showError('Error');
+      history.textContent = expr + ' ?';
+      expr = '';
+      justEvaluated = false;
+    }
+  }
+
+  function doClear() {
+    expr = '';
+    justEvaluated = false;
+    history.textContent = '';
+    render('0');
+  }
+
+  function doBack() {
+    if (justEvaluated || !expr) return;
+    expr = expr.slice(0, -1);
+    render(expr || '0');
+  }
+
+  function doSign() {
+    if (!expr) return;
+    const m = expr.match(/(\d*\.?\d+)$/);
+    if (!m) return;
+    const num = m[1];
+    const before = expr.slice(0, expr.length - num.length);
+    expr = before.endsWith('-')
+      ? before.slice(0, -1) + num
+      : before + '-' + num;
+    render(expr);
+    history.textContent = '';
+    justEvaluated = false;
+  }
+
+  document.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const k = btn.dataset.key;
+      const act = btn.dataset.act;
+      if (k !== undefined) appendKey(k);
+      else if (act === 'eq')    doEval();
+      else if (act === 'clear') doClear();
+      else if (act === 'back')  doBack();
+      else if (act === 'sign')  doSign();
+    });
+  });
+
+  document.addEventListener('keydown', (e) => {
+    const t = e.key;
+    if (/^[0-9+\-*/().]$/.test(t)) { appendKey(t); return; }
+    if (t === '.' || t === ',')    { appendKey('.'); e.preventDefault(); return; }
+    if (t === 'Enter' || t === '='){ doEval();  e.preventDefault(); return; }
+    if (t === 'Backspace')         { doBack();  return; }
+    if (t === 'Escape')            { doClear(); return; }
+  });
+})();
+</script>
+</body>
+</html>

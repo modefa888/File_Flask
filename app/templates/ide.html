@@ -6564,7 +6564,7 @@
     { id: "readonly", label: "仅可查看", icon: "bi-eye",
       desc: "只做解释与答疑，不写入任何文件" },
     { id: "workspace", label: "工作区内修改", icon: "bi-pencil-square",
-      desc: "生成的代码可保存到当前项目内的文件" },
+      desc: "可读写项目内文件；普通命令直接执行，删除/高风险命令需确认" },
     { id: "full", label: "完全权限", icon: "bi-exclamation-triangle",
       desc: "可写入任意路径（含项目外部），请谨慎使用" },
   ];
@@ -6778,6 +6778,7 @@
     const rows = new Map();              // call_id -> 步骤行
     const steps = [];
     const changes = [];                  // 本次 AI 回复产生的文件改动 id（供回撤）
+    AI._agentTurnChanges = changes;      // 中断时也能拿到已产生的改动，供回撤按钮使用
     let stepsBox = null;
     const ensureStepsBox = () => {
       if (!stepsBox) {
@@ -7114,6 +7115,8 @@
     const bodyB = aiBubble("assistant", "", "", null, true);
     bodyB.innerHTML = '<span class="ai-waiting">思考中<span class="d"></span><span class="d"></span><span class="d"></span></span>';
     let acc = "", thinking = "", ttft = 0;                // ttft：首 token 到达耗时
+    let turnChanges = [];                                 // 本轮 AI 产生的文件改动 id（供回撤）
+    AI._agentTurnChanges = [];
     AI.ctrl = new AbortController();
     try {
       if (AI.agent) {                                     // 智能体模式：走带工具的 Agent 接口
@@ -7138,11 +7141,12 @@
           bodyB.innerHTML = aiMd(t) + '<span class="ai-cursor"></span>';
         });
         acc = res.text || "";
+        turnChanges = (res.changes && res.changes.length) ? res.changes : (AI._agentTurnChanges || []);
         bodyB.innerHTML = aiMd(acc) || "（已完成，未产生文字说明）";
         const aMeta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
         AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: acc, ms: aMeta.ms, ts: aMeta.ts,
                        steps: res.steps.length ? res.steps : undefined,
-                       changes: (res.changes && res.changes.length) ? res.changes : undefined });
+                       changes: turnChanges.length ? turnChanges : undefined });
         bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
         aiPersistCurrent(); aiRenderConv();
         aiRecordStat(true, aMeta.ms, acc.length, ttft, inTok);
@@ -7161,7 +7165,7 @@
       const dec = new TextDecoder();
       let buf = "";
       // 普通对话也会调用读取类工具：把过程记录渲染在消息下方
-      const chatSteps = [], chatStepRows = new Map(), chatStepMeta = new Map(), chatChanges = [];
+      const chatSteps = [], chatStepRows = new Map(), chatStepMeta = new Map();
       let chatStepsBox = null;
       const ensureChatSteps = () => {
         if (!chatStepsBox) { chatStepsBox = aiBuildStepsBox([]); bodyB.parentElement.appendChild(chatStepsBox); }
@@ -7201,7 +7205,7 @@
             if (obj.type === "result") {
               const md = chatStepMeta.get(obj.call_id) || { tool: obj.tool, args: {} };
               aiStepDone(chatStepRows.get(obj.call_id), obj);
-              if (obj.changes && obj.changes.length) chatChanges.push(...obj.changes);
+              if (obj.changes && obj.changes.length) turnChanges.push(...obj.changes);
               const rec = { tool: md.tool, args: md.args, ok: !!obj.ok, denied: !!obj.denied,
                             ms: obj.ms, summary: obj.summary || "", detail: obj.detail || "" };
               chatSteps.push(rec);
@@ -7231,7 +7235,7 @@
       const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
       AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, reasoning: thinking.trim() || undefined,
                      ms: meta.ms, ts: meta.ts, steps: chatSteps.length ? chatSteps : undefined,
-                     changes: chatChanges.length ? chatChanges : undefined });
+                     changes: turnChanges.length ? turnChanges : undefined });
       bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
       aiPersistCurrent(); aiRenderConv();
       aiRecordStat(true, performance.now() - t0, out.length, ttft, inTok);
@@ -7239,10 +7243,12 @@
       if (e.name === "AbortError") {
         bodyB.innerHTML = aiMd(acc.replace(/^\s+/, "")) + "\n（已停止）";
         const out = acc.trim();
-        if (out) {
+        const abChanges = turnChanges.length ? turnChanges : (AI._agentTurnChanges || []);
+        if (out || abChanges.length) {                    // 即使没有文字，只要改过文件也保留回撤入口
           const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
-          AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, ms: meta.ms, ts: meta.ts });
-          bodyB.insertAdjacentHTML("afterend", aiMetaHtml({ text: out, ms: meta.ms, ts: meta.ts }, AI.msgs.length - 1));
+          AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, ms: meta.ms, ts: meta.ts,
+                         changes: abChanges.length ? abChanges : undefined });
+          bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
           aiPersistCurrent(); aiRenderConv();
         }
         aiRecordStat(false, performance.now() - t0, acc.length, ttft, inTok);

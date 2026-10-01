@@ -1,0 +1,62 @@
+  /* ===== 查找/替换（VS Code 风格悬浮组件）===== */
+  .ff-widget {
+    position: absolute; top: 8px; right: 20px; z-index: 40; display: none;
+    background: #252526; border: 1px solid #454545; border-radius: 6px;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, .6);
+    /* 左侧留出固定槽位放展开箭头，查找行与替换行因此左右平齐 */
+    padding: 6px 6px 6px 26px;
+    min-width: 470px; max-width: calc(100% - 40px); color: #cccccc;
+  }
+  .ff-widget.show { display: block; }
+  .ff-row { display: flex; align-items: center; gap: 4px; }
+  .ff-row + .ff-row { margin-top: 6px; }
+  /* 展开替换的箭头：垂直居中在左侧槽位，展开后旋转 90° */
+  .ff-expand {
+    position: absolute; left: 3px; top: 50%; transform: translateY(-50%);
+    padding: 4px 4px; font-size: 15px; line-height: 1;
+  }
+  .ff-widget.expanded .ff-expand { transform: translateY(-50%) rotate(90deg); }
+  .ff-opt i { font-size: 13px; line-height: 1; }
+  .ff-input {
+    flex: 1 1 auto; min-width: 110px; background: #3c3c3c; border: 1px solid #565656;
+    border-radius: 3px; color: #ffffff; padding: 4px 8px; font-size: 12px;
+    outline: none; font-family: inherit;
+  }
+  .ff-input:focus { border-color: #007fd4; }
+  .ff-input.no-match { border-color: #f14c4c; }
+  .ff-opt, .ff-nav, .ff-close, .ff-btn {
+    background: transparent; border: none; color: #cccccc; cursor: pointer;
+    border-radius: 3px; font-size: 12px; padding: 3px 6px; line-height: 1.3; flex: none;
+    font-family: inherit;
+  }
+  .ff-expand {
+    background: transparent; border: none; color: #cccccc; cursor: pointer;
+    border-radius: 3px; font-family: inherit;
+  }
+  .ff-opt:hover, .ff-nav:hover, .ff-close:hover, .ff-btn:hover, .ff-expand:hover { background: #3a3d41; color: #ffffff; }
+  .ff-opt.active { background: #37373d; color: #ffffff; box-shadow: inset 0 -2px 0 #007fd4; }
+  .ff-nav.disabled { opacity: .35; pointer-events: none; }
+  .ff-count { color: #8a8a8a; font-size: 11px; padding: 0 4px; white-space: nowrap; flex: none; }
+  .ff-btn { background: #0d7ec4; color: #ffffff; padding: 3px 10px; }
+  .ff-btn:hover { background: #0a6aa8; }
+  .ff-replace-row { display: none; }
+  .ff-widget.expanded .ff-replace-row { display: flex; }
+  /* 匹配高亮：全部匹配 + 当前匹配（亮橙色，保证在深色主题下醒目） */
+  .CodeMirror .cm-find-hl {
+    background: rgba(234, 92, 0, .48);
+    outline: 1px solid rgba(255, 157, 66, .75);
+    border-radius: 2px;
+  }
+  .CodeMirror .cm-find-cur {
+    background: #ff9632; color: #1f1f1f; font-weight: 600;
+    outline: 1px solid #ffd08a; border-radius: 2px;
+  }
+
+  .welcome {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #5a5a5a; gap: 10px; text-align: center; padding: 0 20px; z-index: 3;
+  }
+  .welcome .big { font-size: 64px; color: #3a3a3a; }
+  .welcome .wt { font-size: 18px; color: #9aa0a6; }
+  .welcome .ws { font-size: 13px; color: #666; max-width: 460px; line-height: 1.7; }
+

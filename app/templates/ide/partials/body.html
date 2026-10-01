@@ -1,0 +1,247 @@
+  <div class="titlebar">
+    <div class="traffic"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+    <div class="menubar" id="menubar"><span data-menu="file">文件</span><span data-menu="edit">编辑</span><span data-menu="sel">选择</span><span data-menu="view">查看</span><span data-menu="goto">转到</span><span data-menu="run">运行</span><span data-menu="term">终端</span><span data-menu="help">帮助</span></div>
+    <div class="tb-title" id="tbTitle">在线项目 IDE</div>
+    <div class="tb-actions">
+      <button id="tbNavBack" title="后退 (Alt+←)"><i class="bi bi-arrow-left"></i></button>
+      <button id="tbNavFwd" title="前进 (Alt+→)"><i class="bi bi-arrow-right"></i></button>
+      <span class="tb-sep"></span>
+      <button id="tbSide" title="切换侧边栏 (Ctrl+B)"><i class="bi bi-layout-sidebar"></i></button>
+      <button id="tbBottom" title="切换底部面板 (Ctrl+J)"><i class="bi bi-terminal"></i></button>
+      <button id="tbZen" title="专注模式（隐藏侧边栏与底部面板）"><i class="bi bi-arrows-angle-expand"></i></button>
+      <span class="tb-sep"></span>
+      <button id="tbNewFile" title="新建文件 (Ctrl+N)"><i class="bi bi-file-earmark-plus"></i></button>
+      <button id="tbNewFolder" title="新建文件夹"><i class="bi bi-folder-plus"></i></button>
+      <button id="tbSave" title="保存 (Ctrl+S)"><i class="bi bi-check-lg"></i></button>
+      <a href="/" title="返回文件管理器"><i class="bi bi-house"></i></a>
+    </div>
+  </div>
+
+  <div class="workbench">
+    <div class="activitybar" id="activitybar">
+      <div class="act active" data-panel="explorer" title="资源管理器"><i class="bi bi-files"></i></div>
+      <div class="act" data-panel="search" title="搜索"><i class="bi bi-search"></i></div>
+      <div class="act" data-panel="git" title="源代码管理"><i class="bi bi-git"></i><span class="runner-badge git-badge" id="actGitBadge" style="display:none">0</span></div>
+      <div class="act" data-panel="run" title="运行和调试"><i class="bi bi-bug"></i></div>
+      <div class="act" data-panel="runner" title="后台任务（保持运行 / 查看日志 / 停止）"><i class="bi bi-play-btn"></i><span class="runner-badge" id="actRunnerBadge" style="display:none">0</span></div>
+      <div class="act" data-panel="env" title="运行环境（Node / Python / PHP 等）"><i class="bi bi-cpu"></i></div>
+      <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
+      <div class="act bottom" id="actSettings" title="设置 (Ctrl+,)"><i class="bi bi-gear"></i></div>
+    </div>
+
+    <div class="sidebar" id="sidebar">
+      <div class="side-header">
+        <span id="sideTitle">资源管理器</span>
+        <div class="side-actions">
+          <input id="sidePortSearch" placeholder="端口" title="输入端口号回车：查询是否被占用，可强制结束占用进程" spellcheck="false" autocomplete="off" inputmode="numeric">
+          <button id="sideNewFile" title="新建文件"><i class="bi bi-file-earmark-plus"></i></button>
+          <button id="sideNewFolder" title="新建文件夹"><i class="bi bi-folder-plus"></i></button>
+          <button id="sideTreeToggle" title="全部展开"><i class="bi bi-arrows-expand"></i></button>
+          <button id="sideShowAll" title="显示全部（含 node_modules、.gitignore 等）"><i class="bi bi-eye-slash"></i></button>
+          <button id="sideRefresh" title="刷新资源管理器"><i class="bi bi-arrow-clockwise"></i></button>
+          <button id="sideCollapse" title="折叠侧边栏 (Ctrl+B)"><i class="bi bi-chevron-left"></i></button>
+        </div>
+      </div>
+      <div class="side-root" id="sideRoot">—</div>
+
+      <div class="tree scroll-thin" id="explorerPanel"></div>
+
+      <div class="side-panel mode-content" id="searchPanel">
+        <div class="s-modes">
+          <button class="s-mode active" data-mode="content" title="在文件内容中搜索 (Ctrl+Shift+F)">内容</button>
+          <button class="s-mode" data-mode="name" title="按文件名 / 文件夹名搜索">文件名</button>
+        </div>
+        <input id="searchInput" placeholder="在文件中搜索…" spellcheck="false" autocomplete="off">
+        <div class="s-tools">
+          <button class="s-opt" id="searchCase" title="区分大小写 (Alt+C)，默认不区分">Aa</button>
+          <button class="s-opt" id="grepWord" title="全字匹配 (Alt+W)">ab</button>
+          <button class="s-opt" id="grepRegex" title="使用正则表达式 (Alt+R)">.*</button>
+          <button class="s-opt active" id="searchSkipDep" title="跳过 node_modules、dist、build、__pycache__ 等目录">排除依赖</button>
+        </div>
+        <div class="s-replace-row">
+          <input id="replaceInput" class="s-replace" placeholder="替换（正则模式支持 $1 分组）" spellcheck="false" autocomplete="off">
+          <button class="s-btn" id="grepReplaceAll" title="在所有匹配文件中替换全部匹配">全部替换</button>
+        </div>
+        <div class="s-hint" id="searchHint">输入关键字，在项目所有文件中搜索内容；结果可点击跳转</div>
+        <div class="s-results scroll-thin" id="searchResults"></div>
+      </div>
+      <div class="side-panel not-repo" id="gitPanel">
+        <div class="git-head">
+          <i class="bi bi-git"></i>
+          <span id="gitBranch">—</span>
+          <span class="git-sync" id="gitSync"></span>
+          <span class="git-spacer"></span>
+          <button class="g-ico" id="gitViewToggle" title="切换到树形视图"><i class="bi bi-diagram-3"></i></button>
+          <button class="g-ico" id="gitRefresh" title="刷新状态"><i class="bi bi-arrow-clockwise"></i></button>
+          <button class="g-ico" id="gitStageAll" title="暂存所有更改"><i class="bi bi-plus-lg"></i></button>
+        </div>
+        <div class="git-commit">
+          <div class="git-commit-msg">
+            <textarea id="gitCommitMsg" rows="1" placeholder="提交变更内容（Ctrl+Enter 提交）" spellcheck="false" autocomplete="off"></textarea>
+            <div class="g-ai-split">
+              <button id="gitGenMsg" title="生成提交内容 (Ctrl+Alt+G)"><i class="bi bi-stars"></i></button>
+              <button id="gitGenMsgMore" title="更多生成选项"><i class="bi bi-caret-down-fill"></i></button>
+            </div>
+          </div>
+          <div class="git-commit-btns">
+            <button class="g-btn split-main" id="gitCommitBtn" title="提交 (Ctrl+Enter)"><i class="bi bi-check-lg"></i> <span id="gitCommitBtnLabel">提交</span></button>
+            <button class="g-btn split-arrow" id="gitCommitMore" title="更多提交操作"><i class="bi bi-chevron-down"></i></button>
+          </div>
+        </div>
+        <div class="git-list scroll-thin" id="gitList"></div>
+      </div>
+      <div class="side-panel" id="runPanel">
+        <button class="g-btn block" id="runPanelRun" title="运行当前打开的文件 (F5)"><i class="bi bi-play-fill"></i> 运行当前文件</button>
+        <button class="g-btn block outline" id="runPanelBg" title="常驻运行（Web 服务等），不超时、可随时停止 (Ctrl+F5)"><i class="bi bi-broadcast"></i> 后台运行（服务模式）</button>
+        <div class="s-hint" id="runRuntimes">正在检测可用运行时…</div>
+        <div class="run-list" id="runList"></div>
+      </div>
+      <div class="side-panel" id="runnerPanel">
+        <div class="runner-head">
+          <button class="g-btn block outline" id="runnerPorts" title="查看监听中的端口与占用进程，可强制结束"><i class="bi bi-ethernet"></i> 端口占用</button>
+        </div>
+        <div class="port-box" id="portBox" style="display:none"></div>
+        <div class="s-hint" id="runnerHint">后台程序不随页面关闭而结束；重启本服务后也会自动接管并继续跟踪日志。</div>
+        <div class="runner-list" id="runnerList"></div>
+      </div>
+      <div class="side-panel" id="envPanel">
+        <div class="env-tools">
+          <input id="envFilter" placeholder="筛选运行时 / 工具…" spellcheck="false" autocomplete="off">
+          <button class="g-ico" id="envOnlyInstalled" title="只显示已安装"><i class="bi bi-funnel"></i></button>
+          <button class="g-ico" id="envRefresh" title="重新检测运行环境"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+        <div class="env-sum" id="envSummary">正在检测运行环境…</div>
+        <div class="env-list scroll-thin" id="envList"></div>
+        <div class="env-sec-head" id="envVarsHead"><i class="bi bi-caret-right"></i> 自定义环境变量 <span class="cnt" id="envVarsCnt"></span></div>
+        <div id="envVarsBox" style="display:none">
+          <div id="envVars"></div>
+          <div class="env-acts"><button class="env-btn primary" id="envVarAdd">+ 添加环境变量</button></div>
+        </div>
+        <div class="env-sec-head" id="envSysHead"><i class="bi bi-caret-right"></i> 系统信息</div>
+        <div id="envSysBox" style="display:none"><div class="env-sys" id="envSys">展开后加载…</div></div>
+      </div>
+      <div class="side-panel" id="extPanel"><div class="ph">扩展市场暂未开放。</div></div>
+    </div>
+
+    <div class="splitter" id="splitter" title="拖动调整侧边栏宽度（双击恢复默认）"></div>
+
+    <div class="editorarea">
+      <div class="breadcrumbs">
+        <div class="bc-path" id="breadcrumbs"></div>
+        <span class="bc-spacer"></span>
+        <button class="bc-btn" id="aiToggle" title="AI 助手：对话、解释与修改建议"><i class="bi bi-stars"></i><span>AI 助手</span></button>
+      </div>
+      <div class="ed-groups" id="edGroups">
+        <div class="welcome" id="welcome">
+          <div class="big"><i class="bi bi-code-square"></i></div>
+          <div class="wt">在线项目 IDE</div>
+          <div class="ws" id="welcomeSub">从左侧资源管理器选择文件开始编辑。支持多标签页、语法高亮、保存对比，整体交互参考 VS Code 设计。</div>
+        </div>
+      </div>
+      <div class="splitter-h hidden" id="bpSplitter" title="拖动调整面板高度（双击恢复默认）"></div>
+      <div class="bottom-panel" id="bottomPanel">
+        <div class="bp-tabs">
+          <button class="bp-tab active" data-pane="output" id="tabOutput">输出</button>
+          <span id="bpTermTabs" style="display:none"></span>
+          <span id="bpLogTabs" style="display:none"></span>
+          <span class="bp-title" id="bpTitle"></span>
+          <span class="op-spacer"></span>
+          <button class="bp-btn" id="bpClear" title="清空当前面板">清空</button>
+          <button class="bp-btn" id="bpKill" title="终止正在运行的命令"><i class="bi bi-stop-circle"></i></button>
+          <button class="bp-btn" id="bpClose" title="关闭面板">×</button>
+        </div>
+        <div class="bp-pane active" id="paneOutput">
+          <pre class="op-body scroll-thin" id="opBody"></pre>
+        </div>
+        <div class="bp-pane" id="paneLog">
+          <pre class="logview scroll-thin" id="logBody"></pre>
+        </div>
+        <div class="bp-pane" id="paneTerm">
+          <div id="termBodies" style="flex:1;overflow:hidden;display:flex;"></div>
+          <div class="term-input-row">
+            <span class="term-prompt" id="termPrompt">$</span>
+            <input id="termInput" spellcheck="false" autocomplete="off"
+                   placeholder="输入命令并回车（↑↓ 历史 · Ctrl+L 清屏 · Ctrl+C 终止）">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="splitter" id="aiSplitter" title="拖动调整 AI 助手宽度（双击恢复默认）"></div>
+
+    <div class="ai-panel" id="aiPanel">
+      <div class="ai-head">
+        <span class="ai-title"><i class="bi bi-stars"></i> AI 助手</span>
+        <button class="ai-conv" id="aiConvBtn" title="历史对话"><span id="aiConvTitle">新对话</span><i class="bi bi-chevron-down"></i></button>
+        <span class="ai-spacer"></span>
+        <span class="ai-hsk-wrap" id="aiActiveSkillsWrap" style="display:none">
+          <button class="ai-hsk" id="aiActiveSkillsBtn" title="当前激活的技能"><i class="bi bi-magic"></i><span id="aiActiveSkillsName">技能</span></button>
+          <div class="ai-hsk-pop" id="aiActiveSkillsPop" style="display:none"></div>
+        </span>
+        <button class="ai-hbtn" id="aiNewBtn" title="新建对话"><i class="bi bi-plus-lg"></i></button>
+        <button class="ai-hbtn" id="aiCtxBtn" title="发送时附带当前打开的文件内容作为上下文"><i class="bi bi-file-earmark-text"></i></button>
+        <button class="ai-hbtn" id="aiCfgBtn" title="AI 接口配置（在设置页）"><i class="bi bi-gear"></i></button>
+        <button class="ai-hbtn" id="aiCloseBtn" title="关闭 AI 助手"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div class="ai-hist" id="aiHist" style="display:none"></div>
+      <div class="ai-msgs scroll-thin" id="aiMsgs">
+        <div class="ai-empty" id="aiEmpty">
+          <i class="bi bi-stars"></i>
+          <div class="t">AI 助手</div>
+          <div class="s" id="aiEmptySub">先在设置里配置 OpenAI 兼容接口，即可开始对话。支持解释代码、排查报错、生成片段。</div>
+        </div>
+      </div>
+      <div class="ai-imgs" id="aiImgs" style="display:none"></div>
+      <div class="ai-input">
+        <div class="ai-files" id="aiFiles" style="display:none"></div>
+        <div id="aiText" contenteditable="true" spellcheck="false" data-placeholder="向 AI 提问…（Enter 发送，Shift+Enter 换行，可粘贴/添加图片）"></div>
+        <div class="ai-input-acts">
+          <button class="ai-hbtn" id="aiImgBtn" title="添加图片（支持多选）"><i class="bi bi-image"></i></button>
+          <div class="ai-perm-wrap">
+            <button class="ai-perm" id="aiPermBtn" title="AI 操作权限"><i class="bi bi-pencil-square"></i><span id="aiPermName">工作区内修改</span><i class="bi bi-chevron-up"></i></button>
+            <div class="ai-perm-pop" id="aiPermPop" style="display:none"></div>
+          </div>
+          <button class="ai-agent-btn" id="aiAgentBtn" title="智能体模式：让 AI 自动读文件、改文件、执行命令（需在设置里配置接口）"><i class="bi bi-robot"></i><span>智能体</span></button>
+          <button class="ai-web-btn" id="aiWebBtn" title="联网模式：开启后 AI 会自动搜索网络实时信息"><i class="bi bi-globe"></i><span>联网</span></button>
+          <span class="ai-ctx-flag" id="aiCtxFlag" style="display:none"><i class="bi bi-file-earmark-text"></i> 附带当前文件</span>
+          <span class="ai-spacer"></span>
+          <span class="ai-ctx-ring" id="aiCtxRing" title="上下文占用">
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+              <circle class="cr-bg" cx="8" cy="8" r="6.2"></circle>
+              <circle class="cr-fg" id="aiCtxArc" cx="8" cy="8" r="6.2"></circle>
+            </svg>
+          </span>
+          <div class="ai-skill-wrap">
+            <button class="ai-skill-btn" id="aiSkillBtn" title="选择 Skill（点击插入到输入框，可同时使用多个）"><i class="bi bi-magic"></i><span id="aiSkillName">技能</span><i class="bi bi-chevron-up"></i></button>
+            <div class="ai-skill-pop" id="aiSkillPop" style="display:none"></div>
+          </div>
+          <div class="ai-msel">
+            <button class="ai-msel-btn" id="aiMselBtn" title="选择接口 / 模型"><i class="bi bi-cpu"></i><span id="aiMselName">加载模型…</span><i class="bi bi-chevron-up"></i></button>
+            <div class="ai-msel-pop" id="aiMselPop" style="display:none"></div>
+          </div>
+          <button class="ai-send" id="aiStop" title="停止生成" style="display:none"><i class="bi bi-stop-fill"></i></button>
+          <button class="ai-send" id="aiSend" title="发送 (Enter)"><i class="bi bi-send-fill"></i></button>
+        </div>
+        <input type="file" id="aiFile" accept="image/png,image/jpeg,image/webp,image/gif" multiple style="display:none">
+      </div>
+      <div class="ai-stats" id="aiStats" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span class="sb-item" id="sbBranch"><i class="bi bi-git"></i> 未启用 Git</span>
+    <span class="sb-item" id="sbPos">行 1, 列 1</span>
+    <span class="sb-item" id="sbSpaces">空格: 4</span>
+    <span class="sb-item" id="sbEnc">UTF-8</span>
+    <div class="sb-right">
+      <span class="sb-item" id="sbLang">纯文本</span>
+      <span class="sb-item" id="sbPath">—</span>
+    </div>
+  </div>
+
+  <div class="ctx-menu" id="ctxMenu"></div>
+  <div class="ctx-menu" id="menuDrop"></div>
+  <div class="modal-overlay" id="modalOverlay"></div>
+  <div class="preview-overlay" id="saveConfirm"></div>
+  <div class="ide-toast" id="toast"></div>
+

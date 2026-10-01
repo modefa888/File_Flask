@@ -1,0 +1,10 @@
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    background: #1e1e1e; color: #cccccc; overflow: hidden;
+    /* 固定定位：编辑器内长行/光标会把 overflow:hidden 的页面程序化滚动，
+       导致左侧活动栏、侧边栏被推出视口（整体错位），固定视口后彻底避免 */
+    position: fixed; inset: 0; width: 100%;
+    display: flex; flex-direction: column;
+  }

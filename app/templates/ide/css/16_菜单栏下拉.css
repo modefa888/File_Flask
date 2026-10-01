@@ -1,0 +1,26 @@
+  /* ===== 菜单栏下拉 ===== */
+  .menubar span { cursor: default; padding: 3px 9px; border-radius: 4px; }
+  .menubar span:hover, .menubar span.m-open { background: #3a3a3a; color: #ffffff; }
+  .ctx-menu .mi .sc { margin-left: auto; color: #7a7a7a; font-size: 12px; padding-left: 26px; }
+  .ctx-menu .mi.disabled { opacity: .4; pointer-events: none; }
+  /* 二级子菜单（如「最近打开」） */
+  .ctx-menu .mi.has-sub { position: relative; }
+  .ctx-menu .mi .sub-arrow { margin-left: auto; color: #8a8a8a; font-size: 10px; padding-left: 12px; }
+  .ctx-menu .mi.has-sub .sc { padding-left: 10px; }
+  .ctx-menu .menu-sub {
+    display: none; position: absolute; left: calc(100% - 6px); top: -5px;
+    /* 宽度按内容撑开（不再被父项宽度挤压导致文字被省略），过长时才截断 */
+    width: max-content; min-width: 200px; max-width: min(480px, 74vw);
+    background: #252526; border: 1px solid #454545; border-radius: 5px; padding: 4px 0;
+    box-shadow: 0 4px 18px rgba(0,0,0,.5); max-height: 320px; overflow: auto; z-index: 1001;
+  }
+  /* 右侧空间不足时翻到左边展开，避免子菜单被窗口右边缘裁掉 */
+  .ctx-menu .menu-sub.open-left { left: auto; right: calc(100% - 6px); }
+  .ctx-menu .mi.has-sub:hover > .menu-sub { display: block; }
+  .ctx-menu .mi.has-sub:hover { background: #094771; color: #fff; }
+  .ctx-menu .menu-sub .mi { padding: 6px 12px; }
+  .ctx-menu .menu-sub .mi .lt-nm {
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+

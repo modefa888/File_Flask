@@ -1,0 +1,12 @@
+  /* ===== 底部面板拖动分隔条（上下拖动调整输出 / 终端面板高度） ===== */
+  .splitter-h {
+    flex: none; height: 5px; background: #1a1a1a; cursor: row-resize; position: relative;
+  }
+  .splitter-h.hidden { display: none; }
+  .splitter-h::after {
+    content: ""; position: absolute; left: 0; right: 0; top: 2px; height: 1px;
+    background: transparent; transition: background .12s;
+  }
+  .splitter-h:hover::after, .splitter-h.dragging::after { background: #007fd4; }
+  body.resizing-v { cursor: row-resize; -webkit-user-select: none; user-select: none; }
+

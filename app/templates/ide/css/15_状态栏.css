@@ -1,0 +1,19 @@
+  /* ===== 状态栏 ===== */
+  .statusbar {
+    height: 22px; flex: none; background: #007acc; color: #ffffff;
+    display: flex; align-items: center; gap: 16px; padding: 0 12px; font-size: 12px;
+  }
+  .statusbar .sb-item { display: flex; align-items: center; gap: 5px; cursor: default; }
+  .statusbar .sb-item:hover { background: rgba(255,255,255,.1); }
+  .statusbar .sb-right { margin-left: auto; display: flex; gap: 16px; }
+
+  /* 右键菜单 */
+  .ctx-menu {
+    position: fixed; z-index: 1000; background: #252526; border: 1px solid #454545; border-radius: 5px;
+    padding: 4px 0; min-width: 180px; box-shadow: 0 4px 18px rgba(0,0,0,.5); display: none; font-size: 13px;
+  }
+  .ctx-menu .mi { padding: 6px 14px; color: #cccccc; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .ctx-menu .mi:hover { background: #094771; color: #fff; }
+  .ctx-menu .mi.danger:hover { background: #5a1d1d; }
+  .ctx-menu .div { height: 1px; background: #454545; margin: 4px 0; }
+

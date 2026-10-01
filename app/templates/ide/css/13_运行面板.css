@@ -1,0 +1,63 @@
+  /* ===== 运行面板 ===== */
+  .run-list { padding-top: 6px; }
+  .run-item { display: flex; align-items: center; gap: 6px; padding: 4px 2px; font-size: 12px; color: #cccccc; }
+  .run-item .dot { width: 7px; height: 7px; border-radius: 50%; background: #6fcf8a; flex: none; }
+  .run-item .dot.off { background: #6a6a6a; }
+  .run-item .run-exe { font-family: "SF Mono", Menlo, monospace; font-size: 11px; color: #9d9d9d; }
+
+  /* 后台任务管理面板 */
+  .activitybar .act .runner-badge {
+    position: absolute; top: 4px; right: 5px; min-width: 15px; height: 15px; line-height: 15px;
+    padding: 0 4px; border-radius: 8px; background: #3fb950; color: #0d0d0d;
+    font-size: 10px; font-weight: 700; text-align: center;
+  }
+  .activitybar .act .runner-badge.git-badge { background: #c9514d; color: #fff; }
+  .runner-head { display: flex; gap: 6px; margin-bottom: 8px; }
+  .runner-head .g-btn { margin: 0; }
+  .runner-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .runner-item { background: #2a2d2e; border: 1px solid #37373d; border-left: 2px solid #6a6a6a;
+                 border-radius: 4px; padding: 8px; min-width: 0; overflow: hidden; }
+  .runner-item.running { border-left-color: #3fb950; }
+  .runner-item .ri-top { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #cccccc; min-width: 0; }
+  .runner-item .ri-top .dot { width: 7px; height: 7px; border-radius: 50%; background: #6fcf8a; flex: none; }
+  .runner-item .ri-top .dot.off { background: #6a6a6a; }
+  .runner-item .ri-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6e6e6; }
+  .runner-item .ri-tag { font-size: 10px; color: #9d9d9d; border: 1px solid #454545; border-radius: 3px; padding: 0 4px; flex: none; }
+  .runner-item .ri-cmd { margin-top: 4px; font-family: "SF Mono", Menlo, monospace; font-size: 11px;
+                         color: #9d9d9d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .runner-item .ri-meta { margin-top: 4px; font-size: 11px; color: #8a8a8a; }
+  .runner-item .ri-acts { display: flex; gap: 6px; margin-top: 7px; }
+  .runner-item .ri-acts button {
+    flex: 1; background: #37373d; border: none; color: #cccccc; cursor: pointer;
+    font-size: 11px; padding: 3px 0; border-radius: 3px; font-family: inherit;
+  }
+  .runner-item .ri-acts button:hover { background: #45494e; color: #fff; }
+  .runner-item .ri-acts button.danger:hover { background: #5a2b2b; color: #ffb0b0; }
+  .port-box { margin-bottom: 10px; border: 1px solid #37373d; border-radius: 6px; background: #252526; overflow: hidden; }
+  .port-box .pb-head { display: flex; align-items: center; padding: 6px 8px; font-size: 11px; color: #9d9d9d;
+                       border-bottom: 1px solid #333; background: #2a2d2e; }
+  .port-box .pb-head b { color: #cccccc; }
+  .port-box .pb-head button { margin-left: auto; background: none; border: none; color: #9d9d9d;
+                              cursor: pointer; font-size: 12px; padding: 2px 4px; }
+  .port-box .pb-head button:hover { color: #fff; }
+  /* 最多直观显示约 6 条，其余滚动查看 */
+  .port-box .pb-list { max-height: 306px; overflow-y: auto; overscroll-behavior: contain; }
+  .port-row { padding: 6px 9px; border-bottom: 1px solid #2d2d2d; font-size: 12px; }
+  .port-row:last-child { border-bottom: none; }
+  .port-row:hover { background: #2b2d2f; }
+  .port-row .pr-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .port-row .pr-port { font-family: "SF Mono", Menlo, monospace; font-weight: 600; color: #4fc1ff;
+                       min-width: 46px; flex: none; }
+  .port-row .pr-proto { font-size: 10px; color: #9d9d9d; border: 1px solid #454545; border-radius: 3px;
+                        padding: 0 4px; flex: none; text-transform: uppercase; }
+  .port-row .pr-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6e6e6; }
+  .port-row .pr-other { color: #8a8a8a; font-size: 11px; flex: none; }
+  .port-row .pr-cmd { margin-top: 2px; font-family: "SF Mono", Menlo, monospace; font-size: 11px;
+                      color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .port-row .pr-foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; min-width: 0; }
+  .port-row .pr-foot .pr-cmd { flex: 1; margin: 0; min-width: 0; }
+  .port-row .pr-kill { flex: none; background: #3a3d41; color: #f14c4c; border: 1px solid #454545;
+                       border-radius: 4px; font-size: 11px; padding: 1px 8px; cursor: pointer; }
+  .port-row .pr-kill:hover { background: #5a2b2b; color: #ffb0b0; }
+  .port-row .pr-kill:disabled { opacity: 0.5; cursor: default; }
+

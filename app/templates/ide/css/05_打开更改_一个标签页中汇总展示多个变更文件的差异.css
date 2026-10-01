@@ -1,0 +1,41 @@
+  /* ===== 打开更改：一个标签页中汇总展示多个变更文件的差异 ===== */
+  .all-diff-body { overflow: auto; background: #1e1e1e; }
+  .ad-loading { padding: 30px; color: #888; }
+  .ad-wrap { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+  .ad-file { border: 1px solid #333; border-radius: 4px; overflow: hidden; background: #212121; }
+  .ad-file-head { display: flex; align-items: center; gap: 6px; padding: 5px 8px;
+    background: #252526; cursor: pointer; font-size: 12.5px; color: #cccccc; }
+  .ad-file-head:hover { background: #2d2d2d; }
+  .ad-file-head .ad-tw { font-size: 11px; color: #9aa0a6; flex: none; }
+  .ad-file-head .ic { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .ad-file-head .ic .bi, .ad-file-head .ic .seti-ic { font-size: 1.4em; line-height: 1; }
+  .ad-file-head .ad-name { color: #e6e6e6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ad-file-head .ad-dir { color: #7d7d7d; font-size: 11px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+  .ad-file-head .ad-tag { font-size: 10px; padding: 0 5px; border-radius: 8px; flex: none;
+    background: #3a3d41; color: #bdbdbd; }
+  .ad-file-head .ad-tag.staged { background: #14532d; color: #8fd694; }
+  .ad-file-head .ad-tag.new { background: #123a5c; color: #7fc4ff; }
+  .ad-file-head .ad-tag.add { background: #14532d; color: #8fd694; }
+  .ad-file-head .ad-tag.mod { background: #4a3a12; color: #e2c08a; }
+  .ad-file-head .ad-tag.del { background: #5a2020; color: #f09c9c; }
+  .ad-file-head .ad-stat { margin-left: auto; font-size: 11px; flex: none; color: #9d9d9d; }
+  .ad-file-head .ad-stat .ad-add { color: #73c991; }
+  .ad-file-head .ad-stat .ad-del { color: #e06c75; }
+  .ad-file-head .ad-open { flex: none; color: #9aa0a6; padding: 0 2px; visibility: hidden; }
+  .ad-file-head:hover .ad-open { visibility: visible; }
+  .ad-file-head .ad-open:hover { color: #fff; }
+  .ad-file.collapsed .ad-file-body { display: none; }
+  /* 汇总视图里每个文件块自适应高度（不再是整屏一个文件），并各自内部滚动 */
+  .ad-file-body .sd-wrap { height: auto; margin-right: 0; }
+  .ad-file-body .sd-body { max-height: 60vh; }
+  /* 顶部工具条中的统计信息 */
+  .ad-tools .ad-count { margin-left: auto; color: #8a8a8a; font-size: 11px; white-space: nowrap; }
+  .ad-tools .ad-count .ad-add { color: #73c991; }
+  .ad-tools .ad-count .ad-del { color: #e06c75; }
+  /* 资源管理器中的 Git 状态着色 */
+  .tree-row.git-modified .nm { color: #e2c08a; }
+  .tree-row.git-untracked .nm { color: #6fcf8a; }
+  .tree-row.git-staged .nm { color: #73c991; }
+  .tree-row.tree-ignored { opacity: .5; }
+

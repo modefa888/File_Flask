@@ -1,0 +1,18 @@
+  /* ===== 窄屏自适应（避免菜单/侧栏被挤出行外） ===== */
+  @media (max-width: 1200px) {
+    .sidebar { width: 232px; }
+    .titlebar .tb-title { max-width: 30%; }
+  }
+  @media (max-width: 1000px) {
+    .sidebar { width: 200px; }
+    .menubar { gap: 8px; }
+    .menubar span { padding: 3px 6px; }
+    .titlebar .tb-title { display: none; }
+    .editorarea .breadcrumbs { padding: 0 8px; }
+  }
+  @media (max-width: 820px) {
+    .traffic { display: none; }
+    .sidebar { width: 168px; }
+    .statusbar .sb-right .sb-item:not(#sbLang) { display: none; }
+  }
+

@@ -1,0 +1,312 @@
+  /* ===== 源代码管理（Git）===== */
+  #gitPanel.active { display: flex; flex-direction: column; padding: 8px 0 0; min-height: 0; }
+  .git-head { display: flex; align-items: center; gap: 6px; padding: 0 10px 8px; font-size: 12px; color: #d4d4d4; }
+  .git-head .bi-git { color: #e2a03f; }
+  #gitBranch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-sync { color: #8a8a8a; font-size: 11px; }
+  .git-spacer { flex: 1; }
+  .g-ico {
+    background: transparent; border: none; color: #cccccc; cursor: pointer;
+    border-radius: 4px; padding: 3px 7px; font-size: 15px; line-height: 1.15; flex: none;
+  }
+  .g-ico:hover { background: #3a3d41; color: #fff; }
+  .git-commit { padding: 0 10px 8px; }
+  /* 提交信息：可自增高的多行输入框 + 右侧 AI「生成提交内容」按钮（按钮贴底，与最后一行对齐） */
+  .git-commit-msg { display: flex; gap: 6px; align-items: flex-end; }
+  .git-commit-msg #gitCommitMsg {
+    flex: 1 1 auto; min-width: 0; min-height: 30px; max-height: 132px; box-sizing: border-box;
+    background: #3c3c3c; border: 1px solid #3c3c3c; border-radius: 3px; color: #fff; font-size: 12px;
+    padding: 5px 8px; line-height: 1.5; outline: none; font-family: inherit; resize: none;
+    overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+  }
+  .git-commit-msg #gitCommitMsg:focus { border-color: #007fd4; }
+  .git-commit-msg #gitCommitMsg::placeholder { color: #8a8a8a; }
+  .g-ai-split { flex: none; display: flex; gap: 2px; }
+  .g-ai-split button {
+    height: 30px; padding: 0; cursor: pointer; background: #3a3d41; border: 1px solid #4a4a4a;
+    border-radius: 3px; color: #d7ba7d; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; line-height: 1;
+  }
+  .g-ai-split #gitGenMsg { width: 30px; }
+  .g-ai-split #gitGenMsgMore { width: 16px; font-size: 8px; color: #9aa0a6; }
+  .g-ai-split button:hover { background: #45494e; color: #ffd479; }
+  .g-ai-split button:disabled { opacity: .55; cursor: default; }
+  .g-ai-split.busy #gitGenMsg i { animation: gspin .9s linear infinite; }
+  @keyframes gspin { to { transform: rotate(360deg); } }
+  .g-btn.block { display: block; width: 100%; padding: 8px 12px; margin-top: 6px; font-size: 13px; }
+  .g-btn {
+    background: #0d7ec4; border: none; color: #fff; border-radius: 3px;
+    font-size: 12px; padding: 4px 12px; cursor: pointer; font-family: inherit; flex: none;
+  }
+  .g-btn:hover { background: #0a6aa8; }
+  .g-btn.outline { background: #3a3d41; }
+  .g-btn.outline:hover { background: #45494e; }
+  /* VS Code 式提交拆分按钮：主按钮 + 下拉箭头 */
+  .git-commit-btns { display: flex; margin-top: 6px; align-items: stretch; }
+  .git-commit-btns .g-btn { height: 30px; }
+  .g-btn.split-main { flex: 1 1 auto; border-radius: 3px 0 0 3px; font-size: 12.5px; min-width: 0; }
+  .g-btn.split-main span { display: inline; }
+  .g-btn.split-arrow { flex: 0 0 26px; border-radius: 0 3px 3px 0; padding: 0 6px;
+    background: #0a6aa8; border-left: 1px solid rgba(255,255,255,.25); display: flex; align-items: center; justify-content: center; }
+  .g-btn.split-arrow:hover { background: #0d7cc4; }
+  .g-btn.split-arrow i { transition: transform .12s ease; }
+  .g-btn.split-arrow.open i { transform: rotate(180deg); }
+  .git-list { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; display: flex; flex-direction: column; }
+  /* 更改区始终完整显示（不压缩、无内部滚动条），与参考图一致；
+     内容超出面板时由 .git-list 整体滚动。图形区占满剩余空间，最矮 140px */
+  .git-list > .git-empty, .git-list > .changes-sec { flex: 0 0 auto; }
+  .git-list > .git-graph { flex: 1 1 auto; min-height: 140px; display: flex; flex-direction: column; overflow: hidden; }
+  .git-list > .git-graph.collapsed { flex: 0 0 auto; min-height: 0; margin-top: auto; }
+  /* 折叠时隐藏工具按钮，只留 ▶ 图形 标题 + 计数 */
+  .git-list .git-graph.collapsed .g-auto, .git-list .git-graph.collapsed .git-acts { display: none; }
+  .git-graph .git-sec-head { flex: none; }
+  .git-graph .git-sec-body, .git-graph > :not(.git-sec-head) { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+  .git-sec { padding-bottom: 4px; }
+  .git-sec-head {
+    display: flex; align-items: center; gap: 6px; font-size: 12px; color: #cccccc;
+    padding: 4px 10px; cursor: pointer; user-select: none; flex-wrap: wrap;
+    min-height: 30px;                 /* 固定行高：悬停出现操作按钮时不再把行撑高（避免列表抖动） */
+  }
+  .git-sec-head:hover { background: #2a2d2e; }
+  .git-sec-head > .bi { font-size: 12px; color: #9aa0a6; }
+  .git-sec-head .git-cnt { margin-left: auto; color: #9d9d9d; font-size: 12px; }
+  /* 分组右侧的批量操作按钮：加大到易点击尺寸 */
+  .git-sec-head .git-acts button {
+    padding: 3px 6px; font-size: 15px; line-height: 1.1; border-radius: 4px; flex: none;
+  }
+  .git-file { display: flex; align-items: center; gap: 6px; padding: 5px 8px 5px 22px; font-size: 12.5px; color: #cccccc; cursor: pointer; }
+  .git-file:hover { background: #2a2d2e; }
+  .git-file .ic { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .git-file .ic .bi, .git-file .ic .seti-ic { font-size: 1.4em; line-height: 1; }
+  .git-file .gf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 文件名按 Git 状态着色：删除=红+中划线，修改=绿，新增=蓝 */
+  .git-file.st-D .gf-name { color: #e06c75; text-decoration: line-through; }
+  .git-file.st-M .gf-name { color: #98c379; }
+  .git-file.st-U .gf-name { color: #61afef; }
+  .git-file .gf-dir { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 行尾：操作按钮占用弹性空隙（靠右），状态字母固定在最右侧 */
+  .git-file .gf-acts { display: flex; gap: 2px; flex: none; visibility: hidden; margin-left: auto; }
+  .git-file .gf-st { font-size: 11px; color: #e2c08a; flex: none; }
+  .git-file:hover .gf-acts { visibility: visible; }
+  .git-file .gf-acts button {
+    background: transparent; border: none; color: #cccccc; cursor: pointer;
+    padding: 0 5px; font-size: 13px; border-radius: 4px;
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 17px; line-height: 1;
+  }
+  .git-file .gf-acts button .bi { line-height: 1; vertical-align: baseline; }
+  .git-file .gf-acts button:hover { background: #3a3d41; color: #fff; }
+  .git-empty { color: #777; font-size: 12px; padding: 14px 12px; line-height: 1.9; }
+  /* 分组标题右侧的批量操作按钮 */
+  /* 用 visibility 占位（而不是 display:none），鼠标移入不会改变行高，列表不会抖动 */
+  .git-sec-head .git-acts {
+    display: flex; gap: 6px; margin-left: 6px; align-items: center;
+    visibility: hidden;
+  }
+  .git-sec-head .git-sec-title { flex: 1; }
+  .git-sec-head:hover .git-acts, .git-graph .git-sec-head .git-acts { visibility: visible; }
+  .git-sec-head .git-acts button {
+    background: transparent; border: none; color: #cccccc; cursor: pointer;
+    padding: 0 6px; font-size: 14px; border-radius: 4px;
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 18px; line-height: 1;
+  }
+  .git-sec-head .git-acts button .bi { line-height: 1; vertical-align: baseline; }
+  .git-sec-head .git-acts button:hover { background: #3a3d41; color: #fff; }
+  /* 树形视图：目录行 + 缩进文件行 */
+  .git-dir { display: flex; align-items: center; gap: 5px; padding: 5px 8px; font-size: 12.5px; color: #cccccc; cursor: pointer; }
+  .git-dir:hover { background: #2a2d2e; }
+  .git-dir .git-dir-tw { font-size: 10px; color: #9aa0a6; }
+  .git-dir .git-dir-ic { color: #dcb67a; }
+  .git-dir .gf-dirname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-dir .gf-dot { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: #6fcf8a; flex: none; }
+  .git-dir .gf-st { margin-left: 6px; font-size: 11px; color: #8a8a8a; flex: none; }
+  /* 图形（提交历史）：VS Code 源代码管理 Graph 样式 —— 左侧垂直时间线串起提交节点 */
+  .git-commit-item { position: relative; }
+  .git-commit-row {
+    position: relative; display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px 6px 30px; font-size: 12.5px; color: #cccccc; cursor: pointer;
+  }
+  .git-commit-row:hover { background: #2a2d2e; }
+  /* 时间线：每行画上下两段，首行从节点圆心开始、末行到节点圆心结束；
+     伪元素绘制在行背景之上（::before/::after 会盖过元素自身背景），悬停高亮不会遮挡线条 */
+  .git-commit-row::before, .git-commit-row::after {
+    content: ""; position: absolute; left: 19px; width: 2px; transform: translateX(-50%);
+    background: #3794ff; opacity: .9; pointer-events: none; z-index: 1;
+  }
+  .git-commit-row::before { top: 0; height: 50%; }
+  .git-commit-row::after { top: 50%; bottom: 0; }
+  .git-commit-item.first .git-commit-row::before { display: none; }
+  .git-commit-item.last .git-commit-row::after { display: none; }
+  /* HEAD 到父提交的一段加粗高亮（当前分支游标） */
+  .git-commit-item.head .git-commit-row::after { width: 3px; opacity: 1; }
+  /* 提交节点圆点；box-shadow 用面板底色挖出与线条之间的间隙 */
+  .gc-node {
+    position: absolute; left: 19px; top: 50%; transform: translate(-50%, -50%);
+    width: 9px; height: 9px; border-radius: 50%; background: #3794ff;
+    box-shadow: 0 0 0 3px #252526; z-index: 2; flex: none; pointer-events: none;
+  }
+  /* 当前提交（HEAD）：空心圆 */
+  .git-commit-item.head .gc-node {
+    width: 12px; height: 12px; background: #252526; border: 2px solid #3794ff;
+  }
+  .git-commit-row .gc-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-commit-row .gc-author { color: #9d9d9d; font-size: 11.5px; flex: none; max-width: 45%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-commit-row.flash { background: rgba(13, 90, 138, .55); }
+  .gc-ref {
+    background: #0d5a8a; color: #ffffff; border-radius: 3px;
+    font-size: 10px; padding: 1px 6px; flex: none; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 3px; line-height: 1.4;
+  }
+  .git-commit-row .gc-ref { margin-left: auto; }
+  .gc-ref .bi { font-size: 10px; line-height: 1; }
+  .gc-ref.tag { background: #5a4f0d; }
+  /* 提交行悬停动作：复制哈希 */
+  .git-commit-row .gc-acts { margin-left: auto; display: flex; visibility: hidden; flex: none; }
+  .git-commit-row .gc-ref + .gc-acts { margin-left: 4px; }
+  .git-commit-row:hover .gc-acts { visibility: visible; }
+  .git-commit-row .gc-acts button {
+    background: transparent; border: none; color: #cccccc; cursor: pointer;
+    padding: 0 4px; font-size: 13px; border-radius: 4px; height: 18px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .git-commit-row .gc-acts button:hover { background: #3a3d41; color: #fff; }
+  /* 展开提交后：该提交的变更文件清单（时间线从左侧穿过） */
+  .git-commit-files { position: relative; padding-bottom: 4px; }
+  .git-commit-files::before {
+    content: ""; position: absolute; left: 19px; top: 0; bottom: 0; width: 2px; transform: translateX(-50%);
+    background: #3794ff; opacity: .9; pointer-events: none; z-index: 1;
+  }
+  .git-commit-item.last .git-commit-files::before { display: none; }
+  .git-commit-file { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 34px; font-size: 12.5px; color: #cccccc; cursor: pointer; }
+  .git-commit-file:hover { background: #2a2d2e; }
+  .git-commit-file .ic { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .git-commit-file .ic .bi, .git-commit-file .ic .seti-ic { font-size: 1.4em; line-height: 1; }
+  .git-commit-file .gcf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-commit-file .gcf-dir { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-commit-file .gf-st { margin-left: auto; font-size: 11px; color: #e2c08a; flex: none; }
+  .git-commit-file .gcf-msg { padding: 6px 12px 6px 34px; color: #777; font-size: 12px; }
+  /* 图形区块的工具栏 */
+  .git-graph .git-sec-head .g-auto {
+    display: inline-flex; align-items: center; gap: 3px; color: #9d9d9d;
+    font-size: 12px; margin-left: 4px; cursor: default;
+  }
+  /* 图形区块头：标题 / 自动 / 工具栏 / 计数 全部同一行，禁止换行 */
+  .git-graph-head { flex-wrap: nowrap; gap: 3px; padding-left: 8px; padding-right: 8px; }
+  .git-graph-head .git-acts { display: flex; margin-left: auto; gap: 3px; flex: none; }
+  .git-graph-head .git-acts button { font-size: 13px; padding: 1px 4px; flex: none; }
+  .git-graph-head .git-cnt { margin-left: 3px; flex: none; }
+  /* 侧栏变窄时收起「自动」标记，给工具栏腾出空间（仍保持一行）
+     注意：选择器要带上 .git-graph 才能压过后面的基础规则（同为 3 个类且在此之后） */
+  #sidebar { container-type: inline-size; }
+  @container (max-width: 330px) {
+    .git-graph .git-sec-head .g-auto { display: none; }
+  }
+  .git-graph .git-acts button.on { color: #4fc1ff; }
+  /* 提交悬停信息卡（模拟 VS Code 图形视图悬停详情） */
+  .git-hover-card {
+    position: fixed; z-index: 9000; max-width: 460px; padding: 10px 12px;
+    background: #252526; border: 1px solid #454545; border-radius: 6px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .5); font-size: 12.5px; color: #cccccc;
+  }
+  .git-hover-card .ghc-author { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: #e8e8e8; font-weight: 600; }
+  .git-hover-card .ghc-author .bi { color: #4fc1ff; font-weight: 400; }
+  .git-hover-card .ghc-time { color: #9d9d9d; font-weight: 400; }
+  .git-hover-card .ghc-msg { margin-top: 6px; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .git-hover-card .ghc-stats { margin-top: 6px; color: #b8b8b8; }
+  .git-hover-card .ghc-stats .ins { color: #81b88b; }
+  .git-hover-card .ghc-stats .del { color: #c74e39; }
+  .git-hover-card .ghc-hash { margin-top: 6px; color: #9d9d9d; cursor: pointer;
+    font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .git-hover-card .ghc-hash:hover { color: #4fc1ff; }
+  /* 提交内文件：树形/列表 */
+  .git-commit-dir { display: flex; align-items: center; gap: 5px; padding: 2px 8px 2px 34px; font-size: 12px; color: #cccccc; cursor: pointer; }
+  .git-commit-dir:hover { background: #2a2d2e; }
+  .git-commit-dir .gcf-tw { font-size: 10px; color: #9aa0a6; }
+  .git-commit-dir .gcf-ic { color: #dcb67a; }
+  /* 差异视图顶部的“差异 / 源码”切换条 */
+  .cm-host.diff-host.active { display: flex; flex-direction: column; }
+  .diff-tools {
+    flex: none; display: flex; align-items: center; gap: 6px; padding: 4px 8px;
+    background: #252526; border-bottom: 1px solid #1a1a1a;
+  }
+  .diff-tools .dt-label { color: #8a8a8a; font-size: 12px; margin-right: 2px; }
+  .diff-tools button {
+    background: transparent; border: 1px solid transparent; color: #bbbbbb;
+    font-size: 12px; padding: 2px 10px; border-radius: 3px; cursor: pointer; font-family: inherit;
+  }
+  .diff-tools button:hover { background: #3a3d41; color: #fff; }
+  .diff-tools button.active { background: #0d5a8a; color: #ffffff; }
+  /* 工具条右侧：本次差异的增删行数（+新增 / −删除） */
+  .diff-tools .dt-stat { margin-left: auto; padding-left: 10px; font-size: 11.5px;
+    white-space: nowrap; color: #8a8a8a; font-variant-numeric: tabular-nums; }
+  .diff-tools .dt-stat .dt-add { color: #73c991; }
+  .diff-tools .dt-stat .dt-del { color: #e06c75; }
+  .diff-cm { flex: 1; min-height: 0; position: relative; }
+  /* 尚未初始化仓库时，只显示提示与初始化按钮，提交区/暂存全部按钮隐藏 */
+  #gitPanel.not-repo .git-commit,
+  #gitPanel.not-repo #gitStageAll { display: none; }
+  /* 分栏差异视图（VS Code 风格：左旧右新、逐行对齐，缺失一侧用斜纹占位） */
+  /* .sd-wrap 只负责整体布局：上 .sd-body 是代码的滚动容器（右侧预留 14px 给全局显示区块），
+     下 .sd-sbars 是左右两条自定义水平滚动条 */
+  .sd-wrap { height: 100%; background: #212121; margin-right: 14px;
+    display: flex; flex-direction: column; min-width: 0; }
+  .sd-body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+  /* --sd-txl / --sd-txr：左右两侧各自的水平偏移量，由底部自定义滚动条写入 */
+  .sd-grid { display: grid; grid-template-columns: 1fr 1fr; min-width: 860px; width: 100%;
+    --sd-txl: 0px; --sd-txr: 0px; }
+  .sd-head { position: sticky; top: 0; z-index: 2; padding: 5px 12px; background: #252526;
+    color: #bbbbbb; font-size: 12px; border-bottom: 1px solid #333; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  /* 代码样式对齐「源码」视图（CodeMirror + material-darker）：同字体 / 字号 / 行高 / 前景色 */
+  .sd-cell { display: flex; align-items: flex-start; min-width: 0;
+    font-family: "SF Mono", "Menlo", Consolas, monospace;
+    font-size: var(--cm-font-size, 13px); line-height: normal; }
+  .sd-cell .sd-ln { flex: none; width: 48px; padding-right: 8px; text-align: right;
+    color: #545454; user-select: none; }
+  .sd-cell .sd-tx { flex: 1 1 auto; padding: 0 5px; white-space: pre; overflow: hidden; color: #eeffff; }
+  /* 配色对齐 VS Code Dark+：insertedLineBackground #9bb95533 / removedLineBackground #ff000033 */
+  .sd-cell.add { background: rgba(155, 185, 85, .2); }
+  .sd-cell.del { background: rgba(255, 0, 0, .2); }
+  .sd-cell.fill { background: rgba(96, 96, 96, .16); }
+  /* 行内词级高亮（对应 VS Code 的 insertedTextBackground / removedTextBackground） */
+  .sd-cell.add .sd-wd { background: rgba(155, 185, 85, .4); border-radius: 2px; }
+  .sd-cell.del .sd-wd { background: rgba(255, 0, 0, .4); border-radius: 2px; }
+  /* 未更改区域折叠条（对应 VS Code 的 unchanged region），点击展开 */
+  .sd-gap { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px;
+    height: 20px; padding: 0 10px; background: #252526; cursor: pointer;
+    border-top: 1px solid #2a2a2a; border-bottom: 1px solid #2a2a2a;
+    color: #8a8a8a; font-size: 11px; user-select: none; }
+  .sd-gap:hover { background: #2d2d2d; color: #e0e0e0; }
+  .sd-gap .gd-ic { font-size: 13px; line-height: 1; letter-spacing: -1px; }
+  .sd-gap .gd-n { display: none; }
+  .sd-gap:hover .gd-n { display: inline; }
+  .sd-cell.sd-current { outline: 1px solid #0d5a8a; outline-offset: -1px;
+    box-shadow: inset 2px 0 0 #2979ff; }
+  /* 差异代码语法高亮：token 级着色，覆盖单元格默认的单色文字。
+     .sd-code 设为块级 max-content 宽度，才能用 transform 做整体水平平移（长行左右滚动） */
+  .sd-cell .sd-tx .sd-code { color: inherit; white-space: pre; display: block; width: max-content; }
+  .sd-cell.sd-cl .sd-tx .sd-code { transform: translateX(var(--sd-txl, 0px)); }
+  .sd-cell.sd-cr .sd-tx .sd-code { transform: translateX(var(--sd-txr, 0px)); }
+  /* 差异行的 .cm-* 配色不再单独定义：.sd-grid 带 cm-s-material-darker 类，
+     直接复用 CodeMirror 主题，与「源码」视图完全一致 */
+  /* 底部自定义水平滚动条：左右各一条，贴住差异区底部，拖动/点击滚动该侧被裁剪的长行 */
+  .sd-sbars { flex: none; position: relative; height: 12px; overflow: hidden;
+    background: #1e1e1e; border-top: 1px solid #333; }
+  .sd-sbar { position: absolute; top: 0; bottom: 0; padding: 3px 4px; cursor: pointer; }
+  .sd-sb-thumb { position: absolute; top: 3px; height: 5px; border-radius: 3px;
+    background: rgba(255, 255, 255, .22); pointer-events: none; }
+  .sd-sbar:hover .sd-sb-thumb { background: rgba(255, 255, 255, .34); }
+  .sd-sbar.dragging .sd-sb-thumb { background: rgba(255, 255, 255, .48); }
+  /* 全局显示区块：贴在差异区最右侧（代码区右侧的自动滚动条在它左边），
+     红/绿色块标记增删位置，点击/拖拽跳转到对应修改处 */
+  .diff-overview { position: absolute; top: 0; right: 0; bottom: 0; width: 14px; z-index: 6;
+    background: #1e1e1e; border-left: 1px solid #333; cursor: pointer;
+    overflow: hidden; }
+  .do-mark { position: absolute; left: 1px; right: 1px; opacity: .9; }
+  .do-mark.add { background: #9bb955; }
+  .do-mark.del { background: #ff5c5c; }
+  .do-mark.mod { background: #d29922; }
+  .do-thumb { position: absolute; left: 0; right: 0; background: rgba(255, 255, 255, .13);
+    border: 1px solid rgba(255, 255, 255, .42); pointer-events: none; }

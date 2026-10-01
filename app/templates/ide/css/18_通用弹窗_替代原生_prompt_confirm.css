@@ -1,0 +1,77 @@
+  /* ===== 通用弹窗（替代原生 prompt/confirm） ===== */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none;
+    align-items: center; justify-content: center; z-index: 2500;
+  }
+  .modal-overlay.show { display: flex; }
+  .ide-modal {
+    background: #252526; border: 1px solid #454545; border-radius: 8px; width: 400px; max-width: 92vw;
+    box-shadow: 0 10px 40px rgba(0,0,0,.6); animation: pop .15s ease; overflow: hidden;
+  }
+  .ide-modal.wide { width: 760px; }
+  .ide-modal.wide .m-body { max-height: 62vh; overflow: auto; }
+  /* 轻量二次确认悬浮框（Git 面板等高频危险操作） */
+  .ui-pop-confirm { position: fixed; z-index: 10060; width: 250px; background: #252526; border: 1px solid #454545;
+    border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.55); padding: 10px 12px; animation: pop .12s ease; }
+  .ui-pop-confirm .upc-t { font-size: 12.5px; font-weight: 600; color: #e2e2e2; display: flex; align-items: center; gap: 6px; }
+  .ui-pop-confirm .upc-t i { flex: none; }
+  .ui-pop-confirm.danger .upc-t i { color: #e06c75; }
+  .ui-pop-confirm .upc-m { font-size: 11.5px; color: #9d9d9d; margin: 6px 0 10px; line-height: 1.55; word-break: break-all; }
+  .ui-pop-confirm .upc-f { display: flex; justify-content: flex-end; gap: 8px; }
+  .ui-pop-confirm .upc-no { background: transparent; border: 1px solid #3c3c3c; color: #bbbbbb; border-radius: 5px;
+    padding: 3px 12px; font-size: 11.5px; cursor: pointer; }
+  .ui-pop-confirm .upc-no:hover { border-color: #565656; color: #dddddd; }
+  .ui-pop-confirm .upc-ok { background: #0a6aa8; border: none; color: #ffffff; border-radius: 5px;
+    padding: 3px 12px; font-size: 11.5px; cursor: pointer; }
+  .ui-pop-confirm .upc-ok:hover { background: #0d7cc4; }
+  .ui-pop-confirm.danger .upc-ok { background: #a33b3b; }
+  .ui-pop-confirm.danger .upc-ok:hover { background: #c04646; }
+  /* 规则列表多列排版 */
+  .rule-head { font-size: 12px; font-weight: 600; color: #dddddd; margin: 12px 0 4px; }
+  .rule-block:first-child .rule-head { margin-top: 0; }
+  .rule-list { columns: 3; column-gap: 22px; margin: 0; padding-left: 18px; font-size: 12px; color: #b8b8b8; }
+  .rule-list li { break-inside: avoid; margin-bottom: 3px; }
+  .rule-note { margin-top: 14px; color: #777; font-size: 11px; }
+  /* 键盘快捷方式：分组 + 键位/说明两列表格 */
+  .kb-group { margin-bottom: 14px; }
+  .kb-group:last-child { margin-bottom: 2px; }
+  .kb-head { font-size: 12px; font-weight: 600; color: #dddddd; margin-bottom: 6px; }
+  .kb-grid { display: grid; grid-template-columns: minmax(120px, auto) 1fr; gap: 4px 14px; font-size: 12px; align-items: baseline; }
+  .kb-grid kbd {
+    justify-self: start; background: #333333; border: 1px solid #454545; border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 7px; font-size: 11px; font-family: "SF Mono", Menlo, Consolas, monospace;
+    color: #cccccc; white-space: nowrap;
+  }
+  .kb-grid span { color: #b8b8b8; }
+  .ide-modal .m-title {
+    padding: 12px 16px; font-size: 13px; font-weight: 600; color: #ffffff;
+    border-bottom: 1px solid #333333; display: flex; align-items: center; gap: 8px;
+  }
+  .ide-modal .m-title .bi { color: #4fc1ff; }
+  .ide-modal.danger .m-title .bi { color: #f48771; }
+  .ide-modal .m-body { padding: 16px; font-size: 13px; color: #cccccc; }
+  .ide-modal .m-msg { white-space: pre-wrap; line-height: 1.7; }
+  .ide-modal input:not([type="checkbox"]),
+  .ide-modal textarea {
+    width: 100%; background: #1e1e1e; border: 1px solid #454545; color: #ffffff;
+    padding: 7px 10px; border-radius: 4px; font-size: 13px; outline: none; font-family: inherit;
+  }
+  .ide-modal input:not([type="checkbox"]):focus,
+  .ide-modal textarea:focus { border-color: #0098ff; }
+  .ide-modal textarea { min-height: 120px; resize: vertical; margin-top: 10px; }
+  .ide-modal .m-row { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+  .ide-modal .m-row:first-child { margin-top: 0; }
+  .ide-modal .m-row label { font-size: 12px; color: #aaaaaa; }
+  .ide-modal .m-row .hint { font-size: 11px; color: #777; margin-top: 2px; }
+  .ide-modal .m-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 16px; }
+  .ide-modal .m-foot button { padding: 6px 16px; border-radius: 4px; border: none; cursor: pointer; font-size: 13px; }
+  .ide-modal .m-foot .m-cancel { background: #3a3d41; color: #cccccc; }
+  .ide-modal .m-foot .m-cancel:hover { background: #45494e; }
+  .ide-modal .m-foot .m-ok { background: #0d7ec4; color: #ffffff; }
+  .ide-modal .m-foot .m-ok:hover { background: #0a6aa8; }
+  .ide-modal .m-foot .m-gen { background: #2d8a4e; color: #ffffff; }
+  .ide-modal .m-foot .m-gen:hover { background: #237240; }
+  .ide-modal .m-foot .m-gen:disabled { background: #3d5c47; color: #a0a0a0; cursor: not-allowed; }
+  .ide-modal.danger .m-foot .m-ok { background: #a1260d; }
+  .ide-modal.danger .m-foot .m-ok:hover { background: #c13a17; }
+  .ide-modal textarea.req { min-height: 56px; }

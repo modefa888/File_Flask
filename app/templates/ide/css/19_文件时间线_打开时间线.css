@@ -1,0 +1,38 @@
+  /* ===== 文件时间线（打开时间线） ===== */
+  .timeline { display: flex; flex-direction: column; gap: 2px; }
+  .tl-item { display: flex; gap: 10px; padding: 7px 10px; border-radius: 5px; cursor: pointer; }
+  .tl-item:hover { background: #2a2d2e; }
+  .tl-dot { width: 8px; height: 8px; border-radius: 50%; background: #0d7ec4; margin-top: 6px; flex: none; }
+  .tl-main { min-width: 0; }
+  .tl-sub { color: #e6e6e6; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tl-meta { color: #8a8a8a; font-size: 12px; margin-top: 2px; }
+
+  /* 保存确认弹窗 */
+  .preview-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 2000;
+  }
+  .preview-overlay.show { display: flex; }
+  .confirm-modal { background: #fff; border-radius: 10px; width: 360px; max-width: 92vw; overflow: hidden; animation: pop .15s ease; }
+  @keyframes pop { from { transform: scale(.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .confirm-title { padding: 13px 18px; font-weight: 600; color: #1a202c; background: #fff7ed; border-bottom: 1px solid #fed7aa; display: flex; gap: 8px; align-items: center; }
+  .confirm-title .bi { color: #f59e0b; }
+  .confirm-body { padding: 18px; color: #475569; font-size: 14px; }
+  .confirm-stats { display: flex; gap: 14px; margin-top: 10px; font-weight: 700; font-family: "SF Mono", Menlo, monospace; }
+  .confirm-stats .cs-add { color: #15803d; } .confirm-stats .cs-del { color: #b91c1c; }
+  .confirm-sub { margin-top: 8px; color: #94a3b8; font-size: 12px; }
+  .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 13px 18px; background: #f8fafc; border-top: 1px solid #e2e8f0; }
+  .confirm-actions button { padding: 6px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; }
+  .confirm-actions .cancel { background: #e2e8f0; color: #475569; }
+  .confirm-actions .cancel:hover { background: #cbd5e1; }
+  .confirm-actions .ok { background: #2563eb; color: #fff; }
+  .confirm-actions .ok:hover { background: #1d4ed8; }
+
+  /* Toast */
+  .ide-toast {
+    position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+    background: #333; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; z-index: 3000;
+    box-shadow: 0 6px 20px rgba(0,0,0,.4); opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  .ide-toast.show { opacity: 1; }
+  .ide-toast.ok { background: #1f7a3d; } .ide-toast.err { background: #a33; } .ide-toast.warn { background: #9a6700; }
+

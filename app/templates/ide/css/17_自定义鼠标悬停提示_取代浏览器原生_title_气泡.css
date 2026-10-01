@@ -1,0 +1,11 @@
+  /* ===== 自定义鼠标悬停提示（取代浏览器原生 title 气泡） =====
+     统一样式：出现在元素下方，放不下时自动翻到上方 */
+  .ide-tip {
+    position: fixed; z-index: 3000; max-width: 340px; padding: 5px 9px;
+    background: #252526; color: #e6e6e6; border: 1px solid #454545; border-radius: 4px;
+    font-size: 12px; line-height: 1.5; white-space: pre-line; word-break: break-word;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .5);
+    pointer-events: none; opacity: 0; transition: opacity .12s ease;
+  }
+  .ide-tip.show { opacity: 1; }
+

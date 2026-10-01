@@ -1,0 +1,20 @@
+  /* ===== 自定义滚动条（全局生效）=====
+     浏览器默认滚动条在暗色主题下是白色的，很突兀（安装日志、终端输出等都会出现），
+     这里统一换成与主题一致的深色细条：滑块 #424242（悬停变亮），轨道透明。
+     Firefox 走 scrollbar-width / scrollbar-color。 */
+  html { scrollbar-width: thin; scrollbar-color: #424242 transparent; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: #424242; border-radius: 5px;
+    border: 2px solid transparent; background-clip: content-box;   /* 视觉上更细，接近 VS Code */
+  }
+  ::-webkit-scrollbar-thumb:hover { background: #5a5a5a; border: 2px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:active { background: #6e6e6e; border: 2px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
+
+  .scroll-thin::-webkit-scrollbar { width: 10px; height: 10px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #424242; border-radius: 5px; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+

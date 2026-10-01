@@ -1,0 +1,74 @@
+  /* ===== 搜索面板（内容搜索 / 文件名搜索）===== */
+  #searchPanel { padding: 10px 8px 0; display: none; flex-direction: column; min-height: 0; }
+  #searchPanel.active { display: flex; }
+  .s-modes { display: flex; gap: 0; margin: 0 2px 8px; background: #2d2d2d; border-radius: 4px; overflow: hidden; }
+  .s-mode {
+    flex: 1; background: transparent; border: none; color: #9d9d9d; cursor: pointer;
+    font-size: 12px; padding: 5px 0; font-family: inherit;
+  }
+  .s-mode:hover { color: #ffffff; }
+  .s-mode.active { background: #0d5a8a; color: #ffffff; }
+  .s-replace-row { display: flex; gap: 6px; padding-top: 6px; align-items: center; }
+  .s-replace { flex: 1; min-width: 0; }
+  .s-btn {
+    background: #0d7ec4; border: none; color: #fff; border-radius: 3px;
+    font-size: 12px; padding: 4px 10px; cursor: pointer; flex: none; font-family: inherit;
+  }
+  .s-btn:hover { background: #0a6aa8; }
+  /* 文件名模式：内容搜索专属控件隐藏 */
+  #searchPanel.mode-name #grepWord,
+  #searchPanel.mode-name #grepRegex,
+  #searchPanel.mode-name .s-replace-row { display: none; }
+  .s-tools { display: flex; gap: 6px; padding: 8px 2px 0; }
+  .s-opt {
+    background: #3a3d41; border: 1px solid transparent; color: #b0b0b0; cursor: pointer;
+    border-radius: 10px; font-size: 11px; padding: 2px 9px;
+  }
+  .s-opt:hover { color: #fff; }
+  .s-opt.active { background: #0d5a8a; color: #ffffff; }
+  .s-hint { color: #8a8a8a; font-size: 11px; padding: 8px 2px 6px; line-height: 1.6; }
+  .s-hint.err { color: #e08a8a; }
+  .s-results { flex: 1; overflow: auto; min-height: 0; }
+  .sres {
+    display: flex; align-items: flex-start; gap: 6px; padding: 4px 6px; border-radius: 4px;
+    cursor: pointer; font-size: 13px; color: #d4d4d4;
+  }
+  .sres:hover { background: #2a2d2e; }
+  .sres .ic { color: #9aa0a6; width: 16px; flex: none; text-align: center; margin-top: 1px; }
+  .sres-main { min-width: 0; flex: 1; }
+  .sres-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sres-path { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 内容搜索结果：按文件分组 */
+  .gfile { margin-bottom: 2px; }
+  .gf-head {
+    display: flex; align-items: center; gap: 5px; padding: 4px 6px; cursor: pointer;
+    font-size: 12px; color: #d4d4d4; border-radius: 4px; position: relative;
+  }
+  .gf-head:hover { background: #2a2d2e; }
+  .gf-twist { font-size: 10px; color: #9aa0a6; }
+  .gf-head .ic { color: #9aa0a6; }
+  .gf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gf-rel { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gf-count {
+    margin-left: auto; background: #4d4d4d; color: #ffffff; border-radius: 9px;
+    font-size: 10px; padding: 1px 6px; flex: none;
+  }
+  .gf-rep {
+    background: transparent; border: none; color: #9d9d9d; cursor: pointer;
+    font-size: 12px; padding: 1px 4px; border-radius: 3px; flex: none; display: none;
+  }
+  .gf-head:hover .gf-rep { display: inline-block; }
+  .gf-rep:hover { background: #3a3d41; color: #fff; }
+  .gf-body { display: block; }
+  .gfile.collapsed .gf-body { display: none; }
+  .gm {
+    display: flex; gap: 8px; padding: 2px 6px 2px 22px; cursor: pointer;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; color: #bdbdbd;
+    white-space: pre; overflow: hidden;
+  }
+  .gm:hover { background: #2a2d2e; }
+  .gm-ln { color: #6f6f6f; min-width: 34px; text-align: right; flex: none; }
+  .gm-tx { overflow: hidden; text-overflow: ellipsis; }
+  .gm mark { background: #ff9632; color: #1f1f1f; font-weight: 600; border-radius: 2px; }
+

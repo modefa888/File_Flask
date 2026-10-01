@@ -1,0 +1,892 @@
+(function () {
+  "use strict";
+  const BASE = "/static/vendor/codemirror/mode/";
+  /* ---------- 路径混淆 + 本地持久化 ----------
+     1) 用 ?path=<明文> 打开 IDE 后，把明文 URL 立即替换成 ?id=<混淆token>，地址栏不再暴露路径；
+     2) 明文路径写入 localStorage，下次访问 /ide 不带参数时自动恢复上次的文件夹。
+     混淆方式：字符 code 加 XOR 偏移 + Base64。纯前端、无密钥，仅用于视觉遮挡。 */
+  const LAST_PATH_KEY = "ide_last_path";
+  const PATH_OBFUS_KEY = 0x5f;
+  function obfuscatePath(raw) {
+    try {
+      const s = String(raw || "").replace(/\/+$/, "");
+      if (!s) return "";
+      const bytes = new Uint8Array(s.length);
+      for (let i = 0; i < s.length; i++) { bytes[i] = (s.charCodeAt(i) ^ PATH_OBFUS_KEY) & 0xff; }
+      return btoa(String.fromCharCode.apply(null, Array.from(bytes)));
+    } catch (e) { return ""; }
+  }
+  function deobfuscatePath(id) {
+    try {
+      const bytes = Uint8Array.from(atob(String(id || "")), c => c.charCodeAt(0));
+      let s = "";
+      for (let i = 0; i < bytes.length; i++) { s += String.fromCharCode(bytes[i] ^ PATH_OBFUS_KEY); }
+      return s.replace(/\/+$/, "");
+    } catch (e) { return ""; }
+  }
+  // 工作区根目录：?path 优先，其次 localStorage（不带参数访问时自动恢复上次项目）；
+  // 去掉尾部斜杠，否则文件树会拼出 "a//b" 这种路径，与搜索/新建等入口的标准路径对不上，
+  // 同一个文件会被当成两个文件重复打开
+  const ROOT = (() => {
+    let raw = (new URLSearchParams(location.search).get("path") || "").trim();
+    if (!raw) {
+      try { raw = localStorage.getItem(LAST_PATH_KEY) || ""; } catch (e) {}
+    }
+    return raw.length > 1 ? raw.replace(/\/+$/, "") : raw;
+  })();
+  // 打开 IDE 后：把路径持久化到 localStorage，并把 URL 替换成 ?id=<token>（不显示明文路径）
+  if (ROOT) {
+    try { localStorage.setItem(LAST_PATH_KEY, ROOT); } catch (e) {}
+    try {
+      const tok = obfuscatePath(ROOT);
+      if (tok) history.replaceState(null, "", "/ide?id=" + encodeURIComponent(tok));
+    } catch (e) {}
+  }
+
+  const $ = (id) => document.getElementById(id);
+  const explorerPanel = $("explorerPanel");
+  const welcome = $("welcome");
+  // 分屏：动态多组。tab.group 为组 id（递增不复用），组按 id 升序横向排列，空组自动消失
+  const edGroups = $("edGroups");
+  let curGroup = 0;                  // 焦点所在组：新打开的文件进入该组
+  let groupBundles = new Map();      // gid -> { el, tabbar, wrap }
+  const groupActive = new Map();     // gid -> 该组当前显示的标签
+  let builtGroupKey = "\u0000init";
+
+  // 打开的标签页
+  const tabs = [];         // {path, name, host, cm, original, dirty}
+  let active = null;
+
+  /* ---------- 工具 ---------- */
+  function toast(msg, type) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.className = "ide-toast show " + (type || "");
+    setTimeout(() => { t.className = "ide-toast " + (type || ""); }, 2200);
+  }
+  function esc(s) { s = s == null ? "" : String(s); return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function getExt(name) { const i = name.lastIndexOf("."); return i >= 0 ? name.substring(i + 1).toLowerCase() : ""; }
+  function baseName(p) { p = String(p == null ? "" : p); return p.split("/").pop() || p; }
+  function dirName(p) { const i = p.lastIndexOf("/"); return i > 0 ? p.substring(0, i) : (i === 0 ? "/" : p); }
+
+  /* ---------- 文件树 ---------- */
+  // IDE 树中隐藏的目录：各类语言/工具的依赖与缓存目录（对任何项目生效）
+  // 「显示全部」开关：开启后依赖目录（node_modules 等）也会显示，可手动展开，「全部展开」会跳过
+  let showAllFiles = false;
+  // 「显示隐藏文件」开关：开启后以点开头的文件（.gitignore、.env 等）也会显示
+  let showHidden = false;
+  const TREE_IGNORE = new Set([
+    "node_modules",                      // Node.js / 前端
+    "__pycache__", ".venv", "venv", ".pytest_cache", ".mypy_cache",  // Python
+    "vendor", "Pods",                    // PHP Composer / Go / iOS CocoaPods
+    ".gradle",                           // Java / Gradle
+    ".terraform",                        // Terraform
+    ".git", ".svn", ".hg",               // 版本控制元数据
+    ".idea", ".vscode",                  // 编辑器配置
+  ]);
+  // 特殊命名的中文说明从 /static/special_hints.json 加载（便于单独维护）
+  let SPECIAL_NAME_HINTS = {};
+
+  async function apiFiles(path, showHidden) {
+    const url = "/api/files?path=" + encodeURIComponent(path) + (showHidden ? "&hidden=1" : "");
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    return d;
+  }
+  // 加载特殊命名 → 中文含义的映射表（独立 JSON，便于维护）
+  async function loadSpecialHints() {
+    try {
+      const r = await fetch("/static/special_hints.json");
+      if (r.ok) SPECIAL_NAME_HINTS = await r.json();
+    } catch (e) { /* 加载失败时维持空映射，即不显示说明 */ }
+  }
+  async function loadChildren(path, container, depth) {
+    const spinner = document.createElement("div");
+    spinner.className = "tree-row"; spinner.style.paddingLeft = (depth * 14 + 8) + "px";
+    spinner.innerHTML = '<span class="twist"></span><span class="ic"><i class="bi bi-hourglass-split"></i></span><span class="nm">加载中…</span>';
+    container.appendChild(spinner);
+    try {
+      const d = await apiFiles(path, showHidden);
+      spinner.remove();
+      // 剔除依赖 / 环境目录（任何项目通用）：node_modules、venv、__pycache__ 等
+      const items = (d.items || [])
+        .filter(it => showAllFiles || !TREE_IGNORE.has(it.name))
+        .sort((a, b) => (b.is_dir - a.is_dir) || a.name.localeCompare(b.name, "zh"));
+      if (!items.length) {
+        const e = document.createElement("div");
+        e.className = "tree-row"; e.style.paddingLeft = (depth * 14 + 26) + "px"; e.style.color = "#666";
+        e.innerHTML = '<span class="nm">空文件夹</span>';
+        container.appendChild(e);
+        return;
+      }
+      items.forEach(it => renderNode(it, container, depth + 1));
+      applyGitDecorations(gitState.last);          // 新加载的节点也套用 Git 状态着色
+    } catch (e) {
+      spinner.remove();
+      const er = document.createElement("div");
+      er.className = "tree-row"; er.style.paddingLeft = (depth * 14 + 26) + "px"; er.style.color = "#c66";
+      er.innerHTML = '<span class="nm">' + esc(e.message || "加载失败") + "</span>";
+      container.appendChild(er);
+    }
+  }
+  /* Seti 官方文件图标（microsoft/vscode theme-seti，本地化于 /static/vendor/seti/）：
+     文件按官方映射渲染字形+官方配色；文件夹用 bootstrap 近似 VS Code 默认样式 */
+  const _si = (cls, color) => '<i class="bi ' + cls + '" style="color:' + color + '"></i>';
+  let SETI = null;
+  fetch("/static/vendor/seti/seti-icons.json").then(r => r.ok ? r.json() : Promise.reject(new Error("http " + r.status))).then(j => {
+    if (!j || !j.iconDefinitions) return;
+    SETI = { defs: j.iconDefinitions, names: j.fileNames || {}, exts: j.fileExtensions || {},
+             langs: j.languageIds || {}, fileDef: j.file || "_default" };
+    // 仅当树已渲染（首屏用了兜底图标）时才重绘；启动早期 ROOT/树未就绪则跳过，
+    // 否则会与 initTree 并发建树（这正是树显示两遍的根因）
+    if (typeof refreshTree === "function" && typeof ROOT !== "undefined" && ROOT &&
+        explorerPanel.querySelector(".tree-children")) {
+      try { refreshTree(); } catch (e) {}
+    }
+  }).catch(() => {});
+  const SETI_LANG = {   // 常见扩展名 → 语言 ID（vs-seti 主题按 languageId 映射）
+    py: "python", pyw: "python", ipy: "python",
+    js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript",
+    ts: "typescript", tsx: "typescript",
+    html: "html", htm: "html", css: "css", scss: "scss", sass: "sass", less: "less",
+    json: "json", md: "markdown", markdown: "markdown",
+    yml: "yaml", yaml: "yaml", sh: "shellscript", bash: "shellscript", zsh: "shellscript",
+    xml: "xml", xsl: "xml",
+    gitignore: "ignore", gitattributes: "ignore", gitmodules: "ignore", dockerignore: "ignore"
+  };
+  function iconFor(name, isDir) {
+    if (isDir) return _si("bi-folder2", "#c09553");
+    const lower = name.toLowerCase();
+    const ext = getExt(lower);
+    if (SETI) {
+      let def = SETI.defs[SETI.names[lower]] || SETI.defs[SETI.exts[ext]];
+      if (!def && SETI_LANG[ext]) def = SETI.defs[SETI.langs[SETI_LANG[ext]]];
+      if (def && def.fontCharacter) {
+        const code = String(def.fontCharacter).replace(/\\+/g, "");
+        return '<span class="seti-ic" style="color:' + (def.fontColor || "#9da8ab") + '">&#x' + code + ";</span>";
+      }
+    }
+    // bootstrap 兜底（映射未加载或未命中时）
+    if (lower.endsWith("requirements.txt")) return _si("bi-file-earmark-text", "#6d8086");
+    if (lower.startsWith("dockerfile")) return _si("bi-file-earmark-code", "#438eec");
+    if (ext === "spec") return _si("bi-gear", "#a074c4");
+    const map = {
+      py:    ["bi-filetype-py", "#519aba"],
+      html:  ["bi-filetype-html", "#e37933"], htm: ["bi-filetype-html", "#e37933"],
+      css:   ["bi-filetype-css", "#519aba"], scss: ["bi-filetype-css", "#e37933"], less: ["bi-filetype-css", "#519aba"],
+      js:    ["bi-filetype-js", "#cbcb41"], mjs: ["bi-filetype-js", "#cbcb41"], cjs: ["bi-filetype-js", "#cbcb41"],
+      jsx:   ["bi-filetype-js", "#519aba"], ts: ["bi-filetype-js", "#519aba"], tsx: ["bi-filetype-js", "#519aba"],
+      json:  ["bi-filetype-json", "#cbcb41"],
+      md:    ["bi-filetype-md", "#519aba"], markdown: ["bi-filetype-md", "#519aba"],
+      yml:   ["bi-filetype-yml", "#a074c4"], yaml: ["bi-filetype-yml", "#a074c4"],
+      txt:   ["bi-filetype-txt", "#6d8086"], log: ["bi-file-text", "#6d8086"], lrc: ["bi-file-text", "#6d8086"],
+      ini:   ["bi-gear", "#6d8086"], cfg: ["bi-gear", "#6d8086"], conf: ["bi-gear", "#6d8086"],
+      env:   ["bi-gear", "#6d8086"], toml: ["bi-gear", "#6d8086"],
+      sh:    ["bi-terminal", "#4ec9b0"], bash: ["bi-terminal", "#4ec9b0"], zsh: ["bi-terminal", "#4ec9b0"],
+      bat:   ["bi-terminal", "#4ec9b0"], cmd: ["bi-terminal", "#4ec9b0"], ps1: ["bi-terminal", "#4ec9b0"],
+      sql:   ["bi-database", "#519aba"],
+      png:   ["bi-image", "#a074c4"], jpg: ["bi-image", "#a074c4"], jpeg: ["bi-image", "#a074c4"],
+      gif:   ["bi-image", "#a074c4"], svg: ["bi-image", "#a074c4"], webp: ["bi-image", "#a074c4"],
+      bmp:   ["bi-image", "#a074c4"], ico: ["bi-image", "#a074c4"],
+      mp4:   ["bi-film", "#dd7e2e"], webm: ["bi-film", "#dd7e2e"], mkv: ["bi-film", "#dd7e2e"],
+      avi:   ["bi-film", "#dd7e2e"], mov: ["bi-film", "#dd7e2e"],
+      mp3:   ["bi-music-note", "#519aba"], wav: ["bi-music-note", "#519aba"], flac: ["bi-music-note", "#519aba"],
+      aac:   ["bi-music-note", "#519aba"], m4a: ["bi-music-note", "#519aba"], ogg: ["bi-music-note", "#519aba"],
+      zip:   ["bi-file-earmark-zip", "#b5895f"], tar: ["bi-file-earmark-zip", "#b5895f"],
+      gz:    ["bi-file-earmark-zip", "#b5895f"], rar: ["bi-file-earmark-zip", "#b5895f"], "7z": ["bi-file-earmark-zip", "#b5895f"],
+    };
+    const hit = map[ext];
+    if (hit) return _si(hit[0], hit[1]);
+    if (name.startsWith(".")) return _si("bi-file-earmark", "#6d8086");   // 其它隐藏文件
+    return _si("bi-file-earmark", "#8a8a8a");
+  }
+  /* ---------- .gitignore 规则引擎（文件树中被忽略的条目灰色显示） ---------- */
+  let giRules = null;                              // null=未加载；[]=无 .gitignore 或为空
+  function giGlobRe(pat) {
+    let p = pat, pre = "", post = "";
+    if (p.startsWith("**/")) { pre = "(?:[^/]*/)*"; p = p.slice(3); }
+    if (p.endsWith("/**")) { post = "(?:/.*)?"; p = p.slice(0, -3); }
+    p = p.replace(/\/\*\*\//g, "/(?:[^/]*/)*");    // a/**/b
+    let re = "";
+    for (const c of p) {
+      if (c === "*") re += "[^/]*";
+      else if (c === "?") re += "[^/]";
+      else re += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+    return new RegExp("^" + pre + re + post + "$");
+  }
+  function parseGitignoreFull(text) {
+    const rules = [];
+    String(text || "").split("\n").forEach(raw => {
+      let s = raw.replace(/\r$/, "").trim();
+      if (!s || s.startsWith("#")) return;
+      let negated = false;
+      if (s.startsWith("!")) { negated = true; s = s.slice(1); }
+      let dirOnly = false;
+      if (s.endsWith("/")) { dirOnly = true; s = s.slice(0, -1); }
+      if (!s) return;
+      const anchored = s.includes("/");            // 含 / 的模式锚定到根，否则匹配任意层级的同名
+      if (s.startsWith("/")) s = s.slice(1);
+      if (!s) return;
+      rules.push({ negated, dirOnly, anchored, re: giGlobRe(s) });
+    });
+    return rules;
+  }
+  function giMatchOne(rule, rel, isDir) {
+    if (rule.dirOnly && !isDir) return false;      // 目录规则只作用于目录（文件经由祖先目录被忽略）
+    return rule.re.test(rule.anchored ? rel : rel.substring(rel.lastIndexOf("/") + 1));
+  }
+  function isGitIgnored(rel, isDir) {              // rel：相对 ROOT 的路径
+    if (!giRules || !giRules.length || !rel) return false;
+    const segs = rel.split("/");
+    let ignored = false, prefix = "";
+    for (let i = 0; i < segs.length; i++) {        // 逐段下溯：祖先目录被忽略 → 子项同样忽略
+      prefix = prefix ? prefix + "/" + segs[i] : segs[i];
+      for (const r of giRules) {
+        if (giMatchOne(r, prefix, i < segs.length - 1 ? true : isDir)) ignored = !r.negated;
+      }
+    }
+    return ignored;
+  }
+  function loadGitignoreRules() {                  // 读取根 .gitignore 并重算树中灰色状态
+    return loadFileText(ROOT + "/.gitignore", ".gitignore")
+      .then(d => { giRules = parseGitignoreFull(d.text); })
+      .catch(() => { giRules = []; })
+      .then(() => applyGiDecorations());
+  }
+  function applyGiDecorations() {                  // 对已渲染的树行重算灰色状态（无需重新拉目录）
+    if (!giRules) return;
+    document.querySelectorAll(".tree-row").forEach(r => {
+      const full = r.dataset.path;
+      if (!full) return;
+      const isDir = r.dataset.isdir === "1";
+      const dim = (isDir && TREE_IGNORE.has(r.dataset.name)) ||
+        isGitIgnored(full.startsWith(ROOT + "/") ? full.slice(ROOT.length + 1) : full, isDir);
+      r.classList.toggle("tree-ignored", dim);
+    });
+  }
+
+  function renderNode(it, container, depth) {
+    const full = (it.path && it.path.startsWith("/")) ? it.path : container._base + "/" + it.name;
+    const row = document.createElement("div");
+    row.className = "tree-row";
+    row.tabIndex = -1;                       // 可聚焦：F2 / Delete / Ctrl+Enter 等快捷键作用于选中项
+    row.style.paddingLeft = (depth * 14 + 8) + "px";
+    row.dataset.path = full;
+    row.dataset.name = it.name;
+    row.dataset.isdir = it.is_dir ? "1" : "0";
+    // 依赖目录弱化显示，可手动展开（仅「全部展开」会跳过）；.gitignore 命中的条目同样灰色
+    const isIgnored = (it.is_dir && TREE_IGNORE.has(it.name)) ||
+      (giRules && giRules.length && isGitIgnored(full.startsWith(ROOT + "/") ? full.slice(ROOT.length + 1) : full, !!it.is_dir));
+    if (isIgnored) row.classList.add("tree-ignored");
+    const twist = it.is_dir ? '<span class="twist"><i class="bi bi-chevron-right"></i></span>' : '<span class="twist"></span>';
+    const hint = SPECIAL_NAME_HINTS[it.name] ? '<span class="nm-hint">' + esc(SPECIAL_NAME_HINTS[it.name]) + '</span>' : "";
+    row.innerHTML = twist + '<span class="ic">' + iconFor(it.name, it.is_dir) + '</span><span class="nm">' + esc(it.name) + '</span>' + hint;
+    container.appendChild(row);
+
+    const kids = document.createElement("div");
+    kids.className = "tree-children"; kids._base = full; kids._loaded = false;
+    container.appendChild(kids);
+
+    row.addEventListener("click", (e) => {
+      e.stopPropagation();
+      document.querySelectorAll(".tree-row.selected").forEach(r => r.classList.remove("selected"));
+      row.classList.add("selected");
+      // 记录选中项并让其可聚焦：这样 F2 / Delete / Ctrl+Enter / Ctrl+C 等按键才作用于资源管理器
+      treeSel = { path: full, name: it.name, isDir: !!it.is_dir };
+      try { row.focus({ preventScroll: true }); } catch (_) { row.focus(); }
+      if (it.is_dir) {
+        if (kids.classList.contains("open")) { kids.classList.remove("open"); row.querySelector(".twist i").className = "bi bi-chevron-right"; }
+        else {
+          kids.classList.add("open"); row.querySelector(".twist i").className = "bi bi-chevron-down";
+          if (!kids._loaded) { kids._loaded = true; loadChildren(full, kids, depth); }
+        }
+      } else {
+        openFile(full, it.name);
+      }
+    });
+    row.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); showCtxMenu(e.clientX, e.clientY, full, it.name, it.is_dir); });
+  }
+
+  /* ---------- 全部展开 / 全部折叠 ---------- */
+  // 递归展开：目录未加载过则先异步加载再继续深入
+  async function treeWalkExpand(container) {
+    const rows = [...container.children].filter(el =>
+      el.classList.contains("tree-row") && el.dataset.isdir === "1");
+    for (const row of rows) {
+      if (TREE_IGNORE.has(row.dataset.name)) continue;   // 依赖目录不参与全部展开
+      const kids = row.nextElementSibling;
+      if (!kids || !kids.classList.contains("tree-children")) continue;
+      const twist = row.querySelector(".twist i");
+      if (twist) twist.className = "bi bi-chevron-down";
+      kids.classList.add("open");
+      const depth = (parseFloat(row.style.paddingLeft) - 8) / 14;
+      if (!kids._loaded) { kids._loaded = true; await loadChildren(kids._base, kids, depth); }
+      await treeWalkExpand(kids);
+    }
+  }
+  async function treeExpandAll() {
+    const root = ROOT && explorerPanel.querySelector(".tree-children");
+    if (root) await treeWalkExpand(root).catch(e => toast("展开失败：" + (e.message || e), "err"));
+    syncTreeToggleBtn();
+  }
+  function treeCollapseAll() {
+    explorerPanel.querySelectorAll(".tree-children.open").forEach(k => {
+      const row = k.previousElementSibling;
+      // 根容器（前一个兄弟不是 tree-row）保持展开，否则整棵树会被隐藏
+      if (!row || !row.classList.contains("tree-row")) return;
+      k.classList.remove("open");
+      const t = row.querySelector(".twist i");
+      if (t) t.className = "bi bi-chevron-right";
+    });
+    syncTreeToggleBtn();
+  }
+  /* 树上是否有展开着的子目录（根容器不算）——用于切换按钮状态 */
+  function treeHasOpenDirs() {
+    const open = explorerPanel.querySelectorAll(".tree-children.open");
+    for (const k of open) {
+      const row = k.previousElementSibling;
+      if (row && row.classList.contains("tree-row")) return true;
+    }
+    return false;
+  }
+  function syncTreeToggleBtn() {
+    const btn = $("sideTreeToggle");
+    const anyOpen = treeHasOpenDirs();
+    btn.querySelector("i").className = anyOpen ? "bi bi-arrows-collapse" : "bi bi-arrows-expand";
+    btn.title = anyOpen ? "全部折叠" : "全部展开";
+  }
+
+  /* ---------- 刷新资源管理器：重建目录树并恢复刷新前展开的目录 ---------- */
+  async function refreshTree() {
+    if (!ROOT) return;
+    const openBases = new Set();
+    explorerPanel.querySelectorAll(".tree-children.open").forEach(k => { if (k._base) openBases.add(k._base); });
+    treeSel = null;
+    explorerPanel.innerHTML = "";
+    const root = document.createElement("div");
+    root.className = "tree-children open"; root._base = ROOT; root._loaded = true;
+    explorerPanel.appendChild(root);
+    try {
+      await loadChildren(ROOT, root, 0);
+      // 恢复刷新前处于展开状态的目录（逐层异步加载，与单击展开行为一致）
+      const restore = async (container) => {
+        for (const kids of container.children) {
+          if (!kids.classList || !kids.classList.contains("tree-children")) continue;
+          const row = kids.previousElementSibling;
+          if (!row || !row.classList.contains("tree-row")) continue;
+          if (kids._base && openBases.has(kids._base)) {
+            kids.classList.add("open");
+            const t = row.querySelector(".twist i");
+            if (t) t.className = "bi bi-chevron-down";
+            if (!kids._loaded) {
+              kids._loaded = true;
+              const pad = parseFloat(row.style.paddingLeft);
+              const depth = isNaN(pad) ? 0 : (pad - 8) / 14;
+              await loadChildren(kids._base, kids, depth);
+            }
+            await restore(kids);
+          }
+        }
+      };
+      await restore(root);
+    } catch (e) { toast("刷新失败：" + (e.message || e), "err"); }
+    syncTreeToggleBtn();
+  }
+  $("sideRefresh").onclick = () => refreshTree();
+
+  async function initTree() {
+    if (ROOT) addRecentFolder(ROOT);   // 通过 URL 直接打开的文件夹也记入「最近打开」
+    if (!ROOT) {
+      // 空工作区：居中的引导卡片（比左上角挤两行字更清晰美观）
+      explorerPanel.style.display = "flex";          // 让引导卡片在面板内垂直居中
+      explorerPanel.style.flexDirection = "column";
+      explorerPanel.innerHTML =
+        '<div class="empty-workspace">' +
+          '<i class="bi bi-folder2-open"></i>' +
+          '<div class="ew-title">未打开文件夹</div>' +
+          '<div class="ew-sub">选择一个文件夹，开始浏览与编辑</div>' +
+          '<button class="g-btn outline" id="ewOpenBtn"><i class="bi bi-folder-symlink"></i> 打开文件夹…</button>' +
+        '</div>';
+      const btn = $("ewOpenBtn");
+      if (btn) btn.onclick = openFolderDialog;
+      return;
+    }
+    $("sideRoot").textContent = baseName(ROOT) || ROOT;
+    $("tbTitle").textContent = "在线项目 IDE — " + baseName(ROOT);
+    $("welcomeSub").textContent = "项目根目录：" + ROOT + "\n从左侧资源管理器选择文件开始编辑。";
+    explorerPanel.innerHTML = "";                 // 防御重复建树：先清空再追加（并发触发时只保留最后一次）
+    const root = document.createElement("div");
+    root.className = "tree-children open"; root._base = ROOT; root._loaded = true;
+    explorerPanel.appendChild(root);
+    await loadChildren(ROOT, root, 0);
+    syncTreeToggleBtn();
+  }
+
+  /* ---------- CodeMirror 模式动态加载 ---------- */
+  const MODES = {
+    js: ["javascript", "javascript.min.js"], ts: ["javascript", "javascript.min.js"], jsx: ["javascript", "javascript.min.js"],
+    json: ["javascript", "javascript.min.js"], mjs: ["javascript", "javascript.min.js"], cjs: ["javascript", "javascript.min.js"],
+    py: ["python", "python.min.js"], html: ["htmlmixed", "htmlmixed.min.js"], htm: ["htmlmixed", "htmlmixed.min.js"],
+    xml: ["xml", "xml.min.js"], css: ["css", "css.min.js"], scss: ["css", "css.min.js"], less: ["css", "css.min.js"],
+    md: ["markdown", "markdown.min.js"], c: ["clike", "clike.min.js"], cpp: ["clike", "clike.min.js"], h: ["clike", "clike.min.js"],
+    hpp: ["clike", "clike.min.js"], java: ["clike", "clike.min.js"], cs: ["clike", "clike.min.js"], go: ["go", "go.min.js"],
+    rs: ["clike", "clike.min.js"], php: ["php", "php.min.js"], rb: ["ruby", "ruby.min.js"], sh: ["shell", "shell.min.js"],
+    bash: ["shell", "shell.min.js"], yml: ["yaml", "yaml.min.js"], yaml: ["yaml", "yaml.min.js"],
+    toml: ["properties", "properties.min.js"], ini: ["properties", "properties.min.js"], conf: ["properties", "properties.min.js"],
+    sql: ["sql", "sql.min.js"], lua: ["lua", "lua.min.js"],
+  };
+  const _loaded = new Set(), _promises = {};
+  function ensureMode(ext) {
+    const m = MODES[ext]; if (!m) return Promise.resolve(null);
+    const [mode, rel] = m;
+    if (_loaded.has(mode)) return Promise.resolve(mode);
+    if (_promises[mode]) return _promises[mode];
+    const deps = mode === "htmlmixed" ? ["xml.min.js", "css.min.js", "javascript.min.js"] : [];
+    const p = new Promise((resolve) => {
+      let pending = deps.length + 1;
+      const done = () => { if (--pending === 0) { _loaded.add(mode); resolve(mode); } };
+      const loadOne = (r) => {
+        const s = document.createElement("script");
+        s.src = BASE + r;
+        s.onload = done;
+        s.onerror = () => { pending--; if (pending <= 0) { _loaded.add(mode); resolve(mode); } };
+        document.head.appendChild(s);
+      };
+      loadOne(rel); deps.forEach(loadOne);
+    });
+    _promises[mode] = p; return p;
+  }
+
+  /* ---------- 打开/切换标签 ---------- */
+  function findTab(path) { return tabs.find(t => t.path === path); }
+
+  // 大文件阈值：超过则关闭语法高亮与全量脏值比对，保证流畅
+  const BIG_FILE_BYTES = 400 * 1024;
+
+  // 查找/替换对话框的中文文案（CodeMirror 的 phrases 选项）
+  const CM_PHRASES = {
+    "Search:": "查找：",
+    "Replace:": "替换：",
+    "Replace with:": "替换为：",
+    "Replace all:": "全部替换为：",
+    "Replace?": "是否替换？",
+    "With:": "替换为：",
+    "(Use /re/ syntax for regexp search)": "（支持 /正则/ 语法）",
+    "All": "全部",
+    "Yes": "是",
+    "No": "否",
+    "Stop": "停止",
+  };
+
+  // raw=1：后端直接返回纯文本，省去 base64(膨胀33%) + JSON解析 + atob，大文件快很多
+  async function loadFileText(path, name) {
+    const r = await fetch("/api/preview?path=" + encodeURIComponent(path) + "&raw=1");
+    let body = "";
+    if (r.headers.get("X-Preview-Type") === "text") {
+      body = await r.text();
+      return { text: body, size: parseInt(r.headers.get("X-File-Size") || "0", 10) || 0 };
+    }
+    // 后端未升级（没有 raw 支持）时，回退到老的 JSON + base64 接口，保证仍能打开文件
+    try { body = await r.text(); } catch (_) {}
+    if (r.ok) {
+      try {
+        const d = JSON.parse(body);
+        if (d.type === "text" && d.content) {
+          const bytes = Uint8Array.from(atob(d.content), c => c.charCodeAt(0));
+          return { text: new TextDecoder("utf-8").decode(bytes), size: bytes.length };
+        }
+        if (!d.type) return { unsupported: true };
+      } catch (_) {}
+      return { unsupported: true };
+    }
+    let msg = "服务器响应异常 (HTTP " + r.status + ")";
+    try { const d = JSON.parse(body); if (d && d.error) msg = d.error; } catch (_) {}
+    return { error: msg };
+  }
+
+  // 多次延迟重绘：字体/CSS 延迟就绪或容器刚显示时，避免编辑器空白或行号错位
+  function scheduleRefresh(tab) {
+    if (!tab || !tab.cm) return;
+    const doIt = () => { if (tab.cm) tab.cm.refresh(); };
+    requestAnimationFrame(doIt);
+    setTimeout(doIt, 60);
+    setTimeout(doIt, 300);
+  }
+
+  function fmtSize(n) {
+    if (!n) return "0 B";
+    const u = ["B", "KB", "MB", "GB"];
+    let i = 0, v = n;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return (i === 0 ? v : v.toFixed(1)) + " " + u[i];
+  }
+
+  // 路径规范化：不同入口可能给出 "a//b"、"a/./b"、相对路径等写法，
+  // 统一成绝对路径后才能命中同一个标签（否则同一文件会被重复打开）
+  function canonPath(p) {
+    if (!p) return p;
+    let s = String(p).replace(/\\/g, "/");
+    if (!s.startsWith("/") && ROOT) s = ROOT + "/" + s;   // 相对路径补上工作区前缀
+    const parts = [];
+    s.split("/").forEach(seg => {
+      if (!seg || seg === ".") return;
+      if (seg === "..") { parts.pop(); return; }
+      parts.push(seg);
+    });
+    return (s.startsWith("/") ? "/" : "") + parts.join("/");
+  }
+  async function openFile(path, name, forceGroup) {
+    path = canonPath(path);
+    // forceGroup 指定目标编辑组（拆分编辑器用）；不指定时全局查找已有标签并聚焦
+    let tab = forceGroup == null ? findTab(path) : tabs.find(t => t.path === path && t.group === forceGroup);
+    if (!tab) {
+      const host = document.createElement("div");
+      host.className = "cm-host";
+      const grp = forceGroup == null ? curGroup : forceGroup;
+      tab = { path, name, host, cm: null, original: "", dirty: false, big: false, group: grp };
+      tabs.push(tab);
+      renderTabsAll();
+      host.classList.add("active");
+      host.innerHTML = '<div style="padding:30px;color:#888;">正在加载 ' + esc(name) + ' …</div>';
+      try {
+        const ext = getExt(name);
+        // 图片类型：内嵌图片预览（后端 raw=1 直接返回图片字节），点击图片切换 1:1 / 适应窗口
+        if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"].includes(ext)) {
+          tab.isImage = true;
+          const url = "/api/preview?path=" + encodeURIComponent(path) + "&raw=1";
+          host.innerHTML =
+            '<div class="img-preview"><img alt="' + esc(name) + '" src="' + url + '">' +
+            '<div class="ip-err" style="display:none;">图片加载失败（可能超出 5MB 预览限制）</div></div>';
+          const im = host.querySelector("img");
+          im.addEventListener("error", () => {
+            im.style.display = "none";
+            host.querySelector(".ip-err").style.display = "block";
+          });
+          im.addEventListener("click", () => im.classList.toggle("zoom"));
+          activate(tab);   // 挂载编辑组容器并高亮标签（与文本文件打开行为一致）
+          return;
+        }
+        // 文件内容与语法模式并行加载，减少串行等待
+        const [res, mode] = await Promise.all([loadFileText(path, name), ensureMode(ext)]);
+        if (res.unsupported) { host.innerHTML = '<div style="padding:30px;color:#888;">该文件类型（' + ext + '）不支持文本编辑，预览请用文件管理器。</div>'; return; }
+        if (res.error) { host.innerHTML = '<div style="padding:30px;color:#c66;">无法打开：' + esc(res.error) + '</div>'; return; }
+        const text = res.text;
+        const big = text.length > BIG_FILE_BYTES;
+        tab.original = text;
+        tab.big = big;
+        host.innerHTML = "";
+        // 容器此刻已可见（active），CodeMirror 才能测量正确，避免内容压住行号/错位
+        tab.cm = CodeMirror(host, {
+          value: text, mode: big ? "text/plain" : (mode || "text/plain"), theme: "material-darker",
+          lineNumbers: true, lineWrapping: IDE_SETTINGS.lineWrap, indentUnit: IDE_SETTINGS.indent, tabSize: IDE_SETTINGS.indent,
+          styleActiveLine: IDE_SETTINGS.activeLine && !big, matchBrackets: !big, autoCloseBrackets: true,
+          phrases: CM_PHRASES,
+        });
+        if (big) toast("文件较大（" + fmtSize(res.size || text.length) + "），已关闭语法高亮以保证编辑流畅", "warn");
+        tab.cm.on("change", () => {
+          if (tab.big) {
+            // 大文件不做全量字符串比对（每次按键 getValue 会卡）
+            if (!tab.dirty) { tab.dirty = true; tab.el.classList.add("dirty"); refreshTreeDirty(); }
+          } else {
+            tab.dirty = tab.cm.getValue() !== tab.original;
+            tab.el.classList.toggle("dirty", tab.dirty);
+          }
+          if (tab === active) { updateStatus(); ffOnDocChange(); }
+          if (tab.mdMode === "split") schedulePreviewUpdate(tab);   // 分屏模式：编辑时实时刷新预览
+        });
+        tab.cm.on("cursorActivity", () => { if (tab === active) updateStatus(); });
+        // 光标/焦点在哪一侧编辑器，新文件就打开到哪一侧（同 VS Code 焦点组行为）
+        tab.cm.on("focus", () => { curGroup = tab.group; });
+        if (["md", "markdown"].includes(ext)) setupMarkdownView(tab);
+        else if (["html", "htm"].includes(ext)) setupHtmlView(tab);
+        else if (name === ".gitignore") setupGitignoreView(tab);
+        else if (name.toLowerCase() === "requirements.txt") setupRequirementsView(tab);
+        activate(tab);
+        scheduleRefresh(tab);
+      } catch (e) {
+        host.classList.add("active");
+        host.innerHTML = '<div style="padding:30px;color:#c66;">无法打开：' + esc(e.message || e) + '</div>';
+      }
+    } else {
+      activate(tab);
+    }
+    refreshTreeDirty();
+    navPush(path, name);   // 右上角 ← → 导航历史
+    // 记录最近打开（Quick Open 面板「最近打开」数据源）
+    try {
+      const rec = JSON.parse(localStorage.getItem("ide.recentFiles") || "[]").filter(f => f.path !== path);
+      rec.unshift({ path, name });
+      localStorage.setItem("ide.recentFiles", JSON.stringify(rec.slice(0, 12)));
+    } catch (_) {}
+    return tab;   // 调用方（如 openFileAt 定位行）可直接拿到标签，避免再按路径查一遍
+  }
+  // 把标签的编辑器容器挂到所属编辑组；组布局重建时的兜底挂载也走这里
+  function mountHost(tab) {
+    const b = groupBundles.get(tab.group);
+    if (b && tab.host.parentElement !== b.wrap) b.wrap.appendChild(tab.host);
+  }
+  function renderTab(tab) {
+    // 同一标签的旧节点先摘掉，避免重复挂载（标签栏出现重影/点击错位）
+    if (tab.el && tab.el.parentNode) tab.el.parentNode.removeChild(tab.el);
+    const el = document.createElement("div");
+    el.className = "tab" + (tab.dirty ? " dirty" : "");
+    // 差异标签的 name 带 "@提交哈希" 后缀（如 ide.html@895cd54），直接匹配取不到类型图标，
+    // 用 relPath 的真实文件名来取图标；大小 1.4em 由 .t-ic 规则统一控制
+    const iconName = (tab.diff && tab.relPath) ? baseName(tab.relPath) : tab.name;
+    const ic = tab.iconHtml || iconFor(iconName, false);   // 汇总标签页可自带图标
+    el.innerHTML = '<span class="t-ic">' + ic + '</span><span class="t-nm">' + esc(tab.name) + '</span><span class="t-dot"></span><span class="t-close"><i class="bi bi-x"></i></span>';
+    el.addEventListener("click", (e) => { e.stopPropagation(); if (e.target.closest(".t-close")) closeTab(tab); else activate(tab); });
+    setupTabDrag(el, tab);
+    const bundle = groupBundles.get(tab.group);
+    if (bundle) bundle.tabbar.appendChild(el);
+    if (tab === groupActive.get(tab.group)) el.classList.add("active");
+    tab.el = el;
+  }
+  function renderTabsAll() {
+    rebuildGroups();
+    // 标签栏是 tabs 的唯一投影：先清空再按顺序重建，
+    // 否则 rebuildGroups 命中缓存提前返回时，旧标签节点会残留并不断累积
+    groupBundles.forEach(b => { b.tabbar.textContent = ""; });
+    tabs.forEach(t => { t.el = null; renderTab(t); mountHost(t); });
+  }
+  /* ---------- 动态编辑组：组按「行」排布，每行内可并排多个组 ----------
+     向右拆分：与源组同行、插在其右侧；向下拆分：在源组所在行的下方新起一行 */
+  let groupLayout = [];              // [[gid, gid...], [gid...]] 行 → 组
+  function groupIds() { return [...new Set(tabs.map(t => t.group))].sort((a, b) => a - b); }
+  // 布局与「当前真正存在的组」对齐：丢弃已关闭的组与空行，补上未登记的组
+  function layoutRows() {
+    const present = new Set(groupIds());
+    const rows = [];
+    groupLayout.forEach(row => {
+      const kept = row.filter(g => present.has(g));
+      kept.forEach(g => present.delete(g));
+      if (kept.length) rows.push(kept);
+    });
+    if (present.size) {
+      const rest = [...present].sort((a, b) => a - b);
+      if (rows.length) rows[rows.length - 1].push(...rest); else rows.push(rest);
+    }
+    groupLayout = rows;
+    return rows;
+  }
+  function flatGroupIds() { return layoutRows().flat(); }
+  function groupLabel(g) { const i = flatGroupIds().indexOf(g); return i <= 0 ? "" : "组" + (i + 1) + " · "; }
+  // 登记一次拆分：dir='right' 同行插到源组右侧；dir='down' 在源组所在行下方新起一行
+  function registerSplit(srcGid, newGid, dir) {
+    const rows = layoutRows();
+    const ri = rows.findIndex(row => row.includes(srcGid));
+    if (ri < 0) { groupLayout = rows.concat([[newGid]]); }
+    else if (dir === "down") { groupLayout = rows.slice(0, ri + 1).concat([[newGid]], rows.slice(ri + 1)); }
+    else {
+      const row = rows[ri].slice();
+      row.splice(row.indexOf(srcGid) + 1, 0, newGid);
+      groupLayout = rows.slice();
+      groupLayout[ri] = row;
+    }
+    builtGroupKey = "\u0000split";   // 强制按新布局重排
+  }
+  function currentWrap() {
+    const b = groupBundles.get(curGroup);
+    if (b) return b.wrap;
+    const first = groupBundles.values().next();
+    return first.done ? null : first.value.wrap;
+  }
+  function makeGroupDom(gid) {
+    const el = document.createElement("div");
+    el.className = "editor-group";
+    const tbar = document.createElement("div");
+    tbar.className = "tabbar scroll-thin";
+    // 标签栏隐藏了滚动条，用滚轮也能横向浏览标签（鼠标用户无需拖滚动条）
+    tbar.addEventListener("wheel", (e) => {
+      if (!e.deltaY || tbar.scrollWidth <= tbar.clientWidth) return;
+      tbar.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }, { passive: false });
+    const splitBtn = document.createElement("button");
+    splitBtn.type = "button"; splitBtn.className = "ed-tools ed-split";
+    splitBtn.title = "向右拆分编辑器 (Ctrl+\\)；按住 Alt 点击 = 向下拆分 (Alt+\\)";
+    splitBtn.innerHTML = '<i class="bi bi-layout-split"></i>';
+    // Alt+点击 = 向下拆分（与 VS Code 「向下拆分编辑器」对应）
+    splitBtn.addEventListener("click", (e) => { e.stopPropagation(); splitEditor(gid, e.altKey ? "down" : "right"); });
+    const toolsBtn = document.createElement("button");
+    toolsBtn.type = "button"; toolsBtn.className = "ed-tools"; toolsBtn.title = "编辑器操作";
+    toolsBtn.innerHTML = '<i class="bi bi-three-dots"></i>';
+    toolsBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const key = "edtools" + gid;
+      if (openMenuKey === key) closeDrop();
+      else { closeDrop(); openEditorMenu(toolsBtn, gid); }
+    });
+    const wrap = document.createElement("div");
+    wrap.className = "editor-host-wrap";
+    const row = document.createElement("div");
+    row.className = "tab-row";
+    row.append(tbar, splitBtn, toolsBtn);
+    el.append(row, wrap);
+    setupGroupDrop(wrap, gid);
+    setupGroupDrop(tbar, gid);
+    return { el, tabbar: tbar, wrap };
+  }
+  // 分隔条拖动：文档级 mousemove/mouseup 只注册一次，避免每次重建布局都堆积监听器
+  let _dragSep = null;
+  document.addEventListener("mousemove", (e) => { if (_dragSep) _dragSep.move(e); });
+  document.addEventListener("mouseup", () => { if (_dragSep) { const s = _dragSep; _dragSep = null; s.end(); } });
+
+  function makeGroupSplitter() {          // 行内：左右两块调宽度
+    const sp = document.createElement("div");
+    sp.className = "gsep"; sp.title = "拖动调整分屏宽度（双击恢复默认）";
+    let sx = 0, wL = 0, total = 0;
+    sp.addEventListener("mousedown", (e) => {
+      if (!sp.previousElementSibling || !sp.nextElementSibling) return;
+      sx = e.clientX; wL = sp.previousElementSibling.getBoundingClientRect().width;
+      total = (sp.parentElement || edGroups).getBoundingClientRect().width;
+      sp.classList.add("dragging"); document.body.classList.add("resizing-x");
+      _dragSep = {
+        move: (ev) => {
+          const left = sp.previousElementSibling, right = sp.nextElementSibling;
+          if (!left || !right) return;
+          const pct = Math.min(80, Math.max(10, (wL + ev.clientX - sx) / total * 100));
+          left.style.flex = "0 0 " + pct + "%";
+          right.style.flex = "1 1 0";
+        },
+        end: () => { sp.classList.remove("dragging"); document.body.classList.remove("resizing-x"); },
+      };
+      e.preventDefault();
+    });
+    sp.addEventListener("dblclick", () => {
+      if (sp.previousElementSibling) sp.previousElementSibling.style.flex = "";
+      if (sp.nextElementSibling) sp.nextElementSibling.style.flex = "";
+    });
+    return sp;
+  }
+  function makeRowSplitter() {            // 行间：上下两块调高度
+    const sp = document.createElement("div");
+    sp.className = "gsep-h"; sp.title = "拖动调整上下分屏高度（双击恢复默认）";
+    let sy = 0, hT = 0, total = 0;
+    sp.addEventListener("mousedown", (e) => {
+      if (!sp.previousElementSibling || !sp.nextElementSibling) return;
+      sy = e.clientY; hT = sp.previousElementSibling.getBoundingClientRect().height;
+      total = (sp.parentElement || edGroups).getBoundingClientRect().height;
+      sp.classList.add("dragging"); document.body.classList.add("resizing-y");
+      _dragSep = {
+        move: (ev) => {
+          const top = sp.previousElementSibling, bottom = sp.nextElementSibling;
+          if (!top || !bottom) return;
+          const pct = Math.min(85, Math.max(15, (hT + ev.clientY - sy) / total * 100));
+          top.style.flex = "0 0 " + pct + "%";
+          bottom.style.flex = "1 1 0";
+        },
+        end: () => { sp.classList.remove("dragging"); document.body.classList.remove("resizing-y"); },
+      };
+      e.preventDefault();
+    });
+    sp.addEventListener("dblclick", () => {
+      if (sp.previousElementSibling) sp.previousElementSibling.style.flex = "";
+      if (sp.nextElementSibling) sp.nextElementSibling.style.flex = "";
+    });
+    return sp;
+  }
+  // 组集合/排布变化时重建布局（复用已有组 DOM，尺寸设置得以保留），并把各标签内容区挂回所属组
+  function rebuildGroups() {
+    const rows = layoutRows();
+    const flat = rows.flat();
+    welcome.style.display = flat.length ? "none" : "flex";
+    const key = rows.map(r => r.join("+")).join("|");
+    if (key === builtGroupKey) return;
+    builtGroupKey = key;
+    edGroups.innerHTML = "";
+    const next = new Map();
+    rows.forEach((row, ri) => {
+      if (ri > 0) edGroups.appendChild(makeRowSplitter());
+      const rowEl = document.createElement("div");
+      rowEl.className = "ed-row";
+      row.forEach((gid, i) => {
+        if (i > 0) rowEl.appendChild(makeGroupSplitter());
+        let b = groupBundles.get(gid);
+        if (!b) b = makeGroupDom(gid);
+        next.set(gid, b);
+        rowEl.appendChild(b.el);
+      });
+      edGroups.appendChild(rowEl);
+    });
+    groupBundles = next;
+    edGroups.appendChild(welcome);   // innerHTML 清空会把 welcome 一并移除，需挂回
+    tabs.forEach(mountHost);
+    if (active && tabs.includes(active)) {
+      groupBundles.forEach((b, gid) => b.el.classList.toggle("active-group", gid === active.group));
+      if (active.cm) scheduleRefresh(active);
+    }
+  }
+  // 打开/切换文件时，把激活标签滚进标签栏可视区（标签多时不再“藏在”滚动区域外）
+  function scrollTabIntoView(tab) {
+    const el = tab && tab.el, bar = el && el.parentElement;
+    if (!el || !bar || bar.scrollWidth <= bar.clientWidth) return;
+    const r = el.getBoundingClientRect(), br = bar.getBoundingClientRect();
+    if (r.left < br.left) bar.scrollLeft -= (br.left - r.left);
+    else if (r.right > br.right) bar.scrollLeft += (r.right - br.right);
+  }
+  /* 资源管理器联动：激活标签时在树中选中对应文件，并逐级展开未打开的祖先目录 */
+  let revealSeq = 0;
+  async function revealInTree(abs) {
+    if (!ROOT || !abs || !abs.startsWith(ROOT + "/")) return;
+    const seq = ++revealSeq;
+    const segs = abs.slice(ROOT.length + 1).split("/");
+    let base = ROOT;
+    for (let i = 0; i < segs.length - 1; i++) {       // 逐级展开祖先目录
+      base += "/" + segs[i];
+      const row = [...explorerPanel.querySelectorAll(".tree-row")]
+        .find(r => r.dataset.path === base && r.dataset.isdir === "1");
+      if (!row) return;
+      const kids = row.nextElementSibling;
+      if (!kids || !kids.classList.contains("tree-children")) return;
+      if (!kids.classList.contains("open")) {
+        const twist = row.querySelector(".twist i");
+        if (twist) twist.className = "bi bi-chevron-down";
+        kids.classList.add("open");
+        if (!kids._loaded) {
+          kids._loaded = true;
+          try { await loadChildren(kids._base, kids, (parseFloat(row.style.paddingLeft) - 8) / 14); }
+          catch (_) { kids._loaded = false; return; }
+        }
+      }
+      if (seq !== revealSeq) return;                    // 期间用户已切换其它文件，放弃本次
+    }
+    const target = [...explorerPanel.querySelectorAll(".tree-row")].find(r => r.dataset.path === abs);
+    if (!target) return;
+    document.querySelectorAll(".tree-row.selected").forEach(r => r.classList.remove("selected"));
+    target.classList.add("selected");
+    treeSel = { path: abs, name: segs[segs.length - 1], isDir: false };
+    target.scrollIntoView({ block: "nearest" });
+  }
+
+  function activate(tab) {
+    mountHost(tab);   // 编辑器容器必须先在所属组里，切换才会真正显示内容
+    tabs.forEach(t => { if (t.group === tab.group) { t.host.classList.remove("active"); t.el.classList.remove("active"); } });
+    tab.host.classList.add("active"); tab.el.classList.add("active");
+    active = tab; curGroup = tab.group; groupActive.set(tab.group, tab);
+    // 拆分按钮只跟当前激活组走
+    groupBundles.forEach((b, gid) => b.el.classList.toggle("active-group", gid === tab.group));
+    // 切换显示后重绘，修正隐藏期间创建/变更导致的尺寸测量偏差
+    scheduleRefresh(tab);
+    renderBreadcrumbs(tab.displayPath || tab.path); updateStatus();
+    refreshTreeDirty(); ffOnTabChange();
+    revealInTree(tab.path);          // 树列表跟随当前打开的文件高亮
+    scrollTabIntoView(tab);
+  }
+  async function closeTab(tab) {
+    const i = tabs.indexOf(tab);
+    if (i < 0) return;
+    if (tab.dirty && !(await uiConfirm("关闭标签", "文件 " + tab.name + " 有未保存的修改，确定不保存并关闭？", "不保存并关闭", true))) return;
+    const g = tab.group;
+    tab.host.remove(); tabs.splice(i, 1);
+    renderTabsAll();
+    if (active === tab || groupActive.get(g) === tab) {
+      const rest = tabs.filter(t => t.group === g);
+      const next = rest[rest.length - 1] || tabs[tabs.length - 1] || null;
+      if (next) activate(next);
+      else { active = null; groupActive.delete(g); curGroup = 0; $("breadcrumbs").innerHTML = ""; updateStatus(); ffClose(); }
+    }
+  }
+

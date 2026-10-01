@@ -1,0 +1,88 @@
+  /* ===== 工作区 ===== */
+  .workbench { flex: 1; display: flex; min-height: 0; }
+
+  /* 活动栏 */
+  .activitybar {
+    width: 48px; flex: none; background: #333333;
+    display: flex; flex-direction: column; align-items: center; padding-top: 6px; gap: 2px;
+  }
+  .activitybar .act {
+    position: relative;   /* 让 runner-badge（后台任务数）定位在本图标上，而非飘到窗口右上角 */
+    width: 48px; height: 44px; display: flex; align-items: center; justify-content: center;
+    color: #858585; font-size: 22px; cursor: pointer; border-left: 2px solid transparent;
+  }
+  .activitybar .act:hover { color: #ffffff; }
+  .activitybar .act.active { color: #ffffff; border-left-color: #ffffff; }
+  .activitybar .act.bottom { margin-top: auto; }
+
+  /* 侧边栏 */
+  .sidebar {
+    width: 280px; flex: none; background: #252526; border-right: 1px solid #1a1a1a;
+    display: flex; flex-direction: column; min-height: 0; transition: width .12s ease;
+  }
+  .sidebar.collapsed { display: none; }
+  .side-header {
+    height: 35px; flex: none; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 12px; font-size: 11px; letter-spacing: .6px; text-transform: uppercase; color: #bbbbbb;
+  }
+  .side-header .side-actions { display: flex; gap: 4px; }
+  .side-header .side-actions button {
+    background: transparent; border: none; color: #bbbbbb; cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 4px;
+  }
+  .side-header .side-actions button:hover { background: #2a2d2e; color: #fff; }
+  .side-header .side-actions button.on { color: #4db8ff; }
+  .side-header .side-actions input {
+    width: 64px; background: #2a2d2e; border: 1px solid #3c3c3c; border-radius: 4px;
+    color: #e6e6e6; font-size: 11px; padding: 3px 6px; outline: none; transition: width .15s;
+  }
+  .side-header .side-actions input:focus { width: 90px; border-color: #0a6aa8; }
+  /* 端口搜索框只在「后台任务」面板显示：默认隐藏，由 showPanel() 控制显隐（启动时默认面板是资源管理器） */
+  #sidePortSearch { display: none; }
+  .side-root {
+    font-size: 13px; color: #e7e7e7; padding: 4px 12px 8px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tree { flex: 1; overflow: auto; padding-bottom: 10px; }
+  .tree-row {
+    display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 1px 8px 1px 4px;
+    font-size: 13px; line-height: 1.5; color: #cccccc; cursor: pointer; white-space: nowrap; user-select: none;
+  }
+  .tree-row:hover { background: #2a2d2e; }
+  .tree-row.selected { background: #094771; }
+  .tree-row:focus { outline: none; }        /* 选中态用底色表示，不要浏览器默认聚焦框 */
+  .tree-row.selected:focus { box-shadow: inset 0 0 0 1px #0a6aa8; }
+  .tree-row .twist { width: 16px; text-align: center; color: #9aa0a6; font-size: 10px; flex: none; }
+  /* 图标统一 1.4em，flex 居中保证与文字在同一水平线 */
+  .tree-row .ic { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .tree-row .ic .bi, .tree-row .ic .seti-ic { font-size: 1.4em; line-height: 1; }
+  /* 行高随 .tree-row 的 1.5：不能压成 1，否则 overflow:hidden 会裁掉中文字形的下半部 */
+  .tree-row .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .tree-row .nm-hint { color: #8a8a8a; font-size: 11px; margin-left: 4px; flex: none; }
+  .tree-row.dirty .nm { color: #e2c08a; }
+  .tree-children { display: none; }
+  .tree-children.open { display: block; }
+
+  /* 侧边搜索/占位面板 */
+  .side-panel { flex: 1; overflow: auto; padding: 10px 12px; display: none; }
+  /* 窄侧栏防护：按钮/标题文字不竖排换行，超出省略 */
+  .side-panel button, .side-panel .s-mode, .side-panel .s-opt { white-space: nowrap; }
+  .side-panel .g-btn.block, .side-panel .ri-name, .side-panel .run-exe {
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .side-header #sideTitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side-panel .env-sum, .side-panel .s-hint { overflow-wrap: anywhere; }
+  /* 空工作区引导卡片：垂直水平居中 */
+  .empty-workspace {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; text-align: center; padding: 24px 16px;
+  }
+  .empty-workspace > .bi { font-size: 42px; color: #4a4a4a; }
+  .empty-workspace .ew-title { color: #cccccc; font-size: 13px; }
+  .empty-workspace .ew-sub { color: #777; font-size: 12px; margin-bottom: 8px; }
+  .empty-workspace .g-btn { margin: 0; padding: 6px 14px; }
+  .side-panel.active { display: block; }
+  /* 只作用于文本输入框：否则复选框 / 单选框也会被撑成整行宽 */
+  .side-panel input:not([type="checkbox"]):not([type="radio"]) {
+    width: 100%; background: #3c3c3c; border: 1px solid #3c3c3c; color: #fff; padding: 5px 8px; border-radius: 3px; font-size: 12px;
+  }
+  .side-panel .ph { color: #777; font-size: 12px; padding: 14px 0; }
+

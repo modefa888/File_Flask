@@ -1,0 +1,74 @@
+/* Seti 官方图标字体（microsoft/vscode theme-seti，本地化） */
+@font-face { font-family: "seti"; src: url("/static/vendor/seti/seti.woff") format("woff"); font-display: block; }
+/* seti 图标的字形在自身 em 盒里偏上，靠 align-items:center 对齐时会比文件名高出约 2px，
+   这里按字号做等比的视觉下沉，让图标与文件名的字形中心真正水平对齐 */
+.seti-ic { font-family: "seti"; font-style: normal; font-weight: normal; font-size: 1.4em; line-height: 1; display: inline-block; vertical-align: baseline; transform: translateY(.11em); }
+/* IDE 图片预览：棋盘格背景 + 自适应居中，点击切换 1:1 / 适应窗口 */
+.img-preview { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; overflow: auto;
+  background: repeating-conic-gradient(#262626 0 25%, #1e1e1e 0 50%) 0 0 / 20px 20px; }
+.img-preview img { max-width: 92%; max-height: calc(100% - 44px); object-fit: contain; box-shadow: 0 4px 24px rgba(0,0,0,.5); background: #fff; cursor: zoom-in; }
+.img-preview img.zoom { max-width: none; max-height: none; cursor: zoom-out; }
+.img-preview .ip-err { color: #888; }
+/* Quick Open 命令面板（Ctrl+P，仿 VS Code / Trae） */
+#qopen-mask { position: fixed; inset: 0; z-index: 9000; display: none; background: rgba(0,0,0,.25); }
+#qopen-mask.open { display: block; }
+#qopen { position: absolute; top: 9%; left: 50%; transform: translateX(-50%); width: 620px; max-width: 92vw;
+  background: #252526; border: 1px solid #454545; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.55); overflow: hidden; }
+#qopen-input { display: block; box-sizing: border-box; width: calc(100% - 20px); margin: 10px 10px 8px;
+  background: #3c3c3c; color: #e6e6e6; border: 1px solid #555; border-radius: 4px; font-size: 13px; padding: 7px 10px; outline: none; }
+#qopen-input:focus { border-color: #0a6aa8; }
+#qopen-list { max-height: 46vh; overflow: auto; padding: 0 6px 6px; }
+.qo-sec { font-size: 11px; color: #8a8a8a; padding: 7px 8px 2px; }
+.qo-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px; cursor: pointer; color: #ccc; font-size: 13px; }
+.qo-row.sel { background: #04395e; color: #fff; }
+.qo-row .ic { width: 18px; text-align: center; flex: none; }
+.qo-row .qo-main { flex: none; max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.qo-row .qo-path { color: #888; font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.qo-row .qo-kbd { margin-left: auto; flex: none; font-family: inherit; font-size: 11px; color: #999;
+  background: #2a2d2e; border: 1px solid #3c3c3c; border-radius: 3px; padding: 1px 5px; }
+.qo-empty { color: #777; padding: 8px; font-size: 12px; }
+/* 设置页（仿 Trae / VS Code：以标签页形式打开在编辑器区域内，可与文件标签并存） */
+.set-host { display: flex; }
+.set-host .set-layout { height: 100%; }
+.set-layout { flex: 1; display: flex; min-width: 0; }
+.set-nav { width: 240px; flex: none; background: #1f1f20; border-right: 1px solid #2c2c2d; padding: 22px 18px; overflow-y: auto; }
+.set-nav h1 { font-size: 15px; color: #e8e8e8; margin: 0 0 14px; }
+.set-search { width: 100%; box-sizing: border-box; background: #2a2a2b; border: 1px solid #3c3c3d; border-radius: 6px;
+  color: #d6d6d6; font-size: 12px; padding: 6px 10px; outline: none; margin-bottom: 16px; }
+.set-search:focus { border-color: #0a6aa8; }
+.set-navitem { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px;
+  color: #b8b8b8; font-size: 13px; cursor: pointer; margin-bottom: 2px; }
+.set-navitem:hover { background: #2a2a2b; }
+.set-navitem.on { background: #2f2f30; color: #fff; }
+.set-content { flex: 1; min-width: 0; overflow-y: auto; padding: 26px 36px 60px; }
+.set-sec { max-width: 760px; margin-bottom: 30px; scroll-margin-top: 10px; }
+.set-sec > h2 { font-size: 17px; color: #ececec; margin: 0 0 14px; font-weight: 600; }
+.set-row { display: flex; align-items: center; gap: 14px; background: #242425; border: 1px solid #303031;
+  border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; }
+.set-row .set-info { flex: 1; min-width: 0; }
+.set-row .set-label { color: #e2e2e2; font-size: 13px; }
+.set-row .set-desc { color: #8a8a8a; font-size: 12px; margin-top: 3px; }
+.set-row select, .set-row input[type="number"] {
+  background: #2f2f30; color: #e2e2e2; border: 1px solid #3c3c3d; border-radius: 5px;
+  font-size: 12px; padding: 4px 8px; outline: none; flex: none; }
+.set-row input[type="number"] { width: 74px; }
+.set-row input[type="checkbox"] { width: 15px; height: 15px; accent-color: #0a6aa8; flex: none; cursor: pointer; }
+.set-btn { background: #2f2f30; color: #dcdcdc; border: 1px solid #3c3c3d; border-radius: 5px;
+  font-size: 12px; padding: 5px 12px; cursor: pointer; flex: none; }
+.set-btn:hover { background: #3a3a3b; }
+.set-keys { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 22px; }
+.set-key { display: flex; align-items: center; justify-content: space-between; color: #c8c8c8; font-size: 12.5px;
+  background: #242425; border: 1px solid #303031; border-radius: 6px; padding: 8px 12px; }
+.set-key kbd { font-family: inherit; font-size: 11px; color: #9a9a9a; background: #2a2d2e;
+  border: 1px solid #3c3c3c; border-radius: 3px; padding: 1px 6px; }
+/* 快捷键自定义行 */
+.kb-row { display: flex; align-items: center; gap: 10px; background: #242425; border: 1px solid #303031;
+  border-radius: 8px; padding: 8px 14px; margin-bottom: 6px; }
+.kb-row.capturing { border-color: #0a6aa8; }
+.kb-row .set-label { flex: 1; color: #e2e2e2; font-size: 13px; }
+.kb-keys { display: flex; gap: 4px; align-items: center; }
+.kb-keys kbd { font-family: inherit; font-size: 11px; color: #cfcfcf; background: #2a2d2e;
+  border: 1px solid #3c3c3c; border-radius: 3px; padding: 1px 7px; }
+.kb-btn { background: #2f2f30; color: #bcbcbc; border: 1px solid #3c3c3d; border-radius: 5px;
+  font-size: 11px; padding: 3px 10px; cursor: pointer; flex: none; }
+.kb-btn:hover { background: #3a3a3b; color: #fff; }

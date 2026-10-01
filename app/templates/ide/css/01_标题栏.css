@@ -1,0 +1,22 @@
+  /* ===== 标题栏 ===== */
+  .titlebar {
+    height: 35px; flex: none; background: #323233;
+    display: flex; align-items: center; padding: 0 12px; gap: 14px;
+    -webkit-user-select: none; user-select: none; font-size: 13px;
+    overflow: hidden;
+  }
+  .traffic { display: flex; gap: 8px; }
+  .traffic span { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .traffic .r { background: #ff5f56; } .traffic .y { background: #ffbd2e; } .traffic .g { background: #27c93f; }
+  .menubar { display: flex; gap: 16px; color: #cfcfcf; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+  .menubar span { cursor: default; }
+  .titlebar .tb-title { margin: 0 auto; color: #9aa0a6; font-size: 12px; max-width: 50%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .titlebar .tb-actions { display: flex; gap: 8px; flex: none; align-items: center; }
+  .titlebar .tb-sep { width: 1px; height: 16px; background: #3c3c3c; margin: 0 2px; }
+  .titlebar .tb-actions button:disabled { opacity: .35; cursor: default; }
+  .titlebar .tb-actions button {
+    background: transparent; border: none; color: #cfcfcf; cursor: pointer; font-size: 13px; padding: 2px 8px; border-radius: 4px;
+  }
+  .titlebar .tb-actions button:hover { background: #3a3a3a; }
+  .titlebar .tb-actions button.on { color: #4daafc; }   /* 对应面板处于打开状态 */
+

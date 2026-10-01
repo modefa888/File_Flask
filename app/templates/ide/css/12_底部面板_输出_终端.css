@@ -1,0 +1,84 @@
+  /* ===== 底部面板（输出 / 终端）===== */
+  .bottom-panel {
+    flex: none; height: 240px; display: none; flex-direction: column;
+    background: #1b1b1b; border-top: 1px solid #3a3a3a; min-height: 0;
+  }
+  .bottom-panel.show { display: flex; }
+  .bp-tabs {
+    flex: none; height: 32px; display: flex; align-items: center; gap: 2px;
+    padding: 0 8px; background: #252526; border-bottom: 1px solid #333;
+  }
+  .bp-tab {
+    background: transparent; border: none; border-bottom: 1px solid transparent;
+    color: #9d9d9d; cursor: pointer; font-size: 12px; padding: 6px 10px; font-family: inherit;
+  }
+  .bp-tab:hover { color: #ffffff; }
+  .bp-tab.active { color: #ffffff; border-bottom-color: #007fd4; }
+  /* 运行日志标签（每个后台任务一个）：显示任务名，可切换、可单独关闭 */
+  #bpLogTabs { display: inline-flex; align-items: stretch; gap: 2px; margin-left: 4px; }
+  .bp-log-tab { display: inline-flex; align-items: center; gap: 5px; }
+  .bp-log-tab .lt-nm { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bp-log-tab .lt-x { display: inline-flex; opacity: 0.5; font-size: 11px; }
+  .bp-log-tab .lt-x:hover { opacity: 1; color: #f48771; }
+  .bp-log-tab.ended { color: #777; }
+  .bp-log-tab.ended .lt-nm::after { content: " ·已结束"; font-size: 10px; }
+  .bp-title { color: #8a8a8a; font-size: 12px; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .op-spacer { flex: 1; }
+  .bp-btn {
+    background: transparent; border: none; color: #bbbbbb; cursor: pointer;
+    font-size: 12px; padding: 2px 8px; border-radius: 3px; font-family: inherit; flex: none;
+  }
+  .bp-btn:hover { background: #3a3d41; color: #fff; }
+  .bp-btn.danger { color: #f14c4c; }
+  .bp-btn.danger:hover { background: #4b2020; color: #ff6b6b; }
+  .bp-pane { display: none; flex: 1; min-height: 0; flex-direction: column; }
+  .bp-pane.active { display: flex; }
+  .op-body {
+    flex: 1; margin: 0; padding: 8px 12px; overflow: auto; min-height: 0;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+    color: #d4d4d4; white-space: pre-wrap; word-break: break-word;
+  }
+  .op-body .op-cmd { color: #4fc1ff; }
+  .op-body .op-err { color: #f48771; }
+  .op-body .op-ok { color: #6fcf8a; }
+  .op-body .op-dim { color: #8a8a8a; }
+  .op-body .op-head { color: #dcdcaa; }
+  .op-body .op-link { color: #4fc1ff; text-decoration: underline; cursor: pointer; }
+  .op-body .op-link:hover { color: #7fd4ff; }
+  /* 终端 */
+  .term-body {
+    flex: 1; margin: 0; padding: 8px 12px; overflow: auto; min-height: 0;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+    color: #d4d4d4; white-space: pre-wrap; word-break: break-word; background: #181818;
+  }
+  .term-body .term-cmd { color: #4fc1ff; }
+  .term-body .term-err { color: #f48771; }
+  .term-body .term-dim { color: #8a8a8a; }
+  .term-input-row {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 5px 12px; background: #1f1f1f; border-top: 1px solid #333;
+  }
+  .term-prompt { font-family: "SF Mono", Menlo, monospace; font-size: 12px; flex: none; white-space: nowrap; }
+  .term-prompt .tp-user { color: #6fcf8a; font-weight: 700; }
+  .term-prompt .tp-path { color: #61afef; }
+  .term-prompt .tp-sign { color: #d4d4d4; margin-left: 2px; }
+  /* ANSI 颜色（ls 目录蓝 / 可执行文件绿等） */
+  .term-body .t-bold { font-weight: 700; }
+  .term-body .t-dim { opacity: .75; }
+  .term-body .t-fg30 { color: #5c6370; } .term-body .t-fg31 { color: #e06c75; }
+  .term-body .t-fg32 { color: #98c379; } .term-body .t-fg33 { color: #e5c07b; }
+  .term-body .t-fg34 { color: #61afef; } .term-body .t-fg35 { color: #c678dd; }
+  .term-body .t-fg36 { color: #56b6c2; } .term-body .t-fg37 { color: #d7d7d7; }
+  .term-body .t-fg90 { color: #7f848e; } .term-body .t-fg91 { color: #ff7b86; }
+  .term-body .t-fg92 { color: #b6e08a; } .term-body .t-fg93 { color: #ffd68a; }
+  .term-body .t-fg94 { color: #82c7ff; } .term-body .t-fg95 { color: #e2a1f0; }
+  .term-body .t-fg96 { color: #7fd6e2; } .term-body .t-fg97 { color: #ffffff; }
+  .term-body .t-bg40 { background: #5c6370; } .term-body .t-bg41 { background: #a33; }
+  .term-body .t-bg42 { background: #2f6b3a; } .term-body .t-bg43 { background: #8a6d1f; }
+  .term-body .t-bg44 { background: #2b5a8a; } .term-body .t-bg45 { background: #7a4a8a; }
+  .term-body .t-bg46 { background: #2f6f77; } .term-body .t-bg47 { background: #6a6a6a; }
+  .term-input-row input {
+    flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+    color: #ffffff; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+  }
+

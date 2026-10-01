@@ -997,6 +997,31 @@
   .ai-skill-opt .ai-sk-act.dis { opacity: .38; cursor: not-allowed; }
   .ai-skill-opt .ai-sk-del:hover:not(.dis) { color: #e08a8a; }
   .ai-skill-opt .sub { font-size: 10px; color: #c8a95e; margin-left: 4px; }
+  /* 标题栏：当前激活技能指示器（新建对话左侧） */
+  .ai-hsk-wrap { position: relative; flex: none; }
+  .ai-hsk {
+    display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; max-width: 132px;
+    background: #3a2a5a; border: 1px solid #8b6fd8; border-radius: 11px; color: #d9c6ff;
+    font-size: 11px; cursor: pointer;
+  }
+  .ai-hsk:hover { filter: brightness(1.15); }
+  .ai-hsk .bi { font-size: 11px; flex: none; }
+  .ai-hsk span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-hsk-pop {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 130; min-width: 210px; max-width: 290px;
+    background: #252528; border: 1px solid #3c3c3c; border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: 6px 0;
+  }
+  .ai-hsk-pop .g { font-size: 10px; color: #767676; padding: 6px 10px 3px; letter-spacing: .3px; }
+  .ai-hsk-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; color: #d4d4d4; font-size: 12px; cursor: default; }
+  .ai-hsk-item.clr { cursor: pointer; }
+  .ai-hsk-item.clr:hover { background: #33333a; }
+  .ai-hsk-item .bi { font-size: 12px; color: #9aa4b2; flex: none; }
+  .ai-hsk-item .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-hsk-item .x { background: none; border: none; color: #8a8a8a; cursor: pointer; font-size: 11px; padding: 0 2px; flex: none; }
+  .ai-hsk-item .x:hover { color: #e08a8a; }
+  .ai-hsk-item .sent { color: #7fd88f; font-size: 11px; flex: none; }
+  .ai-hsk-pop .empty { padding: 8px 10px; color: #8a8a8a; font-size: 11.5px; }
   /* 技能查看 / 修改悬浮框 */
   .ai-skedit-pop {
     position: fixed; z-index: 300; width: 340px; max-width: calc(100vw - 16px);
@@ -1042,6 +1067,8 @@
     .ai-title { display: none; }
     .ai-conv span { display: none; }
     .ai-conv { padding: 0 6px; }
+    .ai-hsk span { display: none; }
+    .ai-hsk { padding: 0 6px; max-width: none; }
   }
   /* 上下文占用：模型选择前的空心圆环（进度 = 已用 / 模型上下文窗口） */
   .ai-ctx-ring { flex: none; display: inline-flex; align-items: center; justify-content: center;
@@ -2021,6 +2048,10 @@
         <span class="ai-title"><i class="bi bi-stars"></i> AI 助手</span>
         <button class="ai-conv" id="aiConvBtn" title="历史对话"><span id="aiConvTitle">新对话</span><i class="bi bi-chevron-down"></i></button>
         <span class="ai-spacer"></span>
+        <span class="ai-hsk-wrap" id="aiActiveSkillsWrap" style="display:none">
+          <button class="ai-hsk" id="aiActiveSkillsBtn" title="当前激活的技能"><i class="bi bi-magic"></i><span id="aiActiveSkillsName">技能</span></button>
+          <div class="ai-hsk-pop" id="aiActiveSkillsPop" style="display:none"></div>
+        </span>
         <button class="ai-hbtn" id="aiNewBtn" title="新建对话"><i class="bi bi-plus-lg"></i></button>
         <button class="ai-hbtn" id="aiCtxBtn" title="发送时附带当前打开的文件内容作为上下文"><i class="bi bi-file-earmark-text"></i></button>
         <button class="ai-hbtn" id="aiCfgBtn" title="AI 接口配置（在设置页）"><i class="bi bi-gear"></i></button>
@@ -5203,9 +5234,9 @@
     return m[1];
   }
   function aiMd(src) {
-    // 有些模型把工具调用写在正文里（<tool_call>…</tool_call>）：后端已按兼容模式解析执行，
-    // 这里把原始文本折叠成一行提示，避免整屏 XML 污染消息
-    const clean = String(src || "").replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/g,
+    // 有些模型把工具调用写在正文里（<tool_call>…</tool_call> / <tool_use>…</tool_use>）：
+    // 后端已按兼容模式解析执行，这里把原始文本折叠成一行提示，避免整屏 XML 污染消息
+    const clean = String(src || "").replace(/<(?:tool_call|tool_use)>[\s\S]*?(?:<\/(?:tool_call|tool_use)>|$)/gi,
       "\n\n> 已按兼容模式解析为工具调用\n\n");
     const lines = clean.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").split("\n");
     const flushP = (buf) => buf.length ? "<p>" + buf.map(aiMdInline).join("<br>") + "</p>" : "";
@@ -5527,6 +5558,7 @@
       if (t !== m.text) { m.text = t; changed = true; }
     });
     if (changed) aiPersistCurrent();
+    aiRenderActiveSkills();
   }
   /* 保存修改：内置 → 写覆盖；自定义 → 直接改本地自定义列表 */
   function aiSaveSkillEdit(id, data) {
@@ -5560,6 +5592,114 @@
     try { aiRenderAll(); } catch (_) {}
     const pop = $("aiSkillPop");
     if (pop && pop.style.display !== "none") aiBuildSkillPop();
+    aiRenderActiveSkills();
+  }
+  /* ===== 当前激活技能指示器（标题栏「新建对话」左侧） ===== */
+  function aiActiveSkillIdsFromInput() {
+    const ta = $("aiText");
+    if (!ta) return [];
+    const ids = (aiParseSkillTags(ta.innerText || "").ids || []).slice();
+    ta.querySelectorAll(".ai-tag[data-id]").forEach(t => {
+      const id = t.dataset.id;
+      if (id && !ids.includes(id)) ids.push(id);
+    });
+    return ids;
+  }
+  /* 当前会话最近一条提问激活的技能（发送后仍能显示本轮激活技能） */
+  function aiSessionSkillIds() {
+    for (let i = AI.msgs.length - 1; i >= 0; i--) {
+      const m = AI.msgs[i];
+      if (m.role === "user") return (m.skills || []).slice();
+    }
+    return [];
+  }
+  function aiActiveSkillsList() {
+    const ids = aiActiveSkillIdsFromInput();
+    aiSessionSkillIds().forEach(id => { if (!ids.includes(id)) ids.push(id); });
+    return ids.map(id => aiFindSkill(id)).filter(Boolean);
+  }
+  function aiCloseActiveSkillsPop() {
+    const pop = $("aiActiveSkillsPop");
+    if (pop) pop.style.display = "none";
+  }
+  function aiBuildActiveSkillsPop(list) {
+    const pop = $("aiActiveSkillsPop");
+    if (!pop) return;
+    pop.innerHTML = "";
+    if (!list.length) {
+      const e = document.createElement("div");
+      e.className = "empty"; e.textContent = "当前没有激活技能";
+      pop.appendChild(e);
+      return;
+    }
+    const inputIds = aiActiveSkillIdsFromInput();
+    const g = document.createElement("div");
+    g.className = "g"; g.textContent = "已激活的技能（输入框中的可点 × 移除）";
+    pop.appendChild(g);
+    list.forEach(s => {
+      const it = document.createElement("div");
+      it.className = "ai-hsk-item";
+      const inInput = inputIds.includes(s.id);
+      it.innerHTML = '<i class="bi ' + esc(s.icon || "bi-stars") + '"></i><span class="t"></span>' +
+        (inInput
+          ? '<button class="x" title="从输入框移除"><i class="bi bi-x-lg"></i></button>'
+          : '<span class="sent" title="已随最近一条提问发送"><i class="bi bi-check2"></i></span>');
+      const tEl = it.querySelector(".t");
+      tEl.textContent = s.name;
+      const x = it.querySelector(".x");
+      if (x) x.addEventListener("click", (e) => { e.stopPropagation(); aiRemoveActiveSkill(s); });
+      pop.appendChild(it);
+    });
+    if (inputIds.length) {
+      const clr = document.createElement("div");
+      clr.className = "ai-hsk-item clr";
+      clr.innerHTML = '<i class="bi bi-eraser"></i><span class="t">清空输入框中的技能标签</span>';
+      clr.addEventListener("click", () => aiClearActiveSkills());
+      pop.appendChild(clr);
+    }
+  }
+  /* 从输入框里移除某个技能：删掉它的 DOM 标签，并清掉手打的 @名称 文本 */
+  function aiStripSkillText(name) {
+    const ta = $("aiText");
+    if (!ta || !name) return;
+    const re = new RegExp("(^|[^A-Za-z0-9_@.])@(" + _escapeRegExp(name) + ")(?=\\s|$|[" + _escapeRegExp(_SKILL_PUNC) +
+      "])|\\[Skill:" + _escapeRegExp(name) + "\\]", "g");
+    const walker = document.createTreeWalker(ta, NodeFilter.SHOW_TEXT, null);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(node => {
+      if (node.parentElement && node.parentElement.classList && node.parentElement.classList.contains("ai-tag")) return;
+      const nv = node.nodeValue;
+      if (nv && (nv.indexOf("@") >= 0 || nv.indexOf("[Skill:") >= 0)) {
+        node.nodeValue = nv.replace(re, (m, ws) => ws || "");
+      }
+    });
+  }
+  function aiRemoveActiveSkill(s) {
+    const ta = $("aiText");
+    if (ta) ta.querySelectorAll(".ai-tag[data-id]").forEach(t => { if (t.dataset.id === s.id) t.remove(); });
+    aiStripSkillText(s.name);
+    aiRenderActiveSkills();
+  }
+  function aiClearActiveSkills() {
+    const ta = $("aiText");
+    if (!ta) return;
+    const list = aiActiveSkillIdsFromInput().map(id => aiFindSkill(id)).filter(Boolean);
+    ta.querySelectorAll(".ai-tag[data-id]").forEach(t => t.remove());
+    list.forEach(s => aiStripSkillText(s.name));
+    aiRenderActiveSkills();
+  }
+  function aiRenderActiveSkills() {
+    const wrap = $("aiActiveSkillsWrap"), nameEl = $("aiActiveSkillsName"), btn = $("aiActiveSkillsBtn");
+    if (!wrap || !nameEl || !btn) return;
+    const list = aiActiveSkillsList();
+    if (!list.length) { wrap.style.display = "none"; aiCloseActiveSkillsPop(); return; }
+    wrap.style.display = "";
+    const names = list.map(s => s.name);
+    nameEl.textContent = names.length <= 2 ? names.join("、") : (names[0] + " 等 " + names.length + " 个");
+    btn.title = "当前激活的技能（" + names.length + "）：" + names.join("、");
+    const pop = $("aiActiveSkillsPop");
+    if (pop && pop.style.display !== "none") aiBuildActiveSkillsPop(list);
   }
   /* 自定义 Skill 导入弹窗：名称 / 描述 / 提示词，结果 {id,name,desc,prompt} 或 null */
   /* 让 AI 根据一句话需求生成 {name, desc, prompt} */
@@ -5712,6 +5852,7 @@
     range.collapse(false);
     sel.removeAllRanges();
     sel.addRange(range);
+    aiRenderActiveSkills();
   }
   const _SKILL_PUNC = "，。！？、；：“”‘’（）【】.,;:!?'\"()[]{}";
   /* 从文本中解析出所有已知的 @技能名，返回 { ids: [...], text: 保留标签的原文 } */
@@ -6244,6 +6385,7 @@
     const s = AI.sessions.find(x => x.id === AI.curId);
     $("aiConvTitle").textContent = (s && s.title) || "新对话";
     aiRenderStats();                                      // 统计条跟随当前会话
+    aiRenderActiveSkills();                               // 标题栏激活技能跟随当前输入框
   }
   function aiRenderHist() {
     const box = $("aiHist");
@@ -6770,6 +6912,7 @@
       $("aiText").innerHTML = "";
       AI.pending = [];
       aiRenderPending();
+      aiRenderActiveSkills();
     }
     aiPersistCurrent(); aiRenderConv();
 
@@ -6807,11 +6950,12 @@
     AI.busy = true;
     $("aiSend").style.display = "none";
     $("aiStop").style.display = "";
-    const permHint = AI.perm === "readonly"
+    const permHint = (AI.perm === "readonly"
       ? "当前权限「仅可查看」：只做解释与建议，不要声称自己已经修改了文件。"
       : (AI.perm === "full"
         ? "当前权限「完全权限」：可以给出任意路径下的完整文件内容。"
-        : "当前权限「工作区内修改」：给出可直接保存到项目内的完整文件内容。");
+        : "当前权限「工作区内修改」：给出可直接保存到项目内的完整文件内容。")) +
+      "你可以直接调用工具读取项目文件（list_dir / read_file / search_files），不要要求用户手动粘贴代码。";
     // 内置 skill 由后端根据 skills 列表注入；自定义 / 被本地覆盖的 skill 的 prompt 在这里追加到 system
     const _allSk = aiAllSkills();
     const _of = (id) => _allSk.find(s => s.id === id);
@@ -6855,6 +6999,8 @@
       model: pick.model,
       web_search: AI.webSearch,
       skills: backendSkills,
+      perm: AI.perm,
+      repo: (typeof ROOT !== "undefined" ? ROOT : ""),
       messages: [
         { role: "system", content: sysPrompt + (mem ? "\n\n[本对话早期内容记忆摘要]\n" + mem : "") },
         ...usedHist.map(historyMapper),
@@ -6911,6 +7057,13 @@
       const reader = r.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
+      // 普通对话也会调用读取类工具：把过程记录渲染在消息下方
+      const chatSteps = [], chatStepRows = new Map(), chatStepMeta = new Map();
+      let chatStepsBox = null;
+      const ensureChatSteps = () => {
+        if (!chatStepsBox) { chatStepsBox = aiBuildStepsBox([]); bodyB.parentElement.appendChild(chatStepsBox); }
+        return chatStepsBox;
+      };
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -6924,6 +7077,31 @@
             if (data === "[DONE]") continue;
             let obj; try { obj = JSON.parse(data); } catch (_) { continue; }
             if (obj.error) throw new Error(obj.error);
+            if (obj.type === "step") {
+              chatStepMeta.set(obj.call_id, { tool: obj.tool, args: obj.args });
+              const box = ensureChatSteps();
+              const row = aiStepRow(obj);
+              box._body.appendChild(row);
+              chatStepRows.set(obj.call_id, row);
+              const a = obj.args || {};
+              box._live = (AI_TOOL_LABEL[obj.tool] || obj.tool) +
+                (a.path || a.command || a.pattern ? " " + (a.path || a.command || a.pattern) : "");
+              box._pending++; box._paint();
+              continue;
+            }
+            if (obj.type === "result") {
+              const md = chatStepMeta.get(obj.call_id) || { tool: obj.tool, args: {} };
+              aiStepDone(chatStepRows.get(obj.call_id), obj);
+              const rec = { tool: md.tool, args: md.args, ok: !!obj.ok, denied: !!obj.denied,
+                            ms: obj.ms, summary: obj.summary || "", detail: obj.detail || "" };
+              chatSteps.push(rec);
+              if (chatStepsBox) {
+                chatStepsBox._list.push(rec);
+                chatStepsBox._pending = Math.max(0, chatStepsBox._pending - 1);
+                chatStepsBox._paint();
+              }
+              continue;
+            }
             if ((obj.reasoning || obj.delta) && !ttft) ttft = performance.now() - t0;
             if (obj.reasoning) thinking += obj.reasoning;
             if (obj.delta) acc += obj.delta;
@@ -6936,11 +7114,13 @@
         bodyB.innerHTML = aiMd(acc.replace(/^\s+/, "")) + '<span class="ai-cursor"></span>';   // 边流边渲染 MD
         aiScrollToBottom();
       }
+      if (chatStepsBox) { chatStepsBox._pending = 0; chatStepsBox._paint(); }
       const out = acc.replace(/^\s+/, "");
-      bodyB.innerHTML = aiMd(out) || "（空回复）";
+      bodyB.innerHTML = aiMd(out) || (chatSteps.length ? "（已完成工具调用）" : "（空回复）");
       thinkB.parentElement.style.display = thinking.trim() ? "" : "none";
       const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
-      AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, reasoning: thinking.trim() || undefined, ms: meta.ms, ts: meta.ts });
+      AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, reasoning: thinking.trim() || undefined,
+                     ms: meta.ms, ts: meta.ts, steps: chatSteps.length ? chatSteps : undefined });
       bodyB.insertAdjacentHTML("afterend", aiMetaHtml({ text: out, ms: meta.ms, ts: meta.ts }, AI.msgs.length - 1));
       aiPersistCurrent(); aiRenderConv();
       aiRecordStat(true, performance.now() - t0, out.length, ttft, inTok);
@@ -6982,7 +7162,21 @@
     const tag = e.target.closest(".ai-tag");
     if (tag && tag.dataset.id) { e.preventDefault(); aiOpenSkillEditPop(tag.dataset.id, tag); }
   });
+  $("aiText").addEventListener("input", () => aiRenderActiveSkills());   // 输入变化时刷新标题栏激活技能
+  // 标题栏「当前激活技能」：点击展开列表，点外部关闭
+  $("aiActiveSkillsBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const pop = $("aiActiveSkillsPop");
+    const show = pop.style.display === "none";
+    if (show) aiBuildActiveSkillsPop(aiActiveSkillsList());
+    pop.style.display = show ? "" : "none";
+  });
+  document.addEventListener("click", (e) => {
+    const pop = $("aiActiveSkillsPop");
+    if (pop && pop.style.display !== "none" && !e.target.closest(".ai-hsk-wrap")) pop.style.display = "none";
+  });
   aiLoadSessions();
+  aiRenderActiveSkills();
   try { if (localStorage.getItem("ide.ai.open") === "1") toggleAI(true); } catch (_) {}
 
 

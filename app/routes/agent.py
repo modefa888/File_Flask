@@ -117,6 +117,158 @@ _TOOLS = [
 
 _READ_TOOLS = {"list_dir", "read_file", "search_files", "web_search"}
 _WRITE_TOOLS = {"write_file", "edit_file"}
+_TOOL_NAMES = {t["function"]["name"] for t in _TOOLS}
+
+# 不同模型对工具的命名差异（Claude 风格 / 各类开源权重），统一映射到本项目的工具名
+_TOOL_ALIASES = {
+    "bash": "run_command", "shell": "run_command", "sh": "run_command", "zsh": "run_command",
+    "terminal": "run_command", "run": "run_command", "execute": "run_command",
+    "execute_command": "run_command", "run_command": "run_command", "command": "run_command",
+    "read": "read_file", "cat": "read_file", "open_file": "read_file", "view": "read_file",
+    "read_file": "read_file", "readfile": "read_file",
+    "write": "write_file", "create": "write_file", "create_file": "write_file",
+    "write_file": "write_file", "writefile": "write_file",
+    "edit": "edit_file", "str_replace": "edit_file", "replace": "edit_file",
+    "str_replace_editor": "edit_file", "edit_file": "edit_file", "apply_patch": "edit_file",
+    "ls": "list_dir", "list": "list_dir", "list_files": "list_dir", "listdir": "list_dir",
+    "list_dir": "list_dir",
+    "grep": "search_files", "search": "search_files", "search_files": "search_files",
+    "search_files_content": "search_files", "find": "search_files", "glob": "search_files",
+    "web_search": "web_search", "websearch": "web_search", "search_web": "web_search",
+}
+# 参数名差异：统一成本项目工具使用的键名
+_ARG_ALIASES = {
+    # 统一大小写（模型常写 Path / Content / Old_Text 等）
+    "path": "path", "content": "content", "old_text": "old_text", "new_text": "new_text",
+    "pattern": "pattern", "query": "query", "max": "max", "max_results": "max_results",
+    "command": "command", "timeout": "timeout", "start": "start", "end": "end",
+    # 常见别名
+    "file_path": "path", "filepath": "path", "file_name": "path", "filename": "path",
+    "file": "path", "dir": "path", "directory": "path", "folder": "path",
+    "old_string": "old_text", "old_str": "old_text", "old_content": "old_text", "old": "old_text",
+    "new_string": "new_text", "new_str": "new_text", "new_content": "new_text", "new": "new_text",
+    "cmd": "command", "script": "command", "shell_command": "command",
+    "start_line": "start", "end_line": "end",
+}
+# 这些键只是说明性字段，不作为工具参数
+_CALL_META_KEYS = {"name", "tool", "tool_name", "type", "function", "input", "arguments",
+                   "parameters", "args", "description", "id", "thought", "reasoning"}
+
+
+def _extract_first_json(s):
+    """从字符串里截取第一个花括号平衡的 JSON 对象（忽略字符串内的括号）。"""
+    start = s.find("{")
+    if start < 0:
+        return None
+    depth, in_str, esc = 0, False, False
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return s[start:i + 1]
+    return None
+
+
+def _loads_json(raw):
+    """宽松 JSON 解析：直接解析失败时，尝试截取其中第一个 JSON 对象。"""
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        pass
+    sub = _extract_first_json(raw)
+    if not sub:
+        return None
+    try:
+        return json.loads(sub)
+    except (ValueError, TypeError):
+        return None
+
+
+def _normalize_call(name, args):
+    """把各种模型风格的工具名/参数名归一化到本项目工具；无法识别返回 (None, {})。"""
+    if not name:
+        return None, {}
+    key = str(name).strip().lower().split(".")[-1].split("::")[-1].split("/")[-1]
+    target = _TOOL_ALIASES.get(key, key)
+    if target not in _TOOL_NAMES:
+        return None, {}
+    a = {}
+    for k, v in (args or {}).items():
+        lk = str(k).strip().lower()
+        a[_ARG_ALIASES.get(lk, str(k))] = v
+    if target == "run_command" and "command" not in a:
+        for alt in ("cmd", "script", "shell_command", "bash"):
+            if alt in a:
+                a["command"] = a.pop(alt)
+                break
+    if target in ("search_files", "web_search"):
+        want = "query" if target == "web_search" else "pattern"
+        if want not in a:
+            for alt in ("query", "pattern", "keyword", "q", "text", "regex"):
+                if alt in a:
+                    a[want] = a.pop(alt)
+                    break
+        cnt = "max_results" if target == "web_search" else "max"
+        if cnt not in a:
+            for alt in ("max", "max_results", "limit", "n", "count"):
+                if alt in a:
+                    a[cnt] = a.pop(alt)
+                    break
+    if target in ("read_file", "write_file", "edit_file", "list_dir") and "path" not in a:
+        for alt in ("file", "filename", "file_name", "dir", "directory", "folder"):
+            if alt in a:
+                a["path"] = a.pop(alt)
+                break
+    return target, a
+
+
+def _call_from_obj(obj):
+    """从 JSON 对象里提取一次工具调用，无法识别返回 None。"""
+    if not isinstance(obj, dict):
+        return None
+    name = obj.get("name") or obj.get("tool") or obj.get("tool_name") or obj.get("type")
+    fn = obj.get("function")
+    if not name and isinstance(fn, dict):
+        name = fn.get("name")
+    args = obj.get("input")
+    if args is None:
+        args = obj.get("arguments")
+    if args is None:
+        args = obj.get("parameters")
+    if args is None:
+        args = obj.get("args")
+    if isinstance(args, str):
+        args = _loads_json(args)
+    if not isinstance(args, dict):
+        args = {}
+    extra = {k: v for k, v in obj.items() if k not in _CALL_META_KEYS}
+    merged = dict(extra)
+    merged.update(args)
+    if isinstance(fn, dict):                       # {"function": {"name": ..., "arguments": {...}}}
+        fargs = fn.get("arguments")
+        if isinstance(fargs, str):
+            fargs = _loads_json(fargs)
+        if isinstance(fargs, dict):
+            merged.update(fargs)
+    target, norm = _normalize_call(name, merged)
+    if not target:
+        return None
+    return {"id": "", "name": target, "args": norm, "args_raw": json.dumps(norm, ensure_ascii=False)}
 
 # 待用户确认的调用：{(run_id, call_id): {"ev": Event, "box": {...}}}
 _PENDING = {}
@@ -368,6 +520,14 @@ _TOOL_FUNCS = {
 }
 
 
+def tools_for_perm(perm):
+    """普通对话可用的工具：读取类始终可用；写入类仅在非只读权限下开放；不暴露 run_command。"""
+    names = {"list_dir", "read_file", "search_files", "web_search"}
+    if perm in ("workspace", "full"):
+        names |= {"write_file", "edit_file"}
+    return [t for t in _TOOLS if t["function"]["name"] in names]
+
+
 def _gate(perm, name, args, root):
     """权限校验 → (allowed, refuse_reason, need_ask, ask_reason)。"""
     if perm == "readonly":
@@ -446,6 +606,20 @@ def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None):
         "8. 需要用户提供信息（如密钥、路径偏好）时直接提问，不要臆造。"
         % (root or "/", perm_desc, _TREE_DEPTH, tree or "（无法读取项目结构，请用 list_dir 自行查看）")
     )
+    base += (
+        "\n\n工具调用格式：优先使用标准的函数调用（tool_calls）。"
+        "如果你的接口不支持 function calling，可把调用写在正文里，系统会自动解析。严格使用下列工具名与参数名：\n"
+        '<tool_use>{"name":"read_file","input":{"path":"app/xxx.py"}}</tool_use>\n'
+        "可用工具：\n"
+        "- list_dir(path)\n"
+        "- read_file(path, start, end)\n"
+        "- write_file(path, content)\n"
+        "- edit_file(path, old_text, new_text)\n"
+        "- search_files(pattern, path, max)\n"
+        "- run_command(command, timeout)\n"
+        "- web_search(query, max_results)\n"
+        "不要使用 bash/read/write/edit 等别名，也不要输出无法解析的自由格式。"
+    )
     if skill:
         sids = skill if isinstance(skill, list) else [skill]
         prompts = [_SKILL_PROMPTS.get(str(sid)) for sid in sids if _SKILL_PROMPTS.get(str(sid))]
@@ -469,32 +643,73 @@ _TEXT_CALL_RE = re.compile(r"<tool_call>(.*?)(?:</tool_call>|$)", re.S | re.I)
 _TEXT_FUNC_RE = re.compile(r"<function[=:\s]+[\"']?([\w.\-]+)[\"']?\s*>(.*?)(?:</function>|$)", re.S | re.I)
 _TEXT_ARG_RE = re.compile(r"<parameter[=:\s]+[\"']?([\w.\-]+)[\"']?\s*>(.*?)(?:</parameter>|(?=<parameter)|$)", re.S | re.I)
 _TEXT_NAME_ATTR = re.compile(r"<(parameter|function)\s+name\s*=\s*[\"']([^\"']+)[\"']\s*>", re.I)
-_TEXT_CALL_HINT = re.compile(r"<tool_calls?>|<function[=:\s]|<parameter[=:\s]", re.I)
+# Claude / 部分开源权重风格：<tool_use>{"type":"bash","command":"..."}</tool_use>
+_TEXT_USE_RE = re.compile(r"<tool_use>(.*?)(?:</tool_use>|$)", re.S | re.I)
+_TEXT_CALL_HINT = re.compile(r"<tool_calls?>|<tool_use>|<function[=:\s]|<parameter[=:\s]", re.I)
 
 
 def _parse_text_calls(text):
-    """从正文里解析文本格式的工具调用；解析不到返回 []。"""
-    if not text or not _TEXT_CALL_HINT.search(text):
+    """从正文里解析文本格式的工具调用；解析不到返回 []。
+
+    兼容三种写法：
+      1) Claude 风格：<tool_use>{"type":"bash","command":"ls -la"}</tool_use>
+      2) 商汤/开源权重：<tool_call><function=list_dir><parameter=path>app</parameter></function></tool_call>
+      3) 整段回复就是一个 JSON 对象/数组（含 name/type + 参数）
+    """
+    if not text:
         return []
-    blocks = _TEXT_CALL_RE.findall(text) or [text]
     out = []
-    for b in blocks:
-        b = _TEXT_NAME_ATTR.sub(r"<\1=\2>", b)          # <parameter name="x"> → <parameter=x>
-        for fm in _TEXT_FUNC_RE.finditer(b):
-            name, body = fm.group(1).strip(), fm.group(2) or ""
-            args = {}
-            for am in _TEXT_ARG_RE.finditer(body):
-                key, raw = am.group(1).strip(), (am.group(2) or "").strip()
-                if not key:
+    # ① <tool_use>{json}</tool_use>（可能出现多次）
+    for um in _TEXT_USE_RE.finditer(text):
+        obj = _loads_json(um.group(1).strip())
+        if obj is None:
+            continue
+        for o in (obj if isinstance(obj, list) else [obj]):
+            c = _call_from_obj(o)
+            if c:
+                out.append(c)
+    if out:
+        return _reindex_text_calls(out)
+    # ② <function=...> XML 风格
+    if _TEXT_CALL_HINT.search(text):
+        blocks = _TEXT_CALL_RE.findall(text) or [text]
+        for b in blocks:
+            b = _TEXT_NAME_ATTR.sub(r"<\1=\2>", b)      # <parameter name="x"> → <parameter=x>
+            for fm in _TEXT_FUNC_RE.finditer(b):
+                name, body = fm.group(1).strip(), fm.group(2) or ""
+                args = {}
+                for am in _TEXT_ARG_RE.finditer(body):
+                    key, raw = am.group(1).strip(), (am.group(2) or "").strip()
+                    if not key:
+                        continue
+                    try:
+                        args[key] = json.loads(raw)      # 数字/布尔/对象按 JSON 解析
+                    except ValueError:
+                        args[key] = raw.strip().strip("\"'").strip()
+                if not name:
                     continue
-                try:
-                    args[key] = json.loads(raw)          # 数字/布尔/对象按 JSON 解析
-                except ValueError:
-                    args[key] = raw.strip().strip("\"'").strip()
-            if name:
-                out.append({"id": "textcall_%d" % len(out), "name": name, "args": args,
-                            "args_raw": json.dumps(args, ensure_ascii=False)})
-    return out
+                target, norm = _normalize_call(name, args)
+                if not target:
+                    target, norm = name, args
+                out.append({"id": "", "name": target, "args": norm,
+                            "args_raw": json.dumps(norm, ensure_ascii=False)})
+    if out:
+        return _reindex_text_calls(out)
+    # ③ 整段回复就是 JSON（去掉代码块围栏后尝试）
+    cand = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.I).strip()
+    obj = _loads_json(cand)
+    if obj is not None:
+        for o in (obj if isinstance(obj, list) else [obj]):
+            c = _call_from_obj(o)
+            if c:
+                out.append(c)
+    return _reindex_text_calls(out)
+
+
+def _reindex_text_calls(calls):
+    for i, c in enumerate(calls):
+        c["id"] = "textcall_%d" % i
+    return calls
 
 
 def _stream_model(provider, model, convo):

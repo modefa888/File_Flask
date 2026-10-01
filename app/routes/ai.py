@@ -37,6 +37,8 @@ bp = Blueprint("ai", __name__)
 _LOCK = threading.Lock()
 _CONNECT_TIMEOUT = 15                 # 建立连接的超时（快速报错）
 _READ_TIMEOUT = 300                   # 连上之后等模型吐字的超时（慢模型首字可能要几十秒）
+_CHAT_MAX_ROUNDS = 6                  # 普通对话里工具调用的最大轮数（防止死循环）
+_CHAT_TOOL_CHARS = 20000              # 单个工具结果回填给模型的字符上限
 
 
 def _preflight(url, timeout=_CONNECT_TIMEOUT):
@@ -392,80 +394,179 @@ def api_ai_chat():
         _inject_web_search(clean)                    # 联网搜索并注入结果
     skills = data.get("skills") or data.get("skill")            # 支持多个 skill
     _inject_skill(clean, skills)                                # 注入技能提示词
+    # 「文件权限」在普通对话里同样生效：只读→读取类工具；工作区/完全→额外开放写入工具
+    perm = str(data.get("perm") or "readonly")
+    if perm not in ("readonly", "workspace", "full"):
+        perm = "readonly"
+    repo = str(data.get("repo") or "")
+    root = os.path.abspath(repo) if repo and os.path.isdir(repo) else ""
+    use_tools = bool(root) and data.get("use_tools", True) is not False
     n_imgs = sum(1 for m in clean for part in (m["content"] if isinstance(m["content"], list) else [])
                  if isinstance(part, dict) and part.get("type") == "image_url")
-    _log.info("AI 对话：provider=%s model=%s msgs=%d images=%d web_search=%s skills=%s",
+    _log.info("AI 对话：provider=%s model=%s msgs=%d images=%d web_search=%s skills=%s perm=%s tools=%s",
               provider["name"], model, len(clean), n_imgs, bool(data.get("web_search")),
-              ",".join(skills) if isinstance(skills, list) else (skills or "-"))
+              ",".join(skills) if isinstance(skills, list) else (skills or "-"), perm, use_tools)
 
     base = provider["base_url"].rstrip("/")
     url = base if base.endswith("/chat/completions") else base + "/chat/completions"
-    payload = json.dumps({"model": model, "messages": clean, "stream": True}).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=payload, method="POST",
-        headers={
+
+    def _chat_headers():
+        return {
             "Content-Type": "application/json",
             "Authorization": "Bearer " + provider["api_key"],
             "Accept": "text/event-stream",
-        })
+        }
+
+    def _text_tool_note(perm_now, web=False):
+        """接口不支持原生 tools 时，用系统提示告诉模型可用工具与文本调用格式。"""
+        names = ["list_dir(path)", "read_file(path, start, end)", "search_files(pattern, path, max)"]
+        if web:
+            names.append("web_search(query, max_results)")
+        if perm_now in ("workspace", "full"):
+            names += ["write_file(path, content)", "edit_file(path, old_text, new_text)"]
+        return ("\n\n[可用工具] 你可以按需读取项目文件来回答问题，不要凭空猜测，也不要让用户手动粘贴代码。"
+                "当前项目根目录：%s\n可用工具：%s\n"
+                "调用格式（严格使用工具名与参数名）：<tool_use>{\"name\":\"read_file\",\"input\":{\"path\":\"app/xxx.py\"}}</tool_use>"
+                % (root or "/", "；".join(names)))
 
     def gen():
-        try:
-            resp = _open_stream(req, url)
-        except urllib.error.HTTPError as e:
+        from .agent import tools_for_perm, _run_tool_job, _parse_text_calls, _gate
+        convo = list(clean)
+        all_tools = tools_for_perm(perm) if use_tools else []
+        if not data.get("web_search"):                       # 未开「联网」时不给 web_search 工具
+            all_tools = [t for t in all_tools if t["function"]["name"] != "web_search"]
+        tools = list(all_tools)
+        offered_names = {t["function"]["name"] for t in all_tools}
+        rounds = 0
+        while rounds < _CHAT_MAX_ROUNDS:
+            rounds += 1
+            body = {"model": model, "messages": convo, "stream": True}
+            if tools:
+                body["tools"] = tools
+                body["tool_choice"] = "auto"
+            req = urllib.request.Request(
+                url, data=json.dumps(body).encode("utf-8"), method="POST", headers=_chat_headers())
+            text, calls, resp = "", {}, None
             try:
-                detail = e.read().decode("utf-8", "replace")[:500]
-            except OSError:
-                detail = ""
-            yield _sse({"error": f"接口返回 {e.code}：{detail or e.reason}"})
-            yield b"data: [DONE]\n\n"
-            return
-        except (socket.timeout, TimeoutError):
-            yield _sse({"error": "连接 AI 接口超时（%d 秒）：请检查接口地址与网络" % _CONNECT_TIMEOUT})
-            yield b"data: [DONE]\n\n"
-            return
-        except (urllib.error.URLError, OSError) as e:
-            yield _sse({"error": f"无法连接 AI 接口：{e}"})
-            yield b"data: [DONE]\n\n"
-            return
-        try:
-            # SSE 按行迭代：上游每 flush 一行就能立刻转发，保证打字机效果
-            for raw in resp:
-                line = raw.strip()
-                if not line.startswith(b"data:"):
-                    continue
-                body = line[5:].strip()
-                if body == b"[DONE]":
-                    yield b"data: [DONE]\n\n"
-                    return
+                resp = _open_stream(req, url)
+            except urllib.error.HTTPError as e:
                 try:
-                    obj = json.loads(body.decode("utf-8"))
-                except ValueError:
+                    detail = e.read().decode("utf-8", "replace")[:500]
+                except OSError:
+                    detail = ""
+                if tools:                                   # 接口不认 tools：降级为纯文本 + 提示词方式
+                    _log.info("AI 对话：接口不支持 tools，改用提示词模式（%s）", detail[:200])
+                    tools = []
+                    rounds -= 1
+                    if not any("可用工具" in str(m.get("content") or "") for m in convo):
+                        note = _text_tool_note(perm, bool(data.get("web_search")))
+                        if convo and convo[0].get("role") == "system":
+                            convo[0]["content"] = str(convo[0].get("content") or "") + note
+                        else:
+                            convo.insert(0, {"role": "system", "content": note.strip()})
                     continue
-                if obj.get("error"):
-                    yield _sse({"error": str(obj["error"])})
-                    continue
-                choices = obj.get("choices") or []
-                if not choices:
-                    continue
-                delta = (choices[0] or {}).get("delta") or {}
-                piece = delta.get("content")
-                reasoning = delta.get("reasoning_content")
-                if piece or reasoning:
-                    yield _sse({"delta": piece or "", "reasoning": reasoning or ""})
-            yield b"data: [DONE]\n\n"
-        except (socket.timeout, TimeoutError):
-            yield _sse({"error": "模型 %d 秒没有返回新内容（响应超时），可重试或换个更快的模型"
-                                % _READ_TIMEOUT})
-            yield b"data: [DONE]\n\n"
-        except (OSError, urllib.error.URLError) as e:
-            yield _sse({"error": f"读取流中断：{e}"})
-            yield b"data: [DONE]\n\n"
-        finally:
+                yield _sse({"error": f"接口返回 {e.code}：{detail or e.reason}"})
+                yield b"data: [DONE]\n\n"
+                return
+            except (socket.timeout, TimeoutError):
+                yield _sse({"error": "连接 AI 接口超时（%d 秒）：请检查接口地址与网络" % _CONNECT_TIMEOUT})
+                yield b"data: [DONE]\n\n"
+                return
+            except (urllib.error.URLError, OSError) as e:
+                yield _sse({"error": f"无法连接 AI 接口：{e}"})
+                yield b"data: [DONE]\n\n"
+                return
             try:
-                resp.close()
-            except OSError:
-                pass
+                # SSE 按行迭代：上游每 flush 一行就能立刻转发，保证打字机效果
+                for raw in resp:
+                    line = raw.strip()
+                    if not line.startswith(b"data:"):
+                        continue
+                    chunk = line[5:].strip()
+                    if chunk == b"[DONE]":
+                        break
+                    try:
+                        obj = json.loads(chunk.decode("utf-8"))
+                    except ValueError:
+                        continue
+                    if obj.get("error"):
+                        yield _sse({"error": str(obj["error"])})
+                        continue
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = (choices[0] or {}).get("delta") or {}
+                    piece = delta.get("content")
+                    reasoning = delta.get("reasoning_content")
+                    if piece or reasoning:
+                        yield _sse({"delta": piece or "", "reasoning": reasoning or ""})
+                    if piece:
+                        text += piece
+                    for tc in (delta.get("tool_calls") or []):
+                        slot = calls.setdefault(tc.get("index", 0), {"id": "", "name": "", "args_raw": ""})
+                        if tc.get("id"):
+                            slot["id"] = tc["id"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            slot["name"] += fn["name"]
+                        if fn.get("arguments"):
+                            slot["args_raw"] += fn["arguments"]
+            except (socket.timeout, TimeoutError):
+                yield _sse({"error": "模型 %d 秒没有返回新内容（响应超时），可重试或换个更快的模型"
+                                    % _READ_TIMEOUT})
+                yield b"data: [DONE]\n\n"
+                return
+            except (OSError, urllib.error.URLError) as e:
+                yield _sse({"error": f"读取流中断：{e}"})
+                yield b"data: [DONE]\n\n"
+                return
+            finally:
+                try:
+                    resp.close()
+                except OSError:
+                    pass
+            # 收集本轮工具调用（原生 tool_calls 优先，其次正文里的文本格式）
+            call_list = []
+            for idx in sorted(calls):
+                c = calls[idx]
+                if not c["name"]:
+                    continue
+                try:
+                    a = json.loads(c["args_raw"] or "{}")
+                except ValueError:
+                    a = {}
+                if not isinstance(a, dict):
+                    a = {}
+                call_list.append({"id": c["id"] or ("call_%s" % idx), "name": c["name"], "args": a,
+                                  "args_raw": c["args_raw"] or "{}"})
+            if not call_list:
+                call_list = _parse_text_calls(text)
+            if not call_list:
+                break                                        # 没有工具调用 → 回答结束
+            convo.append({"role": "assistant", "content": text or None,
+                          "tool_calls": [{"id": c["id"], "type": "function",
+                                          "function": {"name": c["name"], "arguments": c["args_raw"]}}
+                                         for c in call_list]})
+            for c in call_list:
+                yield _sse({"type": "step", "call_id": c["id"], "tool": c["name"], "args": c["args"]})
+                if c["name"] not in offered_names:            # 模型可能伪造了未开放的工具（如 run_command）
+                    ok, summary, detail = False, "该工具在普通对话中不可用：%s" % c["name"], ""
+                    model_text = "调用被拒绝：普通对话不允许使用 %s（可在智能体模式下执行命令）" % c["name"]
+                else:
+                    allowed, refuse, need_ask, ask_reason = _gate(perm, c["name"], c["args"], root)
+                    if not allowed:
+                        ok, summary, detail = False, refuse, ""
+                        model_text = "调用被拒绝：%s" % refuse
+                    elif need_ask:
+                        ok, summary, detail = False, "该操作需要确认，普通对话不支持", ""
+                        model_text = "该操作需要用户确认，请提示用户切换到智能体模式执行"
+                    else:
+                        ok, summary, detail, model_text = _run_tool_job(c["name"], c["args"], root, perm)
+                yield _sse({"type": "result", "call_id": c["id"], "tool": c["name"], "ok": bool(ok),
+                            "summary": summary, "detail": detail, "ms": 0})
+                convo.append({"role": "tool", "tool_call_id": c["id"],
+                              "content": (model_text or summary or detail or "")[:_CHAT_TOOL_CHARS]})
+        yield b"data: [DONE]\n\n"
 
     return Response(gen(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

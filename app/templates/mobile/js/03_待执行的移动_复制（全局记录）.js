@@ -133,11 +133,14 @@
   }
 
   var _loadingPath = null;
-  async function load(path, fallbackRoot) {
+  async function load(path, fallbackRoot, opts) {
     if (_loadingPath === (path || "")) return;   // 同一目录正在加载，忽略重复触发
     _loadingPath = path || "";
     exitSelMode();
-    showLoading(true);
+    // 遮罩只用于「打开新文件夹」：刷新当前目录（下拉刷新、操作后重载）静默进行
+    var sameDir = !!state.path && normDirPath(path || "") === normDirPath(state.path);
+    var silent = sameDir || !!(opts && opts.silent);
+    if (!silent) showLoading(true);
     try {
       var url = path
         ? "/api/files?path=" + encodeURIComponent(path) + "&limit=0&offset=0"
@@ -173,7 +176,7 @@
       toast(msg, "error");
     } finally {
       _loadingPath = null;
-      showLoading(false);
+      if (!silent) showLoading(false);
     }
   }
 

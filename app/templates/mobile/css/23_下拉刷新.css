@@ -1,0 +1,12 @@
+  /* ===== 下拉刷新 ===== */
+  /* 小转圈吸附在吸顶顶栏（.header）正下方（面包屑路径底下），随下拉距离出现/下移，松手后旋转 */
+  .ptr {
+    position: absolute; top: 100%; left: 50%; margin-top: 16px;
+    width: 20px; height: 20px; margin-left: -10px;
+    border: 3px solid rgba(31,111,235,.2); border-top-color: var(--primary);
+    border-radius: 50%;
+    opacity: 0; pointer-events: none;
+    transform: translateY(-36px);
+  }
+  .ptr.pull { opacity: .75; }
+  .ptr.spin { opacity: 1; animation: spin .8s linear infinite; }

@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>幸运选号 · Lottery Demo</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background:
+      radial-gradient(900px 500px at 15% 10%, rgba(220, 50, 60, .18), transparent 60%),
+      radial-gradient(900px 500px at 85% 90%, rgba(30, 90, 200, .22), transparent 60%),
+      linear-gradient(135deg, #141428 0%, #1e1e38 55%, #24244a 100%);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #e9e9f5;
+  }
+  body { display: flex; justify-content: center; align-items: center; padding: 20px; }
+
+  .panel {
+    width: 640px;
+    max-width: 100%;
+    background: linear-gradient(180deg, rgba(30, 30, 56, .95) 0%, rgba(20, 20, 40, .95) 100%);
+    border: 1px solid rgba(255, 255, 255, .08);
+    border-radius: 20px;
+    padding: 22px 24px 24px;
+    box-shadow:
+      0 24px 60px rgba(0, 0, 0, .55),
+      0 0 0 1px rgba(255, 255, 255, .04) inset;
+  }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+  }
+  .title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 5px;
+    color: #ffe6a8;
+    text-shadow: 0 0 14px rgba(255, 200, 90, .35);
+  }
+  .title small {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: #7d7da0;
+    font-weight: 400;
+    margin-top: 3px;
+  }
+  .badge {
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: #a0a0c8;
+    padding: 6px 10px;
+    border: 1px solid rgba(255, 255, 255, .1);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .03);
+  }
+
+  .tabs {
+    display: flex;
+    background: rgba(0, 0, 0, .28);
+    border-radius: 12px;
+    padding: 4px;
+    margin-bottom: 18px;
+  }
+  .tab {
+    flex: 1;
+    height: 40px;
+    border: none;
+    background: transparent;
+    color: #a0a0c8;
+    font-size: 14px;
+    letter-spacing: 3px;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: background .2s, color .2s, box-shadow .2s;
+  }
+  .tab.active {
+    background: linear-gradient(180deg, #ffe39a 0%, #f0b64a 100%);
+    color: #3b2412;
+    font-weight: 700;
+    box-shadow: 0 6px 18px rgba(240, 182, 74, .35);
+  }
+  .tab:not(.active):hover { color: #f0f0ff; }
+
+  .stage {
+    background: rgba(0, 0, 0, .28);
+    border: 1px solid rgba(255, 255, 255, .05);
+    border-radius: 16px;
+    padding: 22px 18px;
+    min-height: 180px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .stage::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(255, 90, 90, .10), transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(90, 160, 255, .12), transparent 40%);
+    pointer-events: none;
+  }
+
+  .balls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    z-index: 1;
+    min-height: 66px;
+  }
+  .ball {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #fff;
+    user-select: none;
+    opacity: 0;
+    transform: scale(.4) rotate(-30deg);
+    transition: opacity .35s ease, transform .5s cubic-bezier(.4, 1.6, .5, 1);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+  }
+  .ball.show { opacity: 1; transform: scale(1) rotate(0); }
+
+  /* 红球（双色球 6 红） */
+  .ball.red {
+    background: radial-gradient(circle at 32% 28%, #ff8a7a 0%, #e8312a 55%, #7a0a08 100%);
+    box-shadow:
+      0 6px 14px rgba(232, 49, 42, .55),
+      inset 0 -6px 10px rgba(80, 0, 0, .5),
+      inset 0 4px 8px rgba(255, 200, 200, .5);
+  }
+  /* 蓝球（双色球 1 蓝） */
+  .ball.blue {
+    background: radial-gradient(circle at 32% 28%, #7fb8ff 0%, #1e6ce8 55%, #0a2070 100%);
+    box-shadow:
+      0 6px 14px rgba(30, 108, 232, .55),
+      inset 0 -6px 10px rgba(0, 15, 70, .55),
+      inset 0 4px 8px rgba(180, 210, 255, .5);
+  }
+  /* 大乐透前区（白球-银/白） */
+  .ball.white {
+    background: radial-gradient(circle at 32% 28%, #ffffff 0%, #d6d6e0 55%, #7a7a8c 100%);
+    color: #1e1e2e;
+    text-shadow: 0 1px 1px rgba(255, 255, 255, .5);
+    box-shadow:
+      0 6px 14px rgba(200, 200, 220, .35),
+      inset 0 -6px 10px rgba(90, 90, 110, .5),
+      inset 0 4px 8px rgba(255, 255, 255, .8);
+  }
+  /* 大乐透后区（绿球） */
+  .ball.green {
+    background: radial-gradient(circle at 32% 28%, #8ef0b0 0%, #1db264 55%, #065535 100%);
+    box-shadow:
+      0 6px 14px rgba(29, 178, 100, .55),
+      inset 0 -6px 10px rgba(4, 60, 30, .5),
+      inset 0 4px 8px rgba(200, 255, 220, .55);
+  }
+
+  .split {
+    color: #7d7da0;
+    font-size: 18px;
+    letter-spacing: 4px;
+    padding: 0 6px;
+    opacity: 0;
+    transition: opacity .3s;
+  }
+  .split.show { opacity: 1; }
+
+  .empty-hint {
+    color: #7d7da0;
+    font-size: 14px;
+    letter-spacing: 4px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .count {
+    flex: 1;
+    background: rgba(0, 0, 0, .28);
+    border: 1px solid rgba(255, 255, 255, .08);
+    color: #e9e9f5;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 14px;
+    letter-spacing: 2px;
+    outline: none;
+  }
+  .count:focus { border-color: rgba(240, 182, 74, .6); }
+
+  .btn {
+    flex: 2;
+    height: 48px;
+    border: none;
+    border-radius: 12px;
+    background: linear-gradient(180deg, #ffe39a 0%, #f0b64a 100%);
+    color: #3b2412;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(240, 182, 74, .35), inset 0 1px 0 rgba(255, 255, 255, .4);
+    transition: transform .1s, filter .15s;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:active { transform: translateY(2px); box-shadow: 0 2px 6px rgba(240, 182, 74, .35); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  .history {
+    max-height: 210px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  .history::-webkit-scrollbar { width: 6px; }
+  .history::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .12); border-radius: 3px; }
+  .history::-webkit-scrollbar-track { background: transparent; }
+
+  .hitem {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    background: rgba(0, 0, 0, .22);
+    border: 1px solid rgba(255, 255, 255, .05);
+    border-radius: 10px;
+    font-size: 13px;
+    color: #c8c8e0;
+  }
+  .hitem .idx {
+    color: #7d7da0;
+    font-size: 11px;
+    letter-spacing: 2px;
+    min-width: 34px;
+  }
+  .hitem .nums {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+  .hitem .mini {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .hitem .mini.red   { background: linear-gradient(135deg, #ff8a7a, #e8312a); }
+  .hitem .mini.blue  { background: linear-gradient(135deg, #7fb8ff, #1e6ce8); }
+  .hitem .mini.white { background: linear-gradient(135deg, #ffffff, #a0a0b0); color: #1e1e2e; }
+  .hitem .mini.green { background: linear-gradient(135deg, #8ef0b0, #1db264); }
+  .hitem .dash { color: #7d7da0; font-size: 12px; }
+
+  .empty-history {
+    text-align: center;
+    color: #6b6b88;
+    font-size: 12px;
+    letter-spacing: 3px;
+    padding: 20px 0;
+  }
+
+  .footer {
+    margin-top: 14px;
+    text-align: center;
+    color: #6b6b88;
+    font-size: 11px;
+    letter-spacing: 2px;
+    line-height: 1.7;
+  }
+  .footer b { color: #a0a0c8; }
+</style>
+</head>
+<body>
+  <div class="panel">
+    <div class="header">
+      <div class="title">幸运选号<small>LOTTERY · RANDOM PICK</small></div>
+      <div class="badge" id="badge">双色球 6+1</div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-type="ssq">双色球</button>
+      <button class="tab"        data-type="dlt">大乐透</button>
+    </div>
+
+    <div class="stage">
+      <div class="balls" id="balls">
+        <div class="empty-hint">点下方"随机选号"开始</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <input class="count" id="count" type="number" min="1" max="10" value="1" aria-label="票数">
+      <button class="btn" id="drawBtn">随机选号</button>
+    </div>
+
+    <div class="history" id="history">
+      <div class="empty-history">尚无历史记录</div>
+    </div>
+
+    <div class="footer">
+      双色球：红球 6/33 · 蓝球 1/16　|　大乐透：前区 5/35 · 后区 2/12<br>
+      <b>仅供娱乐参考</b> · 中奖概率极低 · 请理性购彩
+    </div>
+  </div>
+
+<script>
+(function () {
+  const CONFIG = {
+    ssq: {
+      name: '双色球',
+      badge: '双色球 6+1',
+      groups: [
+        { label: '红球', count: 6, pool: 33, cls: 'red'   },
+        { label: '蓝球', count: 1, pool: 16, cls: 'blue'  }
+      ]
+    },
+    dlt: {
+      name: '大乐透',
+      badge: '大乐透 5+2',
+      groups: [
+        { label: '前区', count: 5, pool: 35, cls: 'white' },
+        { label: '后区', count: 2, pool: 12, cls: 'green' }
+      ]
+    }
+  };
+
+  const ballsEl  = document.getElementById('balls');
+  const drawBtn  = document.getElementById('drawBtn');
+  const countEl  = document.getElementById('count');
+  const historyEl= document.getElementById('history');
+  const badgeEl  = document.getElementById('badge');
+  const tabs     = document.querySelectorAll('.tab');
+
+  let currentType = 'ssq';
+  let drawing = false;
+  let history = [];
+
+  // Fisher-Yates 从 1..pool 中抽 k 个不重复整数，再升序排列
+  function pick(pool, k) {
+    const arr = Array.from({ length: pool }, (_, i) => i + 1);
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr.slice(0, k).sort((a, b) => a - b);
+  }
+
+  const pad = n => String(n).padStart(2, '0');
+
+  function generateOne() {
+    const cfg = CONFIG[currentType];
+    return cfg.groups.map(g => pick(g.pool, g.count).map(n => ({ n, cls: g.cls })));
+  }
+
+  function buildMainView(tickets) {
+    ballsEl.innerHTML = '';
+    const cfg = CONFIG[currentType];
+
+    if (tickets.length === 1) {
+      renderTicketBalls(ballsEl, tickets[0], cfg, /*main*/ true);
+    } else {
+      // 多票：竖向铺满
+      tickets.forEach((t, i) => {
+        const idx = document.createElement('div');
+        idx.className = 'empty-hint';
+        idx.style.fontSize = '12px';
+        idx.style.color = '#7d7da0';
+        idx.style.letterSpacing = '2px';
+        idx.style.margin = i === 0 ? '0' : '6px 0 2px';
+        idx.textContent = `第 ${i + 1} 注`;
+        ballsEl.appendChild(idx);
+
+        const row = document.createElement('div');
+        row.className = 'balls';
+        renderTicketBalls(row, t, cfg, true);
+        ballsEl.appendChild(row);
+      });
+    }
+  }
+
+  function renderTicketBalls(container, ticket, cfg, animated) {
+    let groupIdx = 0;
+    ticket.forEach((group, g) => {
+      if (g > 0) {
+        const sep = document.createElement('span');
+        sep.className = 'split' + (animated ? '' : ' show');
+        sep.textContent = '+';
+        container.appendChild(sep);
+        if (animated) setTimeout(() => sep.classList.add('show'), 350 + g * 200);
+      }
+      group.forEach((ball, i) => {
+        const b = document.createElement('div');
+        b.className = 'ball ' + ball.cls;
+        b.textContent = pad(ball.n);
+        container.appendChild(b);
+        if (animated) {
+          const delay = 200 + g * 350 + i * 90;
+          setTimeout(() => b.classList.add('show'), delay);
+        } else {
+          b.classList.add('show');
+        }
+      });
+      groupIdx++;
+    });
+  }
+
+  function renderHistory() {
+    if (history.length === 0) {
+      historyEl.innerHTML = '<div class="empty-history">尚无历史记录</div>';
+      return;
+    }
+    // 只显示最近 30 条，倒序
+    const items = history.slice(-30).reverse();
+    historyEl.innerHTML = '';
+    items.forEach(it => {
+      const row = document.createElement('div');
+      row.className = 'hitem';
+      const idx = document.createElement('div');
+      idx.className = 'idx';
+      idx.textContent = `#${String(it.id).padStart(3, '0')}`;
+      row.appendChild(idx);
+
+      const nums = document.createElement('div');
+      nums.className = 'nums';
+      it.ticket.forEach((group, g) => {
+        if (g > 0) {
+          const dash = document.createElement('span');
+          dash.className = 'dash';
+          dash.textContent = '+';
+          nums.appendChild(dash);
+        }
+        group.forEach(ball => {
+          const m = document.createElement('span');
+          m.className = 'mini ' + ball.cls;
+          m.textContent = pad(ball.n);
+          nums.appendChild(m);
+        });
+      });
+      row.appendChild(nums);
+
+      historyEl.appendChild(row);
+    });
+    // 新记录插到最上面（因为倒序了），滚动到顶
+    historyEl.scrollTop = 0;
+  }
+
+  async function draw() {
+    if (drawing) return;
+    let k = Math.max(1, Math.min(10, parseInt(countEl.value, 10) || 1));
+    countEl.value = k;
+
+    drawing = true;
+    drawBtn.disabled = true;
+    drawBtn.textContent = '选号中…';
+
+    const tickets = [];
+    for (let i = 0; i < k; i++) tickets.push(generateOne());
+
+    // 主区展示：1 票直接展示；多票依次铺
+    buildMainView(tickets);
+
+    // 动画完成后加入历史
+    const waitMs = 900 + k * 300;
+    await new Promise(r => setTimeout(r, waitMs));
+
+    tickets.forEach(t => {
+      history.push({
+        id: history.length + 1,
+        type: currentType,
+        ticket: t,
+        ts: Date.now()
+      });
+    });
+    renderHistory();
+
+    drawing = false;
+    drawBtn.disabled = false;
+    drawBtn.textContent = '随机选号';
+  }
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      if (drawing) return;
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentType = tab.dataset.type;
+      badgeEl.textContent = CONFIG[currentType].badge;
+    });
+  });
+
+  drawBtn.addEventListener('click', draw);
+  countEl.addEventListener('keydown', e => { if (e.key === 'Enter') draw(); });
+
+  // 初始状态：主区显示提示；历史为空
+})();
+</script>
+</body>
+</html>

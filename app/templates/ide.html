@@ -2224,7 +2224,7 @@
   }
   function esc(s) { s = s == null ? "" : String(s); return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
   function getExt(name) { const i = name.lastIndexOf("."); return i >= 0 ? name.substring(i + 1).toLowerCase() : ""; }
-  function baseName(p) { return p.split("/").pop() || p; }
+  function baseName(p) { p = String(p == null ? "" : p); return p.split("/").pop() || p; }
   function dirName(p) { const i = p.lastIndexOf("/"); return i > 0 ? p.substring(0, i) : (i === 0 ? "/" : p); }
 
   /* ---------- 文件树 ---------- */
@@ -4836,7 +4836,8 @@
       const msgs = (s.msgs || []).map(m => ({
         mid: m.pid || aiNewPid(), role: m.role, text: m.text || m.content || "",
         images: m.images || [], reasoning: m.reasoning || "",
-        meta: { ms: m.ms, ts: m.ts, steps: m.steps, files: m.files },
+        meta: { ms: m.ms, ts: m.ts, steps: m.steps, files: m.files,
+                changes: m.changes, undone: m.undone, err: m.err },
       }));
       if (!msgs.length) continue;
       try {
@@ -4905,7 +4906,8 @@
     const toSave = all.filter(m => m && !m._saved && m.pid).map(m => ({
       mid: m.pid, role: m.role, text: m.text || "",
       images: m.images || [], reasoning: m.reasoning || "",
-      meta: { ms: m.ms, ts: m.ts, steps: m.steps, files: m.files },
+      meta: { ms: m.ms, ts: m.ts, steps: m.steps, files: m.files,
+              changes: m.changes, undone: m.undone, err: m.err },
     }));
     const savedPids = s._savedPids || new Set();
     const currentPids = new Set(all.filter(m => m && m.pid).map(m => m.pid));
@@ -5414,6 +5416,7 @@
         const results = d.results || [];
         const failed = results.filter(x => !x.ok);
         m.undone = true; m.changes = [];
+        m._saved = false;                       // 状态变了：允许重新保存，刷新后「已回撤」不丢
         aiReloadAfterUndo(results);
         aiPersistCurrent(); aiRenderAll();
         toast("已回撤 " + (d.restored || 0) + "/" + (d.total || results.length) + " 项改动" +
@@ -5444,9 +5447,23 @@
   function aiChangesBox(m, mi) {
     const list = (m.changes || []).filter(c => c && c.path);
     if (!list.length) return null;
-    const byPath = new Map();                             // 同一文件多次改动只显示一个胶囊（取最后动作）
-    list.forEach(c => byPath.set(c.path, c));
-    const items = [...byPath.values()];
+    // 同一文件多次改动（新建 + 多次修改）合成一个胶囊：动作取净效果，差异看全部操作
+    const groups = new Map();
+    list.forEach(c => {
+      let g = groups.get(c.path);
+      if (!g) { g = { first: c, last: c, ops: [] }; groups.set(c.path, g); }
+      g.last = c; g.ops.push(c);
+    });
+    const items = [];
+    groups.forEach((g, path) => {
+      if (g.last.action === "deleted" && g.first.action === "created") return;   // 本轮新建又删除：净效果为零
+      items.push({
+        path: path,
+        action: g.last.action === "deleted" ? "deleted" : (g.first.action === "created" ? "created" : "modified"),
+        ops: g.ops,
+      });
+    });
+    if (!items.length) return null;
     const box = document.createElement("div");
     box.className = "ai-chg";
     const head = document.createElement("div");
@@ -5462,18 +5479,20 @@
       chip.className = "ai-chg-chip " + cls;
       chip.title = label + "：" + c.path;
       chip.innerHTML = '<i class="bi ' + icon + '"></i><span>' + esc(baseName(c.path)) + '</span>';
-      chip.onclick = () => aiOpenChangesTab([c]);
+      chip.onclick = () => aiOpenChangesTab(c.ops);
       row.appendChild(chip);
     });
-    head.querySelector(".ai-chg-all").onclick = () => aiOpenChangesTab(items);
+    head.querySelector(".ai-chg-all").onclick = () => aiOpenChangesTab(list);
     box.appendChild(head);
     box.appendChild(row);
     return box;
   }
   function aiAppendChangesBox(row, m, mi) {
     if (!row || !m) return;
-    const b = aiChangesBox(m, mi);
-    if (b) row.appendChild(b);
+    try {
+      const b = aiChangesBox(m, mi);
+      if (b) row.appendChild(b);
+    } catch (e) { console.error("文件变更模块渲染失败：", e); }
   }
   /* 「查看文件变更」：打开一个标签页，参考 Git 更改视图汇总展示所有改动差异 */
   function aiOpenChangesTab(changes) {
@@ -7291,6 +7310,7 @@
     bodyB.innerHTML = '<span class="ai-waiting">思考中<span class="d"></span><span class="d"></span><span class="d"></span></span>';
     let acc = "", thinking = "", ttft = 0;                // ttft：首 token 到达耗时
     let turnChanges = [];                                 // 本轮 AI 产生的文件改动 id（供回撤）
+    let turnDone = false;                                 // 回复已入列：之后收尾出错不再覆盖/重复插入
     AI._agentTurnChanges = [];
     AI.ctrl = new AbortController();
     try {
@@ -7323,6 +7343,7 @@
                        steps: res.steps.length ? res.steps : undefined,
                        changes: turnChanges.length ? turnChanges : undefined });
         bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
+        turnDone = true;                                // 回复已落定：后续收尾出错只提示，不覆盖
         aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
         aiPersistCurrent(); aiRenderConv();
         aiRecordStat(true, aMeta.ms, acc.length, ttft, inTok);
@@ -7413,11 +7434,15 @@
                      ms: meta.ms, ts: meta.ts, steps: chatSteps.length ? chatSteps : undefined,
                      changes: turnChanges.length ? turnChanges : undefined });
       bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
+      turnDone = true;                                  // 回复已落定：后续收尾出错只提示，不覆盖
       aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
       aiPersistCurrent(); aiRenderConv();
       aiRecordStat(true, performance.now() - t0, out.length, ttft, inTok);
     } catch (e) {
-      if (e.name === "AbortError") {
+      console.error("AI 回复处理出错：", e);
+      if (turnDone) {                                   // 回复已成功入列：只提示，不覆盖已完成的回复
+        toast("回复已完成，但界面更新出错：" + (e.message || e), "warn");
+      } else if (e.name === "AbortError") {
         bodyB.innerHTML = aiMd(acc.replace(/^\s+/, "")) + "\n（已停止）";
         const out = acc.trim();
         const abChanges = turnChanges.length ? turnChanges : (AI._agentTurnChanges || []);

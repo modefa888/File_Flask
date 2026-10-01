@@ -75,7 +75,7 @@ def _clean_meta(meta):
         return {}
     # 只保留需要的字段
     clean = {}
-    for k in ("ms", "ts", "steps", "files"):
+    for k in ("ms", "ts", "steps", "files", "changes", "undone", "err"):
         if k in meta and meta[k] is not None:
             clean[k] = meta[k]
     return clean
@@ -138,6 +138,12 @@ def get_conversation(user_id, conv_id):
                         m["ms"] = md["ms"]
                     if md.get("ts") is not None:
                         m["ts"] = md["ts"]
+                    if md.get("changes"):
+                        m["changes"] = md["changes"]
+                    if md.get("undone"):
+                        m["undone"] = True
+                    if md.get("err"):
+                        m["err"] = True
             except (ValueError, TypeError):
                 pass
             msgs.append(m)
@@ -184,16 +190,26 @@ def upsert_conversation(user_id, conv_id, title, extra, msgs, deleted=None):
                 (conv_id, user_id, *deleted),
             )
             deleted_out = list(deleted)
-        # 插入新消息
+        # 插入新消息（已存在则更新内容与 meta，例如回撤后 undone 状态变化）
         for m in msgs:
             mid = str(m.get("mid") or "")
             if not mid:
                 continue
+            meta_json = json.dumps(_clean_meta(m.get("meta")), ensure_ascii=False)
             existing = conn.execute(
                 "SELECT 1 FROM ai_messages WHERE conv_id=? AND mid=?",
                 (conv_id, mid),
             ).fetchone()
             if existing:
+                conn.execute(
+                    "UPDATE ai_messages SET text=?, images=?, reasoning=?, meta=? "
+                    "WHERE conv_id=? AND mid=?",
+                    ((m.get("text") or "")[:200000],
+                     json.dumps(_clean_images(m.get("images")), ensure_ascii=False),
+                     (m.get("reasoning") or "")[:200000],
+                     meta_json, conv_id, mid),
+                )
+                saved.append(mid)
                 continue
             seq = conn.execute(
                 "SELECT COALESCE(MAX(seq), -1) + 1 FROM ai_messages WHERE conv_id=?",

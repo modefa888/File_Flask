@@ -98,12 +98,18 @@ def _as_lines(data):
 def _build_diff(rec):
     """根据快照的 before/after 生成 unified diff，存进记录里。"""
     rel = rec.get("_rel") or os.path.basename(rec["path"])
-    tb, ta = _as_lines(rec.get("data")), _as_lines(rec.get("after"))
+    rec["diff"], rec["_adds"], rec["_dels"], rec["truncated"] = \
+        _diff_text(rec.get("data"), rec.get("after"), rel)
+
+
+def _diff_text(before, after, rel):
+    """两份字节内容 → unified diff 文本 + 增删行数 + 是否截断。"""
+    tb, ta = _as_lines(before), _as_lines(after)
     if tb is None or ta is None:
-        rec["diff"] = "（二进制文件变更，不显示差异）"
-        return
+        return "（二进制文件变更，不显示差异）", 0, 0, False
     lines = list(difflib.unified_diff(tb, ta, fromfile="a/" + rel, tofile="b/" + rel, lineterm=""))
     total = sum(len(l) + 1 for l in lines)
+    trunc = False
     if total > _MAX_DIFF_CHARS:
         acc, out = 0, []
         for l in lines:
@@ -112,48 +118,93 @@ def _build_diff(rec):
                 break
             out.append(l)
         lines = out + ["", "（差异内容过大，已截断）"]
-        rec["truncated"] = True
-    rec["diff"] = "\n".join(lines)
+        trunc = True
+    diff = "\n".join(lines)
+    adds = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))
+    dels = sum(1 for l in lines if l.startswith("-") and not l.startswith("---"))
+    return diff, adds, dels, trunc
+
+
+def _rel_of(rec, root_abs):
+    """记录里的绝对路径 → 项目内相对路径（不在项目内则原样返回）。"""
+    p = rec["path"]
+    if not root_abs:
+        return p
+    try:
+        rp = os.path.relpath(p, root_abs)
+        if not rp.startswith(".."):
+            rec["_rel"] = rp
+            return rp
+    except ValueError:
+        pass
+    return p
 
 
 def describe(ids, root="", with_diff=False):
-    """把一组改动 id 整理为描述列表；root 用于把绝对路径转成项目内相对路径。"""
+    """把一组改动 id 整理为描述列表；root 用于把绝对路径转成项目内相对路径。
+
+    with_diff=False：逐条列出（供 SSE 过程流推送）。
+    with_diff=True：按文件聚合为「净变更」——同一文件先新建又多次修改时，
+    差异 = 最早快照的改前状态 → 最后一次的改后状态（新建 + 修改的集合体）。
+    """
     root_abs = os.path.abspath(root) if root else ""
-    out = []
-    for cid in ids or []:
-        with _LOCK:
+    recs = []
+    with _LOCK:
+        for cid in ids or []:
             rec = _STORE.get(str(cid))
-        if not rec:
+            if rec:
+                recs.append((str(cid), rec))
+    if not with_diff:
+        out = []
+        for cid, rec in recs:
+            if rec.get("kind") == "dir":      # 目录快照只用于回撤，不作为文件变更展示
+                continue
+            action = rec.get("action") or "modified"
+            if action == "unchanged":
+                continue
+            out.append({"id": cid, "path": _rel_of(rec, root_abs), "action": action})
+        return out
+    # 聚合：按路径分组，合成净变更
+    groups, order = {}, []
+    for cid, rec in recs:
+        if rec.get("kind") == "dir":
             continue
-        p = rec["path"]
-        if rec.get("kind") == "dir":          # 目录快照只用于回撤，不作为文件变更展示
+        if (rec.get("action") or "modified") == "unchanged":
             continue
-        rel = p
-        if root_abs:
-            try:
-                rp = os.path.relpath(p, root_abs)
-                if not rp.startswith(".."):
-                    rel = rp
-            except ValueError:
-                pass
-        action = rec.get("action") or "modified"
-        if action == "unchanged":
-            continue
-        item = {"id": str(cid), "path": rel, "action": action}
-        if with_diff:
-            # 以项目内相对路径重建差异头（annotate 阶段还不知道 root，只有文件名）
-            if (rec.get("kind") == "file" or rec.get("after") is not None) and \
-                    (rec.get("diff") is None or rec.get("_rel") != rel):
-                rec["_rel"] = rel
-                _build_diff(rec)
-            if rec.get("diff"):
-                item.update({"diff": rec["diff"],
-                             "additions": sum(1 for l in rec["diff"].split("\n")
-                                              if l.startswith("+") and not l.startswith("+++")),
-                             "deletions": sum(1 for l in rec["diff"].split("\n")
-                                              if l.startswith("-") and not l.startswith("---")),
-                             "truncated": bool(rec.get("truncated")),
-                             "action_label": _ACTION_LABEL.get(action, action)})
+        p = _rel_of(rec, root_abs)
+        if p not in groups:
+            groups[p] = {"first": None, "last": None, "ids": []}
+            order.append(p)
+        g = groups[p]
+        if g["first"] is None:
+            g["first"] = rec
+        g["last"] = rec
+        g["ids"].append(cid)
+    out = []
+    for p in order:
+        g = groups[p]
+        first, last = g["first"], g["last"]
+        first_action = first.get("action") or "modified"
+        last_action = last.get("action") or "modified"
+        if last_action == "deleted":
+            if first_action == "created":
+                continue                        # 本轮内新建又删除：净效果为零，不显示
+            action = "deleted"
+        elif first_action == "created":
+            action = "created"
+        else:
+            action = "modified"
+        before = first.get("data") if first.get("kind") == "file" else None
+        after = last.get("after")
+        item = {"id": g["ids"][-1], "path": p, "action": action,
+                "ids": g["ids"], "action_label": _ACTION_LABEL.get(action, action)}
+        if last_action != "deleted" and (after is None or len(after) > _MAX_DIFF_BYTES):
+            item["diff"] = "（文件内容过大或未记录，不显示差异）"
+            item["additions"] = item["deletions"] = 0
+            item["truncated"] = False
+        else:
+            diff, adds, dels, trunc = _diff_text(before, after, p)
+            item.update({"diff": diff, "additions": adds, "deletions": dels, "truncated": trunc})
         out.append(item)
     return out
 

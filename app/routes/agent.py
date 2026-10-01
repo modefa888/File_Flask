@@ -44,7 +44,7 @@ from .ai import (_clean_content, _load_cfg, _open_stream, _sse, _inject_system_t
 _log = get_logger()
 bp = Blueprint("agent", __name__)
 
-_MAX_ROUNDS = 12                     # 最多工具轮数（防止死循环）
+_MAX_ROUNDS = 0                      # 工具轮数上限（0 = 不限制，靠模型自己结束任务）
 _CONNECT_TIMEOUT = 15                # 建立连接超时（快速报错）
 _READ_TIMEOUT = 300                  # 连上后等模型吐字的超时（慢模型首字可能要几十秒）
 _TOOL_CHARS = 20000                  # 单个工具结果回填给模型的字符上限
@@ -911,7 +911,9 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
     convo = [{"role": "system", "content": _agent_system(root, perm, skills, extra_prompts, extra_names)}] + msgs
     always_allow = set()
     rounds_tool_idx = []                 # 每轮追加的 tool 消息下标，用于上下文裁剪
-    for _round in range(_MAX_ROUNDS):
+    _round = 0
+    while True:                          # 不限制工具轮数；模型不再发起调用即自然结束
+        _round += 1
         result = yield from _stream_model(provider, model, convo)
         text, tool_calls = result
         if not tool_calls:
@@ -1005,7 +1007,6 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
         if n_trim:
             _log.info("Agent 上下文裁剪：压缩了 %d 条较早轮次的工具结果（保留最近 %d 轮全文）",
                       n_trim, _RECENT_ROUNDS)
-    yield _sse({"type": "error", "error": "已达到最大工具调用轮数（%d），已停止" % _MAX_ROUNDS})
 
 
 @bp.route("/api/ai/agent", methods=["POST"])

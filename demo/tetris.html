@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>赤落 · Tetris</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 20% 10%, rgba(220, 40, 40, .18), transparent 60%),
+      radial-gradient(900px 500px at 90% 90%, rgba(160, 20, 30, .22), transparent 60%),
+      linear-gradient(135deg, #160406 0%, #2a0808 55%, #3a0a0a 100%);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #ffd8c9;
+  }
+  body { display: flex; justify-content: center; align-items: center; padding: 20px; }
+
+  .wrap {
+    display: flex;
+    gap: 20px;
+    align-items: stretch;
+  }
+
+  .board-card {
+    background: linear-gradient(180deg, #2b0a0c 0%, #1a0507 100%);
+    border: 1px solid rgba(220, 80, 60, .35);
+    border-radius: 18px;
+    padding: 16px;
+    box-shadow:
+      0 20px 60px rgba(0, 0, 0, .55),
+      0 0 0 1px rgba(255, 180, 140, .05) inset,
+      0 0 60px rgba(220, 40, 40, .12);
+    position: relative;
+  }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding: 0 2px;
+  }
+  .title {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 5px;
+    color: #ffd9c2;
+    text-shadow: 0 0 14px rgba(255, 80, 60, .5);
+  }
+  .title small {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: #b45a4a;
+    font-weight: 400;
+    margin-top: 2px;
+  }
+  .level-tag {
+    font-size: 12px;
+    letter-spacing: 2px;
+    color: #ffcaa9;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 180, 140, .25);
+    background: rgba(220, 60, 40, .08);
+  }
+
+  .board-wrap {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding: 8px;
+    border-radius: 12px;
+    background:
+      linear-gradient(180deg, #140304 0%, #1e0508 100%);
+    border: 1px solid rgba(220, 80, 60, .18);
+    box-shadow: inset 0 0 40px rgba(0, 0, 0, .6);
+    position: relative;
+  }
+  canvas#board {
+    display: block;
+    border-radius: 8px;
+    image-rendering: pixelated;
+  }
+
+  .overlay {
+    position: absolute;
+    inset: 8px;
+    border-radius: 12px;
+    background: rgba(12, 3, 4, .82);
+    backdrop-filter: blur(6px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 14px;
+    text-align: center;
+    padding: 24px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 {
+    margin: 0;
+    font-size: 28px;
+    letter-spacing: 6px;
+    color: #ffe0cc;
+    text-shadow: 0 0 18px rgba(255, 90, 60, .6);
+  }
+  .overlay p {
+    margin: 0;
+    font-size: 13px;
+    color: #d08a78;
+    letter-spacing: 2px;
+    line-height: 1.9;
+  }
+  .overlay .big-num {
+    font-size: 44px;
+    font-weight: 800;
+    color: #ff5a3c;
+    letter-spacing: 2px;
+    text-shadow: 0 0 24px rgba(255, 80, 60, .65);
+  }
+  .btn {
+    margin-top: 6px;
+    padding: 10px 26px;
+    font-size: 14px;
+    letter-spacing: 4px;
+    color: #1a0507;
+    background: linear-gradient(180deg, #ff8a5c 0%, #e63946 100%);
+    border: 1px solid rgba(255, 200, 180, .35);
+    border-radius: 999px;
+    cursor: pointer;
+    font-weight: 700;
+    box-shadow: 0 6px 22px rgba(220, 40, 40, .35);
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: 0 10px 28px rgba(220, 40, 40, .5); }
+  .btn:active { transform: translateY(1px); }
+
+  /* right panel */
+  .panel {
+    width: 210px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .card {
+    background: linear-gradient(180deg, rgba(43, 10, 12, .95) 0%, rgba(26, 5, 7, .95) 100%);
+    border: 1px solid rgba(220, 80, 60, .28);
+    border-radius: 14px;
+    padding: 12px 14px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  }
+  .card .label {
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: #b45a4a;
+    margin-bottom: 4px;
+  }
+  .card .val {
+    font-size: 24px;
+    font-weight: 800;
+    color: #ffd9c2;
+    text-shadow: 0 0 10px rgba(255, 90, 60, .45);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 1px;
+  }
+  .next-card canvas {
+    display: block;
+    margin: 6px auto 0;
+    background: rgba(0,0,0,.35);
+    border-radius: 8px;
+  }
+  .rows-row { display: flex; gap: 12px; }
+  .rows-row .card { flex: 1; }
+  .rows-row .val { font-size: 22px; }
+
+  .keys-card {
+    font-size: 11px;
+    line-height: 1.9;
+    color: #d08a78;
+  }
+  .keys-card b {
+    display: inline-block;
+    min-width: 26px;
+    padding: 1px 6px;
+    margin-right: 8px;
+    text-align: center;
+    font-weight: 600;
+    color: #ffd9c2;
+    background: rgba(220, 60, 40, .12);
+    border: 1px solid rgba(220, 80, 60, .3);
+    border-radius: 6px;
+    font-size: 10px;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="board-card">
+    <div class="header">
+      <div class="title">
+        赤　落
+        <small>TETRIS · RED EDITION</small>
+      </div>
+      <div class="level-tag" id="levelTag">LV 1</div>
+    </div>
+    <div class="board-wrap">
+      <canvas id="board"></canvas>
+      <div class="overlay" id="overlay">
+        <h2 id="overlayTitle">赤　落</h2>
+        <p id="overlaySub">点击开始 · 让红色的方块沉入底部</p>
+        <div class="big-num" id="overlayNum" style="display:none">0</div>
+        <button class="btn" id="startBtn">开 始</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="card">
+      <div class="label">SCORE · 得分</div>
+      <div class="val" id="score">0</div>
+    </div>
+    <div class="rows-row">
+      <div class="card">
+        <div class="label">LINES</div>
+        <div class="val" id="lines">0</div>
+      </div>
+      <div class="card">
+        <div class="label">BEST</div>
+        <div class="val" id="best">0</div>
+      </div>
+    </div>
+    <div class="card next-card">
+      <div class="label">NEXT · 下一个</div>
+      <canvas id="next" width="130" height="80"></canvas>
+    </div>
+    <div class="card keys-card">
+      <b>←</b>左移 <b>→</b>右移<br>
+      <b>↑</b>旋转 <b>↓</b>加速<br>
+      <b>空格</b>硬降 <b>P</b>暂停
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- 配置 ----
+  const COLS = 10, ROWS = 20, CELL = 26;
+
+  const boardCanvas = document.getElementById('board');
+  const bctx = boardCanvas.getContext('2d');
+  boardCanvas.width = COLS * CELL;
+  boardCanvas.height = ROWS * CELL;
+
+  const nextCanvas = document.getElementById('next');
+  const nctx = nextCanvas.getContext('2d');
+
+  const scoreEl = document.getElementById('score');
+  const linesEl = document.getElementById('lines');
+  const bestEl  = document.getElementById('best');
+  const levelEl = document.getElementById('levelTag');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlaySub = document.getElementById('overlaySub');
+  const overlayNum = document.getElementById('overlayNum');
+  const startBtn = document.getElementById('startBtn');
+
+  // 五种"红"度渐变，跟谈赤色同款
+  const COLORS = [
+    { main: '#ff9aa2', hi: '#ffd8dd', lo: '#c25560' }, // 浅粉
+    { main: '#ff6b5e', hi: '#ffc2b8', lo: '#b93322' }, // 珊瑚
+    { main: '#e63946', hi: '#ff8a8a', lo: '#7a0f1c' }, // 血红
+    { main: '#8b1a1a', hi: '#c44d4d', lo: '#3a0408' }, // 深绛
+    { main: '#3d0508', hi: '#7a1616', lo: '#0d0001' }  // 漆黑血红
+  ];
+
+  // 7 种标准方块（用坐标数组，颜色下标对应 COLORS）
+  // I:0 O:1 T:2 S:3 Z:4 J:5 L:6
+  const SHAPES = [
+    // I
+    [[0,1],[1,1],[2,1],[3,1]],
+    // O
+    [[0,0],[1,0],[0,1],[1,1]],
+    // T
+    [[1,0],[0,1],[1,1],[2,1]],
+    // S
+    [[1,0],[2,0],[0,1],[1,1]],
+    // Z
+    [[0,0],[1,0],[1,1],[2,1]],
+    // J
+    [[0,0],[0,1],[1,1],[2,1]],
+    // L
+    [[2,0],[0,1],[1,1],[2,1]]
+  ];
+
+  // 每个方块使用哪种红色
+  const PIECE_COLOR = [4, 3, 2, 1, 0, 1, 2];
+
+  // ---- 状态 ----
+  let grid, current, next, score, lines, level;
+  let dropInterval, lastDrop, lastTime;
+  let running = false, paused = false, gameOver = false;
+  let flashRows = []; // 消行闪烁动画
+  let flashUntil = 0; // 闪烁结束时间戳，由主循环检查，避免 setTimeout 堆积
+  let rafId = null;   // 唯一 RAF 句柄，避免多循环并行导致卡死
+  let best = +(localStorage.getItem('tetris_red_best') || 0);
+  bestEl.textContent = best;
+
+  function newGrid() {
+    return Array.from({length: ROWS}, () => Array(COLS).fill(0));
+  }
+
+  function rotateCells(cells) {
+    // 屏幕坐标（y 向下）顺时针 90°：(x, y) -> (y, maxX - x)
+    // 其中 maxX = 原形状 x 方向最大值（用作归一化偏移）
+    const maxX = Math.max.apply(null, cells.map(c => c[0]));
+    return cells.map(([x, y]) => [y, maxX - x]);
+  }
+
+  function makePiece() {
+    const t = Math.floor(Math.random() * SHAPES.length);
+    return {
+      type: t,
+      cells: SHAPES[t].map(c => c.slice()),
+      x: Math.floor((COLS - 4) / 2),
+      y: -1
+    };
+  }
+
+  // dx/dy 是相对 current 当前位置的位移
+  function collides(cells, dx, dy) {
+    for (const [cx, cy] of cells) {
+      const nx = current.x + cx + dx;
+      const ny = current.y + cy + dy;
+      if (nx < 0 || nx >= COLS || ny >= ROWS) return true;
+      if (ny >= 0 && grid[ny][nx]) return true;
+    }
+    return false;
+  }
+
+  function ghostY() {
+    let dy = 0;
+    while (!collides(current.cells, 0, dy + 1)) dy++;
+    return current.y + dy;
+  }
+
+  function lockPiece() {
+    for (const [cx, cy] of current.cells) {
+      const nx = cx + current.x, ny = cy + current.y;
+      if (ny >= 0 && ny < ROWS) grid[ny][nx] = PIECE_COLOR[current.type] + 1;
+    }
+    checkLines();
+    current = next;
+    next = makePiece();
+    if (collides(current.cells, 0, 0)) {
+      // 出生即冲突
+      current.y = -1;
+      if (collides(current.cells, 0, 0)) {
+        endGame();
+      }
+    }
+  }
+
+  function checkLines() {
+    flashRows = [];
+    for (let y = 0; y < ROWS; y++) {
+      if (grid[y].every(v => v !== 0)) flashRows.push(y);
+    }
+    if (flashRows.length) {
+      // 从大到小删除，避免 splice 后行号漂移导致漏消
+      const ys = flashRows.slice().sort((a, b) => b - a);
+      for (const y of ys) {
+        grid.splice(y, 1);
+        grid.unshift(Array(COLS).fill(0));
+      }
+      const n = ys.length;
+      const gain = [0, 100, 300, 500, 800][n] * level;
+      score += gain;
+      lines += n;
+      level = 1 + Math.floor(lines / 10);
+      dropInterval = Math.max(120, 900 - (level - 1) * 70);
+      flashUntil = performance.now() + 180;
+      updateHUD();
+    }
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    linesEl.textContent = lines;
+    levelEl.textContent = 'LV ' + level;
+    if (score > best) {
+      best = score;
+      localStorage.setItem('tetris_red_best', String(best));
+      bestEl.textContent = best;
+    }
+  }
+
+  // ---- 绘制 ----
+  function drawCell(ctx, px, py, colorIdx, alpha) {
+    if (!colorIdx) return;
+    const c = COLORS[colorIdx - 1];
+    ctx.globalAlpha = alpha == null ? 1 : alpha;
+    // 主体
+    ctx.fillStyle = c.main;
+    ctx.fillRect(px + 1, py + 1, CELL - 2, CELL - 2);
+    // 高光（左上）
+    ctx.fillStyle = c.hi;
+    ctx.fillRect(px + 2, py + 2, CELL - 6, 3);
+    ctx.fillRect(px + 2, py + 2, 3, CELL - 6);
+    // 暗边（右下）
+    ctx.fillStyle = c.lo;
+    ctx.fillRect(px + 2, py + CELL - 5, CELL - 6, 3);
+    ctx.fillRect(px + CELL - 5, py + 2, 3, CELL - 6);
+    ctx.globalAlpha = 1;
+  }
+
+  function drawBoard() {
+    bctx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);
+
+    // 网格
+    bctx.strokeStyle = 'rgba(220, 80, 60, 0.07)';
+    bctx.lineWidth = 1;
+    for (let x = 1; x < COLS; x++) {
+      bctx.beginPath();
+      bctx.moveTo(x * CELL + .5, 0);
+      bctx.lineTo(x * CELL + .5, ROWS * CELL);
+      bctx.stroke();
+    }
+    for (let y = 1; y < ROWS; y++) {
+      bctx.beginPath();
+      bctx.moveTo(0, y * CELL + .5);
+      bctx.lineTo(COLS * CELL, y * CELL + .5);
+      bctx.stroke();
+    }
+
+    // 已锁定方块
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        if (grid[y][x]) drawCell(bctx, x * CELL, y * CELL, grid[y][x]);
+      }
+    }
+
+    // 消行闪烁
+    if (flashRows.length) {
+      bctx.fillStyle = 'rgba(255, 220, 200, ' + (0.5 + 0.4 * Math.sin(Date.now() / 40)) + ')';
+      for (const y of flashRows) {
+        bctx.fillRect(0, y * CELL, COLS * CELL, CELL);
+      }
+    }
+
+    if (current) {
+      // 幽灵
+      const gy = ghostY();
+      for (const [cx, cy] of current.cells) {
+        const nx = cx + current.x, ny = cy + gy;
+        if (ny < 0) continue;
+        bctx.globalAlpha = 0.22;
+        drawCell(bctx, nx * CELL, ny * CELL, PIECE_COLOR[current.type] + 1, 0.35);
+        bctx.globalAlpha = 1;
+      }
+      // 当前方块
+      for (const [cx, cy] of current.cells) {
+        const nx = cx + current.x, ny = cy + current.y;
+        if (ny < 0) continue;
+        drawCell(bctx, nx * CELL, ny * CELL, PIECE_COLOR[current.type] + 1);
+      }
+    }
+  }
+
+  function drawNext() {
+    nctx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+    if (!next) return;
+    const cx = nextCanvas.width / 2, cy = nextCanvas.height / 2;
+    // 计算边界以居中
+    const xs = next.cells.map(c => c[0]);
+    const ys = next.cells.map(c => c[1]);
+    const minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+    const minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+    const w = (maxX - minX + 1) * 18;
+    const h = (maxY - minY + 1) * 18;
+    const ox = cx - w / 2, oy = cy - h / 2;
+    for (const [x, y] of next.cells) {
+      const px = ox + (x - minX) * 18;
+      const py = oy + (y - minY) * 18;
+      // 用同样绘制逻辑但 cell 尺寸改为 18
+      const c = COLORS[PIECE_COLOR[next.type]];
+      nctx.fillStyle = c.main;
+      nctx.fillRect(px + 1, py + 1, 16, 16);
+      nctx.fillStyle = c.hi;
+      nctx.fillRect(px + 2, py + 2, 12, 2);
+      nctx.fillRect(px + 2, py + 2, 2, 12);
+      nctx.fillStyle = c.lo;
+      nctx.fillRect(px + 2, py + 14, 12, 2);
+      nctx.fillRect(px + 14, py + 2, 2, 12);
+    }
+  }
+
+  // ---- 移动 ----
+  function tryMove(dx, dy) {
+    if (!collides(current.cells, dx, dy)) {
+      current.x += dx;
+      current.y += dy;
+      return true;
+    }
+    return false;
+  }
+
+  function tryRotate() {
+    // 特殊：O 方块旋转无变化
+    if (current.type === 1) return;
+    const rotated = rotateCells(current.cells);
+    // 尝试不同踢墙偏移
+    const kicks = [0, -1, 1, -2, 2];
+    for (const k of kicks) {
+      if (!collides(rotated, k, 0)) {
+        current.cells = rotated;
+        current.x += k;
+        return;
+      }
+      if (!collides(rotated, k, -1)) {
+        current.cells = rotated;
+        current.x += k;
+        current.y -= 1;
+        return;
+      }
+    }
+  }
+
+  function hardDrop() {
+    // 硬降（加 1000 步上限，防止万一的死循环锁死主线程）
+    let n = 0;
+    while (tryMove(0, 1) && n++ < 1000) {
+      score += 2;
+    }
+    lockPiece();
+    lastDrop = performance.now();
+    updateHUD();
+  }
+
+  // ---- 主循环 ----
+  function loop(t) {
+    rafId = null;               // 出循环前先清句柄，避免误判为"仍在运行"
+    if (!running) return;       // 不在运行中，停止循环
+    if (lastTime == null) lastTime = t;
+    const dt = t - lastTime;
+    lastTime = t;
+
+    if (!paused && !gameOver) {
+      if (t - lastDrop >= dropInterval) {
+        if (!tryMove(0, 1)) {
+          lockPiece();
+        }
+        lastDrop = t;
+      }
+      // 闪烁动画到期回收（替代 setTimeout，避免长期游戏里堆积定时器）
+      if (flashRows.length && t >= flashUntil) {
+        flashRows = [];
+      }
+    }
+
+    drawBoard();
+    drawNext();
+
+    if (running) rafId = requestAnimationFrame(loop);  // 只在仍运行时续帧
+  }
+
+  // 统一入口：保证同一时刻只有一个 RAF 在跑
+  function kickLoop() {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function stopLoop() {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+  }
+
+  // ---- 生命周期 ----
+  function start() {
+    stopLoop();                                 // 先杀掉任何残留循环
+    grid = newGrid();
+    score = 0; lines = 0; level = 1;
+    dropInterval = 900;
+    current = makePiece();
+    next = makePiece();
+    lastDrop = performance.now();
+    lastTime = null;
+    running = true; paused = false; gameOver = false;
+    overlay.classList.add('hidden');
+    updateHUD();
+    drawNext();
+    kickLoop();
+  }
+
+  function pause() {
+    if (!running || gameOver) return;
+    paused = !paused;
+    if (paused) {
+      stopLoop();                               // 暂停时彻底停循环，防止后台堆积
+      overlayTitle.textContent = '暂 停';
+      overlaySub.textContent = '按 P 或点击按钮继续';
+      overlayNum.style.display = 'none';
+      startBtn.textContent = '继 续';
+      overlay.classList.remove('hidden');
+    } else {
+      overlay.classList.add('hidden');
+      lastDrop = performance.now();
+      lastTime = null;
+      kickLoop();                               // 从暂停恢复循环
+    }
+  }
+
+  function endGame() {
+    gameOver = true;
+    running = false;
+    stopLoop();                                 // 结束游戏时停循环
+    overlayTitle.textContent = '结 局';
+    overlaySub.textContent = '得分 · 已存入最佳记录';
+    overlayNum.style.display = 'block';
+    overlayNum.textContent = score;
+    startBtn.textContent = '再 来';
+    overlay.classList.remove('hidden');
+  }
+
+  // ---- 输入 ----
+  document.addEventListener('keydown', function (e) {
+    if (!running) {
+      // 未开始或已结束：空格 / Enter 开始新游戏
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        start();
+      }
+      return;
+    }
+    if (e.key === 'p' || e.key === 'P') {
+      pause();
+      return;
+    }
+    if (paused || gameOver) return;
+
+    switch (e.key) {
+      case 'ArrowLeft':  tryMove(-1, 0); e.preventDefault(); break;
+      case 'ArrowRight': tryMove(1, 0);  e.preventDefault(); break;
+      case 'ArrowDown':
+        if (tryMove(0, 1)) { score += 1; updateHUD(); lastDrop = performance.now(); }
+        e.preventDefault();
+        break;
+      case 'ArrowUp':    tryRotate();    e.preventDefault(); break;
+      case ' ':          hardDrop();     e.preventDefault(); break;
+    }
+  });
+
+  startBtn.addEventListener('click', function () {
+    if (paused) { pause(); return; }
+    start();
+  });
+
+  // 初始渲染一次空板
+  grid = newGrid();
+  drawBoard();
+})();
+</script>
+</body>
+</html>

@@ -10,7 +10,8 @@
     if (!state.items.some(function (it) { return it.is_dir && it.size_pending; })) return;
     _sizePollPath = dir;
     _sizePollTimer = setInterval(function () {
-      fetchTimeout("/api/size-status?path=" + encodeURIComponent(dir), 10000)
+      fetchTimeout("/api/size-status?path=" + encodeURIComponent(dir) +
+        (state.showHidden ? "&hidden=1" : ""), 10000)
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (_sizePollPath !== dir) return;

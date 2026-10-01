@@ -334,7 +334,7 @@
 
   /* ---------- 顶部按钮 ---------- */
   /* ---------- 打开文件夹：输入/选择路径后切换 IDE 工作区 ----------
-     最近打开存到服务端（data/.file_recent_folders.json），不同设备 / 浏览器都能看到同一份记录 */
+     最近打开存到服务端（data/storage/.file_recent_folders.json），不同设备 / 浏览器都能看到同一份记录 */
   let RECENT = [];                           // [{path, name, opened_at, exists}]
 
   function recentFolders() { return RECENT.map(x => x.path); }

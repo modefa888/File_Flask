@@ -5,11 +5,11 @@ import threading
 import time
 import uuid
 
-from ...config import _DATA_ROOT
+from ...config import _STORAGE_DIR
 from ...log import get_logger
 
 _log = get_logger()
-_ARCHIVE_HISTORY_FILE = os.path.join(_DATA_ROOT, ".file_manager_archive_history.json")
+_ARCHIVE_HISTORY_FILE = os.path.join(_STORAGE_DIR, ".file_manager_archive_history.json")
 _ARCHIVE_HISTORY_LOCK = threading.Lock()
 
 

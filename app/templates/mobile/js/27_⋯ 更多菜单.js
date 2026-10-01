@@ -14,9 +14,14 @@
     document.getElementById("mmViewBtn").textContent =
       state.view === "grid" ? "☰ 切换为列表视图" : "▦ 切换为图标视图";
   }
+  function updateHiddenBtn() {
+    document.getElementById("mmHiddenBtn").textContent =
+      state.showHidden ? "🙈 隐藏隐藏文件" : "👁️ 显示隐藏文件";
+  }
   document.getElementById("moreBtn").addEventListener("click", function () {
     toggleAddMenu(false);
     updateViewBtn();
+    updateHiddenBtn();
     var dis = !!state.selMode;   // 选择模式下排序/视图不可用
     document.getElementById("mmSortBtn").disabled = dis;
     document.getElementById("mmViewBtn").disabled = dis;
@@ -30,4 +35,12 @@
     spLsSet(VIEW_KEY, state.view);
     updateViewBtn();
     applyView();
+  });
+  // 显示/隐藏 以点开头的文件（.gitignore、.env 等）：切换后重载当前目录
+  document.getElementById("mmHiddenBtn").addEventListener("click", function () {
+    state.showHidden = !state.showHidden;
+    spLsSet(HIDDEN_KEY, state.showHidden);
+    updateHiddenBtn();
+    toggleMoreMenu(false);
+    load(state.path);            // _loadingPath 已在 finally 复位，可安全重载同目录
   });

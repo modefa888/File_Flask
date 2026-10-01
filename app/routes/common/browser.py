@@ -14,7 +14,7 @@ from ...config import (
     _TEXT_EXTS, _IMAGE_EXTS, _VIDEO_EXTS,
     _AUDIO_EXTS,
     _PREVIEW_MAX_BYTES, _TEXT_PREVIEW_MAX_BYTES,
-    _THUMB_CACHE_DIR, _TEXT_FILENAMES,
+    _THUMB_CACHE_DIR, _TEXT_FILENAMES, _STORAGE_DIR,
 )
 from ...log import get_logger
 from ...services.common.filecore import (
@@ -42,8 +42,7 @@ _RECENT_LOCK = threading.Lock()
 
 
 def _recent_path() -> str:
-    from ...config import _DATA_ROOT
-    return os.path.join(_DATA_ROOT, _RECENT_DIR_FILE)
+    return os.path.join(_STORAGE_DIR, _RECENT_DIR_FILE)
 
 
 def _recent_load() -> list:
@@ -343,14 +342,13 @@ def _get_file_path_from_request(req):
     return target_path
 
 
-# ========== 收藏夹（常用文件夹，持久化到 data/favorites.json） ==========
+# ========== 收藏夹（常用文件夹，持久化到 data/storage/favorites.json） ==========
 _FAV_LOCK = threading.Lock()
 _FAV_MAX = 50
 
 
 def _fav_file():
-    from ...config import _DATA_ROOT
-    return os.path.join(_DATA_ROOT, "favorites.json")
+    return os.path.join(_STORAGE_DIR, "favorites.json")
 
 
 def _load_favs():
@@ -363,8 +361,7 @@ def _load_favs():
 
 
 def _save_favs(items):
-    from ...config import _DATA_ROOT
-    os.makedirs(_DATA_ROOT, exist_ok=True)
+    os.makedirs(_STORAGE_DIR, exist_ok=True)
     tmp = _fav_file() + ".tmp%d" % os.getpid()
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(items, f, ensure_ascii=False, indent=1)
@@ -372,8 +369,7 @@ def _save_favs(items):
 
 
 def _groups_file():
-    from ...config import _DATA_ROOT
-    return os.path.join(_DATA_ROOT, "fav_groups.json")
+    return os.path.join(_STORAGE_DIR, "fav_groups.json")
 
 
 def _load_groups():
@@ -387,8 +383,7 @@ def _load_groups():
 
 
 def _save_groups(groups):
-    from ...config import _DATA_ROOT
-    os.makedirs(_DATA_ROOT, exist_ok=True)
+    os.makedirs(_STORAGE_DIR, exist_ok=True)
     tmp = _groups_file() + ".tmp%d" % os.getpid()
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(groups, f, ensure_ascii=False, indent=1)

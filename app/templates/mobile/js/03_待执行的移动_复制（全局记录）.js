@@ -142,6 +142,7 @@
       var url = path
         ? "/api/files?path=" + encodeURIComponent(path) + "&limit=0&offset=0"
         : "/api/files?limit=0&offset=0";
+      if (state.showHidden) url += "&hidden=1";   // 显示隐藏文件（后端 list_directory 过滤点开头条目）
       var resp = await fetchTimeout(url, 15000);
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       var data = await resp.json();

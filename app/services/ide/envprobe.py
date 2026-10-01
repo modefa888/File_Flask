@@ -28,7 +28,7 @@ from ...log import get_logger
 _log = get_logger()
 
 # 用户自定义配置（解释器路径 / 环境变量）
-_CFG_FILE = os.path.join(config._DATA_ROOT, ".file_flask_env.json")
+_CFG_FILE = os.path.join(config._STORAGE_DIR, ".file_flask_env.json")
 
 # 探测结果缓存时间（秒）：面板刷新走缓存，点「重新检测」强制刷新
 _PROBE_TTL = 60

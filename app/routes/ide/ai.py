@@ -4,7 +4,7 @@ GET  /api/ai/config            读取配置（key 脱敏返回）
 POST /api/ai/config            保存配置：{providers:[...]} 整体替换 / {active:{provider,model}} 切换
 POST /api/ai/chat              流式对话（SSE）：{messages:[{role, content}], provider_id?, model?}
 
-配置保存在 data/.file_manager_ai.json：
+配置保存在 data/storage/.file_manager_ai.json：
     {
       "providers": [ {"id","name","base_url","api_key","models":[...]} , ... ],
       "active":    {"provider": "<id>", "model": "<name>"}

@@ -13,7 +13,7 @@ POST /api/run/prune                          清理全部已结束的任务记�
 持久化设计（这是「后台任务管理」的基础）：
 - 子进程的 stdout/stderr 直接写入 data/run_logs/<task-id>.log：日志可回溯，
   且服务进程退出后子进程也不会因管道断开（EPIPE）而崩溃；
-- 任务注册表写入 data/.file_runner_tasks.json：服务 / 页面重启后仍能看到任务，
+- 任务注册表写入 data/storage/.file_runner_tasks.json：服务 / 页面重启后仍能看到任务，
   对仍然存活的进程会自动「重新接管」，继续跟踪日志；
 - 因此关掉浏览器页面、甚至重启本服务，后台程序都照常在跑。
 
@@ -104,7 +104,8 @@ def _log_path(tid: str) -> str:
 
 
 def _reg_path() -> str:
-    return os.path.join(_data_root(), _REG_NAME)
+    from ... import config
+    return os.path.join(config._STORAGE_DIR, _REG_NAME)
 
 
 def _read_registry() -> list:

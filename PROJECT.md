@@ -104,7 +104,7 @@ File_Flask/
   - `GET/POST /api/ai/config` —— 读取/保存 `{providers, active, sys}`；key 只存服务端，GET 脱敏返回。
   - `POST /api/ai/chat` —— SSE 流式对话，`content` 支持字符串或 OpenAI 图片数组。
   - `POST /api/ai/commit-message` —— 依据仓库改动生成提交信息。
-- 配置持久化在 `data/.file_manager_ai.json`。
+- 配置持久化在 `data/storage/.file_manager_ai.json`。
 - 限制：图片 data URL 单张 9MB、单次最多 8 张图片部件；连接超时 15s、读取超时 300s。
 
 ### 4.2 AI 智能体（`agent.py`）
@@ -222,7 +222,7 @@ Client ◀─响应─
    - 设置 `ENABLE_EXEC = False` 关闭命令执行；
    - 置于反向代理 + HTTPS 之后。
 2. 视频缩略图依赖**系统完整版 ffmpeg**，IDE 自带的精简 ffmpeg 缺图片编码器会失败。
-3. `.gitignore` 已排除 `data/ logs/ build/ dist/ .venv/ __pycache__/`，但请自行确认密钥、AI 配置（`data/.file_manager_ai.json` 内含 API Key）不会被误提交。
+3. `.gitignore` 已排除 `data/ logs/ build/ dist/ .venv/ __pycache__/`，但请自行确认密钥、AI 配置（`data/storage/.file_manager_ai.json` 内含 API Key）不会被误提交。
 4. 修改 `templates/*.html` 后无需重启：`TEMPLATES_AUTO_RELOAD=True` 已启用。
 5. `file_manager.py` 是旧版单文件实现，**当前运行时不再使用**，仅为备份保留。
 

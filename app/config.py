@@ -146,18 +146,25 @@ DATA_ROOT = _DATA_ROOT
 
 _CACHE_DIR = _DATA_ROOT
 
+# 持久化 JSON 存储统一目录（收藏夹 / 配置 / 历史 / 缓存等），
+# 与临时目录、压缩包备份、数据库文件分开，便于管理与备份
+_STORAGE_DIR = os.path.join(_DATA_ROOT, "storage")
+os.makedirs(_STORAGE_DIR, exist_ok=True)
+# 运行时数据：JSON 存储目录（公开常量，供各服务模块引用）
+STORAGE_DIR = _STORAGE_DIR
+
 # 目录大小缓存
-_DIR_SIZE_CACHE_FILE = os.path.join(_CACHE_DIR, ".file_manager_cache.json")
+_DIR_SIZE_CACHE_FILE = os.path.join(_STORAGE_DIR, ".file_manager_cache.json")
 # 目录列表缓存
-_LIST_CACHE_FILE = os.path.join(_CACHE_DIR, ".file_manager_list_cache.json")
+_LIST_CACHE_FILE = os.path.join(_STORAGE_DIR, ".file_manager_list_cache.json")
 # 回收站目录
 _TRASH_DIR = os.path.join(_DATA_ROOT, ".file_manager_trash")
 os.makedirs(_TRASH_DIR, exist_ok=True)
 # 删除历史
-_DELETE_HISTORY_FILE = os.path.join(_DATA_ROOT, ".file_manager_delete_history.json")
+_DELETE_HISTORY_FILE = os.path.join(_STORAGE_DIR, ".file_manager_delete_history.json")
 
 # AI 助手配置（OpenAI 兼容接口：base_url / api_key / model）
-AI_CONFIG_FILE = os.path.join(_DATA_ROOT, ".file_manager_ai.json")
+AI_CONFIG_FILE = os.path.join(_STORAGE_DIR, ".file_manager_ai.json")
 
 # 持久化索引数据库
 _INDEX_DB_FILE = os.path.join(_CACHE_DIR, ".file_manager_index.db")

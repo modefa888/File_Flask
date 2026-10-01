@@ -4,8 +4,9 @@
 
   var SORT_KEY = "fm_mobile_sort";        // 排序偏好（localStorage 持久化）
   var VIEW_KEY = "fm_mobile_view";        // 视图：list / grid
+  var HIDDEN_KEY = "fm_mobile_hidden";    // 是否显示隐藏文件（点开头的条目）
   var state = { path: "", parentPath: null, items: [], selMode: false, selSet: {},
-                sort: { mode: "name", dir: 1 }, view: "list" };
+                sort: { mode: "name", dir: 1 }, view: "list", showHidden: false };
   (function () {   // 恢复上次排序/视图偏好
     var s = spLsGet(SORT_KEY, null);
     if (s && ["name", "type", "size", "time"].indexOf(s.mode) >= 0 && (s.dir === 1 || s.dir === -1)) {
@@ -13,6 +14,7 @@
     }
     var v = spLsGet(VIEW_KEY, null);
     if (v === "grid" || v === "list") state.view = v;
+    state.showHidden = spLsGet(HIDDEN_KEY, false) === true;
   })();
   var pendingOp = null;   // 待执行的移动/复制: { mode: "move"|"copy", paths: [...] }
   var lpFired = false;    // 长按已触发标记，用于抑制随后的 click

@@ -1,7 +1,7 @@
 """文件分享短链接：/share/<token>。
 
 把文件路径映射为随机不可猜测的 token，分享出去的 URL 不暴露服务器上的
-绝对路径（用户名 / 目录结构）。token 持久化在 data/.share_links.json，
+绝对路径（用户名 / 目录结构）。token 持久化在 data/storage/.share_links.json，
 同一文件重复分享会复用已有 token。
 
 - POST /api/share   {path: 绝对路径} → {token, url}   （需登录）
@@ -25,7 +25,7 @@ from ...log import get_logger
 _log = get_logger()
 bp = Blueprint("shares", __name__)
 
-_SHARE_FILE = os.path.join(config._DATA_ROOT, ".share_links.json")
+_SHARE_FILE = os.path.join(config._STORAGE_DIR, ".share_links.json")
 _lock = threading.Lock()
 
 _MD_EXTS = {"md", "markdown"}

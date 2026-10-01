@@ -55,6 +55,9 @@
     document.addEventListener("keydown", hide, true);
     window.addEventListener("scroll", hide, true);
     window.addEventListener("blur", hide);
+    // 目标元素被移除（树刷新/标签重建等）时浏览器不会派发 mouseout，气泡会残留；
+    // 定期检查，元素已不在文档中就收起
+    setInterval(() => { if (cur && !cur.isConnected) hide(); }, 300);
   })();
 
   loadRecentFolders().then(() => loadSpecialHints()).then(() => {  // 先取最近打开，再加载命名说明

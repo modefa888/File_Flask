@@ -18,3 +18,12 @@
   .scroll-thin::-webkit-scrollbar-thumb { background: #424242; border-radius: 5px; }
   .scroll-thin::-webkit-scrollbar-track { background: transparent; }
 
+  /* 编辑区标签栏（.tabbar.scroll-thin，由 JS 动态创建）：横向滚动条收窄到 4px，
+     避免盖过下方内容；上面同优先级的 .scroll-thin 规则会按顺序覆盖
+     09_AI面板里 .tabbar::-webkit-scrollbar{height:0}，这里用双类提高优先级收回来 */
+  .tabbar.scroll-thin { scrollbar-width: thin; scrollbar-color: #3c3c3c transparent; }
+  .tabbar.scroll-thin::-webkit-scrollbar { height: 4px; }
+  .tabbar.scroll-thin::-webkit-scrollbar-thumb { background: #3c3c3c; border: none; border-radius: 2px; }
+  .tabbar.scroll-thin::-webkit-scrollbar-thumb:hover { background: #555; }
+  .tabbar.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+

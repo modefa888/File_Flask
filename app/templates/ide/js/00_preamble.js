@@ -56,6 +56,7 @@
   // 打开的标签页
   const tabs = [];         // {path, name, host, cm, original, dirty}
   let active = null;
+  let openSeq = 0;         // 打开文件序号：异步加载完成后对比，防止快速连点时旧请求抢焦点
 
   /* ---------- 工具 ---------- */
   function toast(msg, type) {
@@ -548,6 +549,11 @@
       tab = { path, name, host, cm: null, original: "", dirty: false, big: false, group: grp };
       tabs.push(tab);
       renderTabsAll();
+      const seq = ++openSeq;           // 本次打开的序号；await 期间用户又点了别的文件则 seq 过期
+      const wasActive = active;        // 记录打开前的活动标签，用于判断用户是否中途切换
+      // 只切 host 显示（同组其它 host 先取消 active，避免两个「加载中」同时可见）；
+      // 完整 activate 留到内容就绪后，避免 CodeMirror 在不可见容器里测量出错
+      tabs.forEach(t => { if (t !== tab && t.group === grp) t.host.classList.remove("active"); });
       host.classList.add("active");
       host.innerHTML = '<div style="padding:30px;color:#888;">正在加载 ' + esc(name) + ' …</div>';
       try {
@@ -570,8 +576,16 @@
         }
         // 文件内容与语法模式并行加载，减少串行等待
         const [res, mode] = await Promise.all([loadFileText(path, name), ensureMode(ext)]);
-        if (res.unsupported) { host.innerHTML = '<div style="padding:30px;color:#888;">该文件类型（' + ext + '）不支持文本编辑，预览请用文件管理器。</div>'; return; }
-        if (res.error) { host.innerHTML = '<div style="padding:30px;color:#c66;">无法打开：' + esc(res.error) + '</div>'; return; }
+        // 不支持 / 打开失败：同样要走激活（否则只有内容切了、标签不高亮、面包屑还是旧文件）；
+        // 竞态防护与正常路径一致：用户已切走就不抢焦点，提示信息留在后台标签里
+        if (res.unsupported || res.error) {
+          host.innerHTML = res.unsupported
+            ? '<div style="padding:30px;color:#888;">该文件类型（' + ext + '）不支持文本编辑，预览请用文件管理器。</div>'
+            : '<div style="padding:30px;color:#c66;">无法打开：' + esc(res.error) + '</div>';
+          if (active === tab) return;
+          if (seq === openSeq && active === wasActive) activate(tab);
+          return;
+        }
         const text = res.text;
         const big = text.length > BIG_FILE_BYTES;
         tab.original = text;
@@ -603,11 +617,15 @@
         else if (["html", "htm"].includes(ext)) setupHtmlView(tab);
         else if (name === ".gitignore") setupGitignoreView(tab);
         else if (name.toLowerCase() === "requirements.txt") setupRequirementsView(tab);
-        activate(tab);
-        scheduleRefresh(tab);
+        // 竞态防护：加载期间用户又点了其它文件（activate 过别的标签 / 又发起新打开），
+        // 则本次不抢焦点，只把内容挂好留在后台标签里（用户最后一次点击优先）
+        if (active === tab) { scheduleRefresh(tab); }
+        else if (seq === openSeq && active === wasActive) { activate(tab); scheduleRefresh(tab); }
+        else { tab.host.classList.remove("active"); }
       } catch (e) {
-        host.classList.add("active");
         host.innerHTML = '<div style="padding:30px;color:#c66;">无法打开：' + esc(e.message || e) + '</div>';
+        // 出错也一样守规矩：用户已切到别的文件就不抢焦点，错误信息留在后台标签里
+        if (active === tab || (seq === openSeq && active === wasActive)) host.classList.add("active");
       }
     } else {
       activate(tab);

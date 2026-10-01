@@ -646,7 +646,7 @@ def api_ai_chat():
                     else:
                         undo.begin()
                         ok, summary, detail, model_text = _run_tool_job(c["name"], c["args"], root, perm)
-                        tool_changes = undo.collect()
+                        tool_changes = undo.finish(root)   # 推断动作 + 生成差异，供「文件变更」模块
                 yield _sse({"type": "result", "call_id": c["id"], "tool": c["name"], "ok": bool(ok),
                             "summary": summary, "detail": detail, "ms": 0,
                             "changes": (tool_changes or None)})
@@ -656,6 +656,19 @@ def api_ai_chat():
 
     return Response(gen(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@bp.route("/api/ai/changes", methods=["POST"])
+def api_ai_changes():
+    """查看某批改动 id 的文件变更详情（路径 / 动作 / unified 差异）。"""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "ids 不能为空"}), 400
+    repo = str(data.get("repo") or "")
+    root = os.path.abspath(repo) if repo and os.path.isdir(repo) else ""
+    changes = undo.describe([str(i) for i in ids][:500], root, with_diff=True)
+    return jsonify({"ok": True, "changes": changes})
 
 
 @bp.route("/api/ai/undo", methods=["POST"])

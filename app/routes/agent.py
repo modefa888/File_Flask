@@ -278,6 +278,15 @@ _PENDING_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------- 基础工具
+def _norm_abs(p):
+    """绝对路径归一化：POSIX 下 abspath/normpath 不折叠开头的 //（模型经常写出 //home/...），
+    这里统一折叠成单个 /，避免与真实根目录前缀不匹配被误判为越界。"""
+    p = os.path.abspath(os.path.normpath(str(p or "")))
+    while p.startswith("//"):
+        p = p[1:]
+    return p
+
+
 def _resolve(path, root):
     """路径解析：绝对路径原样，相对路径按项目根拼接。"""
     p = str(path or "").strip()
@@ -286,14 +295,14 @@ def _resolve(path, root):
     p = os.path.expanduser(p)
     if not os.path.isabs(p):
         p = os.path.join(root or os.getcwd(), p)
-    return os.path.abspath(os.path.normpath(p))
+    return _norm_abs(p)
 
 
 def _inside(path, root):
     if not root:
         return True
     try:
-        return os.path.commonpath([os.path.abspath(path), os.path.abspath(root)]) == os.path.abspath(root)
+        return os.path.commonpath([_norm_abs(path), _norm_abs(root)]) == _norm_abs(root)
     except ValueError:
         return False
 
@@ -974,7 +983,7 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
                     always_allow.add(name)
             undo.begin()
             ok, summary, detail, model_text = _run_tool_job(name, args, root, perm)
-            changes = undo.collect()
+            changes = undo.finish(root)              # 推断动作类型 + 生成差异，供「文件变更」模块
             ms = int((time.time() - t_start) * 1000)
             done[c["id"]] = (ok, summary, detail, model_text, ms, False)
             _log.info("Agent 工具：%s %s → %s（%dms）", name, json.dumps(args, ensure_ascii=False)[:200],

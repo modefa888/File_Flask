@@ -609,6 +609,9 @@
     background: #3a3d41; color: #bdbdbd; }
   .ad-file-head .ad-tag.staged { background: #14532d; color: #8fd694; }
   .ad-file-head .ad-tag.new { background: #123a5c; color: #7fc4ff; }
+  .ad-file-head .ad-tag.add { background: #14532d; color: #8fd694; }
+  .ad-file-head .ad-tag.mod { background: #4a3a12; color: #e2c08a; }
+  .ad-file-head .ad-tag.del { background: #5a2020; color: #f09c9c; }
   .ad-file-head .ad-stat { margin-left: auto; font-size: 11px; flex: none; color: #9d9d9d; }
   .ad-file-head .ad-stat .ad-add { color: #73c991; }
   .ad-file-head .ad-stat .ad-del { color: #e06c75; }
@@ -873,6 +876,26 @@
   .ai-meta .ai-mundo:disabled { opacity: .5; cursor: default; }
   .ai-meta .ai-undone { color: #6e7681; font-size: 10.5px; display: inline-flex; align-items: center; gap: 3px; }
   .ai-meta.user { justify-content: flex-end; }
+  /* 消息下方「文件变更」模块 */
+  .ai-chg { margin: 4px 0 2px; padding: 7px 10px 8px; background: #222226; border: 1px solid #33333a; border-radius: 8px; }
+  .ai-chg-head { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #c8c8c8; margin-bottom: 6px; }
+  .ai-chg-head .bi { color: #e2a03f; font-size: 12px; }
+  .ai-chg-head .ai-chg-all { margin-left: auto; color: #7fb3e0; cursor: pointer; font-size: 11.5px; }
+  .ai-chg-head .ai-chg-all:hover { text-decoration: underline; }
+  .ai-chg-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ai-chg-chip {
+    display: inline-flex; align-items: center; gap: 4px; height: 22px; max-width: 200px;
+    background: #2a2a30; border: 1px solid #3a3a42; border-radius: 5px; padding: 0 8px;
+    color: #d4d4d4; font-size: 11.5px; cursor: pointer;
+  }
+  .ai-chg-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-chg-chip:hover { border-color: #555; filter: brightness(1.15); }
+  .ai-chg-chip .bi { font-size: 11px; flex: none; }
+  .ai-chg-chip.add .bi { color: #7fd88f; }
+  .ai-chg-chip.mod .bi { color: #e2c08a; }
+  .ai-chg-chip.del .bi { color: #e08a8a; }
+  .ai-chg-chip.add { border-color: #2f4a33; }
+  .ai-chg-chip.del { border-color: #4a2f2f; }
   .ai-img-thumb { position: relative; width: 54px; height: 54px; border-radius: 6px; overflow: hidden; border: 1px solid #3c3c3c; }
   .ai-img-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .ai-img-thumb .rm {
@@ -5384,7 +5407,7 @@
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
     fetch("/api/ai/undo", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: m.changes.slice() }),
+      body: JSON.stringify({ ids: m.changes.map(c => (c && c.id) || c) }),
     }).then(async (r) => ({ ok: r.ok, d: await r.json().catch(() => ({})) }))
       .then(({ ok, d }) => {
         if (!ok || d.error) throw new Error(d.error || "回撤接口不可用（请重启服务）");
@@ -5411,6 +5434,155 @@
       if (t) { closeTabSilent(t); openFile(p, baseName(p)); }
     });
     try { refreshTree(); } catch (_) {}
+  }
+  /* ===== 消息下方「文件变更」模块：任务完成（或中途停止）后展示本次改动的文件 ===== */
+  const AI_CHG_ICON = {
+    created: ["bi-file-earmark-plus", "add", "新建"],
+    modified: ["bi-pencil-square", "mod", "修改"],
+    deleted: ["bi-file-earmark-x", "del", "删除"],
+  };
+  function aiChangesBox(m, mi) {
+    const list = (m.changes || []).filter(c => c && c.path);
+    if (!list.length) return null;
+    const byPath = new Map();                             // 同一文件多次改动只显示一个胶囊（取最后动作）
+    list.forEach(c => byPath.set(c.path, c));
+    const items = [...byPath.values()];
+    const box = document.createElement("div");
+    box.className = "ai-chg";
+    const head = document.createElement("div");
+    head.className = "ai-chg-head";
+    head.innerHTML = '<i class="bi bi-file-earmark-diff"></i><span>文件变更（' + items.length + '）</span>' +
+      '<a class="ai-chg-all">查看文件变更 <i class="bi bi-arrow-right-short"></i></a>';
+    const row = document.createElement("div");
+    row.className = "ai-chg-list";
+    items.forEach(c => {
+      const [icon, cls, label] = AI_CHG_ICON[c.action] || AI_CHG_ICON.modified;
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "ai-chg-chip " + cls;
+      chip.title = label + "：" + c.path;
+      chip.innerHTML = '<i class="bi ' + icon + '"></i><span>' + esc(baseName(c.path)) + '</span>';
+      chip.onclick = () => aiOpenChangesTab([c]);
+      row.appendChild(chip);
+    });
+    head.querySelector(".ai-chg-all").onclick = () => aiOpenChangesTab(items);
+    box.appendChild(head);
+    box.appendChild(row);
+    return box;
+  }
+  function aiAppendChangesBox(row, m, mi) {
+    if (!row || !m) return;
+    const b = aiChangesBox(m, mi);
+    if (b) row.appendChild(b);
+  }
+  /* 「查看文件变更」：打开一个标签页，参考 Git 更改视图汇总展示所有改动差异 */
+  function aiOpenChangesTab(changes) {
+    const ids = (changes || []).map(c => (c && c.id) || c).filter(Boolean);
+    if (!ids.length) { toast("没有可查看的文件变更", "warn"); return; }
+    const key = "aiChanges\u0001" + ids.join(",");
+    const exist = findTab(key);
+    if (exist) { activate(exist); return; }
+    const host = document.createElement("div");
+    host.className = "cm-host diff-host";
+    host.innerHTML =
+      '<div class="diff-tools ad-tools"><span class="dt-label">AI 文件变更</span>' +
+      '<button class="ad-expand">全部展开</button>' +
+      '<button class="ad-collapse">全部折叠</button>' +
+      '<span class="ad-count"></span></div><div class="diff-cm all-diff-body"></div>';
+    const dw = currentWrap();
+    (dw || edGroups).appendChild(host);
+    const tab = {
+      path: key, host, cm: null, original: "", dirty: false, group: curGroup,
+      name: "文件变更", big: false, diff: true, diffView: "diff",
+      displayPath: (typeof ROOT !== "undefined" ? ROOT : ""), relPath: "",
+      iconHtml: '<i class="bi bi-file-earmark-diff" style="color:#7ec4ff"></i>',
+      cmBox: host.querySelector(".all-diff-body"),
+      tools: host.querySelector(".diff-tools"),
+    };
+    tabs.push(tab);
+    renderTabsAll();
+    host.classList.add("active");
+    tab.tools.querySelector(".ad-expand").onclick = (e) => { e.stopPropagation(); setAllChangesCollapsed(tab, false); };
+    tab.tools.querySelector(".ad-collapse").onclick = (e) => { e.stopPropagation(); setAllChangesCollapsed(tab, true); };
+    tab.cmBox.innerHTML = '<div class="ad-loading">正在读取变更差异…</div>';
+    fetch("/api/ai/changes", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ids.slice(0, 500), repo: (typeof ROOT !== "undefined" ? ROOT : "") }),
+    }).then(r => r.json()).then(d => {
+      if (d.error) throw new Error(d.error);
+      const files = d.changes || [];
+      let ins = 0, del = 0;
+      files.forEach(f => { ins += f.additions || 0; del += f.deletions || 0; });
+      tab.name = files.length ? "文件变更 (" + files.length + ")" : "文件变更";
+      if (tab.el) { const nm = tab.el.querySelector(".t-nm"); if (nm) nm.textContent = tab.name; }
+      const cnt = tab.tools.querySelector(".ad-count");
+      if (cnt) cnt.innerHTML = files.length
+        ? files.length + " 个文件" +
+          (ins ? ' <span class="ad-add">+' + ins + "</span>" : "") +
+          (del ? ' <span class="ad-del">−' + del + "</span>" : "")
+        : "";
+      renderAiChanges(tab, files);
+    }).catch(e => {
+      tab.cmBox.innerHTML = '<div style="padding:30px;color:#c66;">无法读取变更：' + esc(e.message || e) +
+        '（若刚改过后端代码，请重启服务）</div>';
+    });
+  }
+  function renderAiChanges(tab, files) {
+    const box = tab.cmBox;
+    box.innerHTML = "";
+    tab.allBlocks = [];
+    if (!files.length) { box.innerHTML = '<div class="ad-loading">没有可显示的变更。</div>'; return; }
+    const wrap = document.createElement("div");
+    wrap.className = "ad-wrap";
+    files.forEach(f => wrap.appendChild(aiChangeFileBlock(tab, f)));
+    box.appendChild(wrap);
+  }
+  function aiChangeFileBlock(tab, f) {
+    const name = baseName(f.path);
+    const dir = f.path.indexOf("/") >= 0 ? f.path.substring(0, f.path.lastIndexOf("/")) : "";
+    const [, cls, label] = AI_CHG_ICON[f.action] || AI_CHG_ICON.modified;
+    const sec = document.createElement("div");
+    sec.className = "ad-file";
+    const head = document.createElement("div");
+    head.className = "ad-file-head";
+    head.innerHTML =
+      '<i class="bi bi-chevron-down ad-tw"></i>' +
+      '<span class="ic">' + iconFor(name, false) + '</span>' +
+      '<span class="ad-name">' + esc(name) + '</span>' +
+      (dir ? '<span class="ad-dir">' + esc(dir) + '</span>' : "") +
+      '<span class="ad-tag ' + cls + '">' + esc(label) + '</span>' +
+      '<span class="ad-stat">' +
+        (f.additions ? '<span class="ad-add">+' + f.additions + "</span> " : "") +
+        (f.deletions ? '<span class="ad-del">−' + f.deletions + "</span>" : "") +
+      '</span>' +
+      '<span class="ad-open" title="打开文件"><i class="bi bi-box-arrow-up-right"></i></span>';
+    const body = document.createElement("div");
+    body.className = "ad-file-body";
+    sec.appendChild(head);
+    sec.appendChild(body);
+    head.onclick = (e) => {
+      if (e.target.closest(".ad-open")) {
+        e.stopPropagation();
+        const abs = (typeof ROOT !== "undefined" ? ROOT : "") + "/" + f.path;
+        if (f.action !== "deleted") openFile(abs, name);
+        else toast("该文件已被删除", "warn");
+        return;
+      }
+      const collapsed = sec.classList.toggle("collapsed");
+      head.querySelector(".ad-tw").className = "bi " + (collapsed ? "bi-chevron-right" : "bi-chevron-down") + " ad-tw";
+    };
+    tab.allBlocks.push({ sec: sec, head: head });
+    if (!f.diff || !f.diff.trim()) {
+      body.innerHTML = '<div class="ad-loading">（没有差异）</div>';
+      return sec;
+    }
+    try {
+      mountSplitDiff({ cmBox: body, relPath: f.path, untracked: f.action === "created",
+                       diffText: f.diff, diffView: "diff" });
+    } catch (e) {
+      body.innerHTML = '<div class="ad-loading">无法生成差异：' + esc(e.message || e) + "</div>";
+    }
+    return sec;
   }
   function aiBubble(role, text, cls, imgs, md, files) {
     const row = document.createElement("div");
@@ -5480,6 +5652,9 @@
       const b = aiBubble(m.role, text + extra, "", imgs, m.role === "assistant", m.files);
       if (m.steps && m.steps.length) {                 // 智能体：过程记录收进消息下方的折叠区域
         b.parentElement.appendChild(aiBuildStepsBox(m.steps));
+      }
+      if (m.role === "assistant" && m.changes && m.changes.length) {   // 文件变更模块
+        b.parentElement.appendChild(aiChangesBox(m, mi));
       }
       if (m.role === "assistant") {
         const meta = aiMetaHtml(m, mi);
@@ -7148,6 +7323,7 @@
                        steps: res.steps.length ? res.steps : undefined,
                        changes: turnChanges.length ? turnChanges : undefined });
         bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
+        aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
         aiPersistCurrent(); aiRenderConv();
         aiRecordStat(true, aMeta.ms, acc.length, ttft, inTok);
         return;
@@ -7237,6 +7413,7 @@
                      ms: meta.ms, ts: meta.ts, steps: chatSteps.length ? chatSteps : undefined,
                      changes: turnChanges.length ? turnChanges : undefined });
       bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
+      aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
       aiPersistCurrent(); aiRenderConv();
       aiRecordStat(true, performance.now() - t0, out.length, ttft, inTok);
     } catch (e) {
@@ -7249,6 +7426,7 @@
           AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, ms: meta.ms, ts: meta.ts,
                          changes: abChanges.length ? abChanges : undefined });
           bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
+          aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
           aiPersistCurrent(); aiRenderConv();
         }
         aiRecordStat(false, performance.now() - t0, acc.length, ttft, inTok);
@@ -7258,8 +7436,11 @@
         bodyB.textContent = errText;
         bodyB.classList.add("err");
         const meta = { ms: Math.round(performance.now() - t0), ts: Date.now(), err: true };
-        AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: errText, err: true, ms: meta.ms, ts: meta.ts });
-        bodyB.insertAdjacentHTML("afterend", aiMetaHtml({ text: errText, err: true, ms: meta.ms, ts: meta.ts }, AI.msgs.length - 1));
+        const errChanges = (turnChanges.length ? turnChanges : (AI._agentTurnChanges || []));
+        AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: errText, err: true, ms: meta.ms, ts: meta.ts,
+                       changes: errChanges.length ? errChanges : undefined });
+        bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
+        aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
         aiPersistCurrent(); aiRenderConv();
         aiRecordStat(false, performance.now() - t0, 0, ttft, inTok);
       }

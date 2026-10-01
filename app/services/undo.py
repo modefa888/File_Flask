@@ -8,11 +8,13 @@
 用法（在工具执行线程内）：
     undo.begin()
     ... 执行工具，内部会调用 undo.snapshot / undo.snapshot_any ...
-    ids = undo.collect()      # 本次执行产生的改动 id 列表
+    changes = undo.finish(root)   # 结束收集，返回 [{id, path, action, ...}]
 
-之后前端可拿这些 id 调 /api/ai/undo 回撤（按相反顺序逐个恢复）。
-快照保存在内存里，服务重启后失效；超出容量上限时自动淘汰最早的记录。
+changes 里的 id 可用于 /api/ai/undo 回撤（按相反顺序逐个恢复），
+也可用于 /api/ai/changes 查看差异。快照保存在内存里，服务重启后失效；
+超出容量上限时自动淘汰最早的记录。
 """
+import difflib
 import glob
 import os
 import re
@@ -30,6 +32,10 @@ _MAX_FILE_BYTES = 5 * 1024 * 1024      # 单文件超过该大小不记录
 _MAX_TREE_BYTES = 30 * 1024 * 1024     # 单个目录快照的总大小上限
 _MAX_TREE_FILES = 800                  # 单个目录快照的文件数上限
 _MAX_PATHS = 60                        # 一条命令最多快照多少个路径
+_MAX_DIFF_CHARS = 120_000              # 单个文件差异文本的字符上限
+_MAX_DIFF_BYTES = 1 * 1024 * 1024      # after 内容超过该大小不参与差异计算
+
+_ACTION_LABEL = {"created": "新建", "modified": "修改", "deleted": "删除"}
 
 _local = threading.local()
 
@@ -44,6 +50,121 @@ def collect():
     sink = getattr(_local, "sink", None)
     _local.sink = None
     return list(sink) if sink else []
+
+
+def annotate(ids):
+    """工具执行后调用：对照快照与当前磁盘状态，推断每个改动的动作类型，
+    并保存「改后内容 + 差异文本」（目录型快照只记动作，不生成差异）。"""
+    for cid in ids:
+        with _LOCK:
+            rec = _STORE.get(str(cid))
+        if not rec or rec.get("action"):
+            continue
+        p, kind = rec["path"], rec.get("kind")
+        if not os.path.exists(p):
+            if kind != "absent":
+                rec["action"] = "deleted"
+                if kind == "file":
+                    rec["after"] = None
+                    _build_diff(rec)
+            continue
+        if os.path.isdir(p):
+            rec["action"] = "created" if kind == "absent" else "modified"
+            continue
+        try:
+            after = _read_file_bytes(p)
+        except OSError:
+            continue
+        if after is None:
+            continue
+        rec["after"] = after
+        if kind == "absent":
+            rec["action"] = "created"
+        else:
+            rec["action"] = "modified" if (kind != "file" or rec.get("data") != after) else "unchanged"
+        if rec["action"] != "unchanged" and len(after) <= _MAX_DIFF_BYTES:
+            _build_diff(rec)
+
+
+def _as_lines(data):
+    """字节内容 → 文本行；二进制返回 None。"""
+    if data is None:
+        return []
+    if b"\x00" in data[:4096]:
+        return None
+    return data.decode("utf-8", "replace").splitlines()
+
+
+def _build_diff(rec):
+    """根据快照的 before/after 生成 unified diff，存进记录里。"""
+    rel = rec.get("_rel") or os.path.basename(rec["path"])
+    tb, ta = _as_lines(rec.get("data")), _as_lines(rec.get("after"))
+    if tb is None or ta is None:
+        rec["diff"] = "（二进制文件变更，不显示差异）"
+        return
+    lines = list(difflib.unified_diff(tb, ta, fromfile="a/" + rel, tofile="b/" + rel, lineterm=""))
+    total = sum(len(l) + 1 for l in lines)
+    if total > _MAX_DIFF_CHARS:
+        acc, out = 0, []
+        for l in lines:
+            acc += len(l) + 1
+            if acc > _MAX_DIFF_CHARS:
+                break
+            out.append(l)
+        lines = out + ["", "（差异内容过大，已截断）"]
+        rec["truncated"] = True
+    rec["diff"] = "\n".join(lines)
+
+
+def describe(ids, root="", with_diff=False):
+    """把一组改动 id 整理为描述列表；root 用于把绝对路径转成项目内相对路径。"""
+    root_abs = os.path.abspath(root) if root else ""
+    out = []
+    for cid in ids or []:
+        with _LOCK:
+            rec = _STORE.get(str(cid))
+        if not rec:
+            continue
+        p = rec["path"]
+        if rec.get("kind") == "dir":          # 目录快照只用于回撤，不作为文件变更展示
+            continue
+        rel = p
+        if root_abs:
+            try:
+                rp = os.path.relpath(p, root_abs)
+                if not rp.startswith(".."):
+                    rel = rp
+            except ValueError:
+                pass
+        action = rec.get("action") or "modified"
+        if action == "unchanged":
+            continue
+        item = {"id": str(cid), "path": rel, "action": action}
+        if with_diff:
+            # 以项目内相对路径重建差异头（annotate 阶段还不知道 root，只有文件名）
+            if (rec.get("kind") == "file" or rec.get("after") is not None) and \
+                    (rec.get("diff") is None or rec.get("_rel") != rel):
+                rec["_rel"] = rel
+                _build_diff(rec)
+            if rec.get("diff"):
+                item.update({"diff": rec["diff"],
+                             "additions": sum(1 for l in rec["diff"].split("\n")
+                                              if l.startswith("+") and not l.startswith("+++")),
+                             "deletions": sum(1 for l in rec["diff"].split("\n")
+                                              if l.startswith("-") and not l.startswith("---")),
+                             "truncated": bool(rec.get("truncated")),
+                             "action_label": _ACTION_LABEL.get(action, action)})
+        out.append(item)
+    return out
+
+
+def finish(root=""):
+    """工具执行完毕的收尾：收集 → 推断动作与差异 → 返回描述（不含差异文本，供 SSE 推送）。"""
+    ids = collect()
+    if not ids:
+        return []
+    annotate(ids)
+    return describe(ids, root, with_diff=False)
 
 
 def _trim_locked():

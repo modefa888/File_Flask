@@ -139,18 +139,18 @@
   }
 
   function render(text) {
-    display.textContent = text;
+    display.value = text;
     display.classList.remove('error');
   }
   function showError(msg) {
-    display.textContent = msg;
+    display.value = msg;
     display.classList.add('error');
   }
 
   function appendKey(k) {
     if (justEvaluated) {
       // 计算后按数字 -> 开新算式；按运算符 -> 用上一个结果继续算
-      expr = /[0-9.]/.test(k) ? k : display.textContent;
+      expr = /[0-9.]/.test(k) ? k : display.value;
       justEvaluated = false;
     }
     expr += k;

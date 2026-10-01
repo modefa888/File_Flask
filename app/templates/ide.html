@@ -845,6 +845,14 @@
   .bubble.ai-md th { background: #1d1d21; color: #e8e8e8; font-weight: 600; white-space: nowrap; }
   .bubble.ai-md tr:nth-child(even) td { background: rgba(255,255,255,.02); }
   .ai-row .bubble.err { color: #e08a8a; background: #312525; }
+  /* 用户消息里的 Skill 标签：[Skill:名称]，点击可查看/修改 */
+  .ai-row .bubble .ai-tag-chip {
+    display: inline-block; vertical-align: middle; background: #2d3e50; color: #7ec4ff;
+    border: 1px solid #3a5a7c; border-radius: 4px; padding: 0 5px; margin: 0 1px; font-size: 12px;
+    line-height: 1.45; cursor: pointer;
+  }
+  .ai-row .bubble .ai-tag-chip.custom { background: #3a2d50; color: #d0aaff; border-color: #5a3a7c; }
+  .ai-row .bubble .ai-tag-chip:hover { border-color: #7fb3e0; filter: brightness(1.15); }
   .ai-bimgs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; justify-content: flex-end; }
   .ai-row.assistant .ai-bimgs { justify-content: flex-start; }
   .ai-bimgs img { max-width: 140px; max-height: 100px; border-radius: 6px; border: 1px solid #3c3c3c; object-fit: cover; cursor: zoom-in; }
@@ -856,9 +864,10 @@
   .ai-rate.mid { color: #e8c07a; }
   .ai-rate.bad { color: #e08a8a; }
   .ai-meta { display: flex; align-items: center; gap: 5px; margin-top: 5px; font-size: 10.5px; color: #6e7681; user-select: none; }
-  .ai-meta .ai-mcopy, .ai-meta .ai-mregen { background: none; border: none; color: #8a8a8a; cursor: pointer; font-size: 11.5px; padding: 0 2px; }
-  .ai-meta .ai-mcopy:hover, .ai-meta .ai-mregen:hover { color: #d7dce2; }
+  .ai-meta .ai-mcopy, .ai-meta .ai-mregen, .ai-meta .ai-mretry { background: none; border: none; color: #8a8a8a; cursor: pointer; font-size: 11.5px; padding: 0 2px; }
+  .ai-meta .ai-mcopy:hover, .ai-meta .ai-mregen:hover, .ai-meta .ai-mretry:hover { color: #d7dce2; }
   .ai-meta .ai-mregen:hover { color: #7fb3e0; }
+  .ai-meta .ai-mretry:hover { color: #e8c07a; }
   .ai-img-thumb { position: relative; width: 54px; height: 54px; border-radius: 6px; overflow: hidden; border: 1px solid #3c3c3c; }
   .ai-img-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .ai-img-thumb .rm {
@@ -900,8 +909,9 @@
   .ai-input #aiText .ai-tag {
     display: inline-block; vertical-align: middle; background: #2d3e50; color: #7ec4ff;
     border: 1px solid #3a5a7c; border-radius: 4px; padding: 0 5px; margin: 0 1px; font-size: 12px;
-    line-height: 1.4; cursor: default; user-select: none;
+    line-height: 1.4; cursor: pointer; user-select: none;
   }
+  .ai-input #aiText .ai-tag:hover { border-color: #7fb3e0; filter: brightness(1.15); }
   .ai-input #aiText .ai-tag.custom { background: #3a2d50; color: #d0aaff; border-color: #5a3a7c; }
   .ai-input-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; row-gap: 4px; margin-top: 6px; }
   .ai-ctx-flag { font-size: 10.5px; color: #e2c08a; background: #332c1e; border-radius: 4px; padding: 2px 6px; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -978,6 +988,48 @@
   .ai-skill-opt .bi-check2 { margin-left: auto; visibility: hidden; font-size: 11px; }
   .ai-skill-opt.on .bi-check2 { visibility: visible; color: #7fb3e0; }
   .ai-skill-import { border-top: 1px solid #3c3c3c; margin-top: 4px; padding-top: 4px; }
+  .ai-skill-opt .m { flex: 1; min-width: 0; }
+  .ai-skill-opt .ai-sk-act {
+    background: none; border: none; color: #8a8a8a; cursor: pointer; padding: 1px 3px; border-radius: 4px;
+    font-size: 12px; flex: none; margin-top: 0;
+  }
+  .ai-skill-opt .ai-sk-act:hover { color: #d7dce2; background: #3a3a42; }
+  .ai-skill-opt .ai-sk-act.dis { opacity: .38; cursor: not-allowed; }
+  .ai-skill-opt .ai-sk-del:hover:not(.dis) { color: #e08a8a; }
+  .ai-skill-opt .sub { font-size: 10px; color: #c8a95e; margin-left: 4px; }
+  /* 技能查看 / 修改悬浮框 */
+  .ai-skedit-pop {
+    position: fixed; z-index: 300; width: 340px; max-width: calc(100vw - 16px);
+    background: #26262b; border: 1px solid #3c3c42; border-radius: 10px;
+    box-shadow: 0 12px 36px rgba(0,0,0,.55); padding: 10px 12px 12px; color: #d4d4d4;
+  }
+  .ai-skedit-pop .p-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+  .ai-skedit-pop .p-title .bi { color: #9aa4b2; font-size: 13px; }
+  .ai-skedit-pop .p-badge {
+    font-size: 10px; font-weight: 400; color: #9aa4b2; background: #33333a; border-radius: 4px; padding: 1px 5px;
+  }
+  .ai-skedit-pop .p-badge.ov { color: #c8a95e; background: #3a3320; }
+  .ai-skedit-pop .p-row { margin-bottom: 8px; }
+  .ai-skedit-pop .p-row label { display: block; font-size: 10.5px; color: #8a8a8a; margin-bottom: 3px; }
+  .ai-skedit-pop input, .ai-skedit-pop textarea {
+    width: 100%; box-sizing: border-box; background: #1b1b1e; border: 1px solid #3c3c3c; border-radius: 6px;
+    color: #d4d4d4; font-size: 12px; line-height: 1.5; padding: 5px 8px; outline: none; font-family: inherit;
+  }
+  .ai-skedit-pop input:focus, .ai-skedit-pop textarea:focus { border-color: #0a6aa8; }
+  .ai-skedit-pop textarea { min-height: 120px; max-height: 260px; resize: vertical; }
+  .ai-skedit-pop .p-foot { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+  .ai-skedit-pop .p-sp { flex: 1; }
+  .ai-skedit-pop button {
+    height: 26px; padding: 0 11px; border-radius: 6px; border: 1px solid #3c3c3c; background: #2d2d31;
+    color: #c8c8c8; font-size: 11.5px; cursor: pointer;
+  }
+  .ai-skedit-pop button:hover { border-color: #555; color: #fff; }
+  .ai-skedit-pop .p-save { background: #0d7ec4; border-color: #0d7ec4; color: #fff; }
+  .ai-skedit-pop .p-save:hover { background: #0a6aa8; border-color: #0a6aa8; }
+  .ai-skedit-pop .p-del { color: #e08a8a; border-color: #5a3a3a; }
+  .ai-skedit-pop .p-del:hover { background: #3a2626; color: #ff9c9c; }
+  .ai-skedit-pop .p-reset { color: #c8a95e; border-color: #5a4a2a; }
+  .ai-skedit-pop .p-reset:hover { background: #3a3320; }
   /* 窄面板自动隐藏按钮文字，优先保证图标可见；发送/模型等核心按钮始终保留 */
   @container (max-width: 320px) {
     .ai-input-acts { gap: 4px; }
@@ -5231,7 +5283,7 @@
     html += flushP(pbuf);
     return html;
   }
-  function aiMetaHtml(m, mi) {                            // 回复下方元信息行：复制/重答 + tok · 用时 · 日期
+  function aiMetaHtml(m, mi) {                            // 回复下方元信息行：复制/重答/重试 + tok · 用时 · 日期
     const parts = [];
     const tok = Math.ceil((m.text || "").length / 2);
     if (tok) parts.push('~' + tok + ' tok');
@@ -5243,9 +5295,13 @@
       const d = new Date(m.ts), p2 = n => String(n).padStart(2, "0");
       parts.push((d.getMonth() + 1) + '月' + d.getDate() + '日 ' + p2(d.getHours()) + ':' + p2(d.getMinutes()));
     }
+    const retryBtn = m.role === "assistant" && m.err
+      ? '<button class="ai-mretry" data-mi="' + mi + '" title="重新提问"><i class="bi bi-arrow-repeat"></i></button>'
+      : '';
     return '<div class="ai-meta">' +
       '<button class="ai-mcopy" data-mi="' + mi + '" title="复制回复全文"><i class="bi bi-clipboard"></i></button>' +
       '<button class="ai-mregen" data-mi="' + mi + '" title="删除此回复并重新生成"><i class="bi bi-arrow-clockwise"></i></button>' +
+      retryBtn +
       '<span>' + parts.join(' · ') + '</span></div>';
   }
   function aiBubble(role, text, cls, imgs, md, files) {
@@ -5271,6 +5327,7 @@
     const b = document.createElement("div");
     b.className = "bubble" + (cls ? " " + cls : "");
     if (md) { b.classList.add("ai-md"); b.innerHTML = aiMd(text || ""); }
+    else if (role === "user") { b.innerHTML = aiRenderUserText(text || ""); }
     else { b.textContent = text || ""; }
     row.appendChild(b);
     if (imgs && imgs.length) {
@@ -5428,6 +5485,82 @@
   function aiSaveCustomSkills(list) {
     try { localStorage.setItem("ide.ai.customSkills", JSON.stringify(list)); } catch (_) {}
   }
+  /* 本地覆盖：内置/自定义 Skill 修改后存这里，内置技能本身不落库、可随时恢复默认 */
+  function aiGetSkillOverrides() {
+    try { return JSON.parse(localStorage.getItem("ide.ai.skillOverrides") || "{}") || {}; }
+    catch (_) { return {}; }
+  }
+  function aiSaveSkillOverrides(obj) {
+    try { localStorage.setItem("ide.ai.skillOverrides", JSON.stringify(obj || {})); } catch (_) {}
+  }
+  function aiHasSkillOverride(id) {
+    const o = aiGetSkillOverrides()[id];
+    return !!(o && (o.name || o.prompt || o.desc != null));
+  }
+  /* 合并内置 + 自定义 Skill，并套用本地覆盖，返回统一结构 */
+  function aiAllSkills() {
+    const ov = aiGetSkillOverrides();
+    const list = AI_SKILLS.map(s => {
+      const o = ov[s.id] || {};
+      return { id: s.id, name: o.name || s.name, desc: o.desc != null ? o.desc : s.desc,
+               prompt: o.prompt || s.prompt, icon: s.icon || "bi-stars", builtin: true,
+               overridden: !!(o.name || o.prompt || o.desc != null), promptOverridden: !!o.prompt };
+    });
+    aiGetCustomSkills().forEach(s => {
+      const o = ov[s.id] || {};
+      list.push({ id: s.id, name: o.name || s.name, desc: o.desc != null ? o.desc : (s.desc || ""),
+                  prompt: o.prompt || s.prompt || "", icon: "bi-lightning", builtin: false,
+                  overridden: !!(o.name || o.prompt || o.desc != null), promptOverridden: !!o.prompt });
+    });
+    return list;
+  }
+  function aiFindSkill(id) { return aiAllSkills().find(s => s.id === id) || null; }
+  /* 技能改名后，同步输入框标签与当前会话里已保存的消息文本 */
+  function aiSyncSkillName(id, oldName, newName) {
+    const ta = $("aiText");
+    if (ta) ta.querySelectorAll(".ai-tag[data-id]").forEach(t => { if (t.dataset.id === id) t.textContent = "@" + newName; });
+    if (!oldName || oldName === newName) return;
+    let changed = false;
+    (AI.msgs || []).forEach(m => {
+      if (m.role !== "user" || !m.text) return;
+      let t = m.text.split("[Skill:" + oldName + "]").join("[Skill:" + newName + "]").split("@" + oldName).join("@" + newName);
+      if (t !== m.text) { m.text = t; changed = true; }
+    });
+    if (changed) aiPersistCurrent();
+  }
+  /* 保存修改：内置 → 写覆盖；自定义 → 直接改本地自定义列表 */
+  function aiSaveSkillEdit(id, data) {
+    const sk = aiFindSkill(id);
+    if (!sk) return;
+    const oldName = sk.name;
+    if (sk.builtin) {
+      const ov = aiGetSkillOverrides();
+      ov[id] = { name: data.name, desc: data.desc, prompt: data.prompt };
+      aiSaveSkillOverrides(ov);
+    } else {
+      const list = aiGetCustomSkills();
+      const i = list.findIndex(s => s.id === id);
+      if (i >= 0) list[i] = Object.assign({}, list[i], { name: data.name, desc: data.desc, prompt: data.prompt });
+      else list.push({ id, name: data.name, desc: data.desc, prompt: data.prompt });
+      aiSaveCustomSkills(list);
+      const ov = aiGetSkillOverrides();
+      if (ov[id]) { delete ov[id]; aiSaveSkillOverrides(ov); }
+    }
+    if (oldName !== data.name) aiSyncSkillName(id, oldName, data.name);
+  }
+  function aiDeleteSkill(id) {
+    const sk = aiFindSkill(id);
+    if (!sk || sk.builtin) return;
+    aiSaveCustomSkills(aiGetCustomSkills().filter(s => s.id !== id));
+    const ov = aiGetSkillOverrides();
+    if (ov[id]) { delete ov[id]; aiSaveSkillOverrides(ov); }
+  }
+  /* 技能数据变化后：刷新消息气泡里的标签、若下拉打开则重建 */
+  function aiAfterSkillChange() {
+    try { aiRenderAll(); } catch (_) {}
+    const pop = $("aiSkillPop");
+    if (pop && pop.style.display !== "none") aiBuildSkillPop();
+  }
   /* 自定义 Skill 导入弹窗：名称 / 描述 / 提示词，结果 {id,name,desc,prompt} 或 null */
   /* 让 AI 根据一句话需求生成 {name, desc, prompt} */
   async function aiGenerateSkill(requirement) {
@@ -5550,10 +5683,8 @@
   }
   function aiSkillPrompt(sid) {
     if (!sid) return "";
-    const builtin = AI_SKILLS.find(s => s.id === sid);
-    if (builtin) return builtin.prompt;
-    const custom = aiGetCustomSkills().find(s => s.id === sid);
-    return custom ? (custom.prompt || "") : "";
+    const s = aiFindSkill(sid);
+    return s ? (s.prompt || "") : "";
   }
   function _escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
   /* 把 @技能名 以带颜色的小标签形式插入到输入框光标处 */
@@ -5582,22 +5713,125 @@
     sel.removeAllRanges();
     sel.addRange(range);
   }
-  /* 从文本中解析出所有已知的 @技能名，返回 { ids: [...], cleanText: 去掉标签后的文本 } */
+  const _SKILL_PUNC = "，。！？、；：“”‘’（）【】.,;:!?'\"()[]{}";
+  /* 从文本中解析出所有已知的 @技能名，返回 { ids: [...], text: 保留标签的原文 } */
   function aiParseSkillTags(raw) {
     const ids = [];
-    const allSkills = AI_SKILLS.concat(aiGetCustomSkills());
+    const allSkills = aiAllSkills();
     const byName = new Map(allSkills.map(s => [s.name, s]));
-    const names = allSkills.map(s => s.name).sort((a, b) => b.length - a.length);
-    if (!names.length) return { ids, cleanText: raw.replace(/^\s+|\s+$/g, "") };
-    const re = new RegExp("(^|\\s)@(" + names.map(_escapeRegExp).join("|") + ")(?=\\s|$)", "g");
+    const names = allSkills.map(s => s.name).filter(Boolean).sort((a, b) => b.length - a.length);
+    if (!names.length) return { ids, text: raw };
+    const re = new RegExp("(^|[^A-Za-z0-9_@.])@(" + names.map(_escapeRegExp).join("|") + ")(?=\\s|$|[" + _escapeRegExp(_SKILL_PUNC) + "])", "g");
     let m;
     while ((m = re.exec(raw)) !== null) {
       const skill = byName.get(m[2]);
       if (skill && !ids.includes(skill.id)) ids.push(skill.id);
     }
-    let clean = raw.replace(re, "$1");
-    clean = clean.replace(/[ \t]{2,}/g, " ").replace(/^\s+|\s+$/g, "");
-    return { ids, cleanText: clean };
+    return { ids, text: raw };
+  }
+  /* 把 @技能名 替换成不会和文件引用混淆的 [Skill:名称]，用于发给模型 */
+  function aiReplaceSkillTagsForModel(raw) {
+    const names = aiAllSkills().map(s => s.name).filter(Boolean).sort((a, b) => b.length - a.length);
+    if (!names.length) return raw;
+    const re = new RegExp("(^|[^A-Za-z0-9_@.])@(" + names.map(_escapeRegExp).join("|") + ")(?=\\s|$|[" + _escapeRegExp(_SKILL_PUNC) + "])", "g");
+    return raw.replace(re, (match, ws, name) => ws + "[Skill:" + name + "]");
+  }
+  /* 用户消息展示：把 @技能名 / [Skill:名称] 渲染成可点击的 [Skill:名称] 标签 */
+  function aiRenderUserText(raw) {
+    let out = esc(raw || "");
+    const skills = aiAllSkills().filter(s => s.name).sort((a, b) => b.name.length - a.name.length);
+    skills.forEach(s => {
+      const nm = esc(s.name);
+      const chip = '<span class="ai-tag-chip' + (s.builtin ? "" : " custom") +
+        '" data-skill-id="' + esc(s.id).replace(/"/g, "&quot;") + '" title="点击查看 / 修改该 Skill">[Skill:' + nm + ']</span>';
+      out = out.split("[Skill:" + nm + "]").join(chip);
+      const re = new RegExp("(^|[^A-Za-z0-9_@.])@" + _escapeRegExp(nm) + "(?=\\s|$|[" + _escapeRegExp(_SKILL_PUNC) + "])", "g");
+      out = out.replace(re, (m, ws) => ws + chip);
+    });
+    return out;
+  }
+  /* ===== Skill 查看 / 修改悬浮框 ===== */
+  function aiEnsureSkillEditPop() {
+    let pop = $("aiSkillEditPop");
+    if (pop) return pop;
+    pop = document.createElement("div");
+    pop.id = "aiSkillEditPop";
+    pop.className = "ai-skedit-pop";
+    pop.style.display = "none";
+    document.body.appendChild(pop);
+    document.addEventListener("mousedown", (e) => {
+      if (pop.style.display !== "none" && !pop.contains(e.target) && !e.target.closest(".ai-tag-chip") &&
+          !e.target.closest(".ai-tag") && !e.target.closest(".ai-sk-act")) {
+        pop.style.display = "none"; pop.innerHTML = "";
+      }
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && pop.style.display !== "none") { pop.style.display = "none"; pop.innerHTML = ""; }
+    });
+    return pop;
+  }
+  function aiCloseSkillEditPop() {
+    const pop = $("aiSkillEditPop");
+    if (pop) { pop.style.display = "none"; pop.innerHTML = ""; }
+  }
+  function aiOpenSkillEditPop(skillId, anchor) {
+    const sk = aiFindSkill(skillId);
+    if (!sk) { toast("找不到该 Skill", "warn"); return; }
+    const pop = aiEnsureSkillEditPop();
+    const hasOv = aiHasSkillOverride(skillId);
+    pop.innerHTML =
+      '<div class="p-title"><i class="bi ' + esc(sk.icon || "bi-stars") + '"></i><span>' + esc(sk.name) + '</span>' +
+        '<span class="p-badge' + (hasOv ? " ov" : "") + '">' + (sk.builtin ? "内置" : "自定义") + (hasOv ? " · 已修改" : "") + '</span></div>' +
+      '<div class="p-row"><label>名称</label><input id="skEditName" autocomplete="off"></div>' +
+      '<div class="p-row"><label>描述</label><input id="skEditDesc" autocomplete="off"></div>' +
+      '<div class="p-row"><label>提示词</label><textarea id="skEditPrompt"></textarea></div>' +
+      '<div class="p-foot">' +
+        (sk.builtin && hasOv ? '<button class="p-reset" id="skEditReset">恢复默认</button>' : '') +
+        (!sk.builtin ? '<button class="p-del" id="skEditDel">删除</button>' : '') +
+        '<span class="p-sp"></span>' +
+        '<button class="p-cancel" id="skEditCancel">取消</button>' +
+        '<button class="p-save" id="skEditSave">保存</button>' +
+      '</div>';
+    pop.querySelector("#skEditName").value = sk.name;
+    pop.querySelector("#skEditDesc").value = sk.desc || "";
+    pop.querySelector("#skEditPrompt").value = sk.prompt || "";
+    pop.style.display = "";
+    const r = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : { left: 40, top: 60, bottom: 80 };
+    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+    let left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - pw - 8));
+    let top = r.bottom + 8;
+    if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 8);
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    pop.querySelector("#skEditCancel").onclick = aiCloseSkillEditPop;
+    pop.querySelector("#skEditSave").onclick = () => {
+      const name = pop.querySelector("#skEditName").value.trim();
+      const desc = pop.querySelector("#skEditDesc").value.trim();
+      const prompt = pop.querySelector("#skEditPrompt").value.trim();
+      if (!name) { toast("请输入名称", "warn"); return; }
+      if (!prompt) { toast("请输入提示词", "warn"); return; }
+      aiSaveSkillEdit(skillId, { name, desc, prompt });
+      aiAfterSkillChange();
+      toast("已保存：内置技能以本地覆盖生效，可随时恢复默认", "ok");
+      aiCloseSkillEditPop();
+    };
+    const rst = pop.querySelector("#skEditReset");
+    if (rst) rst.onclick = () => {
+      const ov = aiGetSkillOverrides();
+      delete ov[skillId];
+      aiSaveSkillOverrides(ov);
+      aiAfterSkillChange();
+      toast("已恢复默认", "ok");
+      aiCloseSkillEditPop();
+    };
+    const del = pop.querySelector("#skEditDel");
+    if (del) del.onclick = () => {
+      if (!confirm("删除自定义 Skill「" + sk.name + "」？")) return;
+      aiDeleteSkill(skillId);
+      aiAfterSkillChange();
+      toast("已删除", "ok");
+      aiCloseSkillEditPop();
+    };
   }
   function aiRenderSkillBtn() {
     const btn = $("aiSkillBtn"), nm = $("aiSkillName");
@@ -5609,30 +5843,58 @@
     const pop = $("aiSkillPop");
     if (!pop) return;
     pop.innerHTML = '<div class="ai-skill-g">点击插入到输入框（可同时使用多个）</div>';
-    AI_SKILLS.forEach(s => {
+    const all = aiAllSkills();
+    const mk = (s) => {
       const o = document.createElement("div");
       o.className = "ai-skill-opt";
-      o.innerHTML = '<i class="bi ' + s.icon + '"></i><div><div class="t"></div><div class="d"></div></div><i class="bi bi-plus"></i>';
-      o.querySelector(".t").textContent = s.name; o.querySelector(".d").textContent = s.desc;
-      o.addEventListener("click", () => { aiInsertSkillTag(s); pop.style.display = "none"; });
-      pop.appendChild(o);
-    });
-    const customs = aiGetCustomSkills();
-    if (customs.length) {
-      pop.appendChild(document.createElement("div")).className = "ai-skill-g";
-      pop.lastChild.textContent = "自定义";
-      customs.forEach(s => {
-        const o = document.createElement("div");
-        o.className = "ai-skill-opt";
-        o.innerHTML = '<i class="bi bi-lightning"></i><div><div class="t"></div><div class="d"></div></div><i class="bi bi-plus"></i>';
-        o.querySelector(".t").textContent = s.name; o.querySelector(".d").textContent = s.desc || "自定义 Skill";
-        o.addEventListener("click", () => { aiInsertSkillTag(s); pop.style.display = "none"; });
-        pop.appendChild(o);
+      o.innerHTML = '<i class="bi ' + esc(s.icon || "bi-stars") + '"></i>' +
+        '<div class="m"><div class="t"></div><div class="d"></div></div>' +
+        '<button class="ai-sk-act ai-sk-edit" title="查看 / 修改"><i class="bi bi-pencil"></i></button>' +
+        (s.builtin
+          ? '<button class="ai-sk-act ai-sk-del dis" title="内置技能不可删除" disabled><i class="bi bi-lock"></i></button>'
+          : '<button class="ai-sk-act ai-sk-del" title="删除"><i class="bi bi-trash"></i></button>');
+      const t = o.querySelector(".t");
+      t.textContent = s.name;
+      if (s.overridden) {
+        const sub = document.createElement("span");
+        sub.className = "sub"; sub.textContent = "· 已修改";
+        t.appendChild(sub);
+      }
+      o.querySelector(".d").textContent = s.desc || (s.builtin ? "" : "自定义 Skill");
+      o.addEventListener("click", (e) => {
+        if (e.target.closest(".ai-sk-act")) return;
+        aiInsertSkillTag(s);
+        pop.style.display = "none";
       });
+      o.querySelector(".ai-sk-edit").addEventListener("click", (e) => {
+        e.stopPropagation();
+        const rect = e.currentTarget.getBoundingClientRect();
+        pop.style.display = "none";
+        aiOpenSkillEditPop(s.id, { getBoundingClientRect: () => rect });
+      });
+      const del = o.querySelector(".ai-sk-del");
+      if (del && !s.builtin) {
+        del.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (!confirm("删除自定义 Skill「" + s.name + "」？")) return;
+          aiDeleteSkill(s.id);
+          aiAfterSkillChange();
+          toast("已删除", "ok");
+        });
+      }
+      return o;
+    };
+    all.filter(s => s.builtin).forEach(s => pop.appendChild(mk(s)));
+    const customs = all.filter(s => !s.builtin);
+    if (customs.length) {
+      const g = document.createElement("div");
+      g.className = "ai-skill-g"; g.textContent = "自定义";
+      pop.appendChild(g);
+      customs.forEach(s => pop.appendChild(mk(s)));
     }
     const imp = document.createElement("div");
     imp.className = "ai-skill-opt ai-skill-import";
-    imp.innerHTML = '<i class="bi bi-plus-circle"></i><div><div class="t">导入技能</div><div class="d">自定义名称和提示词</div></div>';
+    imp.innerHTML = '<i class="bi bi-plus-circle"></i><div class="m"><div class="t">导入技能</div><div class="d">自定义名称和提示词</div></div>';
     imp.addEventListener("click", () => {
       uiImportSkill().then((s) => {
         if (!s) return;
@@ -5677,6 +5939,11 @@
     });
   }
   $("aiMsgs").addEventListener("click", (e) => {          // 代码块：插入到项目 / 复制；回复：复制 / 重新生成
+    const chip = e.target.closest(".ai-tag-chip");        // 消息里的 Skill 标签：查看 / 修改
+    if (chip) {
+      aiOpenSkillEditPop(chip.dataset.skillId, chip);
+      return;
+    }
     const mc = e.target.closest(".ai-mcopy");             // 复制整条回复
     if (mc) {
       const m = AI.msgs[+mc.dataset.mi];
@@ -5695,7 +5962,16 @@
       if (!u || u.role !== "user") { toast("找不到原始提问，无法重新生成", "warn"); return; }
       AI.msgs.splice(mi);                                 // 移除该回复及其后所有消息
       aiPersistCurrent(); aiRenderAll();
-      aiSend({ text: u.text || "", imgs: (u.images || []).slice() });
+      aiSend({ text: u.text || "", imgs: (u.images || []).slice(), skills: (u.skills || []).slice() });
+      return;
+    }
+    const rt = e.target.closest(".ai-mretry");            // 重新提问（保留上下文再试一次）
+    if (rt) {
+      if (AI.busy) { toast("正在回复中，请先停止", "warn"); return; }
+      const mi = +rt.dataset.mi;
+      const u = AI.msgs[mi - 1];
+      if (!u || u.role !== "user") { toast("找不到原始提问，无法重新提问", "warn"); return; }
+      aiSend({ text: u.text || "", imgs: (u.images || []).slice(), skills: (u.skills || []).slice() });
       return;
     }
     const ins = e.target.closest(".ai-md-ins");
@@ -6454,12 +6730,23 @@
   async function aiSend(reuse) {                          // reuse={text,imgs}：重新生成，不重复 push 用户消息
     if (AI.busy) return;
     let rawText, text, imgs, skillIds = [];
-    if (reuse) { rawText = reuse.text || ""; text = rawText; imgs = (reuse.imgs || []).slice(); }
+    if (reuse) {
+      rawText = reuse.text || "";
+      text = rawText;
+      imgs = (reuse.imgs || []).slice();
+      skillIds = (reuse.skills || []).slice();      // 重新生成时沿用原消息的 Skill
+    }
     else {
-      rawText = $("aiText").innerText || "";
+      const ta = $("aiText");
+      rawText = ta.innerText || "";
       const parsed = aiParseSkillTags(rawText);
       skillIds = parsed.ids;
-      text = parsed.cleanText;
+      // 输入框里的 @技能 标签带 data-id：改名后也能准确识别
+      ta.querySelectorAll(".ai-tag[data-id]").forEach(t => {
+        const id = t.dataset.id;
+        if (id && !skillIds.includes(id)) skillIds.push(id);
+      });
+      text = parsed.text;
       imgs = AI.pending.slice();
       if (!text && !imgs.length) return;
     }
@@ -6525,17 +6812,28 @@
       : (AI.perm === "full"
         ? "当前权限「完全权限」：可以给出任意路径下的完整文件内容。"
         : "当前权限「工作区内修改」：给出可直接保存到项目内的完整文件内容。");
-    // 内置 skill 由后端根据 skills 列表注入；自定义 skill 的 prompt 在这里追加到 system
+    // 内置 skill 由后端根据 skills 列表注入；自定义 / 被本地覆盖的 skill 的 prompt 在这里追加到 system
+    const _allSk = aiAllSkills();
+    const _of = (id) => _allSk.find(s => s.id === id);
+    const activeSkillNames = skillIds.map(id => (_of(id) || {}).name).filter(Boolean);
     const customSkillPrompts = skillIds
-      .filter(id => !AI_SKILLS.some(s => s.id === id))
+      .filter(id => { const s = _of(id); return s && (!s.builtin || s.promptOverridden); })
       .map(id => aiSkillPrompt(id))
       .filter(Boolean);
+    const backendSkills = skillIds.filter(id => { const s = _of(id); return s && s.builtin && !s.promptOverridden; });
+    const skillNote = activeSkillNames.length
+      ? "\n\n[本轮激活的 Skill]\n" + activeSkillNames.map(n => "- " + n).join("\n") +
+        "\n注意：用户消息里的 @技能名 会转换为 [Skill:技能名] 发送给你；这些标记是 Skill 引用，绝对不是文件路径。" +
+        "不要要求用户为 Skill 标记补充文件路径，直接根据该 Skill 的能力回答即可。如需引用文件，用户会提供具体路径。"
+      : "";
     const sysPrompt = "你是一个自托管文件管理器内置的 AI 编程助手。当前项目根目录：" +
       (typeof ROOT !== "undefined" ? ROOT : "/") +
       "。" + permHint + "回答使用简体中文，代码块标注语言，简洁直接。" +
+      skillNote +
       (customSkillPrompts.length ? "\n\n[Skill 激活说明]\n" + customSkillPrompts.join("\n\n") : "");
     // 当前这条消息：带图片/上下文时用多模态数组，否则纯文本
-    const curText = text + aiBuildContext();
+    const modelText = aiReplaceSkillTagsForModel(text);
+    const curText = modelText + aiBuildContext();
     if (!reuse) {                            // 上下文已抓取进本条消息，发送后清空输入区的附加文件卡片
       AI.files = [];
       aiRenderFiles();
@@ -6546,16 +6844,20 @@
     // 有记忆摘要时只发最近 6 条历史 + 摘要注入 system；无记忆则全量（dsh 行为）
     const hist = AI.msgs.slice(0, -1);
     const usedHist = mem ? hist.slice(-6) : hist;
+    const historyMapper = (m) => ({
+      role: m.role,
+      content: m.role === "user" ? aiReplaceSkillTagsForModel(m.text || m.content || "") : (m.text || m.content || ""),
+    });
     const inTok = Math.ceil((sysPrompt.length + mem.length +
       usedHist.reduce((a, m) => a + (m.text || "").length, 0) + curText.length) / 2);   // 输入 token 估算
     const payload = {
       provider_id: prov.id,
       model: pick.model,
       web_search: AI.webSearch,
-      skills: skillIds,
+      skills: backendSkills,
       messages: [
         { role: "system", content: sysPrompt + (mem ? "\n\n[本对话早期内容记忆摘要]\n" + mem : "") },
-        ...usedHist.map(m => ({ role: m.role, content: m.text || m.content || "" })),
+        ...usedHist.map(historyMapper),
         { role: "user", content: curContent },
       ],
     };
@@ -6573,9 +6875,14 @@
           provider_id: prov.id,
           model: pick.model,
           web_search: AI.webSearch,
-          skills: skillIds,
+          skills: backendSkills,
+          skill_prompts: customSkillPrompts,
+          skill_names: activeSkillNames,
           messages: [
-            ...usedHist.map(m => ({ role: m.role, content: m.text || m.content || "" })),
+            ...usedHist.map(m => ({
+              role: m.role,
+              content: m.role === "user" ? aiReplaceSkillTagsForModel(m.text || m.content || "") : (m.text || m.content || ""),
+            })),
             { role: "user", content: curContent },
           ],
         }, bodyB, (t) => {
@@ -6650,8 +6957,13 @@
         aiRecordStat(false, performance.now() - t0, acc.length, ttft, inTok);
       } else {
         bodyB.classList.remove("ai-md");
-        bodyB.textContent = "出错了：" + e.message;
+        const errText = "出错了：" + e.message;
+        bodyB.textContent = errText;
         bodyB.classList.add("err");
+        const meta = { ms: Math.round(performance.now() - t0), ts: Date.now(), err: true };
+        AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: errText, err: true, ms: meta.ms, ts: meta.ts });
+        bodyB.insertAdjacentHTML("afterend", aiMetaHtml({ text: errText, err: true, ms: meta.ms, ts: meta.ts }, AI.msgs.length - 1));
+        aiPersistCurrent(); aiRenderConv();
         aiRecordStat(false, performance.now() - t0, 0, ttft, inTok);
       }
     } finally {
@@ -6665,6 +6977,10 @@
   $("aiSend").addEventListener("click", () => aiSend());
   $("aiText").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); aiSend(); }
+  });
+  $("aiText").addEventListener("click", (e) => {          // 输入框里的 @技能 标签：点击查看/修改
+    const tag = e.target.closest(".ai-tag");
+    if (tag && tag.dataset.id) { e.preventDefault(); aiOpenSkillEditPop(tag.dataset.id, tag); }
   });
   aiLoadSessions();
   try { if (localStorage.getItem("ide.ai.open") === "1") toggleAI(true); } catch (_) {}

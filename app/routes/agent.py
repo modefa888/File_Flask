@@ -422,7 +422,7 @@ def _repo_tree(root, max_lines=_TREE_LINES, depth=_TREE_DEPTH):
     return "\n".join(out)
 
 
-def _agent_system(root, perm, skill=None):
+def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None):
     perm_desc = {
         "readonly": "仅可查看 —— 只能读文件与搜索，写入和执行会被拒绝（可提示用户切换权限）",
         "workspace": "工作区内修改 —— 可以读写项目内的文件；执行命令前会先征求用户确认",
@@ -451,6 +451,14 @@ def _agent_system(root, perm, skill=None):
         prompts = [_SKILL_PROMPTS.get(str(sid)) for sid in sids if _SKILL_PROMPTS.get(str(sid))]
         if prompts:
             base += "\n\n" + "\n\n".join(prompts)
+    if extra_prompts:
+        extra = [str(p).strip() for p in extra_prompts if str(p).strip()]
+        if extra:
+            header = "[本轮激活的自定义 Skill]"
+            names = [str(n).strip() for n in (extra_names or []) if str(n).strip()]
+            if names:
+                header += "\n技能名称：" + "、".join(names)
+            base += "\n\n" + header + "\n" + "\n\n".join(extra)
     return base
 
 
@@ -608,8 +616,8 @@ def _trim_convo(convo, rounds_tool_idx):
     return trimmed
 
 
-def _run_agent(run_id, provider, model, root, perm, msgs, skills=None):
-    convo = [{"role": "system", "content": _agent_system(root, perm, skills)}] + msgs
+def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_prompts=None, extra_names=None):
+    convo = [{"role": "system", "content": _agent_system(root, perm, skills, extra_prompts, extra_names)}] + msgs
     always_allow = set()
     rounds_tool_idx = []                 # 每轮追加的 tool 消息下标，用于上下文裁剪
     for _round in range(_MAX_ROUNDS):
@@ -736,15 +744,19 @@ def api_ai_agent():
     if perm not in ("readonly", "workspace", "full"):
         perm = "workspace"
     skills = data.get("skills") or data.get("skill") or None
+    raw_extra = data.get("skill_prompts") or []
+    extra_prompts = [str(p) for p in raw_extra if str(p).strip()] if isinstance(raw_extra, list) else []
+    raw_names = data.get("skill_names") or []
+    extra_names = [str(n) for n in raw_names if str(n).strip()] if isinstance(raw_names, list) else []
     run_id = uuid.uuid4().hex[:12]
-    _log.info("Agent 启动：run=%s model=%s perm=%s root=%s msgs=%d skills=%s",
+    _log.info("Agent 启动：run=%s model=%s perm=%s root=%s msgs=%d skills=%s extra=%d",
               run_id, model, perm, root, len(clean),
-              ",".join(skills) if isinstance(skills, list) else (skills or "-"))
+              ",".join(skills) if isinstance(skills, list) else (skills or "-"), len(extra_prompts))
 
     def gen():
         yield _sse({"type": "run", "run_id": run_id, "perm": perm, "model": model, "root": root})
         try:
-            yield from _run_agent(run_id, provider, model, root, perm, clean, skills)
+            yield from _run_agent(run_id, provider, model, root, perm, clean, skills, extra_prompts, extra_names)
         except Exception as e:  # noqa: BLE001
             _log.warning("Agent 异常：%s", e)
             yield _sse({"type": "error", "error": "智能体执行失败：%s" % e})

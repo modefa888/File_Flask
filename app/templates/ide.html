@@ -932,6 +932,14 @@
   .ai-agent-btn:hover { border-color: #555; color: #dbe6f2; }
   .ai-agent-btn.on { background: #234a2e; border-color: #3d7a4d; color: #9fe0b0; }
   .ai-agent-btn .bi { font-size: 12px; }
+  /* 联网搜索开关 */
+  .ai-web-btn {
+    display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; flex: none;
+    background: #2d2d31; border: 1px solid #3c3c3c; border-radius: 5px; color: #9aa4b2; font-size: 11px; cursor: pointer;
+  }
+  .ai-web-btn:hover { border-color: #555; color: #dbe6f2; }
+  .ai-web-btn.on { background: #1e3a5f; border-color: #4a8fd8; color: #9fd4ff; }
+  .ai-web-btn .bi { font-size: 12px; }
   /* 上下文占用：模型选择前的空心圆环（进度 = 已用 / 模型上下文窗口） */
   .ai-ctx-ring { flex: none; display: inline-flex; align-items: center; justify-content: center;
     width: 20px; height: 22px; cursor: default; }
@@ -1884,6 +1892,7 @@
             <div class="ai-perm-pop" id="aiPermPop" style="display:none"></div>
           </div>
           <button class="ai-agent-btn" id="aiAgentBtn" title="智能体模式：让 AI 自动读文件、改文件、执行命令（需在设置里配置接口）"><i class="bi bi-robot"></i><span>智能体</span></button>
+          <button class="ai-web-btn" id="aiWebBtn" title="联网模式：开启后 AI 会自动搜索网络实时信息"><i class="bi bi-globe"></i><span>联网</span></button>
           <span class="ai-ctx-flag" id="aiCtxFlag" style="display:none"><i class="bi bi-file-earmark-text"></i> 附带当前文件</span>
           <span class="ai-spacer"></span>
           <span class="ai-ctx-ring" id="aiCtxRing" title="上下文占用">
@@ -4358,6 +4367,9 @@
     agent: (() => {                                    // 智能体模式：AI 自动读写文件 / 执行命令
       try { return localStorage.getItem("ide.ai.agent") === "1"; } catch (_) { return false; }
     })(),
+    webSearch: (() => {                                // 普通对话联网搜索开关
+      try { return localStorage.getItem("ide.ai.webSearch") === "1"; } catch (_) { return false; }
+    })(),
     ctxUsed: 0,                                        // 最近一次请求的上下文占用（token 估算）
     sessions: [], curId: "",                           // 对话列表（localStorage 持久化）
   };
@@ -4365,54 +4377,147 @@
   function aiSessKey() { return "ide.ai.sessions." + aiRootKey(); }
   function aiCurKey() { return "ide.ai.cur." + aiRootKey(); }
   function aiHistKey() { return "ide.ai.chat." + aiRootKey(); }   // 旧版单会话键（仅用于迁移）
-  function aiLoadSessions() {
-    try { AI.sessions = JSON.parse(localStorage.getItem(aiSessKey()) || "[]"); } catch (_) { AI.sessions = []; }
-    if (!Array.isArray(AI.sessions)) AI.sessions = [];
-    if (!AI.sessions.length) {                          // 旧版单会话自动迁移为一条记录
+  // —— 以下改为后端持久化（SQLite，跨设备/跨浏览器同步），不再写 localStorage ——
+  function aiNewPid() { return "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  async function aiLoadSessions() {
+    AI.sessions = []; AI.curId = ""; AI.msgs = [];
+    let ok = false;
+    try {
+      const r = await fetch("/api/ai/sessions");
+      const d = await r.json();
+      if (r.ok && d.sessions) {
+        AI.sessions = (d.sessions || []).map(s => ({
+          id: s.id, title: s.title || "新对话", time: (s.updated_at || 0) * 1000,
+          msgs: null, _dirty: false, _savedPids: new Set(),
+          mem: (s.extra && s.extra.mem) || "", cmp: (s.extra && s.extra.cmp) || 0,
+          cmpLen: (s.extra && s.extra.cmpLen) || 0, savedTok: (s.extra && s.extra.savedTok) || 0,
+          stats: (s.extra && s.extra.stats) || null,
+        }));
+        AI.curId = d.cur || (AI.sessions[0] ? AI.sessions[0].id : "");
+        ok = true;
+      }
+    } catch (e) {}
+    if (!ok) {                                    // 后端不可用：回退到本地 localStorage
+      try { AI.sessions = JSON.parse(localStorage.getItem(aiSessKey()) || "[]"); } catch (_) { AI.sessions = []; }
+      try { AI.curId = localStorage.getItem(aiCurKey()) || (AI.sessions[0] ? AI.sessions[0].id : ""); } catch (_) { AI.curId = ""; }
+      const cur = AI.sessions.find(s => s.id === AI.curId);
+      AI.msgs = cur ? (cur.msgs || []) : [];
+      for (const m of AI.msgs) if (!m.pid) m.pid = aiNewPid();
+      aiRenderHist(); aiRenderConv(); aiRenderAll();
+      return;
+    }
+    // 首次迁移：本地旧数据上传到后端（仅当后端为空时执行一次）
+    try {
+      const legacy = JSON.parse(localStorage.getItem(aiSessKey()) || "[]");
+      if (Array.isArray(legacy) && legacy.length) await aiMigrateLocal(legacy);
+    } catch (_) {}
+    // 加载当前会话完整消息
+    const cur = AI.sessions.find(s => s.id === AI.curId);
+    if (cur) await aiFetchSession(cur.id);
+    AI.msgs = (AI.sessions.find(s => s.id === AI.curId) || {}).msgs || [];
+    aiRenderHist(); aiRenderConv(); aiRenderAll();
+  }
+  async function aiMigrateLocal(legacy) {
+    for (const s of legacy) {
+      const msgs = (s.msgs || []).map(m => ({
+        mid: m.pid || aiNewPid(), role: m.role, text: m.text || m.content || "",
+        images: m.images || [], reasoning: m.reasoning || "",
+        meta: { ms: m.ms, ts: m.ts, steps: m.steps, files: m.files },
+      }));
+      if (!msgs.length) continue;
       try {
-        const legacy = JSON.parse(localStorage.getItem(aiHistKey()) || "[]");
-        if (Array.isArray(legacy) && legacy.length)
-          AI.sessions = [{ id: "s" + Date.now().toString(36), title: "历史对话", time: Date.now(), msgs: legacy }];
+        await fetch("/api/ai/sessions", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: s.id, title: s.title || "新对话",
+            extra: { mem: s.mem, cmp: s.cmp, cmpLen: s.cmpLen, savedTok: s.savedTok, stats: s.stats }, msgs,
+          }),
+        });
       } catch (_) {}
     }
-    AI.sessions = AI.sessions.slice(0, 30);
-    try { AI.curId = localStorage.getItem(aiCurKey()) || ""; } catch (_) { AI.curId = ""; }
-    const cur = AI.sessions.find(s => s.id === AI.curId);
-    AI.msgs = cur ? (cur.msgs || []) : [];
+    try { localStorage.removeItem(aiSessKey()); localStorage.removeItem(aiCurKey()); } catch (_) {}
   }
+  async function aiFetchSession(id) {
+    try {
+      const r = await fetch("/api/ai/sessions/" + encodeURIComponent(id));
+      const d = await r.json();
+      if (r.ok && d.id) {
+        const s = AI.sessions.find(x => x.id === id);
+        if (s) {
+          s.msgs = (d.msgs || []).map(m => ({ ...m, _saved: true }));
+          s._savedPids = new Set((d.msgs || []).map(m => m.pid).filter(Boolean));
+          if (d.extra) Object.assign(s, {
+            mem: d.extra.mem || "", cmp: d.extra.cmp || 0, cmpLen: d.extra.cmpLen || 0,
+            savedTok: d.extra.savedTok || 0, stats: d.extra.stats || null,
+          });
+        }
+      }
+    } catch (e) {}
+  }
+  function aiSessionExtra(s) {
+    return { mem: s.mem || "", cmp: s.cmp || 0, cmpLen: s.cmpLen || 0, savedTok: s.savedTok || 0, stats: s.stats || null };
+  }
+  let _aiFlushTimer = null, _aiFlushing = false;
   function aiPersistCurrent() {
     if (!AI.curId) AI.curId = "s" + Date.now().toString(36);
     let s = AI.sessions.find(x => x.id === AI.curId);
-    if (!s) { s = { id: AI.curId, title: "", time: 0, msgs: [] }; AI.sessions.unshift(s); }
+    if (!s) { s = { id: AI.curId, title: "", time: Date.now(), msgs: [], _dirty: true, _savedPids: new Set() }; AI.sessions.unshift(s); }
     if (AI.msgs.length) {
       if (!s.title) {
         const first = AI.msgs.find(m => m.role === "user");
-        s.title = ((first && first.text) || "新对话").slice(0, 24);
+        s.title = ((first && (first.text || "")) || "新对话").slice(0, 24);
       }
       s.time = Date.now();
     }
     s.msgs = AI.msgs;
+    for (const m of AI.msgs) if (!m.pid) m.pid = aiNewPid();
     if (!AI.msgs.length && !s.title) AI.sessions = AI.sessions.filter(x => x.id !== s.id);  // 空会话不占列表
-    AI.sessions = AI.sessions.slice(0, 30);
+    s._dirty = true;
+    aiScheduleFlush();
+  }
+  function aiScheduleFlush() {                       // 防抖：多次变更合并为一次请求；捕获触发时的会话
+    if (_aiFlushTimer) return;
+    const cid = AI.curId;
+    _aiFlushTimer = setTimeout(async () => {
+      _aiFlushTimer = null;
+      await aiFlushFor(cid);
+    }, 300);
+  }
+  async function aiFlushFor(cid) {
+    if (_aiFlushing) { aiScheduleFlush(); return; }
+    const s = AI.sessions.find(x => x.id === cid);
+    if (!s || !s._dirty) return;
+    const all = s.msgs || [];
+    const toSave = all.filter(m => m && !m._saved && m.pid).map(m => ({
+      mid: m.pid, role: m.role, text: m.text || "",
+      images: m.images || [], reasoning: m.reasoning || "",
+      meta: { ms: m.ms, ts: m.ts, steps: m.steps, files: m.files },
+    }));
+    const savedPids = s._savedPids || new Set();
+    const currentPids = new Set(all.filter(m => m && m.pid).map(m => m.pid));
+    const deleted = [...savedPids].filter(p => !currentPids.has(p));   // 本地删除但后端仍存的消息
+    if (!toSave.length && !deleted.length) { s._dirty = false; return; }
+    _aiFlushing = true;
     try {
-      // 图片 dataURL 不落 localStorage（会爆配额），只记录张数，回放时显示 [图片 ×N]
-      const slim = AI.sessions.map(v => ({
-        id: v.id, title: v.title, time: v.time,
-        mem: v.mem || "", cmp: v.cmp || 0, cmpLen: v.cmpLen || 0, savedTok: v.savedTok || 0, stats: v.stats,
-        msgs: (v.msgs || []).slice(-60).map(m => ({
-          role: m.role, text: m.text || m.content || "",
-          imgs: m.imgs || (m.images ? m.images.length : 0) || undefined,
-          reasoning: m.reasoning, ms: m.ms, ts: m.ts,
-          files: m.files,                                  // 附带过哪些文件（只存文件名）
-          steps: m.steps && m.steps.length ? m.steps.slice(0, 20).map(s => ({
-            tool: s.tool, args: s.args, ok: s.ok, denied: s.denied, ms: s.ms,
-            summary: s.summary, detail: (s.detail || "").slice(0, 600),
-          })) : undefined,                                 // 智能体的工具调用步骤（截断后落盘）
-        })),
-      }));
-      localStorage.setItem(aiSessKey(), JSON.stringify(slim));
-      localStorage.setItem(aiCurKey(), AI.curId);
-    } catch (_) {}
+      const r = await fetch("/api/ai/sessions", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: cid, title: s.title || "新对话", extra: aiSessionExtra(s), msgs: toSave, deleted }),
+      });
+      const d = await r.json();
+      if (r.ok && d.saved_mids) {
+        const set = new Set(d.saved_mids);
+        for (const m of all) if (m && set.has(m.pid)) m._saved = true;
+        for (const mid of d.saved_mids) savedPids.add(mid);
+        s._dirty = false;
+      }
+      if (d.deleted) for (const mid of d.deleted) savedPids.delete(mid);
+      s._savedPids = savedPids;
+    } catch (e) {}
+    finally { _aiFlushing = false; }
+    if (s._dirty) aiScheduleFlush();                // 保存期间又有变更，再保存一次
+  }
+  async function aiSetCur(id) {
+    try { await fetch("/api/ai/cur", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }); } catch (_) {}
   }
   function applyAiWidth(w, save) {
     const max = Math.min(620, Math.max(300, window.innerWidth - 420));
@@ -4434,7 +4539,7 @@
       applyAiWidth(saved > 0 ? saved : AI_DEFAULT_W, false);
       $("aiHist").style.display = "none";
       const mp = $("aiMselPop"); mp && (mp.style.display = "none");
-      aiRenderAll(); aiRenderConv(); aiRenderPerm(); aiRenderAgentToggle();
+      aiRenderAll(); aiRenderConv(); aiRenderPerm(); aiRenderAgentToggle(); aiRenderWebToggle();
       aiUpdateCtxRing();                 // 上下文占用圆环（按当前模型窗口）
       aiLoadCfg();                       // 打开面板即拉取配置，填充底部模型下拉
       if (!AI.busy) $("aiText").focus();
@@ -4872,9 +4977,27 @@
       row.appendChild(g);
     }
     $("aiMsgs").appendChild(row);
-    $("aiMsgs").scrollTop = $("aiMsgs").scrollHeight;
+    aiScrollToBottom(true);
     return b;
   }
+
+  /* 滚动消息列表到底部，让最后一条完整露出（而不是被输入框挡住半截）。
+     force=true 强制滚动；否则只在用户原本就贴底时跟随滚动，避免打断用户回看历史。 */
+  function aiScrollToBottom(force) {
+    const box = $("aiMsgs");
+    if (!box) return;
+    const nearBottom = force || (box.scrollHeight - box.scrollTop - box.clientHeight < 120);
+    if (!nearBottom) return;
+    requestAnimationFrame(() => {
+      const last = box.lastElementChild;
+      if (last && last.scrollIntoView) {
+        last.scrollIntoView({ block: "end", behavior: "auto" });
+      } else {
+        box.scrollTop = box.scrollHeight;
+      }
+    });
+  }
+
   function aiRenderAll() {
     aiRenderFiles();                     // 附加文件的小卡片（右键「添加到 AI 对话」）
     const box = $("aiMsgs");
@@ -5310,15 +5433,18 @@
       tm.textContent = s.time ? new Date(s.time).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
       const del = document.createElement("button"); del.className = "rm"; del.title = "删除该对话";
       del.innerHTML = '<i class="bi bi-trash3"></i>';
-      del.addEventListener("click", (e) => {
+      del.addEventListener("click", async (e) => {
         e.stopPropagation();
-        AI.sessions = AI.sessions.filter(x => x.id !== s.id);
-        if (AI.curId === s.id) {
+        const sid = s.id;
+        try { await fetch("/api/ai/sessions/" + encodeURIComponent(sid), { method: "DELETE" }); } catch (_) {}
+        AI.sessions = AI.sessions.filter(x => x.id !== sid);
+        if (AI.curId === sid) {
           AI.curId = AI.sessions[0] ? AI.sessions[0].id : "";
           AI.msgs = AI.sessions[0] ? (AI.sessions[0].msgs || []) : [];
+          if (AI.curId) aiSetCur(AI.curId);
           aiRenderAll();
         }
-        aiPersistCurrent(); aiRenderHist(); aiRenderConv();
+        aiRenderHist(); aiRenderConv();
       });
       row.addEventListener("click", () => aiSwitchSession(s.id));
       row.appendChild(t); row.appendChild(tm); row.appendChild(del);
@@ -5329,11 +5455,20 @@
     $("aiHist").style.display = "none";
     if (id === AI.curId) return;
     if (AI.busy && AI.ctrl) AI.ctrl.abort();     // 切换前停止正在生成的回复
-    aiPersistCurrent();
+    aiPersistCurrent();                          // 先保存当前会话（异步）
     AI.curId = id;
+    aiSetCur(id);
     const s = AI.sessions.find(x => x.id === id);
-    AI.msgs = s ? (s.msgs || []) : [];
-    aiPersistCurrent();
+    if (s && s.msgs == null) {                   // 尚未加载过完整消息 → 从后端拉取
+      aiFetchSession(id).then(() => {
+        const cur = AI.sessions.find(x => x.id === id);
+        AI.msgs = (cur && cur.msgs) || [];
+        aiRenderAll(); aiRenderConv();
+      });
+      AI.msgs = [];
+    } else {
+      AI.msgs = s ? (s.msgs || []) : [];
+    }
     aiRenderAll(); aiRenderConv();
   }
   $("aiToggle").addEventListener("click", () => toggleAI());
@@ -5341,13 +5476,15 @@
   $("aiCfgBtn").addEventListener("click", () => aiOpenSettings());
   $("aiNewBtn").addEventListener("click", () => {
     if (AI.busy && AI.ctrl) AI.ctrl.abort();
-    aiPersistCurrent();
+    aiPersistCurrent();                          // 保存上一个会话
     AI.curId = "s" + Date.now().toString(36);
     AI.msgs = [];
-    AI.files = [];                                 // 新对话不继承上一个对话附加的文件
-    aiPersistCurrent();
+    AI.files = [];                               // 新对话不继承上一个对话附加的文件
+    const s = { id: AI.curId, title: "", time: Date.now(), msgs: [], _dirty: true, _savedPids: new Set() };
+    AI.sessions.unshift(s);
+    aiSetCur(AI.curId);
     $("aiHist").style.display = "none";
-    aiRenderAll(); aiRenderConv();
+    aiRenderAll(); aiRenderConv(); aiRenderHist();
     $("aiText").focus();
   });
   $("aiConvBtn").addEventListener("click", () => {
@@ -5451,6 +5588,21 @@
     aiRenderAgentToggle();
     toast(AI.agent ? "已开启智能体模式（权限：" + aiPermDef().label + "）" : "已关闭智能体模式", "ok");
   });
+  function aiRenderWebToggle() {
+    const btn = $("aiWebBtn");
+    if (!btn) return;
+    btn.classList.toggle("on", !!AI.webSearch);
+    btn.title = AI.webSearch
+      ? "联网模式已开启：AI 会自动搜索网络实时信息"
+      : "联网模式已关闭：点击开启后，AI 会在回答前自动搜索网络实时信息";
+  }
+  $("aiWebBtn").addEventListener("click", () => {
+    AI.webSearch = !AI.webSearch;
+    try { localStorage.setItem("ide.ai.webSearch", AI.webSearch ? "1" : "0"); } catch (_) {}
+    aiRenderWebToggle();
+    toast(AI.webSearch ? "已开启联网模式" : "已关闭联网模式", "ok");
+  });
+  aiRenderWebToggle();
 
   /* 工具调用步骤卡片 */
   function aiStepRow(ev) {
@@ -5631,7 +5783,7 @@
           }
         }
       }
-      msgsBox.scrollTop = msgsBox.scrollHeight;
+      aiScrollToBottom(true);
     }
     if (stepsBox) { stepsBox._pending = 0; stepsBox._paint(); }
     return { text: text, steps: steps };
@@ -5682,8 +5834,7 @@
       box.appendChild(chip);
     });
     // 卡片出现/消失会改变输入框高度：消息列表原本贴底时保持贴底，避免最后一条被挤出可视区
-    const m = $("aiMsgs");
-    if (m && m.scrollHeight - m.scrollTop - m.clientHeight < 120) m.scrollTop = m.scrollHeight;
+    aiScrollToBottom();
   }
   function aiBuildContext() {
     let out = "";
@@ -5768,7 +5919,7 @@
     if (!reuse) {
       const userText = text || "（见图）";
       const attFiles = (AI.files || []).map(f => f.name);          // 本条消息附带的文件（消息上方显示）
-      AI.msgs.push({ role: "user", text: userText, imgs: imgs.length || undefined,
+      AI.msgs.push({ role: "user", pid: aiNewPid(), text: userText, imgs: imgs.length || undefined,
                      images: imgs.length ? imgs : undefined,
                      files: attFiles.length ? attFiles : undefined });
       aiBubble("user", userText, "", imgs, false, attFiles);
@@ -5837,6 +5988,7 @@
     const payload = {
       provider_id: prov.id,
       model: pick.model,
+      web_search: AI.webSearch,
       messages: [
         { role: "system", content: sysPrompt + (mem ? "\n\n[本对话早期内容记忆摘要]\n" + mem : "") },
         ...usedHist.map(m => ({ role: m.role, content: m.text || m.content || "" })),
@@ -5856,6 +6008,7 @@
           perm: AI.perm,
           provider_id: prov.id,
           model: pick.model,
+          web_search: AI.webSearch,
           messages: [
             ...usedHist.map(m => ({ role: m.role, content: m.text || m.content || "" })),
             { role: "user", content: curContent },
@@ -5867,7 +6020,7 @@
         acc = res.text || "";
         bodyB.innerHTML = aiMd(acc) || "（已完成，未产生文字说明）";
         const aMeta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
-        AI.msgs.push({ role: "assistant", text: acc, ms: aMeta.ms, ts: aMeta.ts,
+        AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: acc, ms: aMeta.ms, ts: aMeta.ts,
                        steps: res.steps.length ? res.steps : undefined });
         bodyB.insertAdjacentHTML("afterend", aiMetaHtml({ text: acc, ms: aMeta.ms, ts: aMeta.ts }, AI.msgs.length - 1));
         aiPersistCurrent(); aiRenderConv();
@@ -5909,13 +6062,13 @@
           thinkB.textContent = thinking;
         }
         bodyB.innerHTML = aiMd(acc.replace(/^\s+/, "")) + '<span class="ai-cursor"></span>';   // 边流边渲染 MD
-        $("aiMsgs").scrollTop = $("aiMsgs").scrollHeight;
+        aiScrollToBottom();
       }
       const out = acc.replace(/^\s+/, "");
       bodyB.innerHTML = aiMd(out) || "（空回复）";
       thinkB.parentElement.style.display = thinking.trim() ? "" : "none";
       const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
-      AI.msgs.push({ role: "assistant", text: out, reasoning: thinking.trim() || undefined, ms: meta.ms, ts: meta.ts });
+      AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, reasoning: thinking.trim() || undefined, ms: meta.ms, ts: meta.ts });
       bodyB.insertAdjacentHTML("afterend", aiMetaHtml({ text: out, ms: meta.ms, ts: meta.ts }, AI.msgs.length - 1));
       aiPersistCurrent(); aiRenderConv();
       aiRecordStat(true, performance.now() - t0, out.length, ttft, inTok);
@@ -5925,7 +6078,7 @@
         const out = acc.trim();
         if (out) {
           const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
-          AI.msgs.push({ role: "assistant", text: out, ms: meta.ms, ts: meta.ts });
+          AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, ms: meta.ms, ts: meta.ts });
           bodyB.insertAdjacentHTML("afterend", aiMetaHtml({ text: out, ms: meta.ms, ts: meta.ts }, AI.msgs.length - 1));
           aiPersistCurrent(); aiRenderConv();
         }
@@ -5939,7 +6092,7 @@
     } finally {
       AI.busy = false; AI.ctrl = null;
       $("aiSend").style.display = ""; $("aiStop").style.display = "none";
-      $("aiMsgs").scrollTop = $("aiMsgs").scrollHeight;
+      aiScrollToBottom(true);
     }
   }
   // 注意：不能直接把 aiSend 当回调——aiSend(reuse) 的第一个参数会被当成「重新生成」参数，

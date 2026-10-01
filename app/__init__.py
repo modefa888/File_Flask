@@ -31,6 +31,7 @@ def create_app(test_config=None) -> Flask:
 
     _register_blueprints(app)
     _install_request_logging(app)
+    _init_chat_engine()
     _init_index_engine()
 
     return app
@@ -55,9 +56,10 @@ def _register_blueprints(app: Flask) -> None:
     from .routes.shares import bp as shares_bp
     from .routes.ai import bp as ai_bp
     from .routes.agent import bp as agent_bp
+    from .routes.chat_history import bp as chat_history_bp
     for bp in (auth_bp, pages_bp, browser_bp, zip_bp, delete_bp, archive_history_bp,
                fileops_bp, index_bp, progress_stream_bp, grep_bp, git_bp, run_bp, port_bp,
-               term_bp, env_bp, shares_bp, ai_bp, agent_bp):
+               term_bp, env_bp, shares_bp, ai_bp, agent_bp, chat_history_bp):
         app.register_blueprint(bp)
 
 
@@ -89,6 +91,15 @@ def _install_request_logging(app: Flask) -> None:
             },
         )
         return response
+
+
+def _init_chat_engine() -> None:
+    """初始化 AI 对话历史持久化库。"""
+    from .services.chatdb import init_chat_db
+    try:
+        init_chat_db()
+    except Exception as e:                      # 初始化失败不应阻断服务启动
+        _log.warning("对话历史库初始化失败，继续启动: %s", e)
 
 
 def _init_index_engine() -> None:

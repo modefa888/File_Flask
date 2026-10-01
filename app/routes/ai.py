@@ -20,6 +20,7 @@ import shutil
 import socket
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,6 +29,7 @@ from flask import Blueprint, request, jsonify, Response
 
 from .. import config
 from ..log import get_logger
+from ..services.web_search import search_web, format_results
 
 _log = get_logger()
 bp = Blueprint("ai", __name__)
@@ -207,6 +209,78 @@ def api_ai_config_set():
                     "active": cfg["active"]})
 
 
+@bp.route("/api/ai/web_search", methods=["GET", "POST"])
+def api_ai_web_search():
+    """独立联网搜索接口（供前端查询/测试，也可被智能体内部调用）。"""
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+    else:
+        data = request.args.to_dict()
+    query = str(data.get("query") or "").strip()
+    if not query:
+        return jsonify({"error": "缺少 query"}), 400
+    try:
+        max_results = max(1, min(int(data.get("max_results") or 5), 10))
+    except (TypeError, ValueError):
+        max_results = 5
+    try:
+        results = search_web(query, max_results=max_results)
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": "搜索失败：%s" % e}), 500
+    return jsonify({"query": query, "results": results})
+
+
+def _now_zh():
+    """返回中文格式的当前系统时间，注入系统提示让模型知道实时时间。"""
+    try:
+        wday = {"Monday": "周一", "Tuesday": "周二", "Wednesday": "周三",
+                "Thursday": "周四", "Friday": "周五", "Saturday": "周六", "Sunday": "周日"}.get(
+            time.strftime("%A"), "")
+        return time.strftime("当前系统时间：%%Y-%%m-%%d %%H:%%M:%%S（%s）" % wday, time.localtime())
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _extract_text(content):
+    """从消息 content（字符串或多模态数组）中提取纯文本提问。"""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return " ".join(str(p.get("text") or "")
+                        for p in content if isinstance(p, dict) and p.get("type") == "text").strip()
+    return ""
+
+
+def _inject_system_time(clean):
+    """在消息列表开头注入当前系统时间。"""
+    now = _now_zh()
+    if not now:
+        return
+    if clean and clean[0].get("role") == "system":
+        clean[0]["content"] = str(clean[0].get("content") or "") + "\n\n" + now
+    else:
+        clean.insert(0, {"role": "system", "content": now})
+
+
+def _inject_web_search(clean):
+    """针对最后一条用户消息做联网搜索，并把结果注入为 system 消息。"""
+    if not clean:
+        return
+    last = clean[-1]
+    if last.get("role") != "user":
+        return
+    query = _extract_text(last.get("content"))
+    if not query:
+        return
+    _log.info("AI 联网搜索：query=%s", query[:120])
+    try:
+        results = search_web(query, max_results=5)
+        text = format_results(results, max_chars=2500)
+    except Exception as e:  # noqa: BLE001
+        text = "（联网搜索异常：%s）" % e
+    clean.insert(len(clean) - 1, {"role": "system", "content": "[联网搜索结果]\n" + text})
+
+
 def _clean_content(c):
     """清洗消息 content：字符串直接透传；数组只保留 text / data-URL 图片部件。"""
     if isinstance(c, str):
@@ -257,9 +331,13 @@ def api_ai_chat():
 
     clean = [{"role": str(m.get("role") or "user")[:16], "content": _clean_content(m.get("content"))}
              for m in msgs[:40]]
+    _inject_system_time(clean)                       # 自动注入当前系统时间
+    if data.get("web_search"):
+        _inject_web_search(clean)                    # 联网搜索并注入结果
     n_imgs = sum(1 for m in clean for part in (m["content"] if isinstance(m["content"], list) else [])
                  if isinstance(part, dict) and part.get("type") == "image_url")
-    _log.info("AI 对话：provider=%s model=%s msgs=%d images=%d", provider["name"], model, len(clean), n_imgs)
+    _log.info("AI 对话：provider=%s model=%s msgs=%d images=%d web_search=%s",
+              provider["name"], model, len(clean), n_imgs, bool(data.get("web_search")))
 
     base = provider["base_url"].rstrip("/")
     url = base if base.endswith("/chat/completions") else base + "/chat/completions"

@@ -35,7 +35,8 @@ from flask import Blueprint, jsonify, request, Response
 from .. import config
 from ..log import get_logger
 from ..services.safety import check_command
-from .ai import _clean_content, _load_cfg, _open_stream, _sse
+from ..services.web_search import search_web, format_results
+from .ai import _clean_content, _load_cfg, _open_stream, _sse, _inject_system_time, _inject_web_search
 
 _log = get_logger()
 bp = Blueprint("agent", __name__)
@@ -104,9 +105,16 @@ _TOOLS = [
             "command": {"type": "string", "description": "要执行的命令"},
             "timeout": {"type": "integer", "description": "超时秒数（默认 60，最大 300）"}},
             "required": ["command"]}}},
+    {"type": "function", "function": {
+        "name": "web_search",
+        "description": "联网搜索实时信息（当前时间、新闻、文档、技术问题等）。当用户的问题可能涉及时效性、外部事件或需要最新资料时调用。",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "搜索关键词（用简短、准确的中文或英文）"},
+            "max_results": {"type": "integer", "description": "最多返回几条结果（默认 5，最大 10）"}},
+            "required": ["query"]}}},
 ]
 
-_READ_TOOLS = {"list_dir", "read_file", "search_files"}
+_READ_TOOLS = {"list_dir", "read_file", "search_files", "web_search"}
 _WRITE_TOOLS = {"write_file", "edit_file"}
 
 # 待用户确认的调用：{(run_id, call_id): {"ev": Event, "box": {...}}}
@@ -330,6 +338,24 @@ def _tool_run_command(args, root, perm):
     return code == 0, summary, body[-3000:], "$ %s\n%s" % (cmd, body)
 
 
+def _tool_web_search(args, root, perm):
+    """Agent 工具：联网搜索。"""
+    query = str(args.get("query") or "").strip()
+    if not query:
+        return False, "缺少 query", "", "缺少 query"
+    try:
+        max_results = max(1, min(int(args.get("max_results") or 5), 10))
+    except (TypeError, ValueError):
+        max_results = 5
+    try:
+        results = search_web(query, max_results=max_results)
+        text = format_results(results, max_chars=_TOOL_CHARS)
+        summary = "联网搜索：%s" % query
+        return True, summary, text[-3000:], "[联网搜索：%s]\n%s" % (query, text)
+    except Exception as e:  # noqa: BLE001
+        return False, "搜索失败", "", "联网搜索失败：%s" % e
+
+
 _TOOL_FUNCS = {
     "list_dir": _tool_list_dir,
     "read_file": _tool_read_file,
@@ -337,6 +363,7 @@ _TOOL_FUNCS = {
     "edit_file": _tool_edit_file,
     "search_files": _tool_search_files,
     "run_command": _tool_run_command,
+    "web_search": _tool_web_search,
 }
 
 
@@ -693,6 +720,9 @@ def api_ai_agent():
         return jsonify({"error": "messages 不能为空"}), 400
     clean = [{"role": str(m.get("role") or "user")[:16], "content": _clean_content(m.get("content"))}
              for m in msgs[:40]]
+    _inject_system_time(clean)
+    if data.get("web_search"):
+        _inject_web_search(clean)
     repo = str(data.get("repo") or "")
     root = os.path.abspath(repo) if repo and os.path.isdir(repo) else ""
     perm = str(data.get("perm") or "workspace")

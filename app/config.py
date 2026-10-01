@@ -135,6 +135,9 @@ else:
     _DATA_ROOT = os.path.join(os.path.dirname(BASE_DIR), "data")
 os.makedirs(_DATA_ROOT, exist_ok=True)
 
+# 运行时数据根目录（公开常量，供各服务模块引用）
+DATA_ROOT = _DATA_ROOT
+
 _CACHE_DIR = _DATA_ROOT
 
 # 目录大小缓存

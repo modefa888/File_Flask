@@ -178,7 +178,7 @@ _TEXT_EXTS = {
     "txt", "md", "py", "js", "ts", "jsx", "tsx", "html", "htm", "css", "scss", "less",
     "json", "xml", "yml", "yaml", "ini", "cfg", "conf", "env", "sh", "bat", "ps1", "rs",
     "go", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php", "sql", "log", "csv", "toml",
-    "lrc",
+    "lrc", "spec", "lock", "properties", "srt", "vtt",
 }
 # 无扩展名但应按文本打开的文件名（小写）
 _TEXT_FILENAMES = {

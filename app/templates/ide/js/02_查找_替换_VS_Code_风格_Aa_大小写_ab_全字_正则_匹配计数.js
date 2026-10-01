@@ -554,7 +554,13 @@
     explorerPanel.innerHTML = ""; initTree();
     loadGitStatus();
   }
-  document.addEventListener("click", () => { $("ctxMenu").style.display = "none"; closeDrop(); });
+  // capture 阶段拦截：资源管理器树节点的 click 会 stopPropagation（冒泡阶段收不到），
+  // 导致右键菜单点了别处也不消失；改在捕获阶段关闭即可覆盖所有点击。
+  // 菜单自身 / 菜单栏的点击除外——它们各自的处理逻辑负责开合，避免误关破坏切换。
+  document.addEventListener("click", (e) => {
+    if (e.target.closest && (e.target.closest("#menuDrop") || e.target.closest("#menubar"))) return;
+    $("ctxMenu").style.display = "none"; closeDrop();
+  }, true);
 
   /* ---------- 自定义弹窗（Webview 下原生 prompt/confirm 不可用） ---------- */
   function uiModal(opts) {

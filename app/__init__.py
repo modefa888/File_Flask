@@ -38,26 +38,26 @@ def create_app(test_config=None) -> Flask:
 
 
 def _register_blueprints(app: Flask) -> None:
-    from .routes.auth import bp as auth_bp
-    from .routes.pages import bp as pages_bp
-    from .routes.browser import bp as browser_bp
-    from .routes.zip import bp as zip_bp
-    from .routes.delete import bp as delete_bp
-    from .routes.archive_history import bp as archive_history_bp
-    from .routes.fileops import bp as fileops_bp
-    from .routes.index import bp as index_bp
-    from .routes.progress_stream import bp as progress_stream_bp
-    from .routes.grep import bp as grep_bp
-    from .routes.git import bp as git_bp
-    from .routes.run import bp as run_bp
-    from .routes.port import bp as port_bp
-    from .routes.term import bp as term_bp
-    from .routes.env import bp as env_bp
-    from .routes.shares import bp as shares_bp
-    from .routes.ai import bp as ai_bp
-    from .routes.agent import bp as agent_bp
-    from .routes.chat_history import bp as chat_history_bp
-    from .routes.pip import bp as pip_bp
+    from .routes.common.auth import bp as auth_bp
+    from .routes.common.pages import bp as pages_bp
+    from .routes.common.browser import bp as browser_bp
+    from .routes.common.zip import bp as zip_bp
+    from .routes.common.delete import bp as delete_bp
+    from .routes.common.archive_history import bp as archive_history_bp
+    from .routes.common.fileops import bp as fileops_bp
+    from .routes.common.index import bp as index_bp
+    from .routes.common.progress_stream import bp as progress_stream_bp
+    from .routes.ide.grep import bp as grep_bp
+    from .routes.ide.git import bp as git_bp
+    from .routes.ide.run import bp as run_bp
+    from .routes.ide.port import bp as port_bp
+    from .routes.ide.term import bp as term_bp
+    from .routes.ide.env import bp as env_bp
+    from .routes.common.shares import bp as shares_bp
+    from .routes.ide.ai import bp as ai_bp
+    from .routes.ide.agent import bp as agent_bp
+    from .routes.ide.chat_history import bp as chat_history_bp
+    from .routes.ide.pip import bp as pip_bp
     for bp in (auth_bp, pages_bp, browser_bp, zip_bp, delete_bp, archive_history_bp,
                fileops_bp, index_bp, progress_stream_bp, grep_bp, git_bp, run_bp, port_bp,
                term_bp, env_bp, shares_bp, ai_bp, agent_bp, chat_history_bp, pip_bp):
@@ -96,7 +96,7 @@ def _install_request_logging(app: Flask) -> None:
 
 def _init_chat_engine() -> None:
     """初始化 AI 对话历史持久化库。"""
-    from .services.chatdb import init_chat_db
+    from .services.ide.chatdb import init_chat_db
     try:
         init_chat_db()
     except Exception as e:                      # 初始化失败不应阻断服务启动
@@ -105,8 +105,8 @@ def _init_chat_engine() -> None:
 
 def _init_index_engine() -> None:
     """初始化持久化索引：建表、加载元信息、启动后台扫描调度器。"""
-    from .services.db import _init_index_db
-    from .services.indexer import (
+    from .services.common.db import _init_index_db
+    from .services.common.indexer import (
         _load_index_meta, _schedule_index_scan, _build_index, _INDEX_META,
     )
 

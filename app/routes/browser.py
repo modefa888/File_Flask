@@ -624,13 +624,14 @@ def api_raw():
         return jsonify({"error": "文件不存在"}), 404
 
     ext = os.path.splitext(target_path)[1].lower().lstrip(".")
-    if ext not in _IMAGE_EXTS:
+    # 除图片外允许 lrc 歌词文本（音乐播放器加载同名歌词用）
+    if ext not in _IMAGE_EXTS and ext != "lrc":
         return jsonify({"error": "该文件类型不支持"}), 400
 
     try:
         mime_type, _ = mimetypes.guess_type(target_path)
         if not mime_type:
-            mime_type = f"image/{ext}"
+            mime_type = (f"image/{ext}" if ext in _IMAGE_EXTS else "text/plain; charset=utf-8")
         resp = send_file(target_path, mimetype=mime_type, conditional=True)
         resp.headers["Accept-Ranges"] = "bytes"
         return resp

@@ -2,6 +2,7 @@
         const _TEXT_EXTS = new Set(['txt', 'md', 'py', 'js', 'ts', 'jsx', 'tsx', 'html', 'htm', 'css', 'scss', 'less', 'json', 'xml', 'yml', 'yaml', 'ini', 'cfg', 'conf', 'env', 'sh', 'bat', 'ps1', 'rs', 'go', 'java', 'c', 'cpp', 'h', 'hpp', 'cs', 'rb', 'php', 'sql', 'log', 'csv', 'toml']);
         const _IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico']);
         const _VIDEO_EXTS = new Set(['mp4', 'webm', 'mkv', 'avi', 'mov', 'm4v', 'ogg', 'flv']);
+        const _AUDIO_EXTS = new Set(['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'opus', 'wma', 'mp2']);
 
         // 视频预览的键盘监听清理函数：由 previewFile 内部赋值，closePreview 时调用
         let _videoPreviewUnbind = null;
@@ -9,7 +10,7 @@
         function _canPreview(ext) {
             const e = (ext || '').toLowerCase();
             // 视频走 /api/stream 流式播放（支持 Range，边下边播），不会把整个文件读进内存
-            return _TEXT_EXTS.has(e) || _IMAGE_EXTS.has(e) || _VIDEO_EXTS.has(e);
+            return _TEXT_EXTS.has(e) || _IMAGE_EXTS.has(e) || _VIDEO_EXTS.has(e) || _AUDIO_EXTS.has(e);
         }
 
         // 压缩包内成员：视频必须先整体解压才能播放，大文件会占满内存，因此仅支持下载
@@ -72,6 +73,14 @@
             // 只允许点右上角「×」关闭，点击遮罩/其他区域不关闭
             container.querySelector('.preview-overlay').addEventListener('click', (e) => e.stopPropagation());
             const body = container.querySelector('.preview-body');
+
+            // 音乐文件：直接构建「封面 + 歌词滚动」播放器
+            // （后端 /api/stream 原生支持音频流式播放，无需走 /api/preview）
+            if (_AUDIO_EXTS.has(ext)) {
+                document.getElementById('previewCopyBtn').style.display = 'none';
+                _buildMusicPlayer(body, absPath);
+                return;
+            }
 
             // 视频键盘快进/快退：单击方向键 ±5s
             const SEEK_STEP = 5;
@@ -526,6 +535,249 @@
                     const info = body.querySelector('.video-info');
                     if (info) info.textContent = '加载失败';
                 });
+        }
+
+        // ===== 音乐播放器：封面 + 标题/歌手 + LRC 歌词滚动 + 控制条 =====
+        function _buildMusicPlayer(body, absPath) {
+            const dir = absPath.slice(0, absPath.lastIndexOf('/')) || '/';
+            const stem = absPath.split('/').pop().replace(/\.[^.]+$/, '');
+
+            body.className = 'preview-body preview-music';
+            body.innerHTML = `
+            <div class="music-player">
+                <div class="music-main">
+                    <div class="music-cover">
+                        <i class="bi bi-vinyl-fill music-cover-fallback"></i>
+                        <img class="music-cover-img" alt="" style="display:none">
+                    </div>
+                    <div class="music-right">
+                        <div class="music-title">${_escapeHtml(stem)}</div>
+                        <div class="music-artist">未知歌手</div>
+                        <div class="music-lyrics">
+                            <div class="music-lyrics-inner">
+                                <div class="lyric-line active"><i class="bi bi-hourglass-split"></i> 正在加载歌词…</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="vp-controls music-controls">
+                    <div class="mc-progress-row">
+                        <span class="vpc-time mc-time-cur">00:00</span>
+                        <div class="vpc-progress mc-progress">
+                            <div class="vpc-track">
+                                <div class="vpc-buffered"></div>
+                                <div class="vpc-played"></div>
+                                <div class="vpc-knob"></div>
+                            </div>
+                        </div>
+                        <span class="vpc-time mc-time-dur">00:00</span>
+                    </div>
+                    <div class="mc-btn-row">
+                        <div class="vpc-vol">
+                            <button class="vpc-btn music-mute" title="静音"><i class="bi bi-volume-up-fill"></i></button>
+                            <input type="range" class="vpc-vol-range" min="0" max="1" step="0.01" value="1" title="音量">
+                        </div>
+                        <div class="vpc-spacer"></div>
+                        <button class="mc-play music-play" title="播放/暂停"><i class="bi bi-pause-fill"></i></button>
+                        <div class="vpc-spacer"></div>
+                        <button class="vpc-btn music-loop" title="单曲循环：关"><i class="bi bi-repeat"></i></button>
+                    </div>
+                </div>
+                <audio class="music-audio" preload="metadata" autoplay></audio>
+            </div>`;
+
+            const audio = body.querySelector('.music-audio');
+            const coverWrap = body.querySelector('.music-cover');
+            const coverImg = body.querySelector('.music-cover-img');
+            const coverFallback = body.querySelector('.music-cover-fallback');
+            const titleEl = body.querySelector('.music-title');
+            const artistEl = body.querySelector('.music-artist');
+            const lyrBox = body.querySelector('.music-lyrics');
+            const lyrInner = body.querySelector('.music-lyrics-inner');
+            const playBtn = body.querySelector('.music-play');
+            const muteBtn = body.querySelector('.music-mute');
+            const volRange = body.querySelector('.vpc-vol-range');
+            const timeEl = body.querySelector('.mc-time-cur');
+            const durEl = body.querySelector('.mc-time-dur');
+            const loopBtn = body.querySelector('.music-loop');
+            const progress = body.querySelector('.vpc-progress');
+            const playedEl = body.querySelector('.vpc-played');
+            const bufferedEl = body.querySelector('.vpc-buffered');
+            const knobEl = body.querySelector('.vpc-knob');
+
+            // 音频走 /api/stream（Range 流式）
+            audio.src = '/api/stream?path=' + encodeURIComponent(absPath);
+            audio.play().catch(() => {});
+
+            const fmt = s => {
+                if (!isFinite(s)) return '--:--';
+                s = Math.max(0, Math.floor(s));
+                const m = Math.floor(s / 60), ss = s % 60;
+                return `${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+            };
+
+            // 播放/暂停 + 封面旋转
+            const setPlayIcon = () => {
+                playBtn.innerHTML = `<i class="bi ${audio.paused ? 'bi-play-fill' : 'bi-pause-fill'}"></i>`;
+                coverWrap.classList.toggle('playing', !audio.paused);
+            };
+            const togglePlay = () => { audio.paused ? audio.play().catch(() => {}) : audio.pause(); };
+            playBtn.addEventListener('click', togglePlay);
+            audio.addEventListener('play', setPlayIcon);
+            audio.addEventListener('pause', setPlayIcon);
+            setPlayIcon();
+
+            // 进度条 + 时间
+            const updateProgress = () => {
+                const dur = audio.duration || 0;
+                const pct = dur ? audio.currentTime / dur * 100 : 0;
+                playedEl.style.width = pct + '%';
+                knobEl.style.left = pct + '%';
+                timeEl.textContent = fmt(audio.currentTime);
+                durEl.textContent = fmt(dur);
+                if (audio.buffered.length && dur) {
+                    const end = audio.buffered.end(audio.buffered.length - 1);
+                    bufferedEl.style.width = Math.min(100, end / dur * 100) + '%';
+                }
+            };
+            audio.addEventListener('timeupdate', () => { updateProgress(); syncLyrics(); });
+            audio.addEventListener('progress', updateProgress);
+            audio.addEventListener('loadedmetadata', updateProgress);
+
+            // 进度条拖拽
+            let dragging = false;
+            const seekTo = clientX => {
+                if (!isFinite(audio.duration)) return;
+                const rect = progress.getBoundingClientRect();
+                const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+                audio.currentTime = ratio * audio.duration;
+                updateProgress();
+            };
+            progress.addEventListener('pointerdown', e => {
+                dragging = true;
+                progress.classList.add('dragging');
+                try { progress.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+                seekTo(e.clientX);
+            });
+            progress.addEventListener('pointermove', e => { if (dragging) seekTo(e.clientX); });
+            const endDrag = () => { dragging = false; progress.classList.remove('dragging'); };
+            progress.addEventListener('pointerup', endDrag);
+            progress.addEventListener('pointercancel', endDrag);
+
+            // 音量
+            const volIcon = () => {
+                const v = audio.muted ? 0 : audio.volume;
+                muteBtn.innerHTML = `<i class="bi ${v === 0 ? 'bi-volume-mute-fill' : v < 0.5 ? 'bi-volume-down-fill' : 'bi-volume-up-fill'}"></i>`;
+            };
+            volRange.addEventListener('input', () => {
+                audio.volume = +volRange.value;
+                audio.muted = false;
+                volRange.style.setProperty('--vol', (volRange.value * 100) + '%');
+                volIcon();
+            });
+            muteBtn.addEventListener('click', () => { audio.muted = !audio.muted; });
+            audio.addEventListener('volumechange', () => {
+                const v = audio.muted ? 0 : audio.volume;
+                volRange.style.setProperty('--vol', (v * 100) + '%');
+                volIcon();
+            });
+            volRange.style.setProperty('--vol', '100%');
+
+            // 单曲循环
+            loopBtn.addEventListener('click', () => {
+                audio.loop = !audio.loop;
+                loopBtn.classList.toggle('active', audio.loop);
+                loopBtn.innerHTML = `<i class="bi bi-repeat${audio.loop ? '-1' : ''}"></i>`;
+                loopBtn.title = audio.loop ? '单曲循环：开' : '单曲循环：关';
+            });
+
+            // ===== LRC 歌词解析与同步滚动 =====
+            let lyricData = [], lyricIdx = -1;
+            const applyLrc = (text) => {
+                const entries = [];
+                const tags = {};
+                text.split(/\r?\n/).forEach(line => {
+                    const ti = line.match(/^\s*\[ti:(.*?)\]/i);
+                    if (ti) tags.ti = ti[1].trim();
+                    const ar = line.match(/^\s*\[ar:(.*?)\]/i);
+                    if (ar) tags.ar = ar[1].trim();
+                    const times = [...line.matchAll(/\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g)];
+                    if (!times.length) return;
+                    const txt = line.replace(/\[[^\]]*\]/g, '').trim();
+                    times.forEach(m => {
+                        const frac = m[3] ? parseFloat('0.' + m[3]) : 0;
+                        entries.push({ t: (+m[1]) * 60 + (+m[2]) + frac, txt });
+                    });
+                });
+                if (!entries.length) {
+                    lyrInner.innerHTML = '<div class="lyric-line">暂无歌词，请欣赏音乐</div>';
+                    return;
+                }
+                entries.sort((a, b) => a.t - b.t);
+                if (tags.ti) titleEl.textContent = tags.ti;
+                if (tags.ar) artistEl.textContent = tags.ar;
+                lyricData = entries;
+                lyricIdx = -1;
+                lyrInner.innerHTML = entries.map((e, i) =>
+                    `<div class="lyric-line" data-i="${i}">${e.txt ? _escapeHtml(e.txt) : '♪ ♪ ♪'}</div>`
+                ).join('');
+                lyrInner.querySelectorAll('.lyric-line').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const e = lyricData[+el.dataset.i];
+                        if (e) { audio.currentTime = e.t; syncLyrics(); }
+                    });
+                });
+                syncLyrics();
+            };
+            const syncLyrics = () => {
+                if (!lyricData.length) return;
+                const t = audio.currentTime + 0.2;
+                let idx = lyricIdx < 0 ? 0 : lyricIdx;
+                while (idx + 1 < lyricData.length && t >= lyricData[idx + 1].t) idx++;
+                while (idx > 0 && t < lyricData[idx].t) idx--;
+                if (idx === lyricIdx) return;
+                lyricIdx = idx;
+                lyrInner.querySelectorAll('.lyric-line').forEach(el => el.classList.toggle('active', +el.dataset.i === idx));
+                const el = lyrInner.querySelector('.lyric-line.active');
+                if (el && lyrBox.clientHeight > 0) {
+                    const offset = el.offsetTop + el.offsetHeight / 2 - lyrBox.clientHeight / 2;
+                    lyrInner.style.transform = `translateY(${-Math.max(0, offset)}px)`;
+                }
+            };
+
+            // 封面 + 同名歌词：从目录列表找同名 .jpg/.png 与 .lrc
+            fetch(`/api/files?path=${encodeURIComponent(dir)}`)
+                .then(r => r.json())
+                .then(d => {
+                    const items = d.items || [];
+                    const stemLower = stem.toLowerCase();
+                    const IMG = ['jpg', 'jpeg', 'png', 'webp', 'bmp'];
+                    const coverItem = items.find(it => it && !it.is_dir
+                        && IMG.includes((it.ext || '').toLowerCase())
+                        && (it.name || '').replace(/\.[^.]+$/, '').toLowerCase() === stemLower);
+                    if (coverItem) {
+                        coverImg.src = '/api/raw?path=' + encodeURIComponent(dir + '/' + coverItem.name);
+                        coverImg.style.display = '';
+                        coverFallback.style.display = 'none';
+                        coverImg.onerror = () => { coverImg.style.display = 'none'; coverFallback.style.display = ''; };
+                    }
+                    const lrcItem = items.find(it => it && !it.is_dir
+                        && (it.ext || '').toLowerCase() === 'lrc'
+                        && (it.name || '').replace(/\.[^.]+$/, '').toLowerCase() === stemLower);
+                    if (lrcItem) {
+                        // 用 /api/raw/<path> 路径形式取歌词：该端点不做扩展名白名单校验，
+                        // 兼容尚未重启（未放行 lrc）的旧后端；每段单独 URL 编码
+                        const lrcPath = dir + '/' + lrcItem.name;
+                        const lrcUrl = '/api/raw/' + lrcPath.replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
+                        fetch(lrcUrl)
+                            .then(r => r.ok ? r.text() : Promise.reject(new Error(r.status)))
+                            .then(applyLrc)
+                            .catch(() => { lyrInner.innerHTML = '<div class="lyric-line">歌词加载失败</div>'; });
+                    } else {
+                        lyrInner.innerHTML = '<div class="lyric-line">未找到同名 .lrc 歌词文件</div>';
+                    }
+                })
+                .catch(() => { lyrInner.innerHTML = '<div class="lyric-line">元数据加载失败</div>'; });
         }
 
         // ===== 图片查看器：滚轮缩放 / 拖拽平移 / 旋转 / 1:1 / 适应窗口 / 键盘切换 =====

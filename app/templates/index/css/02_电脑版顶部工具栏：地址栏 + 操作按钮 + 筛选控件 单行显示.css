@@ -526,6 +526,179 @@
             font-size: 2rem;
         }
 
+        /* ===== 音乐播放器：封面 + 标题/歌手 + 歌词滚动 ===== */
+        .preview-body.preview-music {
+            background: #14161a;
+        }
+
+        .music-player {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .music-main {
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            align-items: stretch;
+            gap: 36px;
+            padding: 22px 44px 118px;
+        }
+
+        .music-cover {
+            position: relative;
+            flex: 0 0 250px;
+            width: 250px;
+            height: 250px;
+            align-self: center;
+            border-radius: 50%;
+            overflow: hidden;
+            background: #23262c;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55), inset 0 0 0 6px rgba(255, 255, 255, 0.05);
+        }
+
+        .music-cover.playing {
+            animation: music-spin 14s linear infinite;
+        }
+
+        @keyframes music-spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .music-cover-img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .music-cover-fallback {
+            font-size: 6.5rem;
+            color: #4b5563;
+        }
+
+        .music-right {
+            flex: 1 1 auto;
+            min-width: 0;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            padding: 10px 0 0;
+        }
+
+        .music-title {
+            flex: none;
+            color: #f3f4f6;
+            font-size: 1.25rem;
+            font-weight: 700;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .music-artist {
+            flex: none;
+            color: #9ca3af;
+            font-size: 0.85rem;
+            margin: 4px 0 16px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* 歌词区：上下渐隐遮罩，整块随当前行平滑位移 */
+        .music-lyrics {
+            flex: 1 1 0;
+            min-height: 0;
+            overflow: hidden;
+            mask-image: linear-gradient(transparent, #000 16%, #000 84%, transparent);
+            -webkit-mask-image: linear-gradient(transparent, #000 16%, #000 84%, transparent);
+        }
+
+        .music-lyrics-inner {
+            transition: transform 0.35s ease;
+            will-change: transform;
+            padding: 30% 4px 55%;
+        }
+
+        .lyric-line {
+            color: #8b93a1;
+            font-size: 0.95rem;
+            line-height: 1.7;
+            padding: 5px 2px;
+            cursor: pointer;
+            transition: color 0.2s ease, font-size 0.2s ease;
+        }
+
+        .lyric-line:hover {
+            color: #d1d5db;
+        }
+
+        .lyric-line.active {
+            color: #f59e0b;
+            font-weight: 700;
+            font-size: 1.12rem;
+        }
+
+        /* 音乐控制条：时间夹进度条 + 居中圆形播放键 + 音量/循环 */
+        .music-controls {
+            padding: 10px 30px 16px;
+        }
+
+        .mc-progress-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .mc-progress {
+            flex: 1 1 auto;
+        }
+
+        .mc-progress-row .vpc-time {
+            margin: 0;
+            min-width: 44px;
+            text-align: center;
+        }
+
+        .mc-btn-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 6px;
+        }
+
+        .mc-play {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            background: #f59e0b;
+            color: #1f2328;
+            border: none;
+            cursor: pointer;
+            font-size: 1.4rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            transition: background 0.15s ease, transform 0.15s ease;
+        }
+
+        .mc-play:hover {
+            background: #fbbf24;
+            transform: scale(1.06);
+        }
+
+        .mc-play:active {
+            transform: scale(0.95);
+        }
+
         /* ===== 视频播放列表（预览弹窗右侧） ===== */
         .preview-modal.preview-wide {
             max-width: 1200px;

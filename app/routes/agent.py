@@ -276,6 +276,28 @@ def _call_from_obj(obj):
 _PENDING = {}
 _PENDING_LOCK = threading.Lock()
 
+# 每场运行累计的文件变更：run_id -> [{id, path, action}, ...]
+# 停止/中断时最后一批 result 事件可能没送达前端，前端可按 run_id 来这里补拉
+_RUN_CHANGES = {}
+_RUN_CHANGES_ORDER = []
+_RUN_CHANGES_MAX = 50
+
+
+def _record_run_changes(run_id, changes):
+    if not run_id or not changes:
+        return
+    with _PENDING_LOCK:
+        if run_id not in _RUN_CHANGES:
+            _RUN_CHANGES[run_id] = []
+            _RUN_CHANGES_ORDER.append(run_id)
+            while len(_RUN_CHANGES_ORDER) > _RUN_CHANGES_MAX:
+                _RUN_CHANGES.pop(_RUN_CHANGES_ORDER.pop(0), None)
+        lst = _RUN_CHANGES[run_id]
+        seen = {c.get("id") for c in lst}
+        for c in changes:
+            if c.get("id") and c.get("id") not in seen:
+                lst.append(c)
+
 
 # ---------------------------------------------------------------- 基础工具
 def _norm_abs(p):
@@ -986,6 +1008,7 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
             undo.begin()
             ok, summary, detail, model_text = _run_tool_job(name, args, root, perm)
             changes = undo.finish(root)              # 推断动作类型 + 生成差异，供「文件变更」模块
+            _record_run_changes(run_id, changes)     # 按 run_id 累计，供停止后补拉
             ms = int((time.time() - t_start) * 1000)
             done[c["id"]] = (ok, summary, detail, model_text, ms, False)
             _log.info("Agent 工具：%s %s → %s（%dms）", name, json.dumps(args, ensure_ascii=False)[:200],
@@ -1007,6 +1030,16 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
         if n_trim:
             _log.info("Agent 上下文裁剪：压缩了 %d 条较早轮次的工具结果（保留最近 %d 轮全文）",
                       n_trim, _RECENT_ROUNDS)
+
+
+@bp.route("/api/ai/run-changes", methods=["POST"])
+def api_run_changes():
+    """按 run_id 补拉一场运行的累计文件变更（停止/中断后前端调用）。"""
+    data = request.get_json(silent=True) or {}
+    run_id = str(data.get("run_id") or "")
+    with _PENDING_LOCK:
+        changes = list(_RUN_CHANGES.get(run_id) or [])
+    return jsonify({"ok": True, "changes": changes})
 
 
 @bp.route("/api/ai/agent", methods=["POST"])

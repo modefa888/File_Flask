@@ -4065,12 +4065,38 @@
             row.remove();
           }
           loadGitStatus();                                    // 只刷新 Git 角标/更改列表，不动树
-          tabs.filter(t => t.path === path || t.path.startsWith(path + "/")).forEach(closeTabSilent);
+          closeTabsForDeletedPath(path);                      // 列表文件被删除时，自动关闭对应编辑标签
         })
         .catch(e => toast("删除失败：" + (e.message || e), "err"));
     }
   }
   function closeTabSilent(tab) { tab.host.remove(); const i = tabs.indexOf(tab); if (i >= 0) tabs.splice(i, 1); renderTabsAll(); }
+
+  // 文件 / 目录被删除后自动关闭对应标签页（含目录下所有子文件标签）。
+  // 若被关闭的标签中有活动的，则激活同组剩余标签（行为与 closeTab 一致），避免留下空白编辑区。
+  function closeTabsForDeletedPath(absPath) {
+    absPath = canonPath(absPath);
+    const hit = tabs.filter(t => t.path === absPath || t.path.startsWith(absPath + "/"));
+    if (!hit.length) return;
+    hit.forEach(t => { t.host.remove(); const i = tabs.indexOf(t); if (i >= 0) tabs.splice(i, 1); });
+    renderTabsAll();
+    const activeHit = hit.find(t => t === active || groupActive.get(t.group) === t);
+    if (activeHit) {
+      const g = activeHit.group;
+      const rest = tabs.filter(t => t.group === g);
+      const next = rest[rest.length - 1] || tabs[tabs.length - 1] || null;
+      if (next) activate(next);
+      else { active = null; groupActive.delete(g); curGroup = 0; $("breadcrumbs").innerHTML = ""; updateStatus(); ffClose(); }
+    }
+  }
+
+  // AI 助手删除文件后（SSE result 事件的 changes 里 action=deleted），自动关闭对应标签页
+  function aiCloseTabsForChanges(changes) {
+    (changes || []).forEach(c => {
+      if (!c || c.action !== "deleted" || !c.path) return;
+      closeTabsForDeletedPath(ROOT + "/" + String(c.path).replace(/\\/g, "/"));
+    });
+  }
 
   // 编辑器右键「重命名…」：复用 /api/rename，同步更新标签、树与 Git 状态
   async function renameCurrentFile(path, name) {
@@ -7006,7 +7032,7 @@
           if (!line.startsWith("data:")) continue;
           let e;
           try { e = JSON.parse(line.slice(5).trim()); } catch (_) { continue; }
-          if (e.type === "run") { runId = e.run_id; }
+          if (e.type === "run") { runId = e.run_id; AI._agentRunId = runId; }
           else if (e.type === "retry") {
             text = "";                                        // 限流重试：清空本轮已显示内容
             if (onDelta) onDelta("");
@@ -7031,6 +7057,7 @@
             const meta = stepMeta.get(e.call_id) || { tool: e.tool, args: {} };
             aiStepDone(rows.get(e.call_id), e);
             if (e.changes && e.changes.length) changes.push(...e.changes);
+            aiCloseTabsForChanges(e.changes);   // AI 删除了文件：对应编辑标签自动关闭
             const rec = { tool: meta.tool, args: meta.args, ok: !!e.ok, denied: !!e.denied,
                           ms: e.ms, summary: e.summary || "", detail: e.detail || "" };
             steps.push(rec);
@@ -7312,6 +7339,7 @@
     let turnChanges = [];                                 // 本轮 AI 产生的文件改动 id（供回撤）
     let turnDone = false;                                 // 回复已入列：之后收尾出错不再覆盖/重复插入
     AI._agentTurnChanges = [];
+    AI._agentRunId = "";                                  // 本场运行的 id（停止后补拉变更用）
     AI.ctrl = new AbortController();
     try {
       if (AI.agent) {                                     // 智能体模式：走带工具的 Agent 接口
@@ -7403,6 +7431,7 @@
               const md = chatStepMeta.get(obj.call_id) || { tool: obj.tool, args: {} };
               aiStepDone(chatStepRows.get(obj.call_id), obj);
               if (obj.changes && obj.changes.length) turnChanges.push(...obj.changes);
+              aiCloseTabsForChanges(obj.changes);   // AI 删除了文件：对应编辑标签自动关闭
               const rec = { tool: md.tool, args: md.args, ok: !!obj.ok, denied: !!obj.denied,
                             ms: obj.ms, summary: obj.summary || "", detail: obj.detail || "" };
               chatSteps.push(rec);
@@ -7445,16 +7474,31 @@
       } else if (e.name === "AbortError") {
         bodyB.innerHTML = aiMd(acc.replace(/^\s+/, "")) + "\n（已停止）";
         const out = acc.trim();
-        const abChanges = turnChanges.length ? turnChanges : (AI._agentTurnChanges || []);
-        if (out || abChanges.length) {                    // 即使没有文字，只要改过文件也保留回撤入口
-          const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
-          AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, ms: meta.ms, ts: meta.ts,
-                         changes: abChanges.length ? abChanges : undefined });
-          bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
-          aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
-          aiPersistCurrent(); aiRenderConv();
+        const ab0 = turnChanges.length ? turnChanges : (AI._agentTurnChanges || []);
+        const finalizeAbort = (abChanges) => {
+          if (out || abChanges.length) {                  // 即使没有文字，只要改过文件也保留模块与回撤
+            const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
+            AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, ms: meta.ms, ts: meta.ts,
+                           changes: abChanges.length ? abChanges : undefined });
+            bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
+            turnDone = true;
+            aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
+            aiPersistCurrent(); aiRenderConv();
+          }
+          aiRecordStat(false, performance.now() - t0, acc.length, ttft, inTok);
+        };
+        if (ab0.length || !AI._agentRunId) {
+          finalizeAbort(ab0);
+        } else {
+          // 停止瞬间最后一批 result 事件可能没送达：按 run_id 向后端补拉本场累计变更
+          fetch("/api/ai/run-changes", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ run_id: AI._agentRunId }),
+          }).then(r => r.json()).then(d => {
+            const got = (d.changes || []).filter(c => c && c.path);
+            finalizeAbort(got.length ? got : ab0);
+          }).catch(() => finalizeAbort(ab0));
         }
-        aiRecordStat(false, performance.now() - t0, acc.length, ttft, inTok);
       } else {
         bodyB.classList.remove("ai-md");
         const errText = "出错了：" + e.message;

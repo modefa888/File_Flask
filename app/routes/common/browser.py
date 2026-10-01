@@ -232,6 +232,19 @@ def api_preview():
         mime_type, _ = mimetypes.guess_type(target_path)
         if not mime_type:
             mime_type = "application/octet-stream"
+        # SQLite 数据库：不做大小限制，返回表清单；数据行由 /api/sqlite/rows 按表分页取
+        if ext in _SQLITE_EXTS:
+            try:
+                tables, stat2 = _sqlite_read_tables(target_path)
+            except Exception as e:
+                return jsonify({"error": f"无法读取数据库: {str(e)}"}), 500
+            return jsonify({
+                "type": "sqlite",
+                "ext": ext,
+                "tables": tables,
+                "size": stat2.st_size,
+                "size_str": format_size(stat2.st_size),
+            })
         # 文本/图片限制：文本放宽到 20MB，图片 5MB
         _limit = _TEXT_PREVIEW_MAX_BYTES if is_text else _PREVIEW_MAX_BYTES
         if ext not in _VIDEO_EXTS and stat.st_size > _limit:
@@ -287,6 +300,137 @@ def api_preview():
             return jsonify({"error": f"不支持的预览类型: {ext}"}), 400
     except (OSError, PermissionError) as e:
         return jsonify({"error": f"无法读取文件: {str(e)}"}), 500
+
+
+# ======================================================================
+# SQLite 数据库只读预览（db / sqlite / sqlite3 / db3）
+# ======================================================================
+_SQLITE_EXTS = {"db", "sqlite", "sqlite3", "db3"}
+_SQLITE_TABLE_MAX = 200          # 最多列出的表/视图数
+_SQLITE_ROWS_DEFAULT = 100       # 每页默认行数
+_SQLITE_ROWS_MAX = 500           # 每页最大行数
+_SQLITE_CELL_MAX = 1000          # 单元格显示截断长度（避免超大 BLOB/文本撑爆响应）
+
+
+def _is_sqlite_file(ext):
+    return ext in _SQLITE_EXTS
+
+
+def _sqlite_connect_ro(target_path):
+    """以只读 URI 模式打开 SQLite，绝不写入（含 -wal/-shm 伴生文件的库也能安全打开）"""
+    import sqlite3
+    uri = "file:" + quote(target_path, safe="/") + "?mode=ro"
+    con = sqlite3.connect(uri, uri=True, timeout=3)
+    return con
+
+
+def _sqlite_list_tables(cur):
+    """列出用户表与视图（排除 sqlite_ 内部表），返回 [(name, type)]"""
+    return [(r[0], r[1]) for r in cur.execute(
+        "SELECT name, type FROM sqlite_master "
+        "WHERE type IN ('table','view') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' "
+        "ORDER BY type, name").fetchall()]
+
+
+def _sqlite_quote_ident(name):
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _sqlite_cell(v):
+    """单元格值序列化：BLOB 尝试文本解码，其余转字符串；超长截断"""
+    if v is None or isinstance(v, (int, float)):
+        return v
+    if isinstance(v, bytes):
+        try:
+            v = v.decode("utf-8")
+        except UnicodeDecodeError:
+            v = v[:64].hex() + ("…" if len(v) > 64 else "")
+            return f"<BLOB {v}>"
+    s = str(v)
+    if len(s) > _SQLITE_CELL_MAX:
+        s = s[:_SQLITE_CELL_MAX] + f"…（共 {len(s)} 字符）"
+    return s
+
+
+@bp.route("/api/sqlite/tables")
+def api_sqlite_tables():
+    """列出 SQLite 数据库中的表与视图（含行数与列名）"""
+    rel_path = request.args.get("path", "")
+    target_path = os.path.abspath(os.path.normpath(rel_path))
+    if not os.path.isfile(target_path):
+        return jsonify({"error": "文件不存在"}), 404
+    if not _is_sqlite_file(os.path.splitext(target_path)[1].lower().lstrip(".")):
+        return jsonify({"error": "不是 SQLite 数据库文件"}), 400
+    try:
+        tables, stat = _sqlite_read_tables(target_path)
+        return jsonify({
+            "tables": tables,
+            "size": stat.st_size,
+            "size_str": format_size(stat.st_size),
+        })
+    except Exception as e:
+        return jsonify({"error": f"无法读取数据库: {str(e)}"}), 500
+
+
+def _sqlite_read_tables(target_path):
+    """读取库中全部用户表/视图的行数与列名，返回 (tables, stat)"""
+    stat = os.stat(target_path)
+    con = _sqlite_connect_ro(target_path)
+    cur = con.cursor()
+    tables = []
+    for name, ttype in _sqlite_list_tables(cur)[:_SQLITE_TABLE_MAX]:
+        qn = _sqlite_quote_ident(name)
+        try:
+            rows = cur.execute(f"SELECT COUNT(*) FROM {qn}").fetchone()[0]
+        except Exception:
+            rows = None   # 损坏的表（如 page 泄漏）不阻塞整体列表
+        try:
+            columns = [r[1] for r in cur.execute(f"PRAGMA table_info({qn})").fetchall()]
+        except Exception:
+            columns = []
+        tables.append({"name": name, "kind": ttype, "rows": rows, "columns": columns})
+    con.close()
+    return tables, stat
+
+
+@bp.route("/api/sqlite/rows")
+def api_sqlite_rows():
+    """分页读取某个表/视图的数据（只读）"""
+    rel_path = request.args.get("path", "")
+    target_path = os.path.abspath(os.path.normpath(rel_path))
+    if not os.path.isfile(target_path):
+        return jsonify({"error": "文件不存在"}), 404
+    table = request.args.get("table", "")
+    try:
+        limit = min(max(int(request.args.get("limit", _SQLITE_ROWS_DEFAULT)), 1), _SQLITE_ROWS_MAX)
+        offset = max(int(request.args.get("offset", 0)), 0)
+    except (TypeError, ValueError):
+        limit, offset = _SQLITE_ROWS_DEFAULT, 0
+    try:
+        con = _sqlite_connect_ro(target_path)
+        cur = con.cursor()
+        # 表名必须真实存在于 sqlite_master，杜绝注入
+        real_names = [r[0] for r in cur.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','view')")]
+        if table not in real_names:
+            con.close()
+            return jsonify({"error": "表不存在"}), 400
+        qn = _sqlite_quote_ident(table)
+        columns = [r[1] for r in cur.execute(f"PRAGMA table_info({qn})").fetchall()]
+        total = cur.execute(f"SELECT COUNT(*) FROM {qn}").fetchone()[0]
+        cur2 = con.execute(f"SELECT * FROM {qn} LIMIT ? OFFSET ?", (limit, offset))
+        rows = [[_sqlite_cell(v) for v in row] for row in cur2.fetchall()]
+        con.close()
+        return jsonify({
+            "table": table,
+            "columns": columns,
+            "rows": rows,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        })
+    except Exception as e:
+        return jsonify({"error": f"读取数据失败: {str(e)}"}), 500
 
 
 @bp.route("/api/raw/<path:fspath>")

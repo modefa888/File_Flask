@@ -1251,7 +1251,7 @@
     };
     tabs.push(tab);
     renderTabsAll();
-    host.classList.add("active");
+    activate(tab);   // 统一激活（成功后 mountDiffTab 会再激活一次，幂等）
     tab.cmBox.innerHTML = '<div style="padding:30px;color:#888;">正在生成差异…</div>';
     tab.tools.querySelectorAll("button").forEach(b => { b.onclick = () => setDiffView(tab, b.dataset.view); });
     const url = "/api/git/diff?path=" + encodeURIComponent(gitState.repo) +
@@ -1290,7 +1290,7 @@
     };
     tabs.push(tab);
     renderTabsAll();
-    host.classList.add("active");
+    activate(tab);   // 统一激活（成功后 mountDiffTab 会再激活一次，幂等）
     tab.cmBox.innerHTML = '<div style="padding:30px;color:#888;">正在比较…</div>';
     fetch("/api/git/diff-files?a=" + encodeURIComponent(pathA) + "&b=" + encodeURIComponent(pathB))
       .then(r => r.json())
@@ -1335,7 +1335,7 @@
     };
     tabs.push(tab);
     renderTabsAll();
-    host.classList.add("active");
+    activate(tab);   // 走统一激活：标签高亮 + active 状态 + 面包屑（此前只加 host.active，标签条不高亮）
     tab.tools.querySelector(".ad-expand").onclick = (e) => { e.stopPropagation(); setAllChangesCollapsed(tab, false); };
     tab.tools.querySelector(".ad-collapse").onclick = (e) => { e.stopPropagation(); setAllChangesCollapsed(tab, true); };
     tab.tools.querySelector(".ad-reload").onclick = (e) => { e.stopPropagation(); loadAllChanges(tab); };

@@ -80,7 +80,7 @@
     };
     tabs.push(tab);
     renderTabsAll();
-    host.classList.add("active");
+    activate(tab);   // 统一激活：标签高亮 + active 状态 + 面包屑（同「更改」汇总标签的修复）
     tab.tools.querySelector(".ad-expand").onclick = (e) => { e.stopPropagation(); setAllChangesCollapsed(tab, false); };
     tab.tools.querySelector(".ad-collapse").onclick = (e) => { e.stopPropagation(); setAllChangesCollapsed(tab, true); };
     tab.cmBox.innerHTML = '<div class="ad-loading">正在读取变更差异…</div>';

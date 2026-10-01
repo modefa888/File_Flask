@@ -574,6 +574,12 @@
           activate(tab);   // 挂载编辑组容器并高亮标签（与文本文件打开行为一致）
           return;
         }
+        // SQLite 数据库：只读表格查看器（表列表 + 分页数据），不做文本编辑
+        if (["db", "sqlite", "sqlite3", "db3"].includes(ext)) {
+          activate(tab);   // activate 是本闭包内函数，须在这里调用（同图片分支）
+          setupSqliteView(tab, host, path, name);
+          return;
+        }
         // 文件内容与语法模式并行加载，减少串行等待
         const [res, mode] = await Promise.all([loadFileText(path, name), ensureMode(ext)]);
         // 不支持 / 打开失败：同样要走激活（否则只有内容切了、标签不高亮、面包屑还是旧文件）；

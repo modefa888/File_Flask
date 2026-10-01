@@ -1,0 +1,74 @@
+/* ===== SQLite 数据库查看器（db/sqlite 文件，只读） ===== */
+/* 注意：不要用独立 class 改 .cm-host 的 display（会盖过 .cm-host{display:none}，
+   导致非激活的 db 标签不被隐藏、多个库叠在一起）。让 .dbv 绝对定位铺满宿主即可。 */
+.dbv {
+  position: absolute; inset: 0;
+  display: flex; min-height: 0;
+  background: #1e1e1e; color: #ccc;
+  font-size: 13px;
+  user-select: text;
+}
+/* 左侧表列表 */
+.dbv-side {
+  width: 200px; flex: none; display: flex; flex-direction: column;
+  border-right: 1px solid #333; background: #232323;
+}
+.dbv-title {
+  padding: 10px 12px; font-size: 12px; color: #999;
+  border-bottom: 1px solid #333;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dbv-title .bi { margin-right: 4px; color: #4fc3f7; }
+.dbv-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+.dbv-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px; cursor: pointer; white-space: nowrap;
+}
+.dbv-item:hover { background: #2a2d2e; }
+.dbv-item.active { background: #094771; color: #fff; }
+.dbv-item .bi { font-size: 12px; color: #888; flex: none; }
+.dbv-item.active .bi { color: #ffd54f; }
+.dbv-iname { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.dbv-icount { font-size: 10.5px; color: #777; flex: none; }
+.dbv-item.active .dbv-icount { color: #9fd0ff; }
+/* 右侧数据区 */
+.dbv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dbv-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-bottom: 1px solid #333; background: #252526;
+  flex: none;
+}
+.dbv-tname { font-weight: 600; color: #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbv-meta { font-size: 11.5px; color: #888; }
+.dbv-flex { flex: 1; }
+.dbv-btn {
+  background: transparent; border: 1px solid #444; border-radius: 4px;
+  color: #bbb; cursor: pointer; padding: 2px 8px; line-height: 1.4;
+}
+.dbv-btn:hover:not(:disabled) { background: #333; color: #fff; }
+.dbv-btn:disabled { opacity: .35; cursor: default; }
+.dbv-page { font-size: 11.5px; color: #999; min-width: 52px; text-align: center; }
+.dbv-size {
+  background: #2d2d2d; color: #bbb; border: 1px solid #444; border-radius: 4px;
+  font-size: 11.5px; padding: 2px 4px; outline: none;
+}
+.dbv-grid { flex: 1; overflow: auto; }
+/* 数据表 */
+.dbv-table { border-collapse: collapse; min-width: 100%; }
+.dbv-table th, .dbv-table td {
+  border: 1px solid #333; padding: 4px 10px;
+  text-align: left; white-space: nowrap; max-width: 420px;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.dbv-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: #2d2d2d; color: #9fd0ff; font-weight: 600;
+}
+.dbv-table td { color: #ccc; }
+.dbv-table tbody tr:nth-child(even) { background: rgba(255,255,255,.025); }
+.dbv-table tbody tr:hover { background: rgba(79,195,247,.08); }
+.dbv-rownum { color: #666; text-align: right !important; background: #262626; font-size: 11px; min-width: 44px; }
+.dbv-null { color: #666; font-style: italic; }
+.dbv-empty { padding: 24px; color: #777; text-align: center; }
+.dbv-err { padding: 24px; color: #c66; text-align: center; }
+.dbv-nodata { text-align: center !important; color: #777; padding: 24px !important; }

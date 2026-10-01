@@ -248,13 +248,34 @@
                             clearTimeout(videoTipHideTimer);
                             videoTipHideTimer = setTimeout(() => { tipEl.style.opacity = '0'; }, 3000);
                         }
+                    } else if (data.type === 'sqlite') {
+                        document.getElementById('previewCopyBtn').style.display = 'none';
+                        body.className = 'preview-body preview-sqlite';
+                        document.querySelector('#previewContainer .preview-modal').classList.add('preview-wide');
+                        body.innerHTML = `
+                        <div class="sqlite-view">
+                            <div class="sq-side">
+                                <div class="sq-title"><i class="bi bi-database"></i> ${data.tables.length} 个表/视图 · ${data.size_str || ''}</div>
+                                <div class="sq-list">${data.tables.map(t => `
+                                    <div class="sq-item" data-table="${_escapeHtml(t.name)}">
+                                        <i class="bi ${t.kind === 'view' ? 'bi-eye' : 'bi-table'}"></i>
+                                        <span class="sq-iname">${_escapeHtml(t.name)}</span>
+                                        <span class="sq-icount">${t.rows == null ? '?' : t.rows.toLocaleString()}</span>
+                                    </div>`).join('')}</div>
+                            </div>
+                            <div class="sq-main">
+                                <div class="sq-toolbar">
+                                    <span class="sq-tname">—</span><span class="sq-meta"></span><span class="sq-flex"></span>
+                                    <button class="vpc-btn sq-prev" title="上一页"><i class="bi bi-chevron-left"></i></button>
+                                    <span class="sq-page">0 / 0</span>
+                                    <button class="vpc-btn sq-next" title="下一页"><i class="bi bi-chevron-right"></i></button>
+                                    <select class="sq-size" title="每页行数"><option>50</option><option selected>100</option><option>200</option><option>500</option></select>
+                                </div>
+                                <div class="sq-grid"><div class="sq-empty">选择左侧的表查看数据</div></div>
+                            </div>
+                        </div>`;
+                        _bindSqliteViewer(body, absPath, data.tables);
                     } else {
-                        body.className = 'preview-body preview-text';
-                        const bytes = Uint8Array.from(atob(data.content), c => c.charCodeAt(0));
-                        const decoded = new TextDecoder('utf-8').decode(bytes);
-                        body.innerHTML = `<pre>${_escapeHtml(decoded)}</pre>`;
-                        document.getElementById('previewCopyBtn').style.display = '';
-                    }
                 })
                 .catch(err => {
                     body.className = 'preview-body preview-error';
@@ -778,6 +799,69 @@
                     }
                 })
                 .catch(() => { lyrInner.innerHTML = '<div class="lyric-line">元数据加载失败</div>'; });
+        }
+
+        // ===== SQLite 数据库查看器：左侧表列表，右侧分页数据（只读） =====
+        function _bindSqliteViewer(body, absPath, tables) {
+            const grid = body.querySelector('.sq-grid');
+            const tname = body.querySelector('.sq-tname');
+            const meta = body.querySelector('.sq-meta');
+            const pageEl = body.querySelector('.sq-page');
+            const prevBtn = body.querySelector('.sq-prev');
+            const nextBtn = body.querySelector('.sq-next');
+            const sizeSel = body.querySelector('.sq-size');
+            const state = { table: null, offset: 0, limit: 100, seq: 0 };
+
+            function renderRows(d) {
+                tname.textContent = d.table;
+                meta.textContent = d.total.toLocaleString() + ' 行';
+                const cols = d.columns.length ? d.columns : d.rows.map((_, i) => 'col' + (i + 1));
+                let html = '<table class="sq-table"><thead><tr><th class="sq-rownum">#</th>' +
+                    cols.map(c => `<th>${_escapeHtml(c)}</th>`).join('') + '</tr></thead><tbody>';
+                if (!d.rows.length) {
+                    html += `<tr><td class="sq-nodata" colspan="${cols.length + 1}">空表（0 行）</td></tr>`;
+                }
+                d.rows.forEach((row, ri) => {
+                    html += `<tr><td class="sq-rownum">${d.offset + ri + 1}</td>` +
+                        row.map(v => `<td>${v == null ? '<span class="sq-null">NULL</span>' : _escapeHtml(v)}</td>`).join('') + '</tr>';
+                });
+                html += '</tbody></table>';
+                grid.innerHTML = html;
+                grid.scrollTop = 0;
+                pageEl.textContent = (Math.floor(d.offset / d.limit) + 1) + ' / ' + Math.max(1, Math.ceil(d.total / d.limit));
+                prevBtn.disabled = d.offset <= 0;
+                nextBtn.disabled = d.offset + d.limit >= d.total;
+            }
+
+            function loadRows(offset) {
+                const seq = ++state.seq;
+                state.offset = offset;
+                grid.innerHTML = '<div class="sq-empty">加载中…</div>';
+                fetch(`/api/sqlite/rows?path=${encodeURIComponent(absPath)}&table=${encodeURIComponent(state.table)}&limit=${state.limit}&offset=${offset}`)
+                    .then(r => r.json())
+                    .then(d => {
+                        if (seq !== state.seq) return;
+                        if (d.error) { grid.innerHTML = `<div class="sq-empty">${_escapeHtml(d.error)}</div>`; return; }
+                        renderRows(d);
+                    })
+                    .catch(err => {
+                        if (seq !== state.seq) return;
+                        grid.innerHTML = `<div class="sq-empty">加载失败: ${_escapeHtml(err.message)}</div>`;
+                    });
+            }
+
+            function selectTable(item) {
+                body.querySelectorAll('.sq-item').forEach(el => el.classList.toggle('active', el === item));
+                state.table = item.dataset.table;
+                loadRows(0);
+            }
+
+            prevBtn.addEventListener('click', () => loadRows(Math.max(0, state.offset - state.limit)));
+            nextBtn.addEventListener('click', () => loadRows(state.offset + state.limit));
+            sizeSel.addEventListener('change', () => { state.limit = parseInt(sizeSel.value, 10) || 100; loadRows(0); });
+            body.querySelectorAll('.sq-item').forEach(el => el.addEventListener('click', () => selectTable(el)));
+            const first = body.querySelector('.sq-item');
+            if (first) selectTable(first);
         }
 
         // ===== 图片查看器：滚轮缩放 / 拖拽平移 / 旋转 / 1:1 / 适应窗口 / 键盘切换 =====

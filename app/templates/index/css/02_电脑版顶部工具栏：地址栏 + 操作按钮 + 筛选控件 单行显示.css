@@ -389,6 +389,105 @@
             border-radius: 4px;
         }
 
+        /* ===== 图片查看：大图舞台 + 悬浮工具条 + 图片墙 ===== */
+        .preview-body.preview-image.has-playlist {
+            align-items: stretch;
+            justify-content: flex-start;
+            background: #101418;
+        }
+
+        .img-stage {
+            position: relative;
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .img-view {
+            user-select: none;
+            -webkit-user-drag: none;
+            cursor: grab;
+            will-change: transform;
+            transform-origin: center center;
+        }
+
+        .img-view.dragging {
+            cursor: grabbing;
+        }
+
+        .img-toolbar {
+            position: absolute;
+            bottom: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 15;
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            padding: 4px 8px;
+            background: rgba(17, 24, 39, 0.85);
+            border: 1px solid #374151;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+
+        .img-zoom-label {
+            color: #cbd5e1;
+            font-size: 0.72rem;
+            min-width: 46px;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* 图片墙：面板加宽 + 2 列大缩略图 */
+        .preview-body.preview-image .video-playlist {
+            flex-basis: 380px;
+            width: 380px;
+        }
+
+        .preview-body.preview-image .vp-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+
+        .vp-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+
+        .vp-cell {
+            position: relative;
+            aspect-ratio: 1 / 1;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #262626;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: border-color 0.15s ease, transform 0.15s ease;
+        }
+
+        .vp-cell:hover {
+            transform: translateY(-2px);
+        }
+
+        .vp-cell.playing {
+            border-color: #f59e0b;
+        }
+
+        .vp-cell img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
         .preview-body.preview-video {
             display: flex;
             align-items: center;

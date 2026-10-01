@@ -54,7 +54,6 @@
                                 <button class="btn btn-close-preview" id="previewCloseBtn"><i class="bi bi-x-lg"></i></button>
                             </div>
                         </div>
-                        ${isVideoFile ? '' : `<span class="file-path" style="display:block;width:100%;font-size:0.7rem;color:#718096;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 0 0 26px;">.${extLabel} · ${absPath}</span>`}
                     </div>
                     <div class="preview-body preview-loading">
                         <div class="spinner-border" role="status"></div>
@@ -150,8 +149,29 @@
                     }
                     if (data.type === 'image') {
                         document.getElementById('previewCopyBtn').style.display = 'none';
-                        body.className = 'preview-body preview-image';
-                        body.innerHTML = `<img src="data:${data.content_type || 'image/png'};base64,${data.content}" alt="${fileName}" />`;
+                        body.className = 'preview-body preview-image has-playlist';
+                        document.querySelector('#previewContainer .preview-modal').classList.add('preview-wide');
+                        body.innerHTML = `
+                        <div class="img-stage">
+                            <div class="img-tip" style="position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:#fff;padding:4px 10px;border-radius:6px;font-size:0.72rem;z-index:10;pointer-events:none;white-space:nowrap;">
+                                <i class="bi bi-mouse"></i> 滚轮缩放 · 拖拽平移 · 双击放大 · ← → 切换
+                            </div>
+                            <img class="img-view" alt="${fileName}">
+                            <div class="img-toolbar">
+                                <button class="vpc-btn img-zout" title="缩小 (-)"><i class="bi bi-zoom-out"></i></button>
+                                <span class="img-zoom-label">100%</span>
+                                <button class="vpc-btn img-zin" title="放大 (+)"><i class="bi bi-zoom-in"></i></button>
+                                <button class="vpc-btn img-fit" title="适应窗口 (0)"><i class="bi bi-arrows-angle-contract"></i></button>
+                                <button class="vpc-btn img-11" title="原始尺寸 1:1"><i class="bi bi-aspect-ratio"></i></button>
+                                <button class="vpc-btn img-rot" title="旋转 90°"><i class="bi bi-arrow-clockwise"></i></button>
+                            </div>
+                        </div>
+                        <div class="video-playlist">
+                            <div class="vp-head"><i class="bi bi-grid-3x3-gap"></i> 图片墙 <span class="vp-count">…</span></div>
+                            <div class="vp-list"><div class="vp-empty"><i class="bi bi-hourglass-split"></i>正在加载图片墙…</div></div>
+                        </div>`;
+                        _bindImageViewer(body, absPath);
+                        _buildImageWall(absPath, body);
                     } else if (data.type === 'video') {
                         document.getElementById('previewCopyBtn').style.display = 'none';
                         body.className = 'preview-body preview-video has-playlist';
@@ -506,6 +526,178 @@
                     const info = body.querySelector('.video-info');
                     if (info) info.textContent = '加载失败';
                 });
+        }
+
+        // ===== 图片查看器：滚轮缩放 / 拖拽平移 / 旋转 / 1:1 / 适应窗口 / 键盘切换 =====
+        let _vpCurrentImage = '';   // 当前查看的图片绝对路径
+
+        function _bindImageViewer(body, absPath) {
+            const img = body.querySelector('.img-view');
+            const stage = body.querySelector('.img-stage');
+            if (!img || !stage) return;
+            const zoomLabel = body.querySelector('.img-zoom-label');
+
+            let scale = 1, tx = 0, ty = 0, rot = 0;
+            const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+            const apply = () => {
+                img.style.transform = `translate(${tx}px, ${ty}px) rotate(${rot}deg) scale(${scale})`;
+                if (zoomLabel) zoomLabel.textContent = Math.round(scale * 100) + '%';
+            };
+            const setZoom = ns => { scale = clamp(ns, 0.1, 10); apply(); };
+            const resetView = () => { scale = 1; tx = 0; ty = 0; rot = 0; apply(); };
+            // 以光标为锚点缩放：光标下的图像点保持不动
+            const zoomAt = (clientX, clientY, factor) => {
+                const ns = clamp(scale * factor, 0.1, 10);
+                if (ns === scale) return;
+                const r = stage.getBoundingClientRect();
+                const px = clientX - r.left - r.width / 2;
+                const py = clientY - r.top - r.height / 2;
+                tx += (scale - ns) * (px - tx) / scale;
+                ty += (scale - ns) * (py - ty) / scale;
+                scale = ns;
+                apply();
+            };
+
+            // 工具条
+            body.querySelector('.img-zin').addEventListener('click', () => setZoom(scale * 1.25));
+            body.querySelector('.img-zout').addEventListener('click', () => setZoom(scale / 1.25));
+            body.querySelector('.img-fit').addEventListener('click', resetView);
+            body.querySelector('.img-rot').addEventListener('click', () => { rot += 90; apply(); });
+            body.querySelector('.img-11').addEventListener('click', () => {
+                if (!img.naturalWidth) return;   // 图片尚未加载完成
+                const baseW = img.getBoundingClientRect().width / scale || 1;
+                tx = 0; ty = 0;
+                setZoom(img.naturalWidth / baseW);
+            });
+
+            // 滚轮缩放（以光标为中心）
+            stage.addEventListener('wheel', e => {
+                e.preventDefault();
+                zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.2 : 1 / 1.2);
+            }, { passive: false });
+
+            // 拖拽平移
+            let panning = false, lx = 0, ly = 0;
+            img.addEventListener('pointerdown', e => {
+                panning = true;
+                lx = e.clientX; ly = e.clientY;
+                img.classList.add('dragging');
+                try { img.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+            });
+            img.addEventListener('pointermove', e => {
+                if (!panning) return;
+                tx += e.clientX - lx;
+                ty += e.clientY - ly;
+                lx = e.clientX; ly = e.clientY;
+                apply();
+            });
+            const endPan = () => { panning = false; img.classList.remove('dragging'); };
+            img.addEventListener('pointerup', endPan);
+            img.addEventListener('pointercancel', endPan);
+            img.addEventListener('dragstart', e => e.preventDefault());
+
+            // 双击：放大 2.5x ↔ 复位
+            img.addEventListener('dblclick', e => {
+                if (scale > 1.01) resetView();
+                else zoomAt(e.clientX, e.clientY, 2.5);
+            });
+
+            // 原位切换图片：换源 + 复位视图 + 同步标题/路径/图片墙高亮
+            const applyImage = (p) => {
+                if (!p || p === _vpCurrentImage) return;
+                _vpCurrentImage = p;
+                resetView();
+                img.src = '/api/raw?path=' + encodeURIComponent(p);
+                const fileName = p.split('/').pop();
+                const spans = document.querySelectorAll('#previewContainer .preview-title span');
+                if (spans.length > 1) spans[1].textContent = fileName;
+                const iw = body._iw;
+                if (iw) iw.idx = iw.imgs.findIndex(v => (iw.dir + '/' + v.name) === p);
+                const listEl = body.querySelector('.vp-list');
+                if (listEl) listEl.querySelectorAll('.vp-cell').forEach(el => {
+                    const active = el.dataset.path === p;
+                    el.classList.toggle('playing', active);
+                    if (active) el.scrollIntoView({ block: 'nearest' });
+                });
+            };
+            body._applyImage = applyImage;
+            img.src = '/api/raw?path=' + encodeURIComponent(absPath);
+            _vpCurrentImage = absPath;
+
+            // 键盘：← → 切换图片，+/- 缩放，0 复位（监听器交由 _videoPreviewUnbind 机制清理）
+            const keyHandler = e => {
+                const tag = (e.target && e.target.tagName || '').toLowerCase();
+                if (tag === 'input' || tag === 'textarea' || (e.target && e.target.isContentEditable)) return;
+                const iw = body._iw;
+                if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                    if (!iw || !iw.imgs || iw.imgs.length < 2) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const d = e.key === 'ArrowRight' ? 1 : -1;
+                    const ni = ((iw.idx + d) % iw.imgs.length + iw.imgs.length) % iw.imgs.length;
+                    applyImage(iw.dir + '/' + iw.imgs[ni].name);
+                } else if (e.key === '+' || e.key === '=') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setZoom(scale * 1.25);
+                } else if (e.key === '-') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setZoom(scale / 1.25);
+                } else if (e.key === '0') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    resetView();
+                }
+            };
+            document.addEventListener('keydown', keyHandler, true);
+            _videoPreviewUnbind = () => document.removeEventListener('keydown', keyHandler, true);
+        }
+
+        // ===== 图片墙：当前目录下的所有图片文件 =====
+        function _buildImageWall(absPath, body) {
+            const dir = absPath.slice(0, absPath.lastIndexOf('/')) || '/';
+            const listEl = body.querySelector('.vp-list');
+            const countEl = body.querySelector('.vp-count');
+
+            const apply = (items) => {
+                const imgs = (items || [])
+                    .filter(it => it && !it.is_dir && _IMAGE_EXTS.has((it.ext || '').toLowerCase()))
+                    .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+                if (countEl) countEl.textContent = imgs.length;
+                if (!listEl) return;
+                if (!imgs.length) {
+                    listEl.innerHTML = '<div class="vp-empty"><i class="bi bi-image"></i>当前目录没有其他图片</div>';
+                    return;
+                }
+                const curIdx = Math.max(0, imgs.findIndex(v => v.name === absPath.split('/').pop()));
+                listEl.innerHTML = `<div class="vp-grid">` + imgs.map((it, i) => {
+                    const p = dir + '/' + it.name;
+                    // 缩略图走 /api/thumbnail（磁盘缓存 + ETag），失败回落图片图标
+                    return `<div class="vp-cell${i === curIdx ? ' playing' : ''}" data-path="${_escapeHtml(p)}" title="${_escapeHtml(it.name)}">
+                        <i class="bi bi-image vp-thumb-fallback"></i>
+                        <img loading="lazy" alt="" src="/api/thumbnail?path=${encodeURIComponent(p)}" onerror="this.remove()">
+                    </div>`;
+                }).join('') + `</div>`;
+                body._iw = { dir, imgs, idx: curIdx };
+                listEl.querySelectorAll('.vp-cell').forEach(el => {
+                    el.addEventListener('click', () => body._applyImage(el.dataset.path));
+                });
+                const cur = listEl.querySelector('.vp-cell.playing');
+                if (cur) cur.scrollIntoView({ block: 'nearest' });
+            };
+
+            if (dir === currentPath && Array.isArray(fileItems) && fileItems.length) {
+                apply(fileItems);
+            } else {
+                fetch(`/api/files?path=${encodeURIComponent(dir)}`)
+                    .then(r => r.json())
+                    .then(d => apply(d.items || []))
+                    .catch(() => {
+                        if (listEl) listEl.innerHTML = '<div class="vp-empty"><i class="bi bi-wifi-off"></i>图片墙加载失败</div>';
+                        if (countEl) countEl.textContent = '0';
+                    });
+            }
         }
 
         // ===== 视频播放列表：当前目录下的所有视频文件 =====

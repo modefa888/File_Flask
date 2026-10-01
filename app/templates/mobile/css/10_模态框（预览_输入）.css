@@ -1,0 +1,149 @@
+  /* ===== 模态框（预览/输入） ===== */
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 60; display: none;
+    align-items: center; justify-content: center; flex-direction: column;
+  }
+  .modal-mask.show { display: flex; }
+  .modal-close {
+    position: absolute; top: calc(12px + var(--safe-top)); right: 14px; z-index: 2;
+    border: none; background: rgba(255,255,255,.18); color: #fff; width: 40px; height: 40px;
+    border-radius: 50%; font-size: 20px; cursor: pointer;
+  }
+  .preview-body { max-width: 100%; max-height: 100%; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .preview-body img { max-width: 100%; max-height: 80vh; border-radius: 8px; }
+  .preview-body video { max-width: 100%; max-height: 80vh; border-radius: 8px; background: #000; }
+
+  /* 文本预览卡片：文件名 + 操作栏 + 固定大小内容区 */
+  .pv-card {
+    display: flex; flex-direction: column; width: 92vw; height: 84vh;
+    background: #fff; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0,0,0,.15);
+  }
+  .pv-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px 0 14px; font-size: 14px; font-weight: 600; color: #1a1a1a;
+  }
+  .pv-meta {
+    padding: 3px 14px 8px; font-size: 11px; font-weight: 400; color: #8a919c;
+    background: #fff; border-bottom: 1px solid #ececec;
+  }
+  .pv-head .pv-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pv-head .pv-badge {
+    flex: none; display: none; font-size: 11px; font-weight: 500; line-height: 1;
+    color: #fff; background: #9aa7b3; border-radius: 10px; padding: 4px 8px;
+  }
+  .pv-head .pv-badge.show { display: inline-block; }
+  .pv-head .pv-badge.dirty { background: #e53935; }
+  .pv-head .pv-close {
+    flex: none; width: 30px; height: 30px; border: none; border-radius: 50%;
+    background: #f0f1f3; color: #444; font-size: 15px; cursor: pointer;
+  }
+  .pv-ops { position: relative; display: flex; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #ececec; }
+  .pv-confirm {
+    display: none; position: absolute; top: calc(100% + 8px); right: 8px; z-index: 5;
+    background: #fff; border: 1px solid #e3e5e8; border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 12px 14px;
+    font-size: 13px; color: #333; white-space: nowrap;
+  }
+  .pv-confirm.show { display: block; }
+  .pv-confirm-btns { display: flex; gap: 8px; margin-top: 10px; }
+  .pv-confirm-btns button { padding: 6px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; border: 1px solid #dcdfe4; background: #f5f6f8; color: #333; }
+  .pv-confirm-btns .yes { background: #1a73e8; border-color: #1a73e8; color: #fff; }
+  .pv-ops button.hide { display: none; }
+  .pv-ops button:disabled { opacity: .45; }
+  .pv-editwrap { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+  .pv-gutter {
+    flex: none; width: 48px; box-sizing: border-box; overflow: hidden;
+    padding: 12px 6px 12px 0; text-align: right;
+    color: #9aa0a6; font-size: 12px; line-height: 19.5px;
+    background: #fff; border-right: 1px solid #ececec;
+    white-space: pre; user-select: none; -webkit-user-select: none;
+  }
+  .pv-edit {
+    flex: 1; min-width: 0; min-height: 0; box-sizing: border-box; margin: 0;
+    padding: 12px 14px; border: none; outline: none; resize: none;
+    background: #fff; color: #1a1a1a;
+    font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    white-space: pre; overflow: auto;
+  }
+
+  /* 视频预览卡片 */
+  .pv-vidarea {
+    flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+    background: #000; overflow: hidden;
+  }
+  .pv-vidarea video { width: 100%; height: 100%; object-fit: contain; }
+
+  /* 图片预览卡片 */
+  .pv-imgarea {
+    flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+    background: #fff; overflow: hidden; touch-action: none;
+  }
+  .pv-imgarea img {
+    max-width: 100%; max-height: 100%;
+    transform-origin: 0 0; will-change: transform;
+    user-select: none; -webkit-user-select: none; -webkit-user-drag: none;
+  }
+  .pv-imgarea img.anim { transition: transform .25s ease; }
+
+  /* 图片类封面占位（缩略图失败）用 🖼️，覆盖视频的 🎬 */
+  .pv-vitem.img.noimg::before { content: "🖼️"; }
+  .pv-vlist {
+    flex: none; display: flex; gap: 8px; overflow-x: auto;
+    background: #fff; border-top: 1px solid #ececec; padding: 8px 10px;
+  }
+  .pv-vitem {
+    flex: none; width: 110px; box-sizing: border-box; padding: 3px;
+    background: #f6f7f9; border: 2px solid transparent; border-radius: 8px;
+    cursor: pointer;
+  }
+  .pv-vitem.cur { border-color: #1a73e8; background: #e8f0fe; }
+  .pv-vitem img {
+    display: block; width: 100%; height: 62px; object-fit: cover;
+    border-radius: 6px; background: #000;
+  }
+  .pv-vitem.noimg::before {
+    content: "🎬"; display: block; height: 62px; line-height: 62px;
+    text-align: center; font-size: 24px; border-radius: 6px; background: #000;
+  }
+  .pv-vname {
+    display: block; font-size: 11px; color: #1a1a1a; padding: 4px 2px 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .pv-vitem.cur .pv-vname { color: #1a73e8; font-weight: 600; }
+  .pv-vsize { display: block; font-size: 10px; color: #9aa0a6; padding: 1px 2px 2px; }
+  .pv-vempty, .pv-vload {
+    flex: none; width: 100%; padding: 12px 14px; font-size: 12px;
+    color: #9aa0a6; text-align: center;
+  }
+  .pv-retry {
+    display: block; margin: 8px auto 0; padding: 4px 16px; font-size: 12px;
+    border-radius: 14px; border: 1px solid #cfd8ea; background: #fff; color: #1a73e8;
+  }
+  .pv-ops button {
+    flex: 1; padding: 7px 0; font-size: 13px; border-radius: 8px; cursor: pointer;
+    border: 1px solid #dcdfe4; background: #f5f6f8; color: #333;
+  }
+  .pv-ops button.on { background: #e8f0fe; border-color: #1a73e8; color: #1a73e8; }
+  .pv-pre {
+    position: relative; flex: 1; min-height: 0; margin: 0; overflow: auto;
+    padding: 10px 14px 10px 0; background: #fff; color: #1a1a1a;
+    font-size: 13px; line-height: 1.5; white-space: pre; word-break: normal;
+  }
+  .pv-line { display: block; min-height: 1.5em; padding-left: 56px; min-width: max-content; }
+  .pv-pre.wrap .pv-line { min-width: 0; }
+  .pv-line .ln {
+    position: sticky; left: 0; display: inline-block; width: 42px; margin-left: -56px; margin-right: 8px;
+    text-align: right; color: #9aa0a6; font-size: 12px; line-height: inherit;
+    background: #fff; border-right: 1px solid #ececec; padding-right: 6px;
+    user-select: none; -webkit-user-select: none;
+  }
+  mark.pv-hit { background: #ffe58f; color: inherit; padding: 0; }
+  mark.pv-hit.cur { background: #ff9800; color: #fff; }
+  .pv-search { display: none; gap: 6px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #ececec; }
+  .pv-search.show { display: flex; }
+  .pv-search input { flex: 1; min-width: 0; border: 1px solid #dcdfe4; border-radius: 8px; padding: 6px 10px; font-size: 13px; outline: none; }
+  .pv-search input:focus { border-color: #1a73e8; }
+  .pv-scount { font-size: 12px; color: #666; white-space: nowrap; }
+  .pv-search button { padding: 5px 9px; font-size: 12px; border-radius: 8px; border: 1px solid #dcdfe4; background: #f5f6f8; color: #333; cursor: pointer; }
+  .preview-msg { color: #fff; text-align: center; padding: 20px; font-size: 15px; }

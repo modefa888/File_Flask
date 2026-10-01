@@ -1,0 +1,29 @@
+  /* ===== 图标（网格）视图 ===== */
+  .list.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px 8px; align-items: start; }
+  .list.grid .item { flex-direction: column; align-items: stretch; gap: 6px; padding: 6px; margin-bottom: 0; position: relative; }
+  .list.grid .thumb { width: 100%; height: 96px; flex: 0 0 auto; border-radius: 10px; font-size: 40px; }
+  .list.grid .meta { min-width: 0; }
+  .list.grid .meta .name { font-size: 13px; text-align: center; }
+  .list.grid .meta .sub { display: none; }
+  .list.grid .gtime {
+    display: block; font-size: 11px; color: var(--sub); text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;
+  }
+  .list.grid .cnt { position: absolute; top: 4px; left: 4px; z-index: 1; margin: 0; }
+  .list.grid .more { position: absolute; top: 2px; right: 2px; width: 28px; height: 28px; font-size: 18px; background: rgba(255,255,255,.85); border-radius: 6px; }
+  .list.grid .sel-check { position: absolute; top: 4px; left: 4px; z-index: 2; }
+  .list.grid .empty { grid-column: 1 / -1; }
+  .sel-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 36;
+    background: #fff; border-top: 1px solid var(--border);
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    display: none; gap: 6px;
+  }
+  .sel-bar.show { display: flex; }
+  .sel-bar button {
+    flex: 1; border: 1px solid var(--border); background: #fff; color: var(--text);
+    border-radius: 9px; padding: 8px 0; font-size: 13px; cursor: pointer;
+  }
+  .sel-bar button:active { background: #f1f5f9; }
+  .sel-bar button.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .sel-bar button.danger { color: #e11d48; border-color: rgba(225,29,72,.35); }

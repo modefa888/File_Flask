@@ -1,0 +1,5 @@
+  /* ===== 回收站页 ===== */
+  .trash-page { z-index: 56; }
+  #trTitle { flex: 1; min-width: 0; text-align: left; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #ahTitle, #idxTitle { flex: 1; min-width: 0; text-align: left; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #trClear, #ahClear, #idxRebuild { width: auto; padding: 0 14px; font-size: 12px; font-weight: 600; white-space: nowrap; border-radius: 19px; }

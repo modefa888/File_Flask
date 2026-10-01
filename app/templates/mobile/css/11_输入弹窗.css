@@ -1,0 +1,22 @@
+  /* ===== 输入弹窗 ===== */
+  .dialog {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 70; display: none;
+    align-items: center; justify-content: center; padding: 24px;
+  }
+  .dialog.show { display: flex; }
+  .dialog-card {
+    background: var(--card); border-radius: 16px; width: 100%; max-width: 340px; padding: 20px;
+  }
+  .dialog-card h3 { margin: 0 0 14px; font-size: 17px; }
+  .dialog-card input {
+    width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+    font-size: 15px; outline: none;
+  }
+  .dialog-card input:focus { border-color: var(--primary); }
+  .dialog-actions { display: flex; gap: 10px; margin-top: 18px; }
+  .dialog-actions button {
+    flex: 1; border: none; border-radius: 10px; padding: 12px; font-size: 15px; cursor: pointer;
+  }
+  .btn-cancel { background: #eef1f5; color: var(--text); }
+  .btn-ok { background: var(--primary); color: #fff; }
+  .btn-ok:active { opacity: .85; }

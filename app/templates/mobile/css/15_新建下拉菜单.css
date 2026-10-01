@@ -1,0 +1,16 @@
+  /* ===== 新建下拉菜单 ===== */
+  .add-menu-mask { position: fixed; inset: 0; z-index: 38; display: none; }
+  .add-menu-mask.show { display: block; }
+  .add-menu {
+    position: fixed; top: calc(64px + var(--safe-top)); right: 8px; z-index: 39;
+    background: #fff; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
+    padding: 6px; min-width: 150px; display: none;
+  }
+  .add-menu.show { display: block; }
+  .add-item {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    border: none; background: transparent; padding: 11px 12px;
+    font-size: 14px; color: var(--text); border-radius: 8px; cursor: pointer; text-align: left;
+  }
+  .add-item:disabled { opacity: .4; }
+  .add-item:active { background: #f1f5f9; }

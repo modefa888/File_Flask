@@ -1,0 +1,246 @@
+  /* ===== 毛玻璃抽屉：歌词 + 进度 + 控制都收进这块玻璃里 ===== */
+  .pp-sheet {
+    flex: 0 1 auto; max-height: 54vh; min-height: 0;
+    display: flex; flex-direction: column;
+    margin-top: 6px; padding: 14px 16px 16px; border-radius: 26px;
+    background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.07));
+    -webkit-backdrop-filter: blur(26px) saturate(175%);
+    backdrop-filter: blur(26px) saturate(175%);
+    border: 1px solid rgba(255,255,255,.17);
+    box-shadow: 0 -10px 42px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.26);
+    animation: sheetUp .42s cubic-bezier(.22,.61,.36,1) both;
+  }
+  .pp-sheet::before {   /* 顶部把手：抽屉感 */
+    content: ""; display: block; width: 40px; height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,.3); margin: -4px auto 10px; flex: none;
+  }
+  @keyframes sheetUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* 进度条：玻璃轨道 + 高亮已播放段（--p 由 JS 更新） */
+  .pp-progress {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    margin-top: 12px; font-size: 11px; color: rgba(255,255,255,.78);
+    font-variant-numeric: tabular-nums;
+  }
+  .pp-seek {
+    flex: 1; -webkit-appearance: none; appearance: none; height: 5px; border-radius: 4px;
+    outline: none; cursor: pointer; border: none;
+    background: linear-gradient(90deg,
+      rgba(255,255,255,.95) 0 calc(var(--p, 0) * 100%),
+      rgba(255,255,255,.22) calc(var(--p, 0) * 100%) 100%);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.22);
+  }
+  .pp-seek::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: #fff; border: 2px solid rgba(255,255,255,.5);
+    box-shadow: 0 2px 8px rgba(0,0,0,.45);
+  }
+  .pp-seek::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%; background: #fff;
+    border: 2px solid rgba(255,255,255,.5);
+  }
+
+  /* 控制区：两侧玻璃圆钮 + 中间白色主按钮 */
+  .pp-controls {
+    position: relative;   /* 音量悬浮条的定位基准 */
+    flex: none; display: flex; align-items: center; justify-content: space-between;
+    gap: 4px; margin-top: 14px; padding: 0 2px;
+  }
+
+  /* 极窄屏：再收一档，保证 6 个按钮始终一行放得下 */
+  @media (max-width: 345px) {
+    .pp-controls { gap: 2px; padding: 0; }
+    .pp-controls button:not(.pp-play-big) { width: 36px; height: 36px; }
+    .pp-controls button.pp-play-big { width: 52px; height: 52px; }
+    .pp-controls button svg { width: 18px; height: 18px; }
+    .pp-controls button.pp-play-big svg { width: 22px; height: 22px; }
+  }
+  .pp-controls button {
+    border: 1px solid rgba(255,255,255,.15); color: #fff; cursor: pointer;
+    background: rgba(255,255,255,.1);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    backdrop-filter: blur(12px) saturate(160%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 6px 16px rgba(0,0,0,.2);
+    display: flex; align-items: center; justify-content: center; padding: 0;
+    transition: transform .18s ease, background .18s ease;
+  }
+  .pp-controls button:not(.pp-play-big) { width: 42px; height: 42px; border-radius: 50%; flex: none; font-size: 22px; }
+  .pp-controls button:active { transform: scale(.9); background: rgba(255,255,255,.26); }
+
+  /* 主按钮：白色实心（选择器需盖过 .pp-controls button，否则会退回玻璃底色） */
+  .pp-controls button.pp-play-big {
+    width: 60px; height: 60px; border-radius: 50%; flex: none; padding: 0; font-size: 26px;
+    color: #17171f; border: none;
+    background: linear-gradient(180deg, #ffffff, #e6e6ef);
+    box-shadow: 0 12px 30px rgba(0,0,0,.42), inset 0 1px 0 #fff;
+  }
+  .pp-controls button.pp-play-big:active {
+    background: linear-gradient(180deg, #f1f1f7, #d9d9e4);
+  }
+
+  /* 音量工具：垂直悬浮玻璃条（挂在喇叭按钮正上方，不占布局） */
+  .pp-vol {
+
+    /* 抬到进度条上方，避免遮住左侧时间 */
+    position: absolute; left: -2px; bottom: calc(100% + 36px); z-index: 5;
+    display: none; flex-direction: column; align-items: center; gap: 8px;
+    padding: 12px 8px 10px; border-radius: 20px;
+    background: rgba(28,26,42,.42);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: blur(18px) saturate(170%);
+    border: 1px solid rgba(255,255,255,.16);
+    box-shadow: 0 14px 34px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.22);
+    transform-origin: 22px 100%;
+    animation: volPop .22s cubic-bezier(.22,.61,.36,1) both;
+  }
+  .pp-vol.show { display: flex; }
+  @keyframes volPop {
+    from { opacity: 0; transform: translateY(8px) scale(.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .pp-vol-slot { position: relative; width: 34px; height: 132px; }
+  .pp-vol-range {
+    position: absolute; left: 50%; top: 50%; width: 132px; height: 5px; margin: 0;
+    transform: translate(-50%,-50%) rotate(-90deg);   /* 旋转成竖直滑杆：向上=变大 */
+    -webkit-appearance: none; appearance: none; border-radius: 3px;
+    outline: none; cursor: pointer; border: none;
+    background: linear-gradient(90deg,
+      rgba(255,255,255,.95) 0 calc(var(--v, 1) * 100%),
+      rgba(255,255,255,.22) calc(var(--v, 1) * 100%) 100%);
+  }
+  .pp-vol-range::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.45);
+  }
+  .pp-vol-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: none; }
+  .pp-vol-val {
+    flex: none; font-size: 11px; color: rgba(255,255,255,.85);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* SVG 图标尺寸 */
+  .pp-collapse svg, .pp-list-btn svg { width: 20px; height: 20px; }
+  .pp-controls button svg { width: 20px; height: 20px; }
+  .pp-controls button.pp-play-big svg { width: 26px; height: 26px; }
+  .pp-badge svg { width: 20px; height: 20px; }
+  .mp-btn svg { width: 18px; height: 18px; }
+  .pp-pl-close svg { width: 14px; height: 14px; }
+
+  /* 播放列表：右侧悬浮抽屉（半透明毛玻璃，浮在画面上，三个 tab 共用） */
+  .pp-pl-mask {
+    position: fixed; inset: 0; z-index: 96; background: rgba(0,0,0,.24);
+    opacity: 0; pointer-events: none; transition: opacity .25s;
+  }
+  .pp-pl-mask.show { opacity: 1; pointer-events: auto; }
+  .pp-playlist {
+
+    /* 四周留出间距 + 投影 + 描边：做成真正“悬浮”在画面上的卡片 */
+    position: fixed; top: 8px; right: 8px; bottom: calc(8px + var(--safe-bottom)); z-index: 97;
+    width: min(78vw, 320px); max-height: none; overflow: hidden;   /* 整块不滚动：只有中间列表滚动 */
+    display: flex; flex-direction: column;
+
+    /* 更透明、模糊更强（.92 → .55、blur 18 → 30），让背后画面明显透出来 */
+    background: rgba(20,18,38,.55);
+    -webkit-backdrop-filter: blur(30px) saturate(170%);
+    backdrop-filter: blur(30px) saturate(170%);
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 18px; padding: 12px 8px 14px;
+    box-shadow: 0 18px 44px rgba(0,0,0,.45);
+    transform: translateX(116%); transition: transform .3s cubic-bezier(.22,.61,.36,1);
+    scrollbar-width: none;
+  }
+  .pp-playlist::-webkit-scrollbar { display: none; }
+  .pp-playlist.show { transform: translateX(0); }
+
+  /* 顶部标签行固定：列表滚动时不会跟着消失 */
+  .pp-pl-head {
+    flex: none;
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px 10px;
+  }
+  .pp-pl-tabs { flex: 1; display: flex; gap: 4px; min-width: 0; }
+  .pp-tab {
+    flex: 1; border: none; background: transparent; color: rgba(255,255,255,.55);
+    padding: 6px 2px; border-radius: 16px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  .pp-tab .t-cnt { font-size: 10px; opacity: .75; margin-left: 2px; }
+  .pp-tab.active { background: rgba(255,255,255,.16); color: #fff; font-weight: 600; }
+  .pp-pl-head .pp-pl-close {
+    border: none; background: rgba(255,255,255,.12); color: #fff;
+    width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .pp-pl-head .pp-pl-close:active { background: rgba(255,255,255,.25); }
+
+  /* 中间列表是唯一滚动区（顶部标签行、底部按钮都固定不动） */
+  #ppPlItems {
+    flex: 1 1 auto; min-height: 0;
+    overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    padding-bottom: 58px;      /* 给悬浮按钮留出空间，列表末尾不会被永久遮住 */
+    scrollbar-width: none;
+  }
+  #ppPlItems::-webkit-scrollbar { display: none; width: 0; }
+
+  /* 底部按钮：固定在面板底部并悬浮在列表之上 */
+  .pp-pl-foot {
+    position: absolute; left: 10px; right: 10px;
+    bottom: 10px;      /* 面板本身已避开安全区，这里不再重复叠加 */
+    display: flex; gap: 8px; pointer-events: none;   /* 空白区域仍可点到下面的列表 */
+  }
+  .pp-pl-clear {
+    display: block; width: 100%; margin: 0; flex: 1 1 auto;
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.14); color: rgba(255,255,255,.92);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    backdrop-filter: blur(12px) saturate(160%);
+    box-shadow: 0 8px 22px rgba(0,0,0,.38);
+    font-size: 13px; padding: 11px 0; border-radius: 14px; cursor: pointer;
+    pointer-events: auto;
+  }
+  .pp-pl-clear:active { background: rgba(255,255,255,.3); }
+  .pl-empty { padding: 26px 12px; text-align: center; opacity: .5; font-size: 13px; }
+  .pl-group {
+    padding: 10px 12px 4px; font-size: 11px; color: rgba(255,255,255,.45);
+    border-top: 1px solid rgba(255,255,255,.08); margin-top: 6px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .pl-group:first-child { border-top: none; margin-top: 0; }
+  .pl-fav {
+    border: none; background: transparent; color: rgba(255,255,255,.3); padding: 0;
+    width: 30px; height: 30px; border-radius: 50%; cursor: pointer; flex: none;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pl-fav svg { width: 16px; height: 16px; }
+  .pl-fav.on { color: #ff5f8f; }
+  .pp-fav-btn svg { width: 19px; height: 19px; }
+  .pp-fav-btn.on { color: #ff5f8f; background: rgba(255,95,143,.24); border-color: rgba(255,95,143,.5); }
+  .pp-playlist .pl-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
+    font-size: 14px; cursor: pointer;
+  }
+  .pp-playlist .pl-item:active { background: rgba(255,255,255,.12); }
+  .pp-playlist .pl-item.cur { background: rgba(255,255,255,.2); font-weight: 600; }
+  .pp-playlist .pl-item .pl-ico { opacity: .8; }
+  .pp-playlist .pl-item .pl-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* 歌词：在抽屉内滚动，当前句高亮成玻璃胶囊 */
+  .pp-lyrics {
+    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: stretch;
+    overflow-y: auto; margin-top: 2px; padding: 4px 0; position: relative;
+    -webkit-mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent);
+    mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent);
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;              /* Firefox 隐藏滚动条 */
+  }
+  .pp-lyrics::-webkit-scrollbar { display: none; width: 0; }   /* Chrome/Safari 隐藏滚动条 */
+  .pp-line {
+    text-align: center; font-size: 14.5px; line-height: 1.95; opacity: .5;
+    padding: 3px 10px; border-radius: 12px;
+    transition: opacity .25s, background .25s;
+  }
+  .pp-line.cur {
+    opacity: 1; font-weight: 600; color: #fff;
+    background: rgba(255,255,255,.1);
+    text-shadow: 0 0 14px rgba(255,255,255,.45);
+  }
+  .pp-lyr-empty { margin: auto; opacity: .6; font-size: 14px; text-align: center; }

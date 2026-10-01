@@ -1,0 +1,116 @@
+  /* ===== 全局搜索页 ===== */
+  .search-page {
+    position: fixed; inset: 0; z-index: 45; background: var(--bg);
+    display: none; flex-direction: column;
+  }
+  .search-page.show { display: flex; }
+  .sp-head {
+    background: var(--primary); color: #fff;
+    padding: calc(10px + var(--safe-top)) 12px 10px;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 1px 6px rgba(0,0,0,.12);
+  }
+  .sp-head button {
+    border: none; background: rgba(255,255,255,.18); color: #fff;
+    width: 38px; height: 38px; border-radius: 10px; font-size: 17px; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .sp-head button:active { background: rgba(255,255,255,.32); }
+  .sp-head input {
+    flex: 1; min-width: 0; border: none; outline: none; border-radius: 20px;
+    padding: 9px 14px; font-size: 16px; background: #fff; color: var(--text);
+  }
+  .sp-tools {
+    position: relative;   /* 搜索历史下拉面板的定位基准 */
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: var(--card); border-bottom: 1px solid var(--border);
+    flex-wrap: nowrap;
+  }
+  .sp-chip {
+    border: 1px solid var(--border); background: #fff; color: var(--sub);
+    border-radius: 14px; padding: 4px 12px; font-size: 12px; cursor: pointer; flex: 0 0 auto;
+  }
+  .sp-chip.active {
+    background: rgba(31,111,235,.12); border-color: rgba(31,111,235,.4);
+    color: var(--primary); font-weight: 600;
+  }
+  .sp-status {
+    font-size: 12px; color: var(--sub); margin-left: auto;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* 搜索历史：下拉面板（表头固定 + 列表滚动，全部列出） */
+  .sp-histwrap {
+    position: absolute; left: 8px; right: 8px; top: calc(100% + 6px); z-index: 30;
+    display: flex; flex-direction: column;
+    border-radius: 14px; overflow: hidden;   /* 圆角裁切内部滚动区 */
+    background: #fff; border: 1px solid var(--border);
+    box-shadow: 0 16px 36px rgba(15,23,42,.18);
+    max-height: 62vh;
+  }
+  .sp-histwrap.hidden { display: none; }
+  .sp-hist-head {
+    flex: none; display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px 8px; font-size: 12px; color: var(--sub);
+    border-bottom: 1px solid #eef2f7;
+  }
+
+  /* 列表是唯一的滚动区，滚动条按平台能力显示；另加底部渐隐箭头做兜底提示 */
+  .sp-hist-list {
+    flex: 1 1 auto; min-height: 0;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 6px 4px 8px 8px;
+    overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+    scrollbar-width: thin;                                  /* Firefox */
+    scrollbar-color: rgba(100,116,139,.5) transparent;
+  }
+  .sp-hist-list::-webkit-scrollbar { width: 6px; }
+  .sp-hist-list::-webkit-scrollbar-track { background: transparent; }
+  .sp-hist-list::-webkit-scrollbar-thumb {
+    background: rgba(100,116,139,.5); border-radius: 3px;
+  }
+
+  /* 还有更多时：底部渐隐 + 向下箭头（不依赖平台滚动条） */
+  .sp-histwrap.has-more::after {
+    content: "⌄"; position: absolute; left: 0; right: 0; bottom: 0; height: 26px;
+    display: flex; align-items: flex-end; justify-content: center; padding-bottom: 1px;
+    font-size: 14px; color: #94a3b8;
+    background: linear-gradient(rgba(255,255,255,0), #fff 76%);
+    pointer-events: none;
+  }
+  .sp-hist-clear { color: #e05656; cursor: pointer; padding: 2px 6px; border-radius: 8px; }
+  .sp-hist-clear:active { background: #fee2e2; }
+  .sp-hist-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 8px; border-radius: 10px; cursor: pointer;
+  }
+  .sp-hist-item:active { background: #f1f5f9; }
+  .sp-hist-ico {
+    flex: none; width: 30px; height: 30px; border-radius: 9px; font-size: 14px;
+    background: #f1f5f9; display: flex; align-items: center; justify-content: center;
+  }
+  .sp-hist-q {
+    flex: 1 1 auto; min-width: 0; font-size: 14px; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sp-hist-where {
+    flex: 0 1 auto; max-width: 42%; font-size: 12px; color: var(--sub);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sp-hist-del {
+    flex: none; width: 24px; height: 24px; border-radius: 50%; border: none; padding: 0;
+    background: transparent; color: var(--sub); font-size: 12px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .sp-hist-del:active { background: #fee2e2; color: #e05656; }
+  .sp-hist-empty { padding: 16px 8px; text-align: center; font-size: 13px; color: var(--sub); }
+  .sp-histbtn {
+    flex: 0 0 auto;
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 1px solid var(--border); background: #fff; font-size: 14px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .sp-histbtn:active { background: #f1f5f9; }
+  .sp-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .sp-results { padding: 8px; }
+  .sp-note { text-align: center; color: var(--sub); font-size: 12px; padding: 10px; }

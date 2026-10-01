@@ -1,0 +1,53 @@
+  /* ===== 压缩包查看页 ===== */
+  .zip-page { z-index: 55; }
+  .zip-page #zpTitle { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: #fff; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .zip-page #zpExtract { width: auto; padding: 0 10px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .zp-crumb {
+    background: var(--primary); color: rgba(255,255,255,.8); padding: 0 12px 9px;
+    font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
+  }
+  .zp-crumb button {
+    border: none; background: transparent; color: #fff; font-size: 12px; padding: 2px 3px;
+    max-width: 40vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .zp-crumb span { opacity: .6; }
+  .zp-body { padding: 10px 10px calc(14px + var(--safe-bottom)); }
+  .zp-meta { font-size: 11px; color: var(--sub); padding: 0 4px 8px; }
+  .zp-item {
+    display: flex; align-items: center; gap: 10px; padding: 11px 10px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    margin-bottom: 6px; cursor: pointer;
+  }
+  .zp-item:active { background: #eef2f7; }
+  .zp-item .zi { flex: none; width: 24px; text-align: center; font-size: 17px; }
+  .zp-item .zn { flex: 1; min-width: 0; font-size: 14px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .zp-item .zs { flex: none; font-size: 11px; color: var(--sub); }
+  .zp-imgwrap { display: flex; align-items: center; justify-content: center; height: 100%; }
+  .zp-imgwrap img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+  /* 压缩包内文件信息卡片 */
+  .pv-card.zp-fcard { height: auto; max-height: 84vh; }
+  .zp-fbody { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: 10px 14px 0; }
+  .zp-finfo {
+    background: #f7f9fc; border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; font-size: 13px; color: var(--text);
+    display: grid; gap: 6px; margin: 0 0 10px;
+  }
+  .zp-finfo-toggle { display: flex; justify-content: space-between; align-items: center; cursor: pointer; color: var(--sub); font-size: 12px; font-weight: 600; user-select: none; }
+  .zp-finfo-rows { display: grid; gap: 6px; }
+  .zp-finfo.folded .zp-finfo-rows { display: none; }
+  .zp-finfo span { display: inline-block; min-width: 52px; color: var(--sub); margin-right: 8px; }
+  .zp-finfo > div { word-break: break-all; }
+  .zp-fprev { display: flex; justify-content: center; margin-bottom: 10px; }
+  .zp-fprev img { max-width: 100%; max-height: 46vh; object-fit: contain; border-radius: 8px; }
+  .zp-ftext {
+    margin: 0 0 10px; background: #f7f9fc; border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px; font-size: 12px; white-space: pre-wrap; word-break: break-all;
+    max-height: 40vh; overflow: auto;
+  }
+  .zp-fops { display: flex; gap: 8px; padding: 10px 14px 14px; }
+  .zp-fops button {
+    flex: 1; border: 1px solid var(--border); background: #fff; color: var(--text);
+    border-radius: 10px; padding: 11px 0; font-size: 14px; cursor: pointer;
+  }
+  .zp-fops button:active { background: #f0f3f8; }

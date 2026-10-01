@@ -1,0 +1,26 @@
+  /* ===== 文件信息弹层 ===== */
+  .props-mask {
+    position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.4);
+    display: none; align-items: flex-end; justify-content: center;
+  }
+  .props-mask.show { display: flex; }
+  .props-card {
+    width: 100%; max-width: 480px; max-height: 78vh; overflow-y: auto;
+    background: #fff; border-radius: 16px 16px 0 0; padding: 14px 14px 18px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .props-title { font-size: 15px; font-weight: 700; margin-bottom: 8px; color: var(--text);
+    display: flex; align-items: center; gap: 8px; }
+  .prop-row {
+    display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border);
+    font-size: 13px; align-items: baseline;
+  }
+  .prop-label { color: var(--sub); flex: 0 0 62px; }
+  .prop-value { color: var(--text); word-break: break-all; flex: 1; }
+  .prop-value.copyable { color: var(--primary); }
+  .props-close {
+    display: block; width: 100%; margin-top: 12px; padding: 9px 0;
+    border: none; border-radius: 10px; background: #eef2f7; color: var(--sub);
+    font-size: 14px; cursor: pointer;
+  }
+  .props-close:active { background: #e2e8f0; }

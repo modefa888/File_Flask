@@ -1,0 +1,41 @@
+  /* ===== 索引页 ===== */
+  .idx-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .idx-cell { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+  .idx-cell b { font-size: 15px; color: var(--text); }
+  .idx-cell span { font-size: 11px; color: var(--sub); }
+  .idx-status { font-size: 12px; border-radius: 10px; padding: 9px 12px; margin-bottom: 8px; }
+  .idx-status.ok { background: #ecfdf5; color: #15803d; border: 1px solid #bbf7d0; }
+  .idx-status.scan { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .idx-status.err { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+  .idx-progress { height: 6px; border-radius: 3px; background: #e2e8f0; overflow: hidden; margin-bottom: 10px; }
+  .idx-progress-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #8b5cf6); transition: width .5s ease; }
+  .idx-cancel { border: none; background: #fef2f2; color: #b91c1c; border-radius: 8px; padding: 7px 14px; font-size: 12px; font-weight: 600; margin-bottom: 12px; }
+  .idx-sec { font-size: 12px; font-weight: 700; color: var(--sub); margin: 14px 0 6px; }
+  .idx-rank { flex: none; width: 20px; font-size: 12px; font-weight: 700; color: var(--sub); }
+  .idx-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .idx-sub { flex: none; font-size: 11px; color: var(--sub); }
+  .idx-size { flex: none; font-size: 12px; font-weight: 600; color: var(--text); margin-left: 8px; }
+  .idx-ext { flex: none; background: #eef2ff; color: #4338ca; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+  .idx-trow { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 5px; }
+  #ahList .tr-item { cursor: pointer; }
+  #ahList .tr-item:active { background: #f1f5f9; }
+
+  /* 跳转高亮：目标条目闪蓝光渐隐 */
+
+  /* 跳转定位高亮：持久显示，直到用户点击任意处消失 */
+  .item.item-pinned {
+    background: #dbeafe; box-shadow: 0 0 0 2px #3b82f6 inset;
+    transition: background .2s ease, box-shadow .2s ease;
+  }
+  .tr-item { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; }
+  .tr-row { display: flex; align-items: center; gap: 8px; }
+  .tr-ico { flex: none; font-size: 17px; }
+  .tr-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tr-acts { flex: none; display: flex; gap: 6px; }
+  .tr-acts button { border: none; border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .tr-acts .tr-restore { background: var(--primary); color: #fff; }
+  .tr-acts .tr-purge { background: rgba(225,29,72,.08); color: #e11d48; border: 1px solid rgba(225,29,72,.25); }
+  .tr-meta { margin-top: 5px; font-size: 11px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tr-sub { margin-top: 2px; font-size: 11px; color: var(--sub); }
+  .tr-item.gone { opacity: .55; }
+  .tr-empty { text-align: center; color: var(--sub); padding: 48px 0; font-size: 13px; line-height: 1.8; }

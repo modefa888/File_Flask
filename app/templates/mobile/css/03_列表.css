@@ -1,0 +1,36 @@
+  /* ===== 列表 ===== */
+  .list { padding: 8px; }
+  .item {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin-bottom: 8px;
+  }
+  .item:active { background: #f0f3f8; }
+  .thumb {
+    width: 46px; height: 46px; border-radius: 10px; flex: 0 0 auto;
+    background: #eef1f5; display: flex; align-items: center; justify-content: center;
+    font-size: 24px; overflow: hidden;
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+  /* 彩色扩展名徽标（js/md/json 等代码与文本格式） */
+  .ext-badge {
+    width: 100%; height: 100%; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800; letter-spacing: .5px; user-select: none;
+  }
+  .list.grid .ext-badge { font-size: 26px; border-radius: 10px; }
+  .meta { flex: 1; min-width: 0; }
+  .meta .name { font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta .sub { font-size: 12px; color: var(--sub); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cnt {
+    flex: 0 0 auto; font-size: 11px; color: var(--sub); background: #f1f4f8;
+    border: 1px solid var(--border); border-radius: 8px; padding: 3px 7px; white-space: nowrap;
+  }
+  .gtime { display: none; }
+  .name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .name-row .name { flex: 1; min-width: 0; }
+  .more {
+    border: none; background: transparent; color: var(--sub); font-size: 22px;
+    width: 36px; height: 36px; border-radius: 8px; cursor: pointer; flex: 0 0 auto;
+  }
+  .more:active { background: #eef1f5; }

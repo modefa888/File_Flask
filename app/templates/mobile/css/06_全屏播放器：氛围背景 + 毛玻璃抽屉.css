@@ -1,0 +1,92 @@
+  /* ===== 全屏播放器：氛围背景 + 毛玻璃抽屉 ===== */
+  .player-page {
+    position: fixed; inset: 0; z-index: 96; display: none; flex-direction: column;
+    overflow: hidden;
+    padding: calc(14px + var(--safe-top)) 16px calc(14px + var(--safe-bottom));
+    color: #fff; background: linear-gradient(165deg, #2b5876, #4e4376);   /* JS 会按曲目覆盖 */
+    transition: opacity .25s ease;
+  }
+  .player-page.show { display: flex; }
+
+  /* 氛围层：模糊放大的封面，让上层的毛玻璃有内容可透 */
+  .pp-bg {
+    position: absolute; inset: -14%; z-index: 0; pointer-events: none;
+    background: center/cover no-repeat;
+    filter: blur(40px) saturate(155%) brightness(.85);
+    transform: scale(1.15); opacity: 0; transition: opacity .6s ease;
+  }
+  .pp-bg.has-cover { opacity: .9; }
+
+  /* 顶部提亮 + 底部压暗，保证白字和玻璃面板的对比度 */
+  .player-page::after {
+    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(130% 60% at 50% 0%, rgba(255,255,255,.12), transparent 62%),
+      linear-gradient(180deg, rgba(0,0,0,.30), rgba(0,0,0,.06) 34%, rgba(0,0,0,.46));
+  }
+  .pp-top, .pp-disc-wrap, .pp-sheet { position: relative; z-index: 1; }
+  .pp-top { display: flex; align-items: center; gap: 10px; }
+
+  /* 顶部圆形按钮：毛玻璃胶囊 */
+  .pp-collapse, .pp-list-btn, .pp-fav-btn {
+    border: 1px solid rgba(255,255,255,.18); color: #fff; cursor: pointer;
+    background: rgba(255,255,255,.13);
+    -webkit-backdrop-filter: blur(16px) saturate(170%);
+    backdrop-filter: blur(16px) saturate(170%);
+    box-shadow: 0 6px 18px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.24);
+    display: flex; align-items: center; justify-content: center; flex: none;
+    transition: transform .18s ease, background .18s ease;
+  }
+  .pp-collapse, .pp-list-btn { width: 40px; height: 40px; border-radius: 50%; font-size: 18px; }
+  .pp-fav-btn { width: 40px; height: 40px; border-radius: 50%; }
+  .pp-collapse:active, .pp-list-btn:active, .pp-fav-btn:active { transform: scale(.93); background: rgba(255,255,255,.28); }
+  .pp-title-wrap { flex: 1; min-width: 0; text-align: center; }
+  .pp-title-wrap::before {
+    content: "NOW PLAYING"; display: block; margin-bottom: 3px;
+    font-size: 9px; font-weight: 600; letter-spacing: 2.4px; opacity: .55;
+  }
+  .pp-title-wrap .pp-name { font-size: 16px; letter-spacing: .3px; text-shadow: 0 1px 10px rgba(0,0,0,.35); }
+  .pp-title-wrap .pp-artist { margin-top: 2px; font-size: 11px; color: rgba(255,255,255,.72); }
+
+  /* 唱片：居中展示，背后一层柔光让封面从背景里浮起来 */
+  .pp-disc-wrap {
+    flex: 1 1 auto; min-height: 0; position: relative;
+    display: flex; align-items: center; justify-content: center; padding: 6px 0 10px;
+  }
+  .pp-disc-wrap::before {
+    content: ""; position: absolute; border-radius: 50%;
+    width: min(66vw, 290px); height: min(66vw, 290px);
+    background: radial-gradient(circle, rgba(255,255,255,.26), rgba(255,255,255,0) 70%);
+    filter: blur(22px);
+  }
+  /* 喜欢：收进进度行右端，做成图标式（不再是漂浮圆钮），和「当前时间─时长」成为一条信息带
+     外框 32px 保留手指热区，视觉上只有一个心形；负外边距让它不撑高这一行 */
+  .pp-progress .pp-fav-btn {
+    flex: none; width: 32px; height: 32px; margin: -6px -2px -6px 0;
+    border: none; background: transparent; box-shadow: none;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    color: rgba(255,255,255,.62);
+  }
+  .pp-progress .pp-fav-btn svg { width: 20px; height: 20px; }
+  .pp-progress .pp-fav-btn:active { background: transparent; color: #fff; box-shadow: none; }
+  .pp-progress .pp-fav-btn.on { color: #ff6a97; background: transparent; }
+  .pp-disc {
+    width: min(56vw, 240px, 30vh); height: min(56vw, 240px, 30vh); border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 50%, rgba(255,255,255,.95) 0 18%, transparent 19%),
+      conic-gradient(from 0deg, #1f6feb, #7c3aed, #ec4899, #f59e0b, #1f6feb);
+    box-shadow:
+      0 22px 52px rgba(0,0,0,.45),
+      0 0 0 1px rgba(255,255,255,.18),
+      inset 0 0 0 6px rgba(255,255,255,.08),
+      inset 0 10px 26px rgba(255,255,255,.16);
+    display: flex; align-items: center; justify-content: center;
+    animation: discspin 9s linear infinite; position: relative;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .pp-disc.paused { animation-play-state: paused; }
+
+  /* 按下时提亮一下（用 filter 避免和旋转动画的 transform 打架） */
+  .pp-disc:active { filter: brightness(1.18); }
+  .pp-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pp-artist { font-size: 13px; opacity: .82; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

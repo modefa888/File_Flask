@@ -1,5 +1,11 @@
         // ========== 错误捕获（页面级） ==========
         window.addEventListener('error', (e) => {
+            // 忽略良性告警：pdf.js 等第三方组件触发的 ResizeObserver 循环通知，不影响功能
+            const msg = e.message || '';
+            if (msg.indexOf('ResizeObserver loop') !== -1) {
+                console.warn('[忽略良性告警]', msg);
+                return;
+            }
             const errDiv = document.createElement('div');
             errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc2626;color:white;padding:8px 16px;font-size:0.85rem;z-index:99999;text-align:center;';
             errDiv.textContent = 'JS 错误: ' + (e.message || '未知错误') + ' (' + (e.filename || '') + ':' + (e.lineno || '') + ')';

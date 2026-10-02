@@ -199,6 +199,7 @@
                                 您的浏览器不支持视频播放
                             </video>
                             <div class="video-seek-tip" style="position:absolute;bottom:92px;left:50%;transform:translate(-50%,8px);background:rgba(0,0,0,0.72);color:#fff;padding:8px 16px;border-radius:8px;font-size:0.85rem;font-weight:600;z-index:20;pointer-events:none;opacity:0;transition:opacity .2s ease,transform .2s ease;display:flex;align-items:center;gap:6px;white-space:nowrap;"></div>
+                            <button class="vp-panel-toggle" title="收起播放列表"><i class="bi bi-chevron-right"></i></button>
                             <div class="video-tip" style="position:absolute;bottom:72px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:#fff;padding:4px 10px;border-radius:6px;font-size:0.72rem;z-index:10;opacity:0;transition:opacity .3s ease;pointer-events:none;">
                                 <i class="bi bi-keyboard"></i> 空格 播放/暂停 &nbsp;·&nbsp; ← → 快退/快进 5s &nbsp;·&nbsp; M 静音 &nbsp;·&nbsp; F 全屏
                             </div>
@@ -251,6 +252,16 @@
                             posterVideo.addEventListener('playing', () => posterEl.classList.add('hide'));
                             posterVideo.addEventListener('canplay', () => posterEl.classList.add('hide'));
                             posterVideo.addEventListener('waiting', () => posterEl.classList.remove('hide'));
+                        }
+                        // 播放列表面板收起/展开（隐藏式透明按钮）
+                        const panelToggle = body.querySelector('.vp-panel-toggle');
+                        if (panelToggle) {
+                            panelToggle.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                const collapsed = body.classList.toggle('playlist-collapsed');
+                                panelToggle.querySelector('i').className = collapsed ? 'bi bi-chevron-left' : 'bi bi-chevron-right';
+                                panelToggle.title = collapsed ? '展开播放列表' : '收起播放列表';
+                            });
                         }
                         // 播放前 3 秒显示快捷键提示，之后自动淡出
                         const tipEl = body.querySelector('.video-tip');
@@ -1088,6 +1099,7 @@
                     return `<div class="vp-item${playing ? ' playing' : ''}" data-i="${i}" data-path="${_escapeHtml(p)}" title="${_escapeHtml(it.name)}">
                         <div class="vp-thumb-wrap">
                             <i class="bi bi-film vp-thumb-fallback"></i>
+                            <span class="vp-thumb-loading"></span>
                             <img class="vp-thumb" loading="lazy" alt="" data-thumb="/api/thumbnail?path=${encodeURIComponent(p)}">
                         </div>
                         <div class="vp-meta">
@@ -1108,9 +1120,12 @@
                 // 封面延迟加载：等主视频可播放后再请求 /api/thumbnail，
                 // 避免 ffmpeg 抽帧与视频流抢占磁盘 I/O 拖慢起播
                 const loadThumbs = () => listEl.querySelectorAll('img[data-thumb]').forEach(img => {
+                    const wrap = img.closest('.vp-thumb-wrap');
+                    const clearLoading = () => { const s = wrap && wrap.querySelector('.vp-thumb-loading'); if (s) s.remove(); };
+                    img.onload = clearLoading;                       // 封面就绪，停掉加载动画
+                    img.onerror = () => { clearLoading(); img.remove(); };  // 失败回落胶片图标
                     img.src = img.dataset.thumb;
                     img.removeAttribute('data-thumb');
-                    img.onerror = () => img.remove();
                 });
                 if (video) {
                     if (video.readyState >= 3) loadThumbs();

@@ -807,6 +807,36 @@
             text-overflow: ellipsis;
         }
 
+        /* ===== 播放列表面板收起/展开：右缘隐藏式透明按钮，平时不可见，悬停浮现 ===== */
+        .video-stage .vp-panel-toggle {
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 16px;
+            height: 72px;
+            border: none;
+            border-radius: 8px 0 0 8px;
+            background: rgba(255, 255, 255, .28);
+            color: rgba(255, 255, 255, .85);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            font-size: .8rem;
+            cursor: pointer;
+            opacity: .45;                        /* 半透明：常显但不过分抢眼 */
+            transition: opacity .25s ease, background .2s ease;
+            z-index: 15;
+        }
+        .video-stage .vp-panel-toggle:hover {
+            opacity: .95;
+            background: rgba(255, 255, 255, .38);
+        }
+        .preview-body.preview-video.playlist-collapsed .video-playlist {
+            display: none;                       /* 收起后视频区自动占满整行 */
+        }
+
         .video-playlist {
             flex: 0 0 280px;
             width: 280px;
@@ -913,6 +943,24 @@
             justify-content: center;
             color: #6b7280;
             font-size: 1rem;
+        }
+
+        /* 缩略图加载中的动态指示（等效加载 gif 的 CSS 旋转圈） */
+        .vp-thumb-loading {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            border: 2px solid rgba(255, 255, 255, .18);
+            border-top-color: #f59e0b;
+            border-radius: 50%;
+            animation: vpThumbSpin .8s linear infinite;
+            z-index: 2;
+        }
+        @keyframes vpThumbSpin {
+            to { transform: rotate(360deg); }
         }
 
         .vp-meta {

@@ -54,7 +54,9 @@
         function _renderThumb(thumbEl, src) {
             const icon = thumbEl.querySelector('.thumb-icon');
             if (icon) {
-                icon.innerHTML = `<img src="${src}" alt="" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover;border-radius:6px;" />`;
+                // 绝对定位铺满 .icon-thumb 取景框（span 本身只有图标大小，不能靠 100% 撑满）
+                icon.innerHTML = `<img src="${src}" alt="" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:6px;" />`;
+                icon.classList.add('has-thumb');
             }
             thumbEl.dataset.thumbDone = '1';
         }

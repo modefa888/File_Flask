@@ -135,15 +135,19 @@
             font-size: 0.7rem;
             color: #94a3b8;
             display: flex;
-            flex-direction: column;
-            gap: 2px;
-            width: 100%;
+            flex-direction: row;          /* 大小与时间合并为一行，节省纵向空间 */
+            justify-content: center;
             align-items: center;
+            gap: 6px;
+            width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
         }
 
         .icon-item .icon-meta .icon-size {
             color: #64748b;
             font-weight: 500;
+            flex-shrink: 0;
         }
 
         .icon-item .icon-meta .icon-mtime {
@@ -152,7 +156,9 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            max-width: 100%;
+            min-width: 0;
+            flex: 1 1 auto;
+            text-align: left;
         }
 
         /* 空的元信息行自动收起（部分文件夹没有大小统计，不保留空白行） */
@@ -165,11 +171,10 @@
             left: 7px;
             width: 15px;
             height: 15px;
-            opacity: 0;
+            opacity: 1;   /* 选择框常显，不再需要划过才出现 */
             transition: opacity 0.15s;
         }
 
-        .icon-item:hover .icon-check,
         .icon-item.selected .icon-check { opacity: 1; }
 
         .icon-item .icon-delete {
@@ -205,9 +210,5 @@
         }
 
         .icon-item.clickable .icon-name {
-            color: #2563eb;
-        }
-
-        .icon-item.clickable:hover .icon-name {
-            text-decoration: underline;
+            color: inherit;   /* 标题保持默认黑色，不用链接蓝 */
         }

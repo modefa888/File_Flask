@@ -25,6 +25,7 @@
                 document.getElementById('bottomFiles').textContent = f;
                 document.getElementById('bottomDirs').textContent = dirs;
                 document.getElementById('bottomSize').textContent = formatSize(size);
+                _updateBottomTypeStats(fileItems);
             }
         }
 

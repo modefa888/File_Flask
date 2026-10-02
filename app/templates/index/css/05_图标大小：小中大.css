@@ -24,6 +24,13 @@
             height: 52px;
         }
 
+        /* 小尺寸：封面通栏出血 */
+        .icon-item.sm .icon-thumb[data-thumb-path] {
+            width: calc(100% + 16px);
+            height: 64px;
+            margin: -12px -8px 0;
+        }
+
         .icon-item.sm .icon-thumb .thumb-icon {
             font-size: 1.6rem;
         }
@@ -46,6 +53,13 @@
             height: 72px;
         }
 
+        /* 中尺寸：封面通栏出血 */
+        .icon-item.md .icon-thumb[data-thumb-path] {
+            width: calc(100% + 20px);
+            height: 84px;
+            margin: -16px -10px 0;
+        }
+
         .icon-item.md .icon-thumb .thumb-icon {
             font-size: 2rem;
         }
@@ -66,6 +80,13 @@
         .icon-item.lg .icon-thumb {
             width: 116px;
             height: 92px;
+        }
+
+        /* 大尺寸：封面通栏出血 */
+        .icon-item.lg .icon-thumb[data-thumb-path] {
+            width: calc(100% + 24px);
+            height: 108px;
+            margin: -20px -12px 0;
         }
 
         .icon-item.lg .icon-thumb .thumb-icon {

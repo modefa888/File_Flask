@@ -23,7 +23,7 @@
                 confirmMsg = msg;
             } else {
                 confirmMsg = count === 1
-                    ? '确定要删除 "' + paths[0] + '" 吗？已移入回收站，5秒内可撤销。'
+                    ? '确定要删除 "' + (paths[0].split('/').pop() || paths[0]) + '" 吗？已移入回收站，5秒内可撤销。'
                     : '确定要删除选中的 ' + count + ' 个文件吗？已移入回收站，5秒内可撤销。';
             }
             const confirmed = await showConfirm(confirmMsg);

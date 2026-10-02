@@ -165,6 +165,8 @@
                             <div class="img-tip" style="position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:#fff;padding:4px 10px;border-radius:6px;font-size:0.72rem;z-index:10;pointer-events:none;white-space:nowrap;">
                                 <i class="bi bi-mouse"></i> 滚轮缩放 · 拖拽平移 · 双击放大 · ← → 切换
                             </div>
+                            <button class="img-nav prev" title="上一张 (←)"><i class="bi bi-chevron-left"></i></button>
+                            <button class="img-nav next" title="下一张 (→)"><i class="bi bi-chevron-right"></i></button>
                             <img class="img-view" alt="${fileName}">
                             <div class="img-toolbar">
                                 <button class="vpc-btn img-zout" title="缩小 (-)"><i class="bi bi-zoom-out"></i></button>
@@ -173,6 +175,7 @@
                                 <button class="vpc-btn img-fit" title="适应窗口 (0)"><i class="bi bi-arrows-angle-contract"></i></button>
                                 <button class="vpc-btn img-11" title="原始尺寸 1:1"><i class="bi bi-aspect-ratio"></i></button>
                                 <button class="vpc-btn img-rot" title="旋转 90°"><i class="bi bi-arrow-clockwise"></i></button>
+                                <button class="vpc-btn img-del" title="删除此图片"><i class="bi bi-trash"></i></button>
                             </div>
                         </div>
                         <div class="video-playlist">
@@ -997,6 +1000,57 @@
             body._applyImage = applyImage;
             img.src = '/api/raw?path=' + encodeURIComponent(absPath);
             _vpCurrentImage = absPath;
+
+            // 左右边缘透明切换按钮：与键盘 ← → 同一逻辑
+            body.querySelectorAll('.img-nav').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const iw = body._iw;
+                    if (!iw || !iw.imgs || iw.imgs.length < 2) return;
+                    const d = btn.classList.contains('next') ? 1 : -1;
+                    const ni = ((iw.idx + d) % iw.imgs.length + iw.imgs.length) % iw.imgs.length;
+                    applyImage(iw.dir + '/' + iw.imgs[ni].name);
+                });
+            });
+
+            // 删除当前图片：弹窗二次确认 → 移入回收站（可撤销）→ 自动跳到下一张
+            const delBtn = body.querySelector('.img-del');
+            if (delBtn) delBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const cur = _vpCurrentImage;
+                if (!cur) return;
+                const ok = await showConfirm('删除图片「' + (cur.split('/').pop() || '') + '」吗？\n将移入回收站，5 秒内可撤销。');
+                if (!ok) return;
+                const iw = body._iw;
+                let nextPath = null;
+                if (iw && Array.isArray(iw.imgs)) {
+                    const pos = iw.imgs.findIndex(v => (iw.dir + '/' + v.name) === cur);
+                    if (pos !== -1) {
+                        iw.imgs.splice(pos, 1);
+                        if (iw.imgs.length) {
+                            iw.idx = Math.min(pos, iw.imgs.length - 1);
+                            nextPath = iw.dir + '/' + iw.imgs[iw.idx].name;
+                        }
+                    }
+                    const countEl = body.querySelector('.vp-count');
+                    if (countEl) countEl.textContent = iw.imgs.length;
+                    const cell = body.querySelector('.vp-cell[data-path="' + (window.CSS && CSS.escape ? CSS.escape(cur) : cur) + '"]');
+                    if (cell) cell.remove();
+                }
+                if (nextPath) applyImage(nextPath);
+                else closePreview();   // 目录里已无图片，直接关闭预览
+                _bgStart('del', '/api/delete/start', { paths: [cur] }, {
+                    title: '正在删除：' + (cur.split('/').pop() || ''),
+                    onDone: (ok2, d) => {
+                        const result = (d && d.result) || {};
+                        if ((result.deleted || []).length > 0) {
+                            localRemoveItems([cur]);
+                            if (ok2) showToast('成功', '已删除（移入回收站）', 'success');
+                            if (ok2 && (result.trash_items || []).length > 0) showUndoToast(result.trash_items);
+                        }
+                    }
+                });
+            });
 
             // 键盘：← → 切换图片，+/- 缩放，0 复位（监听器交由 _videoPreviewUnbind 机制清理）
             const keyHandler = e => {

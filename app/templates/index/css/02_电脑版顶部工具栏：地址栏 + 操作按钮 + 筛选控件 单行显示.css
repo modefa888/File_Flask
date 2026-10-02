@@ -148,7 +148,7 @@
             position: fixed;
             inset: 0;
             background: rgba(0, 0, 0, 0.4);
-            z-index: 10001;
+            z-index: 10050;   /* 高于预览遮罩(10002)，避免确认框被预览弹窗压住 */
             display: flex;
             align-items: center;
             justify-content: center;
@@ -201,6 +201,10 @@
             color: #4a5568;
             line-height: 1.6;
             margin-bottom: 20px;
+            max-width: 100%;
+            word-break: break-all;   /* 长路径/长文件名自动折行，不撑出弹窗 */
+            white-space: pre-wrap;   /* 保留消息里的换行 */
+            overflow-wrap: anywhere;
         }
 
         .custom-modal .modal-footer {
@@ -1274,5 +1278,38 @@
             font-weight: 600;
         }
         .fav-cur-star.active i { color: #f59e0b; }
+
+        /* ===== 图片预览左右边缘的透明切换按钮（上一张/下一张） ===== */
+        .img-stage .img-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 34px;
+            height: 72px;
+            border: none;
+            background: rgba(255, 255, 255, .08);
+            color: rgba(255, 255, 255, .8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            font-size: 1.15rem;
+            cursor: pointer;
+            opacity: .45;                        /* 半透明常显 */
+            transition: opacity .2s ease, background .2s ease;
+            z-index: 12;
+        }
+        .img-stage .img-nav.prev { left: 0; border-radius: 0 10px 10px 0; }
+        .img-stage .img-nav.next { right: 0; border-radius: 10px 0 0 10px; }
+        .img-stage .img-nav:hover {
+            opacity: .95;
+            background: rgba(255, 255, 255, .22);
+        }
+
+        /* 图片工具栏删除按钮：悬停红色警示 */
+        .img-toolbar .img-del:hover {
+            background: rgba(220, 38, 38, .85);
+            color: #fff;
+        }
 
 

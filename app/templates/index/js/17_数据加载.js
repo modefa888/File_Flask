@@ -43,6 +43,13 @@
                 document.getElementById('totalFiles').textContent = data.stats.total_files;
                 document.getElementById('totalDirs').textContent = data.stats.total_dirs;
                 document.getElementById('totalSize').textContent = data.stats.total_size_str;
+                // 底部提示条同步显示同一份统计
+                const bf = document.getElementById('bottomFiles');
+                if (bf) {
+                    document.getElementById('bottomFiles').textContent = data.stats.total_files;
+                    document.getElementById('bottomDirs').textContent = data.stats.total_dirs;
+                    document.getElementById('bottomSize').textContent = data.stats.total_size_str;
+                }
                 document.getElementById('fileCountBadge').textContent = `${data.total_items != null ? data.total_items : data.items.length} 项`;
                 document.getElementById('pathInput').value = currentPath;
                 updateBreadcrumb(currentPath);

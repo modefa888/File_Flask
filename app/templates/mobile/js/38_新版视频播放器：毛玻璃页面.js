@@ -20,10 +20,16 @@
     sk.value = 0; sk.style.setProperty("--p", "0");
     document.getElementById("vpCur").textContent = "0:00";
     document.getElementById("vpDur").textContent = "0:00";
-    // 氛围背景：抽帧缩略图模糊放大
+    // 氛围背景：抽帧缩略图模糊放大（延迟到视频可播放后再请求，避免 ffmpeg 抽帧与视频流抢占磁盘 I/O 拖慢起播）
     var bg = document.getElementById("vpBg");
-    bg.style.backgroundImage = 'url("/api/thumbnail?path=' + encodeURIComponent(it.abs) + '")';
     bg.classList.add("has-cover");
+    var bgIdx = vpIndex;                       // 换视频后旧的延迟加载作废
+    var vpLoadBg = function () {
+      if (vpIndex !== bgIdx) return;
+      bg.style.backgroundImage = 'url("/api/thumbnail?path=' + encodeURIComponent(it.abs) + '")';
+    };
+    if (vpVideo.readyState >= 3) vpLoadBg();
+    else vpVideo.addEventListener("canplay", vpLoadBg, { once: true });
     vpSeeking = false;
     vpCloseRatePop();                      // 换视频时收起倍速菜单
     vpApplyRate();                         // 换视频后重新套用当前倍速

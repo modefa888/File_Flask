@@ -19,6 +19,13 @@
             if (td) td.textContent = dirs;
             if (ts) ts.textContent = formatSize(size);
             if (badge) badge.textContent = `${fileItems.length} 项`;
+            // 底部提示条同步显示同一份统计
+            const bf = document.getElementById('bottomFiles');
+            if (bf) {
+                document.getElementById('bottomFiles').textContent = f;
+                document.getElementById('bottomDirs').textContent = dirs;
+                document.getElementById('bottomSize').textContent = formatSize(size);
+            }
         }
 
         function localAddItem(item) {

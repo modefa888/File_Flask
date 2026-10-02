@@ -191,6 +191,9 @@
                             <div class="video-info" style="position:absolute;top:10px;left:10px;background:rgba(0,0,0,0.7);color:white;padding:4px 10px;border-radius:6px;font-size:0.75rem;z-index:10;">
                                 ${data.size_str || ''}
                             </div>
+                            <div class="video-poster" data-abs="${_escapeHtml(absPath)}" style="background-image:url('/api/thumbnail?path=${encodeURIComponent(absPath)}');background-color:#0b0f14;">
+                                <div class="vpp-name">${_escapeHtml(absPath.split('/').pop() || '')}</div>
+                            </div>
                             <video autoplay playsinline style="width:100%;height:100%;">
                                 <source src="${data.stream_url}" type="${data.content_type}">
                                 您的浏览器不支持视频播放
@@ -241,6 +244,14 @@
                         _videoExtraCleanup = _bindVideoPlayer(body, showSeekTip);
                         _vpCurrentVideo = absPath;
                         _buildVideoPlaylist(absPath, body);
+                        // 海报封面层：视频数据未就绪时显示封面，开始播放后淡出，缓冲卡顿时重新浮现
+                        const posterVideo = body.querySelector('video');
+                        const posterEl = body.querySelector('.video-poster');
+                        if (posterVideo && posterEl) {
+                            posterVideo.addEventListener('playing', () => posterEl.classList.add('hide'));
+                            posterVideo.addEventListener('canplay', () => posterEl.classList.add('hide'));
+                            posterVideo.addEventListener('waiting', () => posterEl.classList.remove('hide'));
+                        }
                         // 播放前 3 秒显示快捷键提示，之后自动淡出
                         const tipEl = body.querySelector('.video-tip');
                         if (tipEl) {
@@ -276,6 +287,12 @@
                         </div>`;
                         _bindSqliteViewer(body, absPath, data.tables);
                     } else {
+                        body.className = 'preview-body preview-text';
+                        const bytes = Uint8Array.from(atob(data.content), c => c.charCodeAt(0));
+                        const decoded = new TextDecoder('utf-8').decode(bytes);
+                        body.innerHTML = `<pre>${_escapeHtml(decoded)}</pre>`;
+                        document.getElementById('previewCopyBtn').style.display = '';
+                    }
                 })
                 .catch(err => {
                     body.className = 'preview-body preview-error';
@@ -528,6 +545,15 @@
                         const info = body.querySelector('.video-info');
                         if (info) info.textContent = data.error || '加载失败';
                         return;
+                    }
+                    // 切集时同步更新海报封面（waiting 事件会自动让海报重新浮现）
+                    const posterEl = body.querySelector('.video-poster');
+                    if (posterEl) {
+                        posterEl.dataset.abs = newPath;
+                        posterEl.style.backgroundImage = `url('/api/thumbnail?path=${encodeURIComponent(newPath)}')`;
+                        const nameEl = posterEl.querySelector('.vpp-name');
+                        if (nameEl) nameEl.textContent = newPath.split('/').pop() || '';
+                        posterEl.classList.remove('hide');
                     }
                     video.src = data.stream_url;
                     video.load();
@@ -1062,7 +1088,7 @@
                     return `<div class="vp-item${playing ? ' playing' : ''}" data-i="${i}" data-path="${_escapeHtml(p)}" title="${_escapeHtml(it.name)}">
                         <div class="vp-thumb-wrap">
                             <i class="bi bi-film vp-thumb-fallback"></i>
-                            <img class="vp-thumb" loading="lazy" alt="" src="/api/thumbnail?path=${encodeURIComponent(p)}" onerror="this.remove()">
+                            <img class="vp-thumb" loading="lazy" alt="" data-thumb="/api/thumbnail?path=${encodeURIComponent(p)}">
                         </div>
                         <div class="vp-meta">
                             <div class="vp-name">${_escapeHtml(it.name)}</div>
@@ -1079,7 +1105,16 @@
                 });
                 // 播完行为按播放模式处理：顺序=播下一个（末尾停止）、循环=原生 loop、随机=随机换一个
                 const video = body.querySelector('video');
+                // 封面延迟加载：等主视频可播放后再请求 /api/thumbnail，
+                // 避免 ffmpeg 抽帧与视频流抢占磁盘 I/O 拖慢起播
+                const loadThumbs = () => listEl.querySelectorAll('img[data-thumb]').forEach(img => {
+                    img.src = img.dataset.thumb;
+                    img.removeAttribute('data-thumb');
+                    img.onerror = () => img.remove();
+                });
                 if (video) {
+                    if (video.readyState >= 3) loadThumbs();
+                    else video.addEventListener('canplay', loadThumbs, { once: true });
                     video.addEventListener('ended', () => {
                         if (_vpPlayMode === 'loop') return;
                         let nextIdx;

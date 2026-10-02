@@ -802,6 +802,9 @@ def api_stream():
         # 旧手写解析不认后缀区间，导致播放器拿不到片尾数据而反复重试。
         resp = send_file(target_path, mimetype=mime_type, conditional=True)
         resp.headers["Accept-Ranges"] = "bytes"
+        # 允许浏览器缓存 Range 分片（同视频二次打开/回拖时命中本地缓存），
+        # 减少重复 206 请求，起播更快
+        resp.headers["Cache-Control"] = "public, max-age=86400"
         return resp
 
     except (OSError, PermissionError) as e:

@@ -754,6 +754,59 @@
             justify-content: center;
         }
 
+        /* ===== 视频海报封面层：起播前显示封面，播放后淡出，缓冲卡顿时重新浮现 ===== */
+        .video-stage .video-poster {
+            position: absolute;
+            inset: 0;
+            z-index: 5;
+            background-size: cover;
+            background-position: center;
+            display: flex;
+            align-items: flex-end;
+            overflow: hidden;
+            opacity: 1;
+            transition: opacity .5s ease;
+        }
+        .video-stage .video-poster.hide {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .video-stage .video-poster::before {
+            /* 封面单独一层做缓慢放大动效，更有海报感 */
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: inherit;
+            background-size: cover;
+            background-position: center;
+            animation: vpPosterZoom 18s ease-out forwards;
+        }
+        @keyframes vpPosterZoom {
+            from { transform: scale(1); }
+            to   { transform: scale(1.08); }
+        }
+        .video-stage .video-poster::after {
+            /* 底部渐暗，衬托片名 */
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, .72) 100%);
+        }
+        .video-stage .video-poster .vpp-name {
+            position: relative;
+            z-index: 1;
+            padding: 18px 22px;
+            color: #fff;
+            font-size: 1.15rem;
+            font-weight: 600;
+            letter-spacing: .5px;
+            text-shadow: 0 2px 12px rgba(0, 0, 0, .8);
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
         .video-playlist {
             flex: 0 0 280px;
             width: 280px;

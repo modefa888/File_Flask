@@ -38,6 +38,54 @@
             overflow: hidden;
         }
 
+        /* ===== 列表区域动态撑满视口：文件再少也延伸到屏幕底部，内容多时内部滚动 ===== */
+        body {
+            height: 100vh;          /* 锁定视口高度：页面本身不滚动，只有列表内部滚动 */
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        body > .navbar {
+            flex: 0 0 auto;
+        }
+        body > .container-fluid.px-4 {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        /* 顶部工具栏 + 面包屑统计条：固定不动，不参与滚动、不被压缩 */
+        body > .container-fluid.px-4 > .topbar-row,
+        body > .container-fluid.px-4 > .stats-bar {
+            flex: 0 0 auto;
+        }
+        body > .container-fluid.px-4 > .file-table {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        body > .container-fluid.px-4 > .file-table > .table-container {
+            flex: 1 1 auto;
+            min-height: 0;
+            max-height: none;
+        }
+
+        /* ===== 底部提示条：作为 flex 末尾子元素固定在视口底端（页面不滚动即等效 fixed），不遮挡列表 ===== */
+        body > .container-fluid.px-4 {
+            padding-bottom: 0 !important;   /* 强制去掉容器底部留白（覆盖 py-3），让提示条贴住视口底端 */
+        }
+        body > .container-fluid.px-4 > .mt-2 {
+            flex: 0 0 auto;
+            position: sticky;
+            bottom: 0;
+            margin: 8px -1.5rem 0 !important;   /* 负外边距抵消容器 px-4（1.5rem）内边距，左右与底边完全贴紧 */
+            padding: 8px 16px;
+            background: #ffffff;
+            border-top: 1px solid #e2e8f0;
+            z-index: 500;
+        }
+
         .file-table thead th {
             background: #f1f4f9;
             border-bottom: 2px solid #e2e8f0;

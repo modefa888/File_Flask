@@ -159,9 +159,13 @@
                 <div class="fm-loading-text" id="fmLoadingText">正在加载目录…</div>
             </div>
         </div>
-        <div class="mt-2 text-muted small d-flex justify-content-between">
-            <span>💡 点击表头排序 · 勾选文件后可使用底部多选操作栏（移动 / 复制 / 删除 / 压缩）</span>
-            <span id="selectedCount">已选 0 个</span>
+        <div class="mt-2 text-muted small d-flex justify-content-between align-items-center">
+            <span class="d-flex align-items-center gap-3">
+                <span class="bottom-stats"><i class="bi bi-file-earmark"></i> <span id="bottomFiles">0</span>
+                    &nbsp;·&nbsp; <i class="bi bi-folder"></i> <span id="bottomDirs">0</span>
+                    &nbsp;·&nbsp; <i class="bi bi-hdd"></i> 总大小 <span id="bottomSize">--</span></span>
+                <span id="selectedCount">已选 0 个</span>
+            </span>
         </div>
     </div>
 

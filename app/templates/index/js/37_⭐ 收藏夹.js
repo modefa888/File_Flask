@@ -3,6 +3,46 @@
         let _favGroupOrder = [];     // 分组展示顺序（"__ungrouped__" 占位「其他」）
         let _favActiveTab = '__all__';
 
+        // 排序模式（选择后存 localStorage 记住偏好）
+        const _FAV_SORTS = [
+            { key: 'time_desc', label: '添加时间 新→旧', icon: 'bi-sort-down' },
+            { key: 'time_asc', label: '添加时间 旧→新', icon: 'bi-sort-up' },
+            { key: 'name_asc', label: '名称 A→Z', icon: 'bi-sort-alpha-down' },
+            { key: 'name_desc', label: '名称 Z→A', icon: 'bi-sort-alpha-up' }
+        ];
+        let _favSortMode = (function () {
+            try { const m = localStorage.getItem('favSortMode'); if (m && _FAV_SORTS.some(s => s.key === m)) return m; } catch (e) { }
+            return 'time_desc';
+        })();
+
+        function _sortFavList(list) {
+            const arr = list.slice();
+            const nameOf = f => (f.name || _favBasename(f.path) || '').toLowerCase();
+            const coll = (window.Intl && Intl.Collator) ? new Intl.Collator('zh-Hans-CN', { numeric: true }) : null;
+            const cmpName = (a, b) => coll ? coll.compare(nameOf(a), nameOf(b)) : (nameOf(a) < nameOf(b) ? -1 : nameOf(a) > nameOf(b) ? 1 : 0);
+            switch (_favSortMode) {
+                case 'time_asc': arr.sort((a, b) => (a.added || 0) - (b.added || 0)); break;
+                case 'name_asc': arr.sort(cmpName); break;
+                case 'name_desc': arr.sort((a, b) => -cmpName(a, b)); break;
+                default: arr.sort((a, b) => (b.added || 0) - (a.added || 0)); // time_desc
+            }
+            return arr;
+        }
+
+        function _renderFavSortBtn() {
+            const btn = document.getElementById('favSortBtn');
+            if (!btn) return;
+            const cur = _FAV_SORTS.find(s => s.key === _favSortMode) || _FAV_SORTS[0];
+            btn.innerHTML = `<i class="bi ${cur.icon}"></i>`;
+            btn.title = '排序：' + cur.label + '（点击切换）';
+            const menu = document.getElementById('favSortMenu');
+            if (!menu) return;
+            menu.innerHTML = _FAV_SORTS.map(s =>
+                `<button class="fav-sort-item${s.key === _favSortMode ? ' on' : ''}" data-sort="${s.key}">
+                    <i class="bi ${s.icon}"></i> ${_escapeHtml(s.label)}${s.key === _favSortMode ? ' <i class="bi bi-check2"></i>' : ''}
+                </button>`).join('');
+        }
+
         function loadFavs() {
             return fetch('/api/favorites')
                 .then(r => r.json())
@@ -121,13 +161,19 @@
                 <div class="delhist-panel fav-panel">
                     <div class="panel-header">
                         <span class="panel-title"><i class="bi bi-star-fill"></i> 收藏夹</span>
-                        <button class="panel-close" title="关闭"><i class="bi bi-x-lg"></i></button>
+                        <span class="fav-header-acts">
+                            <span class="fav-sort-wrap">
+                                <button class="fav-sort-btn" id="favSortBtn" title="排序"></button>
+                                <span class="fav-sort-menu" id="favSortMenu"></span>
+                            </span>
+                            <button class="panel-close" title="关闭"><i class="bi bi-x-lg"></i></button>
+                        </span>
                     </div>
                     <div class="fav-tabs" id="favTabs"></div>
                     <div class="panel-body" id="favBody"></div>
                     <div class="panel-footer fav-footer">
                         <button class="fav-cur-btn" id="favCurPanelBtn"><i class="bi bi-star"></i> 收藏当前目录</button>
-                        <span class="fav-tip">点名称跳转 · 🏷️ 改分组 · 🗑 取消收藏</span>
+                        <span class="fav-tip">点名称跳转 · 🏷️ 改分组 · 🗑 取消收藏 · 拖动分组标签可排序</span>
                     </div>
                 </div>
             </div>
@@ -137,20 +183,114 @@
                 if (e.target === container.querySelector('.delhist-overlay')) closeFavorites();
             });
             document.getElementById('favCurPanelBtn').addEventListener('click', toggleFavCurrent);
+            // 排序按钮：点击切换下拉菜单，选择排序模式（记住偏好）
+            const sortWrap = container.querySelector('.fav-sort-wrap');
+            const sortBtn = container.querySelector('#favSortBtn');
+            sortBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                sortWrap.classList.toggle('open');
+            });
+            document.getElementById('favSortMenu').addEventListener('click', (e) => {
+                e.stopPropagation();
+                const item = e.target.closest('.fav-sort-item');
+                if (!item) return;
+                _favSortMode = item.dataset.sort;
+                try { localStorage.setItem('favSortMode', _favSortMode); } catch (err) { }
+                sortWrap.classList.remove('open');
+                _renderFavSortBtn();
+                _renderFavList();
+            });
+            document.addEventListener('click', _favSortDocClose);
+            _renderFavSortBtn();
             _renderFavTabs();
         }
 
+        // 点击面板外部时收起排序下拉菜单
+        function _favSortDocClose(e) {
+            const wrap = document.querySelector('#favoritePanel .fav-sort-wrap');
+            if (wrap && !wrap.contains(e.target)) wrap.classList.remove('open');
+        }
+
         function closeFavorites() {
+            document.removeEventListener('click', _favSortDocClose);
             const container = document.getElementById('favoritePanel');
             if (container) container.innerHTML = '';
         }
 
         function _favTabList() {
-            // 顺序：全部 → 各分组（按保存顺序）→ 其他 → ＋新建
+            // 顺序：全部 → 分组（按拖动保存的顺序，含「其他」占位 __ungrouped__）→ 数据中存在但顺序表缺失的分组兜底
+            const order = (_favGroupOrder || []).filter(g => g);
             const list = [{ key: '__all__', label: '全部' }];
-            (_favGroupOrder || []).forEach(g => { if (g !== '__ungrouped__') list.push({ key: g, label: g }); });
-            list.push({ key: '__ungrouped__', label: '其他' });
+            order.forEach(g => list.push({ key: g, label: g === '__ungrouped__' ? '其他' : g }));
+            const seen = new Set(order);
+            const extra = [];
+            _favs.forEach(f => {
+                const g = f.group || '__ungrouped__';
+                if (!seen.has(g)) { seen.add(g); extra.push(g); }
+            });
+            if (!seen.has('__ungrouped__')) extra.push('__ungrouped__');
+            extra.forEach(g => list.push({ key: g, label: g === '__ungrouped__' ? '其他' : g }));
             return list;
+        }
+
+        // 分组 Tab 拖动排序：除「全部」和「＋新建」外均可拖动，落点保存到后端
+        let _favDragKey = null;
+        function _bindFavTabDrag(wrap) {
+            const clearMarks = () => wrap.querySelectorAll('.fav-tab').forEach(b => b.classList.remove('dragging', 'drop-left', 'drop-right'));
+            wrap.querySelectorAll('.fav-tab[data-tab]').forEach(btn => {
+                if (btn.dataset.tab === '__all__') return;
+                btn.draggable = true;
+                btn.addEventListener('dragstart', (e) => {
+                    _favDragKey = btn.dataset.tab;
+                    btn.classList.add('dragging');
+                    try { e.dataTransfer.setData('text/plain', _favDragKey); } catch (err) { }
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+                btn.addEventListener('dragend', () => {
+                    _favDragKey = null;
+                    clearMarks();
+                });
+            });
+            wrap.addEventListener('dragover', (e) => {
+                if (!_favDragKey) return;
+                const tab = e.target.closest('.fav-tab[data-tab]');
+                if (!tab || tab.dataset.tab === '__all__' || tab.dataset.tab === _favDragKey || tab.classList.contains('fav-tab-add')) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                const rect = tab.getBoundingClientRect();
+                const before = e.clientX < rect.left + rect.width / 2;
+                clearMarks();
+                tab.classList.add(before ? 'drop-left' : 'drop-right');
+            });
+            wrap.addEventListener('dragleave', (e) => {
+                if (e.target === wrap) clearMarks();
+            });
+            wrap.addEventListener('drop', (e) => {
+                if (!_favDragKey) return;
+                const tab = e.target.closest('.fav-tab[data-tab]');
+                clearMarks();
+                if (!tab || tab.dataset.tab === '__all__' || tab.dataset.tab === _favDragKey || tab.classList.contains('fav-tab-add')) return;
+                e.preventDefault();
+                const key = _favDragKey;
+                _favDragKey = null;
+                // 以「全部」之后的 Tab 顺序为基准重排
+                const tabs = _favTabList().map(t => t.key).slice(1);
+                const from = tabs.indexOf(key);
+                let to = tabs.indexOf(tab.dataset.tab);
+                if (from < 0 || to < 0) return;
+                tabs.splice(from, 1);
+                if (e.clientX >= tab.getBoundingClientRect().left + tab.getBoundingClientRect().width / 2) to += 1;
+                tabs.splice(to, 0, key);
+                _favGroupOrder = tabs;
+                _persistFavGroupOrder();
+                _renderFavTabs();
+            });
+        }
+
+        function _persistFavGroupOrder() {
+            _favApi('PUT', '/api/favorites/group', { groups: (_favGroupOrder || []).slice() })
+                .then(d => { if (d && d.error) showToast('错误', d.error, 'danger'); })
+                .catch(() => { });
         }
 
         function _renderFavTabs() {
@@ -171,6 +311,7 @@
                     _renderFavTabs();
                 });
             });
+            _bindFavTabDrag(wrap);
             wrap.addEventListener('wheel', (e) => {
                 // 竖向滚轮映射为横向滚动（shift+滚轮或触摸板原生横向滚动不受影响）
                 if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
@@ -202,6 +343,7 @@
             if (_favActiveTab !== '__all__') {
                 list = _favs.filter(f => _favActiveTab === '__ungrouped__' ? !f.group : f.group === _favActiveTab);
             }
+            list = _sortFavList(list);
             let html = '';
             // 当前为具体分组：显示分组管理（重命名/删除分组）
             if (_favActiveTab !== '__all__' && _favActiveTab !== '__ungrouped__') {

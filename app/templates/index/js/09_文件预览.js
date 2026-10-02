@@ -248,13 +248,19 @@
                         _videoExtraCleanup = _bindVideoPlayer(body, showSeekTip);
                         _vpCurrentVideo = absPath;
                         _buildVideoPlaylist(absPath, body);
-                        // 海报封面层：视频数据未就绪时显示封面，开始播放后淡出，缓冲卡顿时重新浮现
+                        // 海报封面层：仅首次加载（视频未播放过）时显示封面；
+                        // 一旦开始播放就永久隐藏，拖动进度条/缓冲卡顿不再浮现
                         const posterVideo = body.querySelector('video');
                         const posterEl = body.querySelector('.video-poster');
                         if (posterVideo && posterEl) {
-                            posterVideo.addEventListener('playing', () => posterEl.classList.add('hide'));
+                            posterVideo.addEventListener('playing', () => {
+                                posterEl.dataset.played = '1';
+                                posterEl.classList.add('hide');
+                            });
                             posterVideo.addEventListener('canplay', () => posterEl.classList.add('hide'));
-                            posterVideo.addEventListener('waiting', () => posterEl.classList.remove('hide'));
+                            posterVideo.addEventListener('waiting', () => {
+                                if (!posterEl.dataset.played) posterEl.classList.remove('hide');
+                            });
                         }
                         // 播放列表面板收起/展开（隐藏式透明按钮）
                         const panelToggle = body.querySelector('.vp-panel-toggle');
@@ -567,8 +573,9 @@
                         posterEl.dataset.abs = newPath;
                         posterEl.style.backgroundImage = `url('/api/thumbnail?path=${encodeURIComponent(newPath)}')`;
                         const nameEl = posterEl.querySelector('.vpp-name');
-                        if (nameEl) nameEl.textContent = newPath.split('/').pop() || '';
+                        if (nameEl)                         nameEl.textContent = newPath.split('/').pop() || '';
                         posterEl.classList.remove('hide');
+                        delete posterEl.dataset.played; // 新视频重新允许首帧前显示封面
                     }
                     video.src = data.stream_url;
                     video.load();

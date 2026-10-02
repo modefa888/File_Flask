@@ -941,6 +941,83 @@
             background: linear-gradient(135deg, #b45309, #f59e0b);
         }
 
+        /* 收藏夹排序控件 */
+        .fav-header-acts {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .fav-sort-wrap {
+            position: relative;
+        }
+
+        .fav-sort-btn {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.15s;
+        }
+
+        .fav-sort-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .fav-sort-menu {
+            display: none;
+            position: absolute;
+            top: calc(100% + 6px);
+            right: 0;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+            padding: 4px;
+            min-width: 160px;
+            z-index: 20;
+        }
+
+        .fav-sort-wrap.open .fav-sort-menu {
+            display: block;
+        }
+
+        .fav-sort-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            border: none;
+            background: transparent;
+            color: #1f2937;
+            font-size: 0.8rem;
+            padding: 7px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            white-space: nowrap;
+            text-align: left;
+        }
+
+        .fav-sort-item:hover {
+            background: #f0f3f8;
+        }
+
+        .fav-sort-item.on {
+            background: rgba(31, 111, 235, .1);
+            color: #1f6feb;
+            font-weight: 600;
+        }
+
+        .fav-sort-item.on .bi-check2 {
+            margin-left: auto;
+        }
+
         .fav-tabs {
             display: flex;
             gap: 8px;
@@ -1000,6 +1077,24 @@
             background: transparent;
             border: 1px dashed #cbd5e1;
             color: #64748b;
+        }
+
+        /* 分组 Tab 拖动排序 */
+        .fav-tab[data-tab]:not([data-tab="__all__"]) {
+            cursor: grab;
+        }
+
+        .fav-tab.dragging {
+            opacity: 0.4;
+            cursor: grabbing;
+        }
+
+        .fav-tab.drop-left {
+            box-shadow: inset 3px 0 0 0 #1f6feb;
+        }
+
+        .fav-tab.drop-right {
+            box-shadow: inset -3px 0 0 0 #1f6feb;
         }
 
         .fav-grp-head {

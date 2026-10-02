@@ -120,6 +120,7 @@
             breadcrumb.querySelectorAll('a[data-path]').forEach(el => {
                 el.addEventListener('click', (e) => { e.preventDefault(); navigateTo(el.dataset.path); });
             });
+            _updateFavCurState();   // 目录切换后同步收藏按钮点亮状态
         }
 
         function navigateTo(path) {

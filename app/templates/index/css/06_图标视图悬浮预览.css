@@ -30,6 +30,23 @@
             display: block;
         }
 
+        /* 悬浮预览左上角的视频时长角标，与卡片角标同风格 */
+        .icon-hover-preview .ihp-dur {
+            position: absolute;
+            top: 14px;
+            left: 14px;
+            background: rgba(0, 0, 0, 0.72);
+            color: #fff;
+            font-size: 0.68rem;
+            padding: 2px 7px;
+            border-radius: 5px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.3px;
+            z-index: 3;
+            pointer-events: none;
+        }
+
         .icon-hover-preview .ihp-meta {
             padding: 4px 2px 0;
             display: flex;
@@ -144,6 +161,22 @@
             letter-spacing: 0.3px;
         }
 
+        /* 视频时长角标：封面左上角（红框位置），与 MP4 徽标同风格 */
+        .icon-thumb .thumb-duration {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            background: rgba(0, 0, 0, 0.72);
+            color: white;
+            font-size: 0.6rem;
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.3px;
+            z-index: 2;
+        }
+
         .icon-thumb .thumb-icon {
             font-size: 1.9rem;
             color: #94a3b8;
@@ -155,6 +188,22 @@
             inset: 0;
             display: block;
             font-size: 0;
+        }
+
+        /* 缩略图已注入后统一铺满取景框；竖屏封面（JS 检测后加 .portrait）改为 contain 完整显示 */
+        .icon-thumb .thumb-icon.has-thumb img {
+            position: absolute !important;
+            inset: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover !important;
+        }
+        .icon-thumb.portrait .thumb-icon.has-thumb img {
+            object-fit: contain !important;   /* 竖屏封面 100% 完整显示，不裁切 */
+        }
+        /* 竖屏封面两侧留边区域用深色底衬托，避免浅灰大块空白 */
+        .icon-thumb.portrait[data-thumb-path] {
+            background: linear-gradient(135deg, #1e293b, #0b0f14);
         }
 
         /* 目录切换加载遮罩 */
@@ -224,6 +273,7 @@
             width: 22px;
             height: 22px;
             opacity: 0;
+            z-index: 6;   /* 封面出血层会盖住卡片顶部，按钮必须抬高到封面之上 */
         }
 
         .icon-item:hover .icon-more {
@@ -244,8 +294,8 @@
         }
 
         .icon-item .icon-more:hover {
-            background: #f1f5f9;
-            color: #1a202c;
+            background: rgba(0, 0, 0, .55);   /* 深色底在浅色封面/深色封面上都清晰 */
+            color: #fff;
         }
 
         .tree-line .tree-more {

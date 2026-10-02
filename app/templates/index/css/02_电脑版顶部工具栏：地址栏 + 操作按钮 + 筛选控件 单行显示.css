@@ -1239,4 +1239,40 @@
             transition: transform 0.25s ease;
         }
 
+        /* ===== 面包屑旁的「收藏本目录」星标按钮（从顶部工具栏迁入并优化） ===== */
+        .fav-cur-star {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            margin-left: 14px;
+            padding: 3px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 999px;
+            background: #fff;
+            color: #64748b;
+            font-size: 0.78rem;
+            cursor: pointer;
+            transition: all .18s ease;
+            white-space: nowrap;
+        }
+        .fav-cur-star i {
+            font-size: .9rem;
+            color: #f59e0b;
+            transition: transform .18s ease;
+        }
+        .fav-cur-star:hover {
+            border-color: #f59e0b;
+            color: #b45309;
+            background: #fffbeb;
+            box-shadow: 0 2px 8px rgba(245, 158, 11, .18);
+        }
+        .fav-cur-star:hover i { transform: scale(1.18) rotate(-8deg); }
+        .fav-cur-star.active {
+            background: linear-gradient(135deg, #fef3c7, #fde68a);
+            border-color: #f59e0b;
+            color: #92400e;
+            font-weight: 600;
+        }
+        .fav-cur-star.active i { color: #f59e0b; }
+
 

@@ -172,6 +172,7 @@
             width: 15px;
             height: 15px;
             opacity: 1;   /* 选择框常显，不再需要划过才出现 */
+            z-index: 6;   /* 抬到封面出血层之上，带封面的卡片也能看到/勾选 */
             transition: opacity 0.15s;
         }
 

@@ -7,6 +7,14 @@
         const _THUMB_MAX_CONCURRENT = 3;
         let _thumbActive = 0;
         const _thumbQueue = [];
+        const _durationCache = {};   // 视频时长文本缓存（"3:45"），避免重复请求
+
+        function _fmtDur(sec) {
+            sec = Math.round(sec);
+            const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+            const two = (n) => String(n).padStart(2, '0');
+            return h ? `${h}:${two(m)}:${two(s)}` : `${m}:${two(s)}`;
+        }
 
         function _thumbUrl(path) {
             return `/api/thumbnail?path=${encodeURIComponent(path)}`;
@@ -57,6 +65,34 @@
                 // 绝对定位铺满 .icon-thumb 取景框（span 本身只有图标大小，不能靠 100% 撑满）
                 icon.innerHTML = `<img src="${src}" alt="" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:6px;" />`;
                 icon.classList.add('has-thumb');
+                // 竖屏封面（高>宽）：切换为 contain 完整显示，不裁切
+                const im = icon.querySelector('img');
+                if (im) im.addEventListener('load', () => {
+                    if (im.naturalHeight > im.naturalWidth) thumbEl.classList.add('portrait');
+                }, { once: true });
+            }
+            // 视频卡片：异步获取时长，显示在封面左上角角标
+            if (thumbEl.dataset.thumbType === 'video' && !thumbEl.querySelector('.thumb-duration')) {
+                const vp = thumbEl.dataset.thumbPath;
+                const showDur = (txt) => {
+                    const s = document.createElement('span');
+                    s.className = 'thumb-duration';
+                    s.textContent = txt;
+                    thumbEl.appendChild(s);
+                };
+                if (_durationCache[vp]) { showDur(_durationCache[vp]); }
+                else {
+                    fetch(`/api/video_duration?path=${encodeURIComponent(vp)}`)
+                        .then(r => r.ok ? r.json() : null)
+                        .then(d => {
+                            if (d && typeof d.duration === 'number') {
+                                const txt = _fmtDur(d.duration);
+                                _durationCache[vp] = txt;
+                                if (thumbEl.isConnected) showDur(txt);
+                            }
+                        })
+                        .catch(() => {});
+                }
             }
             thumbEl.dataset.thumbDone = '1';
         }

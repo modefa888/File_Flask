@@ -45,8 +45,6 @@
                     <div class="d-flex gap-1">
                         <button class="btn btn-outline-secondary btn-sm quick-btn" id="homeBtn" title="主页">🏠<span
                                 class="btn-txt"> 主页</span></button>
-                        <button class="btn btn-outline-secondary btn-sm quick-btn" id="favCurBtn" title="收藏本目录">⭐<span
-                                class="btn-txt"> 收藏本目录</span></button>
                     </div>
                     <div class="view-toggle-group" title="切换视图">
                         <button class="btn-view active" data-view="list" title="列表视图"><i
@@ -96,6 +94,9 @@
                     <li class="breadcrumb-item"><a href="#" data-path="loading">加载中...</a></li>
                 </ol>
             </nav>
+            <button class="fav-cur-star" id="favCurBtn" title="收藏本目录">
+                <i class="bi bi-star"></i><span class="fav-cur-txt">收藏</span>
+            </button>
             <span class="ms-auto d-flex flex-wrap align-items-center">
                 <span class="stat-item"><span class="stat-label">📄 文件</span><span class="stat-value"
                         id="totalFiles">0</span></span>

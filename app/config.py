@@ -217,3 +217,17 @@ def _resolve_ffmpeg_bin():
 
 
 FFMPEG_BIN = _resolve_ffmpeg_bin()
+
+
+def _resolve_ffprobe_bin():
+    """与 ffmpeg 同目录优先取 ffprobe（读取视频时长等元数据）"""
+    try:
+        sibling = os.path.join(os.path.dirname(FFMPEG_BIN), "ffprobe")
+        if os.path.isfile(sibling):
+            return sibling
+    except OSError:
+        pass
+    return shutil.which("ffprobe") or "ffprobe"
+
+
+FFPROBE_BIN = _resolve_ffprobe_bin()

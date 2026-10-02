@@ -3,6 +3,7 @@
         _hoverPreview.className = 'icon-hover-preview';
         _hoverPreview.innerHTML = `
         <img class="ihp-img" alt="" />
+        <span class="ihp-dur" style="display:none"></span>
         <div class="ihp-meta">
             <div class="ihp-name"></div>
             <div class="ihp-info"><span class="ihp-size"></span><span class="ihp-date"></span></div>
@@ -28,6 +29,33 @@
             nameEl.textContent = name;
             sizeEl.textContent = sizeStr || '';
             dateEl.textContent = mtime || '';
+            // 视频时长角标：优先用卡片上已加载的时长，否则复用缓存/异步获取
+            const durEl = _hoverPreview.querySelector('.ihp-dur');
+            const srcThumb = card.querySelector('.icon-thumb[data-thumb-type="video"]');
+            const cardDur = srcThumb ? srcThumb.querySelector('.thumb-duration') : null;
+            if (cardDur) {
+                durEl.textContent = cardDur.textContent;
+                durEl.style.display = 'block';
+            } else if (srcThumb && _durationCache[srcThumb.dataset.thumbPath]) {
+                durEl.textContent = _durationCache[srcThumb.dataset.thumbPath];
+                durEl.style.display = 'block';
+            } else if (srcThumb) {
+                durEl.style.display = 'none';
+                const dp = srcThumb.dataset.thumbPath;
+                fetch(`/api/video_duration?path=${encodeURIComponent(dp)}`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(d => {
+                        if (d && typeof d.duration === 'number' && _hoverPreview._path === path) {
+                            const txt = _fmtDur(d.duration);
+                            _durationCache[dp] = txt;
+                            durEl.textContent = txt;
+                            durEl.style.display = 'block';
+                        }
+                    })
+                    .catch(() => {});
+            } else {
+                durEl.style.display = 'none';
+            }
             _positionHoverPreview(card);
             _hoverPreview.classList.add('visible');
         }

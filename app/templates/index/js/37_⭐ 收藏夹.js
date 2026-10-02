@@ -9,8 +9,20 @@
                 .then(d => {
                     _favs = (d.items || []).slice();
                     _favGroupOrder = (d.groups || []).slice();
+                    _updateFavCurState();
                 })
                 .catch(() => { });
+        }
+
+        // 面包屑旁的 ⭐ 收藏按钮：当前目录已收藏时点亮实心星
+        function _updateFavCurState() {
+            const btn = document.getElementById('favCurBtn');
+            if (!btn) return;
+            const fav = _favs.find(f => f.path === currentPath);
+            btn.classList.toggle('active', !!fav);
+            const icon = btn.querySelector('i');
+            if (icon) icon.className = fav ? 'bi bi-star-fill' : 'bi bi-star';
+            btn.title = fav ? '取消收藏本目录' : '收藏本目录';
         }
 
         function _favBasename(p) {

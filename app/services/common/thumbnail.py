@@ -15,7 +15,7 @@ from collections import OrderedDict
 import mimetypes
 
 from ...config import (
-    _IMAGE_EXTS, _VIDEO_EXTS, FFMPEG_BIN,
+    _IMAGE_EXTS, _VIDEO_EXTS, FFMPEG_BIN, FFPROBE_BIN,
     _THUMB_CACHE_DIR, _THUMB_CACHE_MAX_ENTRIES, _THUMB_MEM_CACHE_MAX,
 )
 
@@ -256,3 +256,48 @@ def _extract_video_frame(video_path):
     finally:
         _VIDEO_THUMB_SEM.release()
     return None, None
+
+
+# ========== 视频时长探测（ffprobe，供播放列表异步显示） ==========
+_DUR_MEM_MAX = 500
+_DUR_MEM = OrderedDict()
+_DUR_MEM_LOCK = threading.Lock()
+_DUR_SEM = threading.Semaphore(_VIDEO_THUMB_MAX_WORKER)   # 与抽帧共用并发上限
+
+
+def get_video_duration(video_path):
+    """返回视频时长（秒，float）；失败返回 None。内存缓存，文件未变时秒回。"""
+    key = _make_cache_key(video_path)
+    if key:
+        with _DUR_MEM_LOCK:
+            if key in _DUR_MEM:
+                _DUR_MEM.move_to_end(key)
+                return _DUR_MEM[key]
+    if not _DUR_SEM.acquire(timeout=3):
+        return None
+    try:
+        cmd = [
+            FFPROBE_BIN, "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            video_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=10)
+        if result.returncode != 0:
+            dur = None
+        else:
+            try:
+                dur = float(result.stdout.decode("utf-8", "ignore").strip())
+            except ValueError:
+                dur = None
+    except (OSError, PermissionError, subprocess.TimeoutExpired, FileNotFoundError):
+        dur = None
+    finally:
+        _DUR_SEM.release()
+    if key and dur is not None:
+        with _DUR_MEM_LOCK:
+            _DUR_MEM[key] = dur
+            _DUR_MEM.move_to_end(key)
+            while len(_DUR_MEM) > _DUR_MEM_MAX:
+                _DUR_MEM.popitem(last=False)
+    return dur

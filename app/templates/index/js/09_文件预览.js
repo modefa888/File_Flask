@@ -538,6 +538,7 @@
 
         // ===== 原位切换视频：不重建播放模块，仅换源 + 同步标题/大小/列表高亮 =====
         let _vpCurrentVideo = '';   // 当前正在播放的视频绝对路径
+        const _vpDurCache = {};     // 播放列表视频时长缓存（path -> "07:18"），避免重复请求
 
         function _switchVideoInPlace(body, newPath) {
             const video = body.querySelector('video');
@@ -1114,6 +1115,27 @@
                     el.addEventListener('click', () => {
                         _switchVideoInPlace(body, el.dataset.path);
                     });
+                });
+                // 异步获取各视频时长（ffprobe 后端探测 + 前端缓存），追加到副标题
+                const fmtDur = (s) => {
+                    s = Math.round(s);
+                    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+                    return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(sec).padStart(2, '0');
+                };
+                vids.forEach((it, i) => {
+                    const p = dir + '/' + it.name;
+                    const subEl = listEl.querySelector(`.vp-item[data-i="${i}"] .vp-sub`);
+                    if (!subEl) return;
+                    if (_vpDurCache[p]) { subEl.textContent += ' · ' + _vpDurCache[p]; return; }
+                    fetch(`/api/video_duration?path=${encodeURIComponent(p)}`)
+                        .then(r => r.ok ? r.json() : null)
+                        .then(d => {
+                            if (!d || !d.duration) return;
+                            const t = fmtDur(d.duration);
+                            _vpDurCache[p] = t;
+                            if (subEl.isConnected) subEl.textContent += ' · ' + t;
+                        })
+                        .catch(() => {});
                 });
                 // 播完行为按播放模式处理：顺序=播下一个（末尾停止）、循环=原生 loop、随机=随机换一个
                 const video = body.querySelector('video');

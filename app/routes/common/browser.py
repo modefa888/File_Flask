@@ -23,6 +23,7 @@ from ...services.common.filecore import (
 )
 from ...services.common.thumbnail import (
     _get_thumbnail_bytes, _extract_video_frame, _clear_disk_cache as _clear_thumb_cache,
+    get_video_duration,
 )
 
 
@@ -715,6 +716,21 @@ def api_thumbnail():
     if etag:
         resp.headers["ETag"] = etag
     return resp
+
+
+@bp.route("/api/video_duration")
+def api_video_duration():
+    """获取视频时长（秒），供播放列表异步显示；服务端内存缓存，文件未变时秒回"""
+    target_path = _get_file_path_from_request(request)
+    if target_path is None:
+        return jsonify({"error": "文件不存在"}), 404
+    ext = os.path.splitext(target_path)[1].lower().lstrip(".")
+    if ext not in _VIDEO_EXTS:
+        return jsonify({"error": "不是视频文件"}), 400
+    dur = get_video_duration(target_path)
+    if dur is None:
+        return jsonify({"error": "无法获取时长"}), 404
+    return jsonify({"duration": round(dur, 1)})
 
 
 def _thumb_cache_stats():

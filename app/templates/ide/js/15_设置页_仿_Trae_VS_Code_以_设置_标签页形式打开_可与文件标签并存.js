@@ -49,6 +49,7 @@
         '<div class="set-navitem" data-sec="sec-data"><i class="bi bi-database"></i>数据</div>' +
         '<div class="set-navitem" data-sec="sec-ai"><i class="bi bi-stars"></i>AI 助手</div>' +
         '<div class="set-navitem" data-sec="sec-sysai"><i class="bi bi-cpu"></i>系统 AI</div>' +
+        '<div class="set-navitem" data-sec="sec-notify"><i class="bi bi-bell"></i>通知</div>' +
       '</div>' +
       '<div class="set-content">' +
         '<div class="set-sec" id="sec-editor"><h2>编辑器</h2>' +
@@ -86,6 +87,105 @@
           '<div class="set-row" data-kw="系统 ai token 接口 模型 提交信息 生成"><div class="set-info"><div class="set-label">使用的接口 / 模型</div><div class="set-desc">生成提交信息时调用的接口与模型</div></div><select id="sysAiPick"></select></div>' +
           '<div class="ai-set-acts" data-kw="系统 ai token 接口 模型 保存"><span class="ai-spacer"></span><button class="ai-set-btn primary" id="sysAiSave">保存</button></div>' +
           '<div class="ai-set-tip" id="sysAiTip"></div>' +
+        '</div>' +
+
+        '<div class="set-sec" id="sec-notify"><h2 data-kw="通知 notify email 邮件 桌面 toast 提示">通知</h2>' +
+          '<div class="set-desc" data-kw="通知 notify 邮件 smtp 桌面">AI 消息完成后向"启动服务的本人"推送。<b>桌面通知</b>仅服务器本机可见；<b>邮件</b>通过 SMTP 发送。默认关闭。</div>' +
+
+          '<div class="set-row">' +
+            '<div class="set-row-text"><div class="set-name">启用通知</div>' +
+              '<div class="set-desc">总开关。关闭后所有通道均不触发。</div></div>' +
+            '<label class="set-switch"><input type="checkbox" id="notifyEnabled"><span></span></label>' +
+          '</div>' +
+
+          '<div class="set-row"><div class="set-row-text"><div class="set-name" style="color:var(--c-a);"><i class="bi bi-display"></i> 本地桌面通知</div>' +
+            '<div class="set-desc">服务器本机可见：Windows 用 BurntToast，macOS 用 osascript，Linux 用 notify-send；未装则兜底浏览器弹窗+声音。</div></div>' +
+          '<label class="set-switch"><input type="checkbox" id="notifyDesktop"><span></span></label></div>' +
+
+          '<div class="set-row notifyDesktopOpts">' +
+            '<div class="set-row-text"><div class="set-name">桌面通知应用名</div>' +
+              '<div class="set-desc">系统通知中心显示的来源名称。</div></div>' +
+            '<input class="set-ipt set-ipt-600" id="notifyAppName" placeholder="文件管理器">' +
+          '</div>' +
+
+          '<div class="set-row notifyDesktopOpts">' +
+            '<div class="set-row-text"><div class="set-name">桌面通知声音</div>' +
+              '<div class="set-desc">是否伴随一次系统提示音。</div></div>' +
+            '<label class="set-switch"><input type="checkbox" id="notifyDesktopSound"><span></span></label>' +
+          '</div>' +
+
+          '<div class="set-row"><div class="set-row-text"><div class="set-name" style="color:var(--c-a);"><i class="bi bi-envelope"></i> 邮件通知（SMTP）</div>' +
+            '<div class="set-desc">最传统、最稳。QQ smtp.qq.com:465 / 163 smtp.163.com:465 / Gmail smtp.gmail.com:465 / Outlook smtp.office365.com:587。</div></div>' +
+          '<label class="set-switch"><input type="checkbox" id="notifyEmail"><span></span></label></div>' +
+
+          '<div class="set-row notifyEmailOpts">' +
+            '<div class="set-row-text"><div class="set-name">收件人地址</div>' +
+              '<div class="set-desc">接收通知的邮箱，多个用英文逗号分隔。</div></div>' +
+            '<input class="set-ipt set-ipt-400" id="notifyTo" placeholder="me@example.com">' +
+          '</div>' +
+
+          '<div class="set-row notifyEmailOpts">' +
+            '<div class="set-row-text"><div class="set-name">SMTP 服务器</div>' +
+              '<div class="set-desc">主机名，如 smtp.qq.com。</div></div>' +
+            '<input class="set-ipt set-ipt-400" id="notifySmtpHost" placeholder="smtp.qq.com">' +
+          '</div>' +
+
+          '<div class="set-row notifyEmailOpts">' +
+            '<div class="set-row-text"><div class="set-name">端口</div>' +
+              '<div class="set-desc">465 或 587。</div></div>' +
+            '<input class="set-ipt set-ipt-400" id="notifySmtpPort" type="number" min="1" max="65535" placeholder="465">' +
+          '</div>' +
+
+          '<div class="set-row notifyEmailOpts">' +
+            '<div class="set-row-text"><div class="set-name">加密方式</div>' +
+              '<div class="set-desc">SSL (TLS) / STARTTLS / 无。</div></div>' +
+            '<select class="set-ipt set-ipt-400" id="notifyEncryption">' +
+              '<option value="ssl">SSL (TLS)</option><option value="starttls">STARTTLS</option><option value="none">无</option>' +
+            '</select>' +
+          '</div>' +
+
+          '<div class="set-row notifyEmailOpts">' +
+            '<div class="set-row-text"><div class="set-name">发件人账号</div>' +
+              '<div class="set-desc">你的邮箱地址。</div></div>' +
+            '<input class="set-ipt set-ipt-400" id="notifyUser" placeholder="me@example.com">' +
+          '</div>' +
+
+          '<div class="set-row notifyEmailOpts">' +
+            '<div class="set-row-text"><div class="set-name">授权码 / 密码</div>' +
+              '<div class="set-desc">邮件服务商授权码（非登录密码）；保存后仅显示 ****。</div></div>' +
+            '<input class="set-ipt set-ipt-400" id="notifyPassword" type="password" placeholder="授权码">' +
+          '</div>' +
+
+          '<div class="set-row notifyEmailOpts">' +
+            '<div class="set-row-text"><div class="set-name">发件人显示名</div>' +
+              '<div class="set-desc">可选。收件箱里显示的名字。</div></div>' +
+            '<input class="set-ipt set-ipt-400" id="notifyFromName" placeholder="文件管理器">' +
+          '</div>' +
+
+          '<div class="set-row"><div class="set-row-text"><div class="set-name">通知标题模板</div>' +
+            '<div class="set-desc">变量：<code>{{task}}</code> <code>{{query}}</code> <code>{{answer_len}}</code> <code>{{file_count}}</code></div></div>' +
+          '<input class="set-ipt set-ipt-600" id="notifyTitle" placeholder="AI 任务已完成"></div>' +
+
+          '<div class="set-row"><div class="set-row-text"><div class="set-name">通知正文模板</div>' +
+            '<div class="set-desc">同上；正文长度自动截断。</div></div>' +
+          '<input class="set-ipt set-ipt-600" id="notifyBody" placeholder="任务 {{task}} 已完成"></div>' +
+
+          '<div class="set-row">' +
+            '<div class="set-row-text"><div class="set-name">操作</div>' +
+              '<div class="set-desc">保存后立即生效；测试会按所选通道发一条真实通知。</div></div>' +
+            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+              '<button class="btn btn-sm" id="notifyTestLocal">🔔 测试桌面</button>' +
+              '<button class="btn btn-sm" id="notifyTestEmail">✉ 测试邮件</button>' +
+              '<button class="btn btn-sm" id="notifyTestAll">全部通道</button>' +
+              '<button class="btn btn-sm btn-primary" id="notifySave">💾 保存</button>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="set-row"><div class="set-row-text"><div class="set-name"><i class="bi bi-clock-history"></i> 最近通知记录</div>' +
+            '<div class="set-desc">最多保留 30 条。</div></div>' +
+            '<button class="btn btn-sm" id="notifyClearHistory">🗑 清空</button>' +
+          '</div>' +
+          '<div id="notifyHistory" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.6;background:rgba(0,0,0,.06);color:var(--c-m);">加载中…</div>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -262,6 +362,7 @@
     q("#setSysKeys").innerHTML = SYS_KEYS.map(k => '<div class="set-key"><span>' + k[0] + "</span><kbd>" + k[1] + "</kbd></div>").join("");
     aiMountSettings();   // 挂载 AI 助手接口配置（设置 → AI 助手）
     sysAiEnsure();       // 挂载「系统 AI」分区（设置 → 系统 AI）
+    notifyMountSettings(); // 挂载「通知」分区（设置 → 通知）
   }
   /* ---------- 命令注册表 + 自定义快捷键（设置 → 快捷键 可视化修改，localStorage 持久化） ---------- */
   const KEY_COMMANDS = [

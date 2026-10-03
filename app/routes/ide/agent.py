@@ -39,7 +39,7 @@ from ...services.ide.web_search import search_web, format_results
 from ...services.common import undo
 from .ai import (_clean_content, _load_cfg, _open_stream, _sse, _inject_system_time,
                  _inject_web_search, _SKILL_PROMPTS, _is_retryable_status, _is_retryable_text,
-                 _retry_wait, _RETRY_MAX)
+                 _retry_wait, _RETRY_MAX, _last_user_text, _fire_notify_async)
 
 _log = get_logger()
 bp = Blueprint("agent", __name__)
@@ -1081,10 +1081,31 @@ def api_ai_agent():
               run_id, model, perm, root, len(clean),
               ",".join(skills) if isinstance(skills, list) else (skills or "-"), len(extra_prompts))
 
+    user_query = _last_user_text(clean)
     def gen():
         yield _sse({"type": "run", "run_id": run_id, "perm": perm, "model": model, "root": root})
+        # 通知：外层包装，捕捉 delta 文本；异常也会触发
+        text_parts: List[str] = []
+        inner = _run_agent(run_id, provider, model, root, perm, clean, skills, extra_prompts, extra_names)
         try:
-            yield from _run_agent(run_id, provider, model, root, perm, clean, skills, extra_prompts, extra_names)
+            for chunk in inner:
+                # 抽取 delta 文本（SSE 字节："data: {...}"）
+                try:
+                    txt = chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk)
+                    for line in txt.splitlines():
+                        if not line.startswith("data: "):
+                            continue
+                        try:
+                            obj = json.loads(line[6:])
+                        except (ValueError, TypeError):
+                            continue
+                        if obj.get("type") == "delta":
+                            t = obj.get("text")
+                            if t:
+                                text_parts.append(t)
+                except Exception:
+                    pass
+                yield chunk
         except Exception as e:  # noqa: BLE001
             _log.warning("Agent 异常：%s", e)
             yield _sse({"type": "error", "error": "智能体执行失败：%s" % e})
@@ -1092,6 +1113,12 @@ def api_ai_agent():
             with _PENDING_LOCK:
                 for k in [k for k in _PENDING if k[0] == run_id]:
                     _PENDING.pop(k, None)
+            # 通知：智能体完成（不管成功/异常都发，让用户看到"任务已终止"）
+            if text_parts:
+                answer_text = "".join(text_parts)
+            else:
+                answer_text = ""
+            _fire_notify_async("agent", user_query, answer_text)
             yield _sse({"type": "done"})
 
     return Response(gen(), mimetype="text/event-stream",

@@ -31,6 +31,7 @@ from ... import config
 from ...log import get_logger
 from ...services.ide.web_search import search_web, format_results
 from ...services.common import undo
+from ...services.common import notifications as notify_svc
 
 _log = get_logger()
 bp = Blueprint("ai", __name__)
@@ -403,6 +404,89 @@ def _sse(payload: dict) -> bytes:
     return ("data: " + json.dumps(payload, ensure_ascii=False) + "\n\n").encode("utf-8")
 
 
+def _last_user_text(msgs) -> str:
+    """从 messages 里反向找最后一条 user 消息的文本，用于通知模板 {query}。"""
+    for m in reversed(msgs or []):
+        if isinstance(m, dict) and m.get("role") == "user":
+            c = m.get("content")
+            if isinstance(c, str):
+                return c
+            if isinstance(c, list):
+                parts = []
+                for p in c:
+                    if isinstance(p, dict) and p.get("type") == "text":
+                        parts.append(str(p.get("text") or ""))
+                return " ".join(parts)
+    return ""
+
+
+def _fire_notify_async(task: str, user_query: str, answer_text: str) -> None:
+    """在独立线程里调用通知服务，避免任何异常/耗时影响 SSE 流。
+    task: "chat" / "agent" 决定通知场景；服务内部会按渠道配置分发。
+    """
+    def _job():
+        try:
+            # 使用场景化默认标题；实际标题/正文会以配置文件中的模板渲染
+            title = "AI 助手 · 回复完成" if task == "chat" else "AI 智能体 · 任务完成"
+            # query 放在 body 前部（截断时优先保留用户任务，模型回复在后）
+            q = (user_query or "").strip()
+            a = (answer_text or "").strip()
+            body = ("%s\n\n%s" % (q, a)).strip()
+            notify_svc.notify(title=title, body=body, channel=task or "chat")
+        except Exception:
+            _log.exception("[notify] %s 触发通知失败", task)
+
+    threading.Thread(target=_job, daemon=True, name="ai-notify").start()
+
+
+@bp.route("/api/ai/notify", methods=["GET"])
+def api_ai_notify_get():
+    """读取通知配置；返回 cfg + recent(最近30条) + latest。"""
+    cfg = notify_svc.sanitize_notify_cfg()
+    d = notify_svc.read_latest(after_cursor=0)
+    return jsonify({
+        "cfg": cfg,
+        "recent": d.get("history") or [],
+        "latest": d.get("latest"),
+        "cursor": int(d.get("cursor") or 0),
+    })
+
+
+@bp.route("/api/ai/notify", methods=["POST"])
+def api_ai_notify_set():
+    """保存通知配置（部分字段可缺，其余保留）。"""
+    try:
+        data = (request.get_json(silent=True) or {})
+        cfg = notify_svc.save_notify_cfg(data)
+        return jsonify({"ok": True, "cfg": cfg})
+    except Exception as e:
+        _log.exception("保存通知配置失败")
+        return jsonify({"error": str(e)}), 400
+
+
+@bp.route("/api/ai/notify/test", methods=["POST"])
+def api_ai_notify_test():
+    """按通道发一条测试通知。channel: desktop / email / all"""
+    body = request.get_json(silent=True) or {}
+    channel = str(body.get("channel") or "all").strip().lower()
+    try:
+        res = notify_svc.send_test(channel)
+        return jsonify(res)
+    except Exception as e:
+        _log.exception("发送测试通知失败")
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@bp.route("/api/ai/notify/history", methods=["DELETE"])
+def api_ai_notify_history_clear():
+    """清空通知历史。"""
+    try:
+        n = notify_svc.clear_recent()
+        return jsonify({"ok": True, "cleared": n})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
 @bp.route("/api/ai/chat", methods=["POST"])
 def api_ai_chat():
     cfg = _load_cfg()
@@ -463,6 +547,8 @@ def api_ai_chat():
                 "当前项目根目录：%s\n可用工具：%s\n"
                 "调用格式（严格使用工具名与参数名）：<tool_use>{\"name\":\"read_file\",\"input\":{\"path\":\"app/xxx.py\"}}</tool_use>"
                 % (root or "/", "；".join(names)))
+    user_query = _last_user_text(msgs)   # 通知用的用户提问
+    text_parts: List[str] = []           # 闭包共享：gen() 内的 append 会实时反映到这里
 
     def gen():
         from .agent import tools_for_perm, _run_tool_job, _parse_text_calls, _gate
@@ -575,6 +661,7 @@ def api_ai_chat():
                             yield _sse({"delta": piece or "", "reasoning": reasoning or ""})
                         if piece:
                             text += piece
+                            text_parts.append(piece)   # 同步到外层，供通知使用
                         for tc in (delta.get("tool_calls") or []):
                             slot = calls.setdefault(tc.get("index", 0), {"id": "", "name": "", "args_raw": ""})
                             if tc.get("id"):
@@ -654,7 +741,14 @@ def api_ai_chat():
                               "content": (model_text or summary or detail or "")[:_CHAT_TOOL_CHARS]})
         yield b"data: [DONE]\n\n"
 
-    return Response(gen(), mimetype="text/event-stream",
+    def _gen_with_notify():
+        try:
+            yield from gen()
+        finally:
+            reply = "".join(text_parts)
+            _fire_notify_async("chat", user_query, reply)
+
+    return Response(_gen_with_notify(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 

@@ -72,3 +72,67 @@
 .kb-btn { background: #2f2f30; color: #bcbcbc; border: 1px solid #3c3c3d; border-radius: 5px;
   font-size: 11px; padding: 3px 10px; cursor: pointer; flex: none; }
 .kb-btn:hover { background: #3a3a3b; color: #fff; }
+
+/* ------ 通知设置专用小类（15_设置页/15b 通知 JS 使用） ------ */
+/* set-row-text 作为独立卡片（标题+说明 上、输入 下） */
+.set-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+/* set-row-text 里的 .set-name：标题 + 描述，禁止被压缩到换行 */
+.set-row-text > .set-name,
+.set-row > .set-name {
+  flex: 0 0 auto;
+  min-width: 140px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 0;
+}
+.set-row-text > .set-name > div:first-child,
+.set-row > .set-name > div:first-child {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e2e2;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.set-row-text > .set-name > div:last-child,
+.set-row > .set-name > div:last-child {
+  font-size: 12px;
+  color: #858585;
+  line-height: 1.5;
+}
+/* 输入框宽度：用 max-width 让 flex 自然处理，避免撑破父容器 */
+.set-row-text .set-ipt-400,
+.set-row .set-ipt-400 {
+  width: 100%;
+  max-width: 400px;
+}
+.set-row-text .set-ipt-600,
+.set-row .set-ipt-600 {
+  width: 100%;
+  max-width: 600px;
+}
+
+/* ============ 通知分区小标题 & 描述 ============ */
+.set-sec h2 {
+  font-size: 13px; color: #d4d4d4; font-weight: 600;
+  margin: 0 0 8px; padding-bottom: 6px;
+  border-bottom: 1px solid #3a3a3a;
+  letter-spacing: 0.5px;
+}
+.set-sec .set-desc {
+  font-size: 12px; color: #999; margin: 0 0 12px;
+  line-height: 1.6;
+}
+.set-row .set-desc { margin: 2px 0 0; font-size: 11px; color: #999; line-height: 1.5; }
+.set-sec h2 .bi, .set-row .set-name .bi { margin-right: 4px; }
+.set-row .set-name[style*="color"] { color: #4fc1ff; }  /* 强调色 fallback */

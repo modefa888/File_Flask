@@ -369,11 +369,14 @@
     btn.title = anyOpen ? "全部折叠" : "全部展开";
   }
 
-  /* ---------- 刷新资源管理器：重建目录树并恢复刷新前展开的目录 ---------- */
+  /* ---------- 刷新资源管理器：重建目录树并恢复刷新前展开的目录 ----------
+     同时保留：选中项（自动刷新时不打断用户当前操作）与滚动位置 */
   async function refreshTree() {
     if (!ROOT) return;
     const openBases = new Set();
     explorerPanel.querySelectorAll(".tree-children.open").forEach(k => { if (k._base) openBases.add(k._base); });
+    const prevScroll = explorerPanel.scrollTop;
+    const prevSelPath = treeSel ? treeSel.path : "";
     treeSel = null;
     explorerPanel.innerHTML = "";
     const root = document.createElement("div");
@@ -402,6 +405,15 @@
         }
       };
       await restore(root);
+      // 恢复选中项与滚动位置
+      if (prevSelPath) {
+        const row = [...explorerPanel.querySelectorAll(".tree-row")].find(r => r.dataset.path === prevSelPath);
+        if (row) {
+          row.classList.add("selected");
+          treeSel = { path: prevSelPath, name: row.dataset.name, isDir: row.dataset.isdir === "1" };
+        }
+      }
+      explorerPanel.scrollTop = prevScroll;
     } catch (e) { toast("刷新失败：" + (e.message || e), "err"); }
     syncTreeToggleBtn();
   }

@@ -120,6 +120,8 @@
    之后加载的文件访问不到闭包内的 toast()，而通知模块的保存/测试提示依赖它 #}
 {% include 'ide/js/18_通知设置_桌面_邮件_测试_历史.js' %}
 {% include 'ide/js/15_设置页_仿_Trae_VS_Code_以_设置_标签页形式打开_可与文件标签并存.js' %}
+{# 自动刷新必须在 16_ 之前加载：依赖 IIFE 闭包内的 refreshTree / loadGitStatus / explorerPanel 等 #}
+{% include 'ide/js/19_后台变更自动刷新_文件树_源代码管理.js' %}
 {% include 'ide/js/16_自定义悬停提示_全局接管所有_title_属性.js' %}
 {% include 'ide/js/17_SQLite数据库查看器_db_sqlite只读浏览_表列表_分页数据.js' %}
 </script>

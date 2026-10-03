@@ -392,9 +392,19 @@
   $("sideTreeToggle").onclick = () => {
     if (treeHasOpenDirs()) treeCollapseAll(); else treeExpandAll();
   };
+  // 启动时按恢复的「显示全部」状态同步眼睛按钮样式（图标/高亮/悬浮提示）
+  (() => {
+    const btn = $("sideShowAll");
+    if (!btn) return;
+    const on = showAllFiles || showHidden;
+    btn.querySelector("i").className = on ? "bi bi-eye" : "bi bi-eye-slash";
+    btn.classList.toggle("on", on);
+    btn.title = on ? "隐藏全部（依赖目录与隐藏文件）" : "显示全部（含 node_modules、.gitignore 等）";
+  })();
   $("sideShowAll").onclick = () => {
     showAllFiles = !showAllFiles;
     showHidden = !showHidden;
+    ideSettingSet("showAllFiles", showAllFiles);   // 写入全局设置 JSON，永久记住
     const btn = $("sideShowAll");
     const on = showAllFiles || showHidden;
     btn.querySelector("i").className = on ? "bi bi-eye" : "bi bi-eye-slash";

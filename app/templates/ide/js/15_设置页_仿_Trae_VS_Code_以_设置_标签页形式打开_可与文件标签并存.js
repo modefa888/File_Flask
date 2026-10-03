@@ -2,10 +2,16 @@
      设置页（仿 Trae / VS Code：以「设置」标签页形式打开，可与文件标签并存）
      ================================================================ */
   const IDE_SETTINGS = Object.assign(
-    { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true },
+    { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
+      showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree" },
     (() => { try { return JSON.parse(localStorage.getItem("ide.settings") || "{}"); } catch (_) { return {}; } })()
   );
-  function saveIdeSettings() { localStorage.setItem("ide.settings", JSON.stringify(IDE_SETTINGS)); }
+  function saveIdeSettings() {
+    // 合并写入：保留其它模块通过 ideSettingSet 写入的开关键，避免整对象覆盖丢失
+    let cur = {};
+    try { cur = JSON.parse(localStorage.getItem("ide.settings") || "{}"); } catch (_) { }
+    localStorage.setItem("ide.settings", JSON.stringify(Object.assign(cur, IDE_SETTINGS)));
+  }
   function applyIdeSettings() {
     document.documentElement.style.setProperty("--cm-font-size", IDE_SETTINGS.fontSize + "px");
     document.body.classList.toggle("hide-nm-hints", !IDE_SETTINGS.hints);
@@ -52,6 +58,9 @@
           '<div class="set-row" data-kw="缩进 tab indent"><div class="set-info"><div class="set-label">缩进空格数</div><div class="set-desc">Tab 与自动缩进的空格宽度</div></div><select id="setIndent"><option value="2">2</option><option value="4">4</option><option value="8">8</option></select></div>' +
         '</div>' +
         '<div class="set-sec" id="sec-files"><h2>文件</h2>' +
+          '<div class="set-row" data-kw="显示 全部 依赖 隐藏 node_modules eye"><div class="set-info"><div class="set-label">显示全部文件</div><div class="set-desc">资源管理器中显示依赖目录（node_modules 等）与点开头隐藏文件（.gitignore、.env 等），与「眼睛」图标按钮联动</div></div><input type="checkbox" id="setShowAll"></div>' +
+          '<div class="set-row" data-kw="源代码管理 git 视图 树形 列表"><div class="set-info"><div class="set-label">源代码管理视图</div><div class="set-desc">更改文件清单的展示方式</div></div><select id="setGitView"><option value="list">列表（平铺）</option><option value="tree">树形（按目录）</option></select></div>' +
+          '<div class="set-row" data-kw="图形 提交 文件 清单 视图 树形 列表"><div class="set-info"><div class="set-label">图形提交文件清单</div><div class="set-desc">「图形」中每个提交的文件展示方式</div></div><select id="setGitCommitMode"><option value="tree">树形（默认）</option><option value="list">列表</option></select></div>' +
           '<div class="set-row" data-kw="提示 注释 命名 hint"><div class="set-info"><div class="set-label">文件树命名提示</div><div class="set-desc">在文件名后显示说明注释（如 README → 项目说明）</div></div><input type="checkbox" id="setHints"></div>' +
         '</div>' +
         '<div class="set-sec" id="sec-keys"><h2 class="set-extra">快捷键</h2>' +
@@ -125,6 +134,9 @@
     q("#setActiveLine").checked = IDE_SETTINGS.activeLine;
     q("#setIndent").value = IDE_SETTINGS.indent;
     q("#setHints").checked = IDE_SETTINGS.hints;
+    q("#setShowAll").checked = !!IDE_SETTINGS.showAllFiles;
+    q("#setGitView").value = IDE_SETTINGS.gitViewMode === "tree" ? "tree" : "list";
+    q("#setGitCommitMode").value = IDE_SETTINGS.gitCommitFileMode === "list" ? "list" : "tree";
     q("#setFontSize").addEventListener("change", e => {
       const v = Math.max(10, Math.min(24, parseInt(e.target.value, 10) || 13));
       IDE_SETTINGS.fontSize = v; e.target.value = v; saveIdeSettings(); applyIdeSettings();
@@ -133,12 +145,59 @@
     q("#setActiveLine").addEventListener("change", e => { IDE_SETTINGS.activeLine = e.target.checked; saveIdeSettings(); applyIdeSettings(); });
     q("#setIndent").addEventListener("change", e => { IDE_SETTINGS.indent = parseInt(e.target.value, 10) || 4; saveIdeSettings(); applyIdeSettings(); });
     q("#setHints").addEventListener("change", e => { IDE_SETTINGS.hints = e.target.checked; saveIdeSettings(); applyIdeSettings(); });
+    // 显示全部文件：与资源管理器「眼睛」图标同源（showAllFiles/showHidden），改动即时刷新文件树
+    q("#setShowAll").addEventListener("change", e => {
+      const on = e.target.checked;
+      IDE_SETTINGS.showAllFiles = on;
+      saveIdeSettings(); ideSettingSet("showAllFiles", on);
+      showAllFiles = on; showHidden = on;
+      const btn = $("sideShowAll");
+      if (btn) {
+        btn.querySelector("i").className = on ? "bi bi-eye" : "bi bi-eye-slash";
+        btn.classList.toggle("on", on);
+        btn.title = on ? "隐藏全部（依赖目录与隐藏文件）" : "显示全部（含 node_modules、.gitignore 等）";
+      }
+      refreshTree(ROOT);
+    });
+    // 源代码管理视图：list/tree，同步头部切换按钮图标并重渲染
+    q("#setGitView").addEventListener("change", e => {
+      const v = e.target.value === "tree" ? "tree" : "list";
+      IDE_SETTINGS.gitViewMode = v;
+      saveIdeSettings(); ideSettingSet("gitViewMode", v);
+      gitViewMode = v;
+      const tg = $("gitViewToggle");
+      if (tg) {
+        tg.innerHTML = '<i class="bi ' + (v === "tree" ? "bi-list-ul" : "bi-diagram-3") + '"></i>';
+        tg.title = v === "tree" ? "切换到列表视图" : "切换到树形视图";
+      }
+      if (gitState.isRepo && gitState.last) renderGitStatus(gitState.last);
+    });
+    // 图形提交文件清单：tree/list，改动后重载提交文件列表
+    q("#setGitCommitMode").addEventListener("change", e => {
+      const v = e.target.value === "list" ? "list" : "tree";
+      IDE_SETTINGS.gitCommitFileMode = v;
+      saveIdeSettings(); ideSettingSet("gitCommitFileMode", v);
+      gitCommitFileMode = v;
+      if (typeof reloadCommitLists === "function") reloadCommitLists();
+    });
     q("#setClearRecent").onclick = () => { localStorage.removeItem("ide.recentFiles"); toast("已清除最近打开记录", "ok"); };
     q("#setReset").onclick = () => {
-      Object.assign(IDE_SETTINGS, { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true });
+      Object.assign(IDE_SETTINGS, { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
+        showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree" });
       saveIdeSettings(); applyIdeSettings();
       q("#setFontSize").value = 13; q("#setLineWrap").checked = false; q("#setActiveLine").checked = true;
       q("#setIndent").value = 4; q("#setHints").checked = true;
+      q("#setShowAll").checked = false; q("#setGitView").value = "list"; q("#setGitCommitMode").value = "tree";
+      // 同步重置各开关的运行时状态
+      showAllFiles = false; showHidden = false;
+      gitViewMode = "list"; gitCommitFileMode = "tree";
+      const btn = $("sideShowAll");
+      if (btn) { btn.querySelector("i").className = "bi bi-eye-slash"; btn.classList.remove("on"); btn.title = "显示全部（含 node_modules、.gitignore 等）"; }
+      const tg = $("gitViewToggle");
+      if (tg) { tg.innerHTML = '<i class="bi bi-diagram-3"></i>'; tg.title = "切换到树形视图"; }
+      refreshTree(ROOT);
+      if (gitState.isRepo && gitState.last) renderGitStatus(gitState.last);
+      if (typeof reloadCommitLists === "function") reloadCommitLists();
       toast("已恢复默认设置", "ok");
     };
     // ---- 自定义快捷键：渲染 + 捕获新组合键 ----

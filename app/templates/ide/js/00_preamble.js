@@ -71,11 +71,21 @@
   function dirName(p) { const i = p.lastIndexOf("/"); return i > 0 ? p.substring(0, i) : (i === 0 ? "/" : p); }
 
   /* ---------- 文件树 ---------- */
+  // 全局设置 JSON（localStorage "ide.settings"）通用读写：所有开关型设置统一收口，永久保存
+  function ideSettingGet(k, def) {
+    try { const s = JSON.parse(localStorage.getItem("ide.settings") || "{}"); return (s && s[k] !== undefined) ? s[k] : def; } catch (_) { return def; }
+  }
+  function ideSettingSet(k, v) {
+    try {
+      const s = JSON.parse(localStorage.getItem("ide.settings") || "{}");
+      s[k] = v; localStorage.setItem("ide.settings", JSON.stringify(s));
+    } catch (_) { }
+  }
   // IDE 树中隐藏的目录：各类语言/工具的依赖与缓存目录（对任何项目生效）
   // 「显示全部」开关：开启后依赖目录（node_modules 等）也会显示，可手动展开，「全部展开」会跳过
-  let showAllFiles = false;
-  // 「显示隐藏文件」开关：开启后以点开头的文件（.gitignore、.env 等）也会显示
-  let showHidden = false;
+  // 初始值从全局设置恢复（设置页 → 文件 → 显示全部；资源管理器眼睛图标与之联动）
+  let showAllFiles = !!ideSettingGet("showAllFiles", false);
+  let showHidden = showAllFiles;
   const TREE_IGNORE = new Set([
     "node_modules",                      // Node.js / 前端
     "__pycache__", ".venv", "venv", ".pytest_cache", ".mypy_cache",  // Python

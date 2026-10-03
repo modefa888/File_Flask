@@ -302,3 +302,98 @@
     grepReplaceFiles(grepData.files);
   };
 
+  /* ---------- 结果区自定义迷你横向滚动条 ----------
+     长行内容可横向延伸，底部固定一条细滚动条：
+     拖动滑块 / 点击轨道即可左右滚动，内容不溢出时自动隐藏 */
+  (function () {
+    const box = $("searchResults");
+    const bar = document.createElement("div");
+    bar.className = "s-hscroll";
+    const thumb = document.createElement("div");
+    thumb.className = "s-hscroll-thumb";
+    bar.appendChild(thumb);
+    box.after(bar);                        // 固定在结果区正下方（搜索模块底部）
+
+    function update() {
+      // 分组标题粘性固定需要知道结果区可视宽度（.gf-head width: var(--sw)）
+      box.style.setProperty("--sw", box.clientWidth + "px");
+      if (!$("searchPanel").classList.contains("active")) { bar.classList.remove("show"); return; }
+      const sw = box.scrollWidth, cw = box.clientWidth;
+      if (sw <= cw + 1) { bar.classList.remove("show"); return; }
+      bar.classList.add("show");
+      const bw = bar.clientWidth;
+      const tw = Math.max(24, Math.round(cw / sw * bw));
+      const maxScroll = sw - cw;
+      const pos = Math.max(0, Math.min(bw - tw, Math.round(box.scrollLeft / maxScroll * (bw - tw))));
+      thumb.style.width = tw + "px";
+      thumb.style.left = pos + "px";
+    }
+
+    // 纵向滚动吸附检测：分组标题吸顶时给分组加 .stuck（驱动标题底部渐隐阴影）
+    function updateStuck() {
+      const top = box.getBoundingClientRect().top;
+      box.querySelectorAll(".gfile").forEach(g => {
+        const head = g.firstElementChild;
+        if (!head) return;
+        const gr = g.getBoundingClientRect();
+        const hr = head.getBoundingClientRect();
+        g.classList.toggle("stuck", gr.top <= top && gr.bottom > top + hr.height);
+      });
+    }
+
+    const refresh = () => { update(); updateStuck(); };
+
+    // 拖动滑块滚动
+    let drag = null;                       // {startX, sl, maxScroll, maxThumb}
+    thumb.addEventListener("pointerdown", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      thumb.setPointerCapture(e.pointerId);
+      thumb.classList.add("dragging");
+      const sw = box.scrollWidth, cw = box.clientWidth;
+      drag = { startX: e.clientX, sl: box.scrollLeft, maxScroll: sw - cw, maxThumb: bar.clientWidth - thumb.offsetWidth };
+    });
+    thumb.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.startX;
+      box.scrollLeft = Math.max(0, Math.min(drag.maxScroll, drag.sl + dx / drag.maxThumb * drag.maxScroll));
+    });
+    const endDrag = () => { drag = null; thumb.classList.remove("dragging"); };
+    thumb.addEventListener("pointerup", endDrag);
+    thumb.addEventListener("pointercancel", endDrag);
+
+    // 点击轨道：滑块跳到点击处（以点击点为中心）
+    bar.addEventListener("pointerdown", (e) => {
+      if (e.target === thumb) return;
+      const r = bar.getBoundingClientRect();
+      const sw = box.scrollWidth, cw = box.clientWidth;
+      const ratio = (e.clientX - r.left) / r.width;
+      box.scrollLeft = Math.max(0, Math.min(sw - cw, ratio * (sw - cw) - cw / 2));
+      update();
+    });
+
+    box.addEventListener("scroll", refresh, { passive: true });
+    window.addEventListener("resize", refresh);
+    // 结果重渲染（新搜索/折叠展开/替换完成）后自动刷新滑块状态
+    new MutationObserver(refresh).observe(box, { childList: true, subtree: true });
+    refresh();
+
+    // 悬停结果行时，若该行高亮关键字在横向可视区外，自动滚动到可见位置（滚到视口左 1/3 处）
+    let hoverRow = null;
+    box.addEventListener("pointerover", (e) => {
+      const row = e.target.closest(".gm");
+      if (!row || row === hoverRow) return;
+      hoverRow = row;
+      const mark = row.querySelector("mark");
+      if (!mark) return;
+      const br = box.getBoundingClientRect();
+      const mr = mark.getBoundingClientRect();
+      const mLeft = mr.left - br.left + box.scrollLeft;    // 关键字相对内容起点的位置
+      const mRight = mLeft + mr.width;
+      const viewL = box.scrollLeft, viewR = viewL + box.clientWidth;
+      if (mLeft >= viewL && mRight <= viewR) return;       // 已完整可见，不滚动
+      const target = Math.max(0, Math.min(box.scrollWidth - box.clientWidth, mLeft - box.clientWidth / 3));
+      box.scrollTo({ left: target, behavior: "smooth" });
+    });
+    box.addEventListener("pointerleave", () => { hoverRow = null; });
+  })();
+

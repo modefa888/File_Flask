@@ -2,7 +2,8 @@
      源代码管理（Git）：状态 / 暂存 / 取消暂存 / 放弃 / 提交 / 差异视图
      ================================================================== */
   const gitState = { isRepo: false, repo: "", branch: "", last: null };
-  let gitViewMode = "list";      // tree（树形视图）/ list（平铺列表，默认，与源代码管理参考样式一致）
+  // 视图模式从全局设置 JSON 恢复（设置页 → 文件 可改），切换时写回永久保存
+  let gitViewMode = ideSettingGet("gitViewMode", "list") === "tree" ? "tree" : "list";
   let gitGraph = [];             // 最近提交（图形区块）
 
   function gitPost(url, body, okMsg) {
@@ -240,7 +241,7 @@
   }
 
   /* 图形：最近提交（含工具栏：转到当前 / 抓取 / 拉取 / 发布 / 刷新 / 更多） */
-  let gitCommitFileMode = "tree";        // 提交内文件清单：list / tree（默认树形，与图形视图一致）
+  let gitCommitFileMode = ideSettingGet("gitCommitFileMode", "tree") === "list" ? "list" : "tree";   // 提交内文件清单：list / tree（默认树形，全局设置持久化）
 
   function showGitMoreMenu(anchor) {
     let menu = $("gitMoreMenu");
@@ -252,8 +253,8 @@
       document.addEventListener("click", () => { menu.style.display = "none"; });
     }
     const items = [
-      { label: "以列表形式查看", on: gitCommitFileMode === "list", act: () => { gitCommitFileMode = "list"; reloadCommitLists(); } },
-      { label: "以树形式查看", on: gitCommitFileMode === "tree", act: () => { gitCommitFileMode = "tree"; reloadCommitLists(); } },
+      { label: "以列表形式查看", on: gitCommitFileMode === "list", act: () => { gitCommitFileMode = "list"; ideSettingSet("gitCommitFileMode", "list"); reloadCommitLists(); } },
+      { label: "以树形式查看", on: gitCommitFileMode === "tree", act: () => { gitCommitFileMode = "tree"; ideSettingSet("gitCommitFileMode", "tree"); reloadCommitLists(); } },
       { label: "设置远程仓库", act: () => setGitRemote() },
     ];
     menu.innerHTML = "";
@@ -1525,8 +1526,15 @@
     });
   }
 
+  // 按恢复的视图模式同步切换按钮初始图标（list 显示"切到树形"图标，反之亦然）
+  (() => {
+    const tg = $("gitViewToggle");
+    tg.innerHTML = '<i class="bi ' + (gitViewMode === "tree" ? "bi-list-ul" : "bi-diagram-3") + '"></i>';
+    tg.title = gitViewMode === "tree" ? "切换到列表视图" : "切换到树形视图";
+  })();
   $("gitViewToggle").onclick = () => {
     gitViewMode = gitViewMode === "tree" ? "list" : "tree";
+    ideSettingSet("gitViewMode", gitViewMode);   // 写入全局设置 JSON，永久记住
     $("gitViewToggle").innerHTML = '<i class="bi ' + (gitViewMode === "tree" ? "bi-list-ul" : "bi-diagram-3") + '"></i>';
     $("gitViewToggle").title = gitViewMode === "tree" ? "切换到列表视图" : "切换到树形视图";
     if (gitState.isRepo && gitState.last) renderGitStatus(gitState.last);

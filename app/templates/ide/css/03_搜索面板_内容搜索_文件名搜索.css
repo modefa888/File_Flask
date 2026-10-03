@@ -29,24 +29,8 @@
   .s-hint { color: #8a8a8a; font-size: 11px; padding: 8px 2px 6px; line-height: 1.6; }
   .s-hint.err { color: #e08a8a; }
   .s-results { flex: 1; overflow: auto; min-height: 0; }
-  /* 内容搜索长行改为横向滚动查看：不再省略号截断，横向滚动由底部自定义迷你滚动条驱动。
-     用双类/ID 选择器提高优先级，确保覆盖本文件后面 .gm/.gm-tx 的 overflow:hidden/ellipsis 规则 */
-  #searchResults { overflow-x: hidden; }
-  .s-results .gm { overflow: visible; }
-  .s-results .gm-tx { overflow: visible; text-overflow: clip; }
-
-  /* 搜索模块底部自定义迷你横向滚动条（仅内容溢出时显示） */
-  .s-hscroll { position: relative; height: 9px; flex: none; margin: 1px 2px 4px; display: none; cursor: pointer; }
-  .s-hscroll.show { display: block; }
-  .s-hscroll::before { content: ""; position: absolute; left: 0; right: 0; top: 3px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.04); }
-  .s-hscroll-thumb {
-    position: absolute; top: 1px; bottom: 1px; min-width: 24px;
-    background: #3c3c3c; border-radius: 3px; cursor: grab;
-  }
-  .s-hscroll-thumb:hover { background: #555; }
-  .s-hscroll-thumb.dragging { background: #6e6e6e; cursor: grabbing; }
-  /* 文件名模式结果均为省略号显示，横向滚动条不出现 */
-  #searchPanel.mode-name .s-hscroll { display: none !important; }
+  /* 匹配行允许溢出，完整显示内容 + 关键字 mark 高亮；容器可横向滚动 */
+  #searchResults { overflow-x: auto; overflow-y: auto; }
   .sres {
     display: flex; align-items: flex-start; gap: 6px; padding: 4px 6px; border-radius: 4px;
     cursor: pointer; font-size: 13px; color: #d4d4d4;
@@ -66,8 +50,8 @@
   .gf-head:hover { background: #2a2d2e; }
   .gf-twist { font-size: 10px; color: #9aa0a6; }
   .gf-head .ic { color: #9aa0a6; }
-  .gf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .gf-rel { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+  .gf-rel { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
   .gf-count {
     margin-left: auto; background: #4d4d4d; color: #ffffff; border-radius: 9px;
     font-size: 10px; padding: 1px 6px; flex: none;
@@ -80,25 +64,23 @@
   .gf-rep:hover { background: #3a3d41; color: #fff; }
   .gf-body { display: block; }
   .gfile.collapsed .gf-body { display: none; }
+  /* 匹配行只让文本部分溢出，行号和行本身不撑宽 */
+  .gfile { margin-bottom: 2px; }
   .gm {
     display: flex; gap: 8px; padding: 2px 6px 2px 22px; cursor: pointer;
     font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; color: #bdbdbd;
-    white-space: pre; overflow: hidden;
+    white-space: pre;
   }
   .gm:hover { background: #2a2d2e; }
   .gm-ln { color: #6f6f6f; min-width: 34px; text-align: right; flex: none; }
-  .gm-tx { overflow: hidden; text-overflow: ellipsis; }
+  .gm-tx { white-space: pre; flex-shrink: 0; overflow: visible; }
   .gm mark { background: #ff9632; color: #1f1f1f; font-weight: 600; border-radius: 2px; }
 
-  /* 横向滚动时分组标题（文件名/路径/计数）固定在视口左侧，仅匹配内容行滚动：
-     分组容器随内容撑宽（max-content），标题行粘性定位；宽度用 --sw（=结果区可视宽）同步，
-     保证「计数」徽标仍贴可视区右缘而不是跑到大宽度尽头 */
-  .s-results .gfile { width: max-content; min-width: 100%; }
+  /* 分组标题粘性定位：纵向吸顶 + 横向锁左，文件名/路径/计数始终可见
+     匹配行溢出由容器横向滚动承载，不再撑宽 .gfile 包含块 */
   .s-results .gf-head {
-    position: sticky; top: 0; left: 0; z-index: 2;
-    width: var(--sw, 100%);
+    position: sticky; top: 0; left: 0; right: 0; z-index: 2;
     background: #252526;
-    box-shadow: 8px 0 8px -6px rgba(0, 0, 0, .8);   /* 右缘阴影提示下方内容被遮挡 */
   }
   .s-results .gf-head:hover { background: #2a2d2e; }
   /* 纵向滚动时当前文件的标题吸附在结果区顶部（同 VS Code）：

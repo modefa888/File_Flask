@@ -422,13 +422,20 @@
     }
     if (act === "delete") {
       if (!(await uiConfirm("删除确认", "确定删除 " + name + " ？此操作不可撤销。", "删除", true))) return;
+      // 删除进行中：在树行图标处显示旋转图标，文件真实删除后随行一起消失
+      const row = document.querySelector('.tree-row[data-path="' + path.replace(/"/g, '\\"') + '"]');
+      const ic = row ? row.querySelector(".ic") : null;
+      if (ic) {
+        ic._origHtml = ic.innerHTML;
+        ic.innerHTML = '<i class="bi bi-arrow-clockwise tree-delete-spin"></i>';
+        row.classList.add("tree-deleting");
+      }
       fetch("/api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paths: [path] }) })
         .then(r => r.json()).then(d => {
           if (d.error) throw new Error(d.error);
           toast("已删除：" + name, "ok");
           // 直接从树里移除该节点（目录连子容器），不重拉整棵树，避免展开状态/滚动位置抖动
           // 注意：带引号的属性选择器值不能套 CSS.escape（会把 . 转成 \. 导致匹配失败），直接拼接即可
-          const row = document.querySelector('.tree-row[data-path="' + path.replace(/"/g, '\\"') + '"]');
           if (row) {
             const kids = row.nextElementSibling;
             if (kids && kids.classList.contains("tree-children")) kids.remove();
@@ -437,7 +444,14 @@
           loadGitStatus();                                    // 只刷新 Git 角标/更改列表，不动树
           closeTabsForDeletedPath(path);                      // 列表文件被删除时，自动关闭对应编辑标签
         })
-        .catch(e => toast("删除失败：" + (e.message || e), "err"));
+        .catch(e => {
+          // 删除失败：还原原图标和行状态
+          if (ic) {
+            ic.innerHTML = ic._origHtml || "";
+            row.classList.remove("tree-deleting");
+          }
+          toast("删除失败：" + (e.message || e), "err");
+        });
     }
   }
   function closeTabSilent(tab) { tab.host.remove(); const i = tabs.indexOf(tab); if (i >= 0) tabs.splice(i, 1); renderTabsAll(); }

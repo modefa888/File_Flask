@@ -45,7 +45,7 @@
                     nameHtml = `<a class="dir-link" data-path="${absPath}">${iconHtml} ${item.name}</a>`;
                 } else {
                     const ext = (item.ext || '').toLowerCase();
-                    const previewable = _canPreview(ext);
+                    const previewable = _canPreviewPath(absPath);
                     const isZip = _isZip(ext);
                     const nameClass = (previewable || isZip) ? 'file-name file-name-clickable' : 'file-name';
                     nameHtml = `${iconHtml} <span class="${nameClass}" data-path="${absPath}" data-ext="${ext}" data-zip="${isZip}" title="${previewable || isZip ? '点击查看' : '不支持预览'}">${item.name}</span>`;

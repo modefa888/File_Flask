@@ -193,6 +193,13 @@ _TEXT_FILENAMES = {
     "makefile", "dockerfile", "dockerfile.dev", "dockerfile.prod",
     "readme", "license", "copying", "changelog", "changes",
 }
+# 点开头文件（.env / .env.example / .npmrc 等）：splitext 对它们取不到扩展名，
+# 按首段名（去掉开头点后的第一段）匹配此集合即视为文本，可打开编辑
+_DOTFILE_TEXT_STEMS = {
+    "env", "npmrc", "nvmrc", "bashrc", "zshrc", "profile", "vimrc", "curlrc", "wgetrc",
+    "gitignore", "gitattributes", "gitmodules", "gitconfig", "dockerignore", "editorconfig",
+    "prettierrc", "eslintrc", "babelrc", "stylelintrc", "flake8", "pypirc", "htaccess", "python-version",
+}
 _IMAGE_EXTS = {"png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"}
 _VIDEO_EXTS = {"mp4", "webm", "mkv", "avi", "mov", "m4v", "ogg", "flv"}
 _AUDIO_EXTS = {"mp3", "wav", "ogg", "flac", "aac", "m4a", "opus", "wma", "mp2", "mid", "midi"}

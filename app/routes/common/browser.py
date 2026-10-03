@@ -14,7 +14,7 @@ from ...config import (
     _TEXT_EXTS, _IMAGE_EXTS, _VIDEO_EXTS,
     _AUDIO_EXTS,
     _PREVIEW_MAX_BYTES, _TEXT_PREVIEW_MAX_BYTES,
-    _THUMB_CACHE_DIR, _TEXT_FILENAMES, _STORAGE_DIR,
+    _THUMB_CACHE_DIR, _TEXT_FILENAMES, _DOTFILE_TEXT_STEMS, _STORAGE_DIR,
 )
 from ...log import get_logger
 from ...services.common.filecore import (
@@ -227,8 +227,12 @@ def api_preview():
         # 链式扩展名匹配：app.log.20260826 / debug.json.bak 这类多段后缀，
         # 只要任一段是已知文本/图片类型就按对应类型处理（日志按天轮转场景）
         segments = [s for s in filename.split(".") if s]
+        # 点开头文件（.env / .env.example / .npmrc 等）：splitext 取不到扩展名，
+        # 按首段名匹配点文件集合视为文本（.env.example 这类带后缀的变体也命中）
+        is_dotfile_text = filename.startswith(".") and segments and segments[0] in _DOTFILE_TEXT_STEMS
         is_text = (ext in _TEXT_EXTS or filename in _TEXT_FILENAMES
-                   or any(seg in _TEXT_EXTS for seg in segments[1:]))
+                   or any(seg in _TEXT_EXTS for seg in segments[1:])
+                   or is_dotfile_text)
         is_image = ext in _IMAGE_EXTS or any(seg in _IMAGE_EXTS for seg in segments[1:])
         mime_type, _ = mimetypes.guess_type(target_path)
         if not mime_type:

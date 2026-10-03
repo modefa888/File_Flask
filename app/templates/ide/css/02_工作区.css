@@ -58,6 +58,12 @@
   .tree-row .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .tree-row .nm-hint { color: #8a8a8a; font-size: 11px; margin-left: 4px; flex: none; }
   .tree-row.dirty .nm { color: #e2c08a; }
+
+  /* 删除进行中：图标处显示旋转图标，文件名淡化 */
+  .tree-row.tree-deleting .nm { color: #777; opacity: 0.6; }
+  .tree-row.tree-deleting .twist { visibility: hidden; }
+  .tree-delete-spin { display: inline-block; animation: treeDelSpin 0.9s linear infinite; color: #e06c75; }
+  @keyframes treeDelSpin { to { transform: rotate(360deg); } }
   .tree-children { display: none; }
   .tree-children.open { display: block; }
 

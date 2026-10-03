@@ -318,8 +318,7 @@
             el.querySelectorAll('[data-preview-path]').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const p = btn.dataset.previewPath;
-                    const ext = (p.split('.').pop() || '').toLowerCase();
-                    if (_canPreview(ext)) previewFile(p);
+                    if (_canPreviewPath(p)) previewFile(p);
                     else showToast('提示', '该文件类型不支持预览', 'warning');
                 });
             });

@@ -12,7 +12,7 @@
                 const isSelected = selectedPaths.has(absPath);
                 const isDir = item.is_dir;
                 const ext = (item.ext || '').toLowerCase();
-                const previewable = isDir ? false : _canPreview(ext);
+                const previewable = isDir ? false : _canPreviewPath(absPath);
                 const iconClass = isDir ? 'bi bi-folder-fill text-warning tree-icon' : (function () {
                     const icons = { 'pdf': 'bi-filetype-pdf text-danger', 'jpg': 'bi-file-image text-success', 'jpeg': 'bi-file-image text-success', 'png': 'bi-file-image text-success', 'gif': 'bi-file-image text-success', 'svg': 'bi-file-image text-success', 'mp4': 'bi-file-play text-primary', 'avi': 'bi-file-play text-primary', 'mov': 'bi-file-play text-primary', 'mkv': 'bi-file-play text-primary', 'mp3': 'bi-file-music text-primary', 'wav': 'bi-file-music text-primary', 'zip': 'bi-file-zip text-secondary', 'rar': 'bi-file-zip text-secondary', '7z': 'bi-file-zip text-secondary', 'py': 'bi-file-code text-info', 'js': 'bi-file-code text-warning', 'html': 'bi-file-code text-danger', 'css': 'bi-file-code text-info', 'json': 'bi-file-code text-secondary', 'txt': 'bi-file-text text-secondary', 'md': 'bi-file-text text-secondary' };
                     const cls = icons[ext] || 'bi-file-earmark';
@@ -98,7 +98,7 @@
                     const childAbsPath = absPath + '/' + item.path;
                     const isDir = item.is_dir;
                     const ext = (item.ext || '').toLowerCase();
-                    const previewable = isDir ? false : _canPreview(ext);
+                    const previewable = isDir ? false : _canPreviewPath(absPath);
                     const iconClass = isDir ? 'bi bi-folder-fill text-warning tree-icon' : 'bi bi-file-earmark tree-icon';
                     const sizeStr = item.size_str || '';
                     const nameTag = previewable ? `<span class="tree-name clickable" data-path="${childAbsPath}" data-ext="${ext}">${item.name}</span>` : `<span class="tree-name">${item.name}</span>`;

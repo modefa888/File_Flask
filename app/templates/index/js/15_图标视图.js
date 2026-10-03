@@ -17,7 +17,7 @@
                 const ext = (item.ext || '').toLowerCase();
                 const isImage = _IMAGE_EXTS.has(ext);
                 const isVideo = _VIDEO_EXTS.has(ext);
-                const previewable = _canPreview(ext);
+                const previewable = _canPreviewPath(absPath);
                 const isZip = _isZip(ext);
                 const sizeStr = item.size_str || '-';
                 const sizeText = item.is_dir ? (sizeStr !== '-' ? sizeStr : '') : sizeStr;
@@ -78,7 +78,7 @@
                         _clickTimer = setTimeout(() => { _clickTimer = null; navigateTo(absPath); }, 220);
                         return;
                     }
-                    if (_canPreview(nameEl.dataset.ext) || _isZip(nameEl.dataset.ext)) {
+                    if (_canPreviewPath(absPath) || _isZip(nameEl.dataset.ext)) {
                         if (_clickTimer) clearTimeout(_clickTimer);
                         _clickTimer = setTimeout(() => { _clickTimer = null; previewFile(absPath); }, 220);
                     }

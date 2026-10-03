@@ -13,6 +13,21 @@
             return _TEXT_EXTS.has(e) || _IMAGE_EXTS.has(e) || _VIDEO_EXTS.has(e) || _AUDIO_EXTS.has(e);
         }
 
+        // 点开头文件（.env / .env.example / .npmrc 等）没有常规扩展名，按首段名匹配视为文本
+        const _DOTFILE_TEXT_STEMS = new Set(['env', 'npmrc', 'nvmrc', 'bashrc', 'zshrc', 'profile', 'vimrc', 'curlrc', 'wgetrc', 'gitignore', 'gitattributes', 'gitmodules', 'gitconfig', 'dockerignore', 'editorconfig', 'prettierrc', 'eslintrc', 'babelrc', 'stylelintrc', 'flake8', 'pypirc', 'htaccess', 'python-version']);
+        function _isDotfileText(p) {
+            const name = (String(p || '').split('/').pop() || '').toLowerCase();
+            if (!name.startsWith('.')) return false;
+            const segs = name.split('.').filter(Boolean);
+            return segs.length > 0 && _DOTFILE_TEXT_STEMS.has(segs[0]);
+        }
+
+        // 按完整路径判定可预览性：先按扩展名，再按点文件名兜底（.env 这类后端 ext 为空）
+        function _canPreviewPath(p) {
+            if (_canPreview(String(p || '').split('.').pop())) return true;
+            return _isDotfileText(p);
+        }
+
         // 压缩包内成员：视频必须先整体解压才能播放，大文件会占满内存，因此仅支持下载
         function _canPreviewZipMember(ext) {
             const e = (ext || '').toLowerCase();
@@ -34,11 +49,11 @@
                 openZipViewer(absPath, '');
                 return;
             }
-            if (!_canPreview(ext)) return;
+            if (!_canPreviewPath(absPath)) return;
             const container = document.getElementById('previewContainer');
             const extLabel = ext ? ext.toUpperCase() : '未知';
             const fileName = absPath.split('/').pop();
-            const isTextFile = _TEXT_EXTS.has(ext);
+            const isTextFile = _TEXT_EXTS.has(ext) || _isDotfileText(absPath);
             const isVideoFile = _VIDEO_EXTS.has(ext);
             container.innerHTML = `
             <div class="preview-overlay">

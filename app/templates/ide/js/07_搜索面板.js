@@ -378,22 +378,69 @@
     refresh();
 
     // 悬停结果行时，若该行高亮关键字在横向可视区外，自动滚动到可见位置（滚到视口左 1/3 处）
-    let hoverRow = null;
-    box.addEventListener("pointerover", (e) => {
-      const row = e.target.closest(".gm");
-      if (!row || row === hoverRow) return;
-      hoverRow = row;
-      const mark = row.querySelector("mark");
+    // · 用"鼠标 Y 坐标定位 .gm 行"，而不是 closest('.gm')
+    //   —— 因为 .gm 有 overflow:hidden，.gm-tx 里的文字被横向裁剪后，鼠标停在裁剪区时
+    //   e.target 已经不是 .gm 的子元素，closest('.gm') 找不到对应行；改成坐标匹配后，
+    //   鼠标停在 .gm 可视区、以及右侧延伸的空白/被裁剪文字区，都能正确归属到该行。
+    // · 横向不做限制：鼠标只要在 Y 方向对应到某行（不管 X 是在行内、行右侧空白、还是行号栏外）都触发
+    // · rAF 节流，避免同一次移动内重复触发 scrollTo
+    // · 缓存失效条件：内容变化 / 垂直滚动 / 窗口 resize
+    let hoverRow = null, rafId = 0, rowCache = null;
+    function buildCache() {
+      const brTop = box.getBoundingClientRect().top;
+      rowCache = Array.prototype.slice.call(box.querySelectorAll(".gm")).map(r => {
+        const rc = r.getBoundingClientRect();
+        return { el: r, top: rc.top - brTop, bottom: rc.bottom - brTop };
+      });
+    }
+    function locateRowByY(relY) {   // relY 相对 box 顶部
+      if (!rowCache) buildCache();
+      for (const it of rowCache) {
+        if (relY >= it.top && relY < it.bottom) return it.el;
+      }
+      return null;
+    }
+    function clearHover() {
+      if (hoverRow) hoverRow = null;
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    }
+    function ensureMarkVisible() {
+      rafId = 0;
+      if (!hoverRow) return;
+      const mark = hoverRow.querySelector("mark");
       if (!mark) return;
-      const br = box.getBoundingClientRect();
       const mr = mark.getBoundingClientRect();
-      const mLeft = mr.left - br.left + box.scrollLeft;    // 关键字相对内容起点的位置
+      if (!mr.width) return;                          // 已折叠/隐藏
+      const br = box.getBoundingClientRect();
+      const mLeft = mr.left - br.left + box.scrollLeft;   // 关键字相对内容起点
       const mRight = mLeft + mr.width;
       const viewL = box.scrollLeft, viewR = viewL + box.clientWidth;
-      if (mLeft >= viewL && mRight <= viewR) return;       // 已完整可见，不滚动
+      if (mLeft >= viewL && mRight <= viewR) return;  // 已完整可见，不再滚
       const target = Math.max(0, Math.min(box.scrollWidth - box.clientWidth, mLeft - box.clientWidth / 3));
       box.scrollTo({ left: target, behavior: "smooth" });
+    }
+    // 在整个 searchPanel 上监听（而不是 box 上），这样鼠标停在右侧空白、被裁剪的文字、
+    // 甚至横向滚动条区域时都能触发；Y 方向仍然只匹配到 .gm 行的位置
+    const listenTarget = $("searchPanel") || box;
+    listenTarget.addEventListener("mousemove", (e) => {
+      const br = box.getBoundingClientRect();
+      // 只按 Y 定位对应行；X 不做限制——鼠标停在搜索面板右侧空白、
+      // 甚至刚划到编辑器区域时，只要 Y 恰好对齐某个 .gm 行，也让该行关键字滚到可见位置
+      if (e.clientY < br.top || e.clientY >= br.bottom) { clearHover(); return; }
+      const relY = e.clientY - br.top;
+      const row = locateRowByY(relY);
+      if (!row) { clearHover(); return; }
+      hoverRow = row;
+      if (rafId) return;                              // 已经有一帧在排队
+      rafId = requestAnimationFrame(ensureMarkVisible);
     });
-    box.addEventListener("pointerleave", () => { hoverRow = null; });
+    // 内容变化（分组展开/折叠、追加分组）时，行位置缓存失效
+    new MutationObserver(() => { rowCache = null; })
+      .observe(box, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+    // 垂直滚动会改变 .gm 的可视位置，缓存失效
+    box.addEventListener("scroll", () => { rowCache = null; });
+    window.addEventListener("resize", () => { rowCache = null; });
+    // 鼠标离开整个 searchPanel 时清掉缓存
+    listenTarget.addEventListener("mouseleave", clearHover);
   })();
 

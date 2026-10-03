@@ -467,7 +467,7 @@
     if (ok) st.outSum = (st.outSum || 0) + st.tokLast;
     aiPersistCurrent();
     aiRenderStats();
-    aiUpdateCtxRing(Math.round(inTok || 0) + Math.ceil((chars || 0) / 2));   // 上下文占用圆环
+    aiUpdateCtxRing();   // 上下文占用圆环：显示当前会话累计（inSum + outSum）
   }
   function aiRenderStats() {                              // 面板最底部总览状态栏
     const el = $("aiStats");
@@ -1124,8 +1124,23 @@
       role: m.role,
       content: m.role === "user" ? aiReplaceSkillTagsForModel(m.text || m.content || "") : (m.text || m.content || ""),
     });
-    const inTok = Math.ceil((sysPrompt.length + mem.length +
-      usedHist.reduce((a, m) => a + (m.text || "").length, 0) + curText.length) / 2);   // 输入 token 估算
+    // inTok 估算：system + 记忆 + 完整历史（含图片） + 当前消息；中英混合粗估 1.5 char/token
+    const _estLen = (c) => {
+      if (typeof c === "string") return c.length;
+      if (Array.isArray(c)) {
+        let n = 0;
+        for (const p of c) {
+          if (!p) continue;
+          if (p.type === "text") n += (p.text || "").length;
+          else if (p.type === "image_url") n += 1050;   // 图片约 700 tok * 1.5
+        }
+        return n;
+      }
+      return JSON.stringify(c || "").length;
+    };
+    const histTokChars = hist.reduce((a, m) => a + _estLen(m.content), 0);
+    const skillChars = customSkillPrompts.reduce((a, p) => a + (p || "").length, 0);
+    const inTok = Math.ceil((sysPrompt.length + mem.length + histTokChars + _estLen(curContent) + skillChars) / 1.5);
     const payload = {
       provider_id: prov.id,
       model: pick.model,

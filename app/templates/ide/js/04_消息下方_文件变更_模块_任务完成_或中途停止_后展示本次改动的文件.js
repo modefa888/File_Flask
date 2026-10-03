@@ -282,7 +282,13 @@
   function aiUpdateCtxRing(used) {
     const arc = $("aiCtxArc"), ring = $("aiCtxRing");
     if (!arc || !ring) return;
-    if (typeof used === "number") AI.ctxUsed = used;
+    // 无参调用时读当前会话累计消耗（inSum + outSum），跟底部"输入 X tok"一致
+    // 之前默认取 AI.ctxUsed（初始化时为 0），导致圆环永远显示 0
+    if (typeof used !== "number") {
+      const cur = AI.sessions.find(x => x.id === AI.curId);
+      used = (cur && cur.stats && (cur.stats.inSum || 0)) + (cur && cur.stats && (cur.stats.outSum || 0));
+    }
+    AI.ctxUsed = used || 0;
     const pick = aiCurrentPick();
     const total = aiCtxWindow(pick.model);
     const ratio = total > 0 ? Math.min(1, (AI.ctxUsed || 0) / total) : 0;
@@ -293,7 +299,7 @@
     ring.classList.toggle("warn", pct >= 60 && pct < 85);
     ring.classList.toggle("bad", pct >= 85);
     ring.title = "上下文占用：约 " + aiFmtTok(AI.ctxUsed || 0) + " / " + aiFmtTok(total) + " tokens（" + pct + "%）\n" +
-      "模型：" + (pick.model || "未选择") + "\n（窗口大小按模型名估算，输入输出合计，仅供参考）";
+      "模型：" + (pick.model || "未选择") + "\n（窗口大小按模型名估算，显示当前会话累计消耗）";
   }
 
   function aiFillModelSelect() {

@@ -28,9 +28,9 @@
                     const icons = { 'pdf': 'bi-filetype-pdf text-danger', 'jpg': 'bi-file-image text-success', 'jpeg': 'bi-file-image text-success', 'png': 'bi-file-image text-success', 'gif': 'bi-file-image text-success', 'svg': 'bi-file-image text-success', 'mp4': 'bi-file-play text-primary', 'avi': 'bi-file-play text-primary', 'mov': 'bi-file-play text-primary', 'mkv': 'bi-file-play text-primary', 'mp3': 'bi-file-music text-primary', 'wav': 'bi-file-music text-primary', 'zip': 'bi-file-zip text-secondary', 'rar': 'bi-file-zip text-secondary', '7z': 'bi-file-zip text-secondary', 'py': 'bi-file-code text-info', 'js': 'bi-file-code text-warning', 'html': 'bi-file-code text-danger', 'css': 'bi-file-code text-info', 'json': 'bi-file-code text-secondary', 'txt': 'bi-file-text text-secondary', 'md': 'bi-file-text text-secondary' };
                     return icons[ext] || 'bi-file-earmark';
                 })();
-                // 缩略图：图片/视频显示缩略图，其余显示图标
+                // 缩略图：图片/视频显示缩略图，其余显示图标；大小角标挂在图标右下角（视频徽标占用右下角时移到左下角）
                 const thumbPath = isImage || isVideo ? absPath : null;
-                const thumbInner = `<span class="thumb-icon"><i class="bi ${iconClass}"></i></span>${isVideo ? `<span class="thumb-badge">${ext.toUpperCase()}</span>` : ''}`;
+                const thumbInner = `<span class="thumb-icon"><i class="bi ${iconClass}"></i></span>${isVideo ? `<span class="thumb-badge">${ext.toUpperCase()}</span>` : ''}${sizeText ? `<span class="icon-size${isVideo ? ' icon-size--flip' : ''}">${sizeText}</span>` : ''}`;
                 const thumbTag = thumbPath
                     ? `<div class="icon-thumb" data-thumb-path="${thumbPath}" data-thumb-type="${isImage ? 'image' : 'video'}">${thumbInner}</div>`
                     : `<div class="icon-thumb">${thumbInner}</div>`;
@@ -40,7 +40,7 @@
                     ${moreBtn}
                     ${thumbTag}
                     <span class="icon-name" data-path="${absPath}" data-ext="${ext}" title="${nameTitle}">${item.name}</span>
-                    <span class="icon-meta"><span class="icon-size">${sizeText}</span><span class="icon-mtime">${item.mtime || ''}</span></span>
+                    <span class="icon-meta"><span class="icon-mtime">${item.mtime || ''}</span></span>
                 </div>
             `;
             }

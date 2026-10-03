@@ -61,7 +61,7 @@
             _zipSortDir = 1;
             const isNested = !!outerPath;
             const displayName = absPath.split('/').pop();
-            const nestedHint = isNested ? `<span style="font-size:0.72rem;color:#718096;margin-left:6px;">· 嵌套在 <i class="bi bi-file-zip"></i> 内</span>` : '';
+            const nestedHint = isNested ? `<span style="font-size:0.8rem;color:#718096;margin-left:6px;">· 嵌套在 <i class="bi bi-file-zip"></i> 内</span>` : '';
             container.innerHTML = `
             <div class="preview-overlay">
                 <div class="zip-modal">
@@ -381,5 +381,6 @@
         function _humanSize(b) {
             if (b < 1024) return b + ' B';
             if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
-            return (b / 1024 / 1024).toFixed(1) + ' MB';
+            if (b < 1024 * 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + ' MB';
+            return (b / 1024 / 1024 / 1024).toFixed(2) + ' GB';
         }

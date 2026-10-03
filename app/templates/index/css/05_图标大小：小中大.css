@@ -32,7 +32,7 @@
         }
 
         .icon-item.sm .icon-thumb .thumb-icon {
-            font-size: 1.6rem;
+            font-size: 2.4rem;
         }
 
         .icon-item.sm .icon-name {
@@ -61,7 +61,7 @@
         }
 
         .icon-item.md .icon-thumb .thumb-icon {
-            font-size: 2rem;
+            font-size: 3rem;
         }
 
         .icon-item.md .icon-name {
@@ -90,7 +90,7 @@
         }
 
         .icon-item.lg .icon-thumb .thumb-icon {
-            font-size: 2.5rem;
+            font-size: 3.8rem;
         }
 
         .icon-item.lg .icon-name {

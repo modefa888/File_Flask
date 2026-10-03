@@ -456,7 +456,17 @@
   .ai-steps-head .ttl { color: #b9c6d4; flex: none; }
   .ai-steps-head .sum { color: #767676; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ai-steps-head .spin { color: #7fb3e0; }
-  .ai-steps-body { display: flex; flex-direction: column; gap: 4px; padding: 2px 6px 6px; }
+  /* 步骤列表：最多显示约 10 条（≈40px/条 = 36 内容 + 4 gap），超出部分用自定义滚动条纵向查看，头部始终可见 */
+  .ai-steps-body { display: flex; flex-direction: column; gap: 4px; padding: 2px 6px 6px;
+    max-height: 380px; overflow-y: auto; overflow-x: hidden;
+    scrollbar-width: thin; scrollbar-color: #424242 transparent; }
+  .ai-steps-body::-webkit-scrollbar { width: 8px; }
+  .ai-steps-body::-webkit-scrollbar-track { background: transparent; }
+  .ai-steps-body::-webkit-scrollbar-thumb {
+    background: #3a3a3a; border-radius: 4px;
+    border: 2px solid transparent; background-clip: content-box;
+  }
+  .ai-steps-body::-webkit-scrollbar-thumb:hover { background: #555; }
   .ai-steps.collapsed .ai-steps-body { display: none; }
   .ai-steps-body .ai-step { align-self: stretch; }
   /* 命令确认卡片 */

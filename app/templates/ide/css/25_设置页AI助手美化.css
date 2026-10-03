@@ -1,0 +1,142 @@
+/* ================================================================
+   设置 → AI 助手 / 系统 AI：接口卡片美化
+   .ai-prov 系列类只在设置页使用（右侧 AI 面板不含），可放心整体覆盖
+   功能不变：接口名/地址/Key/模型列表/自动获取/删除/添加/保存
+   ================================================================ */
+
+/* 接口卡片 */
+.ai-prov {
+  background: #242425;
+  border: 1px solid #303031;
+  border-radius: 12px;
+  padding: 16px;
+  gap: 7px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.18);
+  transition: border-color .15s, box-shadow .15s;
+}
+.ai-prov:hover {
+  border-color: #3a3a3b;
+  box-shadow: 0 4px 14px rgba(0,0,0,.25);
+}
+
+/* 卡片头：接口名 + 删除 */
+.ai-prov-hd { gap: 8px; margin-bottom: 2px; }
+.ai-prov-hd .nm {
+  font-size: 13.5px;
+  color: #e8e8e8;
+  padding: 4px 2px;
+}
+.ai-prov-hd .nm::placeholder { color: #666; }
+.ai-prov-del {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: #7a6a6a;
+  font-size: 13px;
+  transition: background .15s, color .15s;
+}
+.ai-prov-del:hover {
+  background: rgba(220,80,80,.12);
+  color: #f48771;
+}
+
+/* 字段标签 */
+.ai-prov .lbl {
+  font-size: 11.5px;
+  color: #8a8a8a;
+  margin-top: 5px;
+  letter-spacing: .2px;
+}
+.ai-lbl-row { margin-top: 9px; }
+
+/* 输入框 / 文本域 */
+.ai-prov input,
+.ai-prov textarea {
+  min-height: 32px;
+  padding: 6px 10px;
+  background: #2a2a2b;
+  border: 1px solid #3c3c3d;
+  border-radius: 7px;
+  color: #e6e6e6;
+  font-size: 12.5px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.ai-prov input::placeholder,
+.ai-prov textarea::placeholder { color: #777; }
+.ai-prov input:focus,
+.ai-prov textarea:focus {
+  border-color: #0a6aa8;
+  box-shadow: 0 0 0 2px rgba(10,106,168,.25);
+}
+.ai-prov textarea {
+  min-height: 52px;
+  padding: 8px 10px;
+  line-height: 1.55;
+}
+
+/* 「自动获取」按钮 */
+.ai-prov-fetch {
+  height: 24px;
+  padding: 0 10px;
+  background: rgba(79,193,255,.08);
+  border: 1px solid rgba(79,193,255,.28);
+  color: #4fc1ff;
+  font-size: 11px;
+  border-radius: 6px;
+  transition: background .15s, border-color .15s;
+}
+.ai-prov-fetch:hover {
+  background: rgba(79,193,255,.16);
+  border-color: rgba(79,193,255,.45);
+}
+.ai-prov-fetch[disabled] { opacity: .55; cursor: default; }
+
+/* 模型勾选列表：自适应多列 + 行 hover */
+.ai-prov-mlist {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 2px 6px;
+  margin-top: 8px;
+  max-height: 180px;
+  background: #1e1e1f;
+  border: 1px solid #303031;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.ai-prov-mopt {
+  padding: 3px 6px;
+  border-radius: 5px;
+  transition: background .12s;
+}
+.ai-prov-mopt:hover { background: #2c2c2f; }
+.ai-prov-mopt input { accent-color: #0a6aa8; }
+
+/* 空状态 */
+.ai-prov-empty {
+  padding: 22px 0;
+  color: #777;
+  border: 1px dashed #3a3a3b;
+  border-radius: 10px;
+  background: rgba(255,255,255,.015);
+}
+
+/* API Key 密码框的 form 包裹层：仅为满足浏览器「密码字段需在 form 内」的检查，
+   用 display:contents 不生成盒子，保持原有布局不变 */
+.ai-pwd-form { display: contents; }
+
+/* 卡片间距与底部操作区 */
+.ai-prov-list { gap: 12px; }
+.ai-set-acts { margin-top: 14px; gap: 10px; }
+.ai-set-btn {
+  height: 30px;
+  padding: 0 16px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  background: #2f2f30;
+  color: #e6e6e6;
+  border: 1px solid #3c3c3d;
+  transition: background .15s, border-color .15s;
+}
+.ai-set-btn:hover { background: #3a3a3b; border-color: #4a4a4b; }
+.ai-set-btn.primary { background: #0a6aa8; border-color: #0a6aa8; color: #fff; }
+.ai-set-btn.primary:hover { background: #1177bb; border-color: #1177bb; }
+.ai-set-tip { margin-top: 8px; }

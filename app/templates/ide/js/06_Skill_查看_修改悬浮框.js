@@ -303,7 +303,9 @@
         '<div class="lbl">接口地址（OpenAI 兼容）</div>' +
         '<input class="u" placeholder="https://api.deepseek.com" spellcheck="false">' +
         '<div class="lbl">API Key（留空沿用已保存的）</div>' +
-        '<input class="k" type="password" placeholder="' + (p.api_key ? "已保存 " + p.api_key : "sk-...") + '" spellcheck="false" autocomplete="off">' +
+        '<form class="ai-pwd-form" autocomplete="off" onsubmit="return false">' +
+          '<input class="k" type="password" placeholder="' + (p.api_key ? "已保存 " + p.api_key : "sk-...") + '" spellcheck="false" autocomplete="off">' +
+        '</form>' +
         '<div class="lbl ai-lbl-row"><span>模型列表（可手动填写或自动获取）</span>' +
         '<button class="ai-prov-fetch" type="button" title="从接口拉取可用模型列表"><i class="bi bi-arrow-repeat"></i> 自动获取</button></div>' +
         '<textarea class="ms" rows="2" spellcheck="false" placeholder="deepseek-chat, deepseek-reasoner"></textarea>' +

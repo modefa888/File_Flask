@@ -1,0 +1,323 @@
+/* ================================================================
+   通知设置页美化（设置 → 通知）
+   卡片式分组、全宽输入、开关、图标按钮、历史记录
+   ================================================================ */
+
+#sec-notify { max-width: 760px; }
+
+/* ============ 从 00_base.css 迁移过来的通知/设置分区基础样式 ============
+   （.set-row-text / .set-ipt-400 / .set-ipt-600 / .set-name 等旧结构
+     在通知模块改版后已不再使用，已直接从 00_base.css 删除，不再迁移） */
+.set-sec h2 {
+  font-size: 13px; color: #d4d4d4; font-weight: 600;
+  margin: 0 0 8px; padding-bottom: 6px;
+  border-bottom: 1px solid #3a3a3a;
+  letter-spacing: 0.5px;
+}
+.set-sec .set-desc {
+  font-size: 12px; color: #999; margin: 0 0 12px;
+  line-height: 1.6;
+}
+.set-row .set-desc { margin: 2px 0 0; font-size: 11px; color: #999; line-height: 1.5; }
+.set-sec h2 .bi { margin-right: 4px; }
+
+/* 卡片容器 */
+.notify-card {
+  background: #242425;
+  border: 1px solid #303031;
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.18);
+}
+.notify-card:last-child { margin-bottom: 0; }
+
+.notify-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #9cdcfe;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  margin: 0 0 14px;
+}
+.notify-card-title .bi { font-size: 14px; }
+
+/* 卡片内重置 set-row 默认卡片外观 */
+.notify-card .set-row {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin-bottom: 14px;
+  align-items: flex-start;
+}
+.notify-card .set-row:last-child { margin-bottom: 0; }
+
+/* 行布局 */
+.notify-row {
+  display: flex;
+  gap: 14px;
+}
+.notify-row.inline {
+  align-items: center;
+  justify-content: space-between;
+}
+.notify-row.inline .notify-label-wrap { flex: 1; min-width: 0; }
+.notify-row.stack { flex-direction: column; gap: 6px; }
+
+/* 标签与说明 */
+.notify-label-wrap { min-width: 0; }
+.notify-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e2e2;
+  line-height: 1.4;
+}
+.notify-desc {
+  font-size: 11.5px;
+  color: #8a8a8a;
+  line-height: 1.5;
+  margin-top: 2px;
+}
+.notify-label-wrap code,
+.notify-desc code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #ce9178;
+  background: rgba(206,145,120,.12);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* 输入框 / 下拉框 */
+.notify-input,
+.notify-select {
+  width: 100%;
+  box-sizing: border-box;
+  background: #2a2a2b;
+  color: #e6e6e6;
+  border: 1px solid #3c3c3d;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.notify-input::placeholder { color: #777; }
+.notify-input:focus,
+.notify-select:focus {
+  border-color: #0a6aa8;
+  box-shadow: 0 0 0 2px rgba(10,106,168,.25);
+}
+.notify-select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23999' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+/* 覆盖 set-row 对 number 宽度的限制 */
+.notify-card .notify-row .notify-input,
+.notify-card .notify-row .notify-select { width: 100%; }
+
+/* 两列网格 */
+.notify-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.notify-grid-2 > .notify-row { margin-bottom: 0; }
+@media (max-width: 640px) {
+  .notify-grid-2 { grid-template-columns: 1fr; }
+}
+
+/* 开关（替代原生 checkbox） */
+.set-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex: none;
+}
+.set-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.set-switch span {
+  position: absolute;
+  inset: 0;
+  background: #4a4a4b;
+  border-radius: 22px;
+  cursor: pointer;
+  transition: background .2s;
+}
+.set-switch span::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform .2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+.set-switch input:checked + span { background: #0a6aa8; }
+.set-switch input:checked + span::before { transform: translateX(18px); }
+.set-switch input:focus + span { box-shadow: 0 0 0 2px rgba(10,106,168,.35); }
+
+/* 通道大卡片 */
+.notify-channel-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  background: #2a2a2b;
+  border: 1px solid #3c3c3d;
+  border-radius: 10px;
+}
+.notify-card .set-row.notify-channel-card {
+  background: #2a2a2b;
+  border: 1px solid #3c3c3d;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 0;
+}
+.notify-channel-card .notify-icon {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(79,193,255,.12);
+  color: #4fc1ff;
+  border-radius: 9px;
+  font-size: 18px;
+}
+.notify-channel-card.email .notify-icon {
+  background: rgba(255,204,0,.12);
+  color: #ffcc00;
+}
+.notify-channel-info { flex: 1; min-width: 0; }
+.notify-channel-info .notify-label { font-size: 14px; }
+.notify-channel-info .notify-desc { margin-top: 2px; }
+
+/* 按钮 */
+.notify-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.notify-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #2f2f30;
+  color: #e6e6e6;
+  border: 1px solid #3c3c3d;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, transform .05s;
+}
+.notify-btn:hover { background: #3a3a3b; border-color: #4a4a4b; }
+.notify-btn:active { transform: translateY(1px); }
+.notify-btn.primary { background: #0a6aa8; border-color: #0a6aa8; color: #fff; }
+.notify-btn.primary:hover { background: #1177bb; border-color: #1177bb; }
+.notify-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+/* 密码框的 form 包裹层：仅为满足浏览器「密码字段需在 form 内」的检查，
+   用 display:contents 不生成盒子，保持原有布局不变 */
+.notify-pwd-form { display: contents; }
+
+/* 历史记录 */
+.notify-history {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid #303031;
+  border-radius: 10px;
+  background: #1e1e1f;
+  padding: 8px;
+}
+.notify-history-empty {
+  text-align: center;
+  color: #777;
+  font-size: 12px;
+  padding: 24px 8px;
+}
+.notify-history-empty .bi {
+  display: block;
+  font-size: 28px;
+  margin-bottom: 6px;
+  opacity: .4;
+}
+.notify-hitem {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #252526;
+  margin-bottom: 6px;
+  border: 1px solid #2c2c2d;
+  transition: background .15s;
+}
+.notify-hitem:hover { background: #2a2a2b; }
+.notify-hitem:last-child { margin-bottom: 0; }
+.notify-hicon {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2f2f30;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.notify-hbody { flex: 1; min-width: 0; }
+.notify-htitle {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #e2e2e2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.notify-hmeta {
+  font-size: 11px;
+  color: #777;
+  font-weight: 400;
+}
+.notify-hchannels {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.notify-hch {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #333;
+  color: #aaa;
+}
+.notify-hch i { margin-right: 3px; }
+.notify-hch.ok { background: rgba(0,150,0,.18); color: #7ee787; }
+.notify-hch.fail { background: rgba(180,0,0,.18); color: #f48771; }
+.notify-hbodytext {
+  font-size: 11.5px;
+  color: #999;
+  margin-top: 4px;
+  line-height: 1.45;
+  word-break: break-all;
+}

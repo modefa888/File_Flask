@@ -441,14 +441,20 @@ def _fire_notify_async(task: str, user_query: str, answer_text: str) -> None:
 
 @bp.route("/api/ai/notify", methods=["GET"])
 def api_ai_notify_get():
-    """读取通知配置；返回 cfg + recent(最近30条) + latest。"""
+    """读取通知配置；返回 cfg + recent(最近30条) + latest。
+
+    支持 ?cursor=N 增量轮询（浏览器通知轮询用）：cursor 大于 0 时返回 has_new
+    标记是否有更新的通知，latest 为最新一条。
+    """
+    after = request.args.get("cursor", 0, type=int)
     cfg = notify_svc.sanitize_notify_cfg()
-    d = notify_svc.read_latest(after_cursor=0)
+    d = notify_svc.read_latest(after_cursor=after)
     return jsonify({
         "cfg": cfg,
         "recent": d.get("history") or [],
         "latest": d.get("latest"),
         "cursor": int(d.get("cursor") or 0),
+        "has_new": bool(d.get("has_new")),
     })
 
 

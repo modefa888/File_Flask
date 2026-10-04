@@ -9,6 +9,7 @@ POST /api/git/commit     {repo, message, all}   提交
 POST /api/git/init       {repo}                 初始化仓库
 """
 import os
+import re
 import shutil
 import subprocess
 
@@ -710,6 +711,49 @@ def api_git_remote():
     if proc.returncode != 0:
         return _fail(proc.stderr.strip() or "设置远程仓库失败", 500)
     return jsonify({"ok": True, "message": ("已更新" if exists else "已添加") + "远程仓库 " + name})
+
+
+@bp.route("/api/git/remote/test", methods=["POST"])
+def api_git_remote_test():
+    """测试远程仓库地址是否可访问，并返回默认分支信息。"""
+    data = request.get_json(silent=True) or {}
+    root, err = _repo_root(data.get("repo") or "")
+    if err:
+        return _fail(err)
+    if not root:
+        return _fail("不是 Git 仓库")
+    url = (data.get("url") or "").strip()
+    if not url:
+        return _fail("远程仓库地址不能为空")
+    proc, err = _git(root, ["ls-remote", "--symref", url, "HEAD"], timeout=15)
+    if err:
+        return _fail(err, 500)
+    out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if proc.returncode != 0:
+        lowered = out.lower()
+        if "could not resolve" in lowered or "could not connect" in lowered or "unable to access" in lowered:
+            return jsonify({
+                "ok": False,
+                "error": "无法访问该远程仓库，请检查地址是否正确或网络是否可达。",
+                "output": out
+            }), 400
+        if "authentication failed" in lowered or "permission denied" in lowered:
+            return jsonify({
+                "ok": False,
+                "error": "认证失败，请检查是否有该仓库的访问权限（SSH 密钥 / Token）。",
+                "output": out
+            }), 400
+        return jsonify({"ok": False, "error": out or "连接失败", "output": out}), 400
+    default_branch = ""
+    m = re.search(r"ref:\s*refs/heads/(\S+)", proc.stdout or "")
+    if m:
+        default_branch = m.group(1)
+    return jsonify({
+        "ok": True,
+        "output": out,
+        "default_branch": default_branch,
+        "message": "连接成功" + (("，默认分支：" + default_branch) if default_branch else "")
+    })
 
 
 @bp.route("/api/git/gitignore", methods=["POST"])

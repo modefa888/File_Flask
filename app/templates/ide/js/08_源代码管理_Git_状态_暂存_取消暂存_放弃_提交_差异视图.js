@@ -383,24 +383,94 @@
 
   async function setGitRemote() {
     if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
-    let current = "";
+    let current = "", currentName = "origin";
     try {
       const d = await fetch("/api/git/remote?path=" + encodeURIComponent(gitState.repo)).then(r => r.json());
       if (d.ok) {
         const o = (d.remotes || []).find(x => x.name === "origin");
-        if (o) current = o.url;
+        if (o) { current = o.url; currentName = o.name; }
+        else if (d.remotes && d.remotes[0]) { current = d.remotes[0].url; currentName = d.remotes[0].name; }
       }
     } catch (e) {}
-    const url = await uiPrompt("设置远程仓库 origin", current, "例如 https://github.com/用户名/仓库名.git");
-    if (url === null) return;
-    if (!url.trim()) { toast("远程仓库地址不能为空", "warn"); return; }
+    const url = await gitRemoteDialog(current, currentName);
+    if (!url) return;
     fetch("/api/git/remote", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ repo: gitState.repo, name: "origin", url: url.trim() })
+      body: JSON.stringify({ repo: gitState.repo, name: currentName, url: url.trim() })
     })
       .then(r => r.json())
       .then(d => { if (d.error) throw new Error(d.error); toast(d.message || "已设置远程仓库", "ok"); loadGitStatus(); })
       .catch(e => toast("设置失败：" + (e.message || e), "err"));
+  }
+
+  /* 设置远程仓库弹窗：输入地址 + 测试连接 + 默认分支信息 */
+  function gitRemoteDialog(currentUrl, name) {
+    return new Promise((resolve) => {
+      const ov = $("modalOverlay");
+      ov.innerHTML =
+        '<div class="ide-modal">' +
+          '<div class="m-title"><i class="bi bi-pencil-square"></i><span>设置远程仓库 ' + esc(name || "origin") + '</span></div>' +
+          '<div class="m-body">' +
+            '<div class="m-row">' +
+              '<label>远程仓库地址</label>' +
+              '<input id="grUrl" spellcheck="false" autocomplete="off" placeholder="例如 https://github.com/用户名/仓库名.git">' +
+              '<div class="hint">支持 HTTPS / SSH / Git 协议</div>' +
+            '</div>' +
+            '<div class="m-row">' +
+              '<button id="grTest" class="gr-test-btn"><i class="bi bi-wifi"></i> 测试连接</button>' +
+              '<div id="grStatus" class="gr-status gr-status-na">未测试</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="m-foot">' +
+            '<button class="m-cancel" id="grCancel">取消</button>' +
+            '<button class="m-ok" id="grOk">确定</button>' +
+          '</div>' +
+        '</div>';
+      ov.classList.add("show");
+      const inp = $("grUrl");
+      const status = $("grStatus");
+      const testBtn = $("grTest");
+      const okBtn = $("grOk");
+      const cancelBtn = $("grCancel");
+      inp.value = currentUrl || "";
+      const setStatus = (type, html) => {
+        status.className = "gr-status gr-status-" + type;
+        status.innerHTML = html;
+      };
+      const doTest = async () => {
+        const url = inp.value.trim();
+        if (!url) { setStatus("warn", '<i class="bi bi-exclamation-circle"></i> 请先输入远程仓库地址'); return; }
+        setStatus("info", '<i class="bi bi-arrow-repeat spin"></i> 正在测试连接…');
+        testBtn.disabled = true;
+        okBtn.disabled = true;
+        try {
+          const r = await fetch("/api/git/remote/test", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ repo: gitState.repo, name: name || "origin", url })
+          });
+          const d = await r.json();
+          if (d.error) throw new Error(d.error);
+          setStatus("ok", '<i class="bi bi-check-circle"></i> ' + esc(d.message || "连接成功"));
+        } catch (e) {
+          setStatus("err", '<i class="bi bi-x-circle"></i> ' + esc(e.message || "连接失败"));
+        } finally {
+          testBtn.disabled = false;
+          okBtn.disabled = false;
+        }
+      };
+      testBtn.onclick = doTest;
+      const close = (val) => { ov.classList.remove("show"); ov.innerHTML = ""; resolve(val); };
+      okBtn.onclick = () => {
+        const url = inp.value.trim();
+        if (!url) { setStatus("warn", '<i class="bi bi-exclamation-circle"></i> 地址不能为空'); inp.focus(); return; }
+        close(url);
+      };
+      cancelBtn.onclick = () => close(null);
+      ov.onmousedown = (e) => { if (e.target === ov) close(null); };
+      inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); doTest(); } };
+      inp.focus();
+      inp.select();
+    });
   }
 
   function remoteOp(verb, label, done) {

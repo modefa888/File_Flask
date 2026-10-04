@@ -75,3 +75,22 @@
   .ide-modal.danger .m-foot .m-ok { background: #a1260d; }
   .ide-modal.danger .m-foot .m-ok:hover { background: #c13a17; }
   .ide-modal textarea.req { min-height: 56px; }
+
+  /* 远程仓库设置弹窗：测试连接按钮与状态提示 */
+  .gr-test-btn {
+    background: #3a3d41; border: 1px solid #4a4a4a; color: #d7ba7d; border-radius: 4px;
+    padding: 6px 12px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+  }
+  .gr-test-btn:hover { background: #45494e; }
+  .gr-test-btn:disabled { opacity: .6; cursor: not-allowed; }
+  .gr-status {
+    margin-top: 8px; padding: 7px 10px; border-radius: 4px; font-size: 12px; line-height: 1.5;
+    display: flex; align-items: center; gap: 6px; word-break: break-all;
+  }
+  .gr-status-na { background: #2d2d2d; color: #999; }
+  .gr-status-info { background: #1e3a5f; color: #8ec5ff; }
+  .gr-status-ok { background: #1e3f2a; color: #7ee787; }
+  .gr-status-warn { background: #4a3b1a; color: #ffd166; }
+  .gr-status-err { background: #4a1e1e; color: #ff7b72; }
+  @keyframes grSpin { to { transform: rotate(360deg); } }
+  .gr-status .spin { display: inline-block; animation: grSpin 1s linear infinite; }

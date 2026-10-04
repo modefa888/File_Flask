@@ -1,0 +1,17 @@
+{
+  "id": "your-plugin-id",
+  "name": "你的插件名称",
+  "version": "0.1.0",
+  "description": "一句话描述插件功能。",
+  "author": "你的名字",
+  "main": "main.js",
+  "enabled": true,
+  "contributes": {
+    "panels": [
+      { "id": "yourPanelId", "title": "面板标题", "icon": "bi-puzzle" }
+    ],
+    "commands": [
+      { "id": "your.cmd", "title": "命令面板中显示的文字" }
+    ]
+  }
+}

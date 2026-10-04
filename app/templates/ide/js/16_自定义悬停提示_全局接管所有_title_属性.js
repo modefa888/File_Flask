@@ -60,9 +60,10 @@
     setInterval(() => { if (cur && !cur.isConnected) hide(); }, 300);
   })();
 
-  loadRecentFolders().then(() => loadSpecialHints()).then(() => {  // 先取最近打开，再加载命名说明
+  loadRecentFolders().then(() => loadSpecialHints()).then(async () => {  // 先取最近打开，再加载命名说明
     initTree();
     loadGitStatus();          // 启动时同步分支信息到状态栏
     loadGitignoreRules();     // 启动时加载 .gitignore 规则，文件树忽略条目置灰
+    if (typeof sessionRestore === "function") await sessionRestore();
   });
 })();

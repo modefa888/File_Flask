@@ -3,7 +3,7 @@
      ================================================================ */
   const IDE_SETTINGS = Object.assign(
     { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
-      showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree" },
+      showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true },
     (() => { try { return JSON.parse(localStorage.getItem("ide.settings") || "{}"); } catch (_) { return {}; } })()
   );
   function saveIdeSettings() {
@@ -68,6 +68,7 @@
           '<div class="set-row" data-kw="源代码管理 git 视图 树形 列表"><div class="set-info"><div class="set-label">源代码管理视图</div><div class="set-desc">更改文件清单的展示方式</div></div><select id="setGitView"><option value="list">列表（平铺）</option><option value="tree">树形（按目录）</option></select></div>' +
           '<div class="set-row" data-kw="图形 提交 文件 清单 视图 树形 列表"><div class="set-info"><div class="set-label">图形提交文件清单</div><div class="set-desc">「图形」中每个提交的文件展示方式</div></div><select id="setGitCommitMode"><option value="tree">树形（默认）</option><option value="list">列表</option></select></div>' +
           '<div class="set-row" data-kw="提示 注释 命名 hint"><div class="set-info"><div class="set-label">文件树命名提示</div><div class="set-desc">在文件名后显示说明注释（如 README → 项目说明）</div></div><input type="checkbox" id="setHints"></div>' +
+          '<div class="set-row" data-kw="恢复 会话 刷新 重启 标签 侧边栏 restore session"><div class="set-info"><div class="set-label">刷新/重启后恢复会话</div><div class="set-desc">重新加载后自动恢复上次打开的侧边栏面板与文件标签</div></div><input type="checkbox" id="setRestoreSession"></div>' +
         '</div>' +
         '<div class="set-sec" id="sec-keys"><h2 class="set-extra">快捷键</h2>' +
           '<div class="set-desc set-extra" style="margin-bottom:10px;">点击「修改」后按下新组合键即可重新绑定；「清除」禁用该快捷键；冲突时原命令自动禁用。</div>' +
@@ -201,6 +202,7 @@
     q("#setShowAll").checked = !!IDE_SETTINGS.showAllFiles;
     q("#setGitView").value = IDE_SETTINGS.gitViewMode === "tree" ? "tree" : "list";
     q("#setGitCommitMode").value = IDE_SETTINGS.gitCommitFileMode === "list" ? "list" : "tree";
+    q("#setRestoreSession").checked = IDE_SETTINGS.restoreSession !== false;
     q("#setFontSize").addEventListener("change", e => {
       const v = Math.max(10, Math.min(24, parseInt(e.target.value, 10) || 13));
       IDE_SETTINGS.fontSize = v; e.target.value = v; saveIdeSettings(); applyIdeSettings();
@@ -244,14 +246,27 @@
       gitCommitFileMode = v;
       if (typeof reloadCommitLists === "function") reloadCommitLists();
     });
+    q("#setRestoreSession").addEventListener("change", e => {
+      const on = e.target.checked;
+      IDE_SETTINGS.restoreSession = on;
+      saveIdeSettings(); ideSettingSet("restoreSession", on);
+      if (!on) {
+        try {
+          localStorage.removeItem("ide.session.panel");
+          localStorage.removeItem("ide.session.tabs");
+          localStorage.removeItem("ide.session.activeTab");
+        } catch (_) {}
+      }
+    });
     q("#setClearRecent").onclick = () => { localStorage.removeItem("ide.recentFiles"); toast("已清除最近打开记录", "ok"); };
     q("#setReset").onclick = () => {
       Object.assign(IDE_SETTINGS, { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
-        showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree" });
+        showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true });
       saveIdeSettings(); applyIdeSettings();
       q("#setFontSize").value = 13; q("#setLineWrap").checked = false; q("#setActiveLine").checked = true;
       q("#setIndent").value = 4; q("#setHints").checked = true;
       q("#setShowAll").checked = false; q("#setGitView").value = "list"; q("#setGitCommitMode").value = "tree";
+      q("#setRestoreSession").checked = true;
       // 同步重置各开关的运行时状态
       showAllFiles = false; showHidden = false;
       gitViewMode = "list"; gitCommitFileMode = "tree";

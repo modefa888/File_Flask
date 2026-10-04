@@ -81,6 +81,45 @@
       s[k] = v; localStorage.setItem("ide.settings", JSON.stringify(s));
     } catch (_) { }
   }
+  /* ---------- 会话持久化：侧边栏面板 + 打开的文件标签 ---------- */
+  function sessionSavePanel(name) {
+    if (!ideSettingGet("restoreSession", true)) return;
+    try { localStorage.setItem("ide.session.panel", name); } catch (_) {}
+  }
+  // 只有「真实的源码文件标签」才值得恢复：跳过 diff 视图 / 打开更改汇总 / 设置页等
+  // 内部标签（它们的 path 是带 \u0001 的内部 key 或特殊路径，用 openFile 去读必然报错）。
+  function sessionIsRestorable(t) {
+    if (!t || !t.path) return false;
+    if (t.diff || t.allDiff || t.isSettings) return false;
+    if (t.path.indexOf("\u0001") >= 0) return false;   // 内部 key：差异 / 比较视图
+    return true;
+  }
+  function sessionSaveTabs() {
+    if (!ideSettingGet("restoreSession", true)) return;
+    try {
+      const list = tabs.filter(sessionIsRestorable).map(t => ({ path: t.path, name: t.name, group: t.group }));
+      localStorage.setItem("ide.session.tabs", JSON.stringify(list));
+      localStorage.setItem("ide.session.activeTab", (active && sessionIsRestorable(active)) ? active.path : "");
+    } catch (_) {}
+  }
+  async function sessionRestore() {
+    if (!ideSettingGet("restoreSession", true)) return;
+    try {
+      const panel = localStorage.getItem("ide.session.panel");
+      if (panel && typeof showPanel === "function") showPanel(panel);
+      const raw = localStorage.getItem("ide.session.tabs");
+      const list = raw ? JSON.parse(raw) : [];
+      const activePath = localStorage.getItem("ide.session.activeTab") || "";
+      for (const t of list) {
+        if (!t || !t.path || t.path.indexOf("\u0001") >= 0) continue;
+        await openFile(t.path, t.name, t.group || 0).catch(() => {});
+      }
+      if (activePath && activePath.indexOf("\u0001") < 0) {
+        const tab = findTab(activePath);
+        if (tab) activate(tab);
+      }
+    } catch (_) {}
+  }
   // IDE 树中隐藏的目录：各类语言/工具的依赖与缓存目录（对任何项目生效）
   // 「显示全部」开关：开启后依赖目录（node_modules 等）也会显示，可手动展开，「全部展开」会跳过
   // 初始值从全局设置恢复（设置页 → 文件 → 显示全部；资源管理器眼睛图标与之联动）
@@ -666,6 +705,7 @@
       rec.unshift({ path, name });
       localStorage.setItem("ide.recentFiles", JSON.stringify(rec.slice(0, 12)));
     } catch (_) {}
+    sessionSaveTabs();
     return tab;   // 调用方（如 openFileAt 定位行）可直接拿到标签，避免再按路径查一遍
   }
   // 把标签的编辑器容器挂到所属编辑组；组布局重建时的兜底挂载也走这里
@@ -920,6 +960,7 @@
     refreshTreeDirty(); ffOnTabChange();
     revealInTree(tab.path);          // 树列表跟随当前打开的文件高亮
     scrollTabIntoView(tab);
+    sessionSaveTabs();
   }
   async function closeTab(tab) {
     const i = tabs.indexOf(tab);
@@ -934,5 +975,6 @@
       if (next) activate(next);
       else { active = null; groupActive.delete(g); curGroup = 0; $("breadcrumbs").innerHTML = ""; updateStatus(); ffClose(); }
     }
+    sessionSaveTabs();
   }
 

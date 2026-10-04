@@ -1036,6 +1036,7 @@
       el.classList.toggle("active", on);
       el.style.display = on ? "" : "none";
     });
+    if (typeof sessionSavePanel === "function") sessionSavePanel(name);
     $("sideTitle").textContent = titles[name];
     document.querySelectorAll(".activitybar .act[data-panel]").forEach(a => a.classList.toggle("active", a.dataset.panel === name));
     // 「新建文件 / 新建文件夹」与项目根目录行只在资源管理器面板显示，其他面板不显示；

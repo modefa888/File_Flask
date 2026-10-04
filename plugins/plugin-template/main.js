@@ -70,6 +70,8 @@ function demoPanelRender(panel, ctx) {
     ["写入文件",        () => demoWrite(IDE)],
     ["编辑区视图",      () => demoEditors(IDE)],
     ["编辑区视图(禁止拆分)", () => demoEditorsNoSplit(IDE)],
+    ["绚烂页(编辑区)",   () => demoOpenHtmlEditor(IDE)],
+    ["另一页面(编辑区)", () => demoOpenViewHtmlEditor(IDE)],
     ["事件监听",        () => demoEvents(IDE)],
     ["API 请求",        () => demoApi(IDE)],
     ["HTTP 不代理",     () => demoHttp(IDE, false)],
@@ -189,6 +191,29 @@ function demoEditorsNoSplit(IDE) {
   IDE.notifications.show("已打开「禁止拆分的视图」，试试拆分它", "ok");
 }
 
+// 9c) editors.open({ index }) —— 把插件自带的 index.html 以富页面渲染进编辑区标签页
+//     关键：用「已注册命令」触发 —— 命令运行时宿主会把当前插件 id 记为归属，
+//     宿主的 _plMountIndex 才能用正确的插件 id 拼出 /api/plugins/<pid>/asset/index.html。
+function demoOpenHtmlEditor(IDE) {
+  IDE.editors.open({
+    id: "html-in-editor",              // 同 id 再次 open 只聚焦，不重复开标签
+    title: "绚烂 HTML（编辑区）",
+    icon: "bi-stars",
+    index: "index.html"                // ← 由宿主以 iframe 加载插件目录下的 index.html（及其相对引用的 style.css）
+  });
+}
+
+// 9d) editors.open({ index }) —— 在编辑区渲染「另一个 HTML」（view.html），与左侧面板的 index.html 不同
+//     这演示了「左右两边可以使用不一样的 HTML」：面板用 index.html、编辑器用 view.html。
+function demoOpenViewHtmlEditor(IDE) {
+  IDE.editors.open({
+    id: "view-in-editor",
+    title: "插件视图（另一页面）",
+    icon: "bi-filetype-html",
+    index: "view.html"                 // ← 换一个文件即可让右侧与左侧不一样
+  });
+}
+
 // 10) events.on / emit
 let _demoEvtOff = [];
 function demoEvents(IDE) {
@@ -298,6 +323,16 @@ return {
       render: demoPanelRender
     });
 
+    // 15) 用 index.html + style.css 渲染的「绚烂」面板
+    //     宿主会以 <iframe> 加载插件目录下的 index.html（及其相对引用的 css / 图片）。
+    //     index.html 里的脚本可经同源 iframe 直接访问 window.parent.IDE 调用宿主能力。
+    IDE.registerPanel({
+      id: "demo-html",
+      title: "绚烂 HTML",
+      icon: "bi-stars",
+      index: "index.html"
+    });
+
     // 1) 注册命令（命令面板可调用；executeCommand 在面板按钮里演示）
     IDE.registerCommand("demo.cmd.echo", {
       title: "Demo: 执行命令 (executeCommand)",
@@ -316,6 +351,8 @@ return {
     IDE.registerCommand("demo.workspace.write",   { title: "Demo: 写入文件",     run: () => demoWrite(IDE) });
     IDE.registerCommand("demo.editors.view",      { title: "Demo: 编辑区视图",   run: () => demoEditors(IDE) });
     IDE.registerCommand("demo.editors.nosplit",   { title: "Demo: 编辑区视图(禁止拆分)", run: () => demoEditorsNoSplit(IDE) });
+    IDE.registerCommand("demo.editors.html",       { title: "Demo: 在编辑区打开绚烂页(index)", run: () => demoOpenHtmlEditor(IDE) });
+    IDE.registerCommand("demo.editors.otherHtml",  { title: "Demo: 在编辑区打开另一个 HTML(view.html)", run: () => demoOpenViewHtmlEditor(IDE) });
     IDE.registerCommand("demo.events.listen",     { title: "Demo: 事件监听",     run: () => demoEvents(IDE) });
     IDE.registerCommand("demo.api.plugins",       { title: "Demo: API 请求",     run: () => demoApi(IDE) });
     IDE.registerCommand("demo.http.direct",        { title: "Demo: 请求外部接口(不代理)", run: () => demoHttp(IDE, false) });

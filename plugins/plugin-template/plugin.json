@@ -9,7 +9,8 @@
   "enabled": true,
   "contributes": {
     "panels": [
-      { "id": "demo-panel", "title": "API Demo", "icon": "bi-lightbulb" }
+      { "id": "demo-panel", "title": "API Demo", "icon": "bi-lightbulb" },
+      { "id": "demo-html", "title": "绚烂 HTML", "icon": "bi-stars" }
     ],
     "commands": [
       { "id": "demo.cmd.echo",        "title": "Demo: 执行命令 (executeCommand)" },
@@ -23,6 +24,9 @@
       { "id": "demo.workspace.read",   "title": "Demo: 读取文件" },
       { "id": "demo.workspace.write",  "title": "Demo: 写入文件" },
       { "id": "demo.editors.view",     "title": "Demo: 编辑区视图" },
+      { "id": "demo.editors.nosplit",  "title": "Demo: 编辑区视图(禁止拆分)" },
+      { "id": "demo.editors.html",     "title": "Demo: 在编辑区打开绚烂页(index)" },
+      { "id": "demo.editors.otherHtml","title": "Demo: 在编辑区打开另一个 HTML(view.html)" },
       { "id": "demo.events.listen",    "title": "Demo: 事件监听" },
       { "id": "demo.api.plugins",      "title": "Demo: API 请求" },
       { "id": "demo.http.direct",       "title": "Demo: 请求外部接口(不代理)" },

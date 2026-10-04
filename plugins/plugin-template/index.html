@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>绚烂插件首页</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="aurora"></div>
+  <div class="grain"></div>
+
+  <div class="wrap">
+    <header class="hero">
+      <span class="badge">PLUGIN · index.html + style.css</span>
+      <h1 class="title" data-text="绚烂插件面板">绚烂插件面板</h1>
+      <p class="sub">这是通过宿主以 <b>iframe</b> 加载的插件富页面，由 <b>index.html</b> + <b>style.css</b> 渲染。</p>
+    </header>
+
+    <section class="cards">
+      <article class="card glass">
+        <div class="card-ic">🚀</div>
+        <h3>调用宿主通知</h3>
+        <p>通过 <code>window.parent.IDE.notifications.show</code> 弹提示。</p>
+        <button class="btn" data-act="notify">弹一条通知</button>
+      </article>
+
+      <article class="card glass">
+        <div class="card-ic">🗂️</div>
+        <h3>编辑区标签页渲染本页</h3>
+        <p>调用 <code>IDE.editors.open({ index })</code>，把本页以富页面渲染进右侧编辑区。</p>
+        <button class="btn" data-act="editor">在编辑区打开本页</button>
+      </article>
+
+      <article class="card glass">
+        <div class="card-ic">⚡</div>
+        <h3>执行命令</h3>
+        <p>通过 <code>IDE.executeCommand</code> 触发已注册命令。</p>
+        <button class="btn" data-act="cmd">执行命令</button>
+      </article>
+
+      <article class="card glass">
+        <div class="card-ic">🌿</div>
+        <h3>编辑区打开「另一页面」</h3>
+        <p>用 <code>editors.open({ index: "view.html" })</code> 在右侧渲染与左边<strong>不同</strong>的 HTML。</p>
+        <button class="btn" data-act="editor-view">在编辑区打开 view.html</button>
+      </article>
+
+    </section>
+
+    <footer class="foot">
+      宿主 API：<code>window.IDE</code> · 当前已激活插件：<span id="pid">—</span>
+    </footer>
+  </div>
+
+  <script>
+    // 富页面脚本：因 iframe 同源且宿主开放沙箱，可直接访问父页面的 window.parent.IDE
+    const IDE = window.parent && window.parent.IDE;
+    const pidEl = document.getElementById("pid");
+    if (IDE && IDE.plugins) {
+      pidEl.textContent = "已激活 " + IDE.plugins.size + " 个";
+    }
+
+    document.querySelectorAll(".btn").forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (!IDE) { alert("IDE 不可用"); return; }
+        const a = b.dataset.act;
+        if (a === "notify") {
+          IDE.notifications.show("你好，来自 index.html 的绚烂通知 🎉", "ok");
+        } else if (a === "editor") {
+          // 交给「插件命令」执行：命令运行时宿主会把当前插件 id 记为视图归属，
+          // 这样 editors.open({ index }) 才能用正确的插件 id 拼出资源地址
+          IDE.executeCommand("demo.editors.html");
+        } else if (a === "cmd") {
+          IDE.executeCommand("demo.cmd.echo", { from: "index.html" });
+        } else if (a === "editor-view") {
+          // 换一个 index 文件 → 右侧渲染与左侧 index.html 不同风格的页面
+          IDE.executeCommand("demo.editors.otherHtml");
+        }
+      });
+    });
+  </script>
+</body>
+</html>

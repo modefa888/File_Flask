@@ -28,7 +28,7 @@ import urllib.request
 import zipfile
 from datetime import datetime, timezone
 
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, send_from_directory
 
 from ... import config
 from ...log import get_logger
@@ -263,6 +263,25 @@ def serve_main(pid):
     if not os.path.isfile(mpath):
         return jsonify({"error": "入口文件缺失：" + main}), 404
     return send_file(mpath, mimetype="application/javascript", conditional=True)
+
+
+@bp.route("/api/plugins/<pid>/asset/<path:filename>", methods=["GET"])
+def serve_asset(pid, filename):
+    """提供插件内的静态资源（index.html / style.css / 图片等）。
+
+    用于插件以 index.html + css 渲染富页面（宿主以 iframe 加载）。
+    路径受 send_from_directory 的穿越防护约束，只能取插件目录内的文件。
+    """
+    if not _ID_RE.match(pid):
+        return jsonify({"error": "非法插件 id"}), 400
+    meta = _load_meta(pid)
+    if meta is None:
+        return jsonify({"error": "插件不存在"}), 404
+    base = os.path.normpath(_plugin_dir(pid))
+    try:
+        return send_from_directory(base, filename)
+    except Exception:
+        return jsonify({"error": "资源不存在"}), 404
 
 
 @bp.route("/api/plugins/fs/read", methods=["POST"])

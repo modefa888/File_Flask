@@ -92,7 +92,42 @@ IDE.executeCommand("my.echo", { demo: true });
 - `spec.id`：唯一（必填）。重复注册同 id 会直接复用已有面板。
 - `spec.title`：按钮标题 / 侧栏标题。
 - `spec.icon`：图标 class，缺省 `bi-puzzle`。
-- `spec.render(panel, ctx)`：`(panel, { IDE })` —— 把内容渲染进侧栏容器。
+- `spec.render(panel, ctx)`：`(panel, { IDE, iframe })` —— 把内容渲染进侧栏容器。
+- `spec.index`：插件内 HTML 文件名（如 `"index.html"`）。提供后宿主会以 `<iframe>` 加载该文件（及其相对引用的 css / 图片），适合用富页面 / 动画 UI 渲染面板；`render` 仍会被调用（可拿到 `iframe` 句柄做联动）。
+- `spec.css`：仅当未使用 `index` 时，宿主会将该 css 注入页面，供 `render` 使用。
+
+> **富页面（index.html + css）**：插件目录下放 `index.html` + `style.css`，用 `IDE.registerPanel({ id, title, icon, index: "index.html" })` 注册即可。宿主经 `GET /api/plugins/<id>/asset/<file>` 提供静态资源，并以同源 iframe 加载；页面脚本可直接 `window.parent.IDE` 调用宿主能力（可信插件模型，沙箱已开放 `allow-same-origin`）。`IDE.editors.open({ ..., index })` 同样支持。
+
+> **富页面进阶：面板与编辑区可各自「用 / 不用 HTML」，且两边可以不同**
+>
+> 侧栏面板的 HTML 由 `registerPanel({ index })` 决定，编辑区的 HTML 由 `editors.open({ index })` 决定——两者**完全独立**，底层用的是同一个挂载机制 `_plMountIndex`，把任意文件名拼成 `/api/plugins/<pid>/asset/<文件>`。因此三种形态都能成立：
+>
+> | 形态 | 侧栏面板（左） | 编辑区（右） |
+> |---|---|---|
+> | 左不用 / 右用 | 只用 `render`（**不传** `index`） | `editors.open({ index: "any.html" })` |
+> | 左用 / 右不用 | `registerPanel({ index: "a.html" })` | 不打开编辑器视图即可 |
+> | 两边不同 | `registerPanel({ index: "a.html" })` | `editors.open({ index: "b.html" })`（换一个文件） |
+>
+> 一句话：**传 `index` 就用对应文件渲染，不传就退化成纯 `render`；左右各自随便挑文件名，可以相同也可以不同。**
+>
+> 示例 —— 左侧用 `index.html`、右侧点按钮打开风格完全不同的 `view.html`：
+> ```js
+> // 1) 侧栏面板：用 index.html 渲染富页面（想「左不用」就删掉 index 字段、只留 render）
+> IDE.registerPanel({
+>   id: "my-panel", title: "绚烂面板", icon: "bi-stars", index: "index.html",
+>   render(p, ctx) { /* 可用 ctx.iframe 与页面脚本联动 */ }
+> });
+>
+> // 2) 编辑区：换一个文件，就是「两边不一样的 HTML」（经 executeCommand 触发更稳妥，
+> //    命令运行时宿主会把当前插件 id 记为视图归属，确保资源地址拼对）
+> IDE.registerCommand("my.openOther", {
+>   title: "打开另一个页面(view.html)",
+>   run: () => IDE.editors.open({
+>     id: "view-in-editor", title: "另一页面", icon: "bi-filetype-html", index: "view.html"
+>   })
+> });
+> ```
+> 完整可运行示例见 `plugins/plugin-template/`：其中 `index.html` + `style.css` 渲染左侧面板，`view.html` + `view.css` 渲染编辑区（风格不同），按钮与命令均已接好，直接刷新即可点开对比。
 
 ```js
 IDE.registerPanel({

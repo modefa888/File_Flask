@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>插件编辑器视图</title>
+<link rel="stylesheet" href="view.css" />
+</head>
+<body>
+  <div class="grid-bg"></div>
+
+  <div class="wrap">
+    <header class="head">
+      <span class="tag">EDITOR VIEW · view.html + view.css</span>
+      <h1>编辑器专属页面</h1>
+      <p class="desc">
+        这是<strong>另一个 HTML</strong>（<code>view.html</code>），和左侧面板的 <code>index.html</code>
+        完全不同 —— 用来演示「左右两边各自渲染不同的 HTML」。
+      </p>
+    </header>
+
+    <section class="stats">
+      <div class="stat"><div class="n">2</div><div class="l">独立 HTML</div></div>
+      <div class="stat"><div class="n">2</div><div class="l">独立 CSS</div></div>
+      <div class="stat"><div class="n">∞</div><div class="l">可扩展</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>同一个挂载机制，换一个文件就是另一面</h2>
+      <p>
+        宿主用同一个 <code>_plMountIndex</code>，把 <code>view.html</code> 以 iframe 加载进编辑区标签 ——
+        与左侧的 <code>index.html</code> 相互独立、互不影响。
+      </p>
+      <table>
+        <thead><tr><th>位置</th><th>来源文件</th><th>样式</th></tr></thead>
+        <tbody>
+          <tr><td>左侧面板</td><td><code>index.html</code></td><td><code>style.css</code></td></tr>
+          <tr><td>右侧编辑区</td><td><code>view.html</code></td><td><code>view.css</code></td></tr>
+        </tbody>
+      </table>
+      <button class="btn" id="hi">调用宿主通知（IDE.notifications.show）</button>
+    </section>
+
+    <footer class="foot">宿主 API：<code>window.IDE</code> · 本页由插件的 <code>view.html</code> 渲染</footer>
+  </div>
+
+  <script>
+    // 同源 iframe：直接访问父页面的 window.IDE 调用宿主能力
+    const IDE = window.parent && window.parent.IDE;
+    document.getElementById("hi").addEventListener("click", function () {
+      if (IDE && IDE.notifications) {
+        IDE.notifications.show("你好，来自 view.html（编辑器页面）🌿", "ok");
+      }
+    });
+  </script>
+</body>
+</html>

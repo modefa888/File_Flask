@@ -24,7 +24,9 @@
     ".pl-card .pl-sw{font-size:12px;color:#bbb;display:flex;align-items:center;gap:4px}",
     // 插件「编辑区视图」：与打开文件同款标签页容器，内容由插件自行渲染
     ".pl-view-host{height:100%;overflow:hidden}",
-    ".pl-view-body{height:100%;overflow:auto;color:var(--fg,#ddd);font-size:13px}"
+    ".pl-view-body{height:100%;overflow:auto;color:var(--fg,#ddd);font-size:13px}",
+    ".pl-iframe-host{width:100%;height:100%;overflow:hidden}",
+    ".pl-iframe{width:100%;height:100%;border:0;background:transparent;display:block}"
   ].join("");
   document.head.appendChild(_plStyle);
 
@@ -45,6 +47,32 @@
       ic = meta.contributes.panels[0].icon;
     }
     return typeof ic === "string" ? ic : "";
+  }
+
+  // 将插件的 index.html（+ css）挂载进容器：以 iframe 加载插件静态资源，
+  // 富页面可经「同源 iframe」直接访问 window.parent.IDE（可信插件模型）。
+  function _plMountIndex(el, pid, indexFile, cssFile) {
+    pid = pid || _plCurrentId || "";
+    if (indexFile) {
+      const host = document.createElement("div");
+      host.className = "pl-iframe-host";
+      const f = document.createElement("iframe");
+      f.className = "pl-iframe";
+      f.setAttribute("frameborder", "0");
+      f.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-forms");
+      f.src = "/api/plugins/" + encodeURIComponent(pid) + "/asset/" + String(indexFile).replace(/^\/+/, "");
+      host.appendChild(f);
+      el.innerHTML = "";
+      el.appendChild(host);
+      return f;
+    }
+    if (cssFile) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "/api/plugins/" + encodeURIComponent(pid) + "/asset/" + String(cssFile).replace(/^\/+/, "");
+      document.head.appendChild(link);
+    }
+    return null;
   }
 
   // ---------- 命令注册表 ----------
@@ -97,11 +125,16 @@
     panel.style.display = "none";
     const sidebar = document.getElementById("sidebar");
     if (sidebar) sidebar.appendChild(panel);
-    const handle = { id: id, el: panel, act: act, _owner: spec._owner || _plCurrentId };
+    const handle = { id: id, el: panel, act: act, _owner: spec._owner || _plCurrentId, iframe: null };
     _plPanels.set(id, handle);
+    const owner = spec._owner || _plCurrentId;
+    if (spec.index) {
+      // 以 iframe 加载插件的 index.html（+ 其相对引用的 css/图片）
+      handle.iframe = _plMountIndex(panel, owner, spec.index, spec.css);
+    }
     if (typeof spec.render === "function") {
-      const prev = _plCurrentId; _plCurrentId = spec._owner || prev;   // 面板内打开的视图归属该插件
-      try { spec.render(panel, { IDE: IDE }); }
+      const prev = _plCurrentId; _plCurrentId = owner;   // 面板内打开的视图归属该插件
+      try { spec.render(panel, { IDE: IDE, iframe: handle.iframe }); }
       catch (e) { console.error("[IDE] panel render 失败:", id, e); }
       finally { _plCurrentId = prev; }
     }
@@ -249,7 +282,10 @@
     renderTabsAll();
     _plViews.set(key, view);
     activate(tab);                                       // 与打开文件一致：创建即激活
-    if (typeof spec.render === "function") {
+    if (spec.index) {
+      // 以 iframe 加载插件的 index.html（+ css），渲染富页面视图
+      view.iframe = _plMountIndex(body, _plCurrentId, spec.index, spec.css);
+    } else if (typeof spec.render === "function") {
       try { spec.render(body, view); } catch (e) {
         console.error("[IDE] view render 失败:", id, e);
         body.innerHTML = '<div class="pl-pad" style="color:#c66">视图渲染失败：' + _esc(e.message || e) + "</div>";

@@ -616,8 +616,16 @@ def _remote_op(verb, timeout):
         has_upstream = bool(proc_up and proc_up.returncode == 0)
         if not has_upstream and branch and branch != "HEAD":
             args += ["-u", "origin", branch]
-    # 执行远程操作前，先检查 origin 是否已配置（push/pull/fetch 都依赖它）
-    if verb != "fetch":
+    # 执行远程操作前，先检查远程仓库是否已配置（push/pull/fetch 都依赖它）
+    if verb == "fetch":
+        proc_remote, _ = _git(root, ["remote"])
+        if not proc_remote or not (proc_remote.stdout or "").strip():
+            return jsonify({
+                "ok": False,
+                "error": "当前仓库没有配置远程仓库。请先设置远程仓库，例如：\n\ngit remote add origin https://github.com/用户名/仓库名.git",
+                "output": ""
+            }), 400
+    else:
         proc_remote, _ = _git(root, ["remote", "get-url", "origin"])
         if not proc_remote or proc_remote.returncode != 0:
             return jsonify({

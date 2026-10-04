@@ -86,18 +86,25 @@
     if (!ideSettingGet("restoreSession", true)) return;
     try { localStorage.setItem("ide.session.panel", name); } catch (_) {}
   }
-  // 只有「真实的源码文件标签」才值得恢复：跳过 diff 视图 / 打开更改汇总 / 设置页等
-  // 内部标签（它们的 path 是带 \u0001 的内部 key 或特殊路径，用 openFile 去读必然报错）。
+  // 只有「真实的源码文件标签」和「设置页」才值得恢复：
+  // 跳过 diff 视图 / 打开更改汇总 / 文件比较等内部标签（它们的 path 是带 \u0001 的内部 key，用 openFile 去读必然报错）。
   function sessionIsRestorable(t) {
     if (!t || !t.path) return false;
-    if (t.diff || t.allDiff || t.isSettings) return false;
+    if (t.diff || t.allDiff) return false;
     if (t.path.indexOf("\u0001") >= 0) return false;   // 内部 key：差异 / 比较视图
     return true;
   }
   function sessionSaveTabs() {
     if (!ideSettingGet("restoreSession", true)) return;
     try {
-      const list = tabs.filter(sessionIsRestorable).map(t => ({ path: t.path, name: t.name, group: t.group }));
+      const list = tabs.filter(sessionIsRestorable).map(t => {
+        const o = { path: t.path, name: t.name, group: t.group };
+        if (t.isSettings) {
+          o.isSettings = true;
+          try { o.settingsSec = localStorage.getItem("ide.session.settingsSec") || ""; } catch (_) {}
+        }
+        return o;
+      });
       localStorage.setItem("ide.session.tabs", JSON.stringify(list));
       localStorage.setItem("ide.session.activeTab", (active && sessionIsRestorable(active)) ? active.path : "");
     } catch (_) {}
@@ -111,7 +118,14 @@
       const list = raw ? JSON.parse(raw) : [];
       const activePath = localStorage.getItem("ide.session.activeTab") || "";
       for (const t of list) {
-        if (!t || !t.path || t.path.indexOf("\u0001") >= 0) continue;
+        if (!t || !t.path) continue;
+        if (t.isSettings && typeof window.openSettingsTab === "function") {
+          let sec = t.settingsSec || "";
+          try { sec = localStorage.getItem("ide.session.settingsSec") || sec; } catch (_) {}
+          window.openSettingsTab(sec);
+          continue;
+        }
+        if (t.path.indexOf("\u0001") >= 0) continue;
         await openFile(t.path, t.name, t.group || 0).catch(() => {});
       }
       if (activePath && activePath.indexOf("\u0001") < 0) {

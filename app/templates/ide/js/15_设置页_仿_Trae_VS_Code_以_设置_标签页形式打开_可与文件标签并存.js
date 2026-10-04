@@ -187,6 +187,8 @@
       n.onclick = () => {
         showSettingsSec(n.dataset.sec);
         setNavActive(n.dataset.sec);
+        try { localStorage.setItem("ide.session.settingsSec", n.dataset.sec); } catch (_) {}
+        if (typeof sessionSaveTabs === "function") sessionSaveTabs();
       };
     });
     setNavActive(activeSetSec);
@@ -457,4 +459,6 @@
   });
   // 页面完全加载（字体/CSS 就绪）后再统一重绘一次
   window.addEventListener("load", () => { refreshAllEditors(); });
+
+  window.openSettingsTab = openSettingsTab;
 

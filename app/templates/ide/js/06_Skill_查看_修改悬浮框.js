@@ -862,7 +862,18 @@
             box._pending++;
             box._paint();
           } else if (e.type === "ask") {
-            ensureStepsBox()._body.appendChild(aiAskCard(e, runId));
+            // 需要用户确认：卡片必须「单独弹出来」且始终可见。
+            // 若塞进 .ai-steps-body，而该区域默认折叠（.ai-steps.collapsed 隐藏 body），
+            // 用户根本看不到，AI 只能干等到确认超时。所以直接挂在消息下方，
+            // 滚动到可见处，并做弹入 + 脉冲高亮提醒。
+            ensureStepsBox();
+            const askCard = aiAskCard(e, runId);
+            bodyRow.appendChild(askCard);
+            try {
+              askCard.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            } catch (_) { try { askCard.scrollIntoView(); } catch (_) {} }
+            askCard.classList.add("attn");
+            try { toast("AI 正在等待你确认一个操作", "warn"); } catch (_) {}
           } else if (e.type === "result") {
             const meta = stepMeta.get(e.call_id) || { tool: e.tool, args: {} };
             aiStepDone(rows.get(e.call_id), e);
@@ -950,16 +961,16 @@
   /* ---------- 图片输入：选择 / 粘贴 / 待发预览 / 大图降采样 ---------- */
   function aiMaybeDownscale(dataUrl) {
     return new Promise(resolve => {
-      if (dataUrl.length < 900000) { resolve(dataUrl); return; }   // 小于 ~660KB 直接用原图
+      if (dataUrl.length < 1600000) { resolve(dataUrl); return; }  // 小于 ~1.2MB 直接用原图（截图清晰度优先）
       const im = new Image();
       im.onload = () => {
-        const MAX = 1568;
+        const MAX = 2048;                                        // 长边上限：保证截图文字仍可辨认
         const k = Math.min(1, MAX / Math.max(im.width, im.height));
         const cv = document.createElement("canvas");
         cv.width = Math.max(1, Math.round(im.width * k));
         cv.height = Math.max(1, Math.round(im.height * k));
         cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height);
-        try { resolve(cv.toDataURL("image/jpeg", 0.85)); } catch (_) { resolve(dataUrl); }
+        try { resolve(cv.toDataURL("image/jpeg", 0.92)); } catch (_) { resolve(dataUrl); }
       };
       im.onerror = () => resolve(dataUrl);
       im.src = dataUrl;

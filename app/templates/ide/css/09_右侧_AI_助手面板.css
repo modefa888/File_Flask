@@ -498,6 +498,14 @@
   .ai-ask .btns button.no:hover { background: #5a2b2b; border-color: #7a3d3d; color: #ffd7d7; }
   .ai-ask.allowed { border-color: #3d7a4d; color: #9fe0b0; }
   .ai-ask.denied { border-color: #7a3d3d; color: #e08a8a; }
+  /* 需要用户确认：卡片单独挂在消息下方（不放进默认折叠的步骤列表），
+     弹入 + 脉冲高亮，确保用户一眼看到并及时操作 */
+  .ai-ask.attn { animation: aiAskIn .28s ease-out, aiAskPulse 1.6s ease-in-out 3; }
+  @keyframes aiAskIn { from { opacity: 0; transform: translateY(6px) scale(.97); } to { opacity: 1; transform: none; } }
+  @keyframes aiAskPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(226,192,138,0); }
+    50% { box-shadow: 0 0 0 3px rgba(226,192,138,.28); }
+  }
   .ai-send {
     width: 28px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
     background: #0a6aa8; border: none; border-radius: 6px; color: #fff; font-size: 12px; cursor: pointer;

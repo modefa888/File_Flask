@@ -1,6 +1,6 @@
 # PROJECT.md — 项目结构与架构说明
 
-> 本文档基于当前代码库（`app/__init__.py` 注册蓝图、`app/routes/`、`app/services/` 实际文件）梳理生成，用于快速了解工程结构、模块职责与关键数据流。与 `README.md` 中"16 个蓝图"的旧描述不同，**当前实际注册 20 个蓝图**（新增 `ai`、`agent`、`chat_history`、`pip`）。
+> 本文档基于当前代码库（`app/__init__.py` 注册蓝图、`app/routes/`、`app/services/` 实际文件）梳理生成，用于快速了解工程结构、模块职责与关键数据流。当前实际注册 **20 个蓝图**（含 `ai`、`agent`、`chat_history`、`pip`），与 `README.md` 已同步。
 
 ---
 
@@ -74,7 +74,7 @@ File_Flask/
 
 ## 4. 路由层：20 个蓝图
 
-> 共 **20 个 Blueprint**（见 `app/__init__.py`）；`README.md` 中的"16 个"为旧数据，待同步。
+> 共 **20 个 Blueprint**（见 `app/__init__.py`）；与 `README.md` 已同步。
 
 `app/routes/` 下每个模块暴露一个 `bp` 蓝图，均在 `create_app()` 中注册：
 

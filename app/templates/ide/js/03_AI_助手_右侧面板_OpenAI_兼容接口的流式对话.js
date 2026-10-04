@@ -646,10 +646,11 @@
       '<span>' + parts.join(' · ') + '</span></div>';
   }
   /* 回撤某条 AI 回复造成的文件改动 */
-  function aiUndoChanges(mi, btn) {
+  async function aiUndoChanges(mi, btn) {
     const m = AI.msgs[mi];
     if (!m || !m.changes || !m.changes.length) return;
-    if (!confirm("回撤这次 AI 的改动？将把 " + m.changes.length + " 个文件操作恢复到修改前的状态。")) return;
+    if (!(await uiConfirm("回撤 AI 改动",
+        "将把 " + m.changes.length + " 个文件操作恢复到修改前的状态，此操作不可撤销。", "回撤", true))) return;
     const old = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';

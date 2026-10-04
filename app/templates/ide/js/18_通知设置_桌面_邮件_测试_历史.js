@@ -627,7 +627,7 @@
   }
 
   async function notifyClearHistory() {
-    if (!confirm("清空全部通知记录？")) return;
+    if (!(await uiConfirm("清空通知记录", "确定清空全部通知记录？此操作不可恢复。", "清空", true))) return;
     try {
       const r = await fetch("/api/ai/notify/history", { method: "DELETE" });
       const d = await r.json();

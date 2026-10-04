@@ -73,8 +73,14 @@
       aiCloseSkillEditPop();
     };
     const del = pop.querySelector("#skEditDel");
-    if (del) del.onclick = () => {
-      if (!confirm("删除自定义 Skill「" + sk.name + "」？")) return;
+    if (del) del.onclick = async (e) => {
+      const ok = await uiConfirmPop(e.currentTarget, {
+        title: "删除 Skill",
+        msg: "确定删除自定义 Skill「" + sk.name + "」？",
+        okText: "删除",
+        danger: true
+      });
+      if (!ok) return;
       aiDeleteSkill(skillId);
       aiAfterSkillChange();
       toast("已删除", "ok");
@@ -122,9 +128,15 @@
       });
       const del = o.querySelector(".ai-sk-del");
       if (del && !s.builtin) {
-        del.addEventListener("click", (e) => {
+        del.addEventListener("click", async (e) => {
           e.stopPropagation();
-          if (!confirm("删除自定义 Skill「" + s.name + "」？")) return;
+          const ok = await uiConfirmPop(e.currentTarget, {
+            title: "删除 Skill",
+            msg: "确定删除自定义 Skill「" + s.name + "」？",
+            okText: "删除",
+            danger: true
+          });
+          if (!ok) return;
           aiDeleteSkill(s.id);
           aiAfterSkillChange();
           toast("已删除", "ok");

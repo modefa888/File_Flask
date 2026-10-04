@@ -906,9 +906,24 @@
     const g = gid == null ? curGroup : gid;
     const src = groupActive.get(g) || tabs.filter(t => t.group === g).pop() || active;
     if (!src) { toast("先打开一个文件，再拆分编辑器", "info"); return; }
+    if (src.noSplit) { toast("该视图无法拆分", "info"); return; }   // 插件声明禁止拆分
     if (groupIds().length >= MAX_GROUPS) { toast("最多拆分 " + MAX_GROUPS + " 个编辑器", "warn"); return; }
     const newGid = tabs.reduce((m, t) => Math.max(m, t.group), -1) + 1;
-    registerSplit(g, newGid, dir === "down" ? "down" : "right");   // 先登记新组位置，再打开文件
+    const sdir = dir === "down" ? "down" : "right";
+    // 其它内部虚拟标签（设置页 \u0000settings、差异 / 更改汇总视图 path 含 \u0001 等）：
+    // path 不是真实文件，按路径 openFile 必然会报「路径不存在或不是文件」，直接给出提示
+    const isInternalVirtual = !src.pluginView &&
+      (src.diff || src.allDiff || (typeof src.path === "string" && src.path.charCodeAt(0) < 32));
+    if (isInternalVirtual) { toast("该视图不支持拆分", "info"); return; }
+    registerSplit(g, newGid, sdir);   // 先登记新组位置，再打开内容
+    // 插件自定义视图：path 是虚拟路径（\u0000plugin:…），改用插件登记过的 render 在新组重建一个独立实例
+    if (src.pluginView) {
+      const IDE = window.IDE;
+      const v = (IDE && IDE.editors && typeof IDE.editors.split === "function")
+        ? IDE.editors.split(src.pluginViewId, newGid) : null;
+      if (!v) toast("该插件视图无法拆分", "warn");
+      return;
+    }
     await openFile(src.path, src.name, newGid);   // 新组必定新建，不会在两侧来回切换
   }
   async function saveAllTabs() {

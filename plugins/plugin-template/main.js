@@ -69,6 +69,7 @@ function demoPanelRender(panel, ctx) {
     ["读取文件",        () => demoRead(IDE)],
     ["写入文件",        () => demoWrite(IDE)],
     ["编辑区视图",      () => demoEditors(IDE)],
+    ["编辑区视图(禁止拆分)", () => demoEditorsNoSplit(IDE)],
     ["事件监听",        () => demoEvents(IDE)],
     ["API 请求",        () => demoApi(IDE)],
     ["HTTP 不代理",     () => demoHttp(IDE, false)],
@@ -130,9 +131,9 @@ function demoWrite(IDE) {
 function demoEditors(IDE) {
   let n = 0;
   const view = IDE.editors.open({
-    id: "demo-editors",                                   // 同 id 再次 open 只聚焦，不重复开标签
+    id: "demo-editors",                                   // 同 id 再次 open 只聚焦，不重复开标签；如需禁止拆分可加 noSplit:true
     title: "API Demo · 编辑区视图",
-    icon: "bi-puzzle",
+    // 省略 icon：标签默认用「插件列表里的图标」（来自 plugin.json 的 icon / 面板图标 bi-lightbulb）
     render(container, v) {
       container.innerHTML =
         '<div class="pl-pad">' +
@@ -163,6 +164,29 @@ function demoEditors(IDE) {
   });
   const got = IDE.editors.get("demo-editors");               // get：取已打开的视图句柄
   IDE.notifications.show("已打开编辑区视图，句柄在册：" + (!!got), "ok");
+}
+
+// 9b) editors.open + noSplit：禁止拆分的视图（点击拆分按钮 / Ctrl+\ 会提示「该视图无法拆分」）
+function demoEditorsNoSplit(IDE) {
+  const view = IDE.editors.open({
+    id: "demo-editors-nosplit",                              // 同 id 再次 open 只聚焦，不重复开标签
+    title: "API Demo · 禁止拆分的视图",
+    icon: "bi-lock",
+    noSplit: true,                                           // ← 关键：禁止拆分
+    render(container, v) {
+      container.innerHTML =
+        '<div class="pl-pad">' +
+          '<p>这个视图在 <code>open</code> 时带了 <code>noSplit: true</code>：</p>' +
+          '<ul style="margin:6px 0 6px 18px;line-height:1.7">' +
+            '<li>同一个 id 再次 open 只聚焦，不会重复开标签；</li>' +
+            '<li>点击拆分按钮 / 按 Ctrl+\\（或 Alt+\\）都会提示「该视图无法拆分」，不会把虚拟路径当文件去读。</li>' +
+          '</ul>' +
+          '<p style="opacity:.7">对比：上面「编辑区视图」可以正常拆分。试试点本视图的拆分按钮。</p>' +
+        '</div>';
+    },
+    onClose() { IDE.notifications.show("禁止拆分的视图已关闭", "info"); return true; }
+  });
+  IDE.notifications.show("已打开「禁止拆分的视图」，试试拆分它", "ok");
 }
 
 // 10) events.on / emit
@@ -230,6 +254,7 @@ async function demoAi(IDE) {
     IDE.editors.open({
       id: "demo-ai-out",
       title: "AI 回复(默认模型).md",
+      noSplit: true,   // 演示：该视图禁止拆分（点击拆分按钮 / Ctrl+\ 会提示「无法拆分」）
       language: "markdown",
       content: "# 提问\n\n" + prompt + "\n\n---\n\n" + (r.text || ""),
       dirty: true
@@ -290,6 +315,7 @@ return {
     IDE.registerCommand("demo.workspace.read",    { title: "Demo: 读取文件",     run: () => demoRead(IDE) });
     IDE.registerCommand("demo.workspace.write",   { title: "Demo: 写入文件",     run: () => demoWrite(IDE) });
     IDE.registerCommand("demo.editors.view",      { title: "Demo: 编辑区视图",   run: () => demoEditors(IDE) });
+    IDE.registerCommand("demo.editors.nosplit",   { title: "Demo: 编辑区视图(禁止拆分)", run: () => demoEditorsNoSplit(IDE) });
     IDE.registerCommand("demo.events.listen",     { title: "Demo: 事件监听",     run: () => demoEvents(IDE) });
     IDE.registerCommand("demo.api.plugins",       { title: "Demo: API 请求",     run: () => demoApi(IDE) });
     IDE.registerCommand("demo.http.direct",        { title: "Demo: 请求外部接口(不代理)", run: () => demoHttp(IDE, false) });

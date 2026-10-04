@@ -35,6 +35,18 @@
   // 当前正在激活 / 正在执行命令的插件 id：用于把期间创建的编辑区视图、注册的命令归属到该插件
   let _plCurrentId = "";
 
+  // 插件图标表：插件 id → 图标 class（取自 plugin.json 的 icon，或 contributes.panels[0].icon）。
+  // 插件编辑区视图未单独指定 icon/iconHtml 时，标签默认用该图标（即「插件列表里的图标」）。
+  const _plIcons = new Map();
+  function _plResolveIcon(meta) {
+    meta = meta || {};
+    let ic = meta.icon;
+    if (!ic && meta.contributes && Array.isArray(meta.contributes.panels) && meta.contributes.panels[0]) {
+      ic = meta.contributes.panels[0].icon;
+    }
+    return typeof ic === "string" ? ic : "";
+  }
+
   // ---------- 命令注册表 ----------
   const _plCommands = new Map();
   IDE.registerCommand = function (id, opts) {
@@ -85,7 +97,7 @@
     panel.style.display = "none";
     const sidebar = document.getElementById("sidebar");
     if (sidebar) sidebar.appendChild(panel);
-    const handle = { id: id, el: panel, act: act };
+    const handle = { id: id, el: panel, act: act, _owner: spec._owner || _plCurrentId };
     _plPanels.set(id, handle);
     if (typeof spec.render === "function") {
       const prev = _plCurrentId; _plCurrentId = spec._owner || prev;   // 面板内打开的视图归属该插件
@@ -139,12 +151,23 @@
   // 与「打开文件」共用同一套标签页机制：同一标签再次 open 只聚焦、可切换到其它编辑组
   // （Ctrl+\ 拆分）、可拖拽排序、可关闭、状态栏/面包屑随激活标签更新；
   // 区别仅是内容由插件通过 render(container, view) 自行渲染（类似 VS Code 的 WebviewPanel）。
-  //   IDE.editors.open({ id, title, icon, iconHtml, render, group }) → view
+  //   IDE.editors.open({ id, title, icon, iconHtml, render, group, noSplit }) → view
+  //     icon/iconHtml 省略时默认用「打开该视图的插件」在插件列表中的图标；可单独指定覆盖
+  //     noSplit:true 时该视图禁止拆分（点击拆分按钮 / Ctrl+\ 会提示「无法拆分」）
   //   view.setTitle(name) / setIcon(html) / setDirty(bool) / onClose(fn) / focus() / close()
   let _plViewSeq = 0;
-  const _plViews = new Map();                            // id → view
+  const _plViews = new Map();                            // 实例键 → view（同一 id 可在不同编辑组各存一个实例）
   const PL_VIEW_PREFIX = "\u0000plugin:";                // 虚拟路径（与真实文件、内部 key 均不冲突）
   const PL_DEFAULT_ICON = '<i class="bi bi-puzzle"></i>';
+
+  // 取某 id 处于打开状态的视图实例；group 不为 null 时限定编辑组（拆分后同 id 会有多个实例）
+  function _plFindView(id, group) {
+    id = String(id);
+    for (const v of _plViews.values()) {
+      if (String(v.id) === id && tabs.indexOf(v.tab) >= 0 && (group == null || v.tab.group === group)) return v;
+    }
+    return null;
+  }
 
   function _plOpenEditor(spec) {
     if (typeof spec === "string") spec = { title: spec };
@@ -154,8 +177,9 @@
       return null;
     }
     const id = String(spec.id || spec.title || ("view-" + (++_plViewSeq)));
-    const opened = _plViews.get(id);
-    if (opened && tabs.indexOf(opened.tab) >= 0) {       // 已打开：刷新内容并聚焦同一标签
+    // 去重：指定 group 时同 id 同组、未指定 group 时同 id 任一实例已打开 → 刷新内容并聚焦（不重复开标签）
+    const opened = _plFindView(id, spec.group == null ? null : spec.group);
+    if (opened) {
       if (typeof spec.render === "function") {
         try { spec.render(opened.body, opened); }
         catch (e) { console.error("[IDE] view render 失败:", id, e); }
@@ -165,8 +189,13 @@
       activate(opened.tab);
       return opened;
     }
-    _plViews.delete(id);
+    // 兜底：清掉已关闭实例残留的键
+    for (const k of [..._plViews.keys()]) { const v = _plViews.get(k); if (tabs.indexOf(v.tab) < 0) _plViews.delete(k); }
 
+    const key = id + "\u0000" + (++_plViewSeq);          // 实例唯一键：同 id 拆分出的多个实例各自独立
+    // 默认标签图标：未指定 icon/iconHtml 时，用打开该视图的插件在插件列表中的图标，兜底为通用拼图图标
+    const _ownerIcon = (_plCurrentId && _plIcons.get(_plCurrentId)) || "";
+    const _defIconHtml = _ownerIcon ? ('<i class="bi ' + _ownerIcon + '"></i>') : PL_DEFAULT_ICON;
     const host = document.createElement("div");
     host.className = "cm-host pl-view-host";
     const body = document.createElement("div");
@@ -174,15 +203,16 @@
     host.appendChild(body);
 
     const tab = {
-      path: PL_VIEW_PREFIX + id, displayPath: spec.title || id, name: spec.title || id,
+      path: PL_VIEW_PREFIX + key, displayPath: spec.title || id, name: spec.title || id,
       host, cm: null, original: "", dirty: false, big: false,
       group: spec.group != null ? spec.group : curGroup,
       pluginView: true, pluginViewId: id, pluginOwner: _plCurrentId || "",
-      iconHtml: spec.iconHtml || (spec.icon ? '<i class="bi ' + spec.icon + '"></i>' : PL_DEFAULT_ICON),
+      noSplit: !!spec.noSplit,   // 插件声明禁止拆分
+      iconHtml: spec.iconHtml || (spec.icon ? '<i class="bi ' + spec.icon + '"></i>' : _defIconHtml),
     };
 
     const view = {
-      id, tab, host, body, spec,
+      id, key, tab, host, body, spec, noSplit: !!spec.noSplit,
       setTitle(name) {
         tab.name = String(name == null ? "" : name); tab.displayPath = tab.name;
         if (tab.el) { const nm = tab.el.querySelector(".t-nm"); if (nm) nm.textContent = tab.name; }
@@ -210,14 +240,14 @@
       try {
         if (typeof view._onClose === "function" && (await view._onClose()) === false) return false;
       } catch (e) { console.error("[IDE] view onClose 失败:", id, e); }
-      _plViews.delete(id);
+      _plViews.delete(key);
       IDE.events.emit("viewClosed", { id: id });
       return true;
     };
 
     tabs.push(tab);
     renderTabsAll();
-    _plViews.set(id, view);
+    _plViews.set(key, view);
     activate(tab);                                       // 与打开文件一致：创建即激活
     if (typeof spec.render === "function") {
       try { spec.render(body, view); } catch (e) {
@@ -232,12 +262,15 @@
   IDE.editors = {
     // 打开（或聚焦已打开的）插件编辑区视图
     open: _plOpenEditor,
-    get(id) {
-      const v = _plViews.get(String(id));
-      return (v && tabs.indexOf(v.tab) >= 0) ? v : null;
+    get(id) { return _plFindView(id, null); },
+    focus(id) { const v = _plFindView(id, null); if (v) v.focus(); return v; },
+    close(id) { const v = _plFindView(id, null); return v ? v.close() : Promise.resolve(false); },
+    // 拆分：按插件登记过的 render 把某视图实例复制到指定编辑组（供 Ctrl+\ 使用，同 id 多实例并存）
+    split(id, group) {
+      const v = _plFindView(id, null);
+      if (!v || v.noSplit) return null;   // 禁止拆分的视图不创建新实例（splitEditor 会给出提示）
+      return _plOpenEditor(Object.assign({}, v.spec, { id: v.id, group: group, title: v.tab.name }));
     },
-    focus(id) { const v = IDE.editors.get(id); if (v) v.focus(); return v; },
-    close(id) { const v = IDE.editors.get(id); return v ? v.close() : Promise.resolve(false); },
     list() {
       return [..._plViews.values()].filter(v => tabs.indexOf(v.tab) >= 0).map(v => ({ id: v.id, title: v.tab.name }));
     },
@@ -446,9 +479,10 @@
 
   async function _plActivate(meta) {
     if (_plInstances.has(meta.id)) return;
+    _plIcons.set(meta.id, _plResolveIcon(meta));   // 记录插件图标（其视图标签的默认图标）
     const _prevOwner = _plCurrentId; _plCurrentId = meta.id;   // activate 期间创建的视图/命令归属该插件
     try {
-      const code = await (await fetch("/api/plugins/" + encodeURIComponent(meta.id) + "/main.js")).text();
+      const code = await (await fetch("/api/plugins/" + encodeURIComponent(meta.id) + "/main.js", { cache: "no-store" })).text();
       // 受限执行：插件在全局作用域运行，但仅能拿到宿主注入的全局；
       // 直接在页面内执行（可信插件模型，与 VS Code 默认信任用户安装的扩展一致）。
       const factory = new Function(
@@ -472,13 +506,45 @@
     }
   }
 
+  // 移除某插件注册的面板与命令（禁用 / 卸载 / 重装时调用，使界面即时恢复，无需刷新）
+  function _plRemovePluginUI(pid) {
+    pid = String(pid);
+    for (const [id, h] of [..._plPanels.entries()]) {
+      if (String(h._owner) !== pid) continue;
+      try { if (h.act && h.act.parentNode) h.act.parentNode.removeChild(h.act); } catch (e) { console.error(e); }
+      try { if (h.el && h.el.parentNode) h.el.parentNode.removeChild(h.el); } catch (e) { console.error(e); }
+      _plPanels.delete(id);
+      try { if (typeof panels !== "undefined") delete panels[id]; } catch (_) {}
+      try { if (typeof titles !== "undefined") delete titles[id]; } catch (_) {}
+      // 当前正显示被移除的面板 → 切回资源管理器，避免侧栏空白
+      try {
+        if (typeof localStorage !== "undefined" && localStorage.getItem("ide.session.panel") === id &&
+            typeof showPanel === "function") {
+          showPanel("explorer");
+        }
+      } catch (_) {}
+    }
+    for (const [cid, c] of [..._plCommands.entries()]) {
+      if (String(c._owner) !== pid) continue;
+      _plCommands.delete(cid);
+      if (typeof QO_COMMANDS !== "undefined" && Array.isArray(QO_COMMANDS)) {
+        for (let i = QO_COMMANDS.length - 1; i >= 0; i--) {
+          if (QO_COMMANDS[i] && QO_COMMANDS[i][2] === cid) QO_COMMANDS.splice(i, 1);
+        }
+      }
+    }
+  }
+
   function _plDeactivate(id) {
     const inst = _plInstances.get(id);
-    if (!inst) return;
-    try { if (typeof inst.deactivate === "function") inst.deactivate(); } catch (e) { console.error(e); }
-    _plInstances.delete(id);
+    if (inst) {
+      try { if (typeof inst.deactivate === "function") inst.deactivate(); } catch (e) { console.error(e); }
+      _plInstances.delete(id);
+    }
     // 关闭该插件打开的编辑区视图，避免禁用/卸载后残留孤儿标签
     try { IDE.editors.closeAll(id); } catch (e) { console.error(e); }
+    // 移除该插件注册的面板 / 命令，使禁用、卸载能立即在界面上生效（无需刷新页面）
+    try { _plRemovePluginUI(id); } catch (e) { console.error(e); }
     IDE.events.emit("pluginDeactivated", id);
   }
 
@@ -513,10 +579,15 @@
     return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   }
 
+  // 插件列表始终取最新（禁用浏览器缓存，避免刚上传/切换启用状态后读到旧数据）
+  function _plFetchList() {
+    return fetch("/api/plugins", { cache: "no-store" }).then(r => r.json());
+  }
+
   function _plRenderPanel() {
     const box = document.getElementById("extPanel");
     if (!box) return;
-    IDE.api.get("/api/plugins").then(list => {
+    _plFetchList().then(list => {
       list = list || [];
       let html =
         '<div class="ph" style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
@@ -525,9 +596,10 @@
         '</div>';
       if (!list.length) html += '<div class="ph" style="color:#888">暂无插件。把插件目录打包成 zip 上传即可。</div>';
       for (const p of list) {
+        _plIcons.set(p.id, _plResolveIcon(p));   // 同步插件图标（视图标签默认图标即取自此）
         html +=
           '<div class="pl-card" data-id="' + _esc(p.id) + '">' +
-            '<div class="pl-row"><b>' + _esc(p.name || p.id) + '</b> <span class="pl-ver">v' + _esc(p.version || "0.0.0") + '</span></div>' +
+            '<div class="pl-row"><i class="bi ' + _esc(_plResolveIcon(p) || "bi-puzzle") + '"></i> <b>' + _esc(p.name || p.id) + '</b> <span class="pl-ver">v' + _esc(p.version || "0.0.0") + '</span></div>' +
             (p.description ? '<div class="pl-desc">' + _esc(p.description) + '</div>' : '') +
             (p.author ? '<div class="pl-author">作者：' + _esc(p.author) + '</div>' : '') +
             '<div class="pl-acts">' +
@@ -543,13 +615,39 @@
         const id = card.dataset.id;
         const tog = card.querySelector('[data-act="toggle"]');
         if (tog) tog.addEventListener("change", async (e) => {
-          await IDE.api.post("/api/plugins/" + encodeURIComponent(id) + "/toggle", { enabled: e.target.checked });
-          IDE.notifications.show("已" + (e.target.checked ? "启用" : "禁用") + "，刷新页面生效", "ok");
+          const on = e.target.checked;
+          e.target.disabled = true;
+          try {
+            await IDE.api.post("/api/plugins/" + encodeURIComponent(id) + "/toggle", { enabled: on });
+            if (on) {
+              const list = await _plFetchList();
+              const meta = (list || []).find(p => String(p.id) === String(id)) || { id: id, enabled: true };
+              await _plActivate(meta);           // 立即激活，无需刷新
+            } else {
+              _plDeactivate(id);                 // 立即停用并移除其面板 / 命令 / 视图
+            }
+            IDE.notifications.show("已" + (on ? "启用" : "禁用"), "ok");
+          } catch (err) {
+            e.target.checked = !on;              // 失败回滚开关状态
+            IDE.notifications.show("操作失败：" + ((err && err.message) || err), "err");
+          } finally {
+            e.target.disabled = false;
+          }
         });
         const un = card.querySelector('[data-act="uninstall"]');
-        if (un) un.addEventListener("click", async () => {
-          if (!confirm("卸载插件 " + id + "？")) return;
-          await IDE.api.post("/api/plugins/" + encodeURIComponent(id) + "/uninstall", {});
+        if (un) un.addEventListener("click", async (e) => {
+          // 自定义悬浮确认框（贴着「卸载」按钮弹出），替代原生 confirm
+          const ok = await uiConfirmPop(e.currentTarget, {
+            title: "卸载插件",
+            msg: "确定卸载「" + id + "」吗？该插件的面板、命令与已打开的视图会立即移除。",
+            okText: "卸载",
+            danger: true
+          });
+          if (!ok) return;
+          const res = await IDE.api.post("/api/plugins/" + encodeURIComponent(id) + "/uninstall", {});
+          if (res && res.error) { IDE.notifications.show("卸载失败：" + res.error, "err"); return; }
+          _plDeactivate(id);                     // 立即停用并清理界面，无需刷新
+          IDE.notifications.show("已卸载「" + id + "」", "ok");
           _plRenderPanel();
         });
       });
@@ -572,7 +670,16 @@
         const r = await fetch("/api/plugins/install", { method: "POST", body: fd });
         const d = await r.json();
         if (d.error) IDE.notifications.show("安装失败：" + d.error, "err");
-        else { IDE.notifications.show("安装成功：" + ((d.plugin && (d.plugin.name || d.plugin.id)) || ""), "ok"); _plRenderPanel(); }
+        else {
+          const meta = d.plugin || {};
+          IDE.notifications.show("安装成功：" + (meta.name || meta.id || ""), "ok");
+          _plRenderPanel();
+          // 立即生效，无需刷新页面：同名插件若已在运行，先卸载旧实例，再加载新代码（main.js 不带缓存）
+          if (meta.id && meta.enabled !== false) {
+            _plDeactivate(meta.id);
+            await _plActivate(meta);
+          }
+        }
       } catch (e) {
         IDE.notifications.show("安装失败：" + e.message, "err");
       }

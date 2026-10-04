@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "演示 window.IDE 提供的全部宿主能力：命令、面板、通知、工作区读写、编辑区视图、事件总线、请求封装。",
   "author": "demo",
+  "icon": "bi-lightbulb",
   "main": "main.js",
   "enabled": true,
   "contributes": {

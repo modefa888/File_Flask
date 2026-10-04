@@ -26,6 +26,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from datetime import datetime, timezone
 
 from flask import Blueprint, request, jsonify, send_file
 
@@ -38,12 +39,80 @@ bp = Blueprint("plugins", __name__)
 
 PLUGINS_DIR = os.path.join(config.DATA_ROOT, "plugins")
 os.makedirs(PLUGINS_DIR, exist_ok=True)
+REGISTRY_FILE = os.path.join(PLUGINS_DIR, "registry.json")
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 def _plugin_dir(pid):
     return os.path.join(PLUGINS_DIR, pid)
+
+
+def _remove_path(path):
+    """删除插件路径：兼容符号链接 / 普通文件 / 目录（shutil.rmtree 不能处理符号链接）。"""
+    if os.path.islink(path) or os.path.isfile(path):
+        os.remove(path)
+    elif os.path.isdir(path):
+        shutil.rmtree(path)
+
+
+def _load_registry():
+    """读取插件登记簿（data/plugins/registry.json）。"""
+    try:
+        with open(REGISTRY_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("plugins", {})
+    data.setdefault("history", [])
+    return data
+
+
+def _save_registry(data):
+    try:
+        with open(REGISTRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        _log.warning("写入插件登记簿失败: %s", e)
+
+
+def _registry_record(action, meta):
+    """写入一条安装 / 卸载记录，并维护插件状态与历史。
+
+    action: "install" | "uninstall"
+    meta:   插件元数据 dict（至少含 id；name/version 可选）
+    """
+    try:
+        pid = str(meta.get("id", "")).strip()
+        if not pid:
+            return
+        data = _load_registry()
+        now = datetime.now(timezone.utc).isoformat()
+        entry = data["plugins"].get(pid) or {}
+        entry["id"] = pid
+        entry["name"] = meta.get("name", pid)
+        entry["version"] = meta.get("version", "0.0.0")
+        if action == "install":
+            entry["status"] = "installed"
+            entry["installed_at"] = entry.get("installed_at") or now
+            entry["uninstalled_at"] = None
+        else:
+            entry["status"] = "uninstalled"
+            entry["uninstalled_at"] = now
+        entry["updated_at"] = now
+        data["plugins"][pid] = entry
+        data["history"].append({
+            "action": action, "id": pid,
+            "name": meta.get("name", pid), "version": meta.get("version", "0.0.0"),
+            "at": now,
+        })
+        if len(data["history"]) > 500:
+            data["history"] = data["history"][-500:]
+        _save_registry(data)
+    except Exception as e:
+        _log.warning("更新插件登记簿失败: %s", e)
 
 
 def _load_meta(pid):
@@ -81,6 +150,12 @@ def _save_meta(pid, meta):
 @bp.route("/api/plugins", methods=["GET"])
 def list_plugins():
     return jsonify(_list_plugins())
+
+
+@bp.route("/api/plugins/registry", methods=["GET"])
+def plugin_registry():
+    """查看插件登记簿：已安装 / 已卸载历史（data/plugins/registry.json）。"""
+    return jsonify(_load_registry())
 
 
 @bp.route("/api/plugins/install", methods=["POST"])
@@ -123,14 +198,15 @@ def install_plugin():
             return jsonify({"error": "plugin.json 的 id 非法（仅限字母数字 _ -，1-64 位）"}), 400
         src = os.path.join(tmp, top) if top else tmp
         dest = _plugin_dir(pid)
-        if os.path.isdir(dest):
-            shutil.rmtree(dest)
+        if os.path.islink(dest) or os.path.exists(dest):
+            _remove_path(dest)
         shutil.copytree(src, dest)
         # 规范化 manifest
         meta.setdefault("name", pid)
         meta.setdefault("enabled", True)
         meta["installed"] = True
         _save_meta(pid, meta)
+        _registry_record("install", meta)
         return jsonify({"success": True, "plugin": meta})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -156,9 +232,15 @@ def uninstall_plugin(pid):
     if not _ID_RE.match(pid):
         return jsonify({"error": "非法插件 id"}), 400
     dest = _plugin_dir(pid)
-    if not os.path.isdir(dest):
+    if not os.path.islink(dest) and not os.path.exists(dest):
         return jsonify({"error": "插件不存在"}), 404
-    shutil.rmtree(dest, ignore_errors=True)
+    # 卸载前先取元数据（删除后无法再读），用于登记簿记录
+    meta = _load_meta(pid) or {}
+    try:
+        _remove_path(dest)          # 一并删除插件目录（兼容软链接 / 普通目录）
+    except Exception as e:
+        return jsonify({"error": "卸载失败：" + str(e)}), 500
+    _registry_record("uninstall", {"id": pid, "name": meta.get("name", pid), "version": meta.get("version", "0.0.0")})
     return jsonify({"success": True})
 
 

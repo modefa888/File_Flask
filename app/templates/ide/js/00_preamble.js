@@ -240,7 +240,6 @@
       }
     }
     // bootstrap 兜底（映射未加载或未命中时）
-    if (lower.endsWith("requirements.txt")) return _si("bi-file-earmark-text", "#6d8086");
     if (lower.startsWith("dockerfile")) return _si("bi-file-earmark-code", "#438eec");
     if (ext === "spec") return _si("bi-gear", "#a074c4");
     const map = {
@@ -252,7 +251,7 @@
       json:  ["bi-filetype-json", "#cbcb41"],
       md:    ["bi-filetype-md", "#519aba"], markdown: ["bi-filetype-md", "#519aba"],
       yml:   ["bi-filetype-yml", "#a074c4"], yaml: ["bi-filetype-yml", "#a074c4"],
-      txt:   ["bi-filetype-txt", "#6d8086"], log: ["bi-file-text", "#6d8086"], lrc: ["bi-file-text", "#6d8086"],
+      txt:   ["bi-file-earmark-text", "#6d8086"], log: ["bi-file-text", "#6d8086"], lrc: ["bi-file-text", "#6d8086"],
       ini:   ["bi-gear", "#6d8086"], cfg: ["bi-gear", "#6d8086"], conf: ["bi-gear", "#6d8086"],
       env:   ["bi-gear", "#6d8086"], toml: ["bi-gear", "#6d8086"],
       sh:    ["bi-terminal", "#4ec9b0"], bash: ["bi-terminal", "#4ec9b0"], zsh: ["bi-terminal", "#4ec9b0"],

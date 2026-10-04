@@ -51,6 +51,32 @@
 
   // 将插件的 index.html（+ css）挂载进容器：以 iframe 加载插件静态资源，
   // 富页面可经「同源 iframe」直接访问 window.parent.IDE（可信插件模型）。
+  // 插件 iframe 是独立文档，宿主全局的滚动条样式进不去，会退回系统默认样式（暗色下很突兀）。
+  // 这里在 iframe 加载完成后注入一份与 IDE 一致的自定义滚动条（同源 + allow-same-origin 才可访问）。
+  const _PL_SCROLLBAR_CSS =
+    "html{scrollbar-width:thin;scrollbar-color:rgba(150,152,165,.55) transparent}" +
+    "::-webkit-scrollbar{width:10px;height:10px}" +
+    "::-webkit-scrollbar-track{background:transparent}" +
+    "::-webkit-scrollbar-thumb{background:rgba(150,152,165,.5);border-radius:5px;border:2px solid transparent;background-clip:content-box}" +
+    "::-webkit-scrollbar-thumb:hover{background:rgba(170,172,185,.8);border:2px solid transparent;background-clip:content-box}" +
+    "::-webkit-scrollbar-thumb:active{background:rgba(190,192,205,.95);border:2px solid transparent;background-clip:content-box}" +
+    "::-webkit-scrollbar-corner{background:transparent}" +
+    "::-webkit-scrollbar-button{display:none;height:0;width:0}";
+  function _plInjectScrollbar(f) {
+    const inject = () => {
+      try {
+        const d = f.contentDocument;
+        if (!d || d.getElementById("__pl_scrollbar__")) return;
+        const st = d.createElement("style");
+        st.id = "__pl_scrollbar__";
+        st.textContent = _PL_SCROLLBAR_CSS;
+        (d.head || d.documentElement).appendChild(st);
+      } catch (e) { /* 非同源/被禁止访问时忽略 */ }
+    };
+    f.addEventListener("load", inject);
+    if (f.contentDocument && f.contentDocument.readyState === "complete") inject();
+  }
+
   function _plMountIndex(el, pid, indexFile, cssFile) {
     pid = pid || _plCurrentId || "";
     if (indexFile) {
@@ -60,6 +86,7 @@
       f.className = "pl-iframe";
       f.setAttribute("frameborder", "0");
       f.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-forms");
+      _plInjectScrollbar(f);
       f.src = "/api/plugins/" + encodeURIComponent(pid) + "/asset/" + String(indexFile).replace(/^\/+/, "");
       host.appendChild(f);
       el.innerHTML = "";

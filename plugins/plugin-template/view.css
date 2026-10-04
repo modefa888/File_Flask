@@ -1,6 +1,19 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
 
+/* ===== 自定义滚动条（与 IDE 主题一致的深色细条）===== */
+html { scrollbar-width: thin; scrollbar-color: rgba(160, 200, 185, .55) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(160, 200, 185, .5); border-radius: 5px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(190, 225, 210, .85); border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:active { background: rgba(210, 240, 228, .95); border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
+
 body {
   font-family: -apple-system, "Segoe UI", "PingFang SC", system-ui, sans-serif;
   color: #e6fff6;

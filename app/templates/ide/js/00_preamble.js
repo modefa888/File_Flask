@@ -90,6 +90,7 @@
   // 跳过 diff 视图 / 打开更改汇总 / 文件比较等内部标签（它们的 path 是带 \u0001 的内部 key，用 openFile 去读必然报错）。
   function sessionIsRestorable(t) {
     if (!t || !t.path) return false;
+    if (t.pluginView) return false;   // 插件自定义视图：不参与会话恢复（由插件激活时自行打开）
     if (t.diff || t.allDiff) return false;
     if (t.path.indexOf("\u0001") >= 0) return false;   // 内部 key：差异 / 比较视图
     return true;
@@ -220,12 +221,18 @@
     xml: "xml", xsl: "xml",
     gitignore: "ignore", gitattributes: "ignore", gitmodules: "ignore", dockerignore: "ignore"
   };
+  // 表格类扩展名 → 官方图标别名：.et/.ett（WPS）等 SETI 未收录，复用 xls/csv 的官方表格图标
+  const SHEET_ICON_ALIAS = {
+    et: "xls", ett: "xls", xlsx: "xls", xlsm: "xls", xltx: "xls", xltm: "xls", xlsb: "xls", ods: "xls",
+    tsv: "csv",
+  };
   function iconFor(name, isDir) {
     if (isDir) return _si("bi-folder2", "#c09553");
     const lower = name.toLowerCase();
     const ext = getExt(lower);
+    const setiExt = SHEET_ICON_ALIAS[ext] || ext;   // 表格格式统一取官方表格图标
     if (SETI) {
-      let def = SETI.defs[SETI.names[lower]] || SETI.defs[SETI.exts[ext]];
+      let def = SETI.defs[SETI.names[lower]] || SETI.defs[SETI.exts[setiExt]];
       if (!def && SETI_LANG[ext]) def = SETI.defs[SETI.langs[SETI_LANG[ext]]];
       if (def && def.fontCharacter) {
         const code = String(def.fontCharacter).replace(/\\+/g, "");
@@ -251,6 +258,11 @@
       sh:    ["bi-terminal", "#4ec9b0"], bash: ["bi-terminal", "#4ec9b0"], zsh: ["bi-terminal", "#4ec9b0"],
       bat:   ["bi-terminal", "#4ec9b0"], cmd: ["bi-terminal", "#4ec9b0"], ps1: ["bi-terminal", "#4ec9b0"],
       sql:   ["bi-database", "#519aba"],
+      xls:   ["bi-file-earmark-spreadsheet", "#8dc149"], xlsx: ["bi-file-earmark-spreadsheet", "#8dc149"],
+      xlsm:  ["bi-file-earmark-spreadsheet", "#8dc149"], xlsb: ["bi-file-earmark-spreadsheet", "#8dc149"],
+      et:    ["bi-file-earmark-spreadsheet", "#8dc149"], ett: ["bi-file-earmark-spreadsheet", "#8dc149"],
+      ods:   ["bi-file-earmark-spreadsheet", "#8dc149"],
+      csv:   ["bi-file-earmark-spreadsheet", "#8dc149"], tsv: ["bi-file-earmark-spreadsheet", "#8dc149"],
       png:   ["bi-image", "#a074c4"], jpg: ["bi-image", "#a074c4"], jpeg: ["bi-image", "#a074c4"],
       gif:   ["bi-image", "#a074c4"], svg: ["bi-image", "#a074c4"], webp: ["bi-image", "#a074c4"],
       bmp:   ["bi-image", "#a074c4"], ico: ["bi-image", "#a074c4"],
@@ -614,7 +626,7 @@
     });
     return (s.startsWith("/") ? "/" : "") + parts.join("/");
   }
-  async function openFile(path, name, forceGroup) {
+  async function openFile(path, name, forceGroup, forceText) {
     path = canonPath(path);
     // forceGroup 指定目标编辑组（拆分编辑器用）；不指定时全局查找已有标签并聚焦
     let tab = forceGroup == null ? findTab(path) : tabs.find(t => t.path === path && t.group === forceGroup);
@@ -654,6 +666,12 @@
         if (["db", "sqlite", "sqlite3", "db3"].includes(ext)) {
           activate(tab);   // activate 是本闭包内函数，须在这里调用（同图片分支）
           setupSqliteView(tab, host, path, name);
+          return;
+        }
+        // 电子表格：可编辑表格视图（xlsx/xlsm 读写、csv/tsv 读写、xls/et 只读）
+        if (!forceText && ["xlsx", "xlsm", "xltx", "xltm", "xls", "et", "ett", "csv", "tsv"].includes(ext)) {
+          activate(tab);
+          setupSheetView(tab, host, path, name);
           return;
         }
         // 文件内容与语法模式并行加载，减少串行等待
@@ -981,6 +999,12 @@
     const i = tabs.indexOf(tab);
     if (i < 0) return;
     if (tab.dirty && !(await uiConfirm("关闭标签", "文件 " + tab.name + " 有未保存的修改，确定不保存并关闭？", "不保存并关闭", true))) return;
+    // 自定义标签（如插件视图）的关闭钩子：可异步，返回 false 可取消关闭
+    if (typeof tab.onBeforeClose === "function") {
+      let ok = true;
+      try { ok = await tab.onBeforeClose(); } catch (e) { console.error(e); }
+      if (ok === false) return;
+    }
     const g = tab.group;
     tab.host.remove(); tabs.splice(i, 1);
     renderTabsAll();

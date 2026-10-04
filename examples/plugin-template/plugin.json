@@ -1,17 +1,33 @@
 {
-  "id": "your-plugin-id",
-  "name": "你的插件名称",
+  "id": "api-demo",
+  "name": "宿主 API 全量 Demo",
   "version": "0.1.0",
-  "description": "一句话描述插件功能。",
-  "author": "你的名字",
+  "description": "演示 window.IDE 提供的全部宿主能力：命令、面板、通知、工作区读写、编辑区视图、事件总线、请求封装。",
+  "author": "demo",
   "main": "main.js",
   "enabled": true,
   "contributes": {
     "panels": [
-      { "id": "yourPanelId", "title": "面板标题", "icon": "bi-puzzle" }
+      { "id": "demo-panel", "title": "API Demo", "icon": "bi-lightbulb" }
     ],
     "commands": [
-      { "id": "your.cmd", "title": "命令面板中显示的文字" }
+      { "id": "demo.cmd.echo",        "title": "Demo: 执行命令 (executeCommand)" },
+      { "id": "demo.notify.ok",       "title": "Demo: 通知 (ok)" },
+      { "id": "demo.notify.warn",     "title": "Demo: 通知 (warn)" },
+      { "id": "demo.notify.err",      "title": "Demo: 通知 (err)" },
+      { "id": "demo.notify.info",     "title": "Demo: 通知 (info)" },
+      { "id": "demo.workspace.root",   "title": "Demo: getRoot" },
+      { "id": "demo.workspace.current","title": "Demo: 当前文件" },
+      { "id": "demo.workspace.open",   "title": "Demo: 打开文件" },
+      { "id": "demo.workspace.read",   "title": "Demo: 读取文件" },
+      { "id": "demo.workspace.write",  "title": "Demo: 写入文件" },
+      { "id": "demo.editors.view",     "title": "Demo: 编辑区视图" },
+      { "id": "demo.events.listen",    "title": "Demo: 事件监听" },
+      { "id": "demo.api.plugins",      "title": "Demo: API 请求" },
+      { "id": "demo.http.direct",       "title": "Demo: 请求外部接口(不代理)" },
+      { "id": "demo.http.proxy",        "title": "Demo: 请求外部接口(走代理)" },
+      { "id": "demo.ai.ask",            "title": "Demo: AI 调用(系统默认模型)" },
+      { "id": "demo.dialog.show",       "title": "Demo: 系统级自定义弹窗" }
     ]
   }
 }

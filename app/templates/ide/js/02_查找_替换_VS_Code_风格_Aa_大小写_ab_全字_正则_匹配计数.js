@@ -288,6 +288,7 @@
     });
   }
   async function saveTab(tab) {
+    if (tab && tab.isSheet) { await saveSheetTab(tab); return; }   // 表格视图：走表格保存接口
     if (!tab || !tab.cm) return;
     if (tab.diff) { toast("差异视图为只读，不能保存", "warn"); return; }
     if (!tab.dirty) { toast("没有改动", "warn"); return; }
@@ -346,7 +347,11 @@
       items.push({ label: "在侧边打开", sc: "Ctrl+Enter", act: () => ctxAction("open-side") });
     }
     items.push({ label: "打开方式…", sub: () => {
-      const list = [{ label: "编辑器打开", act: () => openFile(path, name) }];
+      const isSheet = /\.(xlsx|xlsm|xltx|xltm|xls|et|ett|csv|tsv)$/i.test(name);
+      const list = [{ label: isSheet ? "表格查看 / 编辑" : "编辑器打开", act: () => openFile(path, name) }];
+      if (/\.(csv|tsv)$/i.test(name)) {
+        list.push({ label: "以文本编辑器打开", act: () => openFile(path, name, null, true) });
+      }
       if (/\.(md|markdown|html|htm)$/i.test(name)) {
         list.push({ label: "渲染预览（Markdown / HTML）", act: async () => { await openFile(path, name); mdSetMode("preview"); } });
       }
@@ -1030,6 +1035,9 @@
   const panels = { explorer: "explorerPanel", search: "searchPanel", git: "gitPanel", run: "runPanel", runner: "runnerPanel", env: "envPanel", ext: "extPanel" };
   const titles = { explorer: "资源管理器", search: "搜索", git: "源代码管理", run: "运行和调试", runner: "后台任务", env: "运行环境", ext: "扩展" };
   function showPanel(name) {
+    // 未知面板（例如会话恢复时插件面板尚未注册、或插件已被卸载）回退到资源管理器，
+    // 否则下面的循环会把所有面板隐藏却没有目标可显示，导致侧栏空白。
+    if (!panels[name]) name = "explorer";
     // 统一显式设置显示状态：隐藏时置 none，显示时清空内联样式交给 CSS（搜索面板需要 flex 布局）
     Object.keys(panels).forEach(k => {
       const el = $(panels[k]), on = (k === name);

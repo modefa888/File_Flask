@@ -221,4 +221,58 @@ def fs_write():
     return jsonify({"success": True, "path": fp})
 
 
+@bp.route("/api/plugins/http", methods=["POST"])
+def http_proxy():
+    """供插件请求「其他网站 / 第三方接口」的服务端转发。
+
+    两种用法（对应前端 IDE.api.direct / IDE.api.proxy）：
+      - 不代理：proxy 留空 → 由本服务直接发起请求（绕开浏览器 CORS）。
+      - 走代理：proxy 传地址（如 http://127.0.0.1:7890）→ 经由该代理访问目标。
+
+    body: { url, method?, headers?, body?, proxy? }
+    返回: { success, status, headers, text } 或 { error }（带状态码）
+    """
+    data = request.get_json(silent=True) or {}
+    url = str(data.get("url", "")).strip()
+    if not url:
+        return jsonify({"error": "未指定 url"}), 400
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return jsonify({"error": "仅支持 http/https"}), 400
+
+    method = str(data.get("method", "GET")).upper()
+    headers = data.get("headers") or {}
+    if not isinstance(headers, dict):
+        headers = {}
+    raw_body = data.get("body")
+    body_bytes = None
+    if raw_body is not None:
+        body_bytes = raw_body.encode("utf-8") if isinstance(raw_body, str) else raw_body
+
+    proxy = str(data.get("proxy", "")).strip()
+    handlers = []
+    if proxy:
+        # 走代理：http 与 https 目标都经由该代理
+        handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    # 不传 ProxyHandler 时 urllib 不会读取环境代理变量 → 真正的「直连」
+    handlers.append(urllib.request.HTTPHandler())
+    handlers.append(urllib.request.HTTPSHandler())
+    opener = urllib.request.build_opener(*handlers)
+
+    req = urllib.request.Request(url, data=body_bytes, method=method, headers=dict(headers))
+    try:
+        resp = opener.open(req, timeout=20)
+        charset = resp.headers.get_content_charset() or "utf-8"
+        text = resp.read().decode(charset, errors="replace")
+        return jsonify({"success": True, "status": resp.status,
+                        "headers": dict(resp.headers), "text": text})
+    except urllib.error.HTTPError as e:
+        charset = (e.headers.get_content_charset() or "utf-8") if e.headers else "utf-8"
+        text = e.read().decode(charset, errors="replace") if e.headers else ""
+        return jsonify({"success": False, "status": e.code,
+                        "error": "HTTP " + str(e.code), "text": text}), e.code
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 502
+
+
 

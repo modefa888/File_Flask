@@ -21,13 +21,19 @@
     ".pl-card .pl-desc{color:#aaa;font-size:12px;margin:4px 0}",
     ".pl-card .pl-author{color:#888;font-size:11px}",
     ".pl-card .pl-acts{display:flex;align-items:center;gap:10px;margin-top:6px}",
-    ".pl-card .pl-sw{font-size:12px;color:#bbb;display:flex;align-items:center;gap:4px}"
+    ".pl-card .pl-sw{font-size:12px;color:#bbb;display:flex;align-items:center;gap:4px}",
+    // 插件「编辑区视图」：与打开文件同款标签页容器，内容由插件自行渲染
+    ".pl-view-host{height:100%;overflow:hidden}",
+    ".pl-view-body{height:100%;overflow:auto;color:var(--fg,#ddd);font-size:13px}"
   ].join("");
   document.head.appendChild(_plStyle);
 
   const IDE = window.IDE || {};
   IDE.host = "file-flask";
   IDE.version = "1.0.0";
+
+  // 当前正在激活 / 正在执行命令的插件 id：用于把期间创建的编辑区视图、注册的命令归属到该插件
+  let _plCurrentId = "";
 
   // ---------- 命令注册表 ----------
   const _plCommands = new Map();
@@ -36,6 +42,7 @@
     if (!opts || typeof opts.run !== "function") {
       console.warn("[IDE] registerCommand 需要一个 run 函数:", id); return id;
     }
+    if (opts._owner == null) opts._owner = _plCurrentId;   // 记录归属插件（执行时用于视图归属）
     _plCommands.set(id, opts);
     const label = opts.title || id;
     if (typeof QO_COMMANDS !== "undefined" && Array.isArray(QO_COMMANDS)) {
@@ -48,7 +55,9 @@
   IDE.executeCommand = function (id) {
     const c = _plCommands.get(id);
     if (!c) { if (typeof toast === "function") toast("命令不存在: " + id, "warn"); return; }
-    return c.run.apply(null, Array.prototype.slice.call(arguments, 1));
+    const prev = _plCurrentId; _plCurrentId = c._owner || prev;   // 命令内打开的视图归属该插件
+    try { return c.run.apply(null, Array.prototype.slice.call(arguments, 1)); }
+    finally { _plCurrentId = prev; }
   };
 
   // ---------- 面板注册 ----------
@@ -57,6 +66,7 @@
     spec = spec || {};
     const id = spec.id;
     if (!id) { console.warn("[IDE] registerPanel 需要 id"); return null; }
+    if (spec._owner == null) spec._owner = _plCurrentId;   // 记录归属插件（面板内打开的视图据此归属）
     if (_plPanels.has(id)) return _plPanels.get(id);
     if (typeof panels !== "undefined") panels[id] = id + "Panel";
     if (typeof titles !== "undefined") titles[id] = spec.title || id;
@@ -78,8 +88,10 @@
     const handle = { id: id, el: panel, act: act };
     _plPanels.set(id, handle);
     if (typeof spec.render === "function") {
+      const prev = _plCurrentId; _plCurrentId = spec._owner || prev;   // 面板内打开的视图归属该插件
       try { spec.render(panel, { IDE: IDE }); }
       catch (e) { console.error("[IDE] panel render 失败:", id, e); }
+      finally { _plCurrentId = prev; }
     }
     return handle;
   };
@@ -123,6 +135,120 @@
     }
   };
 
+  // ---------- 编辑区：插件自定义视图 ----------
+  // 与「打开文件」共用同一套标签页机制：同一标签再次 open 只聚焦、可切换到其它编辑组
+  // （Ctrl+\ 拆分）、可拖拽排序、可关闭、状态栏/面包屑随激活标签更新；
+  // 区别仅是内容由插件通过 render(container, view) 自行渲染（类似 VS Code 的 WebviewPanel）。
+  //   IDE.editors.open({ id, title, icon, iconHtml, render, group }) → view
+  //   view.setTitle(name) / setIcon(html) / setDirty(bool) / onClose(fn) / focus() / close()
+  let _plViewSeq = 0;
+  const _plViews = new Map();                            // id → view
+  const PL_VIEW_PREFIX = "\u0000plugin:";                // 虚拟路径（与真实文件、内部 key 均不冲突）
+  const PL_DEFAULT_ICON = '<i class="bi bi-puzzle"></i>';
+
+  function _plOpenEditor(spec) {
+    if (typeof spec === "string") spec = { title: spec };
+    spec = spec || {};
+    if (typeof tabs === "undefined" || typeof activate !== "function" || typeof renderTabsAll !== "function") {
+      console.warn("[IDE] editors.open 不可用：编辑区尚未就绪");
+      return null;
+    }
+    const id = String(spec.id || spec.title || ("view-" + (++_plViewSeq)));
+    const opened = _plViews.get(id);
+    if (opened && tabs.indexOf(opened.tab) >= 0) {       // 已打开：刷新内容并聚焦同一标签
+      if (typeof spec.render === "function") {
+        try { spec.render(opened.body, opened); }
+        catch (e) { console.error("[IDE] view render 失败:", id, e); }
+      }
+      if (spec.title) opened.setTitle(spec.title);
+      if (spec.iconHtml || spec.icon) opened.setIcon(spec.iconHtml || ('<i class="bi ' + spec.icon + '"></i>'));
+      activate(opened.tab);
+      return opened;
+    }
+    _plViews.delete(id);
+
+    const host = document.createElement("div");
+    host.className = "cm-host pl-view-host";
+    const body = document.createElement("div");
+    body.className = "pl-view-body";
+    host.appendChild(body);
+
+    const tab = {
+      path: PL_VIEW_PREFIX + id, displayPath: spec.title || id, name: spec.title || id,
+      host, cm: null, original: "", dirty: false, big: false,
+      group: spec.group != null ? spec.group : curGroup,
+      pluginView: true, pluginViewId: id, pluginOwner: _plCurrentId || "",
+      iconHtml: spec.iconHtml || (spec.icon ? '<i class="bi ' + spec.icon + '"></i>' : PL_DEFAULT_ICON),
+    };
+
+    const view = {
+      id, tab, host, body, spec,
+      setTitle(name) {
+        tab.name = String(name == null ? "" : name); tab.displayPath = tab.name;
+        if (tab.el) { const nm = tab.el.querySelector(".t-nm"); if (nm) nm.textContent = tab.name; }
+        if (typeof active !== "undefined" && active === tab) renderBreadcrumbs(tab.name);
+        return view;
+      },
+      setIcon(icon) {
+        tab.iconHtml = icon || tab.iconHtml;
+        if (tab.el) { const ic = tab.el.querySelector(".t-ic"); if (ic) ic.innerHTML = tab.iconHtml; }
+        return view;
+      },
+      setDirty(on) {
+        tab.dirty = !!on;
+        if (tab.el) tab.el.classList.toggle("dirty", tab.dirty);
+        refreshTreeDirty();
+        return view;
+      },
+      focus() { activate(tab); return view; },
+      onClose(fn) { view._onClose = fn; return view; },
+      close() { return closeTab(tab); },
+    };
+    // 关闭钩子（closeTab 统一调用）：插件可先清理，返回 false 可取消关闭；
+    // 关闭后从注册表移除并广播 viewClosed
+    tab.onBeforeClose = async function () {
+      try {
+        if (typeof view._onClose === "function" && (await view._onClose()) === false) return false;
+      } catch (e) { console.error("[IDE] view onClose 失败:", id, e); }
+      _plViews.delete(id);
+      IDE.events.emit("viewClosed", { id: id });
+      return true;
+    };
+
+    tabs.push(tab);
+    renderTabsAll();
+    _plViews.set(id, view);
+    activate(tab);                                       // 与打开文件一致：创建即激活
+    if (typeof spec.render === "function") {
+      try { spec.render(body, view); } catch (e) {
+        console.error("[IDE] view render 失败:", id, e);
+        body.innerHTML = '<div class="pl-pad" style="color:#c66">视图渲染失败：' + _esc(e.message || e) + "</div>";
+      }
+    }
+    IDE.events.emit("viewOpened", { id: id, view: view });
+    return view;
+  }
+
+  IDE.editors = {
+    // 打开（或聚焦已打开的）插件编辑区视图
+    open: _plOpenEditor,
+    get(id) {
+      const v = _plViews.get(String(id));
+      return (v && tabs.indexOf(v.tab) >= 0) ? v : null;
+    },
+    focus(id) { const v = IDE.editors.get(id); if (v) v.focus(); return v; },
+    close(id) { const v = IDE.editors.get(id); return v ? v.close() : Promise.resolve(false); },
+    list() {
+      return [..._plViews.values()].filter(v => tabs.indexOf(v.tab) >= 0).map(v => ({ id: v.id, title: v.tab.name }));
+    },
+    // 关闭视图：不传 pluginId 时关闭全部；传则只关该插件打开的视图
+    closeAll(pluginId) {
+      const list = [..._plViews.values()].filter(v => tabs.indexOf(v.tab) >= 0 &&
+        (pluginId == null || v.tab.pluginOwner === String(pluginId)));
+      return Promise.all(list.map(v => v.close()));
+    }
+  };
+
   // ---------- 事件总线 ----------
   const _plEvents = new Map();
   IDE.events = {
@@ -143,7 +269,173 @@
       const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
       return r.json();
     },
-    request: fetch
+    request: fetch,
+    // 读取「设置 → 网络/代理」里配置的默认代理（留空 = 直连）
+    getProxy() {
+      try { return String((typeof IDE_SETTINGS !== "undefined" && IDE_SETTINGS.httpProxy) || "").trim(); }
+      catch (_) { return ""; }
+    },
+    // 经由后端转发请求「其他网站/接口」：可指定代理（留空则服务端直连）。
+    // 代理优先级：显式 proxyUrl 参数 > opts.proxy > 「设置 → 网络/代理」里配置的默认代理。
+    // 返回 { success, status, headers, text }，可绕开浏览器 CORS 限制。
+    async requestProxy(url, opts, proxyUrl) {
+      opts = opts || {};
+      const proxy = (proxyUrl !== undefined) ? proxyUrl
+                  : (opts.proxy !== undefined ? opts.proxy : IDE.api.getProxy());
+      const r = await fetch("/api/plugins/http", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: url,
+          method: (opts.method || "GET").toUpperCase(),
+          headers: opts.headers || {},
+          body: opts.body != null ? String(opts.body) : null,
+          proxy: proxy || ""
+        })
+      });
+      const d = await r.json();
+      if (!d.success) throw new Error(d.error || ("HTTP " + (d.status || r.status)));
+      return d;   // { status, headers, text }
+    },
+    // 直连：明确不走代理（忽略设置页里的默认代理）
+    async direct(url, opts) { return IDE.api.requestProxy(url, opts, ""); },
+    // 走代理：默认用「设置 → 网络/代理」的配置；也可显式传入 proxyUrl 覆盖（如 http://127.0.0.1:7890）
+    async proxy(url, opts, proxyUrl) { return IDE.api.requestProxy(url, opts, proxyUrl); }
+  };
+
+  // ---------- 系统 AI（使用「设置」里配置的接口与默认模型）----------
+  // 转发到后端的 /api/ai/chat（SSE 流式）；不传 provider_id/model 即走系统默认。
+  IDE.ai = {
+    /**
+     * 使用系统设置的 AI 与默认模型对话（流式）。
+     * @param {Array<{role:string,content:string}>} messages
+     * @param {Object} [opts] { onChunk, onReasoning, webSearch, skills, perm }
+     * @returns {Promise<{text:string, reasoning:string}>}
+     */
+    async chat(messages, opts) {
+      opts = opts || {};
+      const body = { messages: messages };
+      if (opts.webSearch) body.web_search = true;
+      if (opts.skills) body.skills = opts.skills;
+      if (opts.perm) body.perm = opts.perm;
+      const resp = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) {
+        let msg = "HTTP " + resp.status;
+        try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch (_) {}
+        throw new Error(msg);
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buf = "", text = "", reasoning = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const raw = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          const lines = raw.split("\n").filter(l => l.indexOf("data:") === 0);
+          for (const l of lines) {
+            const d = l.slice(5).trim();
+            if (d === "[DONE]") continue;
+            let obj; try { obj = JSON.parse(d); } catch (_) { continue; }
+            if (obj.error) throw new Error(String(obj.error));
+            if (typeof obj.delta === "string") {
+              text += obj.delta;
+              if (opts.onChunk) { try { opts.onChunk(text, obj.delta); } catch (_) {} }
+            }
+            if (typeof obj.reasoning === "string" && obj.reasoning) {
+              reasoning += obj.reasoning;
+              if (opts.onReasoning) { try { opts.onReasoning(reasoning, obj.reasoning); } catch (_) {} }
+            }
+          }
+        }
+      }
+      return { text, reasoning };
+    },
+    // 便捷封装：单轮提问，直接返回文本
+    async ask(prompt, opts) {
+      const r = await IDE.ai.chat([{ role: "user", content: String(prompt) }], opts);
+      return r.text;
+    }
+  };
+
+  // ---------- 系统级弹窗（自定义内容 + 自定义按钮）----------
+  function _escHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  // opts: { title, icon?, message?, html?, buttons?[{text,value,primary,gen}], danger?, wide?,
+  //        dismissible?, cancelValue?, onMount?({box, el, close, q, qa}) }
+  // 返回 Promise，resolve 为被点击按钮的 value（点遮罩/Esc 解析 cancelValue 或最后一个按钮 value）
+  IDE.dialog = function (opts) {
+    opts = opts || {};
+    return new Promise((resolve) => {
+      const ov = document.getElementById("modalOverlay");
+      if (!ov) { resolve(opts.cancelValue != null ? opts.cancelValue : null); return; }
+      const title = _escHtml(opts.title || "提示");
+      const icon = opts.icon ? '<i class="bi ' + _escHtml(opts.icon) + '"></i>' : "";
+      const danger = opts.danger ? " danger" : "";
+      const wide = opts.wide ? " wide" : "";
+      const buttons = (opts.buttons && opts.buttons.length)
+        ? opts.buttons
+        : [{ text: "确定", value: "ok", primary: true }];
+      const foot = buttons.map(b => {
+        const cls = b.primary ? "m-ok" : (b.gen ? "m-gen" : "m-cancel");
+        const val = (b.value != null) ? b.value : (b.text || "ok");
+        return '<button class="' + cls + '" data-val="' + _escHtml(String(val)) + '">' +
+               _escHtml(b.text != null ? b.text : val) + '</button>';
+      }).join("");
+      const bodyHtml = opts.html
+        ? opts.html
+        : '<div class="m-msg">' + _escHtml(opts.message || "") + '</div>';
+      ov.innerHTML =
+        '<div class="ide-modal' + wide + danger + '">' +
+          '<div class="m-title">' + icon + '<span>' + title + '</span></div>' +
+          '<div class="m-body">' + bodyHtml + '</div>' +
+          '<div class="m-foot">' + foot + '</div>' +
+        '</div>';
+      ov.classList.add("show");
+      let closed = false;
+      const onKey = (e) => {
+        if (e.key === "Escape") {
+          const last = buttons[buttons.length - 1];
+          close(opts.cancelValue != null ? opts.cancelValue
+              : (last.value != null ? last.value : null));
+        }
+      };
+      const close = (val) => {
+        if (closed) return; closed = true;
+        ov.classList.remove("show");
+        ov.innerHTML = "";
+        document.removeEventListener("keydown", onKey);
+        resolve(val);
+      };
+      document.addEventListener("keydown", onKey);
+      ov.querySelectorAll(".m-foot button").forEach(btn => {
+        btn.addEventListener("click", () => close(btn.dataset.val));
+      });
+      ov.addEventListener("click", (e) => {
+        if (e.target === ov && opts.dismissible !== false) {
+          close(opts.cancelValue != null ? opts.cancelValue : null);
+        }
+      });
+      if (typeof opts.onMount === "function") {
+        try {
+          opts.onMount({
+            box: ov.querySelector(".ide-modal"),
+            el: ov.querySelector(".m-body"),
+            close: (val) => close(val),
+            q: (s) => ov.querySelector(s),
+            qa: (s) => ov.querySelectorAll(s)
+          });
+        } catch (_) {}
+      }
+    });
   };
 
 
@@ -154,6 +446,7 @@
 
   async function _plActivate(meta) {
     if (_plInstances.has(meta.id)) return;
+    const _prevOwner = _plCurrentId; _plCurrentId = meta.id;   // activate 期间创建的视图/命令归属该插件
     try {
       const code = await (await fetch("/api/plugins/" + encodeURIComponent(meta.id) + "/main.js")).text();
       // 受限执行：插件在全局作用域运行，但仅能拿到宿主注入的全局；
@@ -174,6 +467,8 @@
     } catch (e) {
       console.error("[IDE] 插件加载失败:", meta.id, e);
       if (typeof toast === "function") toast("插件[" + (meta.name || meta.id) + "]加载失败: " + e.message, "err");
+    } finally {
+      _plCurrentId = _prevOwner;
     }
   }
 
@@ -182,6 +477,8 @@
     if (!inst) return;
     try { if (typeof inst.deactivate === "function") inst.deactivate(); } catch (e) { console.error(e); }
     _plInstances.delete(id);
+    // 关闭该插件打开的编辑区视图，避免禁用/卸载后残留孤儿标签
+    try { IDE.editors.closeAll(id); } catch (e) { console.error(e); }
     IDE.events.emit("pluginDeactivated", id);
   }
 
@@ -199,6 +496,15 @@
     } catch (e) {
       console.error("[IDE] start 失败:", e);
     }
+    // 插件面板是在运行时注册的，而会话恢复（16_ 的 sessionRestore）可能早于插件激活执行：
+    // 此时「上次打开的插件面板」还没注册，showPanel 找不到目标会把所有面板隐藏 → 侧栏空白。
+    // 这里在插件全部激活后，按已保存的面板名补一次恢复。
+    try {
+      const saved = (typeof localStorage !== "undefined") ? localStorage.getItem("ide.session.panel") : "";
+      if (saved && typeof panels !== "undefined" && panels[saved] && typeof showPanel === "function") {
+        showPanel(saved);
+      }
+    } catch (e) { console.error("[IDE] 恢复插件面板失败:", e); }
     _plRenderPanel();
   };
 

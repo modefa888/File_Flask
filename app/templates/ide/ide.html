@@ -92,6 +92,9 @@
 <style>
 {% include 'ide/css/26_设置页Git认证美化.css' %}
 </style>
+<style>
+{% include 'ide/css/27_表格查看编辑.css' %}
+</style>
 </head>
 <body>
 {% include 'ide/partials/body.html' %}
@@ -127,6 +130,8 @@
 {% include 'ide/js/20_插件系统_宿主API_沙箱.js' %}
 {# 自动刷新必须在 16_ 之前加载：依赖 IIFE 闭包内的 refreshTree / loadGitStatus / explorerPanel 等 #}
 {% include 'ide/js/19_后台变更自动刷新_文件树_源代码管理.js' %}
+{# 表格查看/编辑：必须在 16_（关闭大 IIFE）之前，才能复用闭包内的 toast / refreshTreeDirty / uiConfirm / openFile #}
+{% include 'ide/js/21_表格查看编辑_xlsx_xls_et_csv_可编辑表格.js' %}
 {% include 'ide/js/16_自定义悬停提示_全局接管所有_title_属性.js' %}
 {% include 'ide/js/17_SQLite数据库查看器_db_sqlite只读浏览_表列表_分页数据.js' %}
 </script>

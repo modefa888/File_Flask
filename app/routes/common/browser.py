@@ -844,3 +844,201 @@ def api_download():
         return send_file(target_path, as_attachment=True, conditional=True)
     except (OSError, PermissionError) as e:
         return jsonify({"error": f"无法读取文件: {str(e)}"}), 500
+
+
+# ======================================================================
+# 电子表格查看 / 编辑（xlsx / xlsm / xls / et / csv / tsv）
+#   xlsx/xlsm/xltx/xltm：openpyxl 读写（保留其余工作表与格式）
+#   xls / et（WPS 表格）：xlrd 只读（BIFF8），不支持写回，需另存为 xlsx
+#   csv / tsv：标准库读写
+#   数据以二维数组返回；超大表按行列上限截断，避免响应过大
+# ======================================================================
+_SHEET_WRITE_EXTS = {"xlsx", "xlsm", "xltx", "xltm"}
+_SHEET_RO_EXTS = {"xls", "et", "ett"}
+_SHEET_CSV_EXTS = {"csv", "tsv"}
+_SHEET_ALL_EXTS = _SHEET_WRITE_EXTS | _SHEET_RO_EXTS | _SHEET_CSV_EXTS
+_SHEET_MAX_ROWS = 3000
+_SHEET_MAX_COLS = 300
+
+
+def _sheet_ext_of(path):
+    return os.path.splitext(path)[1].lower().lstrip(".")
+
+
+def _sheet_cell_str(v):
+    """单元格值 → 前端可显示字符串（整数浮点去掉 .0）。"""
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "TRUE" if v else "FALSE"
+    if isinstance(v, float):
+        return str(int(v)) if v.is_integer() else repr(v)
+    return str(v)
+
+
+def _sheet_coerce(v):
+    """字符串转回单元格值：空→None，纯整数/浮点→数字，其余→字符串。"""
+    if v is None or isinstance(v, (int, float, bool)):
+        return v
+    s = str(v).strip()
+    if s == "":
+        return None
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    return s
+
+
+def _sheet_read_xlsx(path, sheet_name):
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        names = list(wb.sheetnames)
+        ws = wb[sheet_name] if sheet_name in names else wb[names[0]]
+        data, truncated = [], False
+        for i, row in enumerate(ws.iter_rows(values_only=True)):
+            if i >= _SHEET_MAX_ROWS:
+                truncated = True
+                break
+            data.append([_sheet_cell_str(v) for v in row[:_SHEET_MAX_COLS]])
+        return names, ws.title, data, truncated
+    finally:
+        wb.close()
+
+
+def _sheet_read_xls(path, sheet_name):
+    """xls / et（WPS BIFF8）：xlrd 读取，只读。"""
+    import xlrd
+    with open(path, "rb") as f:
+        wb = xlrd.open_workbook(file_contents=f.read())
+    names = wb.sheet_names()
+    ws = wb.sheet_by_name(sheet_name) if sheet_name in names else wb.sheet_by_index(0)
+    rows = min(ws.nrows, _SHEET_MAX_ROWS)
+    cols = min(ws.ncols, _SHEET_MAX_COLS)
+    data = [[_sheet_cell_str(ws.cell_value(r, c)) for c in range(cols)] for r in range(rows)]
+    truncated = ws.nrows > _SHEET_MAX_ROWS or ws.ncols > _SHEET_MAX_COLS
+    return names, ws.name, data, truncated
+
+
+def _sheet_read_csv(path, ext):
+    import csv as _csv
+    with open(path, "r", encoding="utf-8-sig", errors="replace", newline="") as f:
+        reader = _csv.reader(f, delimiter=("\t" if ext == "tsv" else ","))
+        data, truncated = [], False
+        for i, row in enumerate(reader):
+            if i >= _SHEET_MAX_ROWS:
+                truncated = True
+                break
+            data.append([str(v) for v in row[:_SHEET_MAX_COLS]])
+    return ["Sheet1"], "Sheet1", data, truncated
+
+
+@bp.route("/api/sheet/read")
+def api_sheet_read():
+    """读取表格文件，返回工作表清单 + 当前表二维数据。"""
+    rel_path = request.args.get("path", "")
+    target_path = os.path.abspath(os.path.normpath(rel_path))
+    if not os.path.isfile(target_path):
+        return jsonify({"error": "文件不存在"}), 404
+    ext = _sheet_ext_of(target_path)
+    if ext not in _SHEET_ALL_EXTS:
+        return jsonify({"error": "不支持的表格类型: " + ext}), 400
+    sheet_name = request.args.get("sheet") or None
+    try:
+        if ext in _SHEET_WRITE_EXTS:
+            names, active, data, trunc = _sheet_read_xlsx(target_path, sheet_name)
+        elif ext in _SHEET_RO_EXTS:
+            names, active, data, trunc = _sheet_read_xls(target_path, sheet_name)
+        else:
+            names, active, data, trunc = _sheet_read_csv(target_path, ext)
+    except ImportError as e:
+        return jsonify({"error": "缺少解析库（%s），请安装 openpyxl / xlrd" % e.name}), 500
+    except Exception as e:
+        return jsonify({"error": "读取表格失败：" + str(e)}), 500
+    writable = ext in _SHEET_WRITE_EXTS or ext in _SHEET_CSV_EXTS
+    return jsonify({
+        "ok": True,
+        "ext": ext,
+        "sheets": names,
+        "active": active,
+        "rows": len(data),
+        "cols": max((len(r) for r in data), default=0),
+        "data": data,
+        "truncated": trunc,
+        "writable": writable,
+        "is_csv": ext in _SHEET_CSV_EXTS,
+        "max_rows": _SHEET_MAX_ROWS,
+        "max_cols": _SHEET_MAX_COLS,
+    })
+
+
+@bp.route("/api/sheet/write", methods=["POST"])
+def api_sheet_write():
+    """保存表格编辑：changes=[[r,c,v]...] 单元格补丁；csv/tsv 可传 data 全量。"""
+    body = request.get_json(silent=True) or {}
+    target_path = os.path.abspath(os.path.normpath(body.get("path", "")))
+    if not os.path.isfile(target_path):
+        return jsonify({"error": "文件不存在"}), 404
+    ext = _sheet_ext_of(target_path)
+    sheet_name = body.get("sheet") or None
+    changes = body.get("changes") or []
+    data = body.get("data")
+    if ext in _SHEET_RO_EXTS:
+        return jsonify({"error": "该格式（.%s）为只读，不支持直接保存，请另存为 .xlsx 后再编辑" % ext}), 400
+    try:
+        if ext in _SHEET_WRITE_EXTS:
+            _sheet_write_xlsx(target_path, sheet_name, changes, data)
+        elif ext in _SHEET_CSV_EXTS:
+            _sheet_write_csv(target_path, ext, data, changes)
+        else:
+            return jsonify({"error": "不支持的表格类型: " + ext}), 400
+    except ImportError as e:
+        return jsonify({"error": "缺少解析库（%s），请安装 openpyxl" % e.name}), 500
+    except Exception as e:
+        return jsonify({"error": "保存表格失败：" + str(e)}), 500
+    return jsonify({"ok": True})
+
+
+def _sheet_write_xlsx(path, sheet_name, changes, data):
+    import openpyxl
+    wb = openpyxl.load_workbook(path, data_only=False)
+    names = wb.sheetnames
+    ws = wb[sheet_name] if sheet_name in names else wb[names[0]]
+    if data is not None:
+        if ws.max_row > 0:
+            ws.delete_rows(1, ws.max_row)
+        for r, row in enumerate(data, start=1):
+            for c, v in enumerate(row, start=1):
+                ws.cell(row=r, column=c).value = _sheet_coerce(v)
+    for ch in changes:
+        try:
+            r, c, v = int(ch[0]) + 1, int(ch[1]) + 1, ch[2]
+        except (TypeError, ValueError, IndexError):
+            continue
+        ws.cell(row=r, column=c).value = _sheet_coerce(v)
+    wb.save(path)
+
+
+def _sheet_write_csv(path, ext, data, changes):
+    import csv as _csv
+    if data is None:
+        _, _, data, _ = _sheet_read_csv(path, ext)
+        for ch in changes:
+            try:
+                r, c, v = int(ch[0]), int(ch[1]), ch[2]
+            except (TypeError, ValueError, IndexError):
+                continue
+            while len(data) <= r:
+                data.append([])
+            while len(data[r]) <= c:
+                data[r].append("")
+            data[r][c] = "" if v is None else str(v)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = _csv.writer(f, delimiter=("\t" if ext == "tsv" else ","))
+        for row in data:
+            w.writerow(["" if v is None else v for v in row])

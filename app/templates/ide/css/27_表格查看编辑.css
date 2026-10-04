@@ -1,0 +1,86 @@
+/* ================================================================
+ * 表格查看 / 编辑（xlsx / xlsm / xls / et / csv / tsv）
+ * 视图由 21_ 表格查看编辑.js 的 setupSheetView 渲染
+ * ================================================================ */
+.sheetv {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #1e1e1e;
+  color: #ddd;
+}
+.sheetv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #252526;
+  border-bottom: 1px solid #333;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.sheetv-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheetv-sheets {
+  background: #1e1e1e;
+  color: #ddd;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.sheetv-meta { color: #9cd; white-space: nowrap; }
+.sheetv-flex { flex: 1; }
+.sheetv-tip { color: #c9a; white-space: nowrap; }
+.sheetv-grid { flex: 1; overflow: auto; min-height: 0; }
+.sheetv-empty, .sheetv-err { padding: 24px; color: #888; }
+.sheetv-err { color: #c66; }
+.sheetv-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+.sheetv-table th,
+.sheetv-table td {
+  border: 1px solid #333;
+  padding: 2px 7px;
+  min-width: 84px;
+  max-width: 320px;
+  height: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheetv-colhead,
+.sheetv-rownum {
+  background: #2d2d2d;
+  color: #aaa;
+  text-align: center;
+  font-weight: 500;
+  position: sticky;
+}
+.sheetv-colhead { top: 0; z-index: 2; }
+.sheetv-rownum { left: 0; z-index: 1; }
+.sheetv-corner {
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background: #2d2d2d;
+  position: sticky;
+}
+.sheetv-cell { background: #1e1e1e; color: #ddd; cursor: cell; }
+.sheetv-cell:hover { background: #242424; }
+.sheetv-cell[contenteditable="true"]:focus {
+  outline: 2px solid #0a84ff;
+  outline-offset: -2px;
+  background: #16324a;
+}

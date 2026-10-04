@@ -3,7 +3,8 @@
      ================================================================ */
   const IDE_SETTINGS = Object.assign(
     { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
-      showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true },
+      showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true,
+      httpProxy: "" },
     (() => { try { return JSON.parse(localStorage.getItem("ide.settings") || "{}"); } catch (_) { return {}; } })()
   );
   function saveIdeSettings() {
@@ -56,6 +57,7 @@
         '<div class="set-navitem" data-sec="sec-sysai"><i class="bi bi-cpu"></i>系统 AI</div>' +
         '<div class="set-navitem" data-sec="sec-notify"><i class="bi bi-bell"></i>通知</div>' +
         '<div class="set-navitem" data-sec="sec-git-creds"><i class="bi bi-git"></i>Git 认证</div>' +
+        '<div class="set-navitem" data-sec="sec-network"><i class="bi bi-globe2"></i>网络/代理</div>' +
       '</div>' +
       '<div class="set-content">' +
         '<div class="set-sec" id="sec-editor"><h2>编辑器</h2>' +
@@ -134,6 +136,11 @@
           '</div>' +
         '</div>' +
 
+        '<div class="set-sec" id="sec-network"><h2 data-kw="网络 代理 proxy 插件 接口 请求">网络 / 代理</h2>' +
+          '<div class="set-desc" data-kw="网络 代理 proxy 插件 接口 请求" style="margin-bottom:10px;">插件通过 <code>IDE.api.proxy()</code> 请求外部网站 / 接口时使用的默认代理。留空 = 服务端直连。支持 http/https 目标经 http 代理转发，例如 <code>http://127.0.0.1:7890</code>。</div>' +
+          '<div class="set-row" data-kw="代理 proxy http 插件 接口 请求"><div class="set-info"><div class="set-label">默认代理地址</div><div class="set-desc">如 http://127.0.0.1:7890，留空 = 直连；插件调用 IDE.api.proxy() 时自动生效</div></div><input type="text" id="setHttpProxy" placeholder="留空 = 直连" autocomplete="off" spellcheck="false" style="width:300px"></div>' +
+        '</div>' +
+
         notifyBuildSectionHTML() +
       '</div>' +
     '</div>';
@@ -206,6 +213,7 @@
     q("#setGitView").value = IDE_SETTINGS.gitViewMode === "tree" ? "tree" : "list";
     q("#setGitCommitMode").value = IDE_SETTINGS.gitCommitFileMode === "list" ? "list" : "tree";
     q("#setRestoreSession").checked = IDE_SETTINGS.restoreSession !== false;
+    q("#setHttpProxy").value = IDE_SETTINGS.httpProxy || "";
     q("#setFontSize").addEventListener("change", e => {
       const v = Math.max(10, Math.min(24, parseInt(e.target.value, 10) || 13));
       IDE_SETTINGS.fontSize = v; e.target.value = v; saveIdeSettings(); applyIdeSettings();
@@ -261,15 +269,21 @@
         } catch (_) {}
       }
     });
+    q("#setHttpProxy").addEventListener("change", e => {
+      IDE_SETTINGS.httpProxy = e.target.value.trim();
+      saveIdeSettings(); ideSettingSet("httpProxy", IDE_SETTINGS.httpProxy);
+      toast(IDE_SETTINGS.httpProxy ? "已保存默认代理" : "已设为直连（不使用代理）", "ok");
+    });
     q("#setClearRecent").onclick = () => { localStorage.removeItem("ide.recentFiles"); toast("已清除最近打开记录", "ok"); };
     q("#setReset").onclick = () => {
       Object.assign(IDE_SETTINGS, { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
-        showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true });
+        showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true, httpProxy: "" });
       saveIdeSettings(); applyIdeSettings();
       q("#setFontSize").value = 13; q("#setLineWrap").checked = false; q("#setActiveLine").checked = true;
       q("#setIndent").value = 4; q("#setHints").checked = true;
       q("#setShowAll").checked = false; q("#setGitView").value = "list"; q("#setGitCommitMode").value = "tree";
       q("#setRestoreSession").checked = true;
+      q("#setHttpProxy").value = "";
       // 同步重置各开关的运行时状态
       showAllFiles = false; showHidden = false;
       gitViewMode = "list"; gitCommitFileMode = "tree";

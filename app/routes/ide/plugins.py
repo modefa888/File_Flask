@@ -15,11 +15,16 @@
     - 文件读写接口不限制路径根（IDE 本身即可访问任意文件），只做归一化与存在性检查。
     当前为「可信插件」模型：插件由用户自行安装，与 VS Code 默认信任用户安装的扩展一致。
 """
+import ipaddress
 import json
 import os
 import re
 import shutil
+import socket
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 import zipfile
 
 from flask import Blueprint, request, jsonify, send_file
@@ -214,3 +219,6 @@ def fs_write():
     except Exception as e:
         return jsonify({"error": "写入失败：" + str(e)}), 500
     return jsonify({"success": True, "path": fp})
+
+
+

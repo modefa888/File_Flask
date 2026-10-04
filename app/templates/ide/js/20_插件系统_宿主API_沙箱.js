@@ -146,6 +146,8 @@
     request: fetch
   };
 
+
+
   // ---------- 插件生命周期 ----------
   const _plInstances = new Map();
   IDE.plugins = _plInstances;

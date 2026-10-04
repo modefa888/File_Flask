@@ -10,6 +10,8 @@
 
   ⑥ SMTP 邮件（最传统、最稳）
 
+ ⑦ Telegram Bot（Bot API sendMessage；支持私聊 / 群组 / 话题 / 自建反代地址 / 独立代理）
+
 统一接口：
 
     notifications.notify(
@@ -32,9 +34,14 @@ import mimetypes
 import os
 import re
 import smtplib
+import socket
+import struct
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 from dataclasses import dataclass
 from email.header import Header
@@ -62,12 +69,13 @@ DEFAULT_NOTIFY_CFG: Dict[str, Any] = {
     "channels": {
         "desktop": True,
         "smtp": False,
+        "telegram": False,
     },
     "template": {
         "chat": "AI 助手 · 回复完成",
         "agent": "AI 智能体 · 任务完成",
     },
-    "template_body": "任务已完成：{query}\n{summary}",
+    "template_body": "任务已完成：{summary}",
     "summary_max_chars": 120,
     "query_max_chars": 60,
     "desktop": {
@@ -87,6 +95,14 @@ DEFAULT_NOTIFY_CFG: Dict[str, Any] = {
         "subject_prefix": "[File_Flask] ",
         "test_recipient": "",   # 留空则用 to
     },
+    "telegram": {
+        "bot_token": "",            # @BotFather 生成的 Bot Token
+        "chat_id": "",              # 私聊 / 群组 的会话 ID
+        "message_thread_id": "",    # 群组「话题」模式下的 thread id（可空）
+        "disable_notification": False,
+        "api_base": "https://api.telegram.org",   # 可改为自建 / 反代地址
+        "proxy": "",                # 仅 Telegram Bot 使用的代理，如 http://127.0.0.1:7890
+    },
 }
 
 
@@ -105,6 +121,7 @@ def _read_cfg() -> Dict[str, Any]:
     _merge(cfg, saved, "template")
     _merge(cfg, saved, "desktop")
     _merge(cfg, saved, "smtp")
+    _merge(cfg, saved, "telegram")
     for k in ("enabled", "scope", "summary_max_chars", "query_max_chars"):
         if k in saved:
             cfg[k] = saved[k]
@@ -134,7 +151,7 @@ def _write_cfg_patch(patch: Dict[str, Any]) -> None:
 
 
 def sanitize_notify_cfg(cfg: Optional[dict] = None) -> Dict[str, Any]:
-    """返回给前端的配置（SMTP 密码脱敏）。"""
+    """返回给前端的配置（SMTP 密码 / Telegram Token 脱敏）。"""
     c = dict(cfg if cfg is not None else _read_cfg())
     smtp = dict(c.get("smtp") or {})
     pw = str(smtp.get("password") or "")
@@ -146,6 +163,18 @@ def sanitize_notify_cfg(cfg: Optional[dict] = None) -> Dict[str, Any]:
         smtp["password"] = ""
         smtp["password_set"] = False
     c["smtp"] = smtp
+
+    tg = dict(c.get("telegram") or {})
+    tk = str(tg.get("bot_token") or "")
+    if tk:
+        tg["bot_token"] = ""
+        tg["token_set"] = True
+    else:
+        tg["bot_token"] = ""
+        tg["token_set"] = False
+    tg["api_base"] = str(tg.get("api_base") or "https://api.telegram.org")
+    tg["proxy"] = str(tg.get("proxy") or "").strip()
+    c["telegram"] = tg
     return c
 
 
@@ -164,6 +193,7 @@ def save_notify_cfg(user_cfg: dict) -> Dict[str, Any]:
     _merge(new, user_cfg, "template")
     _merge(new, user_cfg, "desktop")
     _merge(new, user_cfg, "smtp")
+    _merge(new, user_cfg, "telegram")
     for k in ("enabled", "scope", "summary_max_chars", "query_max_chars"):
         if k in user_cfg:
             new[k] = user_cfg[k]
@@ -177,6 +207,13 @@ def save_notify_cfg(user_cfg: dict) -> Dict[str, Any]:
         new["smtp"]["password"] = disk.get("smtp", {}).get("password", "")
     else:
         new["smtp"]["password"] = incoming_pw
+
+    # Telegram Bot Token 合并：规则与 SMTP 密码一致（空 / 脱敏值 → 保留旧值）
+    incoming_tk = str((user_cfg.get("telegram") or {}).get("bot_token") or "").strip()
+    if not incoming_tk or (len(incoming_tk) > 3 and incoming_tk.startswith("•")):
+        new["telegram"]["bot_token"] = disk.get("telegram", {}).get("bot_token", "")
+    else:
+        new["telegram"]["bot_token"] = incoming_tk
 
     # 校验
     if new.get("scope") not in ("chat", "agent", "both"):
@@ -197,6 +234,16 @@ def save_notify_cfg(user_cfg: dict) -> Dict[str, Any]:
         new["smtp"]["port"] = 465
     if str(new["smtp"].get("security")) not in ("ssl", "tls", "none"):
         new["smtp"]["security"] = "ssl"
+
+    # Telegram：API 地址归一化（去尾部斜杠）+ 话题 ID 只允许数字
+    tg = new.setdefault("telegram", {})
+    api_base = str(tg.get("api_base") or "").strip().rstrip("/")
+    tg["api_base"] = api_base or "https://api.telegram.org"
+    thread = str(tg.get("message_thread_id") or "").strip()
+    tg["message_thread_id"] = thread if thread.isdigit() else ""
+    tg["chat_id"] = str(tg.get("chat_id") or "").strip()
+    # 代理地址：留空 = 直连；写法不对直接报错，免得发信时才失败
+    tg["proxy"] = _normalize_proxy(tg.get("proxy"))
 
     _write_cfg_patch(new)
     return sanitize_notify_cfg(new)
@@ -293,6 +340,8 @@ def send_test(channel: str = "all") -> Dict[str, Any]:
         ch_map["desktop"] = True
     if ch in ("all", "email", "smtp"):
         ch_map["smtp"] = True
+    if ch in ("all", "telegram", "tg", "tgbot"):
+        ch_map["telegram"] = True
     test_notify["channels"] = ch_map
 
     try:
@@ -302,11 +351,15 @@ def send_test(channel: str = "all") -> Dict[str, Any]:
         # 恢复原配置（注意：不要覆盖用户后来可能做的改动，用 _write_cfg_patch 保留其余字段）
         _write_cfg_patch(orig_notify)
 
+    def _ok(key: str) -> bool:
+        return bool((res.get(key) or {}).get("ok"))
+
     return {
-        "ok": bool(res.get("desktop", {}).get("ok")) or bool(res.get("smtp", {}).get("ok")),
+        "ok": _ok("desktop") or _ok("smtp") or _ok("telegram"),
         "results": {
             "desktop": res.get("desktop"),
             "smtp": res.get("smtp"),
+            "telegram": res.get("telegram"),
         },
     }
 
@@ -322,25 +375,57 @@ def _truncate(s: Any, n: int) -> str:
     return s
 
 
+_VAR_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _split_body(body: str) -> Tuple[str, str]:
+    """AI 侧把 body 组织成「提问 + 空行 + 回复」，这里拆成两段。
+
+    没有空行时（测试通知等）两段相同；便于 {query} / {summary} 各取所需。
+    """
+    s = str(body or "").strip()
+    if "\n\n" in s:
+        q, a = s.split("\n\n", 1)
+        return q.strip(), a.strip()
+    return s, s
+
+
 def render(title: str, body: str, channel: str = "chat") -> Tuple[str, str]:
     """根据用户配置的模板渲染最终 title / body。
 
-    模板变量：
-        {title}     —— 通道对应的默认标题（"AI 助手 · 回复完成" 等）
-        {channel}   —— chat / agent
-        {query}     —— 用户提问 / 任务描述
-        {summary}   —— 模型回复摘要（截断）
+    模板变量（未知变量原样保留）：
+        {title}       —— 通道默认标题（"AI 助手 · 回复完成" / "AI 智能体 · 任务完成"）
+        {task}        —— 任务名（AI 助手 / AI 智能体）
+        {channel}     —— chat / agent
+        {query}       —— 用户提问 / 任务描述（按 query_max_chars 截断）
+        {summary}     —— 模型回复摘要（按 summary_max_chars 截断）
+        {answer}      —— 模型回复全文（不截断，邮件里想看完整内容时用）
+        {answer_len}  —— 回复字数（不计空白）
+        {time}/{date} —— 触发时间 HH:MM / YYYY-MM-DD
     """
     cfg = _read_cfg()
     tmpl_title = str((cfg.get("template") or {}).get(channel) or title or title).strip()
-    tmpl_body = str(cfg.get("template_body") or "{title}：{summary}").strip()
+    tmpl_body = str(cfg.get("template_body") or "{summary}").strip()
+
+    q_raw, a_raw = _split_body(body)
+    now = time.localtime()
+    mapping = {
+        "title": title,
+        "task": "AI 智能体" if channel == "agent" else "AI 助手",
+        "channel": channel,
+        "query": _truncate(q_raw, int(cfg.get("query_max_chars") or 60)),
+        "summary": _truncate(a_raw, int(cfg.get("summary_max_chars") or 120)),
+        "answer": a_raw,
+        "answer_len": str(len(re.sub(r"\s+", "", a_raw))),
+        "time": time.strftime("%H:%M", now),
+        "date": time.strftime("%Y-%m-%d", now),
+    }
 
     def sub(s: str) -> str:
-        s = s.replace("{title}", title)
-        s = s.replace("{channel}", channel)
-        s = s.replace("{query}", _truncate(cfg.get("query") if False else body.split("\n")[0] if False else body, 0))
-        s = s.replace("{summary}", _truncate(body, int(cfg.get("summary_max_chars") or 120)))
-        return s
+        def _one(m):
+            key = m.group(1)
+            return mapping[key] if key in mapping else m.group(0)
+        return _VAR_RE.sub(_one, s)
 
     return sub(tmpl_title), sub(tmpl_body)
 
@@ -712,6 +797,250 @@ def _render_email_html(title: str, body: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 通道：Telegram Bot（Bot API sendMessage）
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TelegramResult:
+    ok: bool
+    detail: str = ""
+
+
+_TG_TEXT_LIMIT = 4096          # Telegram sendMessage 的正文上限
+
+# ---------------------------------------------------------------------------
+# Telegram 专属代理：只有本机器人走这里，邮件 / 桌面通知完全不受影响
+# ---------------------------------------------------------------------------
+
+_TG_TIMEOUT = 15
+_PROXY_SCHEMES = ("http", "https", "socks5", "socks5h")
+
+_SOCKS5_ERR = {
+    0x01: "一般性失败", 0x02: "规则不允许连接", 0x03: "网络不可达", 0x04: "主机不可达",
+    0x05: "连接被拒绝", 0x06: "TTL 超时", 0x07: "代理不支持 CONNECT", 0x08: "地址类型不支持",
+}
+
+
+def _normalize_proxy(raw: Any) -> str:
+    """归一化代理地址；空字符串表示直连。写法不对时抛 ValueError（前端会弹提示）。"""
+    s = str(raw or "").strip().rstrip("/")
+    if not s:
+        return ""
+    if "://" not in s:
+        # 只填 host:port 时按 http 代理处理，省得用户记协议名
+        s = "http://" + s
+    u = urllib.parse.urlsplit(s)
+    if u.scheme.lower() not in _PROXY_SCHEMES:
+        raise ValueError("代理地址只支持 http:// https:// socks5:// socks5h:// 开头（当前是 %s://）" % u.scheme)
+    if not u.hostname:
+        raise ValueError("代理地址缺少主机名，应形如 http://127.0.0.1:7890")
+    if not u.port:
+        raise ValueError("代理地址缺少端口，应形如 http://127.0.0.1:7890")
+    return s
+
+
+def _parse_proxy(proxy: str):
+    u = urllib.parse.urlsplit(proxy)
+    scheme = u.scheme.lower()
+    port = u.port or (1080 if scheme.startswith("socks") else 8080)
+    user = urllib.parse.unquote(u.username) if u.username else ""
+    pwd = urllib.parse.unquote(u.password) if u.password else ""
+    return scheme, (u.hostname or ""), port, user, pwd
+
+
+def _recv_exact(sock: socket.socket, n: int) -> bytes:
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise OSError("代理提前关闭了连接")
+        buf += chunk
+    return buf
+
+
+def _socks5_connect(proxy_host: str, proxy_port: int, host: str, port: int,
+                    timeout: Any, username: str = "", password: str = "",
+                    resolve_local: bool = False) -> socket.socket:
+    """极简 SOCKS5 CONNECT 客户端（纯标准库，不依赖 PySocks）。"""
+    t = timeout if isinstance(timeout, (int, float)) else _TG_TIMEOUT
+    s = socket.create_connection((proxy_host, proxy_port), t)
+    s.settimeout(t)
+    try:
+        # 1) 握手：声明支持的认证方式
+        s.sendall(b"\x05\x02\x00\x02" if username else b"\x05\x01\x00")
+        resp = _recv_exact(s, 2)
+        if resp[0] != 0x05:
+            raise OSError("该端口不是 SOCKS5 代理（返回版本 0x%02x）" % resp[0])
+        method = resp[1]
+        if method == 0x02:
+            if not username:
+                raise OSError("代理要求用户名 / 密码认证，请写成 socks5://用户:密码@主机:端口")
+            ub, pb = username.encode("utf-8"), (password or "").encode("utf-8")
+            s.sendall(b"\x01" + bytes([len(ub)]) + ub + bytes([len(pb)]) + pb)
+            if _recv_exact(s, 2)[1] != 0x00:
+                raise OSError("代理认证失败（用户名或密码不正确）")
+        elif method != 0x00:
+            raise OSError("代理不接受「无认证」连接（方式 0x%02x）" % method)
+
+        # 2) CONNECT 请求：默认把域名交给代理解析（等价 socks5h）
+        if resolve_local:
+            info = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+            if not info:
+                raise OSError("本机无法解析域名 %s" % host)
+            fam, _, _, _, addr = info[0]
+            dst = (b"\x04" + socket.inet_pton(socket.AF_INET6, addr[0])) if fam == socket.AF_INET6 \
+                else (b"\x01" + socket.inet_aton(addr[0]))
+        else:
+            try:
+                hb = host.encode("ascii")
+            except UnicodeEncodeError:
+                hb = host.encode("idna")
+            dst = b"\x03" + bytes([len(hb)]) + hb
+        s.sendall(b"\x05\x01\x00" + dst + struct.pack(">H", int(port)))
+
+        head = _recv_exact(s, 4)
+        if head[1] != 0x00:
+            raise OSError("代理返回：%s（0x%02x）" % (_SOCKS5_ERR.get(head[1], "未知错误"), head[1]))
+        atyp = head[3]
+        if atyp == 0x01:
+            _recv_exact(s, 4)
+        elif atyp == 0x03:
+            _recv_exact(s, _recv_exact(s, 1)[0])
+        elif atyp == 0x04:
+            _recv_exact(s, 16)
+        _recv_exact(s, 2)
+        return s
+    except Exception:
+        try:
+            s.close()
+        except Exception:
+            pass
+        raise
+
+
+def _tg_urlopen(req, proxy: str = "", timeout: int = _TG_TIMEOUT):
+    """按「Telegram 专属代理」打开请求。
+
+    proxy 为空 → 直连（沿用系统环境变量代理）；
+    http/https → urllib 自带的 CONNECT 隧道；
+    socks5/socks5h → 用内置的极简 SOCKS5 客户端建立连接。
+    """
+    # 兜底归一化：手工改过配置文件（或只填 host:port）时也能正常工作
+    proxy = _normalize_proxy(proxy)
+    if not proxy:
+        return urllib.request.urlopen(req, timeout=timeout)
+
+    scheme, phost, pport, puser, ppass = _parse_proxy(proxy)
+    if scheme in ("http", "https"):
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+        )
+        return opener.open(req, timeout=timeout)
+
+    import http.client as _http_client
+    # socks5h 把域名交给代理解析；socks5 在本机解析后再连 IP
+    resolve_local = (scheme == "socks5")
+
+    def _connect_socks(conn):
+        conn.sock = _socks5_connect(phost, pport, conn.host, conn.port, conn.timeout,
+                                    puser, ppass, resolve_local)
+        try:
+            conn.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+
+    class _SocksHTTP(_http_client.HTTPConnection):
+        def connect(self):
+            _connect_socks(self)
+
+    class _SocksHTTPS(_http_client.HTTPSConnection):
+        def connect(self):
+            _connect_socks(self)
+            self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+
+    class _Handler(urllib.request.HTTPHandler):
+        def http_open(self, r):
+            return self.do_open(_SocksHTTP, r)
+
+    class _SHandler(urllib.request.HTTPSHandler):
+        def https_open(self, r):
+            return self.do_open(_SocksHTTPS, r, context=None)
+
+    # ProxyHandler({}) 显式关掉环境变量代理，避免和本设置互相打架
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _Handler(), _SHandler())
+    return opener.open(req, timeout=timeout)
+
+
+
+
+def notify_telegram(title: str, body: str) -> TelegramResult:
+    """通过 Bot API 发送一条消息。失败不抛，返回 detail。"""
+    cfg = _read_cfg()
+    tg = cfg.get("telegram") or {}
+    token = str(tg.get("bot_token") or "").strip()
+    chat_id = str(tg.get("chat_id") or "").strip()
+    if not token:
+        return TelegramResult(False, "Telegram 未配置 Bot Token")
+    if not chat_id:
+        return TelegramResult(False, "Telegram 未配置 Chat ID")
+
+    api_base = str(tg.get("api_base") or "https://api.telegram.org").strip().rstrip("/")
+    if not api_base:
+        api_base = "https://api.telegram.org"
+    url = "%s/bot%s/sendMessage" % (api_base, token)
+    proxy = str(tg.get("proxy") or "").strip()
+    px_tip = "（代理 %s）" % proxy if proxy else ""
+
+    text = ("%s\n\n%s" % (title, body)).strip()
+    if len(text) > _TG_TEXT_LIMIT:
+        text = text[: _TG_TEXT_LIMIT - 1].rstrip() + "…"
+
+    payload: Dict[str, Any] = {"chat_id": chat_id, "text": text,
+                               "disable_web_page_preview": True}
+    thread = str(tg.get("message_thread_id") or "").strip()
+    if thread:
+        try:
+            payload["message_thread_id"] = int(thread)
+        except ValueError:
+            return TelegramResult(False, "Telegram 话题 ID 必须是数字")
+    if tg.get("disable_notification"):
+        payload["disable_notification"] = True
+
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, method="POST",
+        headers={"Content-Type": "application/json; charset=utf-8"},
+    )
+    try:
+        with _tg_urlopen(req, proxy, _TG_TIMEOUT) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+        try:
+            d = json.loads(raw) if raw else {}
+        except ValueError:
+            d = {}
+        if isinstance(d, dict) and d.get("ok"):
+            return TelegramResult(True, "ok")
+        desc = (d or {}).get("description") if isinstance(d, dict) else ""
+        return TelegramResult(False, "Telegram 返回：%s" % (desc or raw[:200] or "未知错误"))
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            raw = e.read().decode("utf-8", "replace")
+            d = json.loads(raw)
+            detail = (d or {}).get("description") or raw
+        except Exception:
+            detail = ""
+        return TelegramResult(False, "HTTP %s %s" % (e.code, detail or e.reason or ""))
+    except urllib.error.URLError as e:
+        return TelegramResult(False, "网络错误%s：%s" % (px_tip, getattr(e, "reason", e)))
+    except Exception as e:
+        # SOCKS 握手失败抛的是裸 OSError（不会被包成 URLError），这里给出可读信息
+        if isinstance(e, OSError) and not isinstance(e, urllib.error.URLError):
+            return TelegramResult(False, "连接失败%s：%s" % (px_tip, e))
+        return TelegramResult(False, "%s: %s" % (type(e).__name__, e))
+
+
+# ---------------------------------------------------------------------------
 # 对外主入口
 # ---------------------------------------------------------------------------
 
@@ -730,7 +1059,7 @@ def notify(title: str, body: str, channel: str = "chat") -> Dict[str, Any]:
     任何异常都不会抛，只 log。
     """
     results = {"channel": channel, "title": title, "body": body,
-               "desktop": None, "smtp": None}
+               "desktop": None, "smtp": None, "telegram": None}
     if not should_notify(channel):
         results["skipped"] = "disabled"
         _record_history(results)
@@ -766,6 +1095,18 @@ def notify(title: str, body: str, channel: str = "chat") -> Dict[str, Any]:
             results["smtp"] = {"ok": False, "detail": str(e)}
             _log.exception("notify_smtp 抛异常")
 
+    if (cfg.get("channels") or {}).get("telegram"):
+        try:
+            r = notify_telegram(title, body)
+            results["telegram"] = {"ok": r.ok, "detail": r.detail}
+            if r.ok:
+                _log.info("[notify-telegram/%s] %s", channel, title[:60])
+            else:
+                _log.warning("[notify-telegram/%s] failed: %s", channel, r.detail)
+        except Exception as e:
+            results["telegram"] = {"ok": False, "detail": str(e)}
+            _log.exception("notify_telegram 抛异常")
+
     _record_history(results)
     return results
 
@@ -783,6 +1124,7 @@ def _record_history(results: Dict[str, Any]) -> None:
             "ts": int(time.time()),
             "desktop": results.get("desktop"),
             "smtp": results.get("smtp"),
+            "telegram": results.get("telegram"),
             "skipped": results.get("skipped"),
         }
         append_history(summary)
@@ -817,6 +1159,9 @@ def test_notification(channel: str = "chat", smtp_recipient: str = "") -> Dict[s
             if (test_cfg.get("channels") or {}).get("smtp"):
                 r = notify_smtp(title, body, smtp_recipient)
                 results["smtp"] = {"ok": r.ok, "detail": r.detail}
+            if (test_cfg.get("channels") or {}).get("telegram"):
+                r = notify_telegram(title, body)
+                results["telegram"] = {"ok": r.ok, "detail": r.detail}
         finally:
             globals()["_read_cfg"] = _orig
         return results

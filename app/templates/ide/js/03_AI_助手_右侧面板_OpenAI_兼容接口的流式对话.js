@@ -214,6 +214,7 @@
     let dragging = false;
     const onMove = (e) => {
       if (!dragging) return;
+      if (!(e.buttons & 1)) { onUp(); return; }   // 左键已松开（可能松在 iframe / 窗口外），立即结束拖动
       applyAiWidth(window.innerWidth - e.clientX, false);
       e.preventDefault();
     };

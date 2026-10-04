@@ -915,7 +915,11 @@
   }
   // 分隔条拖动：文档级 mousemove/mouseup 只注册一次，避免每次重建布局都堆积监听器
   let _dragSep = null;
-  document.addEventListener("mousemove", (e) => { if (_dragSep) _dragSep.move(e); });
+  document.addEventListener("mousemove", (e) => {
+    if (!_dragSep) return;
+    if (!(e.buttons & 1)) { const s = _dragSep; _dragSep = null; s.end(); return; }   // 左键已松开，结束拖动
+    _dragSep.move(e);
+  });
   document.addEventListener("mouseup", () => { if (_dragSep) { const s = _dragSep; _dragSep = null; s.end(); } });
 
   function makeGroupSplitter() {          // 行内：左右两块调宽度

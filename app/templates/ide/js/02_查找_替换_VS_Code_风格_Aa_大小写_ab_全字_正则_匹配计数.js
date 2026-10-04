@@ -1144,6 +1144,7 @@
     let startY = 0, startH = 0, raf = 0, dragging = false;
     const onMove = (e) => {
       if (!dragging) return;
+      if (!(e.buttons & 1)) { onUp(); return; }   // 左键已松开（可能松在 iframe / 窗口外），立即结束拖动
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
@@ -1194,6 +1195,7 @@
     let dragging = false;
     const onMove = (e) => {
       if (!dragging) return;
+      if (!(e.buttons & 1)) { onUp(); return; }   // 左键已松开（可能松在 iframe / 窗口外），立即结束拖动
       const left = $("activitybar").getBoundingClientRect().right;
       applySidebarWidth(e.clientX - left, false);
       e.preventDefault();

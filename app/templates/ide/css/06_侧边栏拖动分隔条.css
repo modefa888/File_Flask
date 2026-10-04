@@ -9,4 +9,14 @@
   .splitter:hover::after, .splitter.dragging::after { background: #007fd4; }
   .sidebar.collapsed + .splitter { display: none; }
   body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none; }
+  /* 拖动期间禁用侧边栏/分屏的宽度过渡：否则 width 会以 .12s 动画追赶鼠标而抖动 */
+  body.resizing .sidebar,
+  body.resizing-x .sidebar,
+  body.resizing-y .sidebar { transition: none; }
+  /* 拖动期间让内部 iframe 不再接收指针事件：否则鼠标划过插件 iframe 时父页面收不到
+     mousemove/mouseup，会导致拖动状态卡住——松手后不按键滑动仍继续改宽度 */
+  body.resizing iframe,
+  body.resizing-v iframe,
+  body.resizing-x iframe,
+  body.resizing-y iframe { pointer-events: none; }
 

@@ -132,7 +132,7 @@
   /* 消息里的文件路径：可点击，直接跳转打开（或定位目录） */
   .bubble.ai-md a.ai-path { color: #e8c07a; background: #1b1b1e; border: 1px solid #333; border-radius: 4px;
     padding: 1px 5px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px;
-    cursor: pointer; text-decoration: none; white-space: nowrap; }
+    cursor: pointer; text-decoration: none; word-break: break-all; overflow-wrap: anywhere; }
   .bubble.ai-md a.ai-path:hover { background: #26262b; border-color: #4a4a52; color: #ffd894;
     text-decoration: underline; text-underline-offset: 2px; }
   .bubble.ai-md a.ai-path:active { background: #303036; }
@@ -182,7 +182,22 @@
   .ai-bimgs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; justify-content: flex-end; }
   .ai-row.assistant .ai-bimgs { justify-content: flex-start; }
   .ai-bimgs img { max-width: 140px; max-height: 100px; border-radius: 6px; border: 1px solid #3c3c3c; object-fit: cover; cursor: zoom-in; }
+  .ai-bimgs img:hover { border-color: #5a8ac0; }
   .ai-imgs { flex: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 0 10px 6px; background: #232326; }
+  /* 图片放大查看：点击聊天里的图片 / 待发缩略图 → 全屏查看（滚轮缩放 / 拖动平移 / Esc 关闭） */
+  .ai-lb { position: fixed; inset: 0; z-index: 10000; display: none; background: rgba(0,0,0,.88); }
+  .ai-lb.open { display: block; }
+  .ai-lb-view { position: absolute; inset: 0; overflow: auto; display: flex; }
+  .ai-lb-inner { margin: auto; }
+  .ai-lb-inner img { display: block; max-width: none; max-height: none; border-radius: 4px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.6); background: #fff; cursor: grab; user-select: none; -webkit-user-drag: none; }
+  .ai-lb-inner img.dragging { cursor: grabbing; }
+  .ai-lb-bar { position: absolute; top: 14px; right: 16px; z-index: 2; display: flex; align-items: center; gap: 4px;
+    padding: 5px 6px; background: rgba(30,30,34,.92); border: 1px solid #3c3c44; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,.5); }
+  .ai-lb-bar button { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 24px;
+    padding: 0 6px; background: none; border: none; border-radius: 5px; color: #d0d0d0; font-size: 12px; cursor: pointer; }
+  .ai-lb-bar button:hover { background: #3a3a42; color: #fff; }
+  .ai-lb-bar .pct { min-width: 44px; text-align: center; color: #9aa4b2; font-size: 11px; font-variant-numeric: tabular-nums; }
   .ai-stats { flex: none; padding: 5px 12px 6px; font-size: 10.5px; line-height: 1.5; color: #6e7681;
     background: #1b1b1f; border-top: 1px solid #26262b; user-select: none; }
   .ai-sep { color: #3a3a40; margin: 0 2px; }
@@ -220,7 +235,7 @@
   .ai-chg-chip.add { border-color: #2f4a33; }
   .ai-chg-chip.del { border-color: #4a2f2f; }
   .ai-img-thumb { position: relative; width: 54px; height: 54px; border-radius: 6px; overflow: hidden; border: 1px solid #3c3c3c; }
-  .ai-img-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .ai-img-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: zoom-in; }
   .ai-img-thumb .rm {
     position: absolute; top: 1px; right: 1px; width: 15px; height: 15px; line-height: 13px; text-align: center;
     background: rgba(0,0,0,.65); color: #fff; border: none; border-radius: 50%; font-size: 10px; cursor: pointer; padding: 0;

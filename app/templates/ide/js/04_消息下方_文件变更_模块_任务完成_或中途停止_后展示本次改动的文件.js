@@ -200,6 +200,88 @@
     return b;
   }
 
+  /* ---------- 图片放大查看：点击聊天里的图片 → 全屏查看（滚轮缩放 / 拖动平移 / Esc 关闭） ---------- */
+  let _aiLb = null;
+  function aiOpenImage(src) {
+    const lb = _aiLb || aiBuildLightbox();
+    lb.open(src);
+  }
+  function aiBuildLightbox() {
+    const wrap = document.createElement("div");
+    wrap.className = "ai-lb";
+    wrap.innerHTML =
+      '<div class="ai-lb-view"><div class="ai-lb-inner"><img alt="图片预览"></div></div>' +
+      '<div class="ai-lb-bar">' +
+      '<button class="zout" title="缩小"><i class="bi bi-zoom-out"></i></button>' +
+      '<span class="pct">100%</span>' +
+      '<button class="zin" title="放大"><i class="bi bi-zoom-in"></i></button>' +
+      '<button class="fit" title="适应窗口"><i class="bi bi-arrows-angle-contract"></i></button>' +
+      '<button class="one" title="原始大小 1:1">1:1</button>' +
+      '<button class="close" title="关闭（Esc）"><i class="bi bi-x-lg"></i></button>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    const view = wrap.querySelector(".ai-lb-view");
+    const img = wrap.querySelector("img");
+    const pct = wrap.querySelector(".pct");
+    const st = { nw: 1, nh: 1, scale: 1 };
+    const apply = () => {
+      img.style.width = Math.max(1, Math.round(st.nw * st.scale)) + "px";
+      img.style.height = Math.max(1, Math.round(st.nh * st.scale)) + "px";
+      pct.textContent = Math.round(st.scale * 100) + "%";
+    };
+    const setScale = (s) => { st.scale = Math.max(0.05, Math.min(8, s)); apply(); };
+    const fitScale = () => Math.min(1, (view.clientWidth - 80) / st.nw, (view.clientHeight - 80) / st.nh) || 1;
+    const center = () => {
+      view.scrollLeft = (img.offsetWidth - view.clientWidth) / 2;
+      view.scrollTop = (img.offsetHeight - view.clientHeight) / 2;
+    };
+    const close = () => wrap.classList.remove("open");
+    wrap.querySelector(".zin").onclick = () => setScale(st.scale * 1.25);
+    wrap.querySelector(".zout").onclick = () => setScale(st.scale / 1.25);
+    wrap.querySelector(".fit").onclick = () => { setScale(fitScale()); center(); };
+    wrap.querySelector(".one").onclick = () => { setScale(1); center(); };
+    wrap.querySelector(".close").onclick = close;
+    view.addEventListener("mousedown", (e) => { if (e.target === view) close(); });
+    view.addEventListener("wheel", (e) => { e.preventDefault(); setScale(st.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)); }, { passive: false });
+    let drag = null;
+    img.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      drag = { x: e.clientX, y: e.clientY, sl: view.scrollLeft, st: view.scrollTop };
+      img.classList.add("dragging");
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!drag) return;
+      view.scrollLeft = drag.sl - (e.clientX - drag.x);
+      view.scrollTop = drag.st - (e.clientY - drag.y);
+    });
+    window.addEventListener("mouseup", () => { if (!drag) return; drag = null; img.classList.remove("dragging"); });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && wrap.classList.contains("open")) close();
+    });
+    _aiLb = { open(src) {
+      const start = () => {
+        st.nw = img.naturalWidth || 1; st.nh = img.naturalHeight || 1;
+        wrap.classList.add("open");
+        setScale(fitScale());
+        requestAnimationFrame(center);
+      };
+      if ((img.getAttribute("src") === src || img.src === src) && img.complete && img.naturalWidth) { start(); return; }
+      img.onload = start;
+      img.onerror = () => toast("图片加载失败", "warn");
+      img.src = src;
+    } };
+    return _aiLb;
+  }
+  /* 点击聊天里的任意图片放大查看（历史重渲染 / 流式生成的图片同样生效） */
+  $("aiMsgs").addEventListener("click", (e) => {
+    const im = e.target.closest(".ai-bimgs img");
+    if (!im) return;
+    e.preventDefault();
+    e.stopPropagation();
+    aiOpenImage(im.src);
+  });
+
   /* 滚动消息列表到底部，让最后一条完整露出（而不是被输入框挡住半截）。
      force=true 强制滚动；否则只在用户原本就贴底时跟随滚动，避免打断用户回看历史。 */
   function aiScrollToBottom(force) {

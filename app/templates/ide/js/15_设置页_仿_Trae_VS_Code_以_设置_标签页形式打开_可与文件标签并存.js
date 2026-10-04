@@ -32,7 +32,8 @@
       const host = document.createElement("div");
       host.className = "cm-host set-host";
       tab = { path: SETTINGS_PATH, displayPath: "设置", name: "设置", host, cm: null,
-              original: "", dirty: false, big: false, group: curGroup, isSettings: true };
+              original: "", dirty: false, big: false, group: curGroup, isSettings: true,
+              iconHtml: '<i class="bi bi-gear"></i>' };  // 左侧固定显示齿轮图标，而非默认文件图标
       tabs.push(tab);
       renderTabsAll();
       buildSettingsContent(host);

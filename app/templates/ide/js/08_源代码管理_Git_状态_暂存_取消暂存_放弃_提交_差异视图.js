@@ -420,6 +420,9 @@
               '<button id="grTest" class="gr-test-btn"><i class="bi bi-wifi"></i> 测试连接</button>' +
               '<div id="grStatus" class="gr-status gr-status-na">未测试</div>' +
             '</div>' +
+            '<div class="m-row">' +
+              '<button id="grCreds" class="gr-creds-btn"><i class="bi bi-gear"></i> 前往 Git 认证设置</button>' +
+            '</div>' +
           '</div>' +
           '<div class="m-foot">' +
             '<button class="m-cancel" id="grCancel">取消</button>' +
@@ -432,6 +435,7 @@
       const testBtn = $("grTest");
       const okBtn = $("grOk");
       const cancelBtn = $("grCancel");
+      const credsBtn = $("grCreds");
       inp.value = currentUrl || "";
       const setStatus = (type, html) => {
         status.className = "gr-status gr-status-" + type;
@@ -466,6 +470,7 @@
         close(url);
       };
       cancelBtn.onclick = () => close(null);
+      credsBtn.onclick = () => { close(null); openSettingsTab("sec-git-creds"); };
       ov.onmousedown = (e) => { if (e.target === ov) close(null); };
       inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); doTest(); } };
       inp.focus();

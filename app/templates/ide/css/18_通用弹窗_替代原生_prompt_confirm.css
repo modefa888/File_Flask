@@ -94,3 +94,10 @@
   .gr-status-err { background: #4a1e1e; color: #ff7b72; }
   @keyframes grSpin { to { transform: rotate(360deg); } }
   .gr-status .spin { display: inline-block; animation: grSpin 1s linear infinite; }
+
+  /* 设置远程仓库弹窗：跳转到 Git 认证设置 */
+  .gr-creds-btn {
+    background: transparent; border: 1px solid #4a4a4a; color: #8ec5ff; border-radius: 4px;
+    padding: 5px 10px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+  }
+  .gr-creds-btn:hover { background: #2a3a4a; border-color: #5a7a9a; }

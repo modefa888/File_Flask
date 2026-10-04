@@ -26,7 +26,7 @@
   }
 
   const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真实文件冲突）
-  function openSettingsTab() {
+  function openSettingsTab(section) {
     let tab = findTab(SETTINGS_PATH);
     if (!tab) {
       const host = document.createElement("div");
@@ -38,6 +38,10 @@
       buildSettingsContent(host);
     }
     activate(tab);   // 已打开则直接聚焦；正常文件仍可随时打开
+    if (section) {
+      const nav = tab.host.querySelector('.set-navitem[data-sec="' + section + '"]');
+      if (nav) nav.click();
+    }
   }
   function buildSettingsContent(host) {
     host.innerHTML =

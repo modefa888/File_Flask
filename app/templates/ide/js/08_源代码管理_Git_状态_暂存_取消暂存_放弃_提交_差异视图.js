@@ -473,6 +473,130 @@
     });
   }
 
+  /* ---------- 设置 → Git 认证：可视化配置 Token，自动用于 push/pull/fetch ---------- */
+  let gcState = { type: "none", hasToken: false, loading: false };
+  function gitCredsMountSettings(host) {
+    const q = (s) => host.querySelector(s);
+    const typeEl = q("#gcType");
+    const tokenWrap = q("#gcTokenWrap");
+    const usernameWrap = q("#gcUsernameWrap");
+    const hostWrap = q("#gcHostWrap");
+    const tokenEl = q("#gcToken");
+    const usernameEl = q("#gcUsername");
+    const hostEl = q("#gcHost");
+    const testBtn = q("#gcTest");
+    const saveBtn = q("#gcSave");
+    const tipEl = q("#gcTip");
+    const summaryEl = q("#gcSummary");
+
+    function setTip(type, html) {
+      tipEl.className = "gc-tip gc-tip-" + type;
+      tipEl.innerHTML = html;
+    }
+    function renderSummary(d) {
+      if (!d || d.type === "none" || !d.has_token) {
+        summaryEl.innerHTML = '<span class="gc-sum-na"><i class="bi bi-info-circle"></i> 当前未启用认证</span>';
+        return;
+      }
+      const parts = ['<span class="gc-sum-ok"><i class="bi bi-check-circle"></i> 已启用 HTTPS Token 认证</span>'];
+      if (d.username) parts.push('用户名：<b>' + esc(d.username) + '</b>');
+      if (d.host) parts.push('限定主机：<b>' + esc(d.host) + '</b>');
+      parts.push('Token：<b>' + esc(d.token || "已保存") + '</b>');
+      summaryEl.innerHTML = parts.join(' <span class="gc-sum-div">|</span> ');
+    }
+    function updateFields() {
+      const on = typeEl.value === "https_token";
+      tokenWrap.style.display = on ? "" : "none";
+      usernameWrap.style.display = on ? "" : "none";
+      hostWrap.style.display = on ? "" : "none";
+      summaryEl.style.display = on ? "" : "none";
+    }
+    async function loadCreds() {
+      try {
+        const d = await fetch("/api/git/credentials").then(r => r.json());
+        if (d.error) throw new Error(d.error);
+        gcState.type = d.type || "none";
+        gcState.hasToken = !!d.has_token;
+        typeEl.value = gcState.type;
+        usernameEl.value = d.username || "";
+        hostEl.value = d.host || "";
+        tokenEl.placeholder = d.has_token ? "已保存（留空沿用）" : "输入 Token";
+        tokenEl.value = "";
+        renderSummary(d);
+        updateFields();
+      } catch (e) {
+        setTip("err", "读取认证配置失败：" + esc(e.message || e));
+      }
+    }
+    async function saveCreds() {
+      if (gcState.loading) return;
+      gcState.loading = true;
+      saveBtn.disabled = true;
+      testBtn.disabled = true;
+      setTip("info", "正在保存…");
+      try {
+        const payload = {
+          type: typeEl.value,
+          username: usernameEl.value.trim(),
+          host: hostEl.value.trim(),
+          token: tokenEl.value.trim()
+        };
+        const d = await fetch("/api/git/credentials", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        }).then(r => r.json());
+        if (d.error) throw new Error(d.error);
+        gcState.hasToken = !!d.has_token;
+        usernameEl.value = d.username || "";
+        hostEl.value = d.host || "";
+        tokenEl.placeholder = d.has_token ? "已保存（留空沿用）" : "输入 Token";
+        tokenEl.value = "";
+        renderSummary(d);
+        setTip("ok", "已保存 Git 认证设置");
+      } catch (e) {
+        setTip("err", "保存失败：" + esc(e.message || e));
+      } finally {
+        gcState.loading = false;
+        saveBtn.disabled = false;
+        testBtn.disabled = false;
+      }
+    }
+    async function testCreds() {
+      if (!gitState.isRepo) { setTip("warn", "当前不是 Git 仓库，无法测试"); return; }
+      if (typeEl.value !== "https_token") { setTip("warn", "请先选择「HTTPS Token」认证方式"); return; }
+      if (gcState.loading) return;
+      // 先保存，使当前输入的 Token / 用户名 / 主机生效后再测
+      await saveCreds();
+      if (tipEl.classList.contains("gc-tip-err")) return;
+      gcState.loading = true;
+      saveBtn.disabled = true;
+      testBtn.disabled = true;
+      setTip("info", '<i class="bi bi-arrow-repeat spin"></i> 正在测试…');
+      try {
+        const rd = await fetch("/api/git/remote?path=" + encodeURIComponent(gitState.repo)).then(r => r.json());
+        if (rd.error) throw new Error(rd.error);
+        const origin = (rd.remotes || []).find(x => x.name === "origin");
+        if (!origin || !origin.url) throw new Error("当前仓库没有配置 origin 远程仓库");
+        const td = await fetch("/api/git/remote/test", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ repo: gitState.repo, url: origin.url })
+        }).then(r => r.json());
+        if (td.error) throw new Error(td.error);
+        setTip("ok", esc(td.message || "连接成功"));
+      } catch (e) {
+        setTip("err", esc(e.message || "测试失败"));
+      } finally {
+        gcState.loading = false;
+        saveBtn.disabled = false;
+        testBtn.disabled = false;
+      }
+    }
+    typeEl.addEventListener("change", updateFields);
+    saveBtn.onclick = saveCreds;
+    testBtn.onclick = testCreds;
+    loadCreds();
+  }
+
   function remoteOp(verb, label, done) {
     if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
     toast(label + "中…");

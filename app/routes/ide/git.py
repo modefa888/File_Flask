@@ -8,13 +8,16 @@ POST /api/git/discard    {repo, files[]}        放弃更改（仅已跟踪文�
 POST /api/git/commit     {repo, message, all}   提交
 POST /api/git/init       {repo}                 初始化仓库
 """
+import json
 import os
 import re
 import shutil
 import subprocess
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from flask import Blueprint, request, jsonify
 
+from ... import config
 from ...log import get_logger
 
 
@@ -23,6 +26,61 @@ bp = Blueprint("git", __name__)
 
 _TIMEOUT = 20
 _MAX_DIFF_BYTES = 512 * 1024
+
+
+def _load_git_creds():
+    try:
+        with open(config.GIT_CREDENTIALS_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            return d
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def _save_git_creds(creds):
+    tmp = config.GIT_CREDENTIALS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(creds, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, config.GIT_CREDENTIALS_FILE)
+
+
+def _mask_token(token):
+    if not token:
+        return ""
+    if len(token) <= 8:
+        return "*" * len(token)
+    return token[:4] + "*" * (len(token) - 8) + token[-4:]
+
+
+def _auth_remote_url(url, creds):
+    """如果配置了 HTTPS Token，把 https://host/... 重写为 https://<token>@host/...。"""
+    if not url or not isinstance(url, str):
+        return url
+    if (creds or {}).get("type") != "https_token":
+        return url
+    token = (creds.get("token") or "").strip()
+    if not token:
+        return url
+    if not url.startswith("https://"):
+        return url
+    try:
+        u = urlsplit(url)
+        if u.scheme != "https" or u.username is not None:
+            return url
+        host_filter = (creds.get("host") or "").strip().lower()
+        if host_filter and (u.hostname or "").lower() != host_filter:
+            return url
+        username = (creds.get("username") or "").strip()
+        port = ":" + str(u.port) if u.port else ""
+        if username:
+            netloc = f"{quote(username, safe='')}:{quote(token, safe='')}@{u.hostname}{port}"
+        else:
+            netloc = f"{quote(token, safe='')}@{u.hostname}{port}"
+        return urlunsplit((u.scheme, netloc, u.path, u.query, u.fragment))
+    except Exception:
+        return url
 
 
 def _git_exe():
@@ -44,11 +102,15 @@ def _git(cwd, args, timeout=_TIMEOUT):
     exe = _git_exe()
     if not exe:
         return None, "未找到 git 命令，请先安装 Git"
+    env = os.environ.copy()
+    # 禁止 Git 弹出交互式用户名/密码提示；在 Web 后端没有终端，hang 住会导致超时
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_ASKPASS"] = "false"
     try:
         proc = subprocess.run([exe, "-c", "safe.directory=*", "-c", "core.quotepath=false"] + args,
                               cwd=cwd, capture_output=True,
                               text=True, errors="replace", timeout=timeout,
-                              stdin=subprocess.DEVNULL)
+                              stdin=subprocess.DEVNULL, env=env)
     except subprocess.TimeoutExpired:
         return None, "git 命令执行超时"
     except OSError as e:
@@ -599,41 +661,41 @@ def api_git_file():
 
 
 def _remote_op(verb, timeout):
-    """执行 fetch / pull / push 并返回结果。"""
+    """执行 fetch / pull / push 并返回结果；若保存了 HTTPS Token，自动注入。"""
     data = request.get_json(silent=True) or {}
     root, err = _repo_root(data.get("repo") or "")
     if err:
         return _fail(err)
     if not root:
         return _fail("不是 Git 仓库")
+    creds = _load_git_creds()
+
+    # 检查 origin 是否已配置，并取出原始 URL
+    proc_url, _ = _git(root, ["remote", "get-url", "origin"])
+    if not proc_url or proc_url.returncode != 0:
+        return jsonify({
+            "ok": False,
+            "error": "当前仓库没有配置远程仓库 origin。请先设置远程仓库，例如：\n\ngit remote add origin https://github.com/用户名/仓库名.git",
+            "output": ""
+        }), 400
+    origin_url = proc_url.stdout.strip()
+    auth_url = _auth_remote_url(origin_url, creds)
+
     args = [verb]
     if verb == "fetch":
-        args += ["--all", "--prune"]
+        args += ["--prune", auth_url]
     elif verb == "push":
-        # 分支没有上游时自动发布（push -u origin <branch>）
+        # 分支没有上游时自动发布（push -u <url> <branch>）
         proc_br, _ = _git(root, ["rev-parse", "--abbrev-ref", "HEAD"])
         branch = (proc_br.stdout.strip() if proc_br and proc_br.returncode == 0 else "")
         proc_up, _ = _git(root, ["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
         has_upstream = bool(proc_up and proc_up.returncode == 0)
         if not has_upstream and branch and branch != "HEAD":
-            args += ["-u", "origin", branch]
-    # 执行远程操作前，先检查远程仓库是否已配置（push/pull/fetch 都依赖它）
-    if verb == "fetch":
-        proc_remote, _ = _git(root, ["remote"])
-        if not proc_remote or not (proc_remote.stdout or "").strip():
-            return jsonify({
-                "ok": False,
-                "error": "当前仓库没有配置远程仓库。请先设置远程仓库，例如：\n\ngit remote add origin https://github.com/用户名/仓库名.git",
-                "output": ""
-            }), 400
-    else:
-        proc_remote, _ = _git(root, ["remote", "get-url", "origin"])
-        if not proc_remote or proc_remote.returncode != 0:
-            return jsonify({
-                "ok": False,
-                "error": "当前仓库没有配置远程仓库 origin。请先设置远程仓库，例如：\n\ngit remote add origin https://github.com/用户名/仓库名.git",
-                "output": ""
-            }), 400
+            args += ["-u", auth_url, branch]
+        else:
+            args += [auth_url]
+    else:  # pull
+        args += [auth_url]
 
     proc, err = _git(root, args, timeout=timeout)
     if err:
@@ -648,10 +710,12 @@ def _remote_op(verb, timeout):
                 "error": "无法访问远程仓库 origin。请检查远程地址是否正确，或网络是否可达。",
                 "output": out
             }), 400
-        if "permission denied" in lowered or "authentication failed" in lowered:
+        if ("permission denied" in lowered or "authentication failed" in lowered or
+                "could not read username" in lowered or "could not read password" in lowered or
+                "没有那个设备或地址" in out):
             return jsonify({
                 "ok": False,
-                "error": "访问远程仓库被拒绝，请检查认证信息（SSH 密钥 / 用户名密码 / Token）是否正确。",
+                "error": "访问远程仓库需要认证。请到「设置 → Git 认证」填写 Personal Access Token，或在远程地址中使用 https://<Token>@github.com/用户名/仓库名.git。",
                 "output": out
             }), 400
         return jsonify({"ok": False, "error": out or f"{verb} 失败", "output": out}), 500
@@ -715,7 +779,7 @@ def api_git_remote():
 
 @bp.route("/api/git/remote/test", methods=["POST"])
 def api_git_remote_test():
-    """测试远程仓库地址是否可访问，并返回默认分支信息。"""
+    """测试远程仓库地址是否可访问，并返回默认分支信息；支持临时传入 credentials。"""
     data = request.get_json(silent=True) or {}
     root, err = _repo_root(data.get("repo") or "")
     if err:
@@ -725,8 +789,19 @@ def api_git_remote_test():
     url = (data.get("url") or "").strip()
     if not url:
         return _fail("远程仓库地址不能为空")
-    proc, err = _git(root, ["ls-remote", "--symref", url, "HEAD"], timeout=15)
+    # 优先使用请求里传入的临时 credentials，其次使用已保存的 credentials
+    creds = data.get("credentials")
+    if not isinstance(creds, dict):
+        creds = _load_git_creds()
+    url = _auth_remote_url(url, creds)
+    proc, err = _git(root, ["ls-remote", "--symref", url, "HEAD"], timeout=20)
     if err:
+        if err == "git 命令执行超时":
+            return jsonify({
+                "ok": False,
+                "error": "连接远程仓库超时。如果是 HTTPS 私有仓库，请先到「设置 → Git 认证」填写 Token，或把地址改为 https://<Token>@github.com/用户名/仓库名.git。",
+                "output": ""
+            }), 400
         return _fail(err, 500)
     out = ((proc.stdout or "") + (proc.stderr or "")).strip()
     if proc.returncode != 0:
@@ -737,10 +812,13 @@ def api_git_remote_test():
                 "error": "无法访问该远程仓库，请检查地址是否正确或网络是否可达。",
                 "output": out
             }), 400
-        if "authentication failed" in lowered or "permission denied" in lowered:
+        if ("authentication failed" in lowered or "permission denied" in lowered or
+                "could not read username" in lowered or "could not read password" in lowered or
+                "terminal prompts disabled" in lowered or
+                "没有那个设备或地址" in out):
             return jsonify({
                 "ok": False,
-                "error": "认证失败，请检查是否有该仓库的访问权限（SSH 密钥 / Token）。",
+                "error": "认证失败，请检查是否有该仓库的访问权限。请到「设置 → Git 认证」填写 HTTPS Token，或将远程地址设为 https://<Token>@github.com/用户名/仓库名.git。",
                 "output": out
             }), 400
         return jsonify({"ok": False, "error": out or "连接失败", "output": out}), 400
@@ -753,6 +831,58 @@ def api_git_remote_test():
         "output": out,
         "default_branch": default_branch,
         "message": "连接成功" + (("，默认分支：" + default_branch) if default_branch else "")
+    })
+
+
+@bp.route("/api/git/credentials", methods=["GET"])
+def api_git_credentials_get():
+    """读取已保存的 Git 认证信息（Token 脱敏返回）。"""
+    creds = _load_git_creds()
+    return jsonify({
+        "ok": True,
+        "type": creds.get("type") or "none",
+        "username": creds.get("username") or "",
+        "token": _mask_token(creds.get("token") or ""),
+        "host": creds.get("host") or "",
+        "has_token": bool(creds.get("token")),
+    })
+
+
+@bp.route("/api/git/credentials", methods=["POST"])
+def api_git_credentials_post():
+    """保存 Git 认证信息；Token 留空表示沿用旧值。"""
+    data = request.get_json(silent=True) or {}
+    creds = _load_git_creds()
+    cred_type = (data.get("type") or "none").strip()
+    if cred_type not in ("none", "https_token"):
+        return _fail("不支持的认证类型")
+    creds["type"] = cred_type
+    if cred_type == "https_token":
+        username = (data.get("username") or "").strip()
+        host = (data.get("host") or "").strip()
+        token = (data.get("token") or "").strip()
+        if username:
+            creds["username"] = username
+        else:
+            creds.pop("username", None)
+        if host:
+            creds["host"] = host
+        else:
+            creds.pop("host", None)
+        if token:
+            creds["token"] = token
+    else:
+        creds.pop("token", None)
+        creds.pop("username", None)
+        creds.pop("host", None)
+    _save_git_creds(creds)
+    return jsonify({
+        "ok": True,
+        "type": creds["type"],
+        "token": _mask_token(creds.get("token") or ""),
+        "has_token": bool(creds.get("token")),
+        "username": creds.get("username") or "",
+        "host": creds.get("host") or "",
     })
 
 

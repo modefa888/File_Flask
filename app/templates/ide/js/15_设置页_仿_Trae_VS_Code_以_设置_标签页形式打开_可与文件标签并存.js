@@ -50,6 +50,7 @@
         '<div class="set-navitem" data-sec="sec-ai"><i class="bi bi-stars"></i>AI 助手</div>' +
         '<div class="set-navitem" data-sec="sec-sysai"><i class="bi bi-cpu"></i>系统 AI</div>' +
         '<div class="set-navitem" data-sec="sec-notify"><i class="bi bi-bell"></i>通知</div>' +
+        '<div class="set-navitem" data-sec="sec-git-creds"><i class="bi bi-git"></i>Git 认证</div>' +
       '</div>' +
       '<div class="set-content">' +
         '<div class="set-sec" id="sec-editor"><h2>编辑器</h2>' +
@@ -87,6 +88,44 @@
           '<div class="set-row" data-kw="系统 ai token 接口 模型 提交信息 生成"><div class="set-info"><div class="set-label">使用的接口 / 模型</div><div class="set-desc">生成提交信息时调用的接口与模型</div></div><select id="sysAiPick"></select></div>' +
           '<div class="ai-set-acts" data-kw="系统 ai token 接口 模型 保存"><span class="ai-spacer"></span><button class="ai-set-btn primary" id="sysAiSave">保存</button></div>' +
           '<div class="ai-set-tip" id="sysAiTip"></div>' +
+        '</div>' +
+
+        '<div class="set-sec" id="sec-git-creds" data-kw="git 认证 token 远程仓库 密钥">' +
+          '<h2>Git 认证</h2>' +
+          '<div class="set-desc" style="margin-bottom:10px;">配置 push / pull / fetch 时的远程仓库认证信息。Token 仅保存在服务器本地，不会回传浏览器。</div>' +
+          '<div class="gc-card">' +
+            '<div id="gcSummary" class="gc-summary"></div>' +
+            '<div class="gc-row">' +
+              '<label>认证方式</label>' +
+              '<select id="gcType">' +
+                '<option value="none">不启用</option>' +
+                '<option value="https_token">HTTPS Token</option>' +
+              '</select>' +
+            '</div>' +
+            '<div class="gc-row gc-field" id="gcTokenWrap">' +
+              '<label>Personal Access Token</label>' +
+              '<input type="password" id="gcToken" placeholder="输入 Token" autocomplete="off" spellcheck="false">' +
+              '<div class="gc-hint">' +
+                'GitHub 推荐使用 classic token，至少勾选 repo 权限。' +
+                '<a class="gc-link" href="https://github.com/settings/tokens/new?scopes=repo&description=File_Flask_IDE" target="_blank" rel="noopener">' +
+                  '<i class="bi bi-box-arrow-up-right"></i> 前往 GitHub 创建 Token' +
+                '</a>' +
+              '</div>' +
+            '</div>' +
+            '<div class="gc-row gc-field" id="gcUsernameWrap">' +
+              '<label>用户名（可选）</label>' +
+              '<input type="text" id="gcUsername" placeholder="GitHub 用户名，留空则使用 Token 作为用户名" autocomplete="off" spellcheck="false">' +
+            '</div>' +
+            '<div class="gc-row gc-field" id="gcHostWrap">' +
+              '<label>限定主机（可选）</label>' +
+              '<input type="text" id="gcHost" placeholder="例如 github.com，留空则对所有 HTTPS 远程生效" autocomplete="off" spellcheck="false">' +
+            '</div>' +
+            '<div class="gc-actions">' +
+              '<button class="gc-btn secondary" id="gcTest"><i class="bi bi-wifi"></i> 测试认证</button>' +
+              '<button class="gc-btn primary" id="gcSave">保存</button>' +
+            '</div>' +
+            '<div id="gcTip" class="gc-tip"></div>' +
+          '</div>' +
         '</div>' +
 
         notifyBuildSectionHTML() +
@@ -284,6 +323,7 @@
     aiMountSettings();   // 挂载 AI 助手接口配置（设置 → AI 助手）
     sysAiEnsure();       // 挂载「系统 AI」分区（设置 → 系统 AI）
     notifyMountSettings(); // 挂载「通知」分区（设置 → 通知）
+    if (typeof gitCredsMountSettings === "function") gitCredsMountSettings(host); // 挂载「Git 认证」分区
   }
   /* ---------- 命令注册表 + 自定义快捷键（设置 → 快捷键 可视化修改，localStorage 持久化） ---------- */
   const KEY_COMMANDS = [

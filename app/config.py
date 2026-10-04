@@ -166,6 +166,9 @@ _DELETE_HISTORY_FILE = os.path.join(_STORAGE_DIR, ".file_manager_delete_history.
 # AI 助手配置（OpenAI 兼容接口：base_url / api_key / model）
 AI_CONFIG_FILE = os.path.join(_STORAGE_DIR, ".file_manager_ai.json")
 
+# Git 远程仓库认证信息（Token / SSH 等），仅保存在服务端
+GIT_CREDENTIALS_FILE = os.path.join(_STORAGE_DIR, ".file_manager_git_credentials.json")
+
 # 持久化索引数据库
 _INDEX_DB_FILE = os.path.join(_CACHE_DIR, ".file_manager_index.db")
 _INDEX_DB_NEW = _INDEX_DB_FILE + ".new"

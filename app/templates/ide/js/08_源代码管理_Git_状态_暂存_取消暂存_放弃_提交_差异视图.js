@@ -1626,6 +1626,7 @@
   function gitAutoGrowMsg() {
     const el = $("gitCommitMsg");
     if (!el) return;
+    if (!el.value) { el.style.height = "30px"; return; }
     el.style.height = "auto";
     el.style.height = Math.max(30, Math.min(el.scrollHeight, 132)) + "px";
   }

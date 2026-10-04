@@ -11,21 +11,21 @@
   }
   .g-ico:hover { background: #3a3d41; color: #fff; }
   .git-commit { padding: 0 10px 8px; }
-  /* 提交信息：可自增高的多行输入框 + 右侧 AI「生成提交内容」按钮（按钮贴底，与最后一行对齐） */
+  /* 提交信息：可自增高的多行输入框 + 右侧 AI「生成提交内容」按钮（与输入框统一高度） */
   .git-commit-msg { display: flex; gap: 6px; align-items: flex-end; }
   .git-commit-msg #gitCommitMsg {
-    flex: 1 1 auto; min-width: 0; min-height: 30px; max-height: 132px; box-sizing: border-box;
-    background: #3c3c3c; border: 1px solid #3c3c3c; border-radius: 3px; color: #fff; font-size: 12px;
-    padding: 5px 8px; line-height: 1.5; outline: none; font-family: inherit; resize: none;
-    overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+     flex: 1 1 auto; min-width: 0; min-height: 30px; max-height: 132px; box-sizing: border-box;
+     background: #3c3c3c; border: 1px solid #3c3c3c; border-radius: 3px; color: #fff; font-size: 12px;
+     padding: 5px 8px; line-height: 1.5; outline: none; font-family: inherit; resize: none;
+     overflow-y: auto; white-space: pre-wrap; word-break: break-word;
   }
   .git-commit-msg #gitCommitMsg:focus { border-color: #007fd4; }
-  .git-commit-msg #gitCommitMsg::placeholder { color: #8a8a8a; }
-  .g-ai-split { flex: none; display: flex; gap: 2px; }
+  .git-commit-msg #gitCommitMsg::placeholder { color: #8a8a8a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .g-ai-split { flex: none; display: flex; gap: 2px; align-self: stretch; }
   .g-ai-split button {
-    height: 30px; padding: 0; cursor: pointer; background: #3a3d41; border: 1px solid #4a4a4a;
-    border-radius: 3px; color: #d7ba7d; display: flex; align-items: center; justify-content: center;
-    font-size: 13px; line-height: 1;
+     height: 100%; min-height: 30px; padding: 0; cursor: pointer; background: #3a3d41; border: 1px solid #4a4a4a;
+     border-radius: 3px; color: #d7ba7d; display: flex; align-items: center; justify-content: center;
+     font-size: 13px; line-height: 1;
   }
   .g-ai-split #gitGenMsg { width: 30px; }
   .g-ai-split #gitGenMsgMore { width: 16px; font-size: 8px; color: #9aa0a6; }

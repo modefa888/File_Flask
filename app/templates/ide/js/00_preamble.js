@@ -343,6 +343,22 @@
     });
   }
 
+  // ---------- 资源管理器多选支持（Shift 范围选择 / Ctrl 点选累加） ----------
+  let treeAnchor = null;          // 范围选择的锚点行路径（普通点击 / Ctrl 点击更新，Shift 点击沿用）
+  function visibleTreeRows() {    // 当前可见（所有祖先目录均已展开）的树行，按 DOM 顺序
+    return [...explorerPanel.querySelectorAll(".tree-row")].filter(r => {
+      let p = r.parentElement;
+      while (p && p !== explorerPanel) {
+        if (p.classList.contains("tree-children") && !p.classList.contains("open")) return false;
+        p = p.parentElement;
+      }
+      return true;
+    });
+  }
+  function setTreeSelFromRow(r) { // 让 treeSel 指向某行（供 F2 / Delete / Ctrl+C 等快捷键使用）
+    if (r) treeSel = { path: r.dataset.path, name: r.dataset.name, isDir: r.dataset.isdir === "1" };
+  }
+
   function renderNode(it, container, depth) {
     const full = (it.path && it.path.startsWith("/")) ? it.path : container._base + "/" + it.name;
     const row = document.createElement("div");
@@ -367,11 +383,40 @@
 
     row.addEventListener("click", (e) => {
       e.stopPropagation();
-      document.querySelectorAll(".tree-row.selected").forEach(r => r.classList.remove("selected"));
+      const allSel = () => [...explorerPanel.querySelectorAll(".tree-row.selected")];
+      const focusRow = () => { try { row.focus({ preventScroll: true }); } catch (_) { row.focus(); } };
+
+      // Shift+点击：从「锚点」到当前行做范围选择（不打开文件 / 不展开目录）
+      if (e.shiftKey && treeAnchor) {
+        const vis = visibleTreeRows();
+        const iA = vis.findIndex(r => r.dataset.path === treeAnchor);
+        const iB = vis.findIndex(r => r.dataset.path === full);
+        if (iA >= 0 && iB >= 0) {
+          allSel().forEach(r => r.classList.remove("selected"));
+          const [s, t] = iA < iB ? [iA, iB] : [iB, iA];
+          for (let i = s; i <= t; i++) vis[i].classList.add("selected");
+          setTreeSelFromRow(row);
+          focusRow();
+          return;
+        }
+      }
+
+      // Ctrl / Cmd+点击：切换当前行的选中状态（累加多选，不打开文件 / 不展开目录）
+      if (e.ctrlKey || e.metaKey) {
+        const nowSel = row.classList.toggle("selected");
+        treeAnchor = full;
+        setTreeSelFromRow(nowSel ? row : (allSel().slice(-1)[0] || row));
+        focusRow();
+        return;
+      }
+
+      // 普通点击：清空其它选中，只选中当前行（保持原有「打开文件 / 展开目录」行为）
+      allSel().forEach(r => r.classList.remove("selected"));
       row.classList.add("selected");
+      treeAnchor = full;
       // 记录选中项并让其可聚焦：这样 F2 / Delete / Ctrl+Enter / Ctrl+C 等按键才作用于资源管理器
-      treeSel = { path: full, name: it.name, isDir: !!it.is_dir };
-      try { row.focus({ preventScroll: true }); } catch (_) { row.focus(); }
+      setTreeSelFromRow(row);
+      focusRow();
       if (it.is_dir) {
         if (kids.classList.contains("open")) { kids.classList.remove("open"); row.querySelector(".twist i").className = "bi bi-chevron-right"; }
         else {
@@ -382,7 +427,18 @@
         openFile(full, it.name);
       }
     });
-    row.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); showCtxMenu(e.clientX, e.clientY, full, it.name, it.is_dir); });
+    row.addEventListener("contextmenu", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      // 右键：若该行不在多选集合里，则先把它变成唯一选中项（与 VS Code 一致，避免批量操作误伤其它选中项）
+      if (!row.classList.contains("selected")) {
+        explorerPanel.querySelectorAll(".tree-row.selected").forEach(r => r.classList.remove("selected"));
+        row.classList.add("selected");
+        treeAnchor = full;
+        setTreeSelFromRow(row);
+        try { row.focus({ preventScroll: true }); } catch (_) { row.focus(); }
+      }
+      showCtxMenu(e.clientX, e.clientY, full, it.name, it.is_dir);
+    });
   }
 
   /* ---------- 全部展开 / 全部折叠 ---------- */
@@ -434,8 +490,16 @@
     btn.title = anyOpen ? "全部折叠" : "全部展开";
   }
 
+  /* ---------- 抑制「后台变更自动刷新」的整树重建（配合 19_ 的轮询） ----------
+     本端已经在 DOM 里精确增删过节点时（如删除文件），再整树重建只会打断展开状态、
+     造成"文件列表自己折叠"的观感；调用后一段时间内只更新轮询签名基线、不重建。 */
+  let treeQuietUntil = 0;
+  function holdTreeRefresh(ms) { treeQuietUntil = Date.now() + (ms || 6000); }
+
   /* ---------- 刷新资源管理器：重建目录树并恢复刷新前展开的目录 ----------
-     同时保留：选中项（自动刷新时不打断用户当前操作）与滚动位置 */
+     同时保留：选中项（自动刷新时不打断用户当前操作）与滚动位置
+     注意：全项目「唯一」的 refreshTree 实现在这里；其它文件不要再声明同名函数，
+           否则会静默覆盖它（同一 IIFE 内后声明者生效），自动刷新就会把整棵树折叠。 */
   async function refreshTree() {
     if (!ROOT) return;
     const openBases = new Set();
@@ -443,6 +507,7 @@
     const prevScroll = explorerPanel.scrollTop;
     const prevSelPath = treeSel ? treeSel.path : "";
     treeSel = null;
+    treeAnchor = null;
     explorerPanel.innerHTML = "";
     const root = document.createElement("div");
     root.className = "tree-children open"; root._base = ROOT; root._loaded = true;
@@ -476,6 +541,7 @@
         if (row) {
           row.classList.add("selected");
           treeSel = { path: prevSelPath, name: row.dataset.name, isDir: row.dataset.isdir === "1" };
+          treeAnchor = prevSelPath;
         }
       }
       explorerPanel.scrollTop = prevScroll;
@@ -976,6 +1042,7 @@
     document.querySelectorAll(".tree-row.selected").forEach(r => r.classList.remove("selected"));
     target.classList.add("selected");
     treeSel = { path: abs, name: segs[segs.length - 1], isDir: false };
+    treeAnchor = abs;
     target.scrollIntoView({ block: "nearest" });
   }
 

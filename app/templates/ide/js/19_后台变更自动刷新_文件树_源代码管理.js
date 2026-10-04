@@ -47,7 +47,8 @@
     const sb = $("sidebar");
     if (sb && sb.classList.contains("collapsed")) return;
     if (!explorerPanel.querySelector(".tree-children")) return;
-    if (Date.now() - lastUserAct < QUIET_MS) return;   // 用户刚操作，本轮跳过
+    // 用户刚操作、或本端刚在 DOM 里精确增删过节点（如删除文件）：本轮只更新签名基线，不重建
+    const quiet = (Date.now() - lastUserAct < QUIET_MS) || (Date.now() < treeQuietUntil);
 
     // 根目录 + 所有已展开目录：这些位置的内容对用户可见
     const bases = new Set([ROOT]);
@@ -65,10 +66,11 @@
       // 只有【之前已在监视中】的目录内容变化才触发重建；
       // 用户新展开的目录只登记签名（展开时已加载最新内容）
       if (prev !== undefined && prev !== sig) changed = true;
+      // 静默期也要刷新基线，否则静默结束后会拿旧基线比对，补一次多余的整树重建
       sigMap.set(base, sig);
     }
 
-    if (changed && typeof refreshTree === "function") {
+    if (changed && !quiet && typeof refreshTree === "function") {
       await refreshTree();     // refreshTree 会保留展开目录、选中项与滚动位置
     }
   }

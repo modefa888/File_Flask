@@ -382,7 +382,8 @@
     items.push({ label: "复制相对路径", sc: "Ctrl+Shift+Alt+C", act: () => copyText(relPathOf(path)) });
     items.push({ divider: true });
     items.push({ label: "重命名…", sc: "F2", act: () => ctxAction("rename") });
-    items.push({ label: "删除", sc: "Delete", danger: true, act: () => ctxAction("delete") });
+    const selCount = explorerPanel.querySelectorAll(".tree-row.selected").length;
+    items.push({ label: selCount > 1 ? ("删除 " + selCount + " 项") : "删除", sc: "Delete", danger: true, act: () => ctxAction("delete") });
     renderDrop(items, null, "tree-ctx", { x, y });
   }
   async function ctxAction(act) {
@@ -426,34 +427,60 @@
       return;
     }
     if (act === "delete") {
-      if (!(await uiConfirm("删除确认", "确定删除 " + name + " ？此操作不可撤销。", "删除", true))) return;
+      // 多选时批量删除：选中多于一个 → 删除全部选中项；否则删除右键 / 当前项
+      const selRows = [...explorerPanel.querySelectorAll(".tree-row.selected")];
+      let targets = selRows.length > 1
+        ? selRows.map(r => ({ path: r.dataset.path, name: r.dataset.name, isDir: r.dataset.isdir === "1" }))
+        : [{ path, name, isDir }];
+      // 若同时选中目录与其子项，只保留最上层路径，避免「父目录已移走 → 子项不存在」的多余报错
+      const dirPaths = targets.filter(t => t.isDir).map(t => t.path);
+      targets = targets.filter(t => !dirPaths.some(dp => t.path !== dp && t.path.startsWith(dp + "/")));
+      const isBatch = targets.length > 1;
+      const msg = isBatch
+        ? "确定删除选中的 " + targets.length + " 个项目吗？此操作不可撤销。"
+        : "确定删除 " + name + " ？此操作不可撤销。";
+      if (!(await uiConfirm(isBatch ? "批量删除确认" : "删除确认", msg, "删除", true))) return;
+      // 请求期间先关掉后台自动刷新的整树重建，保证下面捕获的行引用不会被中途换掉
+      holdTreeRefresh(6000);
       // 删除进行中：在树行图标处显示旋转图标，文件真实删除后随行一起消失
-      const row = document.querySelector('.tree-row[data-path="' + path.replace(/"/g, '\\"') + '"]');
-      const ic = row ? row.querySelector(".ic") : null;
-      if (ic) {
-        ic._origHtml = ic.innerHTML;
-        ic.innerHTML = '<i class="bi bi-arrow-clockwise tree-delete-spin"></i>';
-        row.classList.add("tree-deleting");
-      }
-      fetch("/api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paths: [path] }) })
+      const rows = targets.map(t => {
+        const row = document.querySelector('.tree-row[data-path="' + t.path.replace(/"/g, '\\"') + '"]');
+        const ic = row ? row.querySelector(".ic") : null;
+        if (ic) {
+          ic._origHtml = ic.innerHTML;
+          ic.innerHTML = '<i class="bi bi-arrow-clockwise tree-delete-spin"></i>';
+          row.classList.add("tree-deleting");
+        }
+        return { row, ic };
+      });
+      fetch("/api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paths: targets.map(t => t.path) }) })
         .then(r => r.json()).then(d => {
           if (d.error) throw new Error(d.error);
-          toast("已删除：" + name, "ok");
-          // 直接从树里移除该节点（目录连子容器），不重拉整棵树，避免展开状态/滚动位置抖动
+          // 本端已在 DOM 里精确移除了这些节点：让后台自动刷新跳过整树重建（仅更新签名基线），
+          // 避免"删除成功 → 文件列表自己折叠/整树重绘"
+          holdTreeRefresh(6000);
+          const okCount = (d.deleted || []).length;
+          if (d.errors && d.errors.length) {
+            toast("已删除 " + okCount + " 项，" + d.errors.length + " 项失败：" + d.errors[0], "warn");
+          } else {
+            toast(isBatch ? ("已删除 " + okCount + " 项") : ("已删除：" + name), "ok");
+          }
+          // 直接从树里移除这些节点（目录连子容器），不重拉整棵树，避免展开状态/滚动位置抖动
           // 注意：带引号的属性选择器值不能套 CSS.escape（会把 . 转成 \. 导致匹配失败），直接拼接即可
-          if (row) {
+          for (const { row } of rows) {
+            if (!row) continue;
             const kids = row.nextElementSibling;
             if (kids && kids.classList.contains("tree-children")) kids.remove();
             row.remove();
           }
           loadGitStatus();                                    // 只刷新 Git 角标/更改列表，不动树
-          closeTabsForDeletedPath(path);                      // 列表文件被删除时，自动关闭对应编辑标签
+          targets.forEach(t => closeTabsForDeletedPath(t.path));   // 列表文件被删除时，自动关闭对应编辑标签
         })
         .catch(e => {
           // 删除失败：还原原图标和行状态
-          if (ic) {
-            ic.innerHTML = ic._origHtml || "";
-            row.classList.remove("tree-deleting");
+          for (const { row, ic } of rows) {
+            if (ic) ic.innerHTML = ic._origHtml || "";
+            if (row) row.classList.remove("tree-deleting");
           }
           toast("删除失败：" + (e.message || e), "err");
         });
@@ -568,11 +595,9 @@
     });
   }
   /* 拖拽落区与分屏宽度拖动已随组 DOM 动态创建（见 makeGroupDom / makeGroupSplitter） */
-  function refreshTree(dirPath) {
-    // 重新加载包含该目录那一层：简单起见整树重置
-    explorerPanel.innerHTML = ""; initTree();
-    loadGitStatus();
-  }
+  /* 这里曾定义 function refreshTree(dirPath) 做「整树重置」，但它会静默覆盖
+     00_preamble.js 里的同名实现（同一 IIFE 内后声明者生效），导致后台自动刷新时
+     资源管理器整棵树被折叠。故删除：所有调用统一走 00_preamble 的保状态版本。 */
   // capture 阶段拦截：资源管理器树节点的 click 会 stopPropagation（冒泡阶段收不到），
   // 导致右键菜单点了别处也不消失；改在捕获阶段关闭即可覆盖所有点击。
   // 菜单自身 / 菜单栏的点击除外——它们各自的处理逻辑负责开合，避免误关破坏切换。

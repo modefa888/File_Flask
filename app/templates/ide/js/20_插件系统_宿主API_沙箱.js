@@ -628,7 +628,10 @@
       let html =
         '<div class="ph" style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
           '<span>已安装扩展（' + list.length + '）</span>' +
-          '<button class="g-btn outline" id="plUpload" style="padding:2px 8px;font-size:12px">上传插件(zip)</button>' +
+          '<span style="display:flex;gap:6px">' +
+            '<button class="g-btn outline" id="plHistory" style="padding:2px 8px;font-size:12px">历史</button>' +
+            '<button class="g-btn outline" id="plUpload" style="padding:2px 8px;font-size:12px">上传插件(zip)</button>' +
+          '</span>' +
         '</div>';
       if (!list.length) html += '<div class="ph" style="color:#888">暂无插件。把插件目录打包成 zip 上传即可。</div>';
       for (const p of list) {
@@ -647,6 +650,8 @@
       box.innerHTML = html;
       const up = box.querySelector("#plUpload");
       if (up) up.addEventListener("click", _plOpenUpload);
+      const hi = box.querySelector("#plHistory");
+      if (hi) hi.addEventListener("click", _plOpenHistory);
       box.querySelectorAll(".pl-card").forEach(card => {
         const id = card.dataset.id;
         const tog = card.querySelector('[data-act="toggle"]');
@@ -690,6 +695,44 @@
     }).catch(() => {
       box.innerHTML = '<div class="ph">扩展列表加载失败</div>';
     });
+  }
+
+  // ISO 时间 → 本地「YYYY-MM-DD HH:mm」
+  function _plFmtTime(iso) {
+    const d = new Date(iso);
+    if (!iso || isNaN(d.getTime())) return String(iso || "");
+    const p = (n) => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+           " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  // 查看「安装 / 卸载」历史（读取后端登记簿 /api/plugins/registry）
+  function _plOpenHistory() {
+    fetch("/api/plugins/registry", { cache: "no-store" })
+      .then(r => r.json())
+      .then(data => {
+        const hist = ((data && data.history) || []).slice().reverse();   // 新 → 旧
+        const rows = hist.map(h => {
+          const install = h.action === "install";
+          return '<div style="display:flex;align-items:center;gap:10px;padding:6px 2px;border-bottom:1px solid rgba(127,127,127,.16)">' +
+            '<span style="color:' + (install ? "#7bd88f" : "#e57373") + ';min-width:36px;font-size:12px">' + (install ? "安装" : "卸载") + '</span>' +
+            '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _esc(h.name || h.id) +
+              ' <span style="color:#8a8;font-size:11px">v' + _esc(h.version || "0.0.0") + '</span></span>' +
+            '<span style="color:#888;font-size:12px;white-space:nowrap">' + _esc(_plFmtTime(h.at)) + '</span>' +
+          '</div>';
+        }).join("");
+        IDE.dialog({
+          title: "安装 / 卸载历史",
+          icon: "bi-clock-history",
+          wide: true,
+          html: rows
+            ? '<div style="max-height:56vh;overflow:auto">' + rows + '</div>' +
+              '<div style="color:#888;font-size:12px;margin-top:8px">共 ' + hist.length + ' 条记录（最多保留 500 条）。</div>'
+            : '<div style="color:#888;padding:10px 0">暂无安装 / 卸载历史记录。</div>',
+          buttons: [{ text: "关闭", value: "close", primary: true }]
+        });
+      })
+      .catch(() => IDE.notifications.show("读取历史失败", "err"));
   }
 
   function _plOpenUpload() {

@@ -11,9 +11,15 @@
 
 ```
 my-plugin/
-├── plugin.json   # 元数据 + 贡献声明
-└── main.js       # 入口，必须返回 activate / deactivate 契约
+├── plugin.json    # 元数据 + 贡献声明（必填）
+├── main.js        # 入口，必须返回 activate / deactivate 契约（必填）
+├── index.html     # 富页面：注册面板 / 编辑区时通过 index 字段以 iframe 加载（可选）
+├── style.css      # index.html 配套样式（可选）
+├── view.html      # 与 index 不同的另一份 HTML（可选，用于左右展示不同页面）
+└── view.css       # view.html 配套样式（可选）
 ```
+
+> 仅 `plugin.json` + `main.js` 即可运行；想用「富页面」（侧栏面板 / 编辑区以 iframe 渲染 HTML）再加 `index.html` + `style.css`；左右要展示不同页面时再加一份 `view.html` + `view.css`（见第 4 节「富页面进阶」）。
 
 `plugin.json` 字段：
 
@@ -348,7 +354,36 @@ if (val === "run") { /* ... */ }
 
 ---
 
-## 13. 快速上手清单
+## 13. 扩展面板（插件管理）与安装 / 卸载历史
+
+IDE 左侧活动栏的「扩展」按钮打开插件管理面板，用于查看与操作已安装插件：
+
+- 顶部显示「已安装扩展（N）」，并提供 **历史** 与 **上传插件(zip)** 两个按钮。
+- 每个插件卡片展示图标、名称、版本、描述、作者，并提供：
+  - **启用** 开关：切换后**立即生效**（现场 `activate` / `deactivate`，无需刷新）。
+  - **卸载** 按钮：弹出悬浮确认框，确认后删除插件目录，并立即移除其面板 / 命令 / 已打开视图。
+- **上传插件(zip)**：选择 zip 包上传安装；安装成功立即激活（同名插件会先卸载旧实例再加载新代码）。
+
+### 安装 / 卸载历史查看
+
+点面板顶部的 **历史** 按钮，弹窗展示插件安装 / 卸载的历史记录（**新 → 旧**）：每条含 **动作（安装 / 卸载）**、**插件名 + 版本**、**时间**（本地时区），底部显示总条数；无记录时提示「暂无」。历史最多保留最近 **500** 条。
+
+数据由后端登记簿接口提供，插件内也可自行读取：
+
+### `GET /api/plugins/registry` → `{ plugins, history }`
+- `plugins`：`{ <id>: { id, name, version, status, installed_at, uninstalled_at, updated_at } }` —— 各插件最新状态（`status` 为 `installed` | `uninstalled`）。
+- `history`：`[{ action: "install" | "uninstall", id, name, version, at }]` —— 按时间正序追加的事件流。
+- 存储位置：`data/plugins/registry.json`。
+
+```js
+// 插件内也可读取登记簿，自行展示或统计
+const reg = await IDE.api.get("/api/plugins/registry");
+console.log(reg.history.slice(-10));   // 最近 10 条安装 / 卸载记录
+```
+
+---
+
+## 14. 快速上手清单
 
 1. 复制 `plugins/plugin-template/` 作为起点。
 2. 改 `plugin.json` 的 `id` / `name` / `icon`。
@@ -358,7 +393,7 @@ if (val === "run") { /* ... */ }
 
 ---
 
-## 14. 调试技巧
+## 15. 调试技巧
 
 - 所有异常会打印到浏览器 Console（前缀 `[IDE]`）。
 - 加载失败会有 `toast` 提示，并 `console.error` 具体原因。

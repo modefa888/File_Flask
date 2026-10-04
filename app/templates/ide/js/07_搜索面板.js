@@ -251,6 +251,51 @@
     if (kw) runSearch(kw);
   }
 
+  /* ---------- 会话持久化：搜索面板状态（刷新后保留） ---------- */
+  function sessionSaveSearch() {
+    if (!ideSettingGet("restoreSession", true)) return;
+    try {
+      const state = {
+        mode: searchMode,
+        kw: $("searchInput").value,
+        replace: $("replaceInput") ? $("replaceInput").value : "",
+        skipDep: searchSkipping, caseSensitive: searchCase, word: searchWord, regex: searchRegex
+      };
+      localStorage.setItem("ide.session.search", JSON.stringify(state));
+    } catch (_) {}
+  }
+  function sessionRestoreSearch() {
+    if (!ideSettingGet("restoreSession", true)) return;
+    let state = null;
+    try { state = JSON.parse(localStorage.getItem("ide.session.search") || ""); } catch (_) { state = null; }
+    if (!state) return;
+    try {
+      searchMode = state.mode === "name" ? "name" : "content";
+      $("searchPanel").classList.toggle("mode-name", searchMode === "name");
+      $("searchPanel").classList.toggle("mode-content", searchMode === "content");
+      document.querySelectorAll(".s-mode").forEach(b => b.classList.toggle("active", b.dataset.mode === searchMode));
+      $("searchInput").placeholder = searchMode === "content" ? "在文件中搜索…" : "搜索文件名 / 文件夹名…";
+      searchSkipping = !!state.skipDep;
+      searchCase = !!state.caseSensitive;
+      searchWord = !!state.word;
+      searchRegex = !!state.regex;
+      $("searchSkipDep").classList.toggle("active", searchSkipping);
+      $("searchCase").classList.toggle("active", searchCase);
+      $("grepWord").classList.toggle("active", searchWord);
+      $("grepRegex").classList.toggle("active", searchRegex);
+      $("searchInput").value = state.kw || "";
+      if ($("replaceInput")) $("replaceInput").value = state.replace || "";
+      const kw = ($("searchInput").value || "").trim();
+      if (kw) runSearch(kw);
+      else searchHint(searchMode === "content"
+        ? "输入关键字，在项目所有文件中搜索内容；结果可点击跳转"
+        : "输入关键字，递归搜索项目内的文件名与文件夹名");
+    } catch (_) {}
+  }
+  window.sessionRestoreSearch = sessionRestoreSearch;
+
+  if ($("replaceInput")) $("replaceInput").addEventListener("input", () => sessionSaveSearch());
+
   /* ---------- 模式切换与事件绑定 ---------- */
   function setSearchMode(mode) {
     searchMode = mode === "name" ? "name" : "content";
@@ -265,36 +310,41 @@
     else searchHint(searchMode === "content"
       ? "输入关键字，在项目所有文件中搜索内容；结果可点击跳转"
       : "输入关键字，递归搜索项目内的文件名与文件夹名");
+    sessionSaveSearch();
   }
   document.querySelectorAll(".s-mode").forEach(b => { b.onclick = () => { setSearchMode(b.dataset.mode); $("searchInput").focus(); }; });
   $("searchInput").addEventListener("input", (e) => {
     const kw = e.target.value.trim();
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => runSearch(kw), 300);
+    searchTimer = setTimeout(() => { runSearch(kw); sessionSaveSearch(); }, 300);
   });
   $("searchSkipDep").onclick = () => {
     searchSkipping = !searchSkipping;
     $("searchSkipDep").classList.toggle("active", searchSkipping);
     const kw = $("searchInput").value.trim();
     if (kw) runSearch(kw);
+    sessionSaveSearch();
   };
   $("searchCase").onclick = () => {
     searchCase = !searchCase;
     $("searchCase").classList.toggle("active", searchCase);
     const kw = $("searchInput").value.trim();
     if (kw) runSearch(kw);
+    sessionSaveSearch();
   };
   $("grepWord").onclick = () => {
     searchWord = !searchWord;
     $("grepWord").classList.toggle("active", searchWord);
     const kw = $("searchInput").value.trim();
     if (kw) runSearch(kw);
+    sessionSaveSearch();
   };
   $("grepRegex").onclick = () => {
     searchRegex = !searchRegex;
     $("grepRegex").classList.toggle("active", searchRegex);
     const kw = $("searchInput").value.trim();
     if (kw) runSearch(kw);
+    sessionSaveSearch();
   };
   $("grepReplaceAll").onclick = () => {
     if (searchMode !== "content") return;

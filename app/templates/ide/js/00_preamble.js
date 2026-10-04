@@ -114,6 +114,7 @@
     try {
       const panel = localStorage.getItem("ide.session.panel");
       if (panel && typeof showPanel === "function") showPanel(panel);
+      if (panel === "search" && typeof window.sessionRestoreSearch === "function") window.sessionRestoreSearch();
       const raw = localStorage.getItem("ide.session.tabs");
       const list = raw ? JSON.parse(raw) : [];
       const activePath = localStorage.getItem("ide.session.activeTab") || "";

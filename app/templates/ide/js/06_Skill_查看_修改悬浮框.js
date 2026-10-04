@@ -1033,14 +1033,17 @@
       return;
     }
     $("aiEmpty") && ($("aiEmpty").style.display = "none");
+    let userMsgForPending = null;
     if (!reuse) {
       const userText = text || (imgs.length ? "（见图）" : "");
       const attFiles = (AI.files || []).map(f => f.name);          // 本条消息附带的文件（消息上方显示）
-      AI.msgs.push({ role: "user", pid: aiNewPid(), text: userText, ts: Date.now(),
-                     imgs: imgs.length || undefined,
-                     images: imgs.length ? imgs : undefined,
-                     files: attFiles.length ? attFiles : undefined,
-                     skills: skillIds.length ? skillIds : undefined });
+      const userMsg = { role: "user", pid: aiNewPid(), text: userText, ts: Date.now(),
+                        imgs: imgs.length || undefined,
+                        images: imgs.length ? imgs : undefined,
+                        files: attFiles.length ? attFiles : undefined,
+                        skills: skillIds.length ? skillIds : undefined };
+      AI.msgs.push(userMsg);
+      userMsgForPending = { text: userText, ts: userMsg.ts, files: attFiles, skills: skillIds };
       const ub = aiBubble("user", userText, "", imgs, false, attFiles);
       ub.parentElement.insertAdjacentHTML("beforeend", aiUserMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
       $("aiText").innerHTML = "";
@@ -1049,6 +1052,7 @@
       aiRenderActiveSkills();
     }
     aiPersistCurrent(); aiRenderConv();
+    aiSavePendingTurn(text, imgs, skillIds, userMsgForPending);   // 记录本轮生成：刷新后可自动续接
 
     // ---- dsh 式记忆压缩：旧历史攒够就压成摘要，之后只带 摘要 + 最近几条 发送 ----
     const sess = AI.sessions.find(x => x.id === AI.curId);
@@ -1342,8 +1346,53 @@
       AI.busy = false; AI.ctrl = null;
       $("aiSend").style.display = ""; $("aiStop").style.display = "none";
       aiScrollToBottom(true);
+      aiClearPendingTurn();   // 无论成功/失败/停止，本轮已结束
     }
   }
+
+  function aiSavePendingTurn(text, imgs, skillIds, userMsg) {
+    if (!ideSettingGet("restoreSession", true)) return;
+    try {
+      localStorage.setItem("ide.ai.pendingTurn", JSON.stringify({
+        sid: AI.curId,
+        text: text || "",
+        imgs: (imgs || []).slice(0, 10),
+        skills: (skillIds || []).slice(),
+        userMsg: userMsg || null,                 // 轻量备份：防止后端 flush 未完成时刷新导致用户消息丢失
+        ts: Date.now()
+      }));
+    } catch (_) {}
+  }
+  function aiClearPendingTurn() {
+    try { localStorage.removeItem("ide.ai.pendingTurn"); } catch (_) {}
+  }
+  function aiResumePendingTurn() {
+    if (!AI.curId) return;
+    let p = null;
+    try { p = JSON.parse(localStorage.getItem("ide.ai.pendingTurn") || "null"); } catch (_) { p = null; }
+    if (!p || p.sid !== AI.curId) return;
+    let last = AI.msgs[AI.msgs.length - 1];
+    // 后端 flush 有 300ms 防抖：刷新时用户消息可能还没落库，从 localStorage 补回
+    if ((!last || last.role !== "user") && p.userMsg) {
+      const um = p.userMsg;
+      const imgs = (p.imgs || []).slice();
+      AI.msgs.push({
+        role: "user", pid: aiNewPid(),
+        text: um.text || "",
+        ts: um.ts || Date.now(),
+        imgs: imgs.length || undefined,
+        images: imgs.length ? imgs : undefined,
+        files: um.files && um.files.length ? um.files : undefined,
+        skills: um.skills && um.skills.length ? um.skills : undefined,
+      });
+      aiPersistCurrent(); aiRenderConv();
+      last = AI.msgs[AI.msgs.length - 1];
+    }
+    if (!last || last.role !== "user") return;
+    //  slight delay so UI is fully mounted after toggleAI
+    setTimeout(() => aiSend({ text: p.text || "", imgs: p.imgs || [], skills: p.skills || [] }), 50);
+  }
+
   // 注意：不能直接把 aiSend 当回调——aiSend(reuse) 的第一个参数会被当成「重新生成」参数，
   // 结果点击发送按钮会走 reuse 分支（不插入用户消息、不清空输入框）
   $("aiSend").addEventListener("click", () => aiSend());
@@ -1367,7 +1416,7 @@
     const pop = $("aiActiveSkillsPop");
     if (pop && pop.style.display !== "none" && !e.target.closest(".ai-hsk-wrap")) pop.style.display = "none";
   });
-  aiLoadSessions();
+  aiLoadSessions().then(() => aiResumePendingTurn());
   aiRenderActiveSkills();
   try { if (localStorage.getItem("ide.ai.open") === "1") toggleAI(true); } catch (_) {}
 

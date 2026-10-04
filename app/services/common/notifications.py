@@ -319,6 +319,7 @@ def append_history(rec: Dict[str, Any]) -> int:
 
 
 def read_latest(after_cursor: int = 0) -> Dict[str, Any]:
+    """读取最近通知（返回全部 history，由调用方决定展示条数）。"""
     d = _read_latest()
     d["cursor"] = int(d.get("cursor") or 0)
     d["latest_at"] = int(d.get("latest_at") or 0)

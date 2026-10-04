@@ -426,6 +426,7 @@
         } else if (rec_isNewer(d)) {
           notifyShowBrowser(d.latest);
           _notifyLastCursor = d.cursor || _notifyLastCursor;
+          notifyRefreshHistoryOnly();     // 设置面板开着的话，列表同步更新
         }
         try { localStorage.setItem(NOTIFY_CURSOR_KEY, String(_notifyLastCursor)); } catch (_) {}
       } catch (_) {}
@@ -448,6 +449,18 @@
     } catch (e) {
       console.error("[notify] load failed:", e);
     }
+  }
+
+  // 只刷新历史列表（新通知到达时调用）。
+  // 这里刻意不走 notifyLoad()：那个会用服务端配置回填整张表单，
+  // 会把用户正在编辑、还没保存的模板冲掉。
+  async function notifyRefreshHistoryOnly() {
+    if (!document.getElementById("notifyHistory")) return;   // 设置面板没打开就不用管
+    try {
+      const r = await fetch("/api/ai/notify");
+      const d = await r.json();
+      if (d && d.recent) notifyRenderHistory(d.recent);
+    } catch (_) {}
   }
 
   function notifyFill(cfg) {
@@ -597,9 +610,10 @@
         notifyToast(`测试通知已发送（${chName}）`, "ok");
       } else {
         const parts = [];
+        const chLabel = { desktop: "桌面", smtp: "邮件", telegram: "Telegram" };
         if (d.results) for (const [k, v] of Object.entries(d.results)) {
           if (!v) continue;   // 未参与本次测试的通道后端返回 null，跳过
-          parts.push(`${k}: ${v.ok ? "✅" : "❌"} ${(v.detail || v.error || "").slice(0, 200)}`);
+          parts.push(`${chLabel[k] || k}: ${v.ok ? "✅" : "❌"} ${(v.detail || v.error || "").slice(0, 200)}`);
         }
         notifyToast("测试失败：" + (parts.join(" | ") || d.error || "未知错误"), "err");
       }
@@ -708,11 +722,13 @@
       const body = notifyEsc(rawBody.length > 400 ? rawBody.slice(0, 400) + "…" : rawBody);
       const abs = notifyAbsTime(r.ts);
       const rel = notifyRelTime(r.ts);
+      // 标题模板里常已含来源名（如 "📬 AI 助手 · 14:33"），此时 meta 只显示时间，避免重复
+      const namePrefix = (meta.name && !rawTitle.includes(meta.name)) ? meta.name + " · " : "";
       return `<div class="notify-hitem">` +
-        `<div class="notify-hicon">${meta.icon}</div>` +
+        `<div class="notify-hicon" title="${meta.name}">${meta.icon}</div>` +
         `<div class="notify-hbody">` +
           `<div class="notify-htitle"><span>${title}</span>` +
-          `<span class="notify-hmeta" title="${abs}">${meta.name} · ${rel || abs}</span></div>` +
+          `<span class="notify-hmeta" title="${abs}">${namePrefix}${rel || abs}</span></div>` +
           `<div class="notify-hchannels">${chips}</div>` +
           (body ? `<div class="notify-hbodytext">${body}</div>` : "") +
         `</div>` +

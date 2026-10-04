@@ -451,7 +451,8 @@ def api_ai_notify_get():
     d = notify_svc.read_latest(after_cursor=after)
     return jsonify({
         "cfg": cfg,
-        "recent": d.get("history") or [],
+        # 磁盘上最多留 200 条，界面只展示最近 30 条（与卡片上的说明一致）
+        "recent": (d.get("history") or [])[:30],
         "latest": d.get("latest"),
         "cursor": int(d.get("cursor") or 0),
         "has_new": bool(d.get("has_new")),

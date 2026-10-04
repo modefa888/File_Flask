@@ -105,6 +105,16 @@ DEFAULT_NOTIFY_CFG: Dict[str, Any] = {
     },
 }
 
+# 顶层「标量」字段（非 dict）：读取和写入都必须显式搬运。
+# 漏掉任何一个，表现都是「界面改了、还提示保存成功，但通知模板始终是老样子」。
+_TOP_LEVEL_SCALARS = (
+    "enabled",
+    "scope",
+    "template_body",        # 正文模板（曾经漏在这里，导致正文模板保存无效）
+    "summary_max_chars",
+    "query_max_chars",
+)
+
 
 def _read_cfg() -> Dict[str, Any]:
     """深拷贝默认值；再合并磁盘 JSON 中的 notify 字段（缺失字段自动补齐）。"""
@@ -122,9 +132,12 @@ def _read_cfg() -> Dict[str, Any]:
     _merge(cfg, saved, "desktop")
     _merge(cfg, saved, "smtp")
     _merge(cfg, saved, "telegram")
-    for k in ("enabled", "scope", "summary_max_chars", "query_max_chars"):
+    for k in _TOP_LEVEL_SCALARS:
         if k in saved:
             cfg[k] = saved[k]
+    # 正文模板为空会让通知正文变空（Telegram 会直接报错），这里兜底回默认
+    if not str(cfg.get("template_body") or "").strip():
+        cfg["template_body"] = DEFAULT_NOTIFY_CFG["template_body"]
     return cfg
 
 
@@ -189,14 +202,26 @@ def save_notify_cfg(user_cfg: dict) -> Dict[str, Any]:
     disk = _read_cfg()          # 磁盘当前值（含明文 password）
 
     new = json.loads(json.dumps(DEFAULT_NOTIFY_CFG))
+    # 先用磁盘现值打底、再用入参覆盖（部分更新语义，Route 注释也是这么承诺的）。
+    # 否则界面上没有控件的字段（smtp.subject_prefix、desktop.timeout_ms、template.agent 等）
+    # 会在每次点保存时被悄悄重置回默认值。
+    for key in ("channels", "template", "desktop", "smtp", "telegram"):
+        if isinstance(disk.get(key), dict):
+            new.setdefault(key, {}).update(disk[key])
+    for k in _TOP_LEVEL_SCALARS:
+        if k in disk:
+            new[k] = disk[k]
     _merge(new, user_cfg, "channels")
     _merge(new, user_cfg, "template")
     _merge(new, user_cfg, "desktop")
     _merge(new, user_cfg, "smtp")
     _merge(new, user_cfg, "telegram")
-    for k in ("enabled", "scope", "summary_max_chars", "query_max_chars"):
+    for k in _TOP_LEVEL_SCALARS:
         if k in user_cfg:
             new[k] = user_cfg[k]
+    # 正文模板去尾部空白；留空则回默认，避免发出空正文
+    new["template_body"] = (str(new.get("template_body") or "").strip()
+                            or DEFAULT_NOTIFY_CFG["template_body"])
 
     # 密码合并：只有当用户真的输入了新密码时才覆盖
     incoming_pw = str((user_cfg.get("smtp") or {}).get("password") or "").strip()
@@ -346,7 +371,7 @@ def send_test(channel: str = "all") -> Dict[str, Any]:
 
     try:
         _write_cfg_patch(test_notify)
-        res = notify(title, body, channel="chat")
+        res = notify(title, body, channel="chat", source="test")
     finally:
         # 恢复原配置（注意：不要覆盖用户后来可能做的改动，用 _write_cfg_patch 保留其余字段）
         _write_cfg_patch(orig_notify)
@@ -1053,16 +1078,21 @@ def should_notify(channel: str) -> bool:
     return scope in ("both", channel)
 
 
-def notify(title: str, body: str, channel: str = "chat") -> Dict[str, Any]:
+def notify(title: str, body: str, channel: str = "chat",
+           source: str = "") -> Dict[str, Any]:
     """按配置推送一次通知，并把记录写入 latest/history。
 
+    channel: 场景（chat / agent），决定用哪套模板、以及 scope 判定
+    source:  历史记录里的来源标签，默认与 channel 相同；测试入口传 "test"
     任何异常都不会抛，只 log。
     """
-    results = {"channel": channel, "title": title, "body": body,
+    results = {"channel": channel, "source": source or channel,
+               "title": title, "body": body,
                "desktop": None, "smtp": None, "telegram": None}
     if not should_notify(channel):
+        # 没启用 / scope 不匹配：什么都没发出去，不写历史，
+        # 否则列表里会出现一条既没有正文、也没有通道状态的“空壳记录”。
         results["skipped"] = "disabled"
-        _record_history(results)
         return results
 
     cfg = _read_cfg()
@@ -1117,15 +1147,28 @@ def _record_history(results: Dict[str, Any]) -> None:
         cfg = _read_cfg()
         if not cfg.get("enabled"):
             return
+        # 本次真正尝试过的通道（未启用的通道是 None，不写进来）
+        channels: Dict[str, Any] = {}
+        for key in ("desktop", "smtp", "telegram"):
+            r = results.get(key)
+            if isinstance(r, dict):
+                channels[key] = {
+                    "ok": bool(r.get("ok")),
+                    "detail": str(r.get("detail") or "")[:300],
+                }
         summary = {
+            # kind 是历史列表用来显示来源（AI 助手 / AI 智能体 / 测试通知）的字段
+            "kind": str(results.get("source") or results.get("channel") or "chat"),
             "channel": results.get("channel"),
             "title": results.get("title"),
-            "body": (results.get("body") or "")[:400],
+            "body": (results.get("body") or "")[:800],
             "ts": int(time.time()),
+            "channels": channels,
+            "skipped": results.get("skipped"),
+            # 兼容旧版读取方：保留平铺的通道字段
             "desktop": results.get("desktop"),
             "smtp": results.get("smtp"),
             "telegram": results.get("telegram"),
-            "skipped": results.get("skipped"),
         }
         append_history(summary)
     except Exception:

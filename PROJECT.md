@@ -1,6 +1,6 @@
 # PROJECT.md — 项目结构与架构说明
 
-> 本文档基于当前代码库（`app/__init__.py` 注册蓝图、`app/routes/`、`app/services/` 实际文件）梳理生成，用于快速了解工程结构、模块职责与关键数据流。与 `README.md` 中"16 个蓝图"的旧描述不同，**当前实际注册 18 个蓝图**（新增了 `ai` 与 `agent`）。
+> 本文档基于当前代码库（`app/__init__.py` 注册蓝图、`app/routes/`、`app/services/` 实际文件）梳理生成，用于快速了解工程结构、模块职责与关键数据流。与 `README.md` 中"16 个蓝图"的旧描述不同，**当前实际注册 20 个蓝图**（新增 `ai`、`agent`、`chat_history`、`pip`）。
 
 ---
 
@@ -45,7 +45,7 @@ File_Flask/
     ├── __init__.py       # 应用工厂 create_app()
     ├── config.py         # 集中配置（端口/账号/安全规则/缓存路径/ffmpeg…）
     ├── log.py            # JSON 日志 + 每日轮转
-    ├── routes/           # 18 个蓝图（HTTP 层）
+    ├── routes/           # 20 个蓝图（HTTP 层）
     ├── services/         # 11 个业务服务（无 HTTP 依赖）
     ├── templates/        # 5 个 Jinja 模板
     └── static/           # 前端资源 + vendor 本地化依赖
@@ -58,7 +58,7 @@ File_Flask/
 `create_app()` 按顺序执行：
 
 1. **构造 Flask 实例**：模板/静态目录从 `config` 取；写入 `SECRET_KEY / DEBUG / JSON_AS_ASCII / MAX_CONTENT_LENGTH=32MB`。
-2. **`_register_blueprints(app)`**：一次性 `import` 并注册 18 个蓝图（顺序见下文第 4 节）。
+2. **`_register_blueprints(app)`**：一次性 `import` 并注册 20 个蓝图（顺序见下文第 4 节）。
 3. **`_install_request_logging(app)`**：
    - `before_request` 记录 `g._start = monotonic()` 与 `method/path`。
    - `after_request` 输出 JSON 日志，字段包含 `method / path / status / latency_ms`。
@@ -72,7 +72,9 @@ File_Flask/
 
 ---
 
-## 4. 路由层：18 个蓝图
+## 4. 路由层：20 个蓝图
+
+> 共 **20 个 Blueprint**（见 `app/__init__.py`）；`README.md` 中的"16 个"为旧数据，待同步。
 
 `app/routes/` 下每个模块暴露一个 `bp` 蓝图，均在 `create_app()` 中注册：
 
@@ -94,10 +96,12 @@ File_Flask/
 | 14 | `term.py` | `term` | 服务器终端命令执行（含安全拦截与二次确认） |
 | 15 | `env.py` | `env` | 运行环境探测 / 一键安装到 `~/.local` |
 | 16 | `shares.py` | `shares` | `/share/<token>` 分享链接 |
-| 17 | `ai.py` | `ai` | AI 助手：多接口（OpenAI 兼容）配置、流式对话、按 git 改动生成提交信息 |
-| 18 | `agent.py` | `agent` | AI 智能体：模型自动读/写文件、搜索、执行命令，多轮直到任务完成 |
+| 17 | `ide/ai.py` | `ai` | AI 助手：多接口（OpenAI 兼容）配置、流式对话、按 git 改动生成提交信息 |
+| 18 | `ide/agent.py` | `agent` | AI 智能体：模型自动读/写文件、搜索、执行命令，多轮直到任务完成 |
+| 19 | `ide/chat_history.py` | `chat_history` | AI 对话历史持久化：会话/消息的增删查改（SQLite） |
+| 20 | `ide/pip.py` | `pip` | IDE 内的 Python 包管理：安装 / 卸载 / 查询 |
 
-### 4.1 AI 助手（`ai.py`）
+### 4.1 AI 助手（`ide/ai.py`）
 
 - 兼容所有 OpenAI 格式的服务（OpenAI / DeepSeek / Kimi / Qwen / SenseNova / Ollama / vLLM …）。
 - 端点：
@@ -107,7 +111,7 @@ File_Flask/
 - 配置持久化在 `data/storage/.file_manager_ai.json`。
 - 限制：图片 data URL 单张 9MB、单次最多 8 张图片部件；连接超时 15s、读取超时 300s。
 
-### 4.2 AI 智能体（`agent.py`）
+### 4.2 AI 智能体（`ide/agent.py`）
 
 - 端点：
   - `POST /api/ai/agent` `{repo, messages, perm, provider_id?, model?}` —— SSE 流式。
@@ -118,6 +122,16 @@ File_Flask/
   - `workspace` —— 读任意；写只能落在项目根内；执行命令逐条确认。
   - `full` —— 读写任意；执行命令不再确认（危险命令仍被 `services/safety.py` 拦截）。
 - 关键防护：`_MAX_ROUNDS=12` 防死循环；单个工具结果回填模型上限 20000 字符；`read_file` 返回 4 万字符；搜索最多扫 4000 文件、返回 60 命中；命令 `timeout` 1–300s，超时 `SIGTERM → SIGKILL` 杀进程组。
+
+### 4.3 AI 对话历史（`ide/chat_history.py` + `services/ide/chatdb.py`）
+
+- 端点：`/api/ai/chat/*`（列表、详情、新增、删除等，按 `user_id` 隔离）。
+- 存储：`data/.file_manager_ai_chat.db`（SQLite，`conversations` + `messages` 双表）。
+- 消息中的图片以 `dataURL` 形式完整保存（`images` 字段为 JSON 数组），保证多端回放一致。
+
+### 4.4 pip 包管理（`ide/pip.py`）
+
+- 供 IDE 侧边栏调用，支持安装 / 卸载 / 查询 Python 包，可指定虚拟环境。
 
 ---
 
@@ -134,6 +148,8 @@ File_Flask/
 | `envprobe.py` | 探测系统 Python / Node 等运行时 |
 | `envinstall.py` | 白名单式一键安装运行时到 `~/.local`，无需管理员 |
 | `portinfo.py` | 端口占用查询 |
+| `services/ide/chatdb.py` | AI 对话历史 SQLite 存储层（`conversations` + `messages` 双表，按 `user_id` 隔离） |
+| `services/ide/agent/` | Agent 智能体的工具实现与权限门控 |
 | `archive_history.py` | 压缩历史持久化 |
 
 ---
@@ -237,5 +253,7 @@ Client ◀─响应─
 | 加业务逻辑（不依赖 HTTP） | `app/services/xxx.py` |
 | 加日志字段 | `app/log.py` + `app/__init__.py::_install_request_logging` |
 | 前端界面 | `app/templates/index.html`（桌面）/ `mobile.html`（手机）/ `ide.html`（IDE） |
+| AI 对话历史结构 | `app/services/ide/chatdb.py` + `app/routes/ide/chat_history.py` |
+| pip 安装 / 环境探测 | `app/routes/ide/pip.py` + `services/ide/envprobe.py`、`envinstall.py` |
 | 打包脚本 | `FileManager.spec` |
 | 启动参数 | `run.py` 的 `argparse` |

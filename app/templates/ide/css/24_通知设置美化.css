@@ -318,12 +318,20 @@
 .notify-hch i { margin-right: 3px; }
 .notify-hch.ok { background: rgba(0,150,0,.18); color: #7ee787; }
 .notify-hch.fail { background: rgba(180,0,0,.18); color: #f48771; }
+/* 本次没有任何通道参与（例如通知被跳过）：给出明确状态，而不是一个光秃秃的破折号 */
+.notify-hch.skip { background: #2c2c2d; color: #888; }
+/* 鼠标悬停可看通道失败原因 / 完整时间 */
+.notify-hch[title], .notify-hmeta[title] { cursor: help; }
 .notify-hbodytext {
   font-size: 11.5px;
   color: #999;
   margin-top: 4px;
   line-height: 1.45;
-  word-break: break-all;
+  word-break: break-word;
+  /* 保留模板里的换行（结构化报告模板一行一条，压成一行很难读） */
+  white-space: pre-wrap;
+  max-height: 90px;
+  overflow: hidden;
 }
 
 /* ============ 通知模板：快速模板 / 效果预览 / 变量胶囊 ============ */

@@ -385,8 +385,10 @@
 
   function notifyShowBrowser(rec) {
     if (!rec) return;
-    const ch = rec.channels || {};
-    const dk = ch.desktop;                       // 只镜像 desktop（浏览器）通道
+    // 兼容旧记录：早期版本把通道平铺在顶层（rec.desktop），没有 channels 汇总
+    const dk = (rec.channels && rec.channels.desktop !== undefined)
+      ? rec.channels.desktop
+      : rec.desktop;                             // 只镜像 desktop（浏览器）通道
     const ok = typeof dk === "boolean" ? dk : !!(dk && dk.ok);
     if (!ok) return;
     // 浏览器通知仅在安全上下文（https / localhost）可用；
@@ -623,6 +625,65 @@
     }
   }
 
+  /* ---------- 历史记录字段归一化 ----------
+     后端记录格式：{ id, kind: chat|agent|test, title, body, ts,
+                     channels: { desktop: {ok, detail}, ... } }
+     旧记录没有 kind、也没有 channels 汇总（只有平铺的 desktop/smtp/telegram），
+     这里统一兼容，避免列表里出现 "[unknown]"、"—" 这类无意义占位。 */
+  const NOTIFY_KIND_META = {
+    chat:  { icon: "💬", name: "AI 助手" },
+    agent: { icon: "🤖", name: "AI 智能体" },
+    test:  { icon: "🧪", name: "测试通知" },
+  };
+  const NOTIFY_CH_NAME = { desktop: "桌面", smtp: "邮件", telegram: "Telegram" };
+
+  function notifyEsc(v) {
+    return String(v == null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  // 来源场景：新记录读 kind，旧记录退回 channel
+  function notifyKindMeta(r) {
+    const k = String((r && r.kind) || (r && r.channel) || "").toLowerCase();
+    return NOTIFY_KIND_META[k] || { icon: "📢", name: "通知" };
+  }
+
+  // 本次真正走到的通道（未启用的通道后端存 null，直接跳过）
+  function notifyChannelsOf(r) {
+    const src = (r && r.channels && typeof r.channels === "object" && !Array.isArray(r.channels))
+      ? r.channels
+      : { desktop: r && r.desktop, smtp: r && r.smtp, telegram: r && r.telegram };
+    const out = [];
+    for (const key of ["desktop", "smtp", "telegram"]) {
+      const v = src[key];
+      if (v === null || v === undefined) continue;
+      if (typeof v === "boolean") { out.push({ key, ok: v, detail: "" }); continue; }
+      if (typeof v !== "object") continue;
+      out.push({ key, ok: !!v.ok, detail: v.detail ? String(v.detail) : "" });
+    }
+    return out;
+  }
+
+  function notifyAbsTime(ts) {
+    const t = Number(ts) || 0;
+    if (!t) return "—";
+    const d = new Date(t * 1000);
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  function notifyRelTime(ts) {
+    const t = Number(ts) || 0;
+    if (!t) return "";
+    const diff = Math.max(0, Math.floor(Date.now() / 1000) - t);
+    if (diff < 60) return "刚刚";
+    if (diff < 3600) return Math.floor(diff / 60) + " 分钟前";
+    if (diff < 86400) return Math.floor(diff / 3600) + " 小时前";
+    if (diff < 604800) return Math.floor(diff / 86400) + " 天前";
+    return "";
+  }
+
   function notifyRenderHistory(records) {
     const box = document.getElementById("notifyHistory");
     if (!box) return;
@@ -630,33 +691,29 @@
       box.innerHTML = '<div class="notify-history-empty"><i class="bi bi-inbox"></i>暂无通知记录<div>AI 对话或智能体任务完成后会自动出现在这里。</div></div>';
       return;
     }
-    const icon = { ai: "💬", chat: "💬", agent: "🤖", test: "🧪" };
-    const chClass = ok => ok ? "ok" : "fail";
-    const chIcon = ok => ok ? "bi-check-circle" : "bi-x-circle";
-    const chs = r => {
-      const names = Object.keys(r.channels || {});
-      if (!names.length) return '<span class="notify-hch">—</span>';
-      return names.map(n => {
-        const c = r.channels[n] || {};
-        const ok = typeof c === "boolean" ? c : c.ok;
-        return `<span class="notify-hch ${chClass(ok)}"><i class="bi ${chIcon(ok)}"></i> ${n}</span>`;
-      }).join("");
-    };
-    const ts = t => {
-      if (!t) return "—";
-      const d = new Date(t * 1000);
-      const pad = n => String(n).padStart(2, "0");
-      return `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    };
     box.innerHTML = records.map(r => {
-      const title = (r.title || "").replace(/</g, "&lt;");
-      const body = (r.body || "").replace(/</g, "&lt;").replace(/\s+/g, " ").slice(0, 120);
-      const task = (r.task || r.kind || "unknown").replace(/</g, "&lt;");
+      const meta = notifyKindMeta(r);
+      const chats = notifyChannelsOf(r);
+      const chips = chats.length
+        ? chats.map(c => {
+            const tip = c.detail ? ` title="${notifyEsc(c.detail)}"` : "";
+            return `<span class="notify-hch ${c.ok ? "ok" : "fail"}"${tip}>` +
+                   `<i class="bi ${c.ok ? "bi-check-circle" : "bi-x-circle"}"></i>` +
+                   `${NOTIFY_CH_NAME[c.key] || c.key}</span>`;
+          }).join("")
+        : `<span class="notify-hch skip"><i class="bi bi-slash-circle"></i>未发送</span>`;
+      const rawTitle = String(r.title || "").trim();
+      const rawBody = String(r.body || "").trim();
+      const title = notifyEsc(rawTitle.length > 120 ? rawTitle.slice(0, 120) + "…" : rawTitle) || "（无标题）";
+      const body = notifyEsc(rawBody.length > 400 ? rawBody.slice(0, 400) + "…" : rawBody);
+      const abs = notifyAbsTime(r.ts);
+      const rel = notifyRelTime(r.ts);
       return `<div class="notify-hitem">` +
-        `<div class="notify-hicon">${icon[r.kind] || "📢"}</div>` +
+        `<div class="notify-hicon">${meta.icon}</div>` +
         `<div class="notify-hbody">` +
-          `<div class="notify-htitle"><span>${title}</span><span class="notify-hmeta">[${task}] · ${ts(r.ts || 0)}</span></div>` +
-          `<div class="notify-hchannels">${chs(r)}</div>` +
+          `<div class="notify-htitle"><span>${title}</span>` +
+          `<span class="notify-hmeta" title="${abs}">${meta.name} · ${rel || abs}</span></div>` +
+          `<div class="notify-hchannels">${chips}</div>` +
           (body ? `<div class="notify-hbodytext">${body}</div>` : "") +
         `</div>` +
       `</div>`;

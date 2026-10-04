@@ -111,8 +111,6 @@ cd() {
   elif [ "$a" = "~" ] || [ "$a" = "-" ]; then
     command cd "$_SS_SCOPE"
     echo "已限制在操作范围内：$_SS_SCOPE"
-  else
-    echo "作用域限制：无法离开 $_SS_SCOPE" >&2
   fi
 }
 """
@@ -306,9 +304,9 @@ def api_term_exec():
         new_cwd = stdout[idx + len(marker):].strip()
         stdout = stdout[:idx]
         if new_cwd and os.path.isdir(new_cwd):
-            # scope 生效时拒绝越界的 cwd 更新，保留原目录
+            # scope 生效时拒绝越界的 cwd 更新，保留原目录（不在终端输出里刷屏）
             if scope and not (new_cwd == scope or new_cwd.startswith(scope + os.sep)):
-                stdout = (stdout + f"\n作用域限制：拒绝切换出操作范围（{scope}），cwd 已回退。").rstrip("\n")
+                _log.warning("终端 cwd 越界已回退：%s -> %s", new_cwd, scope)
             else:
                 sess["cwd"] = new_cwd
     stdout = stdout.rstrip("\n")

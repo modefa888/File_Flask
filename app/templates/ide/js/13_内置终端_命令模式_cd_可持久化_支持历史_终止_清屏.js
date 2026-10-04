@@ -94,6 +94,12 @@
   }
   function termPrompt() { $("termPrompt").innerHTML = termPromptHtml(); }
 
+  // 把绝对路径折成项目名，用于终端标题、操作范围等展示
+  function termProjName(p) {
+    if (!p) return "项目";
+    return p.replace(/\/+$/, "").split(/[\\/]/).pop() || "项目";
+  }
+
   /* ---------- 会话管理：新建 / 切换 / 关闭 ---------- */
   function termNew() {
     if (TERMS.length >= TERM_MAX) { toast("最多同时打开 " + TERM_MAX + " 个终端", "warn"); return Promise.resolve(null); }
@@ -131,10 +137,11 @@
         s.el = el;
         $("bpTermTabs").style.display = "";
         TERMS.push(s);
-        termAppendTo(s, "内置终端（命令模式）· " + d.cwd + "\n" +
+        const _tProj = termProjName(d.cwd);
+        termAppendTo(s, "内置终端（命令模式）· " + _tProj + "\n" +
         "支持 git / npm / ls 等命令；cd 会保持目录；Ctrl+C 终止当前命令，Ctrl+L 清屏。\n" +
         "（不支持 vim、top 等需要 TTY 的全屏程序）\n" +
-        (d.scope ? "操作范围：" + d.scope + "（仅允许在此目录下执行文件操作，越界路径会被拦截）\n" : "") +
+        (d.scope ? "操作范围：" + termProjName(d.scope) + "（仅允许在此目录下执行文件操作，越界路径会被拦截）\n" : "") +
         "安全策略：危险命令自动拦截，高风险命令执行前二次确认（终端菜单 → 命令安全策略）。\n\n", "term-dim");
         selectTerm(s);
         toggleBottom(true, "term");

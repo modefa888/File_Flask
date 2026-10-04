@@ -438,7 +438,7 @@
     }
     $("sideRoot").textContent = baseName(ROOT) || ROOT;
     $("tbTitle").textContent = "在线项目 IDE — " + baseName(ROOT);
-    $("welcomeSub").textContent = "项目根目录：" + ROOT + "\n从左侧资源管理器选择文件开始编辑。";
+    $("welcomeSub").textContent = "项目：" + baseName(ROOT) + "\n从左侧资源管理器选择文件开始编辑。";
     explorerPanel.innerHTML = "";                 // 防御重复建树：先清空再追加（并发触发时只保留最后一次）
     const root = document.createElement("div");
     root.className = "tree-children open"; root._base = ROOT; root._loaded = true;

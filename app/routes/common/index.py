@@ -39,6 +39,15 @@ def api_search():
     skip_l = {s.lower() for s in skip_dirs}
     # case=1 表示关键字区分大小写（默认不区分）
     case_sensitive = request.args.get("case", "").strip() in ("1", "true", "yes", "on")
+    # 文件大小筛选（字节，0 = 该侧不限），只作用于文件
+    try:
+        min_size = max(0, int(request.args.get("min_size", 0) or 0))
+    except (ValueError, TypeError):
+        min_size = 0
+    try:
+        max_size = max(0, int(request.args.get("max_size", 0) or 0))
+    except (ValueError, TypeError):
+        max_size = 0
 
     if not keyword:
         return jsonify({"error": "搜索关键字不能为空"}), 400
@@ -55,7 +64,8 @@ def api_search():
         meta = _get_index_meta()
         if meta["total_files"] > 0 and use_index in ("auto", "force"):
             t0 = time.monotonic()
-            items = _query_index(keyword, ext_filter, type_filter, limit=5000)
+            items = _query_index(keyword, ext_filter, type_filter, limit=5000,
+                                 min_size=min_size, max_size=max_size)
             # 限定搜索根目录时，过滤索引结果
             if root:
                 root_abs = os.path.abspath(os.path.normpath(root))
@@ -104,7 +114,8 @@ def api_search():
             t0 = time.monotonic()
             items, status = _search_walk(root, keyword, ext_filter, type_filter, timeout, stop_event,
                                          max_results=5000, skip_dirs=skip_dirs,
-                                         case_sensitive=case_sensitive)
+                                         case_sensitive=case_sensitive,
+                                         min_size=min_size, max_size=max_size)
             dur = time.monotonic() - t0
             err = None
             if status == "error:":

@@ -150,8 +150,10 @@ def _scan_root(root, stop_event, conn, max_results=2000000):
     return count, None
 
 
-def _query_index(keyword, ext_filter, type_filter, limit=5000):
-    """从索引中查询，返回文件信息列表"""
+def _query_index(keyword, ext_filter, type_filter, limit=5000, min_size=0, max_size=0):
+    """从索引中查询，返回文件信息列表。
+    min_size / max_size 为字节数，0 表示该侧不限（目录不参与大小过滤）。
+    """
     conn = _get_index_conn()
     try:
         keyword_l = keyword.lower()
@@ -176,6 +178,14 @@ def _query_index(keyword, ext_filter, type_filter, limit=5000):
             where_clauses.append("(is_dir = 0)")
         elif type_filter == "目录":
             where_clauses.append("(is_dir = 1)")
+
+        # 大小过滤（只在文件上生效：目录 size 无意义）
+        if min_size and int(min_size) > 0:
+            where_clauses.append("(is_dir = 0 AND size >= ?)")
+            params.append(int(min_size))
+        if max_size and int(max_size) > 0:
+            where_clauses.append("(is_dir = 0 AND size <= ?)")
+            params.append(int(max_size))
 
         where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
         params.append(limit)
@@ -466,13 +476,14 @@ def _schedule_index_scan():
 
 
 def _search_walk(root, keyword, ext_filter, type_filter, timeout, stop_event, max_results,
-                 skip_dirs=(), case_sensitive=False):
+                 skip_dirs=(), case_sensitive=False, min_size=0, max_size=0):
     """在 root 下遍历，收集匹配项。stop_event 可中断，超时由调用方控制。
 
     skip_dirs: 需要跳过的目录名（不区分大小写），如 node_modules / dist，
                用于按需排除依赖与构建目录，默认不过滤（保持原有行为）。
     case_sensitive: 关键字是否区分大小写，默认 False（如输入 rea 可命中 README.md）；
                     匹配规则为「名称包含关键字」，因此部分关键字与全名都能命中。
+    min_size / max_size: 文件大小区间（字节，0 = 该侧不限），只作用于文件、不影响目录。
     """
     items = []
     keyword_l = keyword if case_sensitive else keyword.lower()
@@ -518,6 +529,10 @@ def _search_walk(root, keyword, ext_filter, type_filter, timeout, stop_event, ma
                     try:
                         info = get_file_info(fp, root)
                         if info:
+                            sz = int(info.get("size") or 0)
+                            if (min_size and int(min_size) > 0 and sz < int(min_size)) or \
+                               (max_size and int(max_size) > 0 and sz > int(max_size)):
+                                continue        # 命中关键字但不在大小区间内
                             info["abs_path"] = fp.replace("\\", "/")
                             items.append(info)
                     except Exception:

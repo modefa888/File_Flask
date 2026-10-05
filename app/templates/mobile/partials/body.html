@@ -42,6 +42,23 @@
     <button class="mp-btn close" id="mpClose" title="关闭"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
   </div>
 
+  <!-- 视频：收起后的后台播放胶囊（参考音乐迷你条，播放不中断） -->
+  <div class="vp-dock" id="vpDock">
+    <div class="vpd-thumb" id="vpdThumb"></div>
+    <div class="vpd-meta">
+      <div class="vpd-name" id="vpdName">—</div>
+      <div class="vpd-sub">
+        <span class="vpd-state" id="vpdState">播放中</span>
+        <span class="vpd-time" id="vpdTime"></span>
+      </div>
+    </div>
+    <button class="vpd-btn" id="vpdToggle" title="播放/暂停"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
+    <button class="vpd-btn" id="vpdNext" title="下一个"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+    <button class="vpd-btn" id="vpdMin" title="缩小为悬浮图标"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 13H5v-2h14v2z"/></svg></button>
+    <button class="vpd-btn" id="vpdClose" title="关闭播放"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+    <div class="vpd-bar"><i id="vpdBar"></i></div>
+  </div>
+
   <!-- 音乐播放器：全屏页 -->
   <div class="player-page" id="playerPage">
     <div class="pp-bg" id="ppBg"></div>
@@ -169,6 +186,7 @@
       <span class="sp-chip" id="spScopeLocal">📁 当前目录</span>
       <span class="sp-status" id="spStatus"></span>
       <div class="sp-histwrap hidden" id="spHistWrap"></div>
+      <button class="sp-histbtn" id="spFilterBtn" title="按文件大小筛选">⚙️</button>
       <button class="sp-histbtn" id="spHistBtn" title="搜索历史">🕘</button>
     </div>
     <div class="sp-body">

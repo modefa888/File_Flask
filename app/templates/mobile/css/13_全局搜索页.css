@@ -114,3 +114,10 @@
   .sp-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .sp-results { padding: 8px; }
   .sp-note { text-align: center; color: var(--sub); font-size: 12px; padding: 10px; }
+
+  /* 工具栏的「大小筛选」按钮：设置了筛选就点亮 */
+  .sp-tools .sp-histbtn.on {
+    background: rgba(31,111,235,.12);
+    border-color: rgba(31,111,235,.45);
+    color: var(--primary);
+  }

@@ -38,6 +38,7 @@
     vpSyncPlayIcon();
     // 播放列表抽屉开着时同步高亮
     if (document.getElementById("vpPl").classList.contains("show")) vpRenderPlaylist();
+    vpDockSync();                          // 收起状态下切歌，胶囊同步
   }
   function vpToggle() {
     if (vpVideo.paused) { var pp = vpVideo.play(); if (pp && pp.catch) pp.catch(function () {}); }
@@ -64,6 +65,7 @@
     if (!items || !items.length) return;
     vpList = items.map(function (x) { return { name: x.name, abs: x.abs || x.abs_path }; });
     vpIndex = Math.max(0, Math.min(idx || 0, vpList.length - 1));
+    vpHideDock();
     vpPage.classList.add("show");
     vpRestoreVolume();
     vpRestoreRate();
@@ -77,7 +79,93 @@
     vpCloseRatePop();
     vpClosePlaylist();
     if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (e) {} }
+    vpHideDock();
   }
+
+  // ===== 收起 = 后台播放胶囊（参考音乐迷你条：不暂停、不卸载视频源） =====
+  var vpDockEl = null;
+  function _vpDock() {
+    if (!vpDockEl) vpDockEl = document.getElementById("vpDock");
+    return vpDockEl;
+  }
+  function vpHideDock() {
+    var d = _vpDock();
+    if (d) { d.classList.remove("show"); d.classList.remove("lifted"); d.classList.remove("dock"); }
+  }
+  // 收起：只隐藏播放页，视频继续播；右下角出现胶囊，点它可还原
+  function vpCollapseToDock() {
+    var d = _vpDock();
+    vpPage.classList.remove("show");
+    document.getElementById("vpVolBar").classList.remove("show");
+    vpCloseRatePop();
+    vpClosePlaylist();
+    if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (e) {} }
+    if (!d) return;
+    d.classList.remove("dock");            // 重新收起时回到完整胶囊
+    // 音乐迷你条也在显示时上移一层，避免两条重叠
+    var mp = document.getElementById("miniPlayer");
+    d.classList.toggle("lifted", !!(mp && mp.classList.contains("show")));
+    d.classList.add("show");
+    vpDockSync();
+  }
+  function vpExpandFromDock() {
+    vpHideDock();
+    vpPage.classList.add("show");
+    vpDockSync();
+  }
+  // 同步胶囊：文件名 / 封面 / 播放按钮 / 进度
+  function vpDockSync() {
+    var d = _vpDock();
+    if (!d) return;
+    var it = vpList[vpIndex];
+    var nameEl = document.getElementById("vpdName");
+    if (nameEl && it) nameEl.textContent = it.name;
+    var th = document.getElementById("vpdThumb");
+    if (th && it && th.getAttribute("data-p") !== it.abs) {
+      th.setAttribute("data-p", it.abs);
+      th.style.backgroundImage = 'url("/api/thumbnail?path=' + encodeURIComponent(it.abs) + '")';
+    }
+    var tg = document.getElementById("vpdToggle");
+    if (tg) tg.innerHTML = vpVideo.paused ? _svgPlay : _svgPause;
+    if (!d.classList.contains("show")) return;      // 没在后台播放就不必刷进度
+    var dur = vpVideo.duration, cur = vpVideo.currentTime;
+    var bar = document.getElementById("vpdBar");
+    if (bar) bar.style.width = (isFinite(dur) && dur > 0) ? (cur / dur * 100) + "%" : "0%";
+    var st = document.getElementById("vpdState");
+    if (st) st.textContent = vpVideo.paused ? "已暂停" : "播放中";
+    var tm = document.getElementById("vpdTime");
+    if (tm) tm.textContent = (isFinite(dur) && dur > 0) ? _fmtTime(cur) + " / " + _fmtTime(dur) : "";
+  }
+  vpVideo.addEventListener("play", vpDockSync);
+  vpVideo.addEventListener("pause", vpDockSync);
+  vpVideo.addEventListener("timeupdate", vpDockSync);
+  (function bindVpDock() {
+    var d = document.getElementById("vpDock");
+    if (!d) return;
+    d.addEventListener("click", vpExpandFromDock);      // 点胶囊主体即展开
+    document.getElementById("vpdToggle").addEventListener("click", function (e) {
+      e.stopPropagation(); vpToggle();
+    });
+    document.getElementById("vpdNext").addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (vpIndex < vpList.length - 1) vpPlayIndex(vpIndex + 1, true);
+      else { vpVideo.currentTime = 0; var p = vpVideo.play(); if (p && p.catch) p.catch(function () {}); }
+    });
+    // 缩小为圆形缩略图（对应音乐条的「缩小为悬浮封面」）；点缩略图恢复胶囊
+    document.getElementById("vpdMin").addEventListener("click", function (e) {
+      e.stopPropagation();
+      d.classList.add("dock");
+    });
+    document.getElementById("vpdThumb").addEventListener("click", function (e) {
+      if (d.classList.contains("dock")) {
+        e.stopPropagation();          // 圆图标模式：点它只恢复胶囊，不打开播放器
+        d.classList.remove("dock");
+      }
+    });
+    document.getElementById("vpdClose").addEventListener("click", function (e) {
+      e.stopPropagation(); closeVPlayer();
+    });
+  })();
 
   // 分享当前正在播放的视频（走统一的分享面板：有效期 / 密码 / 次数 / 二维码）
   document.getElementById("vpShareBtn").addEventListener("click", function () {
@@ -86,7 +174,8 @@
     openShareSheet({ name: it.name, is_dir: false, abs_path: it.abs });
   });
 
-  document.getElementById("vpCollapse").addEventListener("click", closeVPlayer);
+  // ⌄ = 收起为后台播放胶囊（播放不中断）；真正退出改到胶囊上的 ✕
+  document.getElementById("vpCollapse").addEventListener("click", vpCollapseToDock);
   document.getElementById("vpPlay").addEventListener("click", vpToggle);
   document.getElementById("vpBig").addEventListener("click", vpToggle);
   vpVideo.addEventListener("click", vpToggle);        // 点画面也能播放/暂停

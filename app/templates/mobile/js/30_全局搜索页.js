@@ -30,7 +30,7 @@
     try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
   }
   function spSig(q, scope, root) {
-    return q + "|" + scope + "|" + root;
+    return q + "|" + scope + "|" + root + "|" + spFilterSig();   // 筛选条件不同 → 缓存互不串用
   }
   function spCacheLoad() {
     var obj = spLsGet(SP_CACHE_KEY, {});
@@ -156,11 +156,94 @@
     }
   }
   spHistBtn.addEventListener("click", toggleHist);
+
+  // ---------- 搜索结果的大小筛选（单一区间，作用于文件，目录不受影响） ----------
+  var SP_FILTER_KEY = "fm_mobile_search_filter_v1";
+  var SP_FILTER_UNITS = [[1, "B"], [1024, "KB"], [1048576, "MB"], [1073741824, "GB"]];
+  var _spFilter = { min: "", max: "", unit: 1048576 };
+  (function loadSpFilter() {
+    var o = spLsGet(SP_FILTER_KEY, null);
+    if (!o) return;
+    var mn = Number(o.min), mx = Number(o.max);
+    _spFilter = {
+      min: (o.min === "" || o.min == null || !isFinite(mn) || mn <= 0) ? "" : mn,
+      max: (o.max === "" || o.max == null || !isFinite(mx) || mx <= 0) ? "" : mx,
+      unit: Number(o.unit) || 1048576
+    };
+  })();
+  function spFilterBytes() {
+    var unit = Number(_spFilter.unit) || 1;
+    var mn = parseFloat(_spFilter.min), mx = parseFloat(_spFilter.max);
+    return {
+      min: (isFinite(mn) && mn > 0) ? Math.round(mn * unit) : 0,
+      max: (isFinite(mx) && mx > 0) ? Math.round(mx * unit) : 0
+    };
+  }
+  function spFilterSig() {
+    var f = _spFilter || {};      // 防御：赋值前被调用也不报错
+    return (f.min === "" || f.min == null ? "" : f.min) + "~" +
+      (f.max === "" || f.max == null ? "" : f.max) + "@" + (f.unit || 1048576);
+  }
+  function spUpdateFilterBadge() {
+    var btn = document.getElementById("spFilterBtn");
+    if (!btn) return;
+    btn.classList.toggle("on", (parseFloat(_spFilter.min) > 0) || (parseFloat(_spFilter.max) > 0));
+  }
+  function showSpFilterSettings() {
+    var cur = Number(_spFilter.unit || 1048576);
+    var units = SP_FILTER_UNITS.map(function (u) {
+      return '<option value="' + u[0] + '"' + (cur === u[0] ? " selected" : "") + '>' + u[1] + '</option>';
+    }).join("");
+    var minV = (_spFilter.min === "" || _spFilter.min == null) ? "" : _spFilter.min;
+    var maxV = (_spFilter.max === "" || _spFilter.max == null) ? "" : _spFilter.max;
+    var body = document.getElementById("ssBody");
+    body.innerHTML =
+      '<div class="ss-hint" style="margin-top:0">按文件大小筛选搜索结果（留空表示不限），目录不受影响。设置保存在本机，搜索时自动生效。</div>' +
+      '<div class="msf-body">' +
+        '<div class="msf-row">' +
+          '<span class="msf-name">大小</span>' +
+          '<input class="msf-input" id="spMin" type="number" inputmode="decimal" min="0" step="1" placeholder="最小" value="' + minV + '">' +
+          '<span class="msf-sep">~</span>' +
+          '<input class="msf-input" id="spMax" type="number" inputmode="decimal" min="0" step="1" placeholder="最大" value="' + maxV + '">' +
+          '<select class="msf-unit" id="spUnit">' + units + '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div class="ss-btns">' +
+        '<button class="ss-btn" id="spFilterReset">重置</button>' +
+        '<button class="ss-btn primary" id="spFilterApply">应用筛选</button>' +
+      '</div>';
+    document.getElementById("spFilterReset").addEventListener("click", function () {
+      document.getElementById("spMin").value = "";
+      document.getElementById("spMax").value = "";
+      document.getElementById("spUnit").value = "1048576";
+    });
+    document.getElementById("spFilterApply").addEventListener("click", function () {
+      var mn = parseFloat(document.getElementById("spMin").value || "");
+      var mx = parseFloat(document.getElementById("spMax").value || "");
+      var swapped = false;
+      if (isFinite(mn) && isFinite(mx) && mn > 0 && mx > 0 && mn > mx) {
+        var t = mn; mn = mx; mx = t; swapped = true;      // 写反了自动对调
+      }
+      _spFilter = {
+        min: (isFinite(mn) && mn > 0) ? mn : "",
+        max: (isFinite(mx) && mx > 0) ? mx : "",
+        unit: Number(document.getElementById("spUnit").value || 1048576) || 1048576
+      };
+      spLsSet(SP_FILTER_KEY, _spFilter);
+      if (swapped) toast("最小值大于最大值，已自动对调", "info");
+      shareSheetClose();
+      spUpdateFilterBadge();
+      if (spInput.value.trim()) runSearch();               // 有关键字就按新条件重搜
+    });
+    shareSheetOpen("设置大小筛选");
+  }
+  document.getElementById("spFilterBtn").addEventListener("click", showSpFilterSettings);
   // 点结果区/页面别处自动收起历史面板
   var spBodyEl = document.querySelector("#searchPage .sp-body");
   if (spBodyEl) spBodyEl.addEventListener("click", function () { spHistWrap.classList.add("hidden"); });
   function openSearchPage() {
     setScope("local");            // 每次打开记录当前目录，默认搜索当前文件夹
+    spUpdateFilterBadge();        // 同步大小筛选按钮的点亮状态
     document.getElementById("searchPage").classList.add("show");
     document.body.classList.add("lock");
     setTimeout(function () { spInput.focus(); }, 60);
@@ -218,6 +301,9 @@
     spStatus.textContent = "";
     var url = "/api/search?keyword=" + encodeURIComponent(q) + "&use_index=auto&timeout=120";
     if (rootUsed) url += "&root=" + encodeURIComponent(rootUsed);
+    var fb = spFilterBytes();                       // 文件大小筛选（0 = 不限）
+    if (fb.min) url += "&min_size=" + fb.min;
+    if (fb.max) url += "&max_size=" + fb.max;
     try {
       var resp = await fetch(url);
       if (!resp.ok) {

@@ -7,16 +7,17 @@
       openAudioPlayer(item, contextItems);
       return;
     }
+    // 视频直接进新版播放器：不占用预览遮罩，也不再出现中间卡片
+    if (VIDEO_EXT.indexOf(ext) >= 0) {
+      vpOpenVideo(item, abs, contextItems);
+      return;
+    }
     var mask = document.getElementById("previewMask");
     var body = document.getElementById("previewBody");
     body.innerHTML = '<div class="preview-msg">加载中…</div>';
     document.getElementById("previewClose").style.display = "";
     mask.classList.add("show");
 
-    if (VIDEO_EXT.indexOf(ext) >= 0) {
-      buildVideoPreview(item, abs, contextItems);
-      return;
-    }
     if (MOBILE_IMG_EXT.indexOf(ext) >= 0) {
       buildImagePreview(item, abs);
       return;
@@ -47,126 +48,60 @@
     }
     body.innerHTML = '<div class="preview-msg">暂不支持预览该类型<br/>（移动版仅支持 图片 / 视频 / 文本 / 压缩包）</div>';
   }
-  // 会话内缓存「无法生成封面」的视频路径，避免重复探测浪费 ffmpeg
-  var BAD_THUMB = {};
+  // ---------- 视频：直接进新版播放器（不再有中间预览卡片） ----------
+  var VP_MIN_SIZE = 5 * 1024 * 1024;   // 小于 5MB 的小视频不进播放队列（当前播放项除外）
 
-  // 视频预览卡片：文件名 + 播放器 + 视频列表（可切换）
-  // 列表来源优先级：外部上下文（如搜索结果命中的视频）> 同级目录视频
-  function buildVideoPreview(item, abs, contextItems) {
-    var body = document.getElementById("previewBody");
-    var card = document.createElement("div");
-    card.className = "pv-card";
-    card.innerHTML =
-      '<div class="pv-head">' +
-        '<span class="pv-title">' + esc(item.name) + '</span>' +
-        '<button type="button" class="pv-new" data-op="newplayer" title="在新版播放器中打开">✨ 新版播放器</button>' +
-        '<button type="button" class="pv-close" data-op="close">✕</button>' +
-      '</div>' +
-      '<div class="pv-vidarea"><video controls playsinline src="/api/stream?path=' +
-        encodeURIComponent(abs) + '"></video></div>' +
-      '<div class="pv-vlist"><div class="pv-vload">加载同级视频…</div></div>';
-    body.innerHTML = "";
-    body.appendChild(card);
-    document.getElementById("previewClose").style.display = "none";
-
-    var title = card.querySelector(".pv-title");
-    var video = card.querySelector("video");
-    var listEl = card.querySelector(".pv-vlist");
-    var dirAbs = abs.slice(0, abs.lastIndexOf("/")) || "/";
-    var curVids = [], curIdx = 0;      // 传给新版播放器的列表与当前项
-
-    function renderVlist(items) {
-      // 过滤：小于 5MB 的视频直接不进列表（截图里一堆小测试文件）
-      var MIN_SIZE = 5 * 1024 * 1024;
-      var vids = (items || []).filter(function (it) {
-        return !isDir(it) && VIDEO_EXT.indexOf(extOf(it.name)) >= 0 &&
-          (it.size == null || it.size >= MIN_SIZE) && !BAD_THUMB[it.abs_path];
-      });
-      if (!vids.length) {
-        listEl.innerHTML = '<div class="pv-vempty">当前文件夹没有其他视频</div>';
+  // 播放队列：外部上下文（媒体集合 / 搜索结果）> 当前目录 > 同级目录
+  function vpBuildQueue(list, dirAbs, curAbs, curName) {
+    var out = [], hasCur = false;
+    (list || []).forEach(function (it) {
+      if (isDir(it) || VIDEO_EXT.indexOf(extOf(it.name)) < 0) return;
+      var abs = it.abs_path || joinPath(dirAbs, it.name);
+      if (abs === curAbs) {
+        hasCur = true;                       // 当前项一定保留（再小也留着）
+      } else if (it.size != null && it.size < VP_MIN_SIZE) {
         return;
       }
-      listEl.innerHTML = "";
-      // 同步给新版播放器用的列表（含当前项下标）
-      curVids = vids.map(function (it) { return { name: it.name, abs: it.abs_path || joinPath(dirAbs, it.name) }; });
-      curIdx = 0;
-      curVids.forEach(function (v, k) { if (v.name === item.name) curIdx = k; });
-      vids.forEach(function (it, vi) {
-        var p = it.abs_path || joinPath(dirAbs, it.name);
-        var row = document.createElement("div");
-        row.className = "pv-vitem" + (it.name === item.name ? " cur" : "");
-        // 封面：后端抽帧缩略图，失败显示 🎬 占位
-        var img = document.createElement("img");
-        img.loading = "lazy";
-        img.src = "/api/thumbnail?path=" + encodeURIComponent(p);
-        img.onerror = function () { img.style.display = "none"; row.classList.add("noimg"); };
-        var nm = document.createElement("span");
-        nm.className = "pv-vname"; nm.textContent = it.name; nm.title = it.name;
-        var sz = document.createElement("span");
-        sz.className = "pv-vsize"; sz.textContent = it.size_str || "";
-        row.appendChild(img); row.appendChild(nm);
-        if (it.size_str) row.appendChild(sz);
-        // 封面探测：HEAD /api/thumbnail 非 200（如 400=无法抽帧）→ 该行移出列表，
-        // 并同步从新版播放器队列剔除（会话内记入 BAD_THUMB，重开不再探测）
-        fetch("/api/thumbnail?path=" + encodeURIComponent(p), { method: "HEAD" })
-          .then(function (r) {
-            if (r.ok) { delete BAD_THUMB[p]; return; }
-            BAD_THUMB[p] = true;
-            row.remove();
-            var k = -1;
-            curVids.forEach(function (v, i) { if (v.abs === p) k = i; });
-            if (k >= 0) {
-              var wasCur = (k === curIdx);
-              curVids.splice(k, 1);
-              if (k < curIdx) curIdx--;
-              else if (wasCur) curIdx = Math.max(0, Math.min(curIdx, curVids.length - 1));
-            }
-            if (!listEl.querySelector(".pv-vitem")) {
-              listEl.innerHTML = '<div class="pv-vempty">当前文件夹没有可播放的视频（小于 5MB 或无封面的已隐藏）</div>';
-            }
-          })
-          .catch(function () {});
-        row.addEventListener("click", function () {
-          video.src = "/api/stream?path=" + encodeURIComponent(p);
-          var pp = video.play(); if (pp && pp.catch) pp.catch(function () {});
-          title.textContent = it.name;
-          curIdx = vi;                 // 新版播放器要从这里继续
-          Array.prototype.forEach.call(listEl.children, function (n) { n.classList.remove("cur"); });
-          row.classList.add("cur");
-          try { row.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" }); } catch (e) {}
-        });
-        listEl.appendChild(row);
-      });
-      // 当前播放项初始滚动到可视区
-      var cur = listEl.querySelector(".pv-vitem.cur");
-      if (cur) try { cur.scrollIntoView({ block: "nearest", inline: "center" }); } catch (e) {}
-    }
+      out.push({ name: it.name, abs: abs });
+    });
+    if (!hasCur) out.unshift({ name: curName, abs: curAbs });
+    return out;
+  }
 
-    // 优先使用外部上下文（如搜索结果）中的视频作为播放列表（排除当前项后至少 1 个才有意义）
-    var ctxVids = (contextItems || []).filter(function (it) {
+  function vpQueueIndex(queue, abs) {
+    for (var i = 0; i < queue.length; i++) {
+      if (queue[i].abs === abs) return i;
+    }
+    return 0;
+  }
+
+  function vpOpenVideo(item, abs, contextItems) {
+    var dirAbs = abs.slice(0, abs.lastIndexOf("/")) || "/";
+    var ctx = (contextItems || []).filter(function (it) {
       return !isDir(it) && VIDEO_EXT.indexOf(extOf(it.name)) >= 0;
     });
-    if (ctxVids.length > 1) {
-      renderVlist(ctxVids);
-    } else if (normDirPath(dirAbs) === normDirPath(state.path) && state.items && state.items.length) {
-      renderVlist(state.items);
-    } else {
-      loadSiblingsInto(listEl, dirAbs, renderVlist);
+    if (ctx.length > 1) {
+      var q1 = vpBuildQueue(ctx, dirAbs, abs, item.name);
+      openVPlayer(q1, vpQueueIndex(q1, abs));
+      return;
     }
-
-    card.querySelector('[data-op="close"]').addEventListener("click", function () {
-      video.pause();
-      var mask = document.getElementById("previewMask");
-      mask.classList.remove("show");
-      document.getElementById("previewBody").innerHTML = "";
-      document.getElementById("previewClose").style.display = "";
-    });
-    // 前往新版播放器（暂停旧播放器，避免两个声音叠加）
-    card.querySelector('[data-op="newplayer"]').addEventListener("click", function () {
-      video.pause();
-      openVPlayer(curVids.length ? curVids : [{ name: item.name, abs: abs }], curIdx);
-    });
+    if (normDirPath(dirAbs) === normDirPath(state.path) && state.items && state.items.length) {
+      var q2 = vpBuildQueue(state.items, dirAbs, abs, item.name);
+      openVPlayer(q2, vpQueueIndex(q2, abs));
+      return;
+    }
+    // 媒体集合里的文件不一定在当前目录：拉同级目录视频作为播放队列
+    fetchTimeout("/api/files?path=" + encodeURIComponent(dirAbs) + "&limit=0&offset=0", 10000)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var q3 = vpBuildQueue(d.items || [], dirAbs, abs, item.name);
+        openVPlayer(q3, vpQueueIndex(q3, abs));
+      })
+      .catch(function () {
+        openVPlayer([{ name: item.name, abs: abs }], 0);   // 拉取失败：至少能播当前这个
+      });
   }
+
   // 图片预览卡片：文件名 + 可缩放看图区（双指捏合/双击/滚轮）+ 同级图片列表
   function buildImagePreview(item, abs) {
     var body = document.getElementById("previewBody");

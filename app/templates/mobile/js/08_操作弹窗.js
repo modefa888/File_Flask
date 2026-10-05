@@ -1,4 +1,11 @@
   // ---------- 操作弹窗 ----------
+  // 媒体集合是「索引聚合」视图，文件不一定在当前目录，且顶栏 📋（完成移动/复制）被整页盖住：
+  // 依赖浏览页上下文的操作（移动到…/复制到…/压缩为 ZIP）在那里没法收尾，直接在菜单里隐藏。
+  function _inMediaCollectionPage() {
+    var p = document.getElementById("mediaPage");
+    return !!(p && p.classList.contains("show"));
+  }
+
   function openActions(item, contextItems) {
     var ext = extOf(item.name);
     var head = document.getElementById("sheetHead");
@@ -33,18 +40,25 @@
     if (AUDIO_EXT.indexOf(ext) >= 0) {
       addBtn("播放", "🎵", "", function () { openAudioPlayer(item, contextItems); });
     }
-    if (item.abs_path) {          // 搜索结果：支持直接跳到文件所在文件夹
+    if (item.abs_path) {          // 搜索结果 / 媒体集合：支持直接跳到文件所在文件夹
       addBtn("前往所在文件夹", "🧭", "", function () {
         closeSearchPage();
-        load(dirnameOf(item.abs_path));
+        if (_inMediaCollectionPage()) closeMediaPage();   // 媒体页也关掉，否则跳转结果被它盖住
+        gotoAndHighlight(dirnameOf(item.abs_path), item.name);   // 跳过去并高亮该文件
       });
     }
     addBtn("重命名", "✏️", "", function () { doRename(item); });
+    var inMediaPage = _inMediaCollectionPage();
     if (!isDir(item)) {
-      addBtn("移动到…", "➡️", "", function () { setPendingOp("move", [itemAbs(item)]); });
-      addBtn("复制到…", "📑", "", function () { setPendingOp("copy", [itemAbs(item)]); });
+      if (!inMediaPage) {
+        addBtn("移动到…", "➡️", "", function () { setPendingOp("move", [itemAbs(item)]); });
+        addBtn("复制到…", "📑", "", function () { setPendingOp("copy", [itemAbs(item)]); });
+      }
+      addBtn("分享", "🔗", "", function () { openShareSheet(item); });
     }
-    addBtn("压缩为 ZIP", "📦", "", function () { doCompress(item); });
+    if (!inMediaPage) {
+      addBtn("压缩为 ZIP", "📦", "", function () { doCompress(item); });
+    }
     if (ext === "zip" || ext === "rar") {
       addBtn("查看压缩包", "📦", "", function () { openZipViewer(item); });
     }

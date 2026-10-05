@@ -108,6 +108,7 @@
       <div class="vp-title-wrap">
         <div class="vp-name" id="vpName">—</div>
       </div>
+      <button class="vp-list-btn" id="vpShareBtn" title="分享当前视频"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg></button>
       <button class="vp-list-btn" id="vpListBtn" title="播放列表"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg></button>
     </div>
     <div class="vp-stage">
@@ -224,6 +225,51 @@
     <div class="sp-body zp-body" id="idxBody"></div>
   </div>
 
+  <!-- 分享记录页 -->
+  <div class="search-page" id="sharePage">
+    <div class="sp-head">
+      <button id="shBack" title="返回">⬅️</button>
+      <div id="shTitle">🔗 分享记录</div>
+      <button id="shRefresh" title="刷新">⟳</button>
+    </div>
+    <div class="zp-crumb" id="shStat"></div>
+    <div class="sp-body zp-body" id="shList"></div>
+  </div>
+
+  <!-- 媒体集合页 -->
+  <div class="search-page" id="mediaPage">
+    <div class="sp-head">
+      <button id="mdBack" title="返回">⬅️</button>
+      <div id="mdTitle">🖼️ 媒体集合</div>
+      <button id="mdClose" title="关闭">✕</button>
+    </div>
+    <div class="md-tools">
+      <input id="mdKeyword" type="search" enterkeyhint="search" placeholder="按文件名过滤…" />
+      <button id="mdGo">🔍</button>
+      <button id="mdFilterBtn" title="设置文件大小筛选">⚙️</button>
+    </div>
+    <div class="md-tabs" id="mdTabs">
+      <button class="md-tab on" data-type="all">全部</button>
+      <button class="md-tab" data-type="image">🖼️ 图片</button>
+      <button class="md-tab" data-type="video">🎬 视频</button>
+      <button class="md-tab" data-type="audio">🎵 音频</button>
+    </div>
+    <div class="md-stat" id="mdStat"></div>
+    <div class="sp-body md-body" id="mdBody">
+      <div class="md-empty">加载中…</div>
+    </div>
+  </div>
+
+  <!-- 分享面板（创建 / 查看分享链接） -->
+  <div class="share-mask" id="shareMask"></div>
+  <div class="share-sheet" id="shareSheet">
+    <div class="ss-head">
+      <span class="ss-title" id="ssTitle">分享</span>
+      <button class="ss-close" id="ssClose" title="关闭">✕</button>
+    </div>
+    <div class="ss-body" id="ssBody"></div>
+  </div>
+
   <div class="loading" id="loading"><div class="spinner"></div></div>
 
   <!-- 操作底部弹窗 -->
@@ -309,6 +355,8 @@
     <button class="add-item" id="mmHiddenBtn">👁️ 显示隐藏文件</button>
     <button class="add-item" id="mmIdxBtn">🗂️ 索引</button>
     <button class="add-item" id="mmHistBtn">📜 压缩/解压记录</button>
+    <button class="add-item" id="mmMediaBtn">🖼️ 媒体集合</button>
+    <button class="add-item" id="mmShareBtn">🔗 分享记录</button>
   </div>
 
   <!-- 多选操作栏 -->

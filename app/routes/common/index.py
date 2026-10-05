@@ -210,7 +210,27 @@ def api_media_collection():
         max_size = max(0, int(request.args.get("max_size", 0) or 0))
     except (ValueError, TypeError):
         max_size = 0
-    return jsonify(_query_media_collection(media_type, keyword, page, page_size, min_size, max_size))
+    # 分类级区间：形如 video:1048576-0,image:102400-0（0 = 该侧不限），
+    # 让「全部」视图按各分类自己的规则过滤后合并统计
+    cat_filters = {}
+    for part in (request.args.get("filters", "") or "").split(","):
+        part = part.strip()
+        if ":" not in part:
+            continue
+        cat, _, rng = part.partition(":")
+        cat = cat.strip().lower()
+        if cat not in ("video", "audio", "image"):
+            continue
+        mn_s, _, mx_s = rng.partition("-")
+        try:
+            cmn = max(0, int(float(mn_s or 0)))
+            cmx = max(0, int(float(mx_s or 0)))
+        except (ValueError, TypeError):
+            continue
+        if cmn or cmx:
+            cat_filters[cat] = (cmn, cmx)
+    return jsonify(_query_media_collection(media_type, keyword, page, page_size,
+                                           min_size, max_size, cat_filters))
 
 
 @bp.route("/api/index/build", methods=["POST"])

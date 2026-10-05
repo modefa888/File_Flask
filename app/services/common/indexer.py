@@ -869,10 +869,13 @@ _MEDIA_EXT_CAT = {e: cat for cat, exts in _MEDIA_EXTS.items() for e in exts}
 
 
 def _query_media_collection(media_type="all", keyword="", page=1, page_size=48,
-                            min_size=0, max_size=0):
+                            min_size=0, max_size=0, cat_filters=None):
     """按类型聚合索引中的媒体文件（视频/音频/图片），按大小倒序分页返回。
     标准分页：page 从 1 开始，返回 items / total / page / page_size / total_pages / has_more。
     min_size / max_size 为字节数，0 表示该侧不限，用于手动过滤掉过小/过大的文件。
+    cat_filters: {类别: (min, max)}，分类各自的大小区间（0 表示该侧不限）。
+    用于「全部」视图：视频只看 ≥1MB、图片只看 ≥0.1MB 等，各分类按自己的规则过滤后合并统计；
+    没设置区间的类别保持全部保留。
     SQL 始终使用 LIMIT ? OFFSET ?，绝不会一次性返回全部数据。
     """
     exts = []
@@ -895,6 +898,32 @@ def _query_media_collection(media_type="all", keyword="", page=1, page_size=48,
     if max_size and int(max_size) > 0:
         where += " AND size <= ?"
         params.append(int(max_size))
+
+    # 分类级区间：每个类别只受自己那套区间约束，未设置的类别不受限
+    if cat_filters:
+        groups = []
+        for cat in ("video", "audio", "image"):
+            if media_type not in ("all", cat):
+                continue
+            cexts = _MEDIA_EXTS.get(cat) or []
+            if not cexts:
+                continue
+            cond = f"ext IN ({','.join('?' * len(cexts))})"
+            cparams = list(cexts)
+            rng = cat_filters.get(cat)
+            if rng:
+                cmn, cmx = int(rng[0] or 0), int(rng[1] or 0)
+                if cmn > 0:
+                    cond += " AND size >= ?"
+                    cparams.append(cmn)
+                if cmx > 0:
+                    cond += " AND size <= ?"
+                    cparams.append(cmx)
+            groups.append((cond, cparams))
+        if groups:
+            where += " AND (" + " OR ".join(g[0] for g in groups) + ")"
+            for _, cp in groups:
+                params.extend(cp)
 
     conn = _get_index_conn()
     try:

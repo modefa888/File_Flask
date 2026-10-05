@@ -79,6 +79,13 @@
     if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (e) {} }
   }
 
+  // 分享当前正在播放的视频（走统一的分享面板：有效期 / 密码 / 次数 / 二维码）
+  document.getElementById("vpShareBtn").addEventListener("click", function () {
+    var it = vpList[vpIndex];
+    if (!it) { toast("还没有正在播放的视频", "info"); return; }
+    openShareSheet({ name: it.name, is_dir: false, abs_path: it.abs });
+  });
+
   document.getElementById("vpCollapse").addEventListener("click", closeVPlayer);
   document.getElementById("vpPlay").addEventListener("click", vpToggle);
   document.getElementById("vpBig").addEventListener("click", vpToggle);

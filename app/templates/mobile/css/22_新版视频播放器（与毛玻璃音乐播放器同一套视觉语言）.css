@@ -286,10 +286,4 @@
   .vp-vol-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: none; }
   .vp-vol-val { font-size: 11px; color: rgba(255,255,255,.85); font-variant-numeric: tabular-nums; }
 
-  /* 旧视频预览卡片上的入口按钮 */
-  .pv-head .pv-new {
-    flex: none; border: 1px solid rgba(31,111,235,.35); background: rgba(31,111,235,.08);
-    color: var(--primary); border-radius: 999px; padding: 6px 10px; font-size: 12px;
-    font-weight: 600; cursor: pointer; white-space: nowrap;
-  }
-  .pv-head .pv-new:active { background: rgba(31,111,235,.18); }
+  /* 旧视频预览卡片已移除：视频改为直接进入本播放器 */

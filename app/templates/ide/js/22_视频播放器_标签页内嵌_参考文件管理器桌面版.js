@@ -21,6 +21,14 @@
   })();
   var _vpvSave = () => { try { localStorage.setItem("ide.videoPlayer", JSON.stringify(_vpvStore)); } catch (_) {} };
 
+  // 全局唯一播放器：切换视频时复用同一标签页重跑 setupVideoView，
+  // 旧实例挂在 document/window 上的监听（快捷键等）必须先移除，否则会双重触发
+  var _vpvCleanups = [];
+  function _vpvCleanupRun() {
+    _vpvCleanups.forEach(f => { try { f(); } catch (_) {} });
+    _vpvCleanups = [];
+  }
+
   function _vpvEsc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -36,6 +44,7 @@
   }
 
   function setupVideoView(tab, host, path, name) {
+    _vpvCleanupRun();          // 复用标签页切换视频时，先清掉旧实例的全局监听
     tab.isVideo = true;
     const dir = path.slice(0, path.lastIndexOf("/")) || "/";
     const streamUrl = "/api/stream?path=" + encodeURIComponent(path);
@@ -229,6 +238,7 @@
       if (host.isConnected) host.querySelectorAll(".vpv-speed.open").forEach(el => el.classList.remove("open"));
     };
     document.addEventListener("click", closeSpeedMenu);
+    _vpvCleanups.push(() => document.removeEventListener("click", closeSpeedMenu));
 
     /* ---------- 播放模式：顺序 → 循环 → 随机 ---------- */
     const MODES = [
@@ -271,6 +281,7 @@
     const onWinResize = () => applyRotate();
     window.addEventListener("resize", onWinResize);
     document.addEventListener("fullscreenchange", applyRotate);
+    _vpvCleanups.push(() => { window.removeEventListener("resize", onWinResize); document.removeEventListener("fullscreenchange", applyRotate); });
 
     /* ---------- 画中画 / 全屏 ---------- */
     $(".vpv-pip").addEventListener("click", async () => {
@@ -320,6 +331,7 @@
       }
     };
     document.addEventListener("keydown", keyHandler, true);
+    _vpvCleanups.push(() => document.removeEventListener("keydown", keyHandler, true));
 
     /* ---------- 播放列表：同目录视频，点击原位切换；播完按模式续播 ---------- */
     const plList = $(".vpv-pl-list"), plCount = $(".vpv-pl-count");

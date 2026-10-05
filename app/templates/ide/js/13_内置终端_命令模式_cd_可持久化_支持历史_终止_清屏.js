@@ -379,6 +379,8 @@
       const d = await r.json();
       if (d.error) { toast("无法打开：" + d.error, "err"); return; }
       addRecentFolder(path);
+      // 已有主项目：不再跳转，而是把新文件夹「添加为第二个项目」，与主项目在资源管理器同级显示
+      if (ROOT) { addWorkspaceFolder(path); return; }
       location.href = "/ide?path=" + encodeURIComponent(path);
     } catch (e) {
       toast("无法打开：" + (e.message || e), "err");

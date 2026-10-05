@@ -44,6 +44,8 @@
   }
   .side-root:hover { color: #fff; }
   .side-root #sideRootChevron { font-size: 11px; color: #9aa0a6; flex: none; transition: transform .15s; }
+  /* 折叠占位区：居中放「打开文件夹」按钮，填上收起后的空白 */
+  .side-root-open { padding: 14px 12px; display: flex; justify-content: center; }
   .tree { flex: 1; overflow: auto; padding-bottom: 10px; }
   /* 根目录行折叠状态：用类名而非内联样式，避免被 showPanel 的显隐管理清掉 */
   #explorerPanel.tree-hidden { display: none !important; }
@@ -55,6 +57,14 @@
   .tree-row.selected { background: #094771; }
   .tree-row:focus { outline: none; }        /* 选中态用底色表示，不要浏览器默认聚焦框 */
   .tree-row.selected:focus { box-shadow: inset 0 0 0 1px #0a6aa8; }
+  /* 多根工作区：附加项目分区标题行（与主项目同级显示） */
+  .tree-ws-head { font-weight: 600; color: #e7e7e7; }
+  .tree-ws-head .ws-rm {
+    margin-left: auto; display: none; padding: 0 5px; font-size: 11px; color: #9aa0a6;
+    cursor: pointer; border-radius: 4px; flex: none;
+  }
+  .tree-ws-head:hover .ws-rm { display: inline-flex; align-items: center; }
+  .tree-ws-head .ws-rm:hover { color: #ff6b6b; background: rgba(255,255,255,.08); }
   .tree-row .twist { width: 16px; text-align: center; color: #9aa0a6; font-size: 10px; flex: none; }
   /* 图标统一 1.4em，flex 居中保证与文字在同一水平线 */
   .tree-row .ic { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }

@@ -345,6 +345,17 @@
 
   // ---------- 资源管理器多选支持（Shift 范围选择 / Ctrl 点选累加） ----------
   let treeAnchor = null;          // 范围选择的锚点行路径（普通点击 / Ctrl 点击更新，Shift 点击沿用）
+  // 文件树展开状态持久化：记住展开的目录路径（含附加项目分区根），
+  // 刷新页面后逐层恢复之前的展开状态。存入 ide.settings 的 treeOpenDirs。
+  let treeOpenDirs = (() => {
+    const v = ideSettingGet("treeOpenDirs", []);
+    return new Set(Array.isArray(v) ? v.filter(x => typeof x === "string" && x) : []);
+  })();
+  function saveTreeOpenDirs() {
+    let arr = [...treeOpenDirs];
+    if (arr.length > 800) arr = arr.slice(-800);   // 防止长期使用无限增长
+    ideSettingSet("treeOpenDirs", arr);
+  }
   function visibleTreeRows() {    // 当前可见（所有祖先目录均已展开）的树行，按 DOM 顺序
     return [...explorerPanel.querySelectorAll(".tree-row")].filter(r => {
       let p = r.parentElement;
@@ -418,11 +429,16 @@
       setTreeSelFromRow(row);
       focusRow();
       if (it.is_dir) {
-        if (kids.classList.contains("open")) { kids.classList.remove("open"); row.querySelector(".twist i").className = "bi bi-chevron-right"; }
-        else {
-          kids.classList.add("open"); row.querySelector(".twist i").className = "bi bi-chevron-down";
+        const willOpen = !kids.classList.contains("open");
+        kids.classList.toggle("open", willOpen);
+        row.querySelector(".twist i").className = "bi " + (willOpen ? "bi-chevron-down" : "bi-chevron-right");
+        if (willOpen) {
+          treeOpenDirs.add(full);                       // 展开状态持久化
           if (!kids._loaded) { kids._loaded = true; loadChildren(full, kids, depth); }
+        } else {
+          treeOpenDirs.delete(full);
         }
+        saveTreeOpenDirs();
       } else {
         openFile(full, it.name);
       }
@@ -461,6 +477,7 @@
   async function treeExpandAll() {
     const root = ROOT && explorerPanel.querySelector(".tree-children");
     if (root) await treeWalkExpand(root).catch(e => toast("展开失败：" + (e.message || e), "err"));
+    syncTreeOpenDirsFromDom();   // 展开状态持久化
     syncTreeToggleBtn();
   }
   function treeCollapseAll() {
@@ -472,7 +489,17 @@
       const t = row.querySelector(".twist i");
       if (t) t.className = "bi bi-chevron-right";
     });
+    syncTreeOpenDirsFromDom();   // 折叠状态持久化
     syncTreeToggleBtn();
+  }
+  /* 从当前 DOM 收集展开中的目录路径并持久化（全部展开 / 全部折叠后调用） */
+  function syncTreeOpenDirsFromDom() {
+    treeOpenDirs = new Set();
+    explorerPanel.querySelectorAll(".tree-children.open").forEach(k => {
+      // 根容器（前一个兄弟不是 tree-row，主项目根 / 未加载分区）不计入
+      if (k._base && k.previousElementSibling && k.previousElementSibling.classList.contains("tree-row")) treeOpenDirs.add(k._base);
+    });
+    saveTreeOpenDirs();
   }
   /* 树上是否有展开着的子目录（根容器不算）——用于切换按钮状态 */
   function treeHasOpenDirs() {
@@ -535,6 +562,7 @@
         }
       };
       await restore(root);
+      renderExtraRoots(openBases);            // 附加项目分区一并重建（openBases 已记录其展开态）
       // 恢复选中项与滚动位置
       if (prevSelPath) {
         const row = [...explorerPanel.querySelectorAll(".tree-row")].find(r => r.dataset.path === prevSelPath);
@@ -549,6 +577,107 @@
     syncTreeToggleBtn();
   }
   $("sideRefresh").onclick = () => refreshTree();
+
+  /* ---------- 多根工作区：在主项目之外追加更多项目，资源管理器里同级显示 ----------
+     附加项目持久记忆（ide.settings 的 extraRoots），刷新页面后仍在；
+     点击折叠占位区 / 无主项目引导卡里的「打开文件夹…」即可追加。
+     注意：搜索 / Git / 终端等仍以主项目（ROOT）为准，附加项目主要提供浏览与编辑。 */
+  let extraRoots = (() => {
+    const v = ideSettingGet("extraRoots", []);
+    return Array.isArray(v) ? v.filter(x => typeof x === "string" && x) : [];
+  })();
+  function saveExtraRoots() { ideSettingSet("extraRoots", extraRoots); }
+
+  /* 渲染一个「附加项目」分区：标题行（点击折叠 / 展开）+ 文件树容器 */
+  function renderWorkspaceFolder(base, opts) {
+    const open = !opts || opts.open !== false;
+    const sec = document.createElement("div");
+    sec.className = "tree-ws";
+    sec.dataset.wsRoot = base;
+    const head = document.createElement("div");
+    head.className = "tree-row tree-ws-head";
+    head.tabIndex = -1;
+    head.style.paddingLeft = "4px";
+    head.innerHTML =
+      '<span class="twist"><i class="bi ' + (open ? "bi-chevron-down" : "bi-chevron-right") + '"></i></span>' +
+      '<span class="ic">' + iconFor(baseName(base) || base, true) + '</span>' +
+      '<span class="nm">' + esc(baseName(base) || base) + '</span>' +
+      '<span class="ws-rm" title="从工作区移除该项目"><i class="bi bi-x-lg"></i></span>';
+    const kids = document.createElement("div");
+    kids.className = "tree-children" + (open ? " open" : "");
+    kids._base = base; kids._loaded = false;
+    sec.appendChild(head); sec.appendChild(kids);
+    head.addEventListener("click", (e) => {
+      if (e.target.closest(".ws-rm")) return;
+      const show = !kids.classList.contains("open");
+      kids.classList.toggle("open", show);
+      head.querySelector(".twist i").className = "bi " + (show ? "bi-chevron-down" : "bi-chevron-right");
+      if (show) {
+        treeOpenDirs.add(base);   // 分区展开状态持久化
+        if (!kids._loaded) { kids._loaded = true; loadChildren(base, kids, 0); }
+      } else {
+        treeOpenDirs.delete(base);
+      }
+      saveTreeOpenDirs();
+    });
+    head.querySelector(".ws-rm").addEventListener("click", (e) => {
+      e.stopPropagation();
+      extraRoots = extraRoots.filter(x => x !== base); saveExtraRoots();
+      sec.remove();
+      updateSideRootName();
+      toast("已从工作区移除：" + (baseName(base) || base));
+    });
+    explorerPanel.appendChild(sec);
+    if (open) { kids._loaded = true; loadChildren(base, kids, 0); }
+    return kids;
+  }
+  function updateSideRootName() {   // 根目录行显示主项目名 + 附加项目数
+    if (!ROOT) return;
+    const n = extraRoots.length;
+    $("sideRootName").textContent = (baseName(ROOT) || ROOT) + (n ? "（+" + n + " 个项目）" : "");
+  }
+  /* initTree / refreshTree 共用：主树渲染完后把附加项目分区补回来
+     （refreshTree 传 openBases 按运行时 DOM 恢复；initTree 不传则按持久化的展开状态决定） */
+  function renderExtraRoots(openBases) {
+    extraRoots.forEach(b => renderWorkspaceFolder(b, { open: openBases ? openBases.has(b) : treeOpenDirs.has(b) }));
+    updateSideRootName();
+  }
+  function addWorkspaceFolder(path) {
+    if (path === ROOT) { toast("该文件夹已是主项目"); return; }
+    if (extraRoots.includes(path)) { toast("该项目已在工作区中"); return; }
+    extraRoots.push(path); saveExtraRoots();
+    renderWorkspaceFolder(path, { open: true });
+    updateSideRootName();
+    toast("已添加项目：" + (baseName(path) || path), "ok");
+  }
+
+  /* 页面加载后恢复持久化的展开状态：只在 treeOpenDirs 里的目录逐层展开（懒加载），
+     覆盖主项目树与附加项目分区；已删除 / 不存在的路径自动跳过（不清理也无副作用） */
+  async function restoreTreeOpenDirs() {
+    const walk = async (container) => {
+      const rows = [...container.children].filter(el => el.classList.contains("tree-row") && el.dataset.isdir === "1");
+      for (const row of rows) {
+        if (!treeOpenDirs.has(row.dataset.path)) continue;
+        const kids = row.nextElementSibling;
+        if (!kids || !kids.classList.contains("tree-children")) continue;
+        kids.classList.add("open");
+        const t = row.querySelector(".twist i");
+        if (t) t.className = "bi bi-chevron-down";
+        if (!kids._loaded) {
+          kids._loaded = true;
+          const pad = parseFloat(row.style.paddingLeft);
+          await loadChildren(kids._base, kids, isNaN(pad) ? 0 : (pad - 8) / 14);
+        }
+        await walk(kids);
+      }
+    };
+    // 顶层容器：主项目根 + 各附加项目分区
+    const tops = [];
+    explorerPanel.querySelectorAll(":scope > .tree-children, :scope > .tree-ws > .tree-children")
+      .forEach(k => tops.push(k));
+    for (const k of tops) await walk(k);
+    syncTreeToggleBtn();
+  }
 
   async function initTree() {
     if (ROOT) addRecentFolder(ROOT);   // 通过 URL 直接打开的文件夹也记入「最近打开」
@@ -566,14 +695,19 @@
       const btn = $("ewOpenBtn");
       if (btn) btn.onclick = openFolderDialog;
       explorerPanel.classList.remove("tree-hidden");   // 无工作区视图始终可见
+      $("sideRootOpen").style.display = "none";        // 空工作区不需要折叠占位区
       return;
     }
-    $("sideRootName").textContent = baseName(ROOT) || ROOT;
+    updateSideRootName();
+    // 折叠占位区里的「打开文件夹」入口（绑定一次即可，onclick 重复赋值无副作用）
+    const _openBtn = $("sideOpenFolderBtn");
+    if (_openBtn) _openBtn.onclick = openFolderDialog;
     // 全局配置最优先：构建 / 加载树之前就应用折叠状态，
     // 避免先看到「加载中…」再闪一下才收起。
     // 注意：用类名（tree-hidden）而非内联 display，否则会被 showPanel 的显隐管理清掉
     const _explorerCollapsed = !!ideSettingGet("explorerCollapsed", false);
     explorerPanel.classList.toggle("tree-hidden", _explorerCollapsed);
+    $("sideRootOpen").style.display = _explorerCollapsed ? "" : "none";
     {
       const chev = $("sideRootChevron");
       if (chev) chev.className = "bi " + (_explorerCollapsed ? "bi-chevron-right" : "bi-chevron-down");
@@ -583,6 +717,7 @@
       const tree = $("explorerPanel");
       const show = tree.classList.contains("tree-hidden");   // 当前是收起 → 展开
       tree.classList.toggle("tree-hidden", !show);
+      $("sideRootOpen").style.display = show ? "none" : "";  // 折叠时显示「打开文件夹」占位区
       const chev = $("sideRootChevron");
       if (chev) chev.className = "bi " + (show ? "bi-chevron-down" : "bi-chevron-right");
       ideSettingSet("explorerCollapsed", !show);
@@ -594,6 +729,8 @@
     root.className = "tree-children open"; root._base = ROOT; root._loaded = true;
     explorerPanel.appendChild(root);
     await loadChildren(ROOT, root, 0);
+    renderExtraRoots();                      // 主项目树之后渲染附加项目分区（同级显示）
+    await restoreTreeOpenDirs().catch(() => {});   // 恢复上次刷新前的展开状态（含附加项目分区）
     syncTreeToggleBtn();
   }
 
@@ -714,6 +851,23 @@
     path = canonPath(path);
     // forceGroup 指定目标编辑组（拆分编辑器用）；不指定时全局查找已有标签并聚焦
     let tab = forceGroup == null ? findTab(path) : tabs.find(t => t.path === path && t.group === forceGroup);
+    // 播放器全局唯一：已存在视频标签页时（正在播放另一个视频），复用该标签页切换到新视频，
+    // 原播放器随 innerHTML 重建自动停止并释放流，「播放另一个自动切换播放」；
+    // 点的就是当前视频则只聚焦。其余文件类型不受影响。
+    if (!forceText && (window.IDE_VIDEO_EXTS || []).includes(getExt(name)) && typeof window.setupVideoView === "function") {
+      const vt = tabs.find(t => t.isVideo);
+      if (vt) {
+        if (vt.path !== path) {
+          vt.path = path; vt.name = name; vt.dirty = false; vt.big = false; vt.cm = null;
+          renderTabsAll();
+          activate(vt);
+          setupVideoView(vt, vt.host, path, name);
+        } else {
+          activate(vt);
+        }
+        return;
+      }
+    }
     if (!tab) {
       const host = document.createElement("div");
       host.className = "cm-host";

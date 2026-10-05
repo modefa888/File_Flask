@@ -11,6 +11,7 @@ from ...log import get_logger
 from ...services.common.indexer import (
     _build_index, _cancel_index_scan, _get_index_meta, _query_index,
     _search_walk, _load_detail_stats, _load_scanning_detail_stats, _get_chart_stats,
+    _query_media_collection,
     _INDEX_META, _SEARCH_RESULTS, _SEARCH_LOCK,
 )
 from ...services.common.filecore import format_size
@@ -180,6 +181,36 @@ def api_index_charts():
     _log.info("GET /api/index/charts")
     """可视化图表统计数据（类型分布/大小分布/时间分布/Top 目录/最大文件）"""
     return jsonify(_get_chart_stats())
+
+
+@bp.route("/api/media/collection")
+def api_media_collection():
+    _log.info("GET /api/media/collection type=%s", request.args.get("type", "all"))
+    """媒体集合（视频/音频/图片），基于索引聚合，按大小倒序分页查询。
+    参数：type / keyword / page(从1开始) / page_size(默认48, 上限200)
+    """
+    media_type = (request.args.get("type", "all").strip() or "all").lower()
+    if media_type not in ("all", "video", "audio", "image"):
+        media_type = "all"
+    keyword = request.args.get("keyword", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        page_size = min(200, max(1, int(request.args.get("page_size", 48))))
+    except (ValueError, TypeError):
+        page_size = 48
+    # 大小过滤（字节，0 = 不限）
+    try:
+        min_size = max(0, int(request.args.get("min_size", 0) or 0))
+    except (ValueError, TypeError):
+        min_size = 0
+    try:
+        max_size = max(0, int(request.args.get("max_size", 0) or 0))
+    except (ValueError, TypeError):
+        max_size = 0
+    return jsonify(_query_media_collection(media_type, keyword, page, page_size, min_size, max_size))
 
 
 @bp.route("/api/index/build", methods=["POST"])

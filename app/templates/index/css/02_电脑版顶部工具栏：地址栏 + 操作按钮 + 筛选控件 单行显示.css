@@ -350,6 +350,15 @@
             background: #e2e8f0;
         }
 
+        .preview-header .preview-actions .btn-collapse-preview {
+            background: #e2e8f0;
+            color: #475569;
+        }
+
+        .preview-header .preview-actions .btn-collapse-preview:hover {
+            background: #cbd5e1;
+        }
+
         .preview-header .preview-actions .btn-close-preview {
             background: #fee2e2;
             color: #dc2626;
@@ -357,6 +366,275 @@
 
         .preview-header .preview-actions .btn-close-preview:hover {
             background: #fecaca;
+        }
+
+        /* 视频收起时的迷你画面窗（紧挨迷你控制条左侧） */
+        .preview-mini-video {
+            position: fixed;
+            right: 356px;          /* 24（边距） + 320（胶囊宽） + 12（间距） */
+            bottom: 24px;
+            width: 208px;
+            height: 117px;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #000;
+            border: 2px solid rgba(255, 255, 255, 0.85);
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.45);
+            z-index: 10003;
+            cursor: pointer;
+            animation: fadeIn 0.2s ease;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .preview-mini-video:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.55);
+        }
+
+        .preview-mini-video video,
+        .preview-mini-video .pmv-image {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: contain;
+            display: block;
+            background: #000;
+        }
+
+        /* 画面窗自己的收起/展开按钮 */
+        .preview-mini-video .pmv-toggle {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            z-index: 3;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: none;
+            border-radius: 7px;
+            background: rgba(15, 23, 42, 0.6);
+            color: #fff;
+            font-size: 0.8rem;
+            cursor: pointer;
+            opacity: 0.55;   /* 常显半透明，避免被误当成右侧「展开大播放器」按钮 */
+            transition: opacity 0.15s ease, background 0.15s ease;
+        }
+
+        .preview-mini-video:hover .pmv-toggle {
+            opacity: 1;
+        }
+
+        .preview-mini-video .pmv-toggle:hover {
+            background: #2563eb;
+        }
+
+        /* 收起后：窗口缩成一个小方块，画面隐藏，播放不中断 */
+        .preview-mini-video.collapsed {
+            width: 64px;
+            height: 40px;
+        }
+
+        .preview-mini-video.collapsed video,
+        .preview-mini-video.collapsed .pmv-image {
+            display: none;
+        }
+
+        .preview-mini-video.collapsed .pmv-toggle {
+            position: static;
+            width: 100%;
+            height: 100%;
+            border-radius: 10px;
+            background: transparent;
+            opacity: 1;
+            font-size: 1.05rem;
+        }
+
+        .preview-mini-video.collapsed .pmv-toggle:hover {
+            background: rgba(37, 99, 235, 0.85);
+        }
+
+        /* 预览收起后右下角的迷你播放胶囊：播放继续，可直接控制 */
+        .preview-collapsed {
+            position: fixed;
+            right: 24px;
+            bottom: 24px;
+            z-index: 10003;
+            width: 320px;
+            padding: 10px 12px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #1e293b, #0f172a);
+            color: white;
+            cursor: pointer;
+            border: 2px solid rgba(255, 255, 255, 0.85);
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.45);
+            animation: fadeIn 0.2s ease;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .preview-collapsed:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.55);
+        }
+
+        .preview-collapsed .pcc-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .preview-collapsed .preview-collapsed-name {
+            flex: 1;
+            min-width: 0;
+            font-size: 0.78rem;
+            color: #e2e8f0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .preview-collapsed .pcc-btn {
+            flex-shrink: 0;
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.12);
+            color: #e2e8f0;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+
+        .preview-collapsed .pcc-btn:hover {
+            background: #2563eb;
+            color: white;
+        }
+
+        .preview-collapsed .pcc-play {
+            background: #2563eb;
+            color: white;
+        }
+
+        .preview-collapsed .pcc-progress {
+            margin-top: 8px;
+            padding: 5px 0;   /* 加大点击热区 */
+            cursor: pointer;
+        }
+
+        .preview-collapsed .pcc-track {
+            height: 5px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.18);
+            overflow: hidden;
+        }
+
+        .preview-collapsed .pcc-played {
+            height: 100%;
+            width: 0%;
+            border-radius: 3px;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            transition: width 0.12s linear;
+        }
+
+        .preview-collapsed .pcc-time {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 3px;
+            font-size: 0.66rem;
+            color: #94a3b8;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* 图片/文本预览收起时隐藏播放相关控件 */
+        .preview-collapsed.no-media .pcc-play,
+        .preview-collapsed.no-media .pcc-next,
+        .preview-collapsed.no-media .pcc-progress,
+        .preview-collapsed.no-media .pcc-time {
+            display: none;
+        }
+
+        /* 音乐收起：旋转封面 + 滚动歌词 */
+        .preview-collapsed .pcc-music {
+            display: none;
+        }
+
+        .preview-collapsed.music .pcc-music {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .preview-collapsed.music .pcc-next {
+            display: none;
+        }
+
+        .preview-collapsed .pcc-cover-wrap {
+            position: relative;
+            flex-shrink: 0;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            overflow: hidden;
+            background: #334155;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .preview-collapsed .pcc-cover-fallback {
+            font-size: 1.3rem;
+            color: #94a3b8;
+        }
+
+        .preview-collapsed .pcc-cover {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
+            animation: pccSpin 12s linear infinite;
+            animation-play-state: paused;
+        }
+
+        .preview-collapsed .pcc-cover-wrap.playing .pcc-cover {
+            animation-play-state: running;
+        }
+
+        @keyframes pccSpin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .preview-collapsed .pcc-lyrics {
+            flex: 1;
+            min-width: 0;
+            height: 44px;
+            overflow: hidden;
+        }
+
+        .preview-collapsed .pcc-lyrics-inner {
+            transition: transform 0.35s ease;
+        }
+
+        .preview-collapsed .pcc-lyric-line {
+            height: 22px;
+            line-height: 22px;
+            font-size: 0.72rem;
+            color: #64748b;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .preview-collapsed .pcc-lyric-line.active {
+            color: #facc15;
+            font-weight: 600;
         }
 
         .preview-body {

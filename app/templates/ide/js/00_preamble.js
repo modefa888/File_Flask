@@ -717,7 +717,7 @@
           const url = "/api/preview?path=" + encodeURIComponent(path) + "&raw=1";
           host.innerHTML =
             '<div class="img-preview"><img alt="' + esc(name) + '" src="' + url + '">' +
-            '<div class="ip-err" style="display:none;">图片加载失败（可能超出 5MB 预览限制）</div></div>';
+            '<div class="ip-err" style="display:none;">图片加载失败（可能超出 50MB 预览限制）</div></div>';
           const im = host.querySelector("img");
           im.addEventListener("error", () => {
             im.style.display = "none";

@@ -261,7 +261,7 @@ def api_preview():
                 "size": stat2.st_size,
                 "size_str": format_size(stat2.st_size),
             })
-        # 文本/图片限制：文本放宽到 20MB，图片 5MB
+        # 文本/图片限制：文本 20MB，图片 50MB
         _limit = _TEXT_PREVIEW_MAX_BYTES if is_text else _PREVIEW_MAX_BYTES
         if ext not in _VIDEO_EXTS and stat.st_size > _limit:
             return jsonify({"error": f"文件过大，最大支持 {format_size(_limit)}"}), 413

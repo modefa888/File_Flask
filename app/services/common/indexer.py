@@ -859,6 +859,80 @@ def _get_chart_stats():
     return data
 
 
+# 媒体集合：按类别归类的扩展名（注意避开与源码冲突的 ext，如 ts/ts 的 TypeScript）
+_MEDIA_EXTS = {
+    "video": ("mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "rmvb", "mpg", "mpeg", "3gp"),
+    "audio": ("mp3", "flac", "wav", "aac", "ogg", "m4a", "wma", "ape", "opus", "mp2"),
+    "image": ("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "svg", "tiff", "tif", "ico"),
+}
+_MEDIA_EXT_CAT = {e: cat for cat, exts in _MEDIA_EXTS.items() for e in exts}
+
+
+def _query_media_collection(media_type="all", keyword="", page=1, page_size=48,
+                            min_size=0, max_size=0):
+    """按类型聚合索引中的媒体文件（视频/音频/图片），按大小倒序分页返回。
+    标准分页：page 从 1 开始，返回 items / total / page / page_size / total_pages / has_more。
+    min_size / max_size 为字节数，0 表示该侧不限，用于手动过滤掉过小/过大的文件。
+    SQL 始终使用 LIMIT ? OFFSET ?，绝不会一次性返回全部数据。
+    """
+    exts = []
+    for cat in ("video", "audio", "image"):
+        if media_type in ("all", cat):
+            exts.extend(_MEDIA_EXTS[cat])
+    if not exts:
+        return {"items": [], "total": 0, "page": page, "page_size": page_size,
+                "total_pages": 0, "has_more": False}
+
+    placeholders = ",".join("?" * len(exts))
+    where = f"ext IN ({placeholders})"
+    params = list(exts)
+    if keyword:
+        where += " AND LOWER(name) LIKE ?"
+        params.append(f"%{keyword.lower()}%")
+    if min_size and int(min_size) > 0:
+        where += " AND size >= ?"
+        params.append(int(min_size))
+    if max_size and int(max_size) > 0:
+        where += " AND size <= ?"
+        params.append(int(max_size))
+
+    conn = _get_index_conn()
+    try:
+        total = conn.execute(f"SELECT COUNT(*) FROM index_files WHERE {where}", params).fetchone()[0]
+        offset = (page - 1) * page_size
+        # 仅取本页数据，硬上限防止异常参数拖垮服务
+        rows = conn.execute(
+            f"""SELECT abs_path, name, ext, size, mtime FROM index_files
+               WHERE {where} ORDER BY size DESC LIMIT ? OFFSET ?""",
+            params + [min(page_size, 200), offset]
+        ).fetchall()
+    finally:
+        conn.close()
+
+    items = []
+    for abs_path, name, ext, size, mtime in rows:
+        e = (ext or "").lower()
+        items.append({
+            "path": abs_path,
+            "name": name,
+            "ext": ext or "",
+            "size": size or 0,
+            "size_str": format_size(size or 0),
+            "mtime": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M") if mtime else "-",
+            "category": _MEDIA_EXT_CAT.get(e, "other"),
+            "parent": os.path.dirname(abs_path),
+        })
+    total_pages = (total + page_size - 1) // page_size if total else 0
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "has_more": page < total_pages,
+    }
+
+
 def _invalidate_detail_cache():
     """索引重建后清空详情缓存"""
     with _INDEX_DETAIL_CACHE_LOCK:

@@ -6,6 +6,8 @@
 
         // 视频预览的键盘监听清理函数：由 previewFile 内部赋值，closePreview 时调用
         let _videoPreviewUnbind = null;
+        // 预览「收起」后的右下角悬浮胶囊
+        let _previewCollapsedBtn = null;
 
         function _canPreview(ext) {
             const e = (ext || '').toLowerCase();
@@ -51,10 +53,14 @@
             }
             if (!_canPreviewPath(absPath)) return;
             const container = document.getElementById('previewContainer');
+            // innerHTML 重建会移除旧的收起胶囊/迷你窗，重置引用与监听，避免指向已卸载节点
+            _previewCollapsedBtn = null;
+            _detachPreviewCapsuleMedia();
             const extLabel = ext ? ext.toUpperCase() : '未知';
             const fileName = absPath.split('/').pop();
             const isTextFile = _TEXT_EXTS.has(ext) || _isDotfileText(absPath);
             const isVideoFile = _VIDEO_EXTS.has(ext);
+            const isImageFile = _IMAGE_EXTS.has(ext);
             container.innerHTML = `
             <div class="preview-overlay">
                 <div class="preview-modal">
@@ -67,6 +73,7 @@
                             <div class="preview-actions">
                                 ${isTextFile ? `<button class="btn" id="previewEditBtn" style="background:#2563eb;color:white;padding:4px 10px;border-radius:6px;border:none;cursor:pointer;font-size:0.78rem;display:flex;align-items:center;gap:4px;"><i class="bi bi-pencil-square"></i> 编辑</button>` : ''}
                                 <button class="btn btn-copy" id="previewCopyBtn"><i class="bi bi-clipboard"></i> 复制</button>
+                                <button class="btn btn-collapse-preview" id="previewMinBtn" title="收起（后台继续播放）"><i class="bi bi-arrows-angle-contract"></i></button>
                                 <button class="btn btn-close-preview" id="previewCloseBtn"><i class="bi bi-x-lg"></i></button>
                             </div>
                         </div>
@@ -77,7 +84,8 @@
                 </div>
             </div>
         `;
-            document.getElementById('previewCloseBtn').addEventListener('click', closePreview);
+            document.getElementById('previewMinBtn').addEventListener('click', _collapsePreview);
+            document.getElementById('previewCloseBtn').addEventListener('click', _confirmClosePreview);
             document.getElementById('previewCopyBtn').addEventListener('click', _copyPreview);
             if (isTextFile) {
                 document.getElementById('previewEditBtn').addEventListener('click', () => {
@@ -161,10 +169,8 @@
             // 暴露给 closePreview：关闭预览时解绑方向键监听，避免方向键被全局拦截
             _videoPreviewUnbind = unbindVideoKeys;
 
-            // Esc 不再退出预览，只能点右上角「×」关闭
-            fetch(`/api/preview?path=${encodeURIComponent(absPath)}`)
-                .then(r => r.json())
-                .then(data => {
+            // 预览数据应用到界面（抽成函数：视频文件可直接喂数据，无需先请求 /api/preview）
+            const applyPreviewData = (data) => {
                     if (data.error) {
                         body.className = 'preview-body preview-error';
                         body.innerHTML = `<i class="bi bi-exclamation-circle"></i><span>${data.error}</span>`;
@@ -213,7 +219,7 @@
                                 <div class="vpp-name">${_escapeHtml(absPath.split('/').pop() || '')}</div>
                             </div>
                             <video autoplay playsinline style="width:100%;height:100%;">
-                                <source src="${data.stream_url}" type="${data.content_type}">
+                                <source src="${data.stream_url}"${data.content_type ? ` type="${data.content_type}"` : ''}>
                                 您的浏览器不支持视频播放
                             </video>
                             <div class="video-seek-tip" style="position:absolute;bottom:92px;left:50%;transform:translate(-50%,8px);background:rgba(0,0,0,0.72);color:#fff;padding:8px 16px;border-radius:8px;font-size:0.85rem;font-weight:600;z-index:20;pointer-events:none;opacity:0;transition:opacity .2s ease,transform .2s ease;display:flex;align-items:center;gap:6px;white-space:nowrap;"></div>
@@ -328,12 +334,38 @@
                         body.innerHTML = `<pre>${_escapeHtml(decoded)}</pre>`;
                         document.getElementById('previewCopyBtn').style.display = '';
                     }
-                })
-                .catch(err => {
-                    body.className = 'preview-body preview-error';
-                    body.innerHTML = `<i class="bi bi-exclamation-circle"></i><span>加载失败: ${err.message}</span>`;
-                    document.getElementById('previewCopyBtn').style.display = 'none';
+                    // 若用户在内容就绪前就点了「收起」，此时再绑定一次媒体（胶囊控制 + 歌词同步）
+                    if (_previewCollapsedBtn && _previewCollapsedBtn.style.display !== 'none') _collapsePreview();
+            };
+
+            // 图片文件：直接渲染「大图 + 图片墙」骨架，跳过 /api/preview，
+            // 这样不会先闪一屏加载动画，直接就是带图片列表的浏览页
+            if (isImageFile) {
+                applyPreviewData({ type: 'image' });
+                return;
+            }
+
+            // 视频文件：直接用路径拼出流地址渲染播放器，跳过 /api/preview，
+            // 这样不会先闪一屏加载动画，直接就是带播放列表的播放页
+            if (isVideoFile) {
+                const listItem = (Array.isArray(fileItems) ? fileItems : [])
+                    .find(it => it && !it.is_dir && it.name === fileName);
+                applyPreviewData({
+                    type: 'video',
+                    stream_url: '/api/stream?path=' + encodeURIComponent(absPath),
+                    content_type: '',
+                    size_str: (listItem && listItem.size_str) || '',
                 });
+            } else {
+                fetch(`/api/preview?path=${encodeURIComponent(absPath)}`)
+                    .then(r => r.json())
+                    .then(applyPreviewData)
+                    .catch(err => {
+                        body.className = 'preview-body preview-error';
+                        body.innerHTML = `<i class="bi bi-exclamation-circle"></i><span>加载失败: ${err.message}</span>`;
+                        document.getElementById('previewCopyBtn').style.display = 'none';
+                    });
+            }
         }
 
         // ===== 自定义播放器控制条：进度拖拽 / 音量旋钮 / 倍速 / 播放模式 / 旋转 / 画中画 / 全屏 =====
@@ -565,7 +597,8 @@
         const _vpDurCache = {};     // 播放列表视频时长缓存（path -> "07:18"），避免重复请求
 
         function _switchVideoInPlace(body, newPath) {
-            const video = body.querySelector('video');
+            // 收起时 video 会被搬进右下角迷你窗，因此从容器全局查找
+            const video = document.querySelector('#previewContainer video');
             if (!video || newPath === _vpCurrentVideo) return;
             _vpCurrentVideo = newPath;
             if (body._vpResetRotation) body._vpResetRotation();   // 新视频还原旋转角度
@@ -1069,6 +1102,10 @@
                             localRemoveItems([cur]);
                             if (ok2) showToast('成功', '已删除（移入回收站）', 'success');
                             if (ok2 && (result.trash_items || []).length > 0) showUndoToast(result.trash_items);
+                            // 媒体集合若开着，同步把对应卡片移除，避免还显示已删除的文件
+                            if (typeof notifyMediaCollectionDeleted === 'function') {
+                                notifyMediaCollectionDeleted(result.deleted || [cur]);
+                            }
                         }
                     }
                 });
@@ -1214,7 +1251,7 @@
                         .catch(() => {});
                 });
                 // 播完行为按播放模式处理：顺序=播下一个（末尾停止）、循环=原生 loop、随机=随机换一个
-                const video = body.querySelector('video');
+                const video = document.querySelector('#previewContainer video');
                 // 封面延迟加载：等主视频可播放后再请求 /api/thumbnail，
                 // 避免 ffmpeg 抽帧与视频流抢占磁盘 I/O 拖慢起播
                 const loadThumbs = () => listEl.querySelectorAll('img[data-thumb]').forEach(img => {
@@ -1230,6 +1267,13 @@
                     else video.addEventListener('canplay', loadThumbs, { once: true });
                     video.addEventListener('ended', () => {
                         if (_vpPlayMode === 'loop') return;
+                        // 当前索引必须动态取：切换视频是原位换源，不会重建列表，
+                        // 闭包里的 curIdx 会永远停在打开时的位置，导致连播一次后就卡住
+                        const playingEl = body.querySelector('.vp-item.playing');
+                        const playingPath = playingEl ? playingEl.dataset.path : '';
+                        let cur = vids.findIndex(v => dir + '/' + v.name === playingPath);
+                        if (cur < 0) cur = vids.findIndex(v => dir + '/' + v.name === _vpCurrentVideo);
+                        if (cur < 0) cur = curIdx;
                         let nextIdx;
                         if (_vpPlayMode === 'shuffle') {
                             if (vids.length <= 1) {
@@ -1237,12 +1281,18 @@
                                 video.play().catch(() => {});
                                 return;
                             }
-                            do { nextIdx = Math.floor(Math.random() * vids.length); } while (nextIdx === curIdx);
+                            do { nextIdx = Math.floor(Math.random() * vids.length); } while (nextIdx === cur);
                         } else {
-                            if (curIdx < 0 || curIdx >= vids.length - 1) return;
-                            nextIdx = curIdx + 1;
+                            nextIdx = cur + 1;
+                            if (nextIdx >= vids.length) nextIdx = 0;   // 末尾回到第一个，收起时也能自动连播
                         }
-                        _switchVideoInPlace(body, dir + '/' + vids[nextIdx].name);
+                        const nextPath = dir + '/' + vids[nextIdx].name;
+                        if (nextPath === _vpCurrentVideo) {   // 列表只有一个视频：原地重播
+                            video.currentTime = 0;
+                            video.play().catch(() => {});
+                            return;
+                        }
+                        _switchVideoInPlace(body, nextPath);
                     });
                 }
                 // 让正在播放的条目滚动到可视区
@@ -1272,4 +1322,346 @@
             _zipViewerStack.length = 0;   // 清空压缩包查看器返回栈
             const container = document.getElementById('previewContainer');
             container.innerHTML = '';
+            _detachPreviewCapsuleMedia();
+            _previewCollapsedBtn = null;
+        }
+
+        // 关闭预览的二次确认：取消 / 收起（右下角胶囊，播放继续） / 彻底关闭
+        // 处于画中画播放时不再提供「彻底关闭」：removing video 会让画中画窗口一并消失
+        async function _confirmClosePreview() {
+            const pipOn = !!document.pictureInPictureElement;
+            const actions = [
+                { value: 'collapse', text: '收起', cls: 'btn-ok', icon: 'bi-arrows-angle-contract' },
+            ];
+            if (!pipOn) {
+                actions.push({ value: 'close', text: '彻底关闭', cls: 'btn-confirm', icon: 'bi-x-lg' });
+            }
+            const result = await showChoiceModal({
+                title: '<i class="bi bi-x-square"></i> 关闭预览',
+                message: pipOn
+                    ? '当前正在画中画播放，请选择关闭方式：<br>· <strong>收起</strong>：隐藏预览窗口，画中画继续播放<br>（如需彻底关闭，请先退出画中画）'
+                    : '请选择关闭方式：<br>· <strong>收起</strong>：缩小为右下角悬浮胶囊，播放继续进行，点击胶囊即可展开<br>· <strong>彻底关闭</strong>：停止播放并关闭预览窗口',
+                actions,
+            });
+            if (result === 'collapse') _collapsePreview();
+            else if (result === 'close') closePreview();
+        }
+
+        // 收起预览：隐藏弹窗（视频/音频继续播放），右下角显示迷你播放胶囊
+        let _previewCollapsedMedia = null;      // 胶囊当前控制的 video/audio
+        let _previewCollapsedCleanup = null;    // 解绑媒体监听
+        let _previewCapsuleObserver = null;     // 监听预览歌词区变化（歌词异步加载）
+
+        function _pccFmt(sec) {
+            sec = Math.max(0, Math.floor(sec || 0));
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = sec % 60;
+            return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(s).padStart(2, '0');
+        }
+
+        function _collapsePreview() {
+            const container = document.getElementById('previewContainer');
+            const overlay = container.querySelector('.preview-overlay');
+            if (!overlay) return;
+            overlay.style.display = 'none';
+
+            let btn = _previewCollapsedBtn;
+            if (!btn || !document.body.contains(btn)) {
+                btn = document.createElement('div');
+                btn.className = 'preview-collapsed';
+                btn.title = '点击展开预览';
+                btn.innerHTML = `
+                    <div class="pcc-music">
+                        <div class="pcc-cover-wrap">
+                            <i class="bi bi-vinyl-fill pcc-cover-fallback"></i>
+                            <img class="pcc-cover" alt="" style="display:none">
+                        </div>
+                        <div class="pcc-lyrics"><div class="pcc-lyrics-inner"></div></div>
+                    </div>
+                    <div class="pcc-row">
+                        <button class="pcc-btn pcc-play" title="播放 / 暂停"><i class="bi bi-pause-fill"></i></button>
+                        <span class="preview-collapsed-name"></span>
+                        <button class="pcc-btn pcc-next" title="播放下一个"><i class="bi bi-skip-end-fill"></i></button>
+                        <button class="pcc-btn pcc-expand" title="展开预览"><i class="bi bi-arrows-angle-expand"></i></button>
+                    </div>
+                    <div class="pcc-progress" title="点击跳转进度">
+                        <div class="pcc-track"><div class="pcc-played"></div></div>
+                    </div>
+                    <div class="pcc-time"><span class="pcc-cur">00:00</span><span class="pcc-dur">00:00</span></div>`;
+                btn.addEventListener('click', _expandPreview);
+                // 播放 / 暂停
+                btn.querySelector('.pcc-play').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const m = _previewCollapsedMedia;
+                    if (!m) return;
+                    if (m.paused) m.play().catch(() => {}); else m.pause();
+                });
+                // 下一个
+                btn.querySelector('.pcc-next').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    _playNextInPreview();
+                });
+                // 进度条点击跳转
+                btn.querySelector('.pcc-progress').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const m = _previewCollapsedMedia;
+                    if (!m || !m.duration) return;
+                    const r = e.currentTarget.getBoundingClientRect();
+                    const ratio = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+                    m.currentTime = ratio * m.duration;
+                    _syncPreviewCapsule();
+                });
+                container.appendChild(btn);
+                _previewCollapsedBtn = btn;
+            }
+
+            // 绑定当前媒体（视频/音频）的状态同步
+            _detachPreviewCapsuleMedia();
+            const media = overlay.querySelector('video, audio');
+            _previewCollapsedMedia = media;
+            btn.classList.toggle('no-media', !media);
+            btn.classList.toggle('music', !!media && media.tagName === 'AUDIO');
+            if (media) {
+                const sync = () => _syncPreviewCapsule();
+                media.addEventListener('timeupdate', sync);
+                media.addEventListener('progress', sync);
+                media.addEventListener('durationchange', sync);
+                media.addEventListener('loadedmetadata', sync);
+                media.addEventListener('play', sync);
+                media.addEventListener('pause', sync);
+                _previewCollapsedCleanup = () => {
+                    media.removeEventListener('timeupdate', sync);
+                    media.removeEventListener('progress', sync);
+                    media.removeEventListener('durationchange', sync);
+                    media.removeEventListener('loadedmetadata', sync);
+                    media.removeEventListener('play', sync);
+                    media.removeEventListener('pause', sync);
+                };
+            }
+            // 歌词是异步加载的：监听预览歌词区变化，暂停状态下也能同步到胶囊
+            if (media && media.tagName === 'AUDIO' && typeof MutationObserver !== 'undefined') {
+                const lyrBox = overlay.querySelector('.music-lyrics-inner');
+                if (lyrBox) {
+                    const mo = new MutationObserver(() => _syncPreviewCapsule());
+                    mo.observe(lyrBox, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+                    _previewCapsuleObserver = mo;
+                }
+            }
+            // 图片查看器可切换图片：跟进 .img-view 的 src，让迷你窗画面同步
+            const imgViewEl = overlay.querySelector('.img-view');
+            if (imgViewEl && typeof MutationObserver !== 'undefined') {
+                const mo = new MutationObserver(() => _syncMiniImage(container, overlay, imgViewEl));
+                mo.observe(imgViewEl, { attributes: true, attributeFilter: ['src'] });
+                _previewCapsuleObserver = mo;
+            }
+
+            // 视频/图片：额外提供右下角迷你画面窗
+            _syncMiniMediaWindow(container, overlay, media);
+
+            btn.style.display = 'block';
+            _syncPreviewCapsule();
+        }
+
+        // 收起时的迷你画面窗：视频搬移 <video>（同文档移动不中断播放）；图片显示缩小版画面
+        function _syncMiniMediaWindow(container, overlay, media) {
+            const isVideo = !!media && media.tagName === 'VIDEO';
+            const imgView = overlay.querySelector('.img-view');
+            if (!isVideo && !imgView) {
+                _restoreMiniVideoWindow(container);
+                return;
+            }
+            let mini = container.querySelector('.preview-mini-video');
+            if (!mini) {
+                mini = document.createElement('div');
+                mini.className = 'preview-mini-video';
+                mini.title = '点击展开预览';
+                mini.innerHTML = '<button class="pmv-toggle" title="隐藏画面"><i class="bi bi-eye-slash"></i></button>'
+                    + '<img class="pmv-image" alt="" style="display:none">';
+                // 捕获阶段拦截：否则点击画面会先命中 video 自身的「点击=播放/暂停」，展开的同时被暂停
+                mini.addEventListener('click', (e) => {
+                    if (e.target.closest('.pmv-toggle')) return;   // 画面窗按钮交给它自己处理
+                    e.stopPropagation();
+                    _expandPreview();
+                }, true);
+                mini.addEventListener('dblclick', (e) => e.stopPropagation(), true);   // 避免触发画面双击全屏
+                // 画面窗自身的收起/展开（只折叠画面，与「展开大播放器」区分开）
+                mini.querySelector('.pmv-toggle').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const collapsed = mini.classList.toggle('collapsed');
+                    const toggle = mini.querySelector('.pmv-toggle');
+                    toggle.title = collapsed ? '显示画面' : '隐藏画面';
+                    toggle.querySelector('i').className = collapsed ? 'bi bi-eye' : 'bi bi-eye-slash';
+                });
+                container.appendChild(mini);
+            }
+            if (isVideo) {
+                mini.classList.remove('mini-image');
+                const imgEl = mini.querySelector('.pmv-image');
+                if (imgEl) imgEl.style.display = 'none';
+                if (media.parentNode !== mini) {
+                    // 首次搬移时记住原位，展开时按原位放回
+                    if (!media._homeParent) {
+                        media._homeParent = media.parentNode;
+                        media._homeNext = media.nextSibling;
+                    }
+                    const wasPaused = media.paused;
+                    mini.appendChild(media);
+                    if (!wasPaused) media.play().catch(() => {});
+                }
+            } else {
+                mini.classList.add('mini-image');
+                _syncMiniImage(container, overlay, imgView);
+            }
+            mini.style.display = 'block';
+        }
+
+        // 图片：迷你窗里的 <img> 跟随查看器当前图片的 src（同一 URL，浏览器缓存直接命中）
+        function _syncMiniImage(container, overlay, imgView) {
+            const img = container.querySelector('.preview-mini-video .pmv-image');
+            const srcEl = imgView || overlay.querySelector('.img-view');
+            if (!img || !srcEl) return;
+            const src = srcEl.getAttribute('src') || '';
+            if (src && img.dataset.src !== src) {
+                img.dataset.src = src;
+                img.src = src;
+            }
+            img.style.display = '';
+        }
+
+        // 把 video 放回播放舞台，并移除迷你窗
+        function _restoreMiniVideoWindow(container) {
+            const mini = container.querySelector('.preview-mini-video');
+            if (!mini) return;
+            const video = mini.querySelector('video');
+            if (!video) { mini.remove(); return; }
+            const wasPaused = video.paused;
+            const home = video._homeParent;
+            if (home && home.isConnected) {
+                try { home.insertBefore(video, video._homeNext); } catch (err) { /* ignore */ }
+            }
+            if (video.parentNode === mini) {
+                // 原位不可用：退回到舞台末尾，避免随迷你窗一起被删除
+                const stage = container.querySelector('.video-stage');
+                if (stage) stage.appendChild(video);
+            }
+            if (video.parentNode === mini) return;   // 仍移不出去：保留迷你窗
+            if (!wasPaused) video.play().catch(() => {});
+            video._homeParent = null;
+            video._homeNext = null;
+            mini.remove();
+        }
+
+        function _detachPreviewCapsuleMedia() {
+            if (_previewCapsuleObserver) {
+                try { _previewCapsuleObserver.disconnect(); } catch (err) { /* ignore */ }
+                _previewCapsuleObserver = null;
+            }
+            if (_previewCollapsedCleanup) {
+                try { _previewCollapsedCleanup(); } catch (err) { /* ignore */ }
+                _previewCollapsedCleanup = null;
+            }
+            _previewCollapsedMedia = null;
+        }
+
+        // 同步胶囊上的播放状态 / 进度 / 时间 / 文件名
+        function _syncPreviewCapsule() {
+            const btn = _previewCollapsedBtn;
+            const container = document.getElementById('previewContainer');
+            if (!btn) return;
+            const m = _previewCollapsedMedia;
+            const nameEl = btn.querySelector('.preview-collapsed-name');
+            if (nameEl) {
+                const titleSpan = container.querySelector('.preview-title span:last-child');
+                // 视频以当前播放路径为准（切换下一个后标题可能未同步）
+                const fromVideo = (m && m.tagName === 'VIDEO' && _vpCurrentVideo) ? _vpCurrentVideo.split('/').pop() : '';
+                nameEl.textContent = fromVideo || (titleSpan && titleSpan.textContent.trim()) || '预览';
+            }
+            if (!m) return;
+            const playIcon = btn.querySelector('.pcc-play i');
+            if (playIcon) playIcon.className = m.paused ? 'bi bi-play-fill' : 'bi bi-pause-fill';
+            const d = m.duration || 0;
+            const c = m.currentTime || 0;
+            const played = btn.querySelector('.pcc-played');
+            if (played) played.style.width = d ? Math.min(100, c / d * 100) + '%' : '0%';
+            const curEl = btn.querySelector('.pcc-cur');
+            const durEl = btn.querySelector('.pcc-dur');
+            if (curEl) curEl.textContent = _pccFmt(c);
+            if (durEl) durEl.textContent = _pccFmt(d);
+            // 音乐：同步旋转封面 + 滚动歌词
+            if (m.tagName === 'AUDIO') _syncCapsuleMusic(btn, container, m);
+        }
+
+        // 音乐收起时：封面旋转（播放中才转）+ 跟随当前句滚动的歌词
+        function _syncCapsuleMusic(btn, container, audio) {
+            const wrap = btn.querySelector('.pcc-cover-wrap');
+            const img = btn.querySelector('.pcc-cover');
+            const fallback = btn.querySelector('.pcc-cover-fallback');
+            const srcImg = container.querySelector('.music-cover-img');
+            const src = (srcImg && srcImg.style.display !== 'none') ? srcImg.getAttribute('src') : '';
+            if (img) {
+                if (src) {
+                    if (img.dataset.src !== src) {
+                        img.dataset.src = src;
+                        img.src = src;
+                        img.onerror = () => { img.style.display = 'none'; if (fallback) fallback.style.display = ''; };
+                    }
+                    img.style.display = '';
+                    if (fallback) fallback.style.display = 'none';
+                } else {
+                    img.style.display = 'none';
+                    if (fallback) fallback.style.display = '';
+                }
+            }
+            if (wrap) wrap.classList.toggle('playing', !audio.paused);
+
+            const inner = btn.querySelector('.pcc-lyrics-inner');
+            if (!inner) return;
+            const srcLines = container.querySelectorAll('.music-lyrics .lyric-line');
+            if (!srcLines.length) {
+                if (inner.dataset.count !== '0') {
+                    inner.dataset.count = '0';
+                    inner.innerHTML = '<div class="pcc-lyric-line active">♪ 暂无歌词</div>';
+                    inner.style.transform = 'translateY(0)';
+                }
+                return;
+            }
+            if (inner.dataset.count !== String(srcLines.length)) {
+                inner.innerHTML = Array.from(srcLines)
+                    .map(el => `<div class="pcc-lyric-line">${_escapeHtml(el.textContent)}</div>`).join('');
+                inner.dataset.count = String(srcLines.length);
+            }
+            let idx = 0;
+            srcLines.forEach((el, i) => { if (el.classList.contains('active')) idx = i; });
+            const lines = inner.children;
+            for (let i = 0; i < lines.length; i++) lines[i].classList.toggle('active', i === idx);
+            const lineH = lines[0] ? lines[0].offsetHeight : 22;
+            const viewH = inner.parentElement ? inner.parentElement.clientHeight : 44;
+            const offset = idx * lineH + lineH / 2 - viewH / 2;
+            inner.style.transform = `translateY(${-Math.max(0, offset)}px)`;
+        }
+
+        // 收起状态下播放下一个：按播放列表顺序，末位回到第一个
+        function _playNextInPreview() {
+            const container = document.getElementById('previewContainer');
+            const body = container.querySelector('.preview-body');
+            const items = container.querySelectorAll('.vp-item');
+            if (!body || !items.length) return;
+            let idx = -1;
+            items.forEach((el, i) => { if (el.classList.contains('playing')) idx = i; });
+            const next = items[(idx + 1) % items.length];
+            if (next && next.dataset.path) _switchVideoInPlace(body, next.dataset.path);
+        }
+
+        // 展开预览：恢复弹窗并移除悬浮胶囊
+        function _expandPreview() {
+            const container = document.getElementById('previewContainer');
+            const overlay = container.querySelector('.preview-overlay');
+            if (overlay) overlay.style.display = 'flex';
+            _restoreMiniVideoWindow(container);
+            _detachPreviewCapsuleMedia();
+            if (_previewCollapsedBtn) {
+                _previewCollapsedBtn.remove();
+                _previewCollapsedBtn = null;
+            }
         }

@@ -55,3 +55,46 @@
                 });
             });
         }
+
+        /**
+         * 多选确认框：在「取消」之外提供多个操作按钮。
+         * @param {Object} opts
+         * @param {string} opts.title    标题（可含 HTML）
+         * @param {string} opts.message  正文（可含 HTML，注意 modal-body 为 pre-wrap，避免缩进换行）
+         * @param {Array}  opts.actions  [{ value, text, cls, icon }]，cls 默认 btn-ok
+         * @returns {Promise<string>} 'cancel' 或某个 action.value
+         */
+        function showChoiceModal(opts) {
+            const o = opts || {};
+            return new Promise((resolve) => {
+                const container = document.getElementById('customModalContainer');
+                if (!container) { resolve('cancel'); return; }
+                const actions = o.actions || [];
+                const btns = actions.map(a =>
+                    `<button class="btn ${a.cls || 'btn-ok'}" data-result="${a.value}">${a.icon ? `<i class="bi ${a.icon}"></i> ` : ''}${a.text}</button>`
+                ).join('');
+                const overlay = document.createElement('div');
+                overlay.className = 'custom-modal-overlay';
+                overlay.innerHTML = `
+                <div class="custom-modal">
+                    <div class="modal-title">${o.title || '请选择操作'}</div>
+                    <div class="modal-body">${o.message || ''}</div>
+                    <div class="modal-footer">
+                        <button class="btn btn-cancel" data-result="cancel">${o.cancelText || '取消'}</button>
+                        ${btns}
+                    </div>
+                </div>`;
+                const onKey = (e) => { if (e.key === 'Escape') done('cancel'); };
+                const done = (result) => {
+                    document.removeEventListener('keydown', onKey);
+                    if (document.body.contains(overlay)) overlay.remove();
+                    resolve(result);
+                };
+                container.appendChild(overlay);
+                overlay.querySelectorAll('[data-result]').forEach(btn => {
+                    btn.addEventListener('click', () => done(btn.dataset.result));
+                });
+                overlay.addEventListener('click', (e) => { if (e.target === overlay) done('cancel'); });
+                document.addEventListener('keydown', onKey);
+            });
+        }

@@ -18,9 +18,13 @@ _log = get_logger()
 _INDEX_META = {
     "total_files": 0, "total_dirs": 0, "total_size": 0,
     "last_scan": None, "status": "idle", "progress": 0, "status_detail": "",
+    "scanned_files": 0,   # 本轮扫描实时已扫描文件数
+    "scanned_dirs": 0,    # 本轮扫描实时已扫描目录数
+    "scanned_size": 0,    # 本轮扫描实时累计文件大小
 }
 _INDEX_LOCK = threading.Lock()
-_SCAN_EVENT = threading.Event()          # 重新扫描信号
+_SCAN_EVENT = threading.Event()          # 触发重新扫描的信号
+_CANCEL_EVENT = threading.Event()        # 取消当前扫描的信号（与触发信号分开，避免被调度器清掉）
 _INDEX_BUILD_LOCK = threading.Lock()
 
 # 全盘搜索运行态
@@ -31,6 +35,14 @@ _SEARCH_LOCK = threading.Lock()
 _INDEX_DETAIL_MEMORY_CACHE = {}
 _INDEX_DETAIL_CACHE_LOCK = threading.Lock()
 _INDEX_DETAIL_CACHE_EXPIRY = 600         # 10 分钟过期
+
+# 扫描期间实时详情缓存（从临时库聚合开销大，节流 20 秒一次）
+_INDEX_SCANNING_DETAIL = {"time": 0.0, "data": None}
+_INDEX_SCANNING_DETAIL_LOCK = threading.Lock()
+
+# 可视化图表统计缓存（扫描中 20 秒 / 空闲 120 秒）
+_INDEX_CHART_CACHE = {"time": 0.0, "data": None}
+_INDEX_CHART_LOCK = threading.Lock()
 
 
 
@@ -48,6 +60,9 @@ def _load_index_meta():
         _INDEX_META["last_scan"] = meta.get("last_scan", "从未扫描")
         _INDEX_META["status"] = "idle"
         _INDEX_META["progress"] = 100
+        _INDEX_META["scanned_files"] = 0
+        _INDEX_META["scanned_dirs"] = 0
+        _INDEX_META["scanned_size"] = 0
         has_data = _INDEX_META["total_files"] > 0
         conn.close()
         return has_data
@@ -63,7 +78,10 @@ def _scan_root(root, stop_event, conn, max_results=2000000):
     _VIRT_FS_PREFIXES = ("/proc", "/sys", "/dev", "/run", "/snap", "/boot", "/dev/shm")
     _MAX_FILE_SIZE = 256 * 1024 * 1024 * 1024  # 超过 256GB 视为虚拟文件
 
-    count = 0
+    count = 0          # 总项数（含目录），用于进度
+    file_count = 0     # 已扫描文件数
+    dir_count = 0      # 已扫描目录数
+    size_sum = 0       # 已扫描文件总大小
     errors = 0
     try:
         conn.execute("BEGIN")
@@ -86,6 +104,7 @@ def _scan_root(root, stop_event, conn, max_results=2000000):
                     (dirpath_norm, os.path.basename(dirpath), st.st_mtime, os.path.dirname(dirpath_norm))
                 )
                 count += 1
+                dir_count += 1
             except (OSError, PermissionError):
                 errors += 1
                 continue
@@ -105,6 +124,8 @@ def _scan_root(root, stop_event, conn, max_results=2000000):
                         (fpath_norm, fname, ext, st.st_size, st.st_mtime, os.path.dirname(fpath_norm))
                     )
                     count += 1
+                    file_count += 1
+                    size_sum += st.st_size or 0
                 except (OSError, PermissionError):
                     errors += 1
                     continue
@@ -113,7 +134,13 @@ def _scan_root(root, stop_event, conn, max_results=2000000):
                 conn.commit()
                 # 每 50K 项 ≈ 1% 进度；约 5M 项时到 90%（典型全盘最大）
                 _INDEX_META["progress"] = min(90, count // 50000)
+                _INDEX_META["scanned_files"] = file_count
+                _INDEX_META["scanned_dirs"] = dir_count
+                _INDEX_META["scanned_size"] = size_sum
         conn.commit()
+        _INDEX_META["scanned_files"] = file_count
+        _INDEX_META["scanned_dirs"] = dir_count
+        _INDEX_META["scanned_size"] = size_sum
     except Exception as e:
         try:
             conn.rollback()
@@ -186,12 +213,18 @@ def _get_index_meta():
     status_detail = _INDEX_META.get("status_detail", "")
 
     if status == "scanning":
+        # 扫描期间展示实时累计统计（动态更新），total_files 等旧索引字段保持不动，
+        # 新索引构建完成并替换后才整体切换为最终值
+        sf = _INDEX_META.get("scanned_files", 0)
+        sd = _INDEX_META.get("scanned_dirs", 0)
+        ss = _INDEX_META.get("scanned_size", 0)
         return {
-            "total_files": _INDEX_META.get("total_files", 0),
-            "total_dirs": _INDEX_META.get("total_dirs", 0),
-            "total_size": _INDEX_META.get("total_size", 0),
-            "total_size_str": format_size(_INDEX_META.get("total_size", 0)),
+            "total_files": sf,
+            "total_dirs": sd,
+            "total_size": ss,
+            "total_size_str": format_size(ss),
             "last_scan": "扫描中...",
+            "scanned_files": sf,
             "status": "scanning",
             "progress": progress,
             "status_detail": status_detail,
@@ -244,12 +277,17 @@ def _build_index(roots):
             pass
 
     _init_index_db(_INDEX_DB_NEW)
-    stop_event = threading.Event()
+    _CANCEL_EVENT.clear()        # 清掉上一轮可能残留的取消信号
+    stop_event = _CANCEL_EVENT   # 与 /api/index/cancel 共用同一个信号，否则「取消扫描」不会生效
 
     def _worker():
         try:
             _INDEX_META["status"] = "scanning"
             _INDEX_META["progress"] = 0
+            _INDEX_META["scanned_files"] = 0
+            _INDEX_META["scanned_dirs"] = 0
+            _INDEX_META["scanned_size"] = 0
+            _INDEX_SCANNING_DETAIL["data"] = None
             _INDEX_META["status_detail"] = "正在扫描文件..."
             total_count = 0
             all_errors = []
@@ -278,6 +316,24 @@ def _build_index(roots):
                     break
 
             tconn.close()
+
+            if stop_event.is_set():
+                # 用户取消：丢弃半成品临时库、保留原有索引，避免用不完整数据覆盖旧索引
+                try:
+                    if os.path.exists(_INDEX_DB_NEW):
+                        os.remove(_INDEX_DB_NEW)
+                    if os.path.exists(_INDEX_DB_NEW + ".wal"):
+                        os.remove(_INDEX_DB_NEW + ".wal")
+                except Exception:
+                    pass
+                _INDEX_META["status"] = "idle"
+                _INDEX_META["progress"] = 0
+                _INDEX_META["scanned_files"] = 0
+                _INDEX_META["scanned_dirs"] = 0
+                _INDEX_META["scanned_size"] = 0
+                _INDEX_META["status_detail"] = "已取消扫描"
+                return
+
             _INDEX_META["progress"] = 90
             _INDEX_META["status_detail"] = "正在统计文件大小..."
 
@@ -312,17 +368,30 @@ def _build_index(roots):
             if total_files > 0:
                 try:
                     _DIR_SIZE_CACHE.clear()
-                    if os.path.exists(_INDEX_DB_FILE):
-                        os.remove(_INDEX_DB_FILE)
-                    if os.path.exists(_INDEX_DB_FILE + ".wal"):
-                        os.remove(_INDEX_DB_FILE + ".wal")
                     _INDEX_META["status_detail"] = "正在替换索引 DB..."
-                    os.rename(_INDEX_DB_NEW, _INDEX_DB_FILE)
+                    # 清掉旧库残留的 WAL，避免替换后把旧 WAL 应用到新库
+                    try:
+                        if os.path.exists(_INDEX_DB_FILE + ".wal"):
+                            os.remove(_INDEX_DB_FILE + ".wal")
+                    except Exception:
+                        pass
+                    # 确保临时库的 WAL 已合并进主文件（连接关闭时通常已自动 checkpoint，这里兜底）
+                    try:
+                        if os.path.exists(_INDEX_DB_NEW + ".wal"):
+                            _wconn = _get_index_conn(_INDEX_DB_NEW)
+                            _wconn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                            _wconn.close()
+                    except Exception:
+                        pass
+                    # 原子替换：新库一次性顶替旧库（POSIX rename 原子生效）。
+                    # 替换完成前旧索引始终完整可查；替换失败旧索引原封不动。
+                    os.replace(_INDEX_DB_NEW, _INDEX_DB_FILE)
                     _log.info("索引构建完成，已替换主索引: %d 文件, %d 目录", total_files, total_dirs)
                 except Exception as e:
                     _log.error("索引替换失败: %s", e)
                     try:
-                        os.rename(_INDEX_DB_NEW, _INDEX_DB_FILE)
+                        if os.path.exists(_INDEX_DB_NEW):
+                            os.remove(_INDEX_DB_NEW)
                     except Exception:
                         pass
                     _INDEX_META["status"] = "error"
@@ -332,6 +401,9 @@ def _build_index(roots):
                 _INDEX_META["total_files"] = total_files
                 _INDEX_META["total_dirs"] = total_dirs
                 _INDEX_META["total_size"] = total_size
+                _INDEX_META["scanned_files"] = 0
+                _INDEX_META["scanned_dirs"] = 0
+                _INDEX_META["scanned_size"] = 0
                 _INDEX_META["status"] = "idle"
                 _INDEX_META["progress"] = 100
                 _INDEX_META["status_detail"] = "索引构建完成"
@@ -367,18 +439,19 @@ def _build_index(roots):
 
 def _cancel_index_scan():
     """取消正在进行的扫描"""
-    _SCAN_EVENT.set()
+    _CANCEL_EVENT.set()
 
 
-def _schedule_index_scan(interval_minutes=30):
-    """后台扫描调度器：仅响应 SCAN_EVENT 信号（手动触发或 API 触发），不做自动定时扫描"""
+def _schedule_index_scan():
+    """后台扫描调度器：仅在收到 _SCAN_EVENT 信号（手动触发 / API 触发）时才执行扫描；
+    不做定时自动扫描，避免重启后或每隔一段时间自动全盘索引——索引完全由用户在界面手动「重建索引」启动。"""
     def _scheduler():
         if sys.platform.startswith("win"):
             roots = os.environ.get("SystemDrive", "C:") + "\\"
         else:
             roots = "/"
         while True:
-            _SCAN_EVENT.wait(timeout=interval_minutes * 60)
+            _SCAN_EVENT.wait()            # 永久等待手动信号，不超时；没有信号则不扫描
             _SCAN_EVENT.clear()
             if _INDEX_META.get("status") == "scanning":
                 continue
@@ -456,12 +529,13 @@ def _search_walk(root, keyword, ext_filter, type_filter, timeout, stop_event, ma
     return items, "ok"
 
 
-def _compute_detail_stats_in_memory():
-    """实时计算索引详情统计，返回结果字典（不写入 DB）。用于内存缓存。"""
+def _compute_detail_stats_in_memory(db_path=None):
+    """实时计算索引详情统计，返回结果字典（不写入 DB）。用于内存缓存。
+    db_path 可传入临时库路径，用于扫描期间的实时统计。"""
     result = {"top_dirs": [], "type_distribution": [], "top_files": []}
     # 虚拟文件系统前缀，统计时排除
     _VIRT_PREFIXES = "('/proc', '/sys', '/dev', '/run', '/snap', '/boot')"
-    conn = _get_index_conn()
+    conn = _get_index_conn(db_path)
     try:
         top_dirs = conn.execute(
             f"""SELECT parent_dir, COUNT(*) as file_count, SUM(size) as dir_size
@@ -621,7 +695,175 @@ def _load_detail_stats():
     return result
 
 
+def _load_scanning_detail_stats():
+    """扫描期间的详情统计：旧索引有数据则用旧索引统计；
+    无旧索引（首次构建）时从临时库节流计算实时统计。"""
+    # 旧索引仍有数据：直接用旧索引统计（重建期间旧索引有效，开销最小）
+    try:
+        conn = _get_index_conn()
+        try:
+            row = conn.execute("SELECT value FROM index_meta WHERE key='total_files'").fetchone()
+        finally:
+            conn.close()
+        if row and int(row[0] or 0) > 0:
+            return _load_detail_stats()
+    except Exception:
+        pass
+
+    # 无旧索引：从临时库计算实时统计，20 秒节流一次（全量聚合较重，不宜每次轮询都算）
+    now = time.time()
+    with _INDEX_SCANNING_DETAIL_LOCK:
+        cached = _INDEX_SCANNING_DETAIL
+        if cached["data"] is not None and (now - cached["time"]) < 20:
+            return cached["data"]
+
+    data = {"top_dirs": [], "type_distribution": [], "top_files": []}
+    if os.path.exists(_INDEX_DB_NEW):
+        try:
+            data = _compute_detail_stats_in_memory(_INDEX_DB_NEW)
+        except Exception as e:
+            _log.warning("扫描期间实时统计失败: %s", e)
+
+    with _INDEX_SCANNING_DETAIL_LOCK:
+        _INDEX_SCANNING_DETAIL["time"] = time.time()
+        _INDEX_SCANNING_DETAIL["data"] = data
+    return data
+
+
+def _compute_chart_stats(conn):
+    """计算可视化图表数据（不写 DB）。conn 可为主库或临时库。"""
+    result = {
+        "type_distribution": [], "size_buckets": [], "mtime_buckets": [],
+        "top_dirs": [], "top_files": [],
+    }
+    _VFILT = "AND abs_path NOT LIKE '/proc/%' AND abs_path NOT LIKE '/sys/%' AND abs_path NOT LIKE '/dev/%' AND abs_path NOT LIKE '/run/%'"
+    try:
+        # 1. 文件类型分布（按总大小 Top 12，其余合并为"其他"）
+        rows = conn.execute(
+            f"""SELECT COALESCE(NULLIF(ext, ''), '(无后缀)') AS e, COUNT(*) cnt, SUM(size) sz
+               FROM index_files WHERE is_dir=0 {_VFILT}
+               GROUP BY e ORDER BY sz DESC"""
+        ).fetchall()
+        total_size = sum(r[2] or 0 for r in rows)
+        shown_size = 0
+        for r in rows[:12]:
+            result["type_distribution"].append({"ext": r[0], "count": r[1], "size": r[2] or 0})
+            shown_size += r[2] or 0
+        if len(rows) > 12:
+            result["type_distribution"].append({
+                "ext": "其他", "count": sum(r[1] for r in rows[12:]),
+                "size": max(0, total_size - shown_size),
+            })
+
+        # 2. 文件大小分布（5 个区间：数量 + 总大小）
+        row = conn.execute(
+            f"""SELECT
+               COALESCE(SUM(CASE WHEN size < 1048576 THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN size < 1048576 THEN size ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN size >= 1048576 AND size < 10485760 THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN size >= 1048576 AND size < 10485760 THEN size ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN size >= 10485760 AND size < 104857600 THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN size >= 10485760 AND size < 104857600 THEN size ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN size >= 104857600 AND size < 1073741824 THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN size >= 104857600 AND size < 1073741824 THEN size ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN size >= 1073741824 THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN size >= 1073741824 THEN size ELSE 0 END), 0)
+               FROM index_files WHERE is_dir=0 {_VFILT}"""
+        ).fetchone()
+        if row:
+            labels = ["< 1 MB", "1-10 MB", "10-100 MB", "100 MB-1 GB", "≥ 1 GB"]
+            for i, label in enumerate(labels):
+                result["size_buckets"].append({"label": label, "count": row[i * 2], "size": row[i * 2 + 1]})
+
+        # 3. 修改时间分布
+        now_ts = time.time()
+        day = 86400.0
+        t_day, t_week, t_month, t_year = now_ts - day, now_ts - 7 * day, now_ts - 30 * day, now_ts - 365 * day
+        row = conn.execute(
+            f"""SELECT
+               COALESCE(SUM(CASE WHEN mtime >= ? THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN mtime >= ? AND mtime < ? THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN mtime >= ? AND mtime < ? THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN mtime >= ? AND mtime < ? THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN mtime < ? OR mtime IS NULL THEN 1 ELSE 0 END), 0)
+               FROM index_files WHERE is_dir=0 {_VFILT}""",
+            (t_day, t_week, t_day, t_month, t_week, t_year, t_month, t_year)
+        ).fetchone()
+        if row:
+            labels = ["今天", "最近 7 天", "最近 30 天", "最近一年", "更早"]
+            for i, label in enumerate(labels):
+                result["mtime_buckets"].append({"label": label, "count": row[i]})
+
+        # 4. 占用空间 Top 15 目录
+        rows = conn.execute(
+            f"""SELECT parent_dir, COUNT(*) as file_count, SUM(size) as dir_size
+               FROM index_files WHERE is_dir=0 AND parent_dir != ''
+               {_VFILT}
+               GROUP BY parent_dir ORDER BY dir_size DESC LIMIT 15"""
+        ).fetchall()
+        result["top_dirs"] = [
+            {"path": r[0], "name": r[0].rsplit('/', 1)[-1] or r[0], "file_count": r[1], "size": r[2] or 0}
+            for r in rows
+        ]
+
+        # 5. 最大文件 Top 10
+        rows = conn.execute(
+            f"""SELECT name, ext, size, parent_dir
+               FROM index_files WHERE is_dir=0 {_VFILT}
+               ORDER BY size DESC LIMIT 10"""
+        ).fetchall()
+        result["top_files"] = [
+            {"name": r[0], "ext": r[1], "size": r[2] or 0, "parent": r[3]}
+            for r in rows
+        ]
+    except Exception as e:
+        _log.warning("计算图表统计失败: %s", e)
+    return result
+
+
+def _get_chart_stats():
+    """获取可视化图表数据（带缓存：扫描中 20 秒 / 空闲 120 秒）"""
+    now = time.time()
+    scanning = _INDEX_META.get("status") == "scanning"
+    with _INDEX_CHART_LOCK:
+        if _INDEX_CHART_CACHE["data"] is not None and (now - _INDEX_CHART_CACHE["time"]) < (20 if scanning else 120):
+            return _INDEX_CHART_CACHE["data"]
+
+    db_path = None
+    # 无旧索引且正在扫描：从临时库实时计算
+    try:
+        conn = _get_index_conn()
+        try:
+            row = conn.execute("SELECT value FROM index_meta WHERE key='total_files'").fetchone()
+        finally:
+            conn.close()
+        if not (row and int(row[0] or 0) > 0) and scanning and os.path.exists(_INDEX_DB_NEW):
+            db_path = _INDEX_DB_NEW
+    except Exception:
+        pass
+
+    data = {"type_distribution": [], "size_buckets": [], "mtime_buckets": [], "top_dirs": [], "top_files": []}
+    try:
+        conn = _get_index_conn(db_path)
+        try:
+            data = _compute_chart_stats(conn)
+        finally:
+            conn.close()
+    except Exception as e:
+        _log.warning("图表统计失败: %s", e)
+
+    data["meta"] = {"status": "scanning" if scanning else "idle", "from_temp": db_path is not None}
+    with _INDEX_CHART_LOCK:
+        _INDEX_CHART_CACHE["time"] = time.time()
+        _INDEX_CHART_CACHE["data"] = data
+    return data
+
+
 def _invalidate_detail_cache():
     """索引重建后清空详情缓存"""
     with _INDEX_DETAIL_CACHE_LOCK:
         _INDEX_DETAIL_MEMORY_CACHE.clear()
+    with _INDEX_SCANNING_DETAIL_LOCK:
+        _INDEX_SCANNING_DETAIL["data"] = None
+    with _INDEX_CHART_LOCK:
+        _INDEX_CHART_CACHE["data"] = None

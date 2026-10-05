@@ -18,7 +18,10 @@
             panel.innerHTML = `
             <div class="panel-header">
                 <span class="panel-title"><i class="bi bi-database"></i> 索引详情</span>
-                <button class="panel-close" title="关闭"><i class="bi bi-x-lg"></i></button>
+                <div style="display:flex;gap:6px;">
+                    <button class="panel-close" id="idxVizBtn" title="可视化面板"><i class="bi bi-graph-up"></i></button>
+                    <button class="panel-close" title="关闭"><i class="bi bi-x-lg"></i></button>
+                </div>
             </div>
             <div class="panel-body">
                 <div class="idx-section">
@@ -63,6 +66,8 @@
             // 重建索引按钮
             overlay.querySelector('#idxRebuildBtn').addEventListener('click', _handleIndexRebuild);
             overlay.querySelector('#idxCancelBtn').addEventListener('click', _handleIndexCancel);
+            // 可视化面板按钮
+            overlay.querySelector('#idxVizBtn').addEventListener('click', showIndexCharts);
 
             // 加载数据
             _loadIndexDetail();

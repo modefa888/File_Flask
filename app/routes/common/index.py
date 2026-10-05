@@ -10,7 +10,8 @@ from flask import Blueprint, request, jsonify
 from ...log import get_logger
 from ...services.common.indexer import (
     _build_index, _cancel_index_scan, _get_index_meta, _query_index,
-    _search_walk, _load_detail_stats, _INDEX_META, _SEARCH_RESULTS, _SEARCH_LOCK,
+    _search_walk, _load_detail_stats, _load_scanning_detail_stats, _get_chart_stats,
+    _INDEX_META, _SEARCH_RESULTS, _SEARCH_LOCK,
 )
 from ...services.common.filecore import format_size
 
@@ -158,15 +159,27 @@ def api_index_detail():
     meta = _get_index_meta()
     detail = dict(meta)
 
-    if meta.get("status") == "scanning":
-        return jsonify(detail)
-
-    cached = _load_detail_stats()
+    # 扫描期间：优先用旧索引统计（无旧索引时从临时库节流计算实时统计），
+    # 配合前端 2 秒轮询实现动态更新；新索引完成替换后切换为最终数据
+    try:
+        if meta.get("status") == "scanning":
+            cached = _load_scanning_detail_stats()
+        else:
+            cached = _load_detail_stats()
+    except Exception:
+        cached = {}
     detail["top_dirs"] = [dict(d, size_str=format_size(d["size"])) for d in cached.get("top_dirs", [])]
     detail["type_distribution"] = [dict(d, size_str=format_size(d["size"])) for d in cached.get("type_distribution", [])]
     detail["top_files"] = [dict(d, size_str=format_size(d["size"])) for d in cached.get("top_files", [])]
 
     return jsonify(detail)
+
+
+@bp.route("/api/index/charts")
+def api_index_charts():
+    _log.info("GET /api/index/charts")
+    """可视化图表统计数据（类型分布/大小分布/时间分布/Top 目录/最大文件）"""
+    return jsonify(_get_chart_stats())
 
 
 @bp.route("/api/index/build", methods=["POST"])
@@ -196,4 +209,5 @@ def api_index_status():
         "progress": _INDEX_META.get("progress", 0),
         "status_detail": _INDEX_META.get("status_detail", ""),
         "total_files": _INDEX_META.get("total_files", 0),
+        "scanned_files": _INDEX_META.get("scanned_files", 0),
     })

@@ -163,7 +163,18 @@ def api_files():
     rel_path = request.args.get("path", "")
     target_path = safe_path(rel_path)
     if not os.path.isdir(target_path):
-        return jsonify({"error": f"路径不存在或不是目录: {target_path}"}), 400
+        # 路径已失效（目录被删除 / 重命名等）：自动逐级向上回退到最近存在的上级目录，
+        # 不再直接报错。前端也会做同一回退，这里作为兜底，让任意客户端（移动端 / IDE / API）都受益。
+        cur = target_path
+        while cur and not os.path.isdir(cur):
+            parent = os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+        if not cur or not os.path.isdir(cur):
+            return jsonify({"error": f"路径不存在或不是目录: {target_path}"}), 400
+        target_path = cur
+        rel_path = target_path   # 让返回的当前路径反映实际目录
 
     # 分页参数（客户端可传 limit/offset）
     try:

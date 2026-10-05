@@ -114,12 +114,10 @@ def _init_index_engine() -> None:
     try:
         _init_index_db()
         index_loaded = _load_index_meta()
-        _schedule_index_scan(30)
+        # 后台调度器只响应手动 / API 触发的信号，不自动定时扫描；
+        # 首次启动也不再自动全盘索引，完全交由用户在界面手动「重建索引」。
+        _schedule_index_scan()
         if not index_loaded:
-            _log.info("未找到已有索引，启动首次索引扫描...")
-            def _delayed_first_scan():
-                _time.sleep(2)
-                _build_index("")
-            threading.Thread(target=_delayed_first_scan, daemon=True).start()
+            _log.info("未找到已有索引，等待用户在界面手动启动索引（不自动扫描）")
     except Exception as e:                      # 索引初始化失败不应阻断服务启动
         _log.warning("索引初始化失败，继续启动: %s", e)

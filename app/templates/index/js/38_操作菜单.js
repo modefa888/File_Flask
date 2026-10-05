@@ -2,7 +2,7 @@
 
         function startIndexPolling() {
             if (_indexPollTimer) clearInterval(_indexPollTimer);
-            _indexPollTimer = setInterval(updateIndexBadge, 5000);
+            _indexPollTimer = setInterval(updateIndexBadge, 2000);
             updateIndexBadge();
         }
 
@@ -22,9 +22,10 @@
                     const totalFiles = data.total_files || 0;
                     const progress = data.progress || 0;
                     const statusDetail = data.status_detail || '';
+                    const scanned = (typeof data.scanned_files === 'number') ? data.scanned_files : totalFiles;
                     if (status === 'scanning') {
                         const detail = statusDetail ? ' ' + statusDetail : '';
-                        text.textContent = '扫描中... ' + totalFiles.toLocaleString() + ' 个文件' + (progress > 0 ? ' (' + progress + '%)' : '') + detail;
+                        text.textContent = '扫描中... ' + scanned.toLocaleString() + ' 个文件' + (progress > 0 ? ' (' + progress + '%)' : '') + detail;
                         badge.className = 'badge bg-warning text-dark border';
                         badge.title = '扫描中...（' + (statusDetail || '正在进行') + '）';
                     } else if (status === 'error') {
@@ -38,6 +39,8 @@
                         text.textContent = totalFiles.toLocaleString() + ' 个文件 (' + lastScan + ')';
                         badge.className = 'badge bg-success text-white border';
                     }
+                    // 详情面板开着时同步刷新其中的进度条：否则面板只在打开那一刻取一次数据，进度会一直停住
+                    if (_indexPanelRef) _loadIndexDetail();
                     // 索引不在更新中（完成/空闲/失败）则自动关闭轮询；只有更新索引时才需要持续轮询
                     if (status !== 'scanning') {
                         stopIndexPolling();

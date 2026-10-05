@@ -1,5 +1,17 @@
         // ========== 数据加载 ==========
-        async function loadFiles(path) {
+        // 取上一级目录：'/' 再上一级为空（回退到根即停）；Windows 'C:\\' 同理
+        function _parentPath(p) {
+            if (!p) return '';
+            const s = String(p).replace(/[\\/]+$/, '');
+            if (!s) return '';
+            const idx = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+            if (idx < 0) return '';
+            if (idx === 0) return s[0];
+            let parent = s.slice(0, idx);
+            if (/^[A-Za-z]:$/.test(parent)) parent += '\\';
+            return parent;
+        }
+        async function loadFiles(path, _fromFallback) {
             _closeMenus();
             _abortPendingFetch();
             const ctrl = new AbortController();
@@ -17,6 +29,16 @@
                 _currentFetchController = null;
                 _setLoading(false, '');
                 if (data.error) {
+                    // 路径已失效（目录被删除 / 重命名等）：自动逐级向上找最近存在的上级目录，
+                    // 一路回退到根目录为止；中途静默，直到成功再提示一次。
+                    const em = /不存在或不是目录[:：]\s*(.+)$/.exec(data.error || '');
+                    if (em) {
+                        const badPath = em[1].trim();
+                        const up = _parentPath(badPath);
+                        if (up && up !== badPath) {
+                            return loadFiles(up, true);
+                        }
+                    }
                     showToast('错误', data.error, 'danger');
                     // 显示错误行到表格
                     const tbody = document.getElementById('fileBody');
@@ -30,6 +52,9 @@
                     return;
                 }
                 currentPath = data.current_path_abs || '';
+                if (_fromFallback) {
+                    showToast('提示', '原路径不存在，已自动切换到上级目录：' + currentPath, 'warning');
+                }
                 sessionStorage.removeItem('_fmAutoReloaded');   // 服务正常，重置自动刷新标记
                 fileItems = data.items || [];
                 selectedPaths.clear();

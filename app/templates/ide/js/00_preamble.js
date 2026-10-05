@@ -852,7 +852,7 @@
     // forceGroup 指定目标编辑组（拆分编辑器用）；不指定时全局查找已有标签并聚焦
     let tab = forceGroup == null ? findTab(path) : tabs.find(t => t.path === path && t.group === forceGroup);
     // 播放器全局唯一：已存在视频标签页时（正在播放另一个视频），复用该标签页切换到新视频，
-    // 原播放器随 innerHTML 重建自动停止并释放流，「播放另一个自动切换播放」；
+    // 旧播放器由 setupVideoView 开头的 _vpvCleanupRun 暂停并释放流（DOM 摘除不会自动停），「播放另一个自动切换播放」；
     // 点的就是当前视频则只聚焦。其余文件类型不受影响。
     if (!forceText && (window.IDE_VIDEO_EXTS || []).includes(getExt(name)) && typeof window.setupVideoView === "function") {
       const vt = tabs.find(t => t.isVideo);
@@ -1007,6 +1007,14 @@
     if (tab === groupActive.get(tab.group)) el.classList.add("active");
     tab.el = el;
   }
+  // 视频播放器播放列表原位切换时同步标签页（22 号视频播放器 js 调用）：
+  // 更新 path/name 并重绘标签节点；当前激活时顺带刷新面包屑与状态栏
+  window.IDE_SYNC_VIDEO_TAB = function (tab, path, name) {
+    tab.path = path; tab.name = name; tab.dirty = false; tab.big = false; tab.cm = null;
+    if (tab.el) renderTab(tab);   // 重绘标签节点（带新文件名与图标）
+    if (active === tab) { renderBreadcrumbs(tab.displayPath || tab.path); updateStatus(); revealInTree(tab.path); }
+    sessionSaveTabs();
+  };
   function renderTabsAll() {
     rebuildGroups();
     // 标签栏是 tabs 的唯一投影：先清空再按顺序重建，

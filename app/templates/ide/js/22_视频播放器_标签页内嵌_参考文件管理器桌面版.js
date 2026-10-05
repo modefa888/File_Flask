@@ -445,6 +445,12 @@
       });
       const cur = plList.querySelector(".vpv-pl-row.cur");
       if (cur) try { cur.scrollIntoView({ block: "nearest" }); } catch (e) {}
+      // 换源完成后同步标签页（标题/图标/面包屑）；放最后且捕获异常，同步出错也绝不能影响切换播放
+      try {
+        if (typeof window.IDE_SYNC_VIDEO_TAB === "function") {
+          window.IDE_SYNC_VIDEO_TAB(tab, abs, abs.split("/").pop() || "");
+        }
+      } catch (e) {}
     };
 
     video.addEventListener("ended", () => {

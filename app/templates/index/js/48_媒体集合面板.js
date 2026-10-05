@@ -49,9 +49,33 @@
         function _updateMediaFilterBadge() {
             const btn = document.getElementById('mediaSettingsBtn');
             if (!btn) return;
-            const s = _mediaFilterSettings[_mediaState.type] || _mediaFilterSettings.all;
-            const on = (parseFloat(s.min) > 0) || (parseFloat(s.max) > 0);
+            const on = _mediaFilterActive(_mediaState.type);
             btn.classList.toggle('active', !!on);
+        }
+
+        // 某个分类是否设了大小过滤；「全部」视图参考视频/音频/图片三个分类的设置
+        function _mediaFilterActive(type) {
+            const keys = (type === 'all') ? ['video', 'audio', 'image'] : [type];
+            return keys.some(k => {
+                const s = _mediaFilterSettings[k] || {};
+                return (parseFloat(s.min) > 0) || (parseFloat(s.max) > 0);
+            });
+        }
+
+        // 「全部」视图：把视频/音频/图片各自的区间拼成 filters 参数（只包含设置过的分类，
+        // 没设置的分类保持全部保留）。切到具体分类时不传，只套用该分类自己的设置。
+        function _mediaCatFilterParam() {
+            if (_mediaState.type !== 'all') return '';
+            const parts = [];
+            ['video', 'audio', 'image'].forEach(k => {
+                const s = _mediaFilterSettings[k] || {};
+                const unit = Number(s.unit) || 1;
+                const mn = parseFloat(s.min), mx = parseFloat(s.max);
+                const a = (isFinite(mn) && mn > 0) ? Math.round(mn * unit) : 0;
+                const b = (isFinite(mx) && mx > 0) ? Math.round(mx * unit) : 0;
+                if (a || b) parts.push(k + ':' + a + '-' + b);
+            });
+            return parts.join(',');
         }
 
         // 大小过滤设置面板
@@ -81,7 +105,7 @@
                         <span class="msm-title"><i class="bi bi-sliders"></i> 大小过滤设置</span>
                         <button class="msm-close" id="msmCloseBtn" title="关闭"><i class="bi bi-x-lg"></i></button>
                     </div>
-                    <div class="msm-tip">按分类分别设置文件大小范围（留空表示不限）。切换分类时会自动套用对应设置，设置会保存在本机。</div>
+                    <div class="msm-tip">按分类分别设置文件大小范围（留空表示不限）。切换分类时会自动套用对应设置，「全部」视图会同时参考视频/音频/图片各自的设置，保存在本机。</div>
                     <div class="msm-body">${rows}</div>
                     <div class="msm-footer">
                         <button class="btn btn-cancel" id="msmResetBtn">重置</button>
@@ -352,6 +376,9 @@
                 min_size: _mediaState.min_size || 0,
                 max_size: _mediaState.max_size || 0,
             });
+            // 「全部」视图：带上视频/音频/图片各自的区间，列表与统计都按分类规则合并
+            const catParam = _mediaCatFilterParam();
+            if (catParam) params.set('filters', catParam);
             fetch('/api/media/collection?' + params.toString())
                 .then(r => r.json())
                 .then(data => { if (token === _mediaReqToken) _renderMediaPage(wrap, data, reset); })

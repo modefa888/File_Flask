@@ -73,6 +73,7 @@
                             <div class="preview-actions">
                                 ${isTextFile ? `<button class="btn" id="previewEditBtn" style="background:#2563eb;color:white;padding:4px 10px;border-radius:6px;border:none;cursor:pointer;font-size:0.78rem;display:flex;align-items:center;gap:4px;"><i class="bi bi-pencil-square"></i> 编辑</button>` : ''}
                                 <button class="btn btn-copy" id="previewCopyBtn"><i class="bi bi-clipboard"></i> 复制</button>
+                                <button class="btn btn-share-preview" id="previewShareBtn" title="分享此文件"><i class="bi bi-share"></i></button>
                                 <button class="btn btn-collapse-preview" id="previewMinBtn" title="收起（后台继续播放）"><i class="bi bi-arrows-angle-contract"></i></button>
                                 <button class="btn btn-close-preview" id="previewCloseBtn"><i class="bi bi-x-lg"></i></button>
                             </div>
@@ -85,6 +86,7 @@
             </div>
         `;
             document.getElementById('previewMinBtn').addEventListener('click', _collapsePreview);
+            document.getElementById('previewShareBtn').addEventListener('click', () => openShareDialog(absPath));
             document.getElementById('previewCloseBtn').addEventListener('click', _confirmClosePreview);
             document.getElementById('previewCopyBtn').addEventListener('click', _copyPreview);
             if (isTextFile) {

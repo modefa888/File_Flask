@@ -31,6 +31,7 @@ def create_app(test_config=None) -> Flask:
 
     _register_blueprints(app)
     _install_request_logging(app)
+    _install_error_handlers(app)
     _init_chat_engine()
     _init_index_engine()
 
@@ -93,6 +94,39 @@ def _install_request_logging(app: Flask) -> None:
             },
         )
         return response
+
+
+def _install_error_handlers(app: Flask) -> None:
+    """统一错误页：/api 请求仍返回 JSON，页面请求渲染科技感错误页。"""
+    from flask import request, render_template, jsonify
+
+    _META = {
+        400: ("请求有误", "服务器无法理解这次请求，请检查参数后重试。"),
+        403: ("禁止访问", "你没有权限访问该资源。"),
+        404: ("页面走丢了", "你访问的地址不存在，或者链接已经失效。"),
+        405: ("方法不被允许", "该地址不支持这种请求方式。"),
+        429: ("请求过于频繁", "访问太频繁了，请稍后再试。"),
+        500: ("服务器开小差了", "服务内部出现异常，请稍后重试。"),
+    }
+
+    def _handle_error(e):
+        code = getattr(e, "code", 500) or 500
+        if code >= 500:
+            _log.error("请求异常 %s %s: %s", code, request.path,
+                       getattr(e, "original_exception", None) or e)
+        # 接口请求保持 JSON，避免前端的 res.json() 解析失败
+        if request.path.startswith("/api/"):
+            title = _META.get(code, ("出错了", ""))[0]
+            return jsonify({"error": title, "code": code}), code
+        title, message = _META.get(code, ("出错了", "请求未能完成。"))
+        path = request.path
+        if request.query_string:
+            path += "?" + request.query_string.decode("utf-8", "ignore")
+        return render_template("error.html", code=code, title=title,
+                               message=message, path=path), code
+
+    for _code in (400, 403, 404, 405, 429, 500):
+        app.register_error_handler(_code, _handle_error)
 
 
 def _init_chat_engine() -> None:

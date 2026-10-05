@@ -622,11 +622,7 @@
                 _collapseMediaCollection();
                 if (parent) navigateTo(parent);
             } else if (act === 'copy') {
-                navigator.clipboard.writeText(path).then(() => {
-                    showToast('成功', '路径已复制到剪贴板', 'success');
-                }).catch(() => {
-                    showToast('提示', '完整路径: ' + path, 'info');
-                });
+                _copyText(path, '路径已复制到剪贴板');
             } else if (act === 'delete') {
                 _deleteMediaPaths([path]);
             }

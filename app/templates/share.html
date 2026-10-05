@@ -1,0 +1,1692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>{% if mode == 'view' %}{{ file.name }} - 文件分享{% elif mode == 'password' %}密码访问 - 文件分享{% else %}链接不可用{% endif %}</title>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📁</text></svg>">
+    <link rel="stylesheet" href="/static/vendor/bootstrap-icons/bootstrap-icons.css">
+    <style>
+        * { box-sizing: border-box; }
+
+        :root {
+            --bg: #f1f5f9;
+            --card: #ffffff;
+            --line: #e2e8f0;
+            --text: #1e293b;
+            --muted: #64748b;
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+        }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            min-height: 100%;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ---------- 居中卡片（密码 / 错误页） ---------- */
+        .center-wrap {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: linear-gradient(160deg, #eef2ff 0%, #f8fafc 55%, #f1f5f9 100%);
+        }
+
+        .center-card {
+            width: 100%;
+            max-width: 400px;
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            box-shadow: 0 18px 50px rgba(15, 23, 42, 0.1);
+            padding: 32px 28px;
+            text-align: center;
+        }
+
+        .big-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 16px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+        }
+
+        .big-icon.lock { background: #dbeafe; color: #2563eb; }
+        .big-icon.warn { background: #fee2e2; color: #dc2626; }
+
+        .center-card h1 {
+            margin: 0 0 8px;
+            font-size: 1.15rem;
+            font-weight: 700;
+        }
+
+        .center-card p {
+            margin: 0 0 18px;
+            font-size: 0.86rem;
+            color: var(--muted);
+            line-height: 1.6;
+            word-break: break-all;
+        }
+
+        .center-card .err {
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #dc2626;
+            font-size: 0.8rem;
+        }
+
+        .center-card input {
+            width: 100%;
+            padding: 11px 14px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            font-size: 0.9rem;
+            outline: none;
+            margin-bottom: 12px;
+            transition: border-color .15s, box-shadow .15s;
+        }
+
+        .center-card input:focus {
+            border-color: #93c5fd;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.13);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 10px 18px;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.86rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background .15s, transform .15s, box-shadow .15s;
+        }
+
+        .btn.primary {
+            background: var(--primary);
+            color: #fff;
+            box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
+        }
+
+        .btn.primary:hover { background: var(--primary-dark); }
+        .center-card .btn { width: 100%; }
+
+        /* ---------- 分享页主体 ---------- */
+        .share-shell {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 22px 20px 34px;
+        }
+
+        .sh-head {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 14px 18px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+        }
+
+        .sh-icon {
+            flex-shrink: 0;
+            width: 46px;
+            height: 46px;
+            border-radius: 12px;
+            background: #eff6ff;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+        }
+
+        .sh-info { flex: 1; min-width: 0; }
+
+        .sh-name {
+            margin: 0 0 5px;
+            font-size: 1rem;
+            font-weight: 700;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sh-meta {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            font-size: 0.74rem;
+            color: var(--muted);
+        }
+
+        .sh-meta .chip {
+            padding: 1px 8px;
+            border-radius: 999px;
+            background: #eff6ff;
+            color: var(--primary);
+            font-weight: 600;
+            font-size: 0.68rem;
+        }
+
+        .sh-meta .dot {
+            width: 3px;
+            height: 3px;
+            border-radius: 50%;
+            background: #cbd5e1;
+        }
+
+        .sh-body {
+            margin-top: 16px;
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+        }
+
+        .media {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0f172a;
+            min-height: 220px;
+        }
+
+        .media img,
+        .media video {
+            display: block;
+            max-width: 100%;
+            max-height: 76vh;
+            object-fit: contain;
+        }
+
+        .media.audio {
+            flex-direction: column;
+            gap: 18px;
+            padding: 44px 24px;
+            background: #0f172a;
+            color: #94a3b8;
+        }
+
+        .media.audio i { font-size: 3rem; }
+        .media.audio audio { width: min(420px, 100%); }
+
+        .media.pdf { background: #334155; }
+        .media.pdf iframe {
+            width: 100%;
+            height: 76vh;
+            border: 0;
+            background: #fff;
+        }
+
+        .media.other {
+            flex-direction: column;
+            gap: 10px;
+            padding: 56px 24px;
+            background: #f8fafc;
+            color: var(--muted);
+            text-align: center;
+        }
+
+        .media.other i {
+            font-size: 3rem;
+            color: #94a3b8;
+        }
+
+        .media.other p {
+            margin: 0 0 6px;
+            font-size: 0.86rem;
+        }
+
+        .text-view {
+            margin: 0;
+            padding: 18px 20px;
+            max-height: 76vh;
+            overflow: auto;
+            font-family: "SF Mono", Menlo, Consolas, monospace;
+            font-size: 0.82rem;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .sh-foot {
+            margin-top: 16px;
+            text-align: center;
+            font-size: 0.72rem;
+            color: #94a3b8;
+        }
+
+        /* ---------- 视频：与站内一致的自定义播放器 ---------- */
+        .share-player {
+            position: relative;
+            width: 100%;
+            max-width: 100%;
+            /* 固定 16:9 外框：元数据到达前就是完整播放器，不会先缩成一小块 */
+            aspect-ratio: 16 / 9;
+            max-height: 76vh;
+            margin: 0 auto;
+            background: #000;
+            overflow: hidden;
+            line-height: 0;
+        }
+
+        /* 老浏览器不支持 aspect-ratio 时，用 padding 撑出同样的 16:9 外框 */
+        @supports not (aspect-ratio: 16 / 9) {
+            .share-player { height: 0; padding-top: 56.25%; }
+        }
+
+        .share-player video {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            max-height: none;
+            object-fit: contain;
+            background: #000;
+            display: block;
+        }
+
+        /* 首帧就绪前的加载态 */
+        .sp-loading {
+            position: absolute;
+            inset: 0;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            transition: opacity 0.35s ease;
+            pointer-events: none;
+        }
+
+        .sp-loading.hide {
+            opacity: 0;
+        }
+
+        .sp-spinner {
+            width: 42px;
+            height: 42px;
+            border: 3px solid rgba(255, 255, 255, 0.18);
+            border-top-color: #f59e0b;
+            border-radius: 50%;
+            animation: spSpin 0.85s linear infinite;
+        }
+
+        @keyframes spSpin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 快捷键提示（进入后短暂显示，随后淡出） */
+        .sp-tip {
+            position: absolute;
+            left: 50%;
+            bottom: 74px;
+            transform: translateX(-50%);
+            z-index: 12;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            max-width: 92%;
+            padding: 5px 12px;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.6);
+            color: #e5e7eb;
+            font-size: 0.72rem;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.35s ease;
+            pointer-events: none;
+        }
+
+        .sp-tip.show { opacity: 1; }
+
+        /* 快进 / 快退的屏幕提示 */
+        .sp-seek-tip {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%) scale(0.96);
+            z-index: 13;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.72);
+            color: #fff;
+            font-size: 0.9rem;
+            font-weight: 600;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            pointer-events: none;
+        }
+
+        .sp-seek-tip.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        /* ---------- 音乐：旋转封面 + 滚动歌词 + 控制条 ---------- */
+        .share-music {
+            background: linear-gradient(135deg, #0f172a, #131f38);
+            color: #e2e8f0;
+            padding: 24px 24px 14px;
+        }
+
+        .sm-main { display: flex; gap: 24px; align-items: flex-start; }
+
+        .sm-cover {
+            position: relative;
+            flex-shrink: 0;
+            width: 168px;
+            height: 168px;
+            border-radius: 50%;
+            overflow: hidden;
+            background: #1e293b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+        }
+
+        .sm-cover-fallback { font-size: 3.2rem; color: #475569; }
+
+        .sm-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+        .sm-cover.playing .sm-cover-img { animation: smSpin 18s linear infinite; }
+
+        @keyframes smSpin { to { transform: rotate(360deg); } }
+
+        .sm-right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+        .sm-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #f1f5f9;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sm-artist { margin-top: 5px; font-size: 0.78rem; color: #94a3b8; }
+
+        .sm-lyrics {
+            position: relative;
+            margin-top: 14px;
+            height: 132px;
+            overflow: hidden;
+            -webkit-mask-image: linear-gradient(180deg, transparent, #000 24%, #000 76%, transparent);
+            mask-image: linear-gradient(180deg, transparent, #000 24%, #000 76%, transparent);
+        }
+
+        .sm-lyrics-inner { transition: transform 0.35s ease; }
+
+        .sm-lyric-line {
+            padding: 5px 2px;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            color: #64748b;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: color 0.2s ease;
+        }
+
+        .sm-lyric-line.active { color: #f59e0b; font-weight: 600; }
+
+        .sm-controls {
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(148, 163, 184, 0.16);
+        }
+
+        .sm-play { font-size: 1.15rem; }
+        .sm-loop.active { color: #f59e0b; }
+
+        .vp-controls {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 15;
+            padding: 0 14px 8px;
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.78));
+            opacity: 1;
+            transition: opacity 0.25s ease;
+        }
+
+        .share-player.idle .vp-controls {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .vpc-progress { position: relative; height: 16px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
+        .vpc-track { position: relative; width: 100%; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.25); transition: height 0.15s ease; }
+        .vpc-progress:hover .vpc-track { height: 6px; }
+        .vpc-buffered { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 2px; background: rgba(255, 255, 255, 0.35); }
+        .vpc-played { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 2px; background: #f59e0b; }
+        .vpc-knob {
+            position: absolute; top: 50%; left: 0; width: 13px; height: 13px; border-radius: 50%;
+            background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+            transform: translate(-50%, -50%) scale(0); transition: transform 0.15s ease;
+        }
+        .vpc-progress:hover .vpc-knob,
+        .vpc-progress.dragging .vpc-knob { transform: translate(-50%, -50%) scale(1); }
+
+        .vpc-row { display: flex; align-items: center; gap: 4px; }
+
+        .vpc-btn {
+            background: none; border: none; color: #e5e7eb; font-size: 1.02rem; cursor: pointer;
+            padding: 6px 8px; border-radius: 6px; display: flex; align-items: center;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        .vpc-btn:hover { background: rgba(255, 255, 255, 0.14); }
+        .vpc-btn.active { color: #f59e0b; }
+        .vpc-svg { width: 1em; height: 1em; }
+        .vpc-time { color: #cbd5e1; font-size: 0.72rem; font-variant-numeric: tabular-nums; margin: 0 8px; white-space: nowrap; }
+        .vpc-spacer { flex: 1 1 auto; }
+
+        .vpc-vol { display: flex; align-items: center; gap: 2px; }
+        .vpc-vol input[type="range"] {
+            -webkit-appearance: none; appearance: none; width: 74px; height: 4px; border-radius: 2px;
+            outline: none; cursor: pointer;
+            background: linear-gradient(to right, #f59e0b var(--vol, 100%), rgba(255, 255, 255, 0.25) var(--vol, 100%));
+        }
+        .vpc-vol input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+            background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); cursor: pointer;
+        }
+        .vpc-vol input[type="range"]::-moz-range-thumb {
+            width: 12px; height: 12px; border: none; border-radius: 50%;
+            background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); cursor: pointer;
+        }
+
+        .vpc-speed { position: relative; }
+        .vpc-speed-btn { font-size: 0.74rem; font-weight: 700; min-width: 44px; justify-content: center; }
+        .vpc-speed-menu {
+            position: absolute; right: 0; bottom: calc(100% + 8px); min-width: 78px; padding: 4px;
+            background: rgba(20, 20, 20, 0.96); border: 1px solid #333; border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); display: none; flex-direction: column;
+        }
+        .vpc-speed.open .vpc-speed-menu { display: flex; }
+        .vpc-speed-item {
+            background: none; border: none; color: #d1d5db; font-size: 0.74rem; padding: 6px 14px;
+            border-radius: 6px; cursor: pointer; text-align: center; transition: background 0.12s ease;
+        }
+        .vpc-speed-item:hover { background: #2b2b2b; }
+        .vpc-speed-item.active { color: #f59e0b; font-weight: 700; }
+
+        /* ---------- Markdown 预览 ---------- */
+        .md-wrap { background: #fff; }
+
+        .md-toolbar {
+            display: flex;
+            gap: 6px;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--line);
+            background: #f8fafc;
+        }
+
+        .md-tab {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 12px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: #fff;
+            color: var(--muted);
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all .15s;
+        }
+
+        .md-tab:hover { border-color: #a5b4fc; color: #4338ca; }
+        .md-tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+        .md-content {
+            padding: 26px 30px 40px;
+            max-height: 76vh;
+            overflow: auto;
+            font-size: 0.92rem;
+            line-height: 1.75;
+            color: #1f2328;
+            word-break: break-word;
+        }
+
+        .md-content h1, .md-content h2, .md-content h3,
+        .md-content h4, .md-content h5, .md-content h6 {
+            margin: 1.4em 0 .6em;
+            line-height: 1.35;
+            font-weight: 600;
+        }
+
+        .md-content h1:first-child { margin-top: 0; }
+
+        .md-content h1 { font-size: 1.7em; padding-bottom: .3em; border-bottom: 1px solid var(--line); }
+        .md-content h2 { font-size: 1.35em; padding-bottom: .25em; border-bottom: 1px solid #edf2f7; }
+        .md-content h3 { font-size: 1.15em; }
+
+        .md-content p { margin: .8em 0; }
+        .md-content a { color: #0969da; text-decoration: none; }
+        .md-content a:hover { text-decoration: underline; }
+
+        .md-content code {
+            background: #eff1f3;
+            border-radius: 5px;
+            padding: .15em .45em;
+            font-family: "SF Mono", Menlo, Consolas, monospace;
+            font-size: .875em;
+            color: #cf222e;
+        }
+
+        .md-content pre {
+            background: #f6f8fa;
+            border: 1px solid #e4e8ec;
+            border-radius: 8px;
+            padding: 14px 16px;
+            overflow-x: auto;
+            margin: 1em 0;
+            line-height: 1.55;
+        }
+
+        .md-content pre code { background: none; padding: 0; color: #1f2328; font-size: .82rem; }
+
+        .md-content blockquote {
+            margin: 1em 0;
+            padding: 2px 18px;
+            color: #59636e;
+            border-left: 4px solid #d1d9e0;
+            background: #f6f8fa;
+            border-radius: 0 6px 6px 0;
+        }
+
+        .md-content ul, .md-content ol { margin: .6em 0; padding-left: 1.8em; }
+        .md-content li { margin: .25em 0; }
+        .md-content hr { border: none; border-top: 1px solid var(--line); margin: 1.6em 0; }
+        .md-content img { max-width: 100%; border-radius: 6px; }
+
+        .md-content table { border-collapse: collapse; margin: 1em 0; min-width: 50%; }
+        .md-content th, .md-content td { border: 1px solid #d1d9e0; padding: 7px 15px; }
+        .md-content th { background: #f6f8fa; }
+        .md-content tr:nth-child(even) td { background: #fafbfc; }
+        .md-content del { color: #8c959f; }
+
+        /* ---------- 下载二次确认 ---------- */
+        .dl-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(15, 23, 42, 0.55);
+            backdrop-filter: blur(3px);
+            -webkit-backdrop-filter: blur(3px);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s ease, visibility 0.2s ease;
+        }
+
+        .dl-overlay.show { opacity: 1; visibility: visible; }
+
+        .dl-modal {
+            width: 440px;
+            max-width: 100%;
+            background: #fff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 24px 70px rgba(15, 23, 42, 0.35);
+            transform: translateY(8px) scale(0.98);
+            transition: transform 0.2s ease;
+        }
+
+        .dl-overlay.show .dl-modal { transform: translateY(0) scale(1); }
+
+        .dl-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            background: linear-gradient(135deg, #1e3a8a, #2563eb);
+            color: #fff;
+        }
+
+        .dl-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .dl-close {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .dl-close:hover { background: rgba(255, 255, 255, 0.32); }
+
+        .dl-body { padding: 16px 18px; }
+
+        .dl-file {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: #f8fafc;
+        }
+
+        .dl-file-icon {
+            flex-shrink: 0;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 11px;
+            background: #eff6ff;
+            color: var(--primary);
+            font-size: 1.3rem;
+        }
+
+        .dl-file-main { flex: 1; min-width: 0; }
+
+        .dl-file-name {
+            font-size: 0.86rem;
+            font-weight: 600;
+            color: #1e293b;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .dl-file-meta {
+            margin-top: 5px;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            font-size: 0.7rem;
+            color: #64748b;
+        }
+
+        .dl-file-meta > span {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .dl-chip {
+            padding: 1px 8px;
+            border-radius: 999px;
+            background: #eff6ff;
+            color: var(--primary);
+            font-weight: 600;
+            font-size: 0.66rem;
+        }
+
+        .dl-hint {
+            margin-top: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.73rem;
+            color: #64748b;
+        }
+
+        .dl-foot {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 12px 18px;
+            border-top: 1px solid #f1f5f9;
+            background: #fbfcfe;
+        }
+
+        .dl-foot .btn { padding: 9px 18px; font-size: 0.84rem; }
+
+        .dl-foot .btn.ghost {
+            background: #f1f5f9;
+            color: #475569;
+        }
+
+        .dl-foot .btn.ghost:hover { background: #e2e8f0; }
+
+        /* ---------- 头部：二维码按钮 ---------- */
+        .sh-head .btn.ghost {
+            flex-shrink: 0;
+            background: #f1f5f9;
+            color: #475569;
+            box-shadow: none;
+        }
+
+        .sh-head .btn.ghost:hover { background: #e2e8f0; }
+
+        /* ---------- 手机扫码弹层 ---------- */
+        .qr-modal { width: 380px; }
+
+        .qr-body {
+            padding: 20px 18px 18px;
+            text-align: center;
+        }
+
+        .qr-frame {
+            display: inline-block;
+            padding: 10px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #fff;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+            line-height: 0;
+        }
+
+        .qr-frame img {
+            display: block;
+            width: 208px;
+            height: 208px;
+            object-fit: contain;
+        }
+
+        .qr-frame img:not([src]) {
+            /* 未加载时占位，避免弹层高度跳动 */
+            background: repeating-conic-gradient(#f1f5f9 0% 25%, #fff 0% 50%) 50% / 16px 16px;
+        }
+
+        .qr-tip {
+            margin-top: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: #334155;
+        }
+
+        .qr-link-row {
+            margin-top: 12px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .qr-link {
+            flex: 1;
+            min-width: 0;
+            padding: 9px 12px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: #f8fafc;
+            color: #475569;
+            font-size: 0.74rem;
+            outline: none;
+            text-overflow: ellipsis;
+        }
+
+        .qr-link:focus { border-color: #93c5fd; }
+
+        .qr-copy {
+            flex-shrink: 0;
+            padding: 9px 14px;
+            font-size: 0.8rem;
+        }
+
+        .qr-hint {
+            margin-top: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-size: 0.72rem;
+            color: #64748b;
+            line-height: 1.5;
+        }
+
+        .qr-hint.warn { color: #b45309; }
+
+        /* ---------- 移动端 ---------- */
+        @media (max-width: 640px) {
+            .share-shell { padding: 12px 12px 26px; }
+
+            .sh-head {
+                flex-wrap: wrap;
+                padding: 12px 14px;
+                border-radius: 14px;
+            }
+
+            .sh-icon { width: 40px; height: 40px; font-size: 1.2rem; }
+
+            .sh-name { font-size: 0.92rem; }
+
+            .sh-head .btn.dl {
+                width: 100%;
+                margin-top: 4px;
+            }
+
+            .sh-body { border-radius: 14px; }
+
+            .media img,
+            .media video { max-height: 62vh; }
+
+            .media.pdf iframe { height: 62vh; }
+
+            .text-view { font-size: 0.78rem; padding: 14px; }
+
+            .md-content {
+                padding: 16px 14px 28px;
+                font-size: 0.86rem;
+                max-height: 62vh;
+            }
+
+            .md-content h1 { font-size: 1.35em; }
+            .md-content h2 { font-size: 1.18em; }
+
+            .vpc-btn { font-size: 0.95rem; padding: 5px 6px; }
+            .vpc-time { margin: 0 4px; font-size: 0.68rem; }
+            .vpc-vol input[type="range"] { width: 52px; }
+            .vp-controls { padding: 0 8px 6px; }
+
+            .share-player { max-height: 62vh; }
+
+            /* 移动端一般没有物理键盘，隐藏快捷键提示 */
+            .sp-tip { display: none; }
+            .sp-seek-tip { font-size: 0.82rem; padding: 6px 13px; }
+
+            .share-music { padding: 18px 14px 12px; }
+            .sm-main { flex-direction: column; align-items: center; gap: 14px; }
+            .sm-cover { width: 132px; height: 132px; }
+            .sm-right { width: 100%; }
+            .sm-title, .sm-artist { text-align: center; }
+            .sm-lyrics { height: 104px; }
+            .sm-lyric-line { text-align: center; }
+
+            .dl-foot { flex-direction: column-reverse; }
+            .dl-foot .btn { width: 100%; }
+
+            .sh-head .btn.qr-btn {
+                width: 100%;
+                margin-top: 4px;
+            }
+
+            .qr-modal { width: 100%; }
+            .qr-frame img { width: 168px; height: 168px; }
+        }
+    </style>
+</head>
+
+<body>
+    {% if mode == 'error' %}
+    <div class="center-wrap">
+        <div class="center-card">
+            <div class="big-icon warn"><i class="bi bi-exclamation-triangle"></i></div>
+            <h1>链接不可用</h1>
+            <p>{{ message }}</p>
+        </div>
+    </div>
+
+    {% elif mode == 'password' %}
+    <div class="center-wrap">
+        <form class="center-card" method="post" action="/share/{{ token }}">
+            <div class="big-icon lock"><i class="bi bi-shield-lock"></i></div>
+            <h1>需要访问密码</h1>
+            <p>文件：{{ file_name }}</p>
+            {% if error %}<div class="err">{{ error }}</div>{% endif %}
+            <input type="password" name="password" placeholder="请输入访问密码" autofocus required>
+            <button class="btn primary" type="submit"><i class="bi bi-box-arrow-in-right"></i> 进入查看</button>
+        </form>
+    </div>
+
+    {% else %}
+    <div class="share-shell">
+        <header class="sh-head">
+            <div class="sh-icon"><i class="bi {{ file.icon }}"></i></div>
+            <div class="sh-info">
+                <h1 class="sh-name" title="{{ file.name }}">{{ file.name }}</h1>
+                <div class="sh-meta">
+                    <span class="chip">{{ file.ext }}</span>
+                    <span>{{ file.size_str }}</span>
+                    <span class="dot"></span>
+                    <span>{{ file.created_str }} 分享</span>
+                    <span class="dot"></span>
+                    <span>{{ file.expires_str }}</span>
+                </div>
+            </div>
+            <button class="btn ghost qr-btn" id="qrBtn" type="button" title="手机扫码查看">
+                <i class="bi bi-qr-code"></i> <span>二维码</span>
+            </button>
+            <a class="btn primary dl" data-download href="{{ download_url }}">
+                <i class="bi bi-download"></i> <span>下载</span>
+            </a>
+        </header>
+
+        <main class="sh-body">
+            {% if file.kind == 'image' %}
+            <div class="media image">
+                <img src="{{ raw_url }}" alt="{{ file.name }}">
+            </div>
+            {% elif file.kind == 'video' %}
+            <div class="media video">
+                <div class="share-player" id="spRoot">
+                    <video src="{{ raw_url }}" playsinline preload="metadata"></video>
+                    <div class="sp-loading" id="spLoading">
+                        <span class="sp-spinner"></span>
+                    </div>
+                    <div class="sp-tip"><i class="bi bi-keyboard"></i> 空格 播放/暂停 &nbsp;·&nbsp; ← → 快退/快进 5s &nbsp;·&nbsp; M 静音 &nbsp;·&nbsp; F 全屏</div>
+                    <div class="sp-seek-tip"></div>
+                    <div class="vp-controls">
+                        <div class="vpc-progress">
+                            <div class="vpc-track">
+                                <div class="vpc-buffered"></div>
+                                <div class="vpc-played"></div>
+                                <div class="vpc-knob"></div>
+                            </div>
+                        </div>
+                        <div class="vpc-row">
+                            <button class="vpc-btn vpc-play" title="播放/暂停 (空格)"><i class="bi bi-play-fill"></i></button>
+                            <div class="vpc-vol">
+                                <button class="vpc-btn vpc-mute" title="静音 (M)"><i class="bi bi-volume-up-fill"></i></button>
+                                <input type="range" class="vpc-vol-range" min="0" max="1" step="0.01" value="1" title="音量">
+                            </div>
+                            <span class="vpc-time">00:00 / 00:00</span>
+                            <div class="vpc-spacer"></div>
+                            <div class="vpc-speed">
+                                <button class="vpc-btn vpc-speed-btn" title="倍速播放"><span class="vpc-speed-cur">1.0x</span></button>
+                                <div class="vpc-speed-menu">
+                                    <button class="vpc-speed-item" data-rate="0.5">0.5x</button>
+                                    <button class="vpc-speed-item" data-rate="0.75">0.75x</button>
+                                    <button class="vpc-speed-item active" data-rate="1">1.0x</button>
+                                    <button class="vpc-speed-item" data-rate="1.25">1.25x</button>
+                                    <button class="vpc-speed-item" data-rate="1.5">1.5x</button>
+                                    <button class="vpc-speed-item" data-rate="2">2.0x</button>
+                                </div>
+                            </div>
+                            <button class="vpc-btn vpc-rotate" title="旋转画面 90°"><i class="bi bi-arrow-clockwise"></i></button>
+                            <button class="vpc-btn vpc-pip" title="画中画"><svg class="vpc-svg" viewBox="0 0 16 16" fill="currentColor" width="1em" height="1em" aria-hidden="true"><path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 2h-13zM1 3.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-9z"/><path d="M7.5 6a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h5a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-5z"/></svg></button>
+                            <button class="vpc-btn vpc-full" title="全屏 (F)"><i class="bi bi-fullscreen"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% elif file.kind == 'audio' %}
+            <div class="share-music" id="smRoot">
+                <div class="sm-main">
+                    <div class="sm-cover" id="smCover">
+                        <i class="bi bi-vinyl-fill sm-cover-fallback"></i>
+                        <img class="sm-cover-img" id="smCoverImg" alt="" style="display:none">
+                    </div>
+                    <div class="sm-right">
+                        <div class="sm-title" id="smTitle">{{ file.name }}</div>
+                        <div class="sm-artist" id="smArtist">未知歌手</div>
+                        <div class="sm-lyrics" id="smLyrics">
+                            <div class="sm-lyrics-inner" id="smLyricsInner">
+                                <div class="sm-lyric-line active"><i class="bi bi-hourglass-split"></i> 正在加载歌词…</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="sm-controls">
+                    <div class="vpc-progress sm-progress">
+                        <div class="vpc-track">
+                            <div class="vpc-buffered"></div>
+                            <div class="vpc-played"></div>
+                            <div class="vpc-knob"></div>
+                        </div>
+                    </div>
+                    <div class="vpc-row sm-row">
+                        <button class="vpc-btn sm-play" title="播放/暂停 (空格)"><i class="bi bi-play-fill"></i></button>
+                        <span class="vpc-time sm-time">00:00 / 00:00</span>
+                        <div class="vpc-spacer"></div>
+                        <div class="vpc-vol">
+                            <button class="vpc-btn sm-mute" title="静音 (M)"><i class="bi bi-volume-up-fill"></i></button>
+                            <input type="range" class="vpc-vol-range sm-vol" min="0" max="1" step="0.01" value="1" title="音量">
+                        </div>
+                        <button class="vpc-btn sm-loop" title="单曲循环：关"><i class="bi bi-repeat"></i></button>
+                    </div>
+                </div>
+                <audio class="sm-audio" src="{{ raw_url }}" preload="metadata" autoplay></audio>
+            </div>
+            {% elif file.kind == 'pdf' %}
+            <div class="media pdf">
+                <iframe src="{{ raw_url }}" title="{{ file.name }}"></iframe>
+            </div>
+            {% elif file.kind == 'markdown' %}
+            <div class="md-wrap">
+                <div class="md-toolbar">
+                    <button type="button" class="md-tab active" data-md-tab="preview"><i class="bi bi-eye"></i> 预览</button>
+                    <button type="button" class="md-tab" data-md-tab="source"><i class="bi bi-code-slash"></i> 源码</button>
+                </div>
+                <div class="md-content" id="mdContent"></div>
+                <pre class="text-view md-source" id="mdSource" style="display:none">{{ text_preview }}</pre>
+            </div>
+            {% elif file.kind == 'text' %}
+            <pre class="text-view">{{ text_preview }}</pre>
+            {% else %}
+            <div class="media other">
+                <i class="bi bi-file-earmark"></i>
+                <p>该类型无法在线预览，请下载后查看</p>
+                <a class="btn primary" data-download href="{{ download_url }}">
+                    <i class="bi bi-download"></i> 下载文件
+                </a>
+            </div>
+            {% endif %}
+        </main>
+
+        <div class="sh-foot">本文件通过「文件管理可视化」分享 · 请勿外传</div>
+
+        <!-- 下载二次确认 -->
+        <div class="dl-overlay" id="dlOverlay">
+            <div class="dl-modal">
+                <div class="dl-head">
+                    <span class="dl-title"><i class="bi bi-download"></i> 确认下载</span>
+                    <button class="dl-close" id="dlClose" type="button" title="关闭"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="dl-body">
+                    <div class="dl-file">
+                        <div class="dl-file-icon"><i class="bi {{ file.icon }}"></i></div>
+                        <div class="dl-file-main">
+                            <div class="dl-file-name" title="{{ file.name }}">{{ file.name }}</div>
+                            <div class="dl-file-meta">
+                                <span class="dl-chip">{{ file.ext }}</span>
+                                <span><i class="bi bi-hdd"></i> {{ file.size_str }}</span>
+                                <span><i class="bi bi-clock"></i> {{ file.created_str }} 分享</span>
+                                <span><i class="bi bi-shield-check"></i> {{ file.expires_str }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dl-hint"><i class="bi bi-info-circle"></i> 文件将保存到浏览器的默认下载目录</div>
+                </div>
+                <div class="dl-foot">
+                    <button class="btn ghost" id="dlCancel" type="button">取消</button>
+                    <button class="btn primary" id="dlConfirm" type="button"><i class="bi bi-download"></i> 确认下载</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 手机扫码分享 -->
+        <div class="dl-overlay" id="qrOverlay">
+            <div class="dl-modal qr-modal">
+                <div class="dl-head">
+                    <span class="dl-title"><i class="bi bi-qr-code"></i> 手机扫码查看</span>
+                    <button class="dl-close" id="qrClose" type="button" title="关闭"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="dl-body qr-body">
+                    <div class="qr-frame">
+                        <img id="qrImg" alt="分享二维码" data-src="{{ qr_url }}">
+                    </div>
+                    <div class="qr-tip"><i class="bi bi-phone"></i> 用手机相机或微信「扫一扫」打开</div>
+                    <div class="qr-link-row">
+                        <input class="qr-link" id="qrLink" type="text" readonly value="{{ qr_link }}">
+                        <button class="btn primary qr-copy" id="qrCopy" type="button"><i class="bi bi-clipboard"></i> 复制</button>
+                    </div>
+                    <div class="qr-hint" id="qrHint">
+                        <i class="bi bi-wifi"></i> 手机需与本机处于同一局域网（同一 Wi-Fi）
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if mode == 'view' and file.kind == 'markdown' %}
+    <script>
+{% include "partials/markdown_render.js" %}
+        (function () {
+            const SRC = {{ text_preview | tojson }};
+            const content = document.getElementById('mdContent');
+            if (content) content.innerHTML = renderMarkdown(SRC);
+            const tabs = document.querySelectorAll('.md-tab');
+            tabs.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const isPreview = btn.dataset.mdTab === 'preview';
+                    tabs.forEach(b => b.classList.toggle('active', b === btn));
+                    if (content) content.style.display = isPreview ? '' : 'none';
+                    const src = document.getElementById('mdSource');
+                    if (src) src.style.display = isPreview ? 'none' : '';
+                });
+            });
+        })();
+    </script>
+    {% endif %}
+
+    {% if mode == 'view' and file.kind == 'video' %}
+    <script>
+        (function () {
+            const root = document.getElementById('spRoot');
+            if (!root) return;
+            const video = root.querySelector('video');
+            const playBtn = root.querySelector('.vpc-play');
+            const muteBtn = root.querySelector('.vpc-mute');
+            const volRange = root.querySelector('.vpc-vol-range');
+            const timeEl = root.querySelector('.vpc-time');
+            const progress = root.querySelector('.vpc-progress');
+            const played = root.querySelector('.vpc-played');
+            const buffered = root.querySelector('.vpc-buffered');
+            const knob = root.querySelector('.vpc-knob');
+            const speedWrap = root.querySelector('.vpc-speed');
+            const speedCur = root.querySelector('.vpc-speed-cur');
+            const rotateBtn = root.querySelector('.vpc-rotate');
+            const pipBtn = root.querySelector('.vpc-pip');
+            const fullBtn = root.querySelector('.vpc-full');
+
+            const fmt = (s) => {
+                if (!isFinite(s)) return '--:--';
+                s = Math.max(0, Math.floor(s));
+                const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+                const mm = String(m).padStart(2, '0'), ss = String(sec).padStart(2, '0');
+                return h ? h + ':' + mm + ':' + ss : mm + ':' + ss;
+            };
+
+            // 播放 / 暂停
+            const togglePlay = () => { video.paused ? video.play().catch(() => { }) : video.pause(); };
+            const setPlayIcon = () => {
+                playBtn.innerHTML = '<i class="bi ' + (video.paused ? 'bi-play-fill' : 'bi-pause-fill') + '"></i>';
+            };
+            playBtn.addEventListener('click', (e) => { e.stopPropagation(); togglePlay(); });
+            video.addEventListener('click', togglePlay);
+            video.addEventListener('play', setPlayIcon);
+            video.addEventListener('pause', setPlayIcon);
+            video.addEventListener('ended', setPlayIcon);
+            setPlayIcon();
+
+            // 首帧就绪后淡出加载态（失败时给出提示）
+            const loading = document.getElementById('spLoading');
+            const hideLoading = () => { if (loading) loading.classList.add('hide'); };
+            video.addEventListener('loadeddata', hideLoading, { once: true });
+            video.addEventListener('canplay', hideLoading, { once: true });
+            video.addEventListener('error', () => {
+                if (loading) {
+                    loading.innerHTML = '<span style="color:#94a3b8;font-size:.85rem">视频加载失败，请尝试下载后观看</span>';
+                }
+            });
+            if (video.readyState >= 2) hideLoading();
+
+            // 进度 + 缓冲
+            const updateProgress = () => {
+                const dur = video.duration || 0;
+                const pct = dur ? video.currentTime / dur * 100 : 0;
+                played.style.width = pct + '%';
+                knob.style.left = pct + '%';
+                timeEl.textContent = fmt(video.currentTime) + ' / ' + fmt(dur);
+                if (video.buffered.length && dur) {
+                    const end = video.buffered.end(video.buffered.length - 1);
+                    buffered.style.width = Math.min(100, end / dur * 100) + '%';
+                }
+            };
+            video.addEventListener('timeupdate', updateProgress);
+            video.addEventListener('progress', updateProgress);
+            video.addEventListener('loadedmetadata', updateProgress);
+            video.addEventListener('loadeddata', updateProgress);
+
+            // 进度条拖拽
+            let dragging = false;
+            const seekTo = (clientX) => {
+                if (!isFinite(video.duration)) return;
+                const r = progress.getBoundingClientRect();
+                const ratio = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+                video.currentTime = ratio * video.duration;
+                updateProgress();
+            };
+            progress.addEventListener('pointerdown', (e) => {
+                dragging = true;
+                progress.classList.add('dragging');
+                try { progress.setPointerCapture(e.pointerId); } catch (err) { }
+                seekTo(e.clientX);
+            });
+            progress.addEventListener('pointermove', (e) => { if (dragging) seekTo(e.clientX); });
+            const endDrag = () => { dragging = false; progress.classList.remove('dragging'); };
+            progress.addEventListener('pointerup', endDrag);
+            progress.addEventListener('pointercancel', endDrag);
+
+            // 音量 / 静音
+            const volIcon = () => {
+                const v = video.muted ? 0 : video.volume;
+                muteBtn.innerHTML = '<i class="bi ' + (v === 0 ? 'bi-volume-mute-fill'
+                    : v < 0.5 ? 'bi-volume-down-fill' : 'bi-volume-up-fill') + '"></i>';
+            };
+            volRange.addEventListener('input', (e) => {
+                e.stopPropagation();
+                video.volume = +volRange.value;
+                video.muted = false;
+                volRange.style.setProperty('--vol', (volRange.value * 100) + '%');
+                volIcon();
+            });
+            muteBtn.addEventListener('click', (e) => { e.stopPropagation(); video.muted = !video.muted; });
+            video.addEventListener('volumechange', () => {
+                const v = video.muted ? 0 : video.volume;
+                volRange.style.setProperty('--vol', (v * 100) + '%');
+                volIcon();
+            });
+            volRange.style.setProperty('--vol', '100%');
+
+            // 倍速
+            speedWrap.querySelector('.vpc-speed-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                speedWrap.classList.toggle('open');
+            });
+            root.querySelectorAll('.vpc-speed-item').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    video.playbackRate = +el.dataset.rate;
+                    speedCur.textContent = el.textContent;
+                    root.querySelectorAll('.vpc-speed-item').forEach((x) => x.classList.toggle('active', x === el));
+                    speedWrap.classList.remove('open');
+                });
+            });
+            document.addEventListener('click', () => speedWrap.classList.remove('open'));
+
+            // 旋转画面
+            let rot = 0;
+            const applyRotate = () => {
+                let scale = 1;
+                if (rot % 180 !== 0) {
+                    const r = video.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) scale = Math.min(1, r.height / r.width);
+                }
+                video.style.transform = rot ? 'rotate(' + rot + 'deg) scale(' + scale + ')' : '';
+            };
+            rotateBtn.addEventListener('click', (e) => { e.stopPropagation(); rot += 90; applyRotate(); });
+            window.addEventListener('resize', applyRotate);
+
+            // 画中画
+            pipBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                if (!document.pictureInPictureEnabled) return;
+                try {
+                    if (document.pictureInPictureElement) await document.exitPictureInPicture();
+                    else await video.requestPictureInPicture();
+                } catch (err) { /* ignore */ }
+            });
+
+            // 全屏
+            fullBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (document.fullscreenElement) document.exitFullscreen();
+                else if (root.requestFullscreen) root.requestFullscreen();
+                else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+            });
+
+            // 快捷键提示：进入后显示 3 秒自动淡出
+            const keyTip = root.querySelector('.sp-tip');
+            if (keyTip) {
+                setTimeout(() => keyTip.classList.add('show'), 150);
+                setTimeout(() => keyTip.classList.remove('show'), 3400);
+            }
+
+            // 快进 / 快退的屏幕提示
+            const seekTip = root.querySelector('.sp-seek-tip');
+            let seekTipTimer = null;
+            const showSeekTip = (text, icon) => {
+                if (!seekTip) return;
+                seekTip.innerHTML = '<i class="bi ' + icon + '"></i> ' + text;
+                seekTip.classList.add('show');
+                clearTimeout(seekTipTimer);
+                seekTipTimer = setTimeout(() => seekTip.classList.remove('show'), 700);
+            };
+
+            // 快捷键：空格 播放/暂停 · ← → 快退/快进 5s · M 静音 · F 全屏
+            const SEEK_STEP = 5;
+            const seekBy = (delta) => {
+                if (!isFinite(video.duration) || video.duration <= 0) return;
+                video.currentTime = Math.min(video.duration, Math.max(0, video.currentTime + delta));
+                updateProgress();
+                showSeekTip(delta > 0 ? '快进 ' + SEEK_STEP + 's' : '快退 ' + SEEK_STEP + 's',
+                    delta > 0 ? 'bi-fast-forward-fill' : 'bi-rewind-fill');
+            };
+            document.addEventListener('keydown', (e) => {
+                const tag = ((e.target && e.target.tagName) || '').toLowerCase();
+                if (tag === 'input' || tag === 'textarea' || (e.target && e.target.isContentEditable)) return;
+                const k = e.key.toLowerCase();
+                if (e.key === ' ') { e.preventDefault(); e.stopPropagation(); togglePlay(); }
+                else if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); seekBy(-SEEK_STEP); }
+                else if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); seekBy(SEEK_STEP); }
+                else if (k === 'm') { video.muted = !video.muted; }
+                else if (k === 'f') { fullBtn.click(); }
+            });
+
+            // 鼠标静止自动隐藏控制条
+            let hideTimer = null;
+            const showControls = () => {
+                root.classList.remove('idle');
+                clearTimeout(hideTimer);
+                if (!video.paused) hideTimer = setTimeout(() => root.classList.add('idle'), 2600);
+            };
+            ['mousemove', 'pointerdown', 'touchstart'].forEach((ev) =>
+                root.addEventListener(ev, showControls, { passive: true }));
+            showControls();
+
+            // 打开即尝试自动播放（被浏览器拦截则显示播放按钮，并撤掉加载遮罩）
+            video.play().catch(() => { setPlayIcon(); hideLoading(); });
+        })();
+    </script>
+    {% endif %}
+
+    {% if mode == 'view' and file.kind == 'audio' %}
+    <script>
+        (function () {
+            const esc = (s) => String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+            const root = document.getElementById('smRoot');
+            if (!root) return;
+            const audio = root.querySelector('.sm-audio');
+            const cover = document.getElementById('smCover');
+            const coverImg = document.getElementById('smCoverImg');
+            const titleEl = document.getElementById('smTitle');
+            const artistEl = document.getElementById('smArtist');
+            const lyrBox = document.getElementById('smLyrics');
+            const lyrInner = document.getElementById('smLyricsInner');
+            const playBtn = root.querySelector('.sm-play');
+            const muteBtn = root.querySelector('.sm-mute');
+            const volRange = root.querySelector('.sm-vol');
+            const timeEl = root.querySelector('.sm-time');
+            const loopBtn = root.querySelector('.sm-loop');
+            const progress = root.querySelector('.sm-progress');
+            const played = root.querySelector('.vpc-played');
+            const buffered = root.querySelector('.vpc-buffered');
+            const knob = root.querySelector('.vpc-knob');
+
+            const fmt = (s) => {
+                if (!isFinite(s)) return '00:00';
+                s = Math.max(0, Math.floor(s));
+                return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+            };
+
+            // 封面：同目录下的同名图片，取不到就显示唱片图标
+            coverImg.addEventListener('load', () => {
+                coverImg.style.display = '';
+                const fb = cover.querySelector('.sm-cover-fallback');
+                if (fb) fb.style.display = 'none';
+            });
+            coverImg.addEventListener('error', () => { coverImg.style.display = 'none'; });
+            coverImg.src = {{ cover_url | tojson }};
+
+            // ---- LRC 歌词：解析 + 滚动同步 ----
+            let lyricData = [], lyricIdx = -1;
+            const syncLyrics = () => {
+                if (!lyricData.length) return;
+                const t = audio.currentTime + 0.2;
+                let idx = lyricIdx < 0 ? 0 : lyricIdx;
+                while (idx + 1 < lyricData.length && t >= lyricData[idx + 1].t) idx++;
+                while (idx > 0 && t < lyricData[idx].t) idx--;
+                if (idx === lyricIdx) return;
+                lyricIdx = idx;
+                lyrInner.querySelectorAll('.sm-lyric-line')
+                    .forEach((el) => el.classList.toggle('active', +el.dataset.i === idx));
+                const cur = lyrInner.querySelector('.sm-lyric-line.active');
+                if (cur && lyrBox.clientHeight > 0) {
+                    const offset = cur.offsetTop + cur.offsetHeight / 2 - lyrBox.clientHeight / 2;
+                    lyrInner.style.transform = 'translateY(' + (-Math.max(0, offset)) + 'px)';
+                }
+            };
+            const applyLrc = (text) => {
+                const entries = [];
+                text.split(/\r?\n/).forEach((line) => {
+                    const ti = line.match(/^\s*\[ti:(.*?)\]/i);
+                    if (ti && ti[1].trim()) titleEl.textContent = ti[1].trim();
+                    const ar = line.match(/^\s*\[ar:(.*?)\]/i);
+                    if (ar && ar[1].trim()) artistEl.textContent = ar[1].trim();
+                    const times = [...line.matchAll(/\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g)];
+                    if (!times.length) return;
+                    const txt = line.replace(/\[[^\]]*\]/g, '').trim();
+                    times.forEach((m) => {
+                        const frac = m[3] ? parseFloat('0.' + m[3]) : 0;
+                        entries.push({ t: (+m[1]) * 60 + (+m[2]) + frac, txt });
+                    });
+                });
+                if (!entries.length) {
+                    lyrInner.innerHTML = '<div class="sm-lyric-line active">暂无歌词，请欣赏音乐</div>';
+                    return;
+                }
+                entries.sort((a, b) => a.t - b.t);
+                lyricData = entries;
+                lyricIdx = -1;
+                lyrInner.innerHTML = entries.map((e, i) =>
+                    '<div class="sm-lyric-line" data-i="' + i + '">' + esc(e.txt || '♪ ♪ ♪') + '</div>').join('');
+                lyrInner.querySelectorAll('.sm-lyric-line').forEach((el) => {
+                    el.addEventListener('click', () => {
+                        const e = lyricData[+el.dataset.i];
+                        if (e) { audio.currentTime = e.t; syncLyrics(); }
+                    });
+                });
+                syncLyrics();
+            };
+            fetch({{ lyrics_url | tojson }})
+                .then((r) => (r.ok ? r.text() : Promise.reject()))
+                .then(applyLrc)
+                .catch(() => {
+                    lyrInner.innerHTML = '<div class="sm-lyric-line active">暂无歌词，请欣赏音乐</div>';
+                });
+
+            // ---- 播放 / 进度 / 音量 / 循环 ----
+            const setPlayIcon = () => {
+                playBtn.innerHTML = '<i class="bi ' + (audio.paused ? 'bi-play-fill' : 'bi-pause-fill') + '"></i>';
+                cover.classList.toggle('playing', !audio.paused);
+            };
+            const togglePlay = () => { audio.paused ? audio.play().catch(() => { }) : audio.pause(); };
+            playBtn.addEventListener('click', togglePlay);
+            audio.addEventListener('play', setPlayIcon);
+            audio.addEventListener('pause', setPlayIcon);
+            setPlayIcon();
+
+            const updateProgress = () => {
+                const dur = audio.duration || 0;
+                const pct = dur ? audio.currentTime / dur * 100 : 0;
+                played.style.width = pct + '%';
+                knob.style.left = pct + '%';
+                timeEl.textContent = fmt(audio.currentTime) + ' / ' + fmt(dur);
+                if (audio.buffered.length && dur) {
+                    const end = audio.buffered.end(audio.buffered.length - 1);
+                    buffered.style.width = Math.min(100, end / dur * 100) + '%';
+                }
+            };
+            audio.addEventListener('timeupdate', () => { updateProgress(); syncLyrics(); });
+            audio.addEventListener('progress', updateProgress);
+            audio.addEventListener('loadedmetadata', updateProgress);
+
+            let dragging = false;
+            const seekTo = (x) => {
+                if (!isFinite(audio.duration)) return;
+                const r = progress.getBoundingClientRect();
+                audio.currentTime = Math.min(1, Math.max(0, (x - r.left) / r.width)) * audio.duration;
+                updateProgress();
+            };
+            progress.addEventListener('pointerdown', (e) => {
+                dragging = true;
+                progress.classList.add('dragging');
+                try { progress.setPointerCapture(e.pointerId); } catch (err) { }
+                seekTo(e.clientX);
+            });
+            progress.addEventListener('pointermove', (e) => { if (dragging) seekTo(e.clientX); });
+            const endDrag = () => { dragging = false; progress.classList.remove('dragging'); };
+            progress.addEventListener('pointerup', endDrag);
+            progress.addEventListener('pointercancel', endDrag);
+
+            const volIcon = () => {
+                const v = audio.muted ? 0 : audio.volume;
+                muteBtn.innerHTML = '<i class="bi ' + (v === 0 ? 'bi-volume-mute-fill'
+                    : v < 0.5 ? 'bi-volume-down-fill' : 'bi-volume-up-fill') + '"></i>';
+            };
+            volRange.addEventListener('input', (e) => {
+                e.stopPropagation();
+                audio.volume = +volRange.value;
+                audio.muted = false;
+                volRange.style.setProperty('--vol', (volRange.value * 100) + '%');
+                volIcon();
+            });
+            muteBtn.addEventListener('click', (e) => { e.stopPropagation(); audio.muted = !audio.muted; });
+            audio.addEventListener('volumechange', () => {
+                const v = audio.muted ? 0 : audio.volume;
+                volRange.style.setProperty('--vol', (v * 100) + '%');
+                volIcon();
+            });
+            volRange.style.setProperty('--vol', '100%');
+
+            loopBtn.addEventListener('click', () => {
+                audio.loop = !audio.loop;
+                loopBtn.classList.toggle('active', audio.loop);
+                loopBtn.innerHTML = '<i class="bi bi-repeat' + (audio.loop ? '-1' : '') + '"></i>';
+                loopBtn.title = audio.loop ? '单曲循环：开' : '单曲循环：关';
+            });
+
+            // 快捷键：空格 播放/暂停 · ← → 快退/快进 5s · M 静音
+            const SEEK_STEP = 5;
+            document.addEventListener('keydown', (e) => {
+                const tag = ((e.target && e.target.tagName) || '').toLowerCase();
+                if (tag === 'input' || tag === 'textarea' || (e.target && e.target.isContentEditable)) return;
+                const k = e.key.toLowerCase();
+                if (e.key === ' ') { e.preventDefault(); e.stopPropagation(); togglePlay(); }
+                else if (e.key === 'ArrowLeft') {
+                    e.preventDefault(); e.stopPropagation();
+                    if (isFinite(audio.duration)) { audio.currentTime = Math.max(0, audio.currentTime - SEEK_STEP); updateProgress(); }
+                } else if (e.key === 'ArrowRight') {
+                    e.preventDefault(); e.stopPropagation();
+                    if (isFinite(audio.duration)) { audio.currentTime = Math.min(audio.duration, audio.currentTime + SEEK_STEP); updateProgress(); }
+                } else if (k === 'm') { audio.muted = !audio.muted; }
+            });
+
+            audio.play().catch(() => setPlayIcon());
+        })();
+    </script>
+    {% endif %}
+
+    {% if mode == 'view' %}
+    <script>
+        // 下载二次确认：先展示文件信息，再真正触发下载
+        (function () {
+            const overlay = document.getElementById('dlOverlay');
+            if (!overlay) return;
+            const triggers = document.querySelectorAll('[data-download]');
+            if (!triggers.length) return;
+            let targetUrl = '';
+
+            const close = () => overlay.classList.remove('show');
+            triggers.forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    targetUrl = el.getAttribute('href') || '';
+                    if (!targetUrl) return;
+                    overlay.classList.add('show');
+                });
+            });
+
+            document.getElementById('dlCancel').addEventListener('click', close);
+            document.getElementById('dlClose').addEventListener('click', close);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && overlay.classList.contains('show')) close();
+            });
+
+            document.getElementById('dlConfirm').addEventListener('click', () => {
+                close();
+                if (!targetUrl) return;
+                const a = document.createElement('a');
+                a.href = targetUrl;
+                a.download = '';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            });
+        })();
+
+        // 手机扫码分享：展示分享链接二维码，可复制链接
+        (function () {
+            const overlay = document.getElementById('qrOverlay');
+            const btn = document.getElementById('qrBtn');
+            if (!overlay || !btn) return;
+            const img = document.getElementById('qrImg');
+            const linkEl = document.getElementById('qrLink');
+            const copyBtn = document.getElementById('qrCopy');
+            const hint = document.getElementById('qrHint');
+
+            const copy = (text) => {
+                // navigator.clipboard 只在 https / localhost 等安全上下文可用，
+                // 通过 http://内网IP 访问时回退到 execCommand
+                const legacy = () => {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.setAttribute('readonly', '');
+                    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0;';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { document.execCommand('copy'); } catch (err) { /* ignore */ }
+                    ta.remove();
+                };
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(text).catch(legacy);
+                } else {
+                    legacy();
+                }
+            };
+
+            const close = () => overlay.classList.remove('show');
+            btn.addEventListener('click', () => {
+                // 二维码按需加载，没打开过就不请求
+                if (img && !img.getAttribute('src') && img.dataset.src) img.src = img.dataset.src;
+                overlay.classList.add('show');
+            });
+            document.getElementById('qrClose').addEventListener('click', close);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && overlay.classList.contains('show')) close();
+            });
+            if (linkEl) linkEl.addEventListener('click', () => linkEl.select());
+            if (copyBtn) {
+                copyBtn.addEventListener('click', () => {
+                    if (!linkEl) return;
+                    copy(linkEl.value);
+                    const raw = copyBtn.innerHTML;
+                    copyBtn.innerHTML = '<i class="bi bi-check2"></i> 已复制';
+                    setTimeout(() => { copyBtn.innerHTML = raw; }, 1600);
+                });
+            }
+            // 链接仍是 localhost 时手机打不开：给出明确提示
+            if (linkEl && hint && /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/i.test(linkEl.value)) {
+                hint.classList.add('warn');
+                hint.innerHTML = '<i class="bi bi-exclamation-triangle"></i> 未探测到局域网 IP，请改用内网地址（如 http://192.168.x.x:端口）打开本页后再扫码';
+            }
+        })();
+    </script>
+    {% endif %}
+</body>
+
+</html>

@@ -1,5 +1,6 @@
 Flask>=2.0
 Pillow>=9.0
+qrcode>=8.0
 duckduckgo-search>=7.5
 openpyxl>=3.1
 xlrd>=2.0

@@ -300,11 +300,7 @@
                 span.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const p = span.dataset.fullPath || span.textContent;
-                    navigator.clipboard.writeText(p).then(() => {
-                        showToast('成功', '路径已复制到剪贴板: ' + p.substring(0, 60), 'success');
-                    }).catch(() => {
-                        showToast('提示', '完整路径: ' + p, 'info');
-                    });
+                    _copyText(p, '路径已复制到剪贴板');
                 });
             });
             // 行点击：跳转到文件所在目录（排除按钮和复选框）
@@ -418,11 +414,5 @@
 
         function _copyPreview() {
             const pre = document.querySelector('.preview-body pre');
-            if (pre) {
-                navigator.clipboard.writeText(pre.textContent).then(() => {
-                    showToast('成功', '文本已复制到剪切板', 'success');
-                }).catch(() => {
-                    showToast('失败', '复制失败', 'danger');
-                });
-            }
+            if (pre) _copyText(pre.textContent, '文本已复制到剪贴板');
         }

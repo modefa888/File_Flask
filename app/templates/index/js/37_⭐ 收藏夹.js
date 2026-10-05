@@ -464,6 +464,88 @@
             return Math.floor(diff / 86400) + '天前';
         }
 
+        // ===== 回收站条目：类型图标 / 是否可出缩略图 =====
+        const _delhistItemMap = new Map();
+        const _TRASH_IMG_EXT = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp', 'ico'];
+        const _TRASH_VIDEO_EXT = ['mp4', 'webm', 'mkv', 'avi', 'mov', 'm4v', 'ogg', 'flv', 'wmv', 'rmvb'];
+
+        function _trashExt(name) {
+            return (String(name || '').split('.').pop() || '').toLowerCase();
+        }
+
+        function _trashIconClass(item) {
+            if (item.is_dir) return 'bi-folder-fill';
+            const ext = _trashExt(item.name);
+            if (_TRASH_IMG_EXT.includes(ext)) return 'bi-file-image';
+            if (_TRASH_VIDEO_EXT.includes(ext)) return 'bi-file-play';
+            if (['mp3', 'wav', 'flac', 'aac', 'm4a', 'opus', 'wma', 'ape'].includes(ext)) return 'bi-file-music';
+            if (['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'xz'].includes(ext)) return 'bi-file-zip';
+            if (['pdf'].includes(ext)) return 'bi-file-pdf';
+            if (['py', 'js', 'ts', 'java', 'c', 'cpp', 'go', 'rs', 'sh', 'css', 'html'].includes(ext)) return 'bi-file-code';
+            if (['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'csv', 'ini', 'conf'].includes(ext)) return 'bi-file-text';
+            return 'bi-file-earmark';
+        }
+
+        // 只有图片/视频能出缩略图（回收站文件无扩展名，需后端按原文件名判断）
+        function _trashCanThumb(name, isDir) {
+            if (isDir) return false;
+            const ext = _trashExt(name);
+            return _TRASH_IMG_EXT.includes(ext) || _TRASH_VIDEO_EXT.includes(ext);
+        }
+
+        // 查看回收站里的文件（图片/视频/音频/文本）
+        function _viewTrashItem(item) {
+            if (!item) return;
+            if (item.exists === false) { showToast('提示', '文件已丢失，无法查看', 'warning'); return; }
+            const name = item.name || '';
+            const ext = _trashExt(name);
+            const url = '/api/trash/raw?id=' + encodeURIComponent(item.id);
+            const isImg = _TRASH_IMG_EXT.includes(ext);
+            const isVideo = _TRASH_VIDEO_EXT.includes(ext);
+            const isAudio = ['mp3', 'wav', 'flac', 'aac', 'm4a', 'opus', 'wma', 'ape'].includes(ext);
+            const isText = ['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'csv', 'ini', 'conf', 'py', 'js', 'ts', 'css', 'html', 'sh'].includes(ext);
+
+            const container = document.getElementById('customModalContainer');
+            if (!container) return;
+            const overlay = document.createElement('div');
+            overlay.className = 'custom-modal-overlay';
+            overlay.innerHTML = `
+                <div class="trash-view-modal">
+                    <div class="tvm-header">
+                        <span class="tvm-title"><i class="bi ${_trashIconClass(item)}"></i> ${_escHtml(name)}</span>
+                        <button class="tvm-close" title="关闭"><i class="bi bi-x-lg"></i></button>
+                    </div>
+                    <div class="tvm-body"><div class="tvm-loading"><i class="bi bi-hourglass-split"></i> 加载中...</div></div>
+                </div>`;
+            container.appendChild(overlay);
+            const close = () => { if (document.body.contains(overlay)) overlay.remove(); };
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+            overlay.querySelector('.tvm-close').addEventListener('click', close);
+
+            const bodyEl = overlay.querySelector('.tvm-body');
+            if (isImg) {
+                bodyEl.innerHTML = `<img class="tvm-img" alt="" src="${url}">`;
+                bodyEl.querySelector('img').addEventListener('error', () => {
+                    bodyEl.innerHTML = '<div class="tvm-loading">图片加载失败</div>';
+                });
+            } else if (isVideo) {
+                bodyEl.innerHTML = `<video class="tvm-video" src="${url}" controls autoplay playsinline></video>`;
+                bodyEl.querySelector('video').addEventListener('error', () => {
+                    bodyEl.innerHTML = '<div class="tvm-loading">该视频无法播放（可能是编码不受支持）</div>';
+                });
+            } else if (isAudio) {
+                bodyEl.innerHTML = `<div class="tvm-audio"><i class="bi bi-music-note-beamed"></i><audio src="${url}" controls autoplay></audio></div>`;
+            } else if (isText) {
+                fetch(url).then(r => r.text()).then(t => {
+                    bodyEl.innerHTML = '<pre class="tvm-text"></pre>';
+                    bodyEl.querySelector('pre').textContent = t.length > 200000
+                        ? t.slice(0, 200000) + '\n…（内容过长，已截断）' : t;
+                }).catch(() => { bodyEl.innerHTML = '<div class="tvm-loading">读取失败</div>'; });
+            } else {
+                bodyEl.innerHTML = '<div class="tvm-loading"><i class="bi bi-eye-slash"></i> 该类型暂不支持在线查看，可先恢复再打开</div>';
+            }
+        }
+
         function _loadDeleteHistoryList() {
             fetch('/api/delete-history')
                 .then(r => r.json())
@@ -480,6 +562,9 @@
                         badge.textContent = count > 0 ? (count > 99 ? '99+' : count) : '0';
                         badge.classList.toggle('empty', count === 0);
                     }
+                    // 面板标题上的总数
+                    const totalEl = document.getElementById('delhistTotal');
+                    if (totalEl) totalEl.textContent = count > 0 ? count + ' 项' : '';
 
                     if (items.length === 0) {
                         body.innerHTML = '<div class="delhist-empty"><i class="bi bi-check-circle"></i>回收站为空</div>';
@@ -490,27 +575,31 @@
                     if (clearBtn) clearBtn.disabled = false;
 
                     let html = '';
+                    _delhistItemMap.clear();
                     for (const item of items) {
-                        const iconClass = item.is_dir ? 'bi bi-folder-fill dh-icon dir' : 'bi bi-file-earmark dh-icon';
+                        _delhistItemMap.set(item.id, item);
                         const timeStr = _formatTimeAgo(item.deleted_at);
                         const sizeStr = item.size > 0 ? formatSize(item.size) : (item.is_dir ? '目录' : '0 B');
-                        const pathDisp = item.original_path.replace(/^[^:]+:/, '').replace(/^\/+/, '');
                         const exists = item.exists !== false;
-                        const statusClass = exists ? '' : 'lost';
-                        const statusText = exists ? '可恢复' : '文件已丢失';
+                        const icon = _trashIconClass(item);
+                        // 小封面：图片/视频走后端缩略图，其余或加载失败时回落类型图标
+                        const canThumb = exists && _trashCanThumb(item.name, item.is_dir);
+                        const thumbInner = `<i class="bi ${icon} dh-thumb-icon${item.is_dir ? ' dir' : ''}"></i>`
+                            + (canThumb ? `<img loading="lazy" alt="" src="/api/trash/thumb?id=${encodeURIComponent(item.id)}" onerror="this.remove()">` : '');
                         html += `
-                        <div class="delhist-item">
-                            <span class="${iconClass}"></span>
+                        <div class="delhist-item${exists ? '' : ' lost'}">
+                            <span class="dh-thumb">${thumbInner}</span>
                             <div class="dh-info">
-                                <div class="dh-name">${item.name}</div>
-                                <div class="dh-path">${item.original_path}</div>
+                                <div class="dh-name" title="${_escHtml(item.name)}">${_escHtml(item.name)}</div>
+                                <div class="dh-path" title="${_escHtml(item.original_path)}">${_escHtml(item.original_path)}</div>
                                 <div class="dh-meta">
                                     <span class="dh-time"><i class="bi bi-clock"></i> ${timeStr}</span>
                                     <span class="dh-size"><i class="bi bi-hdd"></i> ${sizeStr}</span>
-                                    <span class="dh-status ${statusClass}"><i class="bi bi-${exists ? 'check-circle' : 'x-circle'}"></i> ${statusText}</span>
+                                    <span class="dh-status ${exists ? '' : 'lost'}"><i class="bi bi-${exists ? 'check-circle' : 'x-circle'}"></i> ${exists ? '可恢复' : '文件已丢失'}</span>
                                 </div>
                             </div>
                             <div class="dh-actions">
+                                <button class="btn btn-view" data-tid="${item.id}" ${exists ? '' : 'disabled'} title="查看"><i class="bi bi-eye"></i> 查看</button>
                                 <button class="btn btn-restore" data-tid="${item.id}" ${exists ? '' : 'disabled'} title="恢复"><i class="bi bi-arrow-counterclockwise"></i> 恢复</button>
                                 <button class="btn btn-remove" data-tid="${item.id}" title="永久删除"><i class="bi bi-trash3"></i> 删除</button>
                             </div>
@@ -519,6 +608,12 @@
                     }
                     body.innerHTML = html;
 
+                    // 绑定查看按钮
+                    body.querySelectorAll('.btn-view').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            _viewTrashItem(_delhistItemMap.get(btn.dataset.tid));
+                        });
+                    });
                     // 绑定恢复按钮
                     body.querySelectorAll('.btn-restore').forEach(btn => {
                         btn.addEventListener('click', () => {

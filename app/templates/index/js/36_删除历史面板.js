@@ -6,7 +6,7 @@
             <div class="delhist-overlay">
                 <div class="delhist-panel">
                     <div class="panel-header">
-                        <span class="panel-title"><i class="bi bi-clock-history"></i> 删除历史（回收站）</span>
+                        <span class="panel-title"><i class="bi bi-clock-history"></i> 删除历史（回收站）<span class="delhist-total" id="delhistTotal"></span></span>
                         <button class="panel-close" title="关闭"><i class="bi bi-x-lg"></i></button>
                     </div>
                     <div class="panel-body" id="delhistBody">

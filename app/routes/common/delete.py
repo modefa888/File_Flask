@@ -1,18 +1,21 @@
 """删除 / 撤销删除 / 删除历史路由。"""
 import hashlib
+import mimetypes
 import os
 import shutil
 import threading
 import time
 import uuid
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response, send_file
 
+from ...config import _IMAGE_EXTS, _VIDEO_EXTS
 from ...log import get_logger
 from ...services.common.trash import (
     _load_delete_history, _save_delete_history, _get_trash_item_path, _safe_filename,
     _update_index_after_delete, _invalidate_all_dir_sizes, _DELETE_HISTORY_LOCK,
 )
+from ...services.common.thumbnail import _generate_image_thumb, _extract_video_frame
 from ...services.common.filecore import _invalidate_list_cache
 from ...services.common.db import _get_index_conn
 from .fileops import _guard_protected_path
@@ -477,6 +480,76 @@ def api_undo_delete():
         return jsonify({"success": True, "message": "已恢复: " + original_path})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+def _find_trash_record(trash_id):
+    """按 trash_id 在删除历史里查记录"""
+    if not trash_id:
+        return None
+    with _DELETE_HISTORY_LOCK:
+        history = _load_delete_history()
+    for item in history:
+        if item.get("id") == trash_id:
+            return item
+    return None
+
+
+@bp.route("/api/trash/thumb")
+def api_trash_thumb():
+    """回收站条目的缩略图：图片走 Pillow 缩略，视频走 ffmpeg 抽帧。
+
+    回收站内的文件以 trash_id 命名（没有扩展名），所以类型按记录里的原始文件名判断。
+    """
+    _log.info("GET /api/trash/thumb")
+    rec = _find_trash_record(request.args.get("id", ""))
+    if not rec:
+        return jsonify({"error": "回收站中找不到该项目"}), 404
+    path = rec.get("trash_path", "")
+    if not os.path.isfile(path):
+        return jsonify({"error": "文件已丢失"}), 404
+    name = rec.get("name", "")
+    ext = os.path.splitext(name)[1].lower().lstrip(".")
+    if ext in _IMAGE_EXTS:
+        data = _generate_image_thumb(path)
+        if not data:
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+            except OSError:
+                return jsonify({"error": "读取失败"}), 500
+        ctype = mimetypes.guess_type(name)[0] or "image/jpeg"
+        resp = Response(data, mimetype=ctype)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+    if ext in _VIDEO_EXTS:
+        data, ctype = _extract_video_frame(path)
+        if not data:
+            return jsonify({"error": "无法生成缩略图"}), 404
+        resp = Response(data, mimetype=ctype or "image/jpeg")
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+    return jsonify({"error": "该类型没有缩略图"}), 404
+
+
+@bp.route("/api/trash/raw")
+def api_trash_raw():
+    """回收站条目的原始内容（供「查看」使用），带正确的 MIME 类型。"""
+    _log.info("GET /api/trash/raw")
+    rec = _find_trash_record(request.args.get("id", ""))
+    if not rec:
+        return jsonify({"error": "回收站中找不到该项目"}), 404
+    path = rec.get("trash_path", "")
+    if not os.path.isfile(path):
+        return jsonify({"error": "文件已丢失"}), 404
+    mime, _ = mimetypes.guess_type(rec.get("name", ""))
+    if not mime:
+        mime = "application/octet-stream"
+    try:
+        resp = send_file(path, mimetype=mime, as_attachment=False, conditional=True)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+    except (OSError, PermissionError) as e:
+        return jsonify({"error": f"无法读取文件: {str(e)}"}), 500
 
 
 @bp.route("/api/delete-history")

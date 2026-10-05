@@ -145,14 +145,8 @@
         }
 
         function _copyToClipboard(text, successMsg) {
-            navigator.clipboard.writeText(text).then(() => {
-                showToast('成功', successMsg, 'success');
-            }).catch(() => {
-                const ta = document.createElement('textarea');
-                ta.value = text; document.body.appendChild(ta); ta.select();
-                document.execCommand('copy'); document.body.removeChild(ta);
-                showToast('成功', successMsg, 'success');
-            });
+            // 统一走兼容实现：http 非安全上下文下 navigator.clipboard 不可用，需回退 execCommand
+            _copyText(text, successMsg);
         }
 
         function _openInExplorer(absPath) {

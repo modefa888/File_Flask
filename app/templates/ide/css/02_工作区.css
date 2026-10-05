@@ -40,8 +40,13 @@
   #sidePortSearch { display: none; }
   .side-root {
     font-size: 13px; color: #e7e7e7; padding: 4px 12px 8px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none;
   }
+  .side-root:hover { color: #fff; }
+  .side-root #sideRootChevron { font-size: 11px; color: #9aa0a6; flex: none; transition: transform .15s; }
   .tree { flex: 1; overflow: auto; padding-bottom: 10px; }
+  /* 根目录行折叠状态：用类名而非内联样式，避免被 showPanel 的显隐管理清掉 */
+  #explorerPanel.tree-hidden { display: none !important; }
   .tree-row {
     display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 1px 8px 1px 4px;
     font-size: 13px; line-height: 1.5; color: #cccccc; cursor: pointer; white-space: nowrap; user-select: none;

@@ -565,9 +565,28 @@
         '</div>';
       const btn = $("ewOpenBtn");
       if (btn) btn.onclick = openFolderDialog;
+      explorerPanel.classList.remove("tree-hidden");   // 无工作区视图始终可见
       return;
     }
-    $("sideRoot").textContent = baseName(ROOT) || ROOT;
+    $("sideRootName").textContent = baseName(ROOT) || ROOT;
+    // 全局配置最优先：构建 / 加载树之前就应用折叠状态，
+    // 避免先看到「加载中…」再闪一下才收起。
+    // 注意：用类名（tree-hidden）而非内联 display，否则会被 showPanel 的显隐管理清掉
+    const _explorerCollapsed = !!ideSettingGet("explorerCollapsed", false);
+    explorerPanel.classList.toggle("tree-hidden", _explorerCollapsed);
+    {
+      const chev = $("sideRootChevron");
+      if (chev) chev.className = "bi " + (_explorerCollapsed ? "bi-chevron-right" : "bi-chevron-down");
+    }
+    // 根目录行点击 = 折叠 / 展开整个文件树（仿 VS Code 根目录折叠），状态持久记忆
+    $("sideRoot").onclick = () => {
+      const tree = $("explorerPanel");
+      const show = tree.classList.contains("tree-hidden");   // 当前是收起 → 展开
+      tree.classList.toggle("tree-hidden", !show);
+      const chev = $("sideRootChevron");
+      if (chev) chev.className = "bi " + (show ? "bi-chevron-down" : "bi-chevron-right");
+      ideSettingSet("explorerCollapsed", !show);
+    };
     $("tbTitle").textContent = "在线项目 IDE — " + baseName(ROOT);
     $("welcomeSub").textContent = "项目：" + baseName(ROOT) + "\n从左侧资源管理器选择文件开始编辑。";
     explorerPanel.innerHTML = "";                 // 防御重复建树：先清空再追加（并发触发时只保留最后一次）

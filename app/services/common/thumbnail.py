@@ -199,9 +199,74 @@ def _get_thumbnail_bytes(file_path, use_cache=True):
     return result
 
 
-def _generate_image_thumb(file_path):
-    """用 Pillow 生成图片缩略图（JPEG，最长边 512px，自动纠正 EXIF 方向）。
+# 预览大图（手机/平板看的"清晰版"）：最长边与 JPEG 质量
+_PREVIEW_MAX_SIDE = 2560
+_PREVIEW_QUALITY = 88
+_PREVIEW_DIRECT_MAX = 3 * 1024 * 1024   # 原图 ≤3MB 时直接返回原图（保留 GIF 动图、不重复编码）
 
+
+def _get_preview_bytes(file_path, max_side=_PREVIEW_MAX_SIDE, use_cache=True):
+    """预览大图：给移动端看的清晰图，但不把几十 MB 的原图直接丢过去。
+
+    - 原图 ≤ _PREVIEW_DIRECT_MAX：原图直出（保留动图，不重复编码）
+    - 大图：Pillow 等比缩放到最长边 max_side、JPEG 高质量输出（通常几 MB → 几百 KB）
+    返回 (data, content_type)；类型不支持或读取失败返回 (None, None)。
+    """
+    ext = os.path.splitext(file_path)[1].lower().lstrip(".")
+    if ext not in _IMAGE_EXTS:
+        return None, None
+
+    mime_type, _ = mimetypes.guess_type(file_path)
+    if not mime_type:
+        mime_type = "application/octet-stream"
+
+    try:
+        size = os.path.getsize(file_path)
+    except OSError:
+        size = 0
+    if size and size <= _PREVIEW_DIRECT_MAX:
+        try:
+            with open(file_path, "rb") as f:
+                return f.read(), mime_type
+        except (OSError, PermissionError):
+            return None, None
+
+    # 缓存键带上尺寸前缀，避免和列表缩略图（同一文件）互相串用
+    cache_key = None
+    if use_cache:
+        base = _make_cache_key(file_path)
+        if base:
+            cache_key = "pv%d_%s" % (int(max_side), base)
+    if cache_key:
+        hit = _mem_get(cache_key)
+        if hit is not None:
+            return hit
+        hit = _disk_get(cache_key)
+        if hit is not None:
+            _mem_put(cache_key, hit)
+            return hit
+
+    data = _generate_image_thumb(file_path, max_side=max_side, quality=_PREVIEW_QUALITY)
+    if data is None:
+        # Pillow 不可用 / 解码失败：回退原图（至少能显示）
+        try:
+            with open(file_path, "rb") as f:
+                return f.read(), mime_type
+        except (OSError, PermissionError):
+            return None, None
+
+    result = (data, "image/jpeg")
+    if cache_key:
+        _mem_put(cache_key, result)
+        _disk_put(cache_key, result[0], result[1])
+    return result
+
+
+def _generate_image_thumb(file_path, max_side=None, quality=82):
+    """用 Pillow 生成图片缩略图 / 预览图（JPEG，自动纠正 EXIF 方向）。
+
+    max_side 为最长边（默认取 _THUMB_IMAGE_SIZE 做列表缩略图；
+    预览大图时传更大的值，如 2560）；quality 为 JPEG 质量。
     成功返回 JPEG 字节；Pillow 未安装或解码失败返回 None（由调用方回退原图）。
     """
     try:
@@ -213,9 +278,12 @@ def _generate_image_thumb(file_path):
             im = ImageOps.exif_transpose(im)   # 按 EXIF 摆正方向
             if im.mode not in ("RGB", "L"):
                 im = im.convert("RGB")         # CMYK / P / RGBA → RGB
-            im.thumbnail(_THUMB_IMAGE_SIZE, Image.LANCZOS)
+            side = max_side or _THUMB_IMAGE_SIZE
+            if isinstance(side, int):
+                side = (side, side)
+            im.thumbnail(side, Image.LANCZOS)
             buf = io.BytesIO()
-            im.save(buf, "JPEG", quality=82)
+            im.save(buf, "JPEG", quality=quality)
             return buf.getvalue()
     except Exception:
         # 损坏文件 / 不支持的格式 / 超大图内存不足等，一律回退

@@ -49,6 +49,10 @@ def login():
         ok_pass = hmac.compare_digest(password, config.AUTH_PASSWORD)
         if ok_user and ok_pass:
             session.clear()
+            # 持久化会话 cookie（默认 31 天）：否则是浏览器会话级 cookie，
+            # 关掉浏览器/过一段时间就失效——手机上尤其明显，
+            # 表现为页面还在（缓存），但新接口请求全部 401。
+            session.permanent = True
             session["logged_in"] = True
             session["username"] = config.AUTH_USERNAME
             _log.info("登录成功: %s", username)

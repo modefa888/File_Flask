@@ -101,28 +101,25 @@
       b.classList.toggle("on", b.getAttribute("data-type") === "all");
     });
     mdUpdateFilterBadge();
-    mdLoad(false);
+    mdLoad(1);
   }
 
   function closeMediaPage() {
+    mdCloseSearch();        // 顺手收起搜索浮层，避免下次打开还挂着
     document.getElementById("mediaPage").classList.remove("show");
     document.body.classList.remove("lock");
     _md.token++;            // 让在途请求失效，避免关闭后仍渲染
     _md.loading = false;
   }
 
-  function mdLoad(more) {
+  // 翻页加载：一次只取一页并整体替换（不再滚动懒加载）
+  function mdLoad(page) {
     if (_md.loading) return;
-    if (more && (!_md.pages || _md.page >= _md.pages)) return;
+    page = Math.max(1, parseInt(page, 10) || 1);
     var body = document.getElementById("mdBody");
     _md.loading = true;
-    var page = more ? _md.page + 1 : 1;
-    if (!more) {
-      _md.items = [];
-      _md.page = 0;
-      body.innerHTML = '<div class="md-empty">加载中…</div>';
-      mdStat("");
-    }
+    _md.items = [];
+    body.innerHTML = '<div class="md-empty">加载中…</div>';
     var tk = ++_md.token;
     mdApplyFilter();
     var params = "type=" + encodeURIComponent(_md.type) +
@@ -145,28 +142,24 @@
         _md.page = d.page || page;
         _md.total = d.total || 0;
         _md.pages = d.total_pages || 0;
-        _md.items = _md.items.concat(d.items || []);
+        _md.items = d.items || [];
         mdRender();
+        body.scrollTop = 0;                 // 翻页后回到顶部
       })
       .catch(function () {
         if (tk !== _md.token) return;
         _md.loading = false;
-        if (!_md.items.length) {
-          body.innerHTML = '<div class="md-empty">加载失败，请下拉重试</div>';
-          mdStat("");
-        } else {
-          toast("加载失败，请重试", "error");
-        }
+        body.innerHTML = '<div class="md-empty">加载失败，请重试</div>';
+        mdStat("");
       });
   }
 
   function mdRender() {
     var body = document.getElementById("mdBody");
     var items = _md.items;
-    var keepTop = body.scrollTop;      // 追加加载时保持滚动位置
-    mdStat("共 " + (_md.total || 0).toLocaleString() + " 个媒体 · 已显示 " + items.length);
+    mdStat((_md.total || 0).toLocaleString() + " 个");
     if (!items.length) {
-      body.innerHTML = '<div class="md-empty">🖼️<br>没有找到媒体文件<br>（换个分类或清空关键字再试）</div>';
+      body.innerHTML = '<div class="md-empty"><span class="md-empty-ico">🖼️</span><br>没有找到媒体文件<br>（换个分类或清空关键字再试）</div>';
       return;
     }
     var h = '<div class="md-grid">' + items.map(function (it, i) {
@@ -184,19 +177,24 @@
         '</div>' +
       '</div>';
     }).join("") + '</div>';
-    if (_md.pages && _md.page < _md.pages) {
-      h += '<div class="md-foot"><button id="mdMoreBtn">加载更多（' + items.length + '/' + _md.total + '）</button></div>';
-    } else {
-      h += '<div class="md-foot"><span>— 已全部加载 —</span></div>';
-    }
+    // 分页条
+    var pages = Math.max(1, _md.pages || 1);
+    h += '<div class="md-pager">' +
+      '<button class="md-pg-btn" data-pg="prev"' + (_md.page <= 1 ? " disabled" : "") + '>‹ 上一页</button>' +
+      '<span class="md-pg-info">第 ' + _md.page + ' / ' + pages + ' 页</span>' +
+      '<button class="md-pg-btn" data-pg="next"' + (_md.page >= pages ? " disabled" : "") + '>下一页 ›</button>' +
+    '</div>';
     body.innerHTML = h;
-    body.scrollTop = keepTop;
-    var more = document.getElementById("mdMoreBtn");
-    if (more) more.addEventListener("click", function () { mdLoad(true); });
   }
 
-  // 点卡片：预览（图片 / 视频 / 音频按类型自动分流）；点 ⋯：完整操作菜单（分享、下载、删除…）
+  // 点分页按钮：翻页；点卡片：预览；点 ⋯：完整操作菜单（分享、下载、删除…）
   document.getElementById("mdBody").addEventListener("click", function (e) {
+    var pg = e.target.closest && e.target.closest("[data-pg]");
+    if (pg) {
+      if (pg.disabled) return;
+      mdLoad(pg.getAttribute("data-pg") === "next" ? _md.page + 1 : _md.page - 1);
+      return;
+    }
     var card = e.target.closest && e.target.closest(".md-card");
     if (!card) return;
     var it = _md.items[parseInt(card.getAttribute("data-i"), 10)];
@@ -207,17 +205,10 @@
     openPreview(item, ctx);
   });
 
-  // 滚动接近底部自动加载下一页
-  document.getElementById("mdBody").addEventListener("scroll", function () {
-    if (_md.loading || !_md.pages || _md.page >= _md.pages) return;
-    var el = this;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 260) mdLoad(true);
-  }, { passive: true });
-
   function mdSearch() {
     var kw = document.getElementById("mdKeyword");
     _md.keyword = kw ? kw.value.trim() : "";
-    mdLoad(false);
+    mdLoad(1);
   }
 
   Array.prototype.forEach.call(document.querySelectorAll("#mdTabs .md-tab"), function (b) {
@@ -228,13 +219,45 @@
       });
       _md.type = b.getAttribute("data-type");
       mdUpdateFilterBadge();
-      mdLoad(false);
+      mdLoad(1);
     });
   });
 
-  document.getElementById("mdGo").addEventListener("click", mdSearch);
+  // 搜索浮层：点顶栏 🔍 从底部弹出，输入后回车或点「搜索」执行
+  function mdOpenSearch() {
+    var pop = document.getElementById("mdSearchPop");
+    var mask = document.getElementById("mdSearchMask");
+    if (!pop) return;
+    pop.classList.add("show");
+    if (mask) mask.classList.add("show");
+    var kw = document.getElementById("mdKeyword");
+    if (kw) {
+      kw.value = _md.keyword || "";
+      setTimeout(function () { try { kw.focus(); } catch (e) {} }, 60);
+    }
+  }
+  function mdCloseSearch() {
+    var pop = document.getElementById("mdSearchPop");
+    var mask = document.getElementById("mdSearchMask");
+    if (pop) pop.classList.remove("show");
+    if (mask) mask.classList.remove("show");
+  }
+  document.getElementById("mdSearchBtn").addEventListener("click", mdOpenSearch);
+  document.getElementById("mdSearchMask").addEventListener("click", mdCloseSearch);
+  document.getElementById("mdGo").addEventListener("click", function () {
+    mdSearch();
+    mdCloseSearch();
+  });
   document.getElementById("mdKeyword").addEventListener("keydown", function (e) {
-    if (e.key === "Enter") { e.preventDefault(); mdSearch(); }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      mdSearch();
+      mdCloseSearch();
+      this.blur();
+    } else if (e.key === "Escape") {
+      mdCloseSearch();
+      this.blur();
+    }
   });
   // ===== 大小筛选设置面板（按分类分别设置，留空表示不限） =====
   function showMdFilterSettings() {
@@ -295,7 +318,7 @@
       if (swapped.length) toast(swapped.join("、") + " 的最小值大于最大值，已自动对调", "info");
       shareSheetClose();
       mdUpdateFilterBadge();
-      mdLoad(false);
+      mdLoad(1);
     });
 
     shareSheetOpen("设置大小筛选");

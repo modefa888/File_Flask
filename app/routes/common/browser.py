@@ -22,8 +22,8 @@ from ...services.common.filecore import (
     _DIR_SIZE_CACHE, _ensure_dir_size_async,
 )
 from ...services.common.thumbnail import (
-    _get_thumbnail_bytes, _extract_video_frame, _clear_disk_cache as _clear_thumb_cache,
-    get_video_duration,
+    _get_thumbnail_bytes, _get_preview_bytes, _extract_video_frame,
+    _clear_disk_cache as _clear_thumb_cache, get_video_duration,
 )
 
 
@@ -791,22 +791,75 @@ def api_raw():
     """原图直出（图片预览缩放用）：send_file 条件请求支持 Range / 304"""
     target_path = _get_file_path_from_request(request)
     if target_path is None:
+        _log.warning("GET /api/raw -> 404 (path=%s)", request.args.get("path", "")[:200])
         return jsonify({"error": "文件不存在"}), 404
 
     ext = os.path.splitext(target_path)[1].lower().lstrip(".")
     # 除图片外允许 lrc 歌词文本（音乐播放器加载同名歌词用）
     if ext not in _IMAGE_EXTS and ext != "lrc":
+        _log.warning("GET /api/raw -> 400 不支持的扩展名: %s (%s)", ext, target_path)
         return jsonify({"error": "该文件类型不支持"}), 400
 
     try:
         mime_type, _ = mimetypes.guess_type(target_path)
         if not mime_type:
             mime_type = (f"image/{ext}" if ext in _IMAGE_EXTS else "text/plain; charset=utf-8")
-        resp = send_file(target_path, mimetype=mime_type, conditional=True)
+        # 原图直出必须禁用缓存/304，避免浏览器复用旧的降采样图
+        resp = send_file(target_path, mimetype=mime_type, conditional=False)
         resp.headers["Accept-Ranges"] = "bytes"
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
         return resp
     except (OSError, PermissionError) as e:
+        _log.error("GET /api/raw -> 无法读取文件 %s: %s", target_path, e)
         return jsonify({"error": f"无法读取文件: {str(e)}"}), 500
+
+
+@bp.route("/api/image")
+def api_image():
+    """图片预览大图：按最长边等比缩放的清晰版（默认 2560px、JPEG 质量 88）。
+
+    动辄几十 MB 的原图（长截图 / 大 GIF）直接给移动端会长时间转圈甚至加载失败，
+    这里由服务端降采样后再下发，结果走缩略图同款缓存（带尺寸前缀）。
+    原图小于 3MB 时直接原图直出，保留动图效果。
+    """
+    target_path = _get_file_path_from_request(request)
+    if target_path is None:
+        _log.info("GET /api/image -> 404 (文件不存在)")
+        return jsonify({"error": "文件不存在"}), 404
+    try:
+        max_side = int(request.args.get("max", 2560))
+    except (ValueError, TypeError):
+        max_side = 2560
+    max_side = max(320, min(4096, max_side))
+
+    # 协商缓存：源文件未修改时直接 304，避免重复解码/传输大图
+    etag = _make_thumb_etag(target_path)
+    if etag and request.headers.get("If-None-Match") == etag:
+        resp = FlaskResponse(status=304)
+        resp.headers["ETag"] = etag
+        resp.headers["Cache-Control"] = "private, max-age=604800"
+        return resp
+
+    data, content_type = _get_preview_bytes(target_path, max_side=max_side)
+    if data is None:
+        # 降级：若 Pillow 处理失败或文件无法读取，直接返回原图
+        try:
+            mime_type, _ = mimetypes.guess_type(target_path)
+            if not mime_type:
+                mime_type = "application/octet-stream"
+            with open(target_path, "rb") as f:
+                data = f.read()
+            content_type = mime_type
+        except (OSError, PermissionError) as e:
+            _log.warning("GET /api/image -> 无法读取文件: %s", e)
+            return jsonify({"error": "该文件类型不支持预览"}), 400
+    resp = FlaskResponse(data, status=200, content_type=content_type)
+    resp.headers["Cache-Control"] = "private, max-age=604800"
+    if etag:
+        resp.headers["ETag"] = etag
+    return resp
 
 
 @bp.route("/api/stream")

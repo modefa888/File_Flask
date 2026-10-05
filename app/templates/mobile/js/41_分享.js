@@ -2,7 +2,10 @@
   var _shareTarget = null;     // 待分享的文件 { name, abs, sizeStr, thumbHtml }
   var _shareRec = null;        // 当前分享记录
   var _shareExisting = null;   // 该文件已有的分享（存在则走 update，避免覆盖原密码）
-  var _shItems = [];           // 分享记录列表
+  var _shItems = [];           // 当前 tab 的分享记录列表
+  var _shTab = "active";       // active（有效）| history（历史）
+  var _shActive = [];          // 有效分享
+  var _shHistory = [];         // 已取消 / 已过期 / 次数用完
 
   var SH_EXPIRES = [
     ["1h", "1 小时"], ["1d", "1 天"], ["7d", "7 天"], ["30d", "30 天"], ["forever", "永久有效"]
@@ -11,7 +14,7 @@
   function shareStateText(st) {
     if (st === "expired") return "已过期";
     if (st === "exhausted") return "次数已用完";
-    if (st === "revoked") return "已删除";
+    if (st === "revoked") return "已取消";
     return "有效";
   }
   function shareStateCls(st) {
@@ -228,8 +231,14 @@
       '<input class="ss-input" id="ssMaxViews" type="number" min="0" step="1" inputmode="numeric" value="' +
         (rec.max_views || 0) + '" />' +
       '<button class="ss-primary" id="ssSaveSet">保存设置</button>' +
-      '<div class="ss-hint">链接不变，改完立即生效；把有效期改到未来可以让已过期的分享重新可用。</div>';
+      '<div class="ss-hint">链接不变，改完立即生效；把有效期改到未来可以让已过期的分享重新可用。</div>' +
+      '<div class="ss-btns" style="margin-top:14px">' +
+        '<button class="ss-btn danger wide" id="ssCancelShareSet">🗑️ 取消分享（链接立即失效）</button>' +
+      '</div>';
     document.getElementById("ssSaveSet").addEventListener("click", doShareUpdate);
+    document.getElementById("ssCancelShareSet").addEventListener("click", function () {
+      cancelShare(_shareRec, function () { shareSheetClose(); });
+    });
     shareSheetOpen("分享设置");
   }
 
@@ -301,22 +310,22 @@
     shareSheetOpen("分享二维码");
   }
 
-  // 取消分享（删除记录，链接立即失效）
+  // 取消分享：软取消（链接立即失效），记录保留在「历史」里，可恢复或彻底删除
   function cancelShare(rec, after) {
     if (!rec || !rec.id) return;
     confirmBox({
       title: "取消分享",
-      message: "取消后「" + (rec.name || "") + "」的链接立即失效，确定继续？",
+      message: "取消后「" + (rec.name || "") + "」的链接立即失效，记录会保留在「历史」中（可恢复）。确定继续？",
       okText: "取消分享", danger: true,
       onOk: function () {
         fetchTimeout("/api/share", 10000, {
           method: "DELETE", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: rec.id })
+          body: JSON.stringify({ id: rec.id, soft: true })
         })
           .then(function (r) { return r.json(); })
           .then(function (d) {
             if (d.error) { toast(d.error, "error"); return; }
-            toast("已取消分享", "success");
+            toast("已取消分享，可在「历史」里恢复", "success");
             if (typeof after === "function") after();
             if (document.getElementById("sharePage").classList.contains("show")) loadShares();
           })
@@ -325,7 +334,46 @@
     });
   }
 
-  // ===== 分享记录页 =====
+  // 从历史里恢复一条被取消的分享（revoked → 有效，链接重新可用）
+  function restoreShare(rec) {
+    if (!rec || !rec.id) return;
+    fetchTimeout("/api/share/update", 10000, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: rec.id, revoked: false })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.error) { toast(d.error, "error"); return; }
+        toast("已恢复分享，链接重新可用", "success");
+        loadShares();
+      })
+      .catch(function () { toast("恢复失败，请重试", "error"); });
+  }
+
+  // 从历史里彻底删除记录（写操作的终点，不可恢复）
+  function purgeShare(rec) {
+    if (!rec || !rec.id) return;
+    confirmBox({
+      title: "彻底删除",
+      message: "将从历史中永久删除「" + (rec.name || "") + "」这条记录，不可恢复。确定继续？",
+      okText: "彻底删除", danger: true,
+      onOk: function () {
+        fetchTimeout("/api/share", 10000, {
+          method: "DELETE", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: rec.id })
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.error) { toast(d.error, "error"); return; }
+            toast("已彻底删除", "success");
+            loadShares();
+          })
+          .catch(function () { toast("删除失败，请重试", "error"); });
+      }
+    });
+  }
+
+  // ===== 分享记录页（有效 / 历史） =====
   function openSharePage() {
     document.getElementById("sharePage").classList.add("show");
     document.body.classList.add("lock");
@@ -340,52 +388,87 @@
     var box = document.getElementById("shList");
     var stat = document.getElementById("shStat");
     box.innerHTML = '<div class="tr-empty">加载中…</div>';
-    fetchTimeout("/api/shares", 10000)
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (d.error) {
-          box.innerHTML = '<div class="tr-empty">' + esc(d.error) + '</div>';
-          stat.textContent = "";
-          return;
-        }
-        var items = d.items || [];
-        _shItems = items;
-        var okCnt = items.filter(function (x) { return x.state === "ok"; }).length;
-        stat.textContent = items.length ? "共 " + items.length + " 个分享 · 有效 " + okCnt : "";
-        if (!items.length) {
-          box.innerHTML = '<div class="tr-empty">🔗<br>还没有创建过分享<br>在任意文件上点「⋯」→「分享」即可生成链接</div>';
-          return;
-        }
-        box.innerHTML = items.map(function (it, i) {
-          return '<div class="shr-item" data-i="' + i + '">' +
-            '<div class="shr-top">' +
-              '<span class="shr-ico">' + iconHtmlFor({ name: it.name }) + '</span>' +
-              '<div class="shr-main">' +
-                '<div class="shr-name">' + esc(it.name || "(未知)") + '</div>' +
-                '<div class="shr-link">' + esc(it.full_url || "") + '</div>' +
-              '</div>' +
-            '</div>' +
-            '<div class="shr-meta">' +
-              '<span class="shr-badge ' + shareStateCls(it.state) + '">' + shareStateText(it.state) + '</span>' +
-              '<span>👁 ' + (it.views || 0) + (it.max_views ? "/" + it.max_views : "") + '</span>' +
-              '<span>⏱ ' + esc(it.expires_str || "") + '</span>' +
-              (it.has_password ? '<span>🔒 已加密</span>' : '') +
-              (it.size_str ? '<span>' + esc(it.size_str) + '</span>' : '') +
-            '</div>' +
-            '<div class="shr-acts">' +
-              '<button data-act="copy">📋 复制</button>' +
-              '<button data-act="qr">🔳 二维码</button>' +
-              '<button data-act="settings">⚙️ 设置</button>' +
-              '<button data-act="open">🌐 打开</button>' +
-              '<button class="danger" data-act="del">🗑 取消</button>' +
-            '</div>' +
-          '</div>';
-        }).join("");
+    // 一次把「有效」和「含已取消」两份都取回来，tab 上就能显示各自的数量
+    Promise.all([
+      fetchTimeout("/api/shares", 10000).then(function (r) { return r.json(); }),
+      fetchTimeout("/api/shares?include_revoked=1", 10000).then(function (r) { return r.json(); })
+    ])
+      .then(function (arr) {
+        var all = (arr[1] && arr[1].items) || [];
+        var live = (arr[0] && arr[0].items) || all;
+        _shActive = live.filter(function (x) { return x.state === "ok"; });
+        _shHistory = all.filter(function (x) { return x.state !== "ok"; });
+        renderShareTabs();
+        renderShareList();
       })
       .catch(function () {
         box.innerHTML = '<div class="tr-empty">加载失败，请重试</div>';
         stat.textContent = "";
       });
+  }
+
+  function renderShareTabs() {
+    var tabs = document.getElementById("shTabs");
+    if (!tabs) return;
+    tabs.innerHTML =
+      '<button class="sh-tab' + (_shTab === "active" ? " on" : "") + '" data-tab="active">有效<b>' + _shActive.length + '</b></button>' +
+      '<button class="sh-tab' + (_shTab === "history" ? " on" : "") + '" data-tab="history">历史<b>' + _shHistory.length + '</b></button>';
+    Array.prototype.forEach.call(tabs.querySelectorAll(".sh-tab"), function (b) {
+      b.addEventListener("click", function () {
+        var t = b.getAttribute("data-tab");
+        if (_shTab === t) return;
+        _shTab = t;
+        renderShareTabs();
+        renderShareList();
+      });
+    });
+  }
+
+  function shareRowHtml(it, i) {
+    var history = it.state !== "ok";
+    var acts = '<button data-act="copy">📋 复制</button>' +
+      '<button data-act="qr">🔳 二维码</button>' +
+      (history
+        ? '<button data-act="restore">♻️ 恢复</button>' +
+          '<button class="danger" data-act="purge">🗑 删除</button>'
+        : '<button data-act="settings">⚙️ 设置</button>' +
+          '<button data-act="open">🌐 打开</button>' +
+          '<button class="danger" data-act="del">🗑 取消</button>');
+    return '<div class="shr-item" data-i="' + i + '">' +
+      '<div class="shr-top">' +
+        '<span class="shr-ico">' + iconHtmlFor({ name: it.name }) + '</span>' +
+        '<div class="shr-main">' +
+          '<div class="shr-name">' + esc(it.name || "(未知)") + '</div>' +
+          '<div class="shr-link">' + esc(it.full_url || "") + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="shr-meta">' +
+        '<span class="shr-badge ' + shareStateCls(it.state) + '">' + shareStateText(it.state) + '</span>' +
+        '<span>👁 ' + (it.views || 0) + (it.max_views ? "/" + it.max_views : "") + '</span>' +
+        '<span>⏱ ' + esc(it.expires_str || "") + '</span>' +
+        (it.has_password ? '<span>🔒 已加密</span>' : '') +
+        (it.size_str ? '<span>' + esc(it.size_str) + '</span>' : '') +
+      '</div>' +
+      '<div class="shr-acts">' + acts + '</div>' +
+    '</div>';
+  }
+
+  function renderShareList() {
+    var box = document.getElementById("shList");
+    var stat = document.getElementById("shStat");
+    var items = (_shTab === "active") ? _shActive : _shHistory;
+    _shItems = items;                 // 供点击分发按行号取用
+    var total = _shActive.length + _shHistory.length;
+    stat.textContent = total
+      ? "共 " + total + " 个分享 · 有效 " + _shActive.length + " · 历史 " + _shHistory.length
+      : "";
+    if (!items.length) {
+      box.innerHTML = (_shTab === "active")
+        ? '<div class="tr-empty">🔗<br>还没有可用的分享<br>在任意文件上点「⋯」→「分享」即可生成链接</div>'
+        : '<div class="tr-empty">🗂<br>暂无历史记录<br>已取消 / 已过期 / 次数用完的分享会留在这里，可恢复或彻底删除</div>';
+      return;
+    }
+    box.innerHTML = items.map(shareRowHtml).join("");
   }
 
   document.getElementById("shList").addEventListener("click", function (e) {
@@ -400,6 +483,8 @@
     else if (act === "open") { if (it.full_url) window.open(it.full_url, "_blank"); }
     else if (act === "qr") showShareQr(it);
     else if (act === "settings") openShareSettings(it);
+    else if (act === "restore") restoreShare(it);
+    else if (act === "purge") purgeShare(it);
     else if (act === "del") cancelShare(it, null);
   });
 

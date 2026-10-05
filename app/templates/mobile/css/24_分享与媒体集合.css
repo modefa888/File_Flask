@@ -91,6 +91,18 @@
   #sharePage { z-index: 105; }
   /* 标题占满剩余宽度，让刷新按钮贴到最右边 */
   #shTitle { flex: 1; min-width: 0; font-size: 16px; font-weight: 600; }
+  /* 有效 / 历史 切换（放在顶栏刷新按钮左边，蓝色底上用半透明白）。
+     用 .sh-tabs .sh-tab 提高特异性并显式覆盖宽高，避免被 .sp-head button 的 38×38 方块样式命中。 */
+  .sh-tabs { display: flex; gap: 6px; flex: 0 0 auto; }
+  .sh-tabs .sh-tab {
+    width: auto; height: auto;
+    border: none; background: rgba(255,255,255,.18); color: #fff;
+    border-radius: 12px; padding: 5px 10px; font-size: 12px; font-weight: 400;
+    cursor: pointer; white-space: nowrap; line-height: 1.5;
+  }
+  .sh-tabs .sh-tab:active { background: rgba(255,255,255,.34); }
+  .sh-tabs .sh-tab b { margin-left: 3px; font-weight: 700; }
+  .sh-tabs .sh-tab.on { background: #fff; color: var(--primary); font-weight: 600; }
   #shList { padding: 8px 10px calc(18px + var(--safe-bottom)); }
   .shr-item {
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
@@ -109,7 +121,8 @@
   .shr-badge.ok { background: #ecfdf5; color: #15803d; }
   .shr-badge.expired { background: #fffbeb; color: #b45309; }
   .shr-badge.bad { background: #fef2f2; color: #b91c1c; }
-  .shr-acts { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 9px; }
+  /* 自适应列数：有效项 5 个按钮、历史项 4 个，都均匀铺满 */
+  .shr-acts { display: grid; grid-template-columns: repeat(auto-fit, minmax(58px, 1fr)); gap: 6px; margin-top: 9px; }
   .shr-acts button {
     min-width: 0; border: 1px solid var(--border); background: #fff;
     border-radius: 9px; padding: 8px 2px; font-size: 12px; color: var(--text); cursor: pointer;
@@ -121,22 +134,32 @@
   /* ===== 媒体集合页 ===== */
   /* 标题占满剩余宽度，让关闭按钮贴到最右边 */
   #mdTitle { flex: 1; min-width: 0; font-size: 16px; font-weight: 600; }
-  .md-tools { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--card); }
-  .md-tools input {
-    flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 16px;
-    padding: 8px 13px; font-size: 14px; outline: none; background: #fff; color: var(--text);
+  /* 顶栏里的 🔍 / ⚙️ 与 ✕ 同款方块（复用 .sp-head button）；当前分类设了筛选时 ⚙️ 点亮 */
+  #mdFilterBtn.on { background: #fff; color: var(--primary); }
+
+  /* 搜索浮层：点顶栏 🔍 从底部弹出输入条 */
+  .md-search-mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 100; display: none;
   }
-  .md-tools input:focus { border-color: rgba(31,111,235,.55); }
-  .md-tools button {
-    flex: none; border: 1px solid var(--border); background: #fff; color: var(--text);
-    border-radius: 16px; padding: 8px 13px; font-size: 13px; cursor: pointer;
+  .md-search-mask.show { display: block; }
+  .md-search-pop {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 101;
+    display: none; align-items: center; gap: 8px;
+    padding: 12px 12px calc(12px + var(--safe-bottom));
+    background: var(--card); border-radius: 16px 16px 0 0;
+    box-shadow: 0 -6px 24px rgba(0,0,0,.15);
   }
-  .md-tools button:active { background: #f1f5f9; }
-  /* 当前分类设了大小过滤时点亮 */
-  .md-tools button.on {
-    background: rgba(31,111,235,.12); border-color: rgba(31,111,235,.45);
-    color: var(--primary); font-weight: 600;
+  .md-search-pop.show { display: flex; }
+  .md-search-pop input {
+    flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 12px;
+    padding: 11px 13px; font-size: 16px; outline: none; background: #fff; color: var(--text);
   }
+  .md-search-pop input:focus { border-color: rgba(31,111,235,.55); }
+  .md-search-pop button {
+    flex: none; border: none; border-radius: 12px; background: var(--primary); color: #fff;
+    padding: 12px 18px; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .md-search-pop button:active { opacity: .85; }
 
   /* 大小过滤设置面板 */
   .msf-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
@@ -154,17 +177,35 @@
     outline: none; -webkit-appearance: none; appearance: none; text-align: center;
   }
   .msf-body { margin-top: 12px; }
+  /* 工具区：tabs 与统计合并成一块白底、底部一条细线收尾
+     （原来两块各自带背景与描边，被切成好几段，看着碎） */
+  /* 工具行：tabs 在左、数量在右，同一条白底，底部一条细线收尾 */
+  .md-toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; background: var(--card);
+    border-bottom: 1px solid var(--border);
+  }
   .md-tabs {
-    display: flex; gap: 8px; padding: 0 10px 9px; background: var(--card);
-    border-bottom: 1px solid var(--border); overflow-x: auto; -webkit-overflow-scrolling: touch;
+    display: flex; gap: 6px; flex: 1 1 auto; min-width: 0;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
   }
   .md-tabs::-webkit-scrollbar { display: none; }
   .md-tab {
-    flex: none; border: 1px solid var(--border); background: #fff; color: var(--sub);
-    border-radius: 14px; padding: 5px 13px; font-size: 12px; cursor: pointer; white-space: nowrap;
+    flex: none; border: none; background: #eef1f6; color: #475569;
+    border-radius: 999px; padding: 4px 11px; font-size: 12px; font-weight: 500;
+    line-height: 1.6; cursor: pointer; white-space: nowrap;
+    transition: background .15s ease, color .15s ease, box-shadow .15s ease;
   }
-  .md-tab.on { background: rgba(31,111,235,.12); border-color: rgba(31,111,235,.4); color: var(--primary); font-weight: 600; }
-  .md-stat { padding: 8px 12px 0; font-size: 11px; color: var(--sub); }
+  .md-tab:active { background: #e2e8f0; }
+  /* 选中态用浅蓝底 + 内描边，不用实底：emoji 图标自带颜色，压在蓝底上会看不清 */
+  .md-tab.on {
+    background: rgba(31,111,235,.13); color: var(--primary); font-weight: 600;
+    box-shadow: inset 0 0 0 1px rgba(31,111,235,.38);
+  }
+  .md-stat {
+    flex: none; font-size: 11.5px; color: var(--sub);
+    white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
   .md-body { padding: 8px 8px calc(18px + var(--safe-bottom)); }
   .md-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .md-card {
@@ -191,10 +232,26 @@
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
   .md-sub { margin-top: 3px; font-size: 10px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .md-empty { text-align: center; color: var(--sub); font-size: 13px; line-height: 1.9; padding: 56px 0; }
-  .md-foot { text-align: center; padding: 14px 0 6px; }
-  .md-foot button {
-    border: 1px solid var(--border); background: #fff; color: var(--text);
-    border-radius: 16px; padding: 9px 20px; font-size: 13px; cursor: pointer;
+  .md-empty {
+    text-align: center; color: var(--sub); font-size: 13px; line-height: 1.9;
+    padding: 52px 20px;
   }
-  .md-foot span { font-size: 12px; color: var(--sub); }
+  .md-empty-ico {
+    display: inline-block; font-size: 32px; line-height: 1;
+    margin-bottom: 10px; opacity: .5;
+  }
+  /* 底部分页条 */
+  .md-pager {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    padding: 16px 0 6px;
+  }
+  .md-pg-btn {
+    border: 1px solid var(--border); background: #fff; color: var(--text);
+    border-radius: 999px; padding: 8px 16px; font-size: 13px; cursor: pointer;
+  }
+  .md-pg-btn:active:not(:disabled) { background: #f1f5f9; }
+  .md-pg-btn:disabled { opacity: .45; }
+  .md-pg-info {
+    font-size: 12.5px; color: var(--sub);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }

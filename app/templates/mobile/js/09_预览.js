@@ -1,5 +1,31 @@
   // ---------- 预览 ----------
+  // 缩略图懒加载：底部横向列表可能有上百张，逐个创建 <img> 并设 src 会一次性并发
+  // 几十上百个请求（横向滚动容器里 loading="lazy" 基本不生效）。
+  // 这里改为先只记 URL，元素进入可视区附近才真正加载。
+  var _pvThumbObserver = null;
+  function observePvThumb(el) {
+    var url = el.dataset && el.dataset.src;
+    if (!url) return;
+    if (typeof IntersectionObserver === "undefined") {   // 老浏览器：直接加载
+      el.src = url;
+      return;
+    }
+    if (!_pvThumbObserver) {
+      _pvThumbObserver = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (!en.isIntersecting) return;
+          var img = en.target;
+          if (!img.getAttribute("src") && img.dataset.src) img.src = img.dataset.src;
+          _pvThumbObserver.unobserve(img);
+        });
+      }, { rootMargin: "160px 0px" });                   // 左右各预载 160px
+    }
+    _pvThumbObserver.observe(el);
+  }
+
   function openPreview(item, contextItems) {
+    // 上一次预览留下的缩略图观察器先清掉（底部列表马上会重建）
+    if (_pvThumbObserver) { _pvThumbObserver.disconnect(); _pvThumbObserver = null; }
     var ext = extOf(item.name);
     var abs = itemAbs(item);
     // 音频走独立播放器，不占用预览遮罩（避免遮罩停留在“加载中…”）
@@ -276,18 +302,56 @@
       return true;
     }
 
-    // ===== 图片加载：先缩略图快速显示，原图（/api/raw）就绪后无缝替换 =====
+    // ===== 图片加载：img 只加载 /api/image 的清晰预览图（服务端按最长边 2560px 降采样） =====
+    // 缩略图（/api/thumbnail，最长边 512px）只作为加载期间的背景占位。
+    // 原来是把缩略图直接设进 img、等原图就绪再替换，一旦原图加载慢或解码失败，
+    // 预览里就一直停在压缩封面上，看着像"最终结果"。
     function setImg(path, name) {
       var tk = ++imgToken;
       curPath = path;
-      resetZoom();
-      img.src = "/api/thumbnail?path=" + encodeURIComponent(path);
-      var hi = new Image();
-      hi.onload = function () { if (tk === imgToken) img.src = hi.src; };
-      hi.onerror = function () { /* 原图失败则保留缩略图 */ };
-      hi.src = "/api/raw?path=" + encodeURIComponent(path);
       title.textContent = name;
       markCur(path);
+      area.style.backgroundImage = 'url("/api/thumbnail?path=' + encodeURIComponent(path) + '")';
+      area.style.backgroundSize = "contain";
+      area.style.backgroundPosition = "center";
+      area.style.backgroundRepeat = "no-repeat";
+      img.style.transition = "opacity .2s ease";
+      img.style.opacity = "0";             // 原图就绪前先露出背景缩略图
+      img.onload = function () {
+        if (tk !== imgToken) return;
+        img.style.opacity = "1";           // 原图到位 → 淡入覆盖占位
+        resetZoom();                       // 尺寸就绪后重算缩放边界
+      };
+      img.onerror = function () {
+        if (tk !== imgToken) return;
+        // 用 HEAD 探出具体原因：401=会话过期（会表现为"只有缩略图、很模糊"）
+        fetch(img.src, { method: "HEAD", credentials: "same-origin" }).then(function (r) {
+          if (tk !== imgToken) return;
+          if (r.status === 401) {
+            toast("登录已过期，请重新登录后再预览", "error");
+            return;
+          }
+          // 非 401：尝试回退原图直出（/api/raw），避免只能看模糊缩略图
+          var rawTk = tk;
+          img.onerror = function () {
+            if (rawTk !== imgToken) return;
+            toast("图片加载失败（当前显示的是缩略图）", "error");
+          };
+          img.src = "/api/raw?path=" + encodeURIComponent(path) + "&_=" + Date.now();
+        }).catch(function () {
+          if (tk !== imgToken) return;
+          // 网络异常时也回退原图
+          var rawTk = tk;
+          img.onerror = function () {
+            if (rawTk !== imgToken) return;
+            toast("图片加载失败（当前显示的是缩略图）", "error");
+          };
+          img.src = "/api/raw?path=" + encodeURIComponent(path) + "&_=" + Date.now();
+        });
+      };
+      resetZoom();
+      // 清晰预览图：服务端按最长边 2560px 降采样（原图几十 MB 时也能秒开、不糊）
+      img.src = "/api/image?path=" + encodeURIComponent(path);
     }
 
     function renderImgs(items) {
@@ -302,19 +366,25 @@
         return;
       }
       listEl.innerHTML = "";
+      if (_pvThumbObserver) {          // 列表重建：先丢弃旧观察目标，避免残留
+        _pvThumbObserver.disconnect();
+        _pvThumbObserver = null;
+      }
       imgList.forEach(function (it) {
         var row = document.createElement("div");
         row.className = "pv-vitem img" + (it.path === curPath ? " cur" : "");
         row.setAttribute("data-path", it.path);
         var t = document.createElement("img");
         t.loading = "lazy";
-        t.src = "/api/thumbnail?path=" + encodeURIComponent(it.path);
+        t.alt = "";
+        t.dataset.src = "/api/thumbnail?path=" + encodeURIComponent(it.path);   // 进入可视区才加载
         t.onerror = function () { t.style.display = "none"; row.classList.add("noimg"); };
         var nm = document.createElement("span");
         nm.className = "pv-vname"; nm.textContent = it.name; nm.title = it.name;
         row.appendChild(t); row.appendChild(nm);
         row.addEventListener("click", function () { setImg(it.path, it.name); });
         listEl.appendChild(row);
+        observePvThumb(t);
       });
       markCur(curPath);
     }

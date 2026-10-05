@@ -205,7 +205,7 @@ _DOTFILE_TEXT_STEMS = {
     "gitignore", "gitattributes", "gitmodules", "gitconfig", "dockerignore", "editorconfig",
     "prettierrc", "eslintrc", "babelrc", "stylelintrc", "flake8", "pypirc", "htaccess", "python-version",
 }
-_IMAGE_EXTS = {"png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"}
+_IMAGE_EXTS = {"png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "tiff", "tif", "avif", "heic"}
 _VIDEO_EXTS = {"mp4", "webm", "mkv", "avi", "mov", "m4v", "ogg", "flv"}
 _AUDIO_EXTS = {"mp3", "wav", "ogg", "flac", "aac", "m4a", "opus", "wma", "mp2", "mid", "midi"}
 _PREVIEW_EXTS = _TEXT_EXTS | _IMAGE_EXTS | _VIDEO_EXTS

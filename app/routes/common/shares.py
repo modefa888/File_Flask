@@ -147,6 +147,16 @@ def _check_same_origin():
     except ValueError:
         return False
 
+def _truthy(v):
+    """把 JSON 布尔 / 查询串统一成布尔值。
+
+    注意：JSON 里传 true 时 Python 拿到的是 bool，str(True) == "True"（首字母大写），
+    所以必须 lower 后再比较，否则 "True" 会被误判为假。
+    前端发 {soft: true} 就踩过这个坑：软取消被当成硬删除、记录直接消失。
+    """
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
 _MD_EXTS = {"md", "markdown"}
 _IMG_EXTS = {"png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "avif"}
 _VIDEO_EXTS = {"mp4", "webm", "mkv", "avi", "mov", "m4v", "ogg", "flv", "wmv", "rmvb"}
@@ -339,9 +349,13 @@ def api_create_share():
 
 @bp.route("/api/shares")
 def api_list_shares():
-    """分享记录列表（含状态、访问量、有效期）"""
-    _log.info("GET /api/shares")
-    items = [_decorate(r) for r in list_shares()]
+    """分享记录列表（含状态、访问量、有效期）。
+
+    include_revoked=1 时连已取消（revoked）的记录一起返回，供「分享历史」查看。
+    """
+    _log.info("GET /api/shares include_revoked=%s", request.args.get("include_revoked", ""))
+    include_revoked = _truthy(request.args.get("include_revoked", ""))
+    items = [_decorate(r) for r in list_shares(include_revoked=include_revoked)]
     return jsonify({"items": items, "count": len(items)})
 
 
@@ -377,19 +391,33 @@ def api_update_share():
 
 @bp.route("/api/share", methods=["DELETE"])
 def api_delete_share():
-    """删除分享记录（body 或 query 传 id / token）"""
+    """删除分享记录（body 或 query 传 id / token）。
+
+    soft=1 表示「取消分享」：只把链接置为失效（revoked=1）并保留记录进历史；
+    不带 soft 则彻底删除该条记录。
+    """
     _log.info("DELETE /api/share")
     body = request.get_json(silent=True) or {}
     sid = body.get("id") or request.args.get("id")
     token = body.get("token") or request.args.get("token")
+    soft = _truthy(body.get("soft")) or _truthy(request.args.get("soft", ""))
+
+    rec = None
     if sid:
-        ok = delete_share(int(sid))
+        try:
+            rec = get_share(share_id=int(sid))
+        except (TypeError, ValueError):
+            rec = None
     elif token:
         rec = get_share(token=token)
-        ok = delete_share(rec["id"]) if rec else False
-    else:
-        return jsonify({"error": "缺少 id 或 token"}), 400
-    if not ok:
+    if not rec:
+        return jsonify({"error": "未找到分享记录"}), 404
+
+    if soft:
+        update_share(rec["id"], revoked=True)
+        return jsonify({"success": True, "soft": True, "id": rec["id"]})
+
+    if not delete_share(rec["id"]):
         return jsonify({"error": "未找到分享记录"}), 404
     return jsonify({"success": True})
 

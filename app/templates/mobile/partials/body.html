@@ -248,6 +248,7 @@
     <div class="sp-head">
       <button id="shBack" title="返回">⬅️</button>
       <div id="shTitle">🔗 分享记录</div>
+      <div class="sh-tabs" id="shTabs"></div>
       <button id="shRefresh" title="刷新">⟳</button>
     </div>
     <div class="zp-crumb" id="shStat"></div>
@@ -259,23 +260,29 @@
     <div class="sp-head">
       <button id="mdBack" title="返回">⬅️</button>
       <div id="mdTitle">🖼️ 媒体集合</div>
+      <button id="mdSearchBtn" title="搜索文件名">🔍</button>
+      <button id="mdFilterBtn" title="设置文件大小筛选">⚙️</button>
       <button id="mdClose" title="关闭">✕</button>
     </div>
-    <div class="md-tools">
-      <input id="mdKeyword" type="search" enterkeyhint="search" placeholder="按文件名过滤…" />
-      <button id="mdGo">🔍</button>
-      <button id="mdFilterBtn" title="设置文件大小筛选">⚙️</button>
+    <div class="md-toolbar">
+      <div class="md-tabs" id="mdTabs">
+        <button class="md-tab on" data-type="all">全部</button>
+        <button class="md-tab" data-type="image">🖼️ 图片</button>
+        <button class="md-tab" data-type="video">🎬 视频</button>
+        <button class="md-tab" data-type="audio">🎵 音频</button>
+      </div>
+      <div class="md-stat" id="mdStat"></div>
     </div>
-    <div class="md-tabs" id="mdTabs">
-      <button class="md-tab on" data-type="all">全部</button>
-      <button class="md-tab" data-type="image">🖼️ 图片</button>
-      <button class="md-tab" data-type="video">🎬 视频</button>
-      <button class="md-tab" data-type="audio">🎵 音频</button>
-    </div>
-    <div class="md-stat" id="mdStat"></div>
     <div class="sp-body md-body" id="mdBody">
       <div class="md-empty">加载中…</div>
     </div>
+  </div>
+
+  <!-- 媒体集合：搜索浮层（点顶栏 🔍 弹出） -->
+  <div class="md-search-mask" id="mdSearchMask"></div>
+  <div class="md-search-pop" id="mdSearchPop">
+    <input id="mdKeyword" type="search" enterkeyhint="search" placeholder="按文件名过滤…" />
+    <button id="mdGo" type="button">搜索</button>
   </div>
 
   <!-- 分享面板（创建 / 查看分享链接） -->

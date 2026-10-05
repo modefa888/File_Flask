@@ -222,16 +222,53 @@ def _lan_ip():
         s.close()
 
 
-def _phone_url(token):
-    """给手机扫码用的地址：本机 localhost / 127.0.0.1 自动替换为局域网 IP，
-    否则手机扫码会打开「自己」而不是这台电脑。"""
-    base = request.host_url.rstrip("/")
-    parsed = urlparse(base)
-    if parsed.hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1", ""}
+
+
+def _is_private_host(host):
+    """是否是内网地址（IPv4 私有段）"""
+    if host.startswith("10.") or host.startswith("192.168."):
+        return True
+    if host.startswith("172."):
+        try:
+            return 16 <= int(host.split(".")[1]) <= 31
+        except (IndexError, ValueError):
+            return False
+    return False
+
+
+def _phone_target(token):
+    """计算「给手机扫码用」的地址，并判断它的可达范围。
+
+    返回 (url, scope)：
+    - 'public'：公网域名 / 公网 IP —— 手机用任意网络（4G/5G）都能打开
+    - 'lan'   ：局域网 IP —— 手机需要和本机连同一个 Wi-Fi
+    - 'local' ：只有 localhost 且探测不到网卡 IP —— 扫码打不开，需要换地址访问
+
+    localhost 会被替换成局域网 IP，否则手机扫出来的是「手机自己」；
+    公网域名照原样保留。另外反向代理（nginx 等）下 request.host 可能只是
+    内部地址（如 127.0.0.1:5001），此时优先采用代理写入的对外地址。
+    """
+    parsed = urlparse(request.host_url.rstrip("/"))
+    fwd_host = (request.headers.get("X-Forwarded-Host") or "").split(",")[0].strip()
+    fwd_proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip()
+    host = fwd_host or parsed.netloc
+    scheme = fwd_proto or parsed.scheme or "http"
+    hp = urlparse("//" + host)
+    hostname = (hp.hostname or "").lower()
+
+    if hostname in _LOCAL_HOSTS:
         lan = _lan_ip()
         if lan:
-            base = f"{parsed.scheme}://{lan}" + (f":{parsed.port}" if parsed.port else "")
-    return base + "/share/" + str(token or "")
+            host = lan + (f":{hp.port}" if hp.port else "")
+            scope = "lan"
+        else:
+            scope = "local"
+    elif _is_private_host(hostname):
+        scope = "lan"
+    else:
+        scope = "public"
+    return f"{scheme}://{host}/share/{token}", scope
 
 
 def _decorate(rec):
@@ -413,6 +450,7 @@ def view_share(token):
                 text_preview = f.read(200000)
         except (OSError, PermissionError):
             text_preview = ""
+    qr_link, qr_scope = _phone_target(token)
     return render_template("share.html", mode="view", token=token,
                            file=info, text_preview=text_preview,
                            raw_url=_signed_url(token, "raw"),
@@ -420,7 +458,8 @@ def view_share(token):
                            cover_url=_signed_url(token, "cover"),
                            lyrics_url=_signed_url(token, "lyrics"),
                            qr_url=f"/share/{token}/qr",
-                           qr_link=_phone_url(token))
+                           qr_link=qr_link,
+                           qr_scope=qr_scope)
 
 
 @bp.route("/share/<token>/qr")
@@ -439,7 +478,7 @@ def share_qr(token):
         box_size=10,
         border=2,
     )
-    qr.add_data(_phone_url(token))
+    qr.add_data(_phone_target(token)[0])
     qr.make(fit=True)
     buf = io.BytesIO()
     qr.make_image(fill_color="#0f172a", back_color="#ffffff").save(buf, format="PNG")

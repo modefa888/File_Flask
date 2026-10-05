@@ -1158,9 +1158,19 @@
                         <input class="qr-link" id="qrLink" type="text" readonly value="{{ qr_link }}">
                         <button class="btn primary qr-copy" id="qrCopy" type="button"><i class="bi bi-clipboard"></i> 复制</button>
                     </div>
-                    <div class="qr-hint" id="qrHint">
+                    {% if qr_scope == 'public' %}
+                    <div class="qr-hint">
+                        <i class="bi bi-globe2"></i> 该链接可公网访问，手机用 4G / 5G 或任意网络扫码即可打开
+                    </div>
+                    {% elif qr_scope == 'lan' %}
+                    <div class="qr-hint">
                         <i class="bi bi-wifi"></i> 手机需与本机处于同一局域网（同一 Wi-Fi）
                     </div>
+                    {% else %}
+                    <div class="qr-hint warn">
+                        <i class="bi bi-exclamation-triangle"></i> 当前地址是 localhost，手机扫码打不开：请改用局域网 IP 或公网域名访问本页后再扫码
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -1636,7 +1646,6 @@
             const img = document.getElementById('qrImg');
             const linkEl = document.getElementById('qrLink');
             const copyBtn = document.getElementById('qrCopy');
-            const hint = document.getElementById('qrHint');
 
             const copy = (text) => {
                 // navigator.clipboard 只在 https / localhost 等安全上下文可用，
@@ -1678,11 +1687,6 @@
                     copyBtn.innerHTML = '<i class="bi bi-check2"></i> 已复制';
                     setTimeout(() => { copyBtn.innerHTML = raw; }, 1600);
                 });
-            }
-            // 链接仍是 localhost 时手机打不开：给出明确提示
-            if (linkEl && hint && /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/i.test(linkEl.value)) {
-                hint.classList.add('warn');
-                hint.innerHTML = '<i class="bi bi-exclamation-triangle"></i> 未探测到局域网 IP，请改用内网地址（如 http://192.168.x.x:端口）打开本页后再扫码';
             }
         })();
     </script>

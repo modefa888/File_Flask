@@ -1,9 +1,11 @@
 """浏览/预览/缩略图/视频流转发路由。"""
 import os
+import re
 import sys
 import json
 import time
 import threading
+import subprocess
 import mimetypes
 import base64
 
@@ -15,6 +17,7 @@ from ...config import (
     _AUDIO_EXTS,
     _PREVIEW_MAX_BYTES, _TEXT_PREVIEW_MAX_BYTES,
     _THUMB_CACHE_DIR, _TEXT_FILENAMES, _DOTFILE_TEXT_STEMS, _STORAGE_DIR,
+    FFMPEG_BIN,
 )
 from ...log import get_logger
 from ...services.common.filecore import (
@@ -893,6 +896,75 @@ def api_stream():
 
     except (OSError, PermissionError) as e:
         return jsonify({"error": f"无法读取文件: {str(e)}"}), 500
+
+
+# ======================================================================
+# 视频实时转码兜底：浏览器解不了视频轨（HEVC/H.265、10bit H.264 等——
+# 症状是有声音有时长但没有画面）时，服务端用 ffmpeg 实时转成
+# H.264/AAC 的 fMP4 流给播放器。支持 ss 参数（秒或 hh:mm:ss）定位起播。
+# ======================================================================
+_TRANCODE_SEM = threading.BoundedSemaphore(2)   # 最多同时 2 路转码，防止 CPU 打满
+
+
+def _parse_ss(v):
+    """校验 ss 参数：纯秒数（"12.5"）或 hh:mm:ss(.ms)；合法返回原文，非法返回 None"""
+    v = (v or "").strip() or "0"
+    if re.fullmatch(r"\d+(\.\d+)?", v) or re.fullmatch(r"(\d{1,3}:)?\d{1,2}:\d{1,2}(\.\d+)?", v):
+        return v
+    return None
+
+
+@bp.route("/api/stream_transcode")
+def api_stream_transcode():
+    target_path = _get_file_path_from_request(request)
+    if target_path is None:
+        return jsonify({"error": "文件不存在"}), 404
+    ext = os.path.splitext(target_path)[1].lower().lstrip(".")
+    if ext not in _VIDEO_EXTS:
+        return jsonify({"error": "该文件类型不支持转码播放"}), 400
+    ss = _parse_ss(request.args.get("ss"))
+    if ss is None:
+        return jsonify({"error": "ss 参数非法"}), 400
+
+    cmd = [
+        FFMPEG_BIN, "-hide_banner", "-loglevel", "error",
+        "-ss", ss, "-i", target_path,
+        # 视频：H.264 兼容 8bit，1280 内缩放 + veryfast 控制转码延迟与 CPU 占用
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+        "-pix_fmt", "yuv420p", "-vf", "scale='min(iw,1280)':-2",
+        # 音频：AAC 立体声（浏览器全支持）
+        "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+        # fMP4 分片输出：边转边播，无需等整体转完
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-f", "mp4", "pipe:1",
+    ]
+
+    def generate():
+        with _TRANCODE_SEM:                 # 并发上限，超出的排队等待
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            try:
+                while True:
+                    chunk = proc.stdout.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                # 客户端断开 / 切换视频 → 立即杀掉 ffmpeg，不留后台转码进程
+                try:
+                    if proc.poll() is None:
+                        proc.kill()
+                except Exception:
+                    pass
+                try:
+                    if proc.stdout:
+                        proc.stdout.close()
+                except Exception:
+                    pass
+
+    resp = FlaskResponse(generate(), mimetype="video/mp4")
+    resp.headers["Cache-Control"] = "no-store"   # 转码结果不缓存（带 ss 定位，且不可 Range）
+    resp.headers["X-Transcoded"] = "1"
+    return resp
 
 
 @bp.route("/api/download")

@@ -117,9 +117,40 @@
     video.addEventListener("canplay", () => poster.classList.add("hide"));
     video.addEventListener("playing", () => { poster.dataset.played = "1"; poster.classList.add("hide"); });
     video.addEventListener("waiting", () => { if (!poster.dataset.played) poster.classList.remove("hide"); });
+    /* ---------- 编码兜底：HEVC/10bit 等浏览器解不了的视频轨（症状：黑屏有声有时长）
+       → 自动切到服务端实时转码源 /api/stream_transcode（ffmpeg 转 H.264/AAC） ---------- */
+    let transMode = false;   // 当前源是否为转码兜底源
+    let transStart = 0;      // 转码源 -ss 起播偏移（currentTime 从 0 计，显示时需加回）
+    let transDur = 0;        // 转码源实际总时长（fMP4 流无总时长，从时长接口获取）
+    let transToken = 0;      // 转码会话序号（预留，配合快速连续切换防串流）
+    const transUrl = (abs, ss) => "/api/stream_transcode?path=" + encodeURIComponent(abs) + "&ss=" + encodeURIComponent(String(ss || 0));
+    const startTranscode = (abs, ss, autoplay) => {
+      const first = !transMode;
+      transToken++;
+      transMode = true;
+      transStart = +ss || 0;
+      video.dataset.trans = "1";
+      video.src = transUrl(abs, ss);
+      if (autoplay !== false) video.play().catch(() => {});
+      if (!transDur) {       // 拉取真实总时长，供进度显示与拖拽换算
+        fetch("/api/video_duration?path=" + encodeURIComponent(abs))
+          .then(r => r.json()).then(d => { if (d && d.duration) { transDur = d.duration; updateProgress(); } })
+          .catch(() => {});
+      }
+      if (first) showTip("该视频编码浏览器不支持，已切换服务器转码播放", "bi-cpu");
+    };
+    // 检测：开始出数据后画面宽度仍为 0（只有音轨被解码）→ 走转码兜底
+    const tryTransFallback = () => {
+      if (transMode || video.videoWidth !== 0 || video.readyState < 2) return;
+      startTranscode(curPath, 0, true);
+    };
+    video.addEventListener("loadeddata", tryTransFallback);
+    video.addEventListener("playing", tryTransFallback);
     video.addEventListener("error", () => {
       poster.classList.add("hide");
-      showTip("视频加载失败，请确认文件可读", "bi-exclamation-circle");
+      // 直连源解码失败（不支持编码 / 容器异常）也先试一次转码；转码源再错才报错
+      if (!transMode) startTranscode(curPath, video.currentTime || 0, true);
+      else showTip("视频加载失败，请确认文件可读", "bi-exclamation-circle");
     });
     // 打开即自动播放（与文件管理器桌面版一致；被浏览器策略拦截时静默回退为手动播放）
     video.addEventListener("loadedmetadata", function firstPlay() {
@@ -142,13 +173,15 @@
     const timeEl = $(".vpv-time"), progress = $(".vpv-progress");
     const played = $(".vpv-played"), buffered = $(".vpv-buffered"), knob = $(".vpv-knob");
     const updateProgress = () => {
-      const dur = video.duration || 0;
-      const pct = dur ? video.currentTime / dur * 100 : 0;
+      // 转码模式：fMP4 流 duration 为 Infinity，用真实总时长 + ss 偏移换算显示
+      const dur = transMode ? transDur : (video.duration || 0);
+      const cur = transMode ? (transStart + video.currentTime) : video.currentTime;
+      const pct = dur ? cur / dur * 100 : 0;
       played.style.width = pct + "%";
       knob.style.left = pct + "%";
-      timeEl.textContent = _vpvFmt(video.currentTime) + " / " + _vpvFmt(dur);
+      timeEl.textContent = _vpvFmt(cur) + " / " + _vpvFmt(dur);
       if (video.buffered.length && dur) {
-        const end = video.buffered.end(video.buffered.length - 1);
+        const end = video.buffered.end(video.buffered.length - 1) + (transMode ? transStart : 0);
         buffered.style.width = Math.min(100, end / dur * 100) + "%";
       }
     };
@@ -158,10 +191,17 @@
 
     let dragging = false;
     const seekTo = clientX => {
-      if (!isFinite(video.duration)) return;
+      const dur = transMode ? transDur : video.duration;
+      if (!isFinite(dur) || !dur) return;
       const rect = progress.getBoundingClientRect();
       const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-      video.currentTime = ratio * video.duration;
+      const target = ratio * dur;
+      if (transMode) {   // 转码流不支持 Range 定位：用 -ss 重启转码流到目标位置
+        startTranscode(curPath, target, !video.paused);
+        updateProgress();
+        return;
+      }
+      video.currentTime = target;
       updateProgress();
     };
     progress.addEventListener("pointerdown", e => {
@@ -326,7 +366,12 @@
         e.preventDefault(); e.stopPropagation(); fullBtn.click();
       } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
         e.preventDefault(); e.stopPropagation();
-        video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + (e.key === "ArrowRight" ? 5 : -5)));
+        if (transMode) {   // 转码模式：±5s 同样走 -ss 重启定位
+          const target = Math.max(0, Math.min(transDur || 0, transStart + video.currentTime + (e.key === "ArrowRight" ? 5 : -5)));
+          startTranscode(curPath, target, !video.paused);
+        } else {
+          video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + (e.key === "ArrowRight" ? 5 : -5)));
+        }
         showTip((e.key === "ArrowRight" ? "快进 " : "快退 ") + "5s", e.key === "ArrowRight" ? "bi-skip-forward-fill" : "bi-skip-backward-fill");
       }
     };
@@ -388,6 +433,7 @@
       poster.classList.remove("hide");
       delete poster.dataset.played;
       rotDeg = 0; applyRotate();
+      transMode = false; transStart = 0; transDur = 0; delete video.dataset.trans;   // 新文件重新走直连 → 兜底检测
       video.src = "/api/stream?path=" + encodeURIComponent(abs);
       video.addEventListener("loadedmetadata", function onMeta() {
         video.removeEventListener("loadedmetadata", onMeta);

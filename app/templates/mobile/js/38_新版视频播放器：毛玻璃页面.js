@@ -14,6 +14,8 @@
     if (i < 0 || i >= vpList.length) return;
     vpIndex = i;
     var it = vpList[i];
+    // 视频未加载成功前先显示封面（缩略图作 poster），避免黑屏等待
+    vpVideo.poster = "/api/thumbnail?path=" + encodeURIComponent(it.abs);
     vpVideo.src = "/api/stream?path=" + encodeURIComponent(it.abs);
     document.getElementById("vpName").textContent = it.name;
     var sk = document.getElementById("vpSeek");
@@ -74,6 +76,7 @@
   function closeVPlayer() {
     vpVideo.pause();
     try { vpVideo.removeAttribute("src"); vpVideo.load(); } catch (e) {}
+    vpVideo.poster = "";   // 关闭播放器时清掉封面
     vpPage.classList.remove("show");
     document.getElementById("vpVolBar").classList.remove("show");
     vpCloseRatePop();

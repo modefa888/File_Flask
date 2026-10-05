@@ -197,7 +197,6 @@
                                 <button class="vpc-btn img-zin" title="放大 (+)"><i class="bi bi-zoom-in"></i></button>
                                 <button class="vpc-btn img-fit" title="适应窗口 (0)"><i class="bi bi-arrows-angle-contract"></i></button>
                                 <button class="vpc-btn img-11" title="原始尺寸 1:1"><i class="bi bi-aspect-ratio"></i></button>
-                                <button class="vpc-btn img-orig" title="刷新原图"><i class="bi bi-arrow-clockwise"></i></button>
                                 <button class="vpc-btn img-rot" title="旋转 90°"><i class="bi bi-arrow-clockwise"></i></button>
                                 <button class="vpc-btn img-del" title="删除此图片"><i class="bi bi-trash"></i></button>
                             </div>
@@ -997,10 +996,6 @@
             body.querySelector('.img-zin').addEventListener('click', () => setZoom(scale * 1.25));
             body.querySelector('.img-zout').addEventListener('click', () => setZoom(scale / 1.25));
             body.querySelector('.img-fit').addEventListener('click', resetView);
-            body.querySelector('.img-orig').addEventListener('click', () => {
-                resetView();
-                img.src = '/api/raw?path=' + encodeURIComponent(absPath) + '&_=' + Date.now();
-            });
             body.querySelector('.img-rot').addEventListener('click', () => { rot += 90; apply(); });
             body.querySelector('.img-11').addEventListener('click', () => {
                 if (!img.naturalWidth) return;   // 图片尚未加载完成

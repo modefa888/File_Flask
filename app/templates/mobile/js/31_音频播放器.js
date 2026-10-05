@@ -17,7 +17,9 @@
   function _fmtTime(sec) {
     if (!isFinite(sec) || sec < 0) sec = 0;
     sec = Math.floor(sec);
-    var m = Math.floor(sec / 60), s = sec % 60;
+    var s = sec % 60, m = Math.floor(sec / 60) % 60, h = Math.floor(sec / 3600);
+    // 超过 1 小时显示 h:mm:ss，否则保持 m:ss
+    if (h) return h + ":" + (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
     return m + ":" + (s < 10 ? "0" : "") + s;
   }
   function _parseTrack(name) {

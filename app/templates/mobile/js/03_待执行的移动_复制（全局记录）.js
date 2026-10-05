@@ -155,6 +155,8 @@
         return;
       }
       state.path = data.current_path_abs || "";
+      // 记住本次目录：下次打开页面直接回到这里，而不是又去列文件系统根目录
+      spLsSet("fm_mobile_lastdir", state.path || "");
       // 同步 URL hash（编码后）：刷新/分享链接可直接回到当前目录，浏览器前进后退也可用
       var wantPath = (state.path && state.path !== "/") ? state.path : "/";
       var curHash = readHashPath();

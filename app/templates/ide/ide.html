@@ -96,6 +96,9 @@
 <style>
 {% include 'ide/css/27_表格查看编辑.css' %}
 </style>
+<style>
+{% include 'ide/css/28_标签页内嵌视频播放器.css' %}
+</style>
 </head>
 <body>
 {% include 'ide/partials/body.html' %}
@@ -135,6 +138,8 @@
 {% include 'ide/js/21_表格查看编辑_xlsx_xls_et_csv_可编辑表格.js' %}
 {% include 'ide/js/16_自定义悬停提示_全局接管所有_title_属性.js' %}
 {% include 'ide/js/17_SQLite数据库查看器_db_sqlite只读浏览_表列表_分页数据.js' %}
+{# 标签页内嵌视频播放器：openFile 的视频分支调用 setupVideoView（全局函数，须在 IIFE 关闭后加载） #}
+{% include 'ide/js/22_视频播放器_标签页内嵌_参考文件管理器桌面版.js' %}
 </script>
 </body>
 </html>

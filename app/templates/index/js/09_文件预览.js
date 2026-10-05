@@ -373,7 +373,15 @@
         // ===== 自定义播放器控制条：进度拖拽 / 音量旋钮 / 倍速 / 播放模式 / 旋转 / 画中画 / 全屏 =====
         // 返回清理函数（解除空格、M、F 键等全局监听），由 previewFile 在关闭/切换时调用
         let _vpDocClickBound = false;   // 「点击空白处收起倍速菜单」的全局监听只绑一次
-        let _vpPlayMode = 'order';      // 播放模式：order 顺序 / loop 循环 / shuffle 随机（切换视频时保留）
+        // 播放器状态持久化：独立 JSON（localStorage["ide.videoPlayer"]，与 IDE 内嵌播放器共用），
+        // 永久记住音量 / 静音 / 倍速 / 播放模式，下次打开视频预览沿用上次状态（如静音仍静音）
+        let _vpvStore = (() => {
+            const def = { volume: 1, muted: false, rate: 1, mode: 'order' };
+            try { return Object.assign(def, JSON.parse(localStorage.getItem('ide.videoPlayer') || '{}')); }
+            catch (_) { return def; }
+        })();
+        const _vpvSave = () => { try { localStorage.setItem('ide.videoPlayer', JSON.stringify(_vpvStore)); } catch (_) {} };
+        let _vpPlayMode = _vpvStore.mode || 'order';   // 播放模式：order 顺序 / loop 循环 / shuffle 随机（与 _vpvStore.mode 同步）
 
         function _bindVideoPlayer(body, showSeekTip) {
             const video = body.querySelector('video');
@@ -443,25 +451,37 @@
             progress.addEventListener('pointerup', () => { dragging = false; progress.classList.remove('dragging'); });
             progress.addEventListener('pointercancel', () => { dragging = false; progress.classList.remove('dragging'); });
 
-            // 音量旋钮：滑杆调音量，喇叭按钮静音
+            // 音量旋钮：滑杆调音量，喇叭按钮静音（音量/静音持久化，下次打开沿用）
             const volIcon = () => {
                 const v = video.muted ? 0 : video.volume;
                 muteBtn.innerHTML = `<i class="bi ${v === 0 ? 'bi-volume-mute-fill' : v < 0.5 ? 'bi-volume-down-fill' : 'bi-volume-up-fill'}"></i>`;
             };
+            const syncVolUi = () => {
+                const v = video.muted ? 0 : video.volume;
+                volRange.value = v;
+                volRange.style.setProperty('--vol', (v * 100) + '%');
+                volIcon();
+            };
             const applyVol = () => {
                 video.volume = +volRange.value;
-                video.muted = false;
-                volRange.style.setProperty('--vol', (volRange.value * 100) + '%');
-                volIcon();
+                video.muted = false;                  // 主动拖动音量条视为解除静音
+                _vpvStore.volume = video.volume;
+                _vpvStore.muted = false;
+                _vpvSave();
+                syncVolUi();
             };
             volRange.addEventListener('input', applyVol);
             muteBtn.addEventListener('click', () => { video.muted = !video.muted; });
             video.addEventListener('volumechange', () => {
-                const v = video.muted ? 0 : video.volume;
-                volRange.style.setProperty('--vol', (v * 100) + '%');
-                volIcon();
+                _vpvStore.volume = video.volume;      // 静音键 / 快捷键 M 也走这里持久化
+                _vpvStore.muted = video.muted;
+                _vpvSave();
+                syncVolUi();
             });
-            applyVol();
+            // 恢复上次的音量与静音状态（不经过 applyVol，避免把静音强制解除）
+            video.volume = Math.min(1, Math.max(0, +_vpvStore.volume || 1));
+            video.muted = !!_vpvStore.muted;
+            syncVolUi();
 
             // 倍速菜单：点击按钮弹出，选择后立即生效
             speedWrap.querySelector('.vpc-speed-btn').addEventListener('click', e => {
@@ -473,11 +493,22 @@
                     e.stopPropagation();
                     const rate = +el.dataset.rate;
                     video.playbackRate = rate;
+                    _vpvStore.rate = rate; _vpvSave();   // 倍速持久化
                     speedCur.textContent = el.textContent;   // 直接取菜单项文字，避免 0.75x 被 toFixed 成 0.8x
                     body.querySelectorAll('.vpc-speed-item').forEach(x => x.classList.toggle('active', x === el));
                     speedWrap.classList.remove('open');
                 });
             });
+            // 恢复上次的倍速状态
+            const _initRate = Math.min(4, Math.max(0.25, +_vpvStore.rate || 1));
+            video.playbackRate = _initRate;
+            const _rateItem = body.querySelector('.vpc-speed-item[data-rate="' + _initRate + '"]');
+            if (_rateItem) {
+                speedCur.textContent = _rateItem.textContent;
+                body.querySelectorAll('.vpc-speed-item').forEach(x => x.classList.toggle('active', x === _rateItem));
+            } else {
+                speedCur.textContent = _initRate + 'x';
+            }
             if (!_vpDocClickBound) {
                 _vpDocClickBound = true;
                 // 点击弹窗其他区域时收起倍速菜单（元素随弹窗销毁，监听器常驻但只做收起操作，无泄漏）
@@ -496,6 +527,7 @@
             const applyMode = (announce) => {
                 const m = MODES[modeIdx];
                 _vpPlayMode = m.key;
+                _vpvStore.mode = m.key; _vpvSave();   // 播放模式持久化
                 modeBtn.innerHTML = `<i class="bi ${m.icon}"></i>`;
                 modeBtn.title = '播放模式：' + m.label;
                 modeBtn.classList.toggle('active', m.key !== 'order');

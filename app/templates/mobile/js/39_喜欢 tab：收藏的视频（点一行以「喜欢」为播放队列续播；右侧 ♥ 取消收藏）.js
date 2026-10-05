@@ -168,7 +168,7 @@
       b.addEventListener("click", function () {
         vpRate = r;
         vpApplyRate();
-        try { localStorage.setItem("ff_video_rate", String(r)); } catch (e) {}
+        _vpStore.rate = r; _vpStoreSave();    // 倍速写入统一 JSON，与电脑端 / IDE 互通
         vpCloseRatePop();
       });
       box.appendChild(b);
@@ -186,10 +186,16 @@
     document.getElementById("vpRate").classList.remove("on");
   }
   function vpRestoreRate() {
+    var r = null;
     try {
-      var r = parseFloat(localStorage.getItem("ff_video_rate"));
-      if (isFinite(r) && r > 0) vpRate = r;
+      var s = JSON.parse(localStorage.getItem("ide.videoPlayer") || "{}");
+      if (s && typeof s.rate === "number" && isFinite(s.rate) && s.rate > 0) r = s.rate;
     } catch (e) {}
+    if (r === null) {   // 统一 JSON 里还没记过：回读旧的倍速键完成迁移
+      try { r = parseFloat(localStorage.getItem("ff_video_rate")); } catch (e) {}
+      if (!isFinite(r) || r <= 0) r = null;
+    }
+    if (r !== null) vpRate = Math.max(0.25, Math.min(8, r));
     vpApplyRate();
   }
   document.getElementById("vpRate").addEventListener("click", function () {
@@ -221,5 +227,7 @@
 
   var initPath = readHashPath();
   updateViewBtn();
-  load(initPath === null ? "" : initPath, true);
+  // 无 hash（或 hash 无效）打开时：恢复上次浏览的目录，不再直接列文件系统根目录
+  if (initPath === null || initPath === "") initPath = spLsGet("fm_mobile_lastdir", "") || "";
+  load(initPath, true);
 })();

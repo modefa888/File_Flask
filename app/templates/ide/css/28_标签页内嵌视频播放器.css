@@ -1,0 +1,349 @@
+/* ================================================================
+ * 标签页内嵌视频播放器（配合 22_视频播放器 js 使用）
+ * 视觉参考文件管理器桌面版的视频预览：深色舞台 + 毛玻璃控制条 + 右侧播放列表
+ * ================================================================ */
+
+/* 整体布局：左侧视频舞台 + 右侧播放列表 */
+.vpv-wrap {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  min-height: 0;
+  background: #0d1117;
+}
+
+/* ---------- 视频舞台 ---------- */
+.vpv-stage {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #000;
+}
+.vpv-stage video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: transparent;
+  display: block;
+}
+.vpv-stage:fullscreen { border-radius: 0; }
+
+/* 左上角文件大小徽标 */
+.vpv-info {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 6;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  pointer-events: none;
+}
+
+/* ---------- 封面海报层：视频首帧渲染前显示缩略图 ---------- */
+.vpv-poster {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background-color: #0b0f14;
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  display: flex;
+  align-items: flex-end;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+}
+.vpv-poster.hide { opacity: 0; }
+.vpv-poster .vpv-name {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 26px 14px 10px;
+  color: #e5e7eb;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
+}
+
+/* ---------- 操作提示气泡 ---------- */
+.vpv-seek-tip {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translate(-50%, 8px);
+  z-index: 7;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.vpv-seek-tip.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- 播放列表开关（舞台右上角） ---------- */
+.vpv-side-toggle {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 6;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #e5e7eb;
+  background: rgba(255, 255, 255, 0.13);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+.vpv-side-toggle:hover { background: rgba(255, 255, 255, 0.24); }
+
+/* ---------- 控制条（悬浮在画面底部） ---------- */
+.vpv-controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  padding: 28px 12px 8px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+  transition: opacity 0.25s ease;
+}
+.vpv-stage.idle .vpv-controls { opacity: 0; pointer-events: none; }
+.vpv-stage.idle .vpv-side-toggle,
+.vpv-stage.idle .vpv-info { opacity: 0; transition: opacity 0.25s ease; }
+.vpv-side-toggle,
+.vpv-info { transition: opacity 0.25s ease; }
+
+/* 进度条：轨道 + 缓冲 + 已播放 + 拖拽圆点 */
+.vpv-progress {
+  height: 14px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+.vpv-track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.22);
+  transition: height 0.15s ease;
+}
+.vpv-progress:hover .vpv-track,
+.vpv-progress.dragging .vpv-track { height: 6px; }
+.vpv-buffered {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.35);
+}
+.vpv-played {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  border-radius: 2px;
+  background: #3b82f6;
+}
+.vpv-knob {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* 按钮行 */
+.vpv-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.vpv-btn {
+  background: none;
+  border: none;
+  color: #e5e7eb;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.vpv-btn:hover { background: rgba(255, 255, 255, 0.14); }
+.vpv-btn.active { color: #60a5fa; }
+.vpv-time {
+  font-size: 0.75rem;
+  color: #cbd5e1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.vpv-spacer { flex: 1; }
+
+/* 音量滑杆 */
+.vpv-vol { display: flex; align-items: center; gap: 2px; }
+.vpv-vol-range {
+  width: 80px;
+  height: 4px;
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
+/* 倍速菜单（向上弹出） */
+.vpv-speed { position: relative; }
+.vpv-speed-btn { font-size: 0.8rem; font-weight: 600; }
+.vpv-speed-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 10;
+  min-width: 76px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 18, 25, 0.96);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  display: none;
+  flex-direction: column;
+}
+.vpv-speed.open .vpv-speed-menu { display: flex; }
+.vpv-speed-item {
+  background: none;
+  border: none;
+  color: #cbd5e1;
+  font-size: 0.78rem;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.vpv-speed-item:hover { background: rgba(255, 255, 255, 0.12); }
+.vpv-speed-item.active { color: #60a5fa; font-weight: 600; }
+
+/* ---------- 右侧播放列表 ---------- */
+.vpv-side {
+  width: 250px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #11151c;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+.vpv-wrap.no-side .vpv-side { display: none; }
+.vpv-pl-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex: none;
+}
+.vpv-pl-count { color: #64748b; }
+.vpv-pl-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+.vpv-pl-empty {
+  padding: 26px 12px;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.78rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.vpv-pl-empty i { font-size: 1.3rem; }
+.vpv-pl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.vpv-pl-row:hover { background: rgba(255, 255, 255, 0.06); }
+.vpv-pl-row.cur {
+  background: rgba(59, 130, 246, 0.16);
+  border-left-color: #3b82f6;
+}
+.vpv-pl-thumb {
+  position: relative;
+  width: 64px;
+  height: 36px;
+  flex: none;
+  border-radius: 4px;
+  background: #000;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  overflow: hidden;
+}
+.vpv-pl-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.vpv-pl-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: #dbe2ea;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vpv-pl-row.cur .vpv-pl-name { color: #93c5fd; }
+.vpv-pl-dur {
+  flex: none;
+  font-size: 0.7rem;
+  color: #7d8794;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 窄屏：播放列表自动隐藏，靠右上角按钮展开 */
+@media (max-width: 760px) {
+  .vpv-side { display: none; }
+  .vpv-side-toggle { display: none; }
+}

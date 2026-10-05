@@ -739,6 +739,12 @@
           setupSheetView(tab, host, path, name);
           return;
         }
+        // 视频类型：标签页内嵌播放器（实现见 22_视频播放器 js，交互参考文件管理器桌面版）
+        if (!forceText && (window.IDE_VIDEO_EXTS || []).includes(ext) && typeof window.setupVideoView === "function") {
+          activate(tab);
+          setupVideoView(tab, host, path, name);
+          return;
+        }
         // 文件内容与语法模式并行加载，减少串行等待
         const [res, mode] = await Promise.all([loadFileText(path, name), ensureMode(ext)]);
         // 不支持 / 打开失败：同样要走激活（否则只有内容切了、标签不高亮、面包屑还是旧文件）；

@@ -1,4 +1,14 @@
   // ================= 新版视频播放器：毛玻璃页面 =================
+  // 播放器状态持久化：独立 JSON（localStorage["ide.videoPlayer"]，与电脑端 / IDE 内嵌播放器共用），
+  // 永久记住音量 / 静音 / 倍速——三端互通，下次打开沿用上一次的状态（如静音仍静音）
+  var _vpStore = (function () {
+    var def = { volume: 1, muted: false, rate: 1, mode: "order" };
+    try { return Object.assign(def, JSON.parse(localStorage.getItem("ide.videoPlayer") || "{}")); }
+    catch (e) { return def; }
+  })();
+  function _vpStoreSave() {
+    try { localStorage.setItem("ide.videoPlayer", JSON.stringify(_vpStore)); } catch (e) {}
+  }
   var vpPage = document.getElementById("vpPage");
   var vpVideo = document.getElementById("vpVideo");
   var vpList = [];        // [{name, abs}]
@@ -53,13 +63,22 @@
     range.style.setProperty("--v", v.toFixed(3));
     document.getElementById("vpVolVal").textContent = Math.round(v * 100) + "%";
     document.getElementById("vpVolBtn").innerHTML = v > 0 ? _svgVolOn : _svgVolOff;
-    if (save) { try { localStorage.setItem("ff_music_vol", String(Math.round(v * 100))); } catch (e) {} }
+    if (save) {
+      try { localStorage.setItem("ff_music_vol", String(Math.round(v * 100))); } catch (e) {}   // 兼容音乐播放器旧键
+      _vpStore.volume = v; _vpStoreSave();    // 写入统一 JSON，与电脑端 / IDE 互通
+    }
   }
   function vpRestoreVolume() {
+    var v = null;
     try {
-      var lv = parseInt(localStorage.getItem("ff_music_vol"), 10);
-      if (isFinite(lv)) vpVideo.volume = Math.max(0, Math.min(1, lv / 100));
+      var s = JSON.parse(localStorage.getItem("ide.videoPlayer") || "{}");
+      if (s && typeof s.volume === "number" && isFinite(s.volume)) v = Math.max(0, Math.min(1, s.volume));
     } catch (e) {}
+    if (v === null) {   // 统一 JSON 里还没记过：回读旧的音乐音量键完成迁移
+      try { var lv = parseInt(localStorage.getItem("ff_music_vol"), 10); if (isFinite(lv)) v = Math.max(0, Math.min(1, lv / 100)); } catch (e) {}
+    }
+    if (v === null) v = 1;
+    vpVideo.volume = v;
     vpApplyVolume(false);
   }
   // items: [{name, abs}]，idx 为当前播放项

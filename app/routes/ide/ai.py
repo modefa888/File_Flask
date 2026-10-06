@@ -120,6 +120,7 @@ _MAX_IMAGE_PARTS = 8                  # 单次请求最多图片部件数
 _SYS_META_KEY = "ai_sys"
 _SYS_MODULES = ("chat", "plugin", "agent", "commit", "nl2sql", "summary", "models", "scaffold")
 _AI_CALLS_KEEP = 2000            # 调用明细最多保留多少条（超出从最旧的开始删）
+_AI_DETAIL_CHARS = 1500          # 明细里保存的请求 / 响应摘要上限（点开能看清这次做了什么）
 
 
 def _clean_per_module(raw) -> dict:
@@ -232,24 +233,85 @@ def _sys_err_response(err: str, **extra):
     return jsonify(body), (403 if disabled else 400)
 
 
-def _log_ai_call(module: str, ok: bool, ms: int = 0, error: str = "") -> None:
-    """记录一次系统 AI 调用：累计表（次数）+ 明细表（每次一行，供按天统计与查看）"""
+def _estimate_tokens(text) -> int:
+    """上游没返回 usage 时粗略估算 token 数（界面标 ≈，不是精确计费值）。
+
+    中文按 1 字 ≈ 1 token、其余按 4 字符 ≈ 1 token，只求数量级正确。
+    多数 OpenAI 兼容端点在流式下不给 usage（也不认 stream_options），
+    没有用量就没有参考意义，所以这里兜底估算，并明确标成估算值。
+    """
+    s = str(text or "")
+    if not s:
+        return 0
+    cn = sum(1 for ch in s if "\u4e00" <= ch <= "\u9fff" or "\u3000" <= ch <= "\u303f")
+    return int(cn + (len(s) - cn) / 4 + 0.5)
+
+
+def _estimate_msgs(messages) -> int:
+    """估算一组消息（含角色与多段文本）的输入 token 数"""
+    total = 0
+    for m in (messages or []):
+        c = m.get("content") if isinstance(m, dict) else m
+        if isinstance(c, list):                     # 多模态：content 是分段数组
+            for part in c:
+                if isinstance(part, dict):
+                    total += _estimate_tokens(part.get("text") or "")
+                    if part.get("type") == "image_url":
+                        total += 1000               # 一张图按千级粗估，避免严重偏低
+        else:
+            total += _estimate_tokens(c)
+        total += 4                                  # 角色等结构开销
+    return total
+
+
+def _brief(text) -> str:
+    """把请求 / 响应整理成可读摘要：保留段落但折叠多余空行，并截断。
+
+    明细里存的是「这次调用了什么、回了什么」，用于点开查看，不追求全文；
+    截断是为了不让长对话把明细表撑大（每条最多 _AI_DETAIL_CHARS 字符）。
+    """
+    s = str(text or "").replace("\r\n", "\n").strip()
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s[:_AI_DETAIL_CHARS] + ("…（已截断）" if len(s) > _AI_DETAIL_CHARS else "")
+
+
+def _log_ai_call(module: str, ok: bool, ms: int = 0, error: str = "",
+                 model: str = "", tokens_in: int = 0, tokens_out: int = 0,
+                 est: bool = False, req: str = "", resp: str = "") -> None:
+    """记录一次系统 AI 调用：累计表（次数 + token 用量）+ 明细表（每次一行）
+
+    model / tokens 取上游返回的用量：流式在最后一个 chunk 的 usage 里，
+    非流式在响应体的 usage 里。上游不给（流式很常见）时由调用方按字数估算并
+    设 est=True，界面显示为「≈」，与实际计费存在偏差。
+
+    req / resp 是本次的请求与响应摘要（已由调用方 _brief 处理），
+    用于在明细里点开查看「这一次到底做了什么」。
+    """
     if not module:
         return
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     err = "" if ok else str(error or "")[:300]
+    mdl = str(model or "")[:64]
+    try:
+        tin, tout = max(int(tokens_in or 0), 0), max(int(tokens_out or 0), 0)
+    except (TypeError, ValueError):
+        tin = tout = 0
     try:
         with store_tx() as conn:
             conn.execute(
-                "INSERT INTO ai_usage (module, ok, fail, last_at, last_ms, last_error) "
-                "VALUES (?,?,?,?,?,?) ON CONFLICT(module) DO UPDATE SET "
+                "INSERT INTO ai_usage (module, ok, fail, last_at, last_ms, last_error, tokens_in, tokens_out) "
+                "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(module) DO UPDATE SET "
                 "ok = ok + excluded.ok, fail = fail + excluded.fail, "
                 "last_at = excluded.last_at, last_ms = excluded.last_ms, "
-                "last_error = excluded.last_error",
-                (module, 1 if ok else 0, 0 if ok else 1, ts, int(ms or 0), err))
+                "last_error = excluded.last_error, "
+                "tokens_in = tokens_in + excluded.tokens_in, "
+                "tokens_out = tokens_out + excluded.tokens_out",
+                (module, 1 if ok else 0, 0 if ok else 1, ts, int(ms or 0), err, tin, tout))
             conn.execute(
-                "INSERT INTO ai_calls (module, ok, ms, ts, day, error) VALUES (?,?,?,?,?,?)",
-                (module, 1 if ok else 0, int(ms or 0), ts, ts[:10], err))
+                "INSERT INTO ai_calls (module, ok, ms, ts, day, error, model, "
+                "tokens_in, tokens_out, est, req, resp) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (module, 1 if ok else 0, int(ms or 0), ts, ts[:10], err, mdl, tin, tout,
+                 1 if est else 0, _brief(req), _brief(resp)))
             # 明细只留最近若干条：超量就按时间从旧到新裁掉，避免表无限增长
             n = conn.execute("SELECT COUNT(*) AS n FROM ai_calls").fetchone()["n"]
             if n > _AI_CALLS_KEEP:
@@ -266,6 +328,58 @@ def _resp_error(resp, code: int) -> str:
     except Exception:
         body = {}
     return str(body.get("error") or f"HTTP {code}")[:300]
+
+
+def _usage_from_body(resp):
+    """从非流式响应体里取 (model, prompt_tokens, completion_tokens)，取不到就给空值。"""
+    try:
+        body = resp.get_json(silent=True) or {}
+    except Exception:
+        return "", 0, 0
+    if not isinstance(body, dict):
+        return "", 0, 0
+    u = body.get("usage")
+    u = u if isinstance(u, dict) else {}
+    try:
+        tin = int(u.get("prompt_tokens") or 0)
+        tout = int(u.get("completion_tokens") or 0)
+    except (TypeError, ValueError):
+        tin = tout = 0
+    return str(body.get("model") or ""), tin, tout
+
+
+def _brief_request(body) -> str:
+    """请求摘要：优先取最后一条用户消息，否则给去掉 messages 的 JSON（参数类接口）"""
+    if not isinstance(body, dict):
+        return ""
+    msgs = body.get("messages")
+    if isinstance(msgs, list) and msgs and isinstance(msgs[-1], dict):
+        c = msgs[-1].get("content")
+        if isinstance(c, list):                      # 多模态：content 是分段数组
+            c = " ".join(str(p.get("text") or "") for p in c if isinstance(p, dict))
+        if c:
+            return str(c)
+    try:
+        return json.dumps({k: v for k, v in body.items() if k != "messages"}, ensure_ascii=False)
+    except Exception:
+        return ""
+
+
+def _brief_response(resp) -> str:
+    """响应摘要：优先取常见正文键，否则给整个 JSON"""
+    try:
+        b = resp.get_json(silent=True)
+    except Exception:
+        return ""
+    if not isinstance(b, dict):
+        return ""
+    for k in ("text", "summary", "message", "content", "sql", "name", "model"):
+        if b.get(k):
+            return str(b[k])
+    try:
+        return json.dumps(b, ensure_ascii=False)
+    except Exception:
+        return ""
 
 
 def _count_calls(module: str):
@@ -288,10 +402,30 @@ def _count_calls(module: str):
                 r = make_response(resp)
                 code = r.status_code
                 err = _resp_error(r, code) if code >= 400 else ""
+                model, tin, tout = _usage_from_body(r) if code < 400 else ("", 0, 0)
             except Exception:
-                code, err = 200, ""
+                code, err, model, tin, tout = 200, "", "", 0, 0
+            try:
+                req_body = request.get_json(silent=True)
+            except Exception:
+                req_body = None
+            est = False
+            if not (tin or tout) and code < 400:
+                # 响应体没给 usage：按请求体里的 messages 粗估输入（输出拿不到，记 0）
+                try:
+                    tin = _estimate_msgs((req_body or {}).get("messages"))
+                    est = True
+                except Exception:
+                    est = False
+            if not model:                # 响应体没带模型名时，用该模块配置里的模型
+                try:
+                    model = _sys_pick(_load_cfg(), module)[1] or ""
+                except Exception:
+                    model = ""
             if code != 400:              # 400 多为参数/配置问题，没真正发起调用，不计入
-                _log_ai_call(module, code < 400, int((time.time() - t0) * 1000), err)
+                _log_ai_call(module, code < 400, int((time.time() - t0) * 1000), err,
+                             model, tin, tout, est,
+                             req=_brief_request(req_body), resp=_brief_response(r))
             return resp
         return wrapper
     return deco
@@ -299,17 +433,20 @@ def _count_calls(module: str):
 
 def _usage_all() -> dict:
     """各模块的累计调用统计（没出现过的模块也补 0，便于前端直接渲染）"""
-    out = {m: {"ok": 0, "fail": 0, "last_at": "", "last_ms": 0, "last_error": ""} for m in _SYS_MODULES}
+    out = {m: {"ok": 0, "fail": 0, "last_at": "", "last_ms": 0, "last_error": "",
+               "tokens_in": 0, "tokens_out": 0} for m in _SYS_MODULES}
     try:
         conn = store_conn()
         try:
             for r in conn.execute(
-                    "SELECT module, ok, fail, last_at, last_ms, last_error FROM ai_usage"):
+                    "SELECT module, ok, fail, last_at, last_ms, last_error, "
+                    "tokens_in, tokens_out FROM ai_usage"):
                 if r["module"] in out:
                     out[r["module"]] = {
                         "ok": r["ok"] or 0, "fail": r["fail"] or 0,
                         "last_at": r["last_at"] or "", "last_ms": r["last_ms"] or 0,
                         "last_error": r["last_error"] or "",
+                        "tokens_in": r["tokens_in"] or 0, "tokens_out": r["tokens_out"] or 0,
                     }
         finally:
             conn.close()
@@ -505,24 +642,66 @@ def api_ai_usage_detail():
         limit = min(max(int(request.args.get("limit", 50)), 1), 200)
     except (TypeError, ValueError):
         limit = 50
-    days, calls = [], []
+    days, calls, tok_in, tok_out = [], [], 0, 0
     try:
         conn = store_conn()
         try:
             rows = conn.execute(
-                "SELECT day, SUM(ok) AS ok, COUNT(*) - SUM(ok) AS fail FROM ai_calls "
+                "SELECT day, SUM(ok) AS ok, COUNT(*) - SUM(ok) AS fail, "
+                "SUM(tokens_in) AS tin, SUM(tokens_out) AS tout FROM ai_calls "
                 "WHERE module=? GROUP BY day ORDER BY day DESC LIMIT 7", (module,)).fetchall()
-            days = [{"day": r["day"], "ok": r["ok"] or 0, "fail": r["fail"] or 0} for r in rows][::-1]
+            days = [{"day": r["day"], "ok": r["ok"] or 0, "fail": r["fail"] or 0,
+                     "tokens_in": r["tin"] or 0, "tokens_out": r["tout"] or 0}
+                    for r in rows][::-1]
             rows = conn.execute(
-                "SELECT ts, ok, ms, error FROM ai_calls WHERE module=? ORDER BY id DESC LIMIT ?",
-                (module, limit)).fetchall()
-            calls = [{"ts": r["ts"], "ok": bool(r["ok"]), "ms": r["ms"] or 0,
-                      "error": r["error"] or ""} for r in rows]
+                "SELECT id, ts, ok, ms, error, model, tokens_in, tokens_out, est FROM ai_calls "
+                "WHERE module=? ORDER BY id DESC LIMIT ?", (module, limit)).fetchall()
+            calls = [{"id": r["id"], "ts": r["ts"], "ok": bool(r["ok"]), "ms": r["ms"] or 0,
+                      "error": r["error"] or "", "model": r["model"] or "",
+                      "tokens_in": r["tokens_in"] or 0, "tokens_out": r["tokens_out"] or 0,
+                      "est": bool(r["est"])} for r in rows]
+            tot = conn.execute(
+                "SELECT COALESCE(SUM(tokens_in),0) AS tin, COALESCE(SUM(tokens_out),0) AS tout "
+                "FROM ai_calls WHERE module=?", (module,)).fetchone()
+            tok_in, tok_out = tot["tin"] or 0, tot["tout"] or 0
         finally:
             conn.close()
     except Exception as e:
         return jsonify({"error": f"读取明细失败：{e}"}), 500
-    return jsonify({"module": module, "days": days, "calls": calls})
+    return jsonify({"module": module, "days": days, "calls": calls,
+                    "tokens_in": tok_in, "tokens_out": tok_out})
+
+
+@bp.route("/api/ai/usage/call", methods=["GET"])
+def api_ai_usage_call():
+    """单条调用详情（含请求 / 响应摘要）：明细里点某一行时按需拉取
+
+    列表接口不返回正文，避免几十条记录一次把长文本都传下去。
+    """
+    try:
+        cid = int(request.args.get("id", 0))
+    except (TypeError, ValueError):
+        cid = 0
+    if not cid:
+        return jsonify({"error": "缺少 id"}), 400
+    try:
+        conn = store_conn()
+        try:
+            r = conn.execute(
+                "SELECT id, module, ok, ms, ts, error, model, tokens_in, tokens_out, est, "
+                "req, resp FROM ai_calls WHERE id=?", (cid,)).fetchone()
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({"error": f"读取详情失败：{e}"}), 500
+    if not r:
+        return jsonify({"error": "记录不存在（可能已被清理）"}), 404
+    return jsonify({"call": {
+        "id": r["id"], "module": r["module"], "ok": bool(r["ok"]), "ms": r["ms"] or 0,
+        "ts": r["ts"], "error": r["error"] or "", "model": r["model"] or "",
+        "tokens_in": r["tokens_in"] or 0, "tokens_out": r["tokens_out"] or 0,
+        "est": bool(r["est"]), "req": r["req"] or "", "resp": r["resp"] or "",
+    }})
 
 
 @bp.route("/api/ai/usage", methods=["DELETE"])
@@ -938,6 +1117,9 @@ def api_ai_chat():
                 % (root or "/", "；".join(names)))
     user_query = _last_user_text(msgs)   # 通知用的用户提问
     text_parts: List[str] = []           # 闭包共享：gen() 内的 append 会实时反映到这里
+    # 闭包共享：本次实际用到的模型与 token 用量（流式在末尾的 usage chunk 里返回；
+    # 带工具调用时会有多轮请求，按轮累加才是这次对话的总消耗）
+    usage_meta = {"model": model, "in": 0, "out": 0}
 
     def gen():
         from .agent import tools_for_perm, _run_tool_job, _parse_text_calls, _gate
@@ -1040,6 +1222,15 @@ def api_ai_chat():
                                 break
                             yield _sse({"error": emsg})
                             continue
+                        u = obj.get("usage")
+                        if isinstance(u, dict):          # 末尾的 usage chunk（此时 choices 通常为空）
+                            try:
+                                usage_meta["in"] += int(u.get("prompt_tokens") or 0)
+                                usage_meta["out"] += int(u.get("completion_tokens") or 0)
+                            except (TypeError, ValueError):
+                                pass
+                        if obj.get("model"):
+                            usage_meta["model"] = str(obj["model"])
                         choices = obj.get("choices") or []
                         if not choices:
                             continue
@@ -1143,7 +1334,13 @@ def api_ai_chat():
             stream_err = str(e)
             raise
         finally:
-            _log_ai_call(module, not stream_err, int((time.time() - t0) * 1000), stream_err)
+            if usage_meta["in"] or usage_meta["out"]:
+                tin, tout, est = usage_meta["in"], usage_meta["out"], False
+            else:                                    # 上游没给 usage：按字数兜底估算
+                tin, tout, est = _estimate_msgs(clean), _estimate_tokens("".join(text_parts)), True
+            _log_ai_call(module, not stream_err, int((time.time() - t0) * 1000), stream_err,
+                         usage_meta["model"], tin, tout, est,
+                         req=user_query, resp="".join(text_parts))
             reply = "".join(text_parts)
             _fire_notify_async("chat", user_query, reply)
 

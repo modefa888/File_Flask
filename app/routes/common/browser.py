@@ -173,7 +173,7 @@ def _ai_generate_files(brief, name):
 
     def _fail(msg):
         """统一失败出口：记一次失败调用再返回。"""
-        _log_ai_call("scaffold", False, int((time.time() - t0) * 1000), msg)
+        _log_ai_call("scaffold", False, int((time.time() - t0) * 1000), msg, model)
         return [], msg
 
     base = provider["base_url"].rstrip("/")
@@ -202,7 +202,15 @@ def _ai_generate_files(brief, name):
     if not files:
         return _fail("AI 没有返回可用的文件清单，请换个说法或换个模型")
 
-    _log_ai_call("scaffold", True, int((time.time() - t0) * 1000))
+    u = obj.get("usage") or {}
+    tin, tout, est = u.get("prompt_tokens") or 0, u.get("completion_tokens") or 0, False
+    if not (tin or tout):                            # 没给 usage 就按字数兜底估算
+        from ..ide.ai import _estimate_msgs, _estimate_tokens
+        tin = _estimate_msgs([{"role": "system", "content": scaffold.AI_SYS},
+                              {"role": "user", "content": user}])
+        tout, est = _estimate_tokens(text), True
+    _log_ai_call("scaffold", True, int((time.time() - t0) * 1000), "",
+                 str(obj.get("model") or model), tin, tout, est, req=user, resp=text)
     return files, ""
 
 

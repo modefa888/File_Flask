@@ -887,6 +887,19 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .sysai-call { border-bottom-color: #eeeeee; }
 :where(html.theme-light) .sysai-call-ts { color: #8a8a8a; }
 :where(html.theme-light) .sysai-call-r { color: #1a7f37; }
+:where(html.theme-light) .sysai-call-model { color: #5a6a7a; }
+:where(html.theme-light) .sysai-call-tok { color: #3f6a3f; }
+:where(html.theme-light) .sysai-call-hd { color: #999999; border-bottom-color: #dddddd; }
+:where(html.theme-light) .sysai-call.clickable:hover { background: #f6f8fa; }
+:where(html.theme-light) .sysai-call.sel { background: #eef4fb; }
+:where(html.theme-light) .sysai-pop { background: #ffffff; border-color: #dcdcdc; box-shadow: 0 6px 18px rgba(0, 0, 0, .12); }
+:where(html.theme-light) .sysai-pop-hd { color: #1f2328; }
+:where(html.theme-light) .sysai-pop-hd .bi { color: #005fb8; }
+:where(html.theme-light) .sysai-pop-kv { color: #3a3a3a; }
+:where(html.theme-light) .sysai-pop-kv b { color: #6b6b6b; }
+:where(html.theme-light) .sysai-pop-lb { color: #6b6b6b; }
+:where(html.theme-light) .sysai-pop-txt { background: #f7f8fa; border-color: #e0e0e0; color: #24292f; }
+:where(html.theme-light) .sysai-pop-none { color: #999999; }
 :where(html.theme-light) .sysai-call.err .sysai-call-r { color: #c0392b; }
 :where(html.theme-light) .sysai-call-err { color: #a8544a; }
 :where(html.theme-light) .sysai-mod-desc { color: #6b6b6b; }

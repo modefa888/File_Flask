@@ -38,6 +38,7 @@ from ...services.common.safety import check_command, is_delete_command
 from ...services.ide.web_search import search_web, format_results
 from ...services.common import undo
 from .ai import (_clean_content, _load_cfg, _sys_pick, _override_pick, _log_ai_call,
+                 _estimate_msgs, _estimate_tokens,
                  _open_stream, _sse, _inject_system_time, _sys_err_response,
                  _inject_web_search, _SKILL_PROMPTS, _is_retryable_status, _is_retryable_text,
                  _retry_wait, _RETRY_MAX, _last_user_text, _fire_notify_async)
@@ -764,8 +765,10 @@ def _stream_model(provider, model, convo):
     """调用模型（流式，带工具定义）：yield SSE 事件，返回 (文本, 工具调用列表)。"""
     base = provider["base_url"].rstrip("/")
     url = base if base.endswith("/chat/completions") else base + "/chat/completions"
-    payload = json.dumps({"model": model, "stream": True, "messages": convo,
-                          "tools": _TOOLS, "tool_choice": "auto"}).encode("utf-8")
+    body = {"model": model, "stream": True, "messages": convo,
+            "tools": _TOOLS, "tool_choice": "auto"}
+    payload = json.dumps(body).encode("utf-8")
+    u_in, u_out = 0, 0                    # 本轮请求的 token 用量，结束后交回外层统计
     req = urllib.request.Request(url, data=payload, method="POST", headers={
         "Content-Type": "application/json",
         "Authorization": "Bearer " + provider["api_key"],
@@ -838,6 +841,13 @@ def _stream_model(provider, model, convo):
                         break
                     yield _sse({"type": "error", "error": emsg})
                     continue
+                u = obj.get("usage")
+                if isinstance(u, dict):                  # 末尾的 usage chunk（choices 通常为空）
+                    try:
+                        u_in += int(u.get("prompt_tokens") or 0)
+                        u_out += int(u.get("completion_tokens") or 0)
+                    except (TypeError, ValueError):
+                        pass
                 choices = obj.get("choices") or []
                 if not choices:
                     continue
@@ -877,6 +887,9 @@ def _stream_model(provider, model, convo):
                         "error": "接口限流或连接中断，已自动重试 %d 次仍未成功：%s" % (_RETRY_MAX, broken)})
             return text, []
         break
+    if u_in or u_out:                        # 本轮 token 用量交给外层累加统计
+        yield _sse({"type": "usage", "model": model,
+                    "usage": {"prompt_tokens": u_in, "completion_tokens": u_out}})
     out = []
     for idx in sorted(calls):
         c = calls[idx]
@@ -1076,10 +1089,14 @@ def api_ai_agent():
               ",".join(skills) if isinstance(skills, list) else (skills or "-"), len(extra_prompts))
 
     user_query = _last_user_text(clean)
+    # 闭包共享：本次实际用到的模型与 token 用量（_stream_model 每轮 yield 一次 usage 事件）；
+    # texts 收集回复正文，供上游没给 usage 时按字数兜底估算
+    usage_meta = {"model": model, "in": 0, "out": 0, "texts": []}
+
     def gen():
         yield _sse({"type": "run", "run_id": run_id, "perm": perm, "model": model, "root": root})
         # 通知：外层包装，捕捉 delta 文本；异常也会触发
-        text_parts: List[str] = []
+        text_parts = usage_meta["texts"]       # 同一份列表：通知与用量估算共用
         inner = _run_agent(run_id, provider, model, root, perm, clean, skills, extra_prompts, extra_names)
         try:
             for chunk in inner:
@@ -1097,6 +1114,15 @@ def api_ai_agent():
                             t = obj.get("text")
                             if t:
                                 text_parts.append(t)
+                        elif obj.get("type") == "usage":
+                            uu = obj.get("usage") or {}
+                            try:
+                                usage_meta["in"] += int(uu.get("prompt_tokens") or 0)
+                                usage_meta["out"] += int(uu.get("completion_tokens") or 0)
+                            except (TypeError, ValueError):
+                                pass
+                            if obj.get("model"):
+                                usage_meta["model"] = str(obj["model"])
                 except Exception:
                     pass
                 yield chunk
@@ -1128,7 +1154,14 @@ def api_ai_agent():
             err = str(e)
             raise
         finally:
-            _log_ai_call("agent", not err, int((time.time() - t0) * 1000), err)
+            if usage_meta["in"] or usage_meta["out"]:
+                tin, tout, est = usage_meta["in"], usage_meta["out"], False
+            else:                                    # 上游没给 usage：按字数兜底估算
+                tin = _estimate_msgs(clean)
+                tout = _estimate_tokens("".join(usage_meta["texts"]))
+                est = True
+            _log_ai_call("agent", not err, int((time.time() - t0) * 1000), err, model,
+                         tin, tout, est, req=user_query, resp="".join(usage_meta["texts"]))
 
     return Response(_gen_counted(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

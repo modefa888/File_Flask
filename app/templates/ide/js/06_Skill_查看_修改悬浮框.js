@@ -467,6 +467,7 @@
     var el = document.getElementById("sysAiDetail");
     if (el) el.remove();
     sysAiDetailMod = "";
+    sysAiCloseCallDetail();        // 连同已展开的「单次调用详情」一起收起
   }
   async function sysAiToggleDetail(row) {
     var mod = row.dataset.modRow;
@@ -492,11 +493,20 @@
       box.querySelector(".sysai-detail-sub").textContent = "读取失败：" + (e.message || e);
     }
   }
+  /* token 数缩写：12345 → 12.3k */
+  function sysAiFmtTok(n) {
+    n = Number(n) || 0;
+    if (!n) return "0";
+    return n >= 10000 ? (n / 1000).toFixed(1) + "k" : String(n);
+  }
   function sysAiRenderDetail(box, d) {
     var days = d.days || [], calls = d.calls || [];
     var total = days.reduce(function (s, x) { return s + x.ok + x.fail; }, 0);
+    var tkAll = (d.tokens_in || 0) + (d.tokens_out || 0);
+    var hasEst = calls.some(function (c) { return c.est; });
     box.querySelector(".sysai-detail-sub").textContent =
-      days.length ? "最近 " + days.length + " 天共 " + total + " 次" : "暂无记录";
+      (days.length ? "最近 " + days.length + " 天共 " + total + " 次" : "暂无记录") +
+      (tkAll ? " · 累计 " + (hasEst ? "≈ " : "") + sysAiFmtTok(tkAll) + " tokens" : "");
     var max = Math.max.apply(null, [1].concat(days.map(function (x) { return x.ok + x.fail; })));
     var html = '<div class="sysai-days">' + (days.length ? days.map(function (x) {
       var oh = x.ok ? Math.max(Math.round(x.ok / max * 34), 2) : 0;
@@ -507,14 +517,99 @@
           (oh ? '<div class="sysai-day-ok" style="height:' + oh + 'px"></div>' : "") +
         '</div><div class="sysai-day-lb">' + esc(x.day.slice(5)) + "</div></div>";
     }).join("") : '<span class="sysai-detail-none">最近 7 天没有调用</span>') + "</div>";
-    html += '<div class="sysai-calls">' + (calls.length ? calls.map(function (c) {
-      return '<div class="sysai-call' + (c.ok ? "" : " err") + '">' +
+    html += '<div class="sysai-calls">' +
+      (calls.length ? '<div class="sysai-call sysai-call-hd">' +
+        '<span class="sysai-call-ts">时间</span>' +
+        '<span class="sysai-call-r">结果</span>' +
+        '<span class="sysai-call-ms">耗时</span>' +
+        '<span class="sysai-call-model">模型</span>' +
+        '<span class="sysai-call-tok">tokens</span>' +
+        '<span class="sysai-call-err">说明</span></div>' : "") +
+      (calls.length ? calls.map(function (c) {
+      var tk = (c.tokens_in || c.tokens_out)
+        ? (c.est ? "≈ " : "") + sysAiFmtTok(c.tokens_in) + " → " + sysAiFmtTok(c.tokens_out) : "-";
+      return '<div class="sysai-call' + (c.ok ? "" : " err") +
+        '" data-call-id="' + esc(c.id == null ? "" : c.id) + '" title="点击查看这次调用的详情">' +
         '<span class="sysai-call-ts">' + esc(c.ts) + "</span>" +
         '<span class="sysai-call-r">' + (c.ok ? "成功" : "失败") + "</span>" +
         '<span class="sysai-call-ms">' + (c.ms ? c.ms + " ms" : "-") + "</span>" +
+        '<span class="sysai-call-model" title="' + esc(c.model || "未记录") + '">' +
+          esc(c.model || "-") + "</span>" +
+        '<span class="sysai-call-tok" title="' + (c.est
+          ? "按字数估算（上游未返回用量）：输入 → 输出"
+          : "输入 → 输出 tokens") + '">' + esc(tk) + "</span>" +
         '<span class="sysai-call-err">' + esc(c.error || "") + "</span></div>";
     }).join("") : '<div class="sysai-detail-none">还没有调用记录</div>') + "</div>";
     box.insertAdjacentHTML("beforeend", html);
+    // 每行可点开：按 id 拉取该次调用的请求 / 响应摘要，就地弹一个悬浮框
+    box.querySelectorAll(".sysai-call[data-call-id]").forEach(function (row) {
+      if (!row.dataset.callId) return;
+      row.classList.add("clickable");
+      row.onclick = function () { sysAiToggleCallDetail(row); };
+    });
+  }
+  /* 点击某一行 → 该行下方就地弹出「这次调用的详情」（请求 / 响应摘要） */
+  var sysAiPopId = "";
+  function sysAiCloseCallDetail() {
+    var el = document.getElementById("sysAiCallPop");
+    if (el) el.remove();
+    sysAiPopId = "";
+    document.querySelectorAll(".sysai-call.sel").forEach(function (x) {
+      x.classList.remove("sel");
+    });
+  }
+  async function sysAiToggleCallDetail(row) {
+    var id = row.dataset.callId;
+    if (!id) return;
+    if (sysAiPopId === id) { sysAiCloseCallDetail(); return; }   // 再点一次收起
+    sysAiCloseCallDetail();
+    sysAiPopId = id;
+    row.classList.add("sel");
+    var pop = document.createElement("div");
+    pop.className = "sysai-pop";
+    pop.id = "sysAiCallPop";
+    pop.innerHTML = '<div class="sysai-pop-hd"><i class="bi bi-hourglass-split"></i>' +
+      "调用详情<span class=\"sysai-mods-sp\"></span>加载中…</div>";
+    row.after(pop);                       // 就地展开，跟着当前滚动位置
+    try {
+      var d = await (await fetch("/api/ai/usage/call?id=" + encodeURIComponent(id))).json();
+      if (d.error) throw new Error(d.error);
+      sysAiRenderCallPop(pop, d.call || {});
+    } catch (e) {
+      pop.innerHTML = '<div class="sysai-pop-hd"><i class="bi bi-exclamation-triangle"></i>' +
+        "读取失败：" + esc(e.message || e) +
+        '<span class="sysai-mods-sp"></span><button class="ai-set-btn sysai-pop-close">关闭</button></div>';
+      pop.querySelector(".sysai-pop-close").onclick = sysAiCloseCallDetail;
+    }
+  }
+  function sysAiRenderCallPop(pop, c) {
+    var tk = (c.tokens_in || c.tokens_out)
+      ? (c.est ? "≈ " : "") + sysAiFmtTok(c.tokens_in) + " → " + sysAiFmtTok(c.tokens_out) +
+        (c.est ? "（估算）" : "")
+      : "未记录";
+    var kvs = [
+      ["时间", esc(c.ts || "-")],
+      ["结果", c.ok ? "成功" : "失败"],
+      ["耗时", c.ms ? c.ms + " ms" : "-"],
+      ["模型", esc(c.model || "未记录")],
+      ["tokens", esc(tk)],
+    ];
+    if (c.error) kvs.push(["错误", esc(c.error)]);
+    pop.innerHTML =
+      '<div class="sysai-pop-hd"><i class="bi bi-info-circle"></i>' +
+        esc(SYS_MOD_TITLE[c.module] || c.module || "") + " · 调用详情" +
+        '<span class="sysai-mods-sp"></span>' +
+        '<button class="ai-set-btn sysai-pop-close">关闭</button></div>' +
+      '<div class="sysai-pop-meta">' + kvs.map(function (kv) {
+        return '<span class="sysai-pop-kv"><b>' + kv[0] + "</b>" + kv[1] + "</span>";
+      }).join("") + "</div>" +
+      '<div class="sysai-pop-sec"><div class="sysai-pop-lb">请求</div>' +
+        '<pre class="sysai-pop-txt">' +
+          (c.req ? esc(c.req) : '<span class="sysai-pop-none">未记录</span>') + "</pre></div>" +
+      '<div class="sysai-pop-sec"><div class="sysai-pop-lb">响应</div>' +
+        '<pre class="sysai-pop-txt">' +
+          (c.resp ? esc(c.resp) : '<span class="sysai-pop-none">未记录</span>') + "</pre></div>";
+    pop.querySelector(".sysai-pop-close").onclick = sysAiCloseCallDetail;
   }
   function sysAiBindModRows() {
     document.querySelectorAll(".sysai-mod[data-mod-row]").forEach(function (row) {
@@ -537,7 +632,10 @@
       }
       sp.textContent = d.fail ? "成功 " + d.ok + " · 失败 " + d.fail : "成功 " + d.ok;
       sp.className = "sysai-stat" + (d.fail ? " has-fail" : " ok");
+      const tk = (d.tokens_in || 0) + (d.tokens_out || 0);
       sp.title = "共 " + (d.ok + d.fail) + " 次" +
+        (tk ? "；累计 " + sysAiFmtTok(tk) + " tokens（输入 " + sysAiFmtTok(d.tokens_in) +
+              " / 输出 " + sysAiFmtTok(d.tokens_out) + "）" : "") +
         (d.last_at ? "；最近一次 " + d.last_at + (d.last_ms ? "（" + d.last_ms + " ms）" : "") : "") +
         (d.last_error ? "；最近错误：" + d.last_error : "");
     });

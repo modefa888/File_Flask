@@ -202,18 +202,27 @@ CREATE TABLE IF NOT EXISTS ai_usage (
     fail       INTEGER NOT NULL DEFAULT 0,
     last_at    TEXT DEFAULT '',
     last_ms    INTEGER DEFAULT 0,
-    last_error TEXT DEFAULT ''
+    last_error TEXT DEFAULT '',
+    tokens_in  INTEGER NOT NULL DEFAULT 0,
+    tokens_out INTEGER NOT NULL DEFAULT 0
 );
 
 -- 系统 AI 调用明细（最近的每一次调用一行，用于「按天」维度与调用记录查看）
+-- model / tokens_* 记录本次实际使用的模型与用量（上游没返回 usage 时为 0）
 CREATE TABLE IF NOT EXISTS ai_calls (
-    id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    module TEXT NOT NULL,
-    ok     INTEGER NOT NULL DEFAULT 1,
-    ms     INTEGER DEFAULT 0,
-    ts     TEXT NOT NULL DEFAULT '',
-    day    TEXT NOT NULL DEFAULT '',
-    error  TEXT DEFAULT ''
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    module     TEXT NOT NULL,
+    ok         INTEGER NOT NULL DEFAULT 1,
+    ms         INTEGER DEFAULT 0,
+    ts         TEXT NOT NULL DEFAULT '',
+    day        TEXT NOT NULL DEFAULT '',
+    error      TEXT DEFAULT '',
+    model      TEXT DEFAULT '',
+    tokens_in  INTEGER DEFAULT 0,
+    tokens_out INTEGER DEFAULT 0,
+    est        INTEGER DEFAULT 0,      -- 1 = 上游没返回 usage，用量是按字数估算的
+    req        TEXT DEFAULT '',        -- 本次请求摘要（提问 / 参数，截断存）
+    resp       TEXT DEFAULT ''         -- 本次响应摘要（回复 / 结果，截断存）
 );
 CREATE INDEX IF NOT EXISTS idx_ai_calls_mod ON ai_calls(module, id);
 CREATE INDEX IF NOT EXISTS idx_ai_calls_day ON ai_calls(module, day);
@@ -295,9 +304,34 @@ def init_store_db():
         conn = store_conn()
         try:
             conn.executescript(_SCHEMA)
+            _migrate_ai_columns(conn)          # 老库补上后加的 tokens / model 列
             conn.commit()
         finally:
             conn.close()
+
+
+def _migrate_ai_columns(conn):
+    """老库补列：ai_calls.model / tokens_in / tokens_out、ai_usage.tokens_in / tokens_out。
+
+    CREATE TABLE IF NOT EXISTS 对已存在的表不会补列，所以这里手工加；
+    SQLite 的 ADD COLUMN 没有 IF NOT EXISTS，先查 PRAGMA，缺了才加（故可反复执行）。
+    """
+    for table, col, decl in (
+        ("ai_calls", "model", "TEXT DEFAULT ''"),
+        ("ai_calls", "tokens_in", "INTEGER DEFAULT 0"),
+        ("ai_calls", "tokens_out", "INTEGER DEFAULT 0"),
+        ("ai_calls", "est", "INTEGER DEFAULT 0"),
+        ("ai_calls", "req", "TEXT DEFAULT ''"),
+        ("ai_calls", "resp", "TEXT DEFAULT ''"),
+        ("ai_usage", "tokens_in", "INTEGER DEFAULT 0"),
+        ("ai_usage", "tokens_out", "INTEGER DEFAULT 0"),
+    ):
+        try:
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}
+            if cols and col not in cols:
+                conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, col, decl))
+        except Exception as e:
+            _log.warning("给 %s 补列 %s 失败：%s", table, col, e)
 
 
 # 常驻连接：进程内一直持有（不做实际读写，只在建表后打开一次）。

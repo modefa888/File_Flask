@@ -63,6 +63,35 @@
 .sysai-call.err .sysai-call-r { color: #e08a8a; }
 .sysai-call-ms { flex: none; width: 62px; color: #777; }
 .sysai-call-err { flex: 1; min-width: 0; color: #c09090; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 本次使用的模型 / token 用量（输入 → 输出） */
+.sysai-call-model { flex: none; width: 132px; color: #8fa6b8; font-size: 11px; font-family: ui-monospace, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sysai-call-tok { flex: none; width: 96px; color: #8aa88a; font-size: 11px; text-align: right; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.sysai-call-hd { color: #777; border-bottom: 1px solid #333333; }
+.sysai-call-hd .sysai-call-r, .sysai-call-hd .sysai-call-ms { color: #777; }
+/* 点击明细行 → 就地弹开的「调用详情」（请求 / 响应摘要） */
+.sysai-call.clickable { cursor: pointer; }
+.sysai-call.clickable:hover { background: #2a2d30; }
+.sysai-call.sel { background: #2f3540; }
+.sysai-pop {
+  margin: 6px 0 10px; padding: 10px 12px; border-radius: 8px;
+  background: #202225; border: 1px solid #3a3f47;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
+}
+.sysai-pop-hd { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12.5px; color: #e6e6e6; }
+.sysai-pop-hd .bi { color: #4fc1ff; }
+.sysai-pop-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 10px; }
+.sysai-pop-kv { font-size: 11.5px; color: #c8c8c8; word-break: break-all; }
+.sysai-pop-kv b { margin-right: 5px; font-weight: 500; color: #8a8a8a; }
+.sysai-pop-sec { margin-top: 8px; }
+.sysai-pop-lb { margin-bottom: 4px; font-size: 11.5px; color: #8a8a8a; }
+.sysai-pop-txt {
+  margin: 0; padding: 8px 10px; max-height: 220px; overflow: auto;
+  background: #17181a; border: 1px solid #333333; border-radius: 6px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11.5px; line-height: 1.6; color: #d6d6d6;
+  white-space: pre-wrap; word-break: break-word;
+}
+.sysai-pop-none { color: #777777; }
 .sysai-mod-desc { margin-top: 2px; font-size: 11.5px; line-height: 1.55; color: #8a8a8a; }
 .sysai-mod code {
   flex: none; align-self: center; margin-left: 10px;

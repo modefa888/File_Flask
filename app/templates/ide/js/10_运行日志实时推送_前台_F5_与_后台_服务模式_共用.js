@@ -40,7 +40,8 @@
   function ensureLogTab(t) {
     let L = LOGS[t.id];
     if (!L) {
-      L = LOGS[t.id] = { name: t.name || "运行", buf: [], offset: 0, es: null, timer: null, done: false, promoted: false };
+      L = LOGS[t.id] = { name: t.name || "运行", buf: [], offset: 0, es: null, timer: null,
+                         done: false, promoted: false, target: t.target || "" };
       const el = document.createElement("button");
       el.className = "bp-tab bp-log-tab";
       el.dataset.task = t.id;
@@ -55,6 +56,7 @@
       $("bpLogTabs").style.display = "";                // 首个标签出现时显示容器
       L.el = el;
     }
+    if (t.target) L.target = t.target;                  // 供启动按钮判断「这个文件是否在跑」
     selectLogTab(t.id);
     return L;
   }
@@ -96,6 +98,7 @@
     }
     if (RUNBG.id === id && RUNBG.mode === "bg") bgReset();
     loadRunnerList({ silent: true });
+    syncRunButtons();
   }
 
   function closeLogTab(id) {
@@ -225,7 +228,25 @@
     clearTimeout(RUNBG.timer);
     if (RUNBG.es) { try { RUNBG.es.close(); } catch (e) { /* 忽略 */ } RUNBG.es = null; }
     bpKillMode();
+    syncRunButtons();
   }
+
+  /* 把「当前在跑哪些文件」推给启动按钮（01_ 文件里画 ▶ / ⏸）。
+     前台看 RUNBG，后台看未结束的日志标签 —— 两处都要带上原始文件路径。 */
+  function runningTargets() {
+    const map = {};
+    if (RUNBG.id && RUNBG.target) map[RUNBG.target] = RUNBG.id;
+    Object.keys(LOGS).forEach(id => {
+      const L = LOGS[id];
+      if (L && !L.done && L.target) map[L.target] = id;
+    });
+    return map;
+  }
+
+  function syncRunButtons() {
+    if (typeof window.setRunningTargets === "function") window.setRunningTargets(runningTargets());
+  }
+  window.syncRunButtons = syncRunButtons;              // 11_ 后台任务面板恢复任务后也要刷一次
 
   // F5 前台运行：输出走「输出」面板（会结束的脚本，打印完就退出）
   function startRunStream(d, target, mode, argsStr) {
@@ -233,6 +254,7 @@
     RUNBG.name = baseName(target); RUNBG.target = target;
     RUNBG.mode = mode; RUNBG.timeout = d.timeout || 0; RUNBG.args = argsStr || "";
     RUNBG.promoted = false;
+    syncRunButtons();                                  // 启动按钮变成 ⏸
     if (mode === "fg") {
       toggleBottom(true, "output");
       opLine("$ " + d.command + "    （工作目录：" + d.cwd + "）", "op-cmd");
@@ -243,7 +265,7 @@
     }
     // 后台运行：生成「任务名」日志标签并实时推送
     RUNBG.id = d.id; RUNBG.name = baseName(target);
-    ensureLogTab({ id: d.id, name: baseName(target) });
+    ensureLogTab({ id: d.id, name: baseName(target), target: target });
     logPush(d.id, "▶ 后台运行：" + baseName(target) + "（pid " + d.pid + "）· 点右上 ⊘ 可终止", "op-cmd");
     bpKillMode();
     streamLog(d.id);
@@ -301,10 +323,11 @@
     if (d.mode === "bg" && !RUNBG.promoted) {
       // 转后台（由用户点右上「↓」手动触发）：建日志标签接续跟踪，输出面板保留已打印内容
       RUNBG.promoted = true;
-      ensureLogTab({ id: RUNBG.id, name: RUNBG.name });
+      ensureLogTab({ id: RUNBG.id, name: RUNBG.name, target: RUNBG.target });
       logPush(RUNBG.id, "⏱ 已转为后台运行，后续日志请看「运行日志」标签", "op-head");
       streamLog(RUNBG.id);
       bpKillMode();                                    // 已转后台 → 收起「转后台」按钮
+      syncRunButtons();                                // 前台转后台，按钮保持 ⏸
     }
     if (d.done) {
       const okExit = d.exit_code === 0;

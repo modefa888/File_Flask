@@ -984,6 +984,8 @@
         else if (name === ".gitignore") setupGitignoreView(tab);
         else if (name.toLowerCase() === "requirements.txt") setupRequirementsView(tab);
         else if (name.toLowerCase() === "package.json") setupPackageJsonView(tab);
+        // 可运行文件（py / js / sh / rb …）：在「程序入口」那一行的行首加「▶ 启动」按钮
+        else if (typeof RUN_LABELS !== "undefined" && RUN_LABELS[ext]) setupRunButtonView(tab);
         // .env / .env.local / .env.example 等：可视化编辑浮框（setupEnvView 见 23_ 文件）
         else if (/^\.env(\.[A-Za-z0-9_-]+)?$/.test(name)) setupEnvView(tab);
         // 竞态防护：加载期间用户又点了其它文件（activate 过别的标签 / 又发起新打开），

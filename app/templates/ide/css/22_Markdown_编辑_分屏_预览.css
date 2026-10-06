@@ -87,6 +87,18 @@
   .cm-pip-ok { color: #6fcf8a; }
   .cm-pip-miss { color: #e0a06a; cursor: pointer; }
   .cm-pip-miss:hover { color: #f0b070; }
+  /* 启动按钮：可运行文件的「程序入口」行前（gutter），点它运行当前文件 */
+  .cm-run-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: #2f7d32; color: #ffffff; cursor: pointer;
+    font-size: 10px; line-height: 1; user-select: none;
+  }
+  .cm-run-btn:hover { background: #43a047; }
+  .cm-run-btn .bi { font-size: 11px; }
+  /* 运行中：图标变 ⏸，配色改成琥珀色以示区别 */
+  .cm-run-btn.running { background: #b7791f; }
+  .cm-run-btn.running:hover { background: #d69e2e; }
   .cm-pip-skip { color: #555; }
 
   /* .gitignore 选择器 */

@@ -73,6 +73,67 @@ _RUNNERS = {
 }
 
 
+# 项目级虚拟环境目录名（Python，按优先级）
+_PY_VENV_NAMES = (".venv", "venv", ".env", "env")
+
+
+def _ancestor_dirs(path: str, limit: int = 5):
+    """文件所在目录及其上若干层（遇到 .git 视为项目根、提前停止）。
+
+    用于「就近」查找项目自带的运行环境，避免向上无限找到用户家目录里的 .venv 误伤。
+    """
+    d = os.path.dirname(os.path.abspath(path))
+    out = []
+    for _ in range(limit):
+        out.append(d)
+        if os.path.isdir(os.path.join(d, ".git")):
+            break
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    return out
+
+
+def _py_venv_python(root: str) -> str:
+    """root 下的虚拟环境解释器路径（找不到返回空串）。"""
+    for name in _PY_VENV_NAMES:
+        for sub, leaf in (("bin", "python"), ("Scripts", "python.exe")):
+            p = os.path.join(root, name, sub, leaf)
+            if os.path.isfile(p):
+                return p
+    return ""
+
+
+def _project_runtime(target: str, exe: str):
+    """按语言解析「项目自带」的运行环境，返回 (exe_path, path_prepend, note)。
+
+    exe_path     None 表示沿用全局解释器；
+    path_prepend 需要前置到子进程 PATH 的目录（可为空串）；
+    note         给日志的一行说明（可为空串）。
+
+    - Python：项目里有 .venv / venv 就改用它的解释器。这是最容易踩的坑 ——
+      依赖明明是用 venv 里的 pip 装的，运行时却拿系统 python，于是 ModuleNotFoundError；
+    - Node  ：把 node_modules/.bin 前置到 PATH，nodemon / vite / tsx 这类本地 CLI 才找得到；
+    - PHP   ：vendor/bin 同理。
+    """
+    for d in _ancestor_dirs(target):
+        if exe in ("python3", "python"):
+            py = _py_venv_python(d)
+            if py:
+                venv_name = os.path.basename(os.path.dirname(os.path.dirname(py)))
+                return py, os.path.dirname(py), f"{venv_name}（项目虚拟环境）"
+        elif exe == "node":
+            nm = os.path.join(d, "node_modules", ".bin")
+            if os.path.isdir(nm):
+                return None, nm, "node_modules/.bin（项目依赖）"
+        elif exe == "php":
+            vb = os.path.join(d, "vendor", "bin")
+            if os.path.isdir(vb):
+                return None, vb, "vendor/bin（项目依赖）"
+    return None, "", ""
+
+
 def _fail(msg, code=400):
     return jsonify({"error": msg}), code
 
@@ -544,10 +605,17 @@ def _ensure_loaded() -> None:
         _persist()
 
 
-def _spawn_task(cmd, cwd, target, exe, raw_args, mode="bg", timeout=None):
-    """启动进程并注册任务：成功返回 (task, None)，失败返回 (None, 错误响应)。"""
+def _spawn_task(cmd, cwd, target, exe, raw_args, mode="bg", timeout=None,
+                path_prepend="", env_note=""):
+    """启动进程并注册任务：成功返回 (task, None)，失败返回 (None, 错误响应)。
+
+    path_prepend / env_note 来自 _project_runtime：优先使用项目自带的运行环境。
+    """
     from ...services.ide import envprobe
     env = envprobe.apply_custom_env(os.environ.copy())
+    # 项目级目录（venv/bin、node_modules/.bin…）放在最前面，同名命令优先命中项目里的
+    if path_prepend:
+        env["PATH"] = path_prepend + os.pathsep + env.get("PATH", "")
     env["PYTHONUNBUFFERED"] = "1"                 # Python 输出不缓冲，日志才能实时看到
     env["FORCE_COLOR"] = "0"
 
@@ -569,6 +637,8 @@ def _spawn_task(cmd, cwd, target, exe, raw_args, mode="bg", timeout=None):
     task.proc = proc
     short = " ".join([os.path.basename(exe), os.path.basename(target)] + raw_args)
     task.add(("▶ 后台运行：" if mode == "bg" else "$ ") + short, "head")
+    if env_note:
+        task.add(f"  使用 {env_note}", "dim")
     task.add(f"  pid={proc.pid} · cwd={cwd}", "dim")
     with _LOCK:
         _TASKS[tid] = task
@@ -790,6 +860,12 @@ def api_run():
     if not exe_path:
         return _fail(f"未安装 {label}（找不到命令 {exe}）")
 
+    # 项目自带的运行环境再优先一层：Python 用项目的 .venv、Node 前置 node_modules/.bin 等。
+    # 少了这一步，最典型的症状就是「依赖装在 venv 里，运行却报 ModuleNotFoundError」。
+    proj_exe, path_prepend, env_note = _project_runtime(target, exe)
+    if proj_exe:
+        exe_path = proj_exe
+
     default_timeout, max_timeout = _timeout_limits()
     try:
         timeout = int(data.get("timeout") or default_timeout)
@@ -813,7 +889,8 @@ def api_run():
 
     # 后台运行：常驻进程，不超时、可随时终止，关页面 / 重启服务都继续跑
     if background:
-        task, err = _spawn_task(cmd, cwd, target, exe, raw_args, mode="bg")
+        task, err = _spawn_task(cmd, cwd, target, exe, raw_args, mode="bg",
+                                path_prepend=path_prepend, env_note=env_note)
         if err:
             return err
         return jsonify({
@@ -822,7 +899,8 @@ def api_run():
         })
 
     # 前台运行：立即返回任务 id，日志实时推送；超时按 config.RUN_TIMEOUT_ACTION 处理
-    task, err = _spawn_task(cmd, cwd, target, exe, raw_args, mode="fg", timeout=timeout)
+    task, err = _spawn_task(cmd, cwd, target, exe, raw_args, mode="fg", timeout=timeout,
+                            path_prepend=path_prepend, env_note=env_note)
     if err:
         return err
     return jsonify({

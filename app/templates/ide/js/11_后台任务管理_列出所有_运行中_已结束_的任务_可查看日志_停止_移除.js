@@ -92,6 +92,7 @@
     RUNBG.id = t.id; RUNBG.name = t.name; RUNBG.target = t.target;
     RUNBG.mode = t.mode || "bg";
     bpKillMode();
+    if (window.syncRunButtons) window.syncRunButtons();  // 启动按钮跟着变 ⏸
     loadRunnerList({ silent: true });
   }
 

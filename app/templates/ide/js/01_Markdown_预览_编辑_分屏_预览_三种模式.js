@@ -575,6 +575,94 @@
     check();
   }
 
+  /* 启动按钮：在「程序入口」那一行的行号「前面」放 ▶ / ⏸，点它运行或停止当前文件。
+     入口按各语言常见写法识别；识别不到就不标 —— 宁可不显，也不标错行。 */
+  const RUN_BTN_TABS = [];          // 已挂启动按钮的标签
+  let RUNNING_TASKS = {};           // target → taskId，由 10_ 运行模块同步过来
+
+  // 运行状态只有 10_ 运行模块知道（RUNBG / LOGS），这里只负责画：它推送状态，按钮跟着变
+  window.setRunningTargets = function (map) {
+    RUNNING_TASKS = map || {};
+    RUN_BTN_TABS.forEach(t => { if (t.runBtnMark) t.runBtnMark(); });
+  };
+
+  function setupRunButtonView(tab) {
+    if (tab.runBtnReady) return;                 // 每个标签只挂一次
+    tab.runBtnReady = true;
+    RUN_BTN_TABS.push(tab);
+
+    tab.cm.setOption("gutters", ["run-btn-gutter", "CodeMirror-linenumbers"]);   // ▶ 在行号前面
+    tab.cm.refresh();
+
+    const ext = getExt(tab.displayPath || tab.path);
+    const PATTERNS = {
+      py: [/^if\s+__name__\s*==\s*['"]__main__['"]\s*:/, /\.run\s*\(/, /\.serve_forever\s*\(/],
+      js: [/\.listen\s*\(/, /createServer\s*\(/, /\.serve\s*\(/],
+      mjs: [/\.listen\s*\(/, /createServer\s*\(/],
+      cjs: [/\.listen\s*\(/, /createServer\s*\(/],
+      rb: [/^if\s+__FILE__\s*==\s*\$0/, /\.run\b/],
+      php: [/^<\?php/, /->run\s*\(/],
+      sh: [/^#!\s*\/bin\//],
+      bash: [/^#!\s*\/bin\//],
+      r: [/^#!/],
+      pl: [/use\s+strict/],
+      lua: [/io\.read\s*\(/],
+    };
+    const pats = PATTERNS[ext] || [];
+
+    function findEntry() {
+      if (!pats.length || !tab.cm) return -1;
+      const lines = tab.cm.getValue().split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trim();
+        if (!t) continue;
+        for (let k = 0; k < pats.length; k++) {
+          if (pats[k].test(t)) return i;
+        }
+      }
+      return -1;
+    }
+
+    function mark() {
+      if (!tab.cm) return;
+      const last = tab.cm.lineCount();
+      for (let i = 0; i < last; i++) tab.cm.setGutterMarker(i, "run-btn-gutter", null);
+      const line = findEntry();
+      if (line < 0) return;
+      const target = tab.displayPath || tab.path;
+      const running = !!RUNNING_TASKS[target];
+      const label = (RUN_LABELS[ext] || ext) + " " + baseName(target);
+      const el = document.createElement("div");
+      el.className = "cm-run-btn" + (running ? " running" : "");
+      el.title = running ? "停止：" + label + "（正在运行）" : "启动：" + label;
+      el.innerHTML = '<i class="bi ' + (running ? "bi-pause-fill" : "bi-play-fill") + '"></i>';
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const tid = RUNNING_TASKS[target];
+        if (tid) {                                // 运行中：再点一下 = 停止
+          fetch("/api/run/stop", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: tid })
+          }).then(r => r.json()).then(d => {
+            if (d.error) toast("停止失败：" + d.error, "err");
+            else toast("已停止运行", "ok");
+          }).catch(err => toast("停止失败：" + (err.message || err), "err"));
+          return;
+        }
+        if (active !== tab) activate(tab);        // runCurrentFile 用的是 active，先切过来
+        runCurrentFile();
+      });
+      tab.cm.setGutterMarker(line, "run-btn-gutter", el);
+    }
+    tab.runBtnMark = mark;
+
+    mark();
+    tab.cm.on("change", () => {
+      if (tab.runTimer) clearTimeout(tab.runTimer);
+      tab.runTimer = setTimeout(mark, 400);       // 行号会随编辑变化，稍后重扫
+    });
+  }
+
   // 解析 .gitignore 内容为归一化规则列表（去掉注释 / 空行 / 前后斜杠 / 取反规则）
   function parseGitignoreRules(text) {
     return (text || "").split(/\r?\n/).map(l => l.trim())

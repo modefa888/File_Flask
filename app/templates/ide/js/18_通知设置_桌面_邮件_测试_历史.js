@@ -563,6 +563,11 @@
 
   async function notifySave() {
     const body = notifyReadForm();
+    // SMTP 授权码 / Telegram Bot Token 传输加密（见 js/24_敏感字段传输加密.js）
+    if (window.TP) {
+      if (body.smtp && body.smtp.password) body.smtp.password = window.TP.encrypt(body.smtp.password);
+      if (body.telegram && body.telegram.bot_token) body.telegram.bot_token = window.TP.encrypt(body.telegram.bot_token);
+    }
     try {
       const r = await fetch("/api/ai/notify", {
         method: "POST", headers: { "Content-Type": "application/json" },

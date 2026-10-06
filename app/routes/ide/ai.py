@@ -28,6 +28,7 @@ import urllib.request
 from flask import Blueprint, request, jsonify, Response
 
 from ... import config
+from ...services.common import secret, transport
 from ...services.common.store_db import (
     store_conn, store_tx, flatten_cfg, read_json, get_meta, set_meta,
     kv_get, kv_delete, finalize_kv_migration,
@@ -111,8 +112,12 @@ _MAX_IMAGE_PARTS = 8                  # 单次请求最多图片部件数
 
 
 def _load_cfg() -> dict:
-    """读取 AI 接口配置（接口一行一个、模型一行一个、激活项一行）并做规范化。"""
+    """读取 AI 接口配置（接口一行一个、模型一行一个、激活项一行）并做规范化。
+
+    api_key 以密文落库，这里解密后使用；历史明文 key 读完顺手加密落库。
+    """
     providers, active = [], {}
+    need_rewrite_key = False
     try:
         conn = store_conn()
         try:
@@ -121,9 +126,12 @@ def _load_cfg() -> dict:
                 models_by_pid.setdefault(r["provider_id"], []).append(r["name"])
             for r in conn.execute(
                     "SELECT id, name, base_url, api_key FROM ai_providers ORDER BY seq ASC"):
+                plain_key, need_rewrite = secret.decrypt_ex(r["api_key"] or "")
+                if need_rewrite:
+                    need_rewrite_key = True
                 providers.append({
                     "id": r["id"], "name": r["name"], "base_url": r["base_url"],
-                    "api_key": r["api_key"], "models": models_by_pid.get(r["id"], []),
+                    "api_key": plain_key, "models": models_by_pid.get(r["id"], []),
                 })
             row = conn.execute("SELECT provider, model FROM ai_active WHERE id=1").fetchone()
             if row:
@@ -153,7 +161,13 @@ def _load_cfg() -> dict:
             "models": models,
         })
     active = _resolve_active(clean, active)
-    return {"providers": clean, "active": active}
+    cfg = {"providers": clean, "active": active}
+    if need_rewrite_key:
+        try:
+            _save_cfg(cfg)      # 历史明文 / 旧密钥：用当前密钥重写
+        except Exception:
+            pass
+    return cfg
 
 
 def _resolve_active(providers, active):
@@ -187,7 +201,7 @@ def _save_cfg(cfg: dict) -> None:
             conn.execute(
                 "INSERT INTO ai_providers (seq, id, name, base_url, api_key) VALUES (?,?,?,?,?)",
                 (i, pid, str(p.get("name") or ""), str(p.get("base_url") or ""),
-                 str(p.get("api_key") or "")))
+                 secret.encrypt(str(p.get("api_key") or ""))))
             for m in (p.get("models") or []):
                 m = str(m).strip()
                 if m:
@@ -252,11 +266,8 @@ _migrate_ai_cfg()
 
 
 def _mask_key(key: str) -> str:
-    if not key:
-        return ""
-    if len(key) <= 8:
-        return key[:2] + "****"
-    return key[:4] + "****" + key[-4:]
+    """脱敏返回前端：只保留前 4 位，其余用 ****** 覆盖。"""
+    return secret.mask(key)
 
 
 @bp.route("/api/ai/config", methods=["GET"])
@@ -294,7 +305,8 @@ def api_ai_config_set():
                 models = [str(m).strip() for m in models if str(m).strip()]
                 name = str(p.get("name") or "").strip() or "接口 " + str(len(clean) + 1)
                 base_url = str(p.get("base_url") or "").strip()
-                key = str(p.get("api_key") or "").strip()
+                # 前端以 RSA 密文提交（tp1: 前缀），这里先解出明文
+                key = transport.unwrap(str(p.get("api_key") or "")).strip()
                 if not key:                                   # 留空 → 沿用该 id 旧 key
                     key = old_keys.get(pid, "")
                 # 完全空白的卡片（刚点添加还没填）直接跳过；填了一半的才报错

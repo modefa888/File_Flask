@@ -18,6 +18,7 @@ from flask import Blueprint, request, jsonify
 
 from ... import config
 from ...log import get_logger
+from ...services.common import secret, transport
 from ...services.common.store_db import store_conn, store_tx, migrate_legacy_dict
 
 
@@ -29,7 +30,7 @@ _MAX_DIFF_BYTES = 512 * 1024
 
 
 def _load_git_creds():
-    """Git 认证信息（一行一个字段）。"""
+    """Git 认证信息（一行一个字段；token 以密文落库，这里解密后返回）。"""
     out = {}
     try:
         conn = store_conn()
@@ -39,24 +40,39 @@ def _load_git_creds():
         finally:
             conn.close()
     except Exception:
-        pass
+        return {}
+    raw_token = out.get("token")
+    if raw_token:
+        plain, need_rewrite = secret.decrypt_ex(raw_token)
+        out["token"] = plain
+        if need_rewrite:
+            try:
+                _save_git_creds(out)      # 历史明文 / 旧密钥：顺手用当前密钥重写
+            except Exception:
+                pass
     return out
 
 
 def _save_git_creds(creds):
-    """整表覆盖写入（一行一个字段）。"""
+    """整表覆盖写入（token 加密后落库，一行一个字段）。"""
     creds = creds if isinstance(creds, dict) else {}
     with store_tx() as conn:
         conn.execute("DELETE FROM git_creds")
         for k, v in creds.items():
-            conn.execute("INSERT INTO git_creds (name, value) VALUES (?,?)", (str(k), str(v)))
+            value = str(v)
+            if k == "token" and value:
+                value = secret.encrypt(value)
+            conn.execute("INSERT INTO git_creds (name, value) VALUES (?,?)", (str(k), value))
 
 
 def _import_git_creds(creds) -> None:
     with store_tx() as conn:
         conn.execute("DELETE FROM git_creds")
         for k, v in (creds or {}).items():
-            conn.execute("INSERT INTO git_creds (name, value) VALUES (?,?)", (str(k), str(v)))
+            value = str(v)
+            if k == "token" and value:
+                value = secret.encrypt(value)
+            conn.execute("INSERT INTO git_creds (name, value) VALUES (?,?)", (str(k), value))
 
 
 # 旧版 .file_manager_git_credentials.json（或上一版 kv 键）一次性导入
@@ -65,11 +81,8 @@ migrate_legacy_dict("table_migrated:git_creds", "git_creds",
 
 
 def _mask_token(token):
-    if not token:
-        return ""
-    if len(token) <= 8:
-        return "*" * len(token)
-    return token[:4] + "*" * (len(token) - 8) + token[-4:]
+    """脱敏返回前端：只保留前 4 位，其余用 ****** 覆盖。"""
+    return secret.mask(token)
 
 
 def _auth_remote_url(url, creds):
@@ -878,7 +891,8 @@ def api_git_credentials_post():
     if cred_type == "https_token":
         username = (data.get("username") or "").strip()
         host = (data.get("host") or "").strip()
-        token = (data.get("token") or "").strip()
+        # 前端以 RSA 密文提交（tp1: 前缀），这里先解出明文
+        token = transport.unwrap(data.get("token") or "").strip()
         if username:
             creds["username"] = username
         else:

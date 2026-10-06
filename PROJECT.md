@@ -211,6 +211,12 @@ Client ◀─响应─
 `app/config.py` 集中管理：
 
 - **服务**：`HOST / PORT / DEBUG / SECRET_KEY`
+- **凭据加密盐**：`SECRET_SALT`（Git Token / AI API Key / SMTP 授权码 / Telegram Bot Token
+  落库前用它派生加密密钥；留空则回退到 `data/.file_manager_secret_key` 本地随机密钥。
+  换盐会导致已存凭据无法解密，需在界面上重新填写）
+- **传输加密**：IDE 页面渲染时注入 RSA 公钥（密钥对见 `data/.file_manager_transport_key.pem`），
+  前端用纯 JS RSA-OAEP 加密后提交（`tp1:` 前缀），后端解密再按存储密钥加密落库；
+  未安装 `cryptography` 时自动降级为明文传输，功能不受影响
 - **默认路径**：`DEFAULT_START_PATH`（首次启动默认起始目录）
 - **认证**：默认 `admin / admin123`
 - **执行权限**：`ENABLE_EXEC`（关闭后 `term` 与 Agent 的 `run_command` 都禁用）

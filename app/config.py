@@ -45,6 +45,13 @@ DEBUG = _env_bool("DEBUG", False)
 HOST = _env_str("HOST", "0.0.0.0")
 PORT = _env_int("PORT", 5001)
 
+# ===== 凭据加密盐 =====
+# Git Token / AI API Key / SMTP 授权码 / Telegram Bot Token 等落库前一律加密保存，
+# 这里配置派生加密密钥（PBKDF2-HMAC-SHA256）所用的盐。
+# 留空则回退到 data/.file_manager_secret_key 的本地随机密钥；
+# 更换盐会使已保存的凭据无法解密（需要在界面上重新填写）。
+SECRET_SALT = _env_str("SECRET_SALT", "")
+
 # 默认起始路径
 _DEFAULT_START = os.path.sep if os.name != "nt" else os.environ.get("SystemDrive", "C:") + "\\"
 DEFAULT_START_PATH = _env_str("DEFAULT_START_PATH", _DEFAULT_START)

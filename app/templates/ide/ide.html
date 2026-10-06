@@ -120,6 +120,11 @@ try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'li
 <script src="/static/vendor/codemirror/addon/edit/closebrackets.min.js"></script>
 <script src="/static/vendor/codemirror/addon/search/searchcursor.min.js"></script>
 <script src="/static/vendor/codemirror/addon/search/search.min.js"></script>
+{# 敏感字段传输加密：注入 RSA 公钥 + 纯 JS 加密工具（供各提交处调用 window.TP） #}
+<script>window.__tpPub = {{ (tp_pub or {'enabled': false})|tojson }};</script>
+<script>
+{% include 'ide/js/24_敏感字段传输加密.js' %}
+</script>
 <script>
 {% include 'ide/js/00_preamble.js' %}
 {% include 'ide/js/01_Markdown_预览_编辑_分屏_预览_三种模式.js' %}

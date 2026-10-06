@@ -544,7 +544,8 @@
           type: typeEl.value,
           username: usernameEl.value.trim(),
           host: hostEl.value.trim(),
-          token: tokenEl.value.trim()
+          // Token 传输加密（见 js/24_敏感字段传输加密.js）；未启用时 TP.encrypt 原样返回
+          token: window.TP ? window.TP.encrypt(tokenEl.value.trim()) : tokenEl.value.trim()
         };
         const d = await fetch("/api/git/credentials", {
           method: "POST", headers: { "Content-Type": "application/json" },

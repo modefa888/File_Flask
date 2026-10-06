@@ -400,7 +400,9 @@
       try {
         const r = await fetch("/api/ai/config", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ providers: aiCollectProviders() }),
+          // api_key 传输加密（见 js/24_敏感字段传输加密.js）
+          body: JSON.stringify({ providers: aiCollectProviders().map(p => ({
+            ...p, api_key: window.TP ? window.TP.encrypt(p.api_key) : p.api_key })) }),
         });
         const d = await r.json();
         if (d.error) { tip.textContent = d.error; return; }

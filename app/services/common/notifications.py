@@ -50,6 +50,7 @@ from email.utils import formataddr, formatdate, make_msgid
 from typing import Any, Dict, List, Optional, Tuple
 
 from app import config
+from app.services.common import secret, transport
 from app.services.common.store_db import (
     store_conn, store_tx, migrate_json_once, flatten_cfg, unflatten_cfg,
 )
@@ -144,8 +145,16 @@ def _merge(base: dict, patch: dict, key: str) -> None:
         base.setdefault(key, {}).update(patch[key])
 
 
+# 通知配置里需要加密落库的字段（分组, 字段）
+_SECRET_FIELDS = (("smtp", "password"), ("telegram", "bot_token"))
+
+
 def _read_notify_cfg() -> Dict[str, Any]:
-    """通知配置：一行一个配置项（key 为点号路径，如 smtp.host），读取时还原成嵌套结构。"""
+    """通知配置：一行一个配置项（key 为点号路径，如 smtp.host），读取时还原成嵌套结构。
+
+    smtp.password / telegram.bot_token 以密文落库，这里解密；历史明文或旧密钥
+    会在本次读完后顺手用当前密钥重写。
+    """
     try:
         conn = store_conn()
         try:
@@ -154,12 +163,30 @@ def _read_notify_cfg() -> Dict[str, Any]:
             conn.close()
     except Exception:
         return {}
-    return unflatten_cfg(rows)
+    data = unflatten_cfg(rows)
+    need_rewrite = False
+    for section, field in _SECRET_FIELDS:
+        block = data.get(section)
+        if isinstance(block, dict) and block.get(field):
+            plain, rewrite = secret.decrypt_ex(block[field])
+            block[field] = plain
+            need_rewrite = need_rewrite or rewrite
+    if need_rewrite:
+        try:
+            _write_notify_cfg(data)
+        except Exception:
+            pass
+    return data
 
 
 def _write_notify_cfg(cfg: Dict[str, Any]) -> None:
-    """整表覆盖写入通知配置（嵌套结构展平成一行一项）。"""
-    rows = flatten_cfg(cfg or {})
+    """整表覆盖写入通知配置（嵌套结构展平成一行一项；敏感字段加密后落库）。"""
+    data = json.loads(json.dumps(cfg or {}))      # 深拷贝，避免改动调用方对象
+    for section, field in _SECRET_FIELDS:
+        block = data.get(section)
+        if isinstance(block, dict) and block.get(field):
+            block[field] = secret.encrypt(block[field])
+    rows = flatten_cfg(data)
     with store_tx() as conn:
         conn.execute("DELETE FROM notify_cfg")
         for k, v in rows.items():
@@ -180,27 +207,24 @@ def sanitize_notify_cfg(cfg: Optional[dict] = None) -> Dict[str, Any]:
     c = dict(cfg if cfg is not None else _read_cfg())
     smtp = dict(c.get("smtp") or {})
     pw = str(smtp.get("password") or "")
-    if pw:
-        # 真实密码不回传；只保留"已保存"标志
-        smtp["password"] = ""
-        smtp["password_set"] = True
-    else:
-        smtp["password"] = ""
-        smtp["password_set"] = False
+    # 真实值不回传；只给"前 4 位 + ******"的脱敏形式 + 已保存标志
+    smtp["password_set"] = bool(pw)
+    smtp["password"] = secret.mask(pw)
     c["smtp"] = smtp
 
     tg = dict(c.get("telegram") or {})
     tk = str(tg.get("bot_token") or "")
-    if tk:
-        tg["bot_token"] = ""
-        tg["token_set"] = True
-    else:
-        tg["bot_token"] = ""
-        tg["token_set"] = False
+    tg["token_set"] = bool(tk)
+    tg["bot_token"] = secret.mask(tk)
     tg["api_base"] = str(tg.get("api_base") or "https://api.telegram.org")
     tg["proxy"] = str(tg.get("proxy") or "").strip()
     c["telegram"] = tg
     return c
+
+
+def _is_masked_secret(value: str) -> bool:
+    """判断是否为回传的脱敏值（旧格式 •••••abc / 新格式 abcd******）→ 视为「未修改」。"""
+    return value.startswith("•") or "******" in value
 
 
 def save_notify_cfg(user_cfg: dict) -> Dict[str, Any]:
@@ -235,19 +259,18 @@ def save_notify_cfg(user_cfg: dict) -> Dict[str, Any]:
     new["template_body"] = (str(new.get("template_body") or "").strip()
                             or DEFAULT_NOTIFY_CFG["template_body"])
 
-    # 密码合并：只有当用户真的输入了新密码时才覆盖
-    incoming_pw = str((user_cfg.get("smtp") or {}).get("password") or "").strip()
-    if not incoming_pw:
-        new["smtp"]["password"] = disk.get("smtp", {}).get("password", "")
-    elif len(incoming_pw) > 3 and incoming_pw.startswith("•"):
-        # 前端回传的脱敏值 → 保留旧值
+    # 密码合并：只有用户真的输入了新密码才覆盖；空值 / 脱敏回传一律保留旧值
+    incoming_pw = transport.unwrap(
+        str((user_cfg.get("smtp") or {}).get("password") or "")).strip()
+    if not incoming_pw or _is_masked_secret(incoming_pw):
         new["smtp"]["password"] = disk.get("smtp", {}).get("password", "")
     else:
         new["smtp"]["password"] = incoming_pw
 
-    # Telegram Bot Token 合并：规则与 SMTP 密码一致（空 / 脱敏值 → 保留旧值）
-    incoming_tk = str((user_cfg.get("telegram") or {}).get("bot_token") or "").strip()
-    if not incoming_tk or (len(incoming_tk) > 3 and incoming_tk.startswith("•")):
+    # Telegram Bot Token 合并：规则与 SMTP 密码一致
+    incoming_tk = transport.unwrap(
+        str((user_cfg.get("telegram") or {}).get("bot_token") or "")).strip()
+    if not incoming_tk or _is_masked_secret(incoming_tk):
         new["telegram"]["bot_token"] = disk.get("telegram", {}).get("bot_token", "")
     else:
         new["telegram"]["bot_token"] = incoming_tk

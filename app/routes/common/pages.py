@@ -4,6 +4,7 @@ import re
 from flask import Blueprint, make_response, render_template, request
 
 from ...log import get_logger
+from ...services.common import transport
 
 
 _log = get_logger()
@@ -33,8 +34,8 @@ def index():
     return _render_page(template)
 
 
-def _render_page(template):
-    resp = make_response(render_template(template))
+def _render_page(template, **ctx):
+    resp = make_response(render_template(template, **ctx))
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'
@@ -60,4 +61,5 @@ def desktop_entry():
 @bp.route("/ide")
 def ide_entry():
     _log.info("GET /ide path=%s", request.args.get("path", ""))
-    return _render_page("ide/ide.html")
+    # 注入传输加密公钥：前端提交 Token / API Key 前用它加密（见 services/common/transport.py）
+    return _render_page("ide/ide.html", tp_pub=transport.public_key_payload())

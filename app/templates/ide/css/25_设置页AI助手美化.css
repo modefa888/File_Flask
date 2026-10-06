@@ -38,7 +38,9 @@
   font-size: 11px; color: #777;
 }
 .sysai-stat.ok { color: #7fc98a; }
-.sysai-stat.has-fail { color: #e08a8a; }
+.sysai-stat.has-fail { color: #8a8a8a; }        /* 分隔符用中性色，成败各自着色 */
+.sysai-stat .sysai-ok { color: #7fc98a; }
+.sysai-stat .sysai-bad { color: #e08a8a; }
 /* 点击模块行展开的调用明细 */
 .sysai-mod.clickable { cursor: pointer; }
 .sysai-mod.clickable:hover { background: rgba(255, 255, 255, .022); }
@@ -62,7 +64,9 @@
 .sysai-call-r { flex: none; width: 30px; color: #7fc98a; }
 .sysai-call.err .sysai-call-r { color: #e08a8a; }
 .sysai-call-ms { flex: none; width: 62px; color: #777; }
-.sysai-call-err { flex: 1; min-width: 0; color: #c09090; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sysai-call-err { flex: 1; min-width: 0; color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 失败行的说明就是错误原因 → 标红（成功行这一列通常为空） */
+.sysai-call.err .sysai-call-err { color: #e08a8a; }
 /* 本次使用的模型 / token 用量（输入 → 输出） */
 .sysai-call-model { flex: none; width: 132px; color: #8fa6b8; font-size: 11px; font-family: ui-monospace, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sysai-call-tok { flex: none; width: 96px; color: #8aa88a; font-size: 11px; text-align: right; font-family: ui-monospace, Menlo, Consolas, monospace; }
@@ -73,7 +77,7 @@
 .sysai-call.clickable:hover { background: #2a2d30; }
 .sysai-call.sel { background: #2f3540; }
 .sysai-pop {
-  margin: 6px 0 10px; padding: 10px 12px; border-radius: 8px;
+  margin: 8px 0 12px; padding: 14px 16px; border-radius: 8px;
   background: #202225; border: 1px solid #3a3f47;
   box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
 }
@@ -82,16 +86,48 @@
 .sysai-pop-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 10px; }
 .sysai-pop-kv { font-size: 11.5px; color: #c8c8c8; word-break: break-all; }
 .sysai-pop-kv b { margin-right: 5px; font-weight: 500; color: #8a8a8a; }
+/* 失败原因用红色单独标出（含「错误」这个标签，整块红更好认） */
+.sysai-pop-kv.err, .sysai-pop-kv.err b { color: #e08a8a; }
 .sysai-pop-sec { margin-top: 8px; }
 .sysai-pop-lb { margin-bottom: 4px; font-size: 11.5px; color: #8a8a8a; }
 .sysai-pop-txt {
-  margin: 0; padding: 8px 10px; max-height: 220px; overflow: auto;
+  margin: 0; padding: 10px 12px; max-height: min(46vh, 420px); overflow: auto;
   background: #17181a; border: 1px solid #333333; border-radius: 6px;
   font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 11.5px; line-height: 1.6; color: #d6d6d6;
+  font-size: 12px; line-height: 1.65; color: #d6d6d6;
   white-space: pre-wrap; word-break: break-word;
 }
 .sysai-pop-none { color: #777777; }
+/* 调用明细改为弹窗：宽度随屏幕走（上限 1400px），正文区直接占满高度，
+   这样一屏能看很多条，不用在小窗口里滚动。
+   用 #modalOverlay 提权：通用弹窗里的 .ide-modal.wide .m-body 更具体，
+   否则这里设的宽高会被它压回去（表现为窗口依旧很小）。 */
+#modalOverlay .sysai-modal { width: min(1400px, 94vw); }
+#modalOverlay .sysai-modal .m-title { font-size: 13.5px; padding: 11px 16px; }
+#modalOverlay .sysai-modal .m-body {
+  height: 78vh; max-height: none;       /* 固定高度：内容少时窗口也不会缩成一条 */
+  padding: 14px 18px 18px; box-sizing: border-box;
+  display: flex; flex-direction: column;   /* 柱状图固定，表格吃掉剩余高度 */
+}
+/* 关键：表格原来被 max-height:170px 钉死（只够五六行），弹窗里让它填满剩余空间自己滚 */
+#modalOverlay .sysai-modal .sysai-days { flex: none; margin-bottom: 14px; }
+#modalOverlay .sysai-modal .sysai-calls { flex: 1; min-height: 0; max-height: none; }
+.sysai-modal .sysai-days { margin-bottom: 14px; }
+.sysai-modal .sysai-day-col { height: 110px; }
+.sysai-modal .sysai-day-lb { font-size: 12px; }
+/* 弹窗里表格整体放大（默认那套是按行内小面板的尺寸定的） */
+.sysai-modal .sysai-call { padding: 7px 10px; font-size: 12.5px; gap: 10px; }
+.sysai-modal .sysai-call-ts { width: 152px; font-size: 12px; }
+.sysai-modal .sysai-call-r { width: 38px; }
+.sysai-modal .sysai-call-ms { width: 76px; }
+.sysai-modal .sysai-call-model { width: 180px; font-size: 12px; }
+.sysai-modal .sysai-call-tok { width: 116px; font-size: 12px; }
+/* 「请求」列：表格里最宽的一列，一眼看出这次调用了什么 */
+.sysai-call-req {
+  flex: 2; min-width: 0; color: #9aa7b2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sysai-call-hd .sysai-call-req { color: #777777; }
 .sysai-mod-desc { margin-top: 2px; font-size: 11.5px; line-height: 1.55; color: #8a8a8a; }
 .sysai-mod code {
   flex: none; align-self: center; margin-left: 10px;

@@ -464,33 +464,51 @@
   };
   var sysAiDetailMod = "";
   function sysAiCloseDetail() {
-    var el = document.getElementById("sysAiDetail");
-    if (el) el.remove();
+    sysAiCloseCallDetail();
+    var ov = $("modalOverlay");
+    if (ov) {                             // 明细改为弹窗：关掉即恢复原样
+      ov.classList.remove("show");
+      ov.innerHTML = "";
+      ov.onkeydown = null;
+      ov.onmousedown = null;
+    }
     sysAiDetailMod = "";
-    sysAiCloseCallDetail();        // 连同已展开的「单次调用详情」一起收起
   }
+  /* 点模块行 → 弹窗展示调用明细（行内展开高度太挤，看不全几行） */
   async function sysAiToggleDetail(row) {
     var mod = row.dataset.modRow;
     if (!mod) return;
-    if (sysAiDetailMod === mod) { sysAiCloseDetail(); return; }
+    if (sysAiDetailMod === mod) { sysAiCloseDetail(); return; }   // 再点同一行收起
     sysAiCloseDetail();
+    var ov = $("modalOverlay");
+    if (!ov) return;
     var box = document.createElement("div");
-    box.className = "sysai-detail";
-    box.id = "sysAiDetail";
-    box.innerHTML = '<div class="sysai-detail-hd">' +
-        '<span class="sysai-detail-title">' + esc(SYS_MOD_TITLE[mod] || mod) + " · 调用明细</span>" +
+    box.className = "ide-modal wide sysai-modal";
+    box.innerHTML =
+      '<div class="m-title"><i class="bi bi-bar-chart-line"></i>' +
+        '<span>' + esc(SYS_MOD_TITLE[mod] || mod) + " · 调用明细</span>" +
         '<span class="sysai-mods-sp"></span>' +
-        '<span class="sysai-detail-sub">加载中…</span>' +
-        '<button class="ai-set-btn sysai-all sysai-detail-close">收起</button></div>';
-    row.after(box);                       // 紧跟被点的模块展开，不跳到清单末尾
+        '<span class="sysai-detail-sub" id="sysAiDetailSub">加载中…</span>' +
+        '<button class="ai-set-btn sysai-all sysai-detail-close">关闭</button></div>' +
+      '<div class="m-body"><div class="sysai-detail-none">加载中…</div></div>';
+    ov.innerHTML = "";
+    ov.appendChild(box);
+    ov.classList.add("show");
     sysAiDetailMod = mod;
-    box.querySelector(".sysai-detail-close").onclick = sysAiCloseDetail;
+    box.querySelector(".sysai-detail-close").onclick = function () { sysAiCloseDetail(); };
+    ov.onmousedown = function (e) { if (e.target === ov) sysAiCloseDetail(); };
+    ov.onkeydown = function (e) {
+      if (e.key === "Escape") { e.preventDefault(); sysAiCloseDetail(); }
+    };
+    var body = box.querySelector(".m-body");
     try {
-      var d = await (await fetch("/api/ai/usage/detail?module=" + encodeURIComponent(mod))).json();
+      // 一次多取些：弹窗空间够，比行内多得多
+      var d = await (await fetch("/api/ai/usage/detail?module=" + encodeURIComponent(mod) +
+                                 "&limit=200")).json();
       if (d.error) throw new Error(d.error);
-      sysAiRenderDetail(box, d);
+      sysAiRenderDetail(body, d);
     } catch (e) {
-      box.querySelector(".sysai-detail-sub").textContent = "读取失败：" + (e.message || e);
+      body.innerHTML = '<div class="sysai-detail-none">读取失败：' + esc(e.message || e) + "</div>";
     }
   }
   /* token 数缩写：12345 → 12.3k */
@@ -504,14 +522,20 @@
     var total = days.reduce(function (s, x) { return s + x.ok + x.fail; }, 0);
     var tkAll = (d.tokens_in || 0) + (d.tokens_out || 0);
     var hasEst = calls.some(function (c) { return c.est; });
-    box.querySelector(".sysai-detail-sub").textContent =
-      (days.length ? "最近 " + days.length + " 天共 " + total + " 次" : "暂无记录") +
-      (tkAll ? " · 累计 " + (hasEst ? "≈ " : "") + sysAiFmtTok(tkAll) + " tokens" : "");
+    var sub = document.getElementById("sysAiDetailSub");
+    if (sub) {                             // 概要在弹窗标题栏里
+      sub.textContent =
+        (days.length ? "最近 " + days.length + " 天共 " + total + " 次" : "暂无记录") +
+        (tkAll ? " · 累计 " + (hasEst ? "≈ " : "") + sysAiFmtTok(tkAll) + " tokens" : "") +
+        (calls.length ? " · 列出最近 " + calls.length + " 条" : "");
+    }
     var max = Math.max.apply(null, [1].concat(days.map(function (x) { return x.ok + x.fail; })));
     var html = '<div class="sysai-days">' + (days.length ? days.map(function (x) {
-      var oh = x.ok ? Math.max(Math.round(x.ok / max * 34), 2) : 0;
-      var fh = x.fail ? Math.max(Math.round(x.fail / max * 34), 2) : 0;
-      return '<div class="sysai-day" title="' + esc(x.day) + "：成功 " + x.ok + " · 失败 " + x.fail + '">' +
+      var oh = x.ok ? Math.max(Math.round(x.ok / max * 64), 3) : 0;
+      var fh = x.fail ? Math.max(Math.round(x.fail / max * 64), 3) : 0;
+      return '<div class="sysai-day" title="' + esc(x.day) + "：成功 " + x.ok + " · 失败 " + x.fail +
+          (x.tokens_in || x.tokens_out
+            ? " · " + sysAiFmtTok((x.tokens_in || 0) + (x.tokens_out || 0)) + " tokens" : "") + '">' +
         '<div class="sysai-day-col">' +
           (fh ? '<div class="sysai-day-fail" style="height:' + fh + 'px"></div>' : "") +
           (oh ? '<div class="sysai-day-ok" style="height:' + oh + 'px"></div>' : "") +
@@ -524,6 +548,7 @@
         '<span class="sysai-call-ms">耗时</span>' +
         '<span class="sysai-call-model">模型</span>' +
         '<span class="sysai-call-tok">tokens</span>' +
+        '<span class="sysai-call-req">请求</span>' +
         '<span class="sysai-call-err">说明</span></div>' : "") +
       (calls.length ? calls.map(function (c) {
       var tk = (c.tokens_in || c.tokens_out)
@@ -538,8 +563,11 @@
         '<span class="sysai-call-tok" title="' + (c.est
           ? "按字数估算（上游未返回用量）：输入 → 输出"
           : "输入 → 输出 tokens") + '">' + esc(tk) + "</span>" +
+        '<span class="sysai-call-req" title="' + esc(c.req || "未记录") + '">' +
+          (c.req ? esc(c.req) : '<span class="sysai-pop-none">-</span>') + "</span>" +
         '<span class="sysai-call-err">' + esc(c.error || "") + "</span></div>";
     }).join("") : '<div class="sysai-detail-none">还没有调用记录</div>') + "</div>";
+    box.innerHTML = "";                  // 先清掉「加载中…」占位（原来是追加，占位会留在最上面）
     box.insertAdjacentHTML("beforeend", html);
     // 每行可点开：按 id 拉取该次调用的请求 / 响应摘要，就地弹一个悬浮框
     box.querySelectorAll(".sysai-call[data-call-id]").forEach(function (row) {
@@ -594,14 +622,15 @@
       ["模型", esc(c.model || "未记录")],
       ["tokens", esc(tk)],
     ];
-    if (c.error) kvs.push(["错误", esc(c.error)]);
+    if (c.error) kvs.push(["错误", esc(c.error), "err"]);   // 第三项 = 附加 class
     pop.innerHTML =
       '<div class="sysai-pop-hd"><i class="bi bi-info-circle"></i>' +
         esc(SYS_MOD_TITLE[c.module] || c.module || "") + " · 调用详情" +
         '<span class="sysai-mods-sp"></span>' +
         '<button class="ai-set-btn sysai-pop-close">关闭</button></div>' +
       '<div class="sysai-pop-meta">' + kvs.map(function (kv) {
-        return '<span class="sysai-pop-kv"><b>' + kv[0] + "</b>" + kv[1] + "</span>";
+        return '<span class="sysai-pop-kv' + (kv[2] ? " " + kv[2] : "") + '"><b>' + kv[0] +
+          "</b>" + kv[1] + "</span>";
       }).join("") + "</div>" +
       '<div class="sysai-pop-sec"><div class="sysai-pop-lb">请求</div>' +
         '<pre class="sysai-pop-txt">' +
@@ -630,7 +659,13 @@
         sp.title = "";
         return;
       }
-      sp.textContent = d.fail ? "成功 " + d.ok + " · 失败 " + d.fail : "成功 " + d.ok;
+      // 成功、失败分开着色：之前有失败时整段变红，把「成功 5」也染红了
+      if (d.fail) {
+        sp.innerHTML = '<span class="sysai-ok">成功 ' + d.ok + "</span> · " +
+          '<span class="sysai-bad">失败 ' + d.fail + "</span>";
+      } else {
+        sp.innerHTML = '<span class="sysai-ok">成功 ' + d.ok + "</span>";
+      }
       sp.className = "sysai-stat" + (d.fail ? " has-fail" : " ok");
       const tk = (d.tokens_in || 0) + (d.tokens_out || 0);
       sp.title = "共 " + (d.ok + d.fail) + " 次" +

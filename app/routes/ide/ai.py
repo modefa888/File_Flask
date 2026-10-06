@@ -654,12 +654,13 @@ def api_ai_usage_detail():
                      "tokens_in": r["tin"] or 0, "tokens_out": r["tout"] or 0}
                     for r in rows][::-1]
             rows = conn.execute(
-                "SELECT id, ts, ok, ms, error, model, tokens_in, tokens_out, est FROM ai_calls "
-                "WHERE module=? ORDER BY id DESC LIMIT ?", (module, limit)).fetchall()
+                "SELECT id, ts, ok, ms, error, model, tokens_in, tokens_out, est, req "
+                "FROM ai_calls WHERE module=? ORDER BY id DESC LIMIT ?", (module, limit)).fetchall()
+            # 列表里只带请求的短摘要（够一眼看出这次做了什么），完整正文点开时再取
             calls = [{"id": r["id"], "ts": r["ts"], "ok": bool(r["ok"]), "ms": r["ms"] or 0,
                       "error": r["error"] or "", "model": r["model"] or "",
                       "tokens_in": r["tokens_in"] or 0, "tokens_out": r["tokens_out"] or 0,
-                      "est": bool(r["est"])} for r in rows]
+                      "est": bool(r["est"]), "req": (r["req"] or "")[:120]} for r in rows]
             tot = conn.execute(
                 "SELECT COALESCE(SUM(tokens_in),0) AS tin, COALESCE(SUM(tokens_out),0) AS tout "
                 "FROM ai_calls WHERE module=?", (module,)).fetchone()

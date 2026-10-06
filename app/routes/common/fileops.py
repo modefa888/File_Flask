@@ -12,6 +12,7 @@ from flask import Blueprint, request, jsonify
 from ...log import get_logger
 from ...services.common.filecore import (
     safe_path, _invalidate_list_cache, _invalidate_dir_size, _human_size,
+    _in_pseudo_fs,
 )
 
 
@@ -453,6 +454,8 @@ def _get_dir_info(dir_path):
     sub_files = 0
     try:
         for root, dirs, files in os.walk(dir_path):
+            # 跳过 proc/sysfs/tmpfs 等伪文件系统，别把 /proc/kcore 的 128TB 算进总和
+            dirs[:] = [d for d in dirs if not _in_pseudo_fs(os.path.join(root, d))]
             for f in files:
                 fp = os.path.join(root, f)
                 try:

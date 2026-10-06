@@ -29,6 +29,53 @@ except (OSError, json.JSONDecodeError):
     _LIST_CACHE = {}
 
 
+# ---------- 伪文件系统（proc / sysfs / tmpfs 等）----------
+# 这些目录里的"文件大小"是虚拟值：/proc/kcore 恒为 128TB、/sys 下大量 4K 假文件……
+# 统计磁盘占用必须排除，否则根目录总大小会被撑到上百 TB，跟真实磁盘容量对不上。
+_PSEUDO_FS_TYPES = {
+    "proc", "sysfs", "devtmpfs", "devpts", "tmpfs", "cgroup", "cgroup2",
+    "securityfs", "debugfs", "tracefs", "pstore", "bpf", "configfs",
+    "fusectl", "mqueue", "hugetlbfs", "ramfs", "binfmt_misc", "autofs",
+    "efivarfs", "rpc_pipefs", "nsfs",
+}
+_PSEUDO_MOUNT_CACHE = {"ts": 0.0, "points": []}
+
+
+def _pseudo_mount_points():
+    """伪文件系统的挂载点（绝对路径、无尾斜杠）。非 Linux 或读取失败返回空表。
+    结果缓存 30 秒，兼顾插拔外置盘后挂载点的变化。"""
+    now = time.monotonic()
+    if now - _PSEUDO_MOUNT_CACHE["ts"] < 30:
+        return _PSEUDO_MOUNT_CACHE["points"]
+    points = []
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/mounts", "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) < 3 or parts[2] not in _PSEUDO_FS_TYPES:
+                        continue
+                    mp = parts[1].replace("\\040", " ").rstrip("/")
+                    if mp and mp != "/":      # 根目录即使本身是 tmpfs 也照常统计
+                        points.append(mp)
+        except OSError:
+            points = []
+    _PSEUDO_MOUNT_CACHE["ts"] = now
+    _PSEUDO_MOUNT_CACHE["points"] = points
+    return points
+
+
+def _in_pseudo_fs(path):
+    """路径本身或其祖先落在伪文件系统里 → 这个"大小"没有磁盘意义"""
+    path = (path or "").rstrip("/")
+    if not path:
+        return False
+    for mp in _pseudo_mount_points():
+        if path == mp or path.startswith(mp + "/"):
+            return True
+    return False
+
+
 
 
 
@@ -83,15 +130,49 @@ def _invalidate_dir_size(dir_path):
     _save_cache()
 
 
+def _purge_pseudo_fs_cache():
+    """清掉伪文件系统带来的脏统计：历史缓存里 /proc 之类的"大小"是虚拟值
+    （/proc/kcore 恒为 128TB），会让根目录总大小显示成上百 TB。
+    这里既清目录大小缓存，也清列表缓存——后者存的是目录项快照，同样带着旧数字。"""
+    dirty = False
+    for mp in _pseudo_mount_points():
+        if _DIR_SIZE_CACHE.pop(mp, None) is not None:
+            dirty = True
+    if dirty:
+        _save_cache()
+    if _LIST_CACHE:
+        _LIST_CACHE.clear()
+        _save_list_cache()
+
+
+_purge_pseudo_fs_cache()
+
+
+# 目录大小缓存的有效期（秒）：目录 mtime 只反映"直接子项"的增删，
+# 深层新增/删除文件不会更新它，所以再加一道时间上限，保证数字最多陈旧这么久。
+_DIR_SIZE_TTL = 3600.0
+
+
+def _dir_size_cache_hit(cached, current_mtime):
+    """缓存是否可信：目录 mtime 未变，且没超过有效期。"""
+    if not cached or cached.get("size") is None:
+        return False
+    if abs(cached.get("dir_mtime", 0) - current_mtime) >= 0.1:
+        return False
+    return (time.time() - cached.get("ts", 0)) < _DIR_SIZE_TTL
+
+
 def get_dir_size(dir_path):
     """基于 mtime 的持久化缓存：目录未变动则秒回，有变动才重新计算。返回 None 表示无法计算。"""
+    if _in_pseudo_fs(dir_path):
+        return 0        # 伪文件系统不占磁盘，别去 du 那 128TB 的 kcore
     try:
         current_mtime = os.stat(dir_path).st_mtime
     except OSError:
         return None
 
     cached = _DIR_SIZE_CACHE.get(dir_path)
-    if cached and abs(cached.get("dir_mtime", 0) - current_mtime) < 0.1 and cached.get("size") is not None:
+    if _dir_size_cache_hit(cached, current_mtime):
         return cached.get("size", 0)
 
     result = None
@@ -103,20 +184,23 @@ def get_dir_size(dir_path):
     except Exception:
         pass
 
-    _DIR_SIZE_CACHE[dir_path] = {"size": result, "dir_mtime": current_mtime}
+    _DIR_SIZE_CACHE[dir_path] = {"size": result, "dir_mtime": current_mtime, "ts": time.time()}
     _save_cache()
     return result
 
 
 def _get_dir_size_unix(dir_path, timeout=5):
-    """Linux/macOS: du -sb（C 实现，单目录通常毫秒级）"""
+    """Linux/macOS: du -sb（C 实现，单目录通常毫秒级）。
+    额外用 --exclude 跳过伪文件系统，避免 /proc/kcore（128TB）这类虚拟大小污染统计。"""
+    cmd = ["du", "-sb"]
+    if sys.platform.startswith("linux"):
+        for mp in _pseudo_mount_points():
+            cmd.append("--exclude=" + mp)
+    cmd.append(dir_path)
     try:
-        out = subprocess.run(
-            ["du", "-sb", dir_path],
-            capture_output=True, text=True, timeout=timeout
-        ).stdout
-        return int(out.split()[0]) if out else 0
-    except subprocess.TimeoutExpired:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+        return int(out.split()[0]) if out.split() else 0
+    except (subprocess.TimeoutExpired, OSError, ValueError):
         return None
 
 
@@ -197,12 +281,14 @@ _SIZE_SEM = threading.Semaphore(8)   # 限制并发 du 数量，避免多目录�
 
 def get_dir_size_cached(dir_path):
     """只查缓存与索引，绝不触发 du。返回 None 表示暂时未知。"""
+    if _in_pseudo_fs(dir_path):
+        return 0
     try:
         current_mtime = os.stat(dir_path).st_mtime
     except OSError:
         return None
     cached = _DIR_SIZE_CACHE.get(dir_path)
-    if cached and abs(cached.get("dir_mtime", 0) - current_mtime) < 0.1 and cached.get("size") is not None:
+    if _dir_size_cache_hit(cached, current_mtime):
         return cached.get("size", 0)
     return _get_dir_size_from_index(dir_path)
 
@@ -217,7 +303,7 @@ def _bg_compute_dir_size(dir_path):
                 mtime = os.stat(dir_path).st_mtime
             except OSError:
                 mtime = 0
-            _DIR_SIZE_CACHE[dir_path] = {"size": size, "dir_mtime": mtime}
+            _DIR_SIZE_CACHE[dir_path] = {"size": size, "dir_mtime": mtime, "ts": time.time()}
             _save_cache()
     finally:
         with _SIZE_PENDING_LOCK:

@@ -72,9 +72,11 @@
   .pv-more button:active { background: #f1f5f9; }
   .pv-editwrap { flex: 1; min-height: 0; display: flex; overflow: hidden; }
   .pv-gutter {
-    flex: none; width: 48px; box-sizing: border-box; overflow: hidden;
+    flex: none; width: calc(var(--pv-fs, 13px) * 3.6); box-sizing: border-box; overflow: hidden;
     padding: 12px 6px 12px 0; text-align: right;
-    color: #9aa0a6; font-size: 12px; line-height: 19.5px;
+    color: #9aa0a6;
+    font-size: calc(var(--pv-fs, 13px) - 1px);
+    line-height: calc(var(--pv-fs, 13px) * 1.5);   /* 必须与编辑框行高一致才能对齐行号 */
     background: #fff; border-right: 1px solid #ececec;
     white-space: pre; user-select: none; -webkit-user-select: none;
   }
@@ -82,7 +84,9 @@
     flex: 1; min-width: 0; min-height: 0; box-sizing: border-box; margin: 0;
     padding: 12px 14px; border: none; outline: none; resize: none;
     background: #fff; color: #1a1a1a;
-    font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: var(--pv-fs, 13px);
+    line-height: 1.5;
     white-space: pre; overflow: auto;
   }
 
@@ -97,16 +101,32 @@
   .pv-pre {
     position: relative; flex: 1; min-height: 0; margin: 0; overflow: auto;
     padding: 10px 14px 10px 0; background: #fff; color: #1a1a1a;
-    font-size: 13px; line-height: 1.5; white-space: pre; word-break: normal;
+    font-size: var(--pv-fs, 13px); line-height: 1.5; white-space: pre; word-break: normal;
+    touch-action: pan-x pan-y;    /* 单指仍是原生滚动，双指捏合由脚本接管 */
   }
-  .pv-line { display: block; min-height: 1.5em; padding-left: 56px; min-width: max-content; }
+  /* 行号栏宽度与留白按字号等比缩放，放大后行号才不会压到代码上 */
+  .pv-line {
+    display: block; min-height: 1.5em; min-width: max-content;
+    padding-left: calc(var(--pv-fs, 13px) * 4.3);
+  }
   .pv-pre.wrap .pv-line { min-width: 0; }
   .pv-line .ln {
-    position: sticky; left: 0; display: inline-block; width: 42px; margin-left: -56px; margin-right: 8px;
-    text-align: right; color: #9aa0a6; font-size: 12px; line-height: inherit;
+    position: sticky; left: 0; display: inline-block;
+    width: calc(var(--pv-fs, 13px) * 3.2);
+    margin-left: calc(var(--pv-fs, 13px) * -4.3); margin-right: 8px;
+    text-align: right; color: #9aa0a6;
+    font-size: calc(var(--pv-fs, 13px) - 1px); line-height: inherit;
     background: #fff; border-right: 1px solid #ececec; padding-right: 6px;
     user-select: none; -webkit-user-select: none;
   }
+  /* 语法高亮配色（VSCode Light 风格） */
+  .hl-kw   { color: #0000ff; }
+  .hl-str  { color: #a31515; }
+  .hl-num  { color: #098658; }
+  .hl-cmt  { color: #008000; font-style: italic; }
+  .hl-tag  { color: #800000; }
+  .hl-attr { color: #e50000; }
+
   mark.pv-hit { background: #ffe58f; color: inherit; padding: 0; }
   mark.pv-hit.cur { background: #ff9800; color: #fff; }
   .pv-search { display: none; gap: 6px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #ececec; }

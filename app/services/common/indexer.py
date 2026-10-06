@@ -9,7 +9,7 @@ from datetime import datetime
 from ...config import _INDEX_DB_FILE, _INDEX_DB_NEW
 from ...log import get_logger
 from .db import _get_index_conn, _init_index_db, _index_has_data
-from .filecore import format_size, get_file_info, _DIR_SIZE_CACHE
+from .filecore import format_size, get_file_info, _DIR_SIZE_CACHE, _in_pseudo_fs
 
 
 _log = get_logger()
@@ -88,7 +88,12 @@ def _scan_root(root, stop_event, conn, max_results=2000000):
         for dirpath, dirnames, filenames in os.walk(root):
             if stop_event.is_set():
                 break
-            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            # 跳过隐藏目录，以及 proc/sysfs/tmpfs 等伪文件系统
+            # （/proc/kcore 这种 128TB 的虚拟文件既不该入库，也不该计入总大小）
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith(".") and not _in_pseudo_fs(os.path.join(dirpath, d))
+            ]
             dirpath_norm = os.path.normpath(dirpath).replace("\\", "/")
 
             if not sys.platform.startswith("win"):
@@ -497,8 +502,11 @@ def _search_walk(root, keyword, ext_filter, type_filter, timeout, stop_event, ma
         for dirpath, dirnames, filenames in os.walk(root):
             if stop_event.is_set():
                 return items, "search_cancelled"
-            # 跳过不可访问子目录（避免走死循环或权限错误）
-            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            # 跳过隐藏目录与伪文件系统（避免走死循环、权限错误或收录虚拟文件）
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith(".") and not _in_pseudo_fs(os.path.join(dirpath, d))
+            ]
             if skip_l:
                 dirnames[:] = [d for d in dirnames if d.lower() not in skip_l]
             # 匹配目录

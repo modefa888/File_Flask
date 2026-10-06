@@ -477,6 +477,96 @@
     var cur = track.querySelector(".pswp-tb-item.cur");
     if (cur) try { cur.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" }); } catch (e) {}
   }
+  // ---------- 轻量语法高亮（查看模式用；纯前端正则实现，无额外依赖） ----------
+  var HL_MAX_LINES = 4000;            // 行数超过这个就不高亮，避免大文件卡顿
+  var HL_KW = {
+    js: "const let var function return if else for while do switch case break continue new this class extends import export from default await async try catch finally throw typeof instanceof delete in of null undefined true false void yield static get set",
+    ts: "const let var function return if else for while new this class extends interface type enum import export from await async try catch throw typeof as public private readonly null undefined true false",
+    py: "def class return if elif else for while import from as with try except finally raise lambda None True False and or not in is pass break continue yield async await global nonlocal self",
+    sh: "if then else elif fi for do done while case esac function return export local readonly echo cd exit source set unset",
+    conf: "true false yes no on off null",
+    css: "important media import from to"
+  };
+  var HL_LANG_BY_EXT = {
+    js: "js", jsx: "js", mjs: "js", cjs: "js",
+    ts: "ts", tsx: "ts",
+    py: "py",
+    sh: "sh", bash: "sh", zsh: "sh",
+    json: "json",
+    html: "html", htm: "html", xml: "html", svg: "html", vue: "html",
+    css: "css", scss: "css", less: "css",
+    yml: "conf", yaml: "conf", ini: "conf", cfg: "conf", conf: "conf", toml: "conf", env: "conf"
+  };
+  function hlLang(name) { return HL_LANG_BY_EXT[extOf(name)] || "txt"; }
+  function hlEsc(s) {
+    // 不转义引号：高亮是在文本节点里输出，引号无需 &quot;，保留后正则才好识别字符串
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  // 找注释起点（跳过字符串内的 # 与 //）
+  function hlCommentAt(line, marks) {
+    var inStr = null;
+    for (var i = 0; i < line.length; i++) {
+      var c = line.charAt(i);
+      if (inStr) {
+        if (c === "\\") { i++; continue; }
+        if (c === inStr) inStr = null;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") { inStr = c; continue; }
+      for (var m = 0; m < marks.length; m++) {
+        if (line.substr(i, marks[m].length) === marks[m]) return i;
+      }
+    }
+    return -1;
+  }
+  // 普通片段（不含字符串）：关键字 + 数字
+  function hlPlain(text, lang) {
+    var t = hlEsc(text);
+    var kws = HL_KW[lang];
+    if (kws) {
+      t = t.replace(/[A-Za-z_$][\w$]*/g, function (w) {
+        return kws.indexOf(" " + w + " ") >= 0 ? '<span class="hl-kw">' + w + "</span>" : w;
+      });
+    }
+    return t.replace(/\b\d+(\.\d+)?\b/g, '<span class="hl-num">$&</span>');
+  }
+  // 代码片段：字符串单独成块，其余片段再上关键字/数字 —— 分段处理才不会互相污染
+  function hlCode(code, lang) {
+    var re = /("[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*'|`[^`\\]*(?:\\.[^`\\]*)*`)/g;
+    var out = "", last = 0, m;
+    while ((m = re.exec(code)) !== null) {
+      out += hlPlain(code.slice(last, m.index), lang);
+      out += '<span class="hl-str">' + hlEsc(m[1]) + "</span>";
+      last = m.index + m[1].length;
+    }
+    return out + hlPlain(code.slice(last), lang);
+  }
+  // HTML / XML：先用占位符标出属性名与标签名，最后统一包成 span
+  // （不能边替换边匹配，否则会匹配到自己刚刚生成的 class="hl-tag"）
+  function hlTagLine(line) {
+    var out = hlEsc(line);
+    out = out.replace(/([A-Za-z_][\w:.-]*)(=)/g, "\u0001$1\u0001$2");
+    out = out.replace(/(&lt;\/?)([A-Za-z][\w:-]*)/g, "$1\u0002$2\u0002");
+    out = out.replace(/\u0001([^\u0001]+)\u0001/g, '<span class="hl-attr">$1</span>');
+    return out.replace(/\u0002([^\u0002]+)\u0002/g, '<span class="hl-tag">$1</span>');
+  }
+  function hlLine(line, lang) {
+    if (!line) return "";
+    if (!lang || lang === "txt") return hlEsc(line);
+    if (lang === "html") {
+      var hi = line.indexOf("<!--");
+      var hb = hi >= 0 ? line.slice(0, hi) : line;
+      var hm = hi >= 0 ? line.slice(hi) : "";
+      return hlTagLine(hb) + (hm ? '<span class="hl-cmt">' + hlEsc(hm) + "</span>" : "");
+    }
+    var marks = lang === "css" ? ["/*"]
+      : (lang === "py" || lang === "sh" || lang === "conf") ? ["#"] : ["//"];
+    var ci = hlCommentAt(line, marks);
+    var code = ci >= 0 ? line.slice(0, ci) : line;
+    var cmt = ci >= 0 ? line.slice(ci) : "";
+    return hlCode(code, lang) + (cmt ? '<span class="hl-cmt">' + hlEsc(cmt) + "</span>" : "");
+  }
+
   // 文本预览卡片：文件名 + 操作栏（含搜索）+ 带行号的内容区
   function buildTextPreview(item, text) {
     var body = document.getElementById("previewBody");
@@ -498,6 +588,7 @@
         '<button type="button" data-op="wrap">↩️ 换行</button>' +
         '<button type="button" data-op="search">🔍 搜索</button>' +
         '<button type="button" data-op="download">⬇️ 下载</button>' +
+        '<button type="button" data-op="zoom">🔍 字号 100%</button>' +
       '</div>' +
       '<div class="pv-search">' +
         '<input type="text" placeholder="搜索关键字…">' +
@@ -509,21 +600,85 @@
     var pre = document.createElement("pre");
     pre.className = "pv-pre";
     var lines = [], contentSpans = [];
+    var lang = hlLang(item.name);       // 按扩展名选高亮语言
+    var hlOn = true;                    // 行数过多时自动关闭高亮
+    function lineHtml(t) { return hlOn ? hlLine(t, lang) : esc(t); }
     function renderContent(t) {
       lines = t.replace(/\r\n?/g, "\n").split("\n");
+      hlOn = lines.length <= HL_MAX_LINES;
       contentSpans = [];
       pre.innerHTML = "";
       var frag = document.createDocumentFragment();
       for (var i = 0; i < lines.length; i++) {
         var row = document.createElement("span"); row.className = "pv-line";
         var ln = document.createElement("span"); ln.className = "ln"; ln.textContent = i + 1;
-        var lc = document.createElement("span"); lc.className = "lc"; lc.textContent = lines[i];
+        var lc = document.createElement("span"); lc.className = "lc"; lc.innerHTML = lineHtml(lines[i]);
         row.appendChild(ln); row.appendChild(lc);
         frag.appendChild(row); contentSpans.push(lc);
       }
       pre.appendChild(frag);
     }
     renderContent(text);
+
+    // ===== 字号缩放：双指捏合 / 菜单「字号」循环（像图片查看器那样放大看代码） =====
+    // 这里用改字号而不是 transform 缩放：文字始终清晰，行号与滚动都是原生的，不会和滚动打架。
+    var FS_MIN = 9, FS_MAX = 34, fsBase = 13, fsCur = 13;
+    var FS_STEPS = [1, 1.25, 1.5, 1.85, 2.3, 0.85];
+    function syncFsLabel() {
+      var b = card.querySelector('[data-op="zoom"]');
+      if (b) b.textContent = "🔍 字号 " + Math.round(fsCur / fsBase * 100) + "%";
+    }
+    function applyFs(v) {
+      var before = fsCur;
+      fsCur = Math.max(FS_MIN, Math.min(FS_MAX, v));
+      card.style.setProperty("--pv-fs", fsCur + "px");
+      syncFsLabel();
+      return before;
+    }
+    // 以查看区内的 (x,y) 为锚点缩放：改完字号把该点内容拉回原位，观感与图片缩放一致
+    function zoomTextAt(x, y, v) {
+      var sl = pre.scrollLeft, st = pre.scrollTop;
+      var before = applyFs(v);
+      if (!before || before === fsCur) return;
+      var k = fsCur / before;
+      pre.scrollLeft = (sl + x) * k - x;
+      pre.scrollTop = (st + y) * k - y;
+    }
+    function cycleFs() {
+      var r = fsCur / fsBase, i;
+      for (i = 0; i < FS_STEPS.length; i++) { if (FS_STEPS[i] > r + 0.03) break; }
+      if (i >= FS_STEPS.length) i = 0;
+      applyFs(fsBase * FS_STEPS[i]);
+    }
+    // 双指捏合：单指仍可正常滚动、双击仍能选中单词
+    var fsPinch = null;
+    function pdist(t) {
+      var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy) || 1;
+    }
+    pre.addEventListener("touchstart", function (e) {
+      if (e.touches.length !== 2) { fsPinch = null; return; }
+      var r = pre.getBoundingClientRect();
+      fsPinch = {
+        d0: pdist(e.touches), f0: fsCur,
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top
+      };
+    }, { passive: true });
+    pre.addEventListener("touchmove", function (e) {
+      if (!fsPinch || e.touches.length !== 2) return;
+      e.preventDefault();                  // 别让浏览器把双指当成页面缩放
+      var r = pre.getBoundingClientRect();
+      zoomTextAt(
+        (e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left,
+        (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top,
+        fsPinch.f0 * pdist(e.touches) / fsPinch.d0
+      );
+    }, { passive: false });
+    pre.addEventListener("touchend", function (e) {
+      if (e.touches.length < 2) fsPinch = null;
+    });
+    pre.addEventListener("touchcancel", function () { fsPinch = null; });
 
     // 编辑用文本框（带行号栏）
     var editWrap = document.createElement("div"); editWrap.className = "pv-editwrap";
@@ -585,7 +740,8 @@
       return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
     function clearHits() {
-      for (var k = 0; k < dirty.length; k++) contentSpans[dirty[k]].textContent = lines[dirty[k]];
+      // 恢复成高亮 HTML（而不是纯文本），否则清掉搜索后语法配色就没了
+      for (var k = 0; k < dirty.length; k++) contentSpans[dirty[k]].innerHTML = lineHtml(lines[dirty[k]]);
       dirty = []; hits = []; hitIdx = -1; sCount.textContent = "";
     }
     function doSearch() {
@@ -699,6 +855,11 @@
         okText: "下载",
         onOk: function () { download(item); }
       });
+    });
+    // 字号：点一次按 100% → 125% → 150% → 185% → 230% → 85% 循环，按钮上显示当前比例
+    card.querySelector('[data-op="zoom"]').addEventListener("click", function () {
+      moreMenu.classList.remove("show");
+      cycleFs();
     });
 
     // ---- 编辑 / 保存 ----

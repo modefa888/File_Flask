@@ -1,0 +1,140 @@
+  /* ===== 数据库连接工具：左栏连接列表 + 编辑器区域的库表浏览与查询 ===== */
+
+  /* ---------- 左栏面板 ---------- */
+  .dbc-tools { display: flex; align-items: center; gap: 6px; padding: 8px 10px 0; }
+  .dbc-tools .g-btn { flex: 1; }
+  .dbc-list { padding: 8px 8px 12px; overflow: auto; flex: 1; }
+  .dbc-item {
+    position: relative; display: flex; align-items: center; gap: 8px;
+    padding: 7px 8px; margin-bottom: 4px; border-radius: 6px; cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .dbc-item:hover { background: #2a2d2e; border-color: #37373d; }
+  .dbc-ico { flex: none; font-size: 15px; color: #4ec9b0; }
+  .dbc-main { flex: 1; min-width: 0; }
+  .dbc-name { font-size: 12.5px; color: #e2e2e2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dbc-sub {
+    font-size: 11px; color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .dbc-act {
+    flex: none; display: none; width: 22px; height: 22px; border: none; border-radius: 4px;
+    background: transparent; color: #a0a0a0; cursor: pointer; font-size: 12px;
+  }
+  .dbc-item:hover .dbc-act { display: block; }
+  .dbc-act:hover { background: #3a3d41; color: #ffffff; }
+  .dbc-del:hover { color: #e06c75; }
+
+  /* ---------- 新建 / 编辑弹窗 ---------- */
+  .dbc-modal { width: 520px; }
+  .dbc-modal .dbc-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+  .dbc-modal .dbc-row[hidden] { display: none; }
+  .dbc-lb { flex: none; width: 44px; font-size: 12.5px; color: #b8b8b8; }
+  .dbc-in {
+    flex: 1; min-width: 0; box-sizing: border-box; height: 30px;
+    background: #1b1b1b; color: #e6e6e6; border: 1px solid #3a3a3a; border-radius: 5px;
+    padding: 0 9px; font-size: 12.5px; font-family: inherit; outline: none;
+  }
+  .dbc-in:focus { border-color: #0e639c; }
+  .dbc-kinds { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+  .dbc-kind {
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    height: 28px; padding: 0 11px; border-radius: 14px; white-space: nowrap;
+    background: #2d2d2d; border: 1px solid #3a3a3a; color: #d0d0d0;
+    font-size: 12px; font-family: inherit;
+  }
+  .dbc-kind:hover { background: #3a3d41; color: #ffffff; }
+  .dbc-kind.on { background: #0e4a75; border-color: #0e639c; color: #ffffff; }
+  .dbc-kind.off { opacity: .55; cursor: not-allowed; }
+  .dbc-nodrv { font-size: 10px; color: #e0a04a; }
+  .dbc-tip {
+    display: flex; gap: 6px; padding: 7px 9px; margin-top: 2px; border-radius: 5px;
+    background: #22303c; border: 1px solid #2f4658; color: #7fb6d8;
+    font-size: 11.5px; line-height: 1.5;
+  }
+  .dbc-tip .bi { flex: none; margin-top: 1px; }
+  .dbc-msg { min-height: 16px; margin-top: 8px; font-size: 12px; color: #8a8a8a; word-break: break-all; }
+  .dbc-msg.err { color: #e08a8a; }
+  .dbc-msg.ok { color: #7dd88a; }
+  .dbc-modal .m-foot { display: flex; align-items: center; gap: 8px; }
+  .dbc-modal .dbc-sp { flex: 1; }
+  .dbc-modal .dbc-test {
+    background: transparent; border: 1px solid #3c3c3c; color: #bbbbbb; border-radius: 5px;
+    padding: 4px 12px; font-size: 12px; cursor: pointer;
+  }
+  .dbc-modal .dbc-test:hover { border-color: #565656; color: #ffffff; }
+  .dbc-modal .dbc-test:disabled { opacity: .6; cursor: default; }
+
+  /* ---------- 编辑器区域：数据库视图 ---------- */
+  /* 不要改 .dbc-host 的 position（会盖过 .cm-host{position:absolute;inset:0}，
+     导致宿主塌成 0 高度、视图被压扁）。让 .dbc 绝对定位铺满宿主即可。 */
+  .dbc { position: absolute; inset: 0; display: flex; background: #1e1e1e; }
+  .dbc-side {
+    flex: none; width: 240px; display: flex; flex-direction: column;
+    border-right: 1px solid #2e2e2f; background: #202021;
+  }
+  .dbc-side-hd { display: flex; align-items: center; gap: 6px; padding: 8px; border-bottom: 1px solid #2e2e2f; }
+  .dbc-db-sel {
+    flex: 1; min-width: 0; height: 26px; box-sizing: border-box; font-size: 12px;
+    background: #2a2a2c; color: #e0e0e0; border: 1px solid #3a3a3a; border-radius: 5px; padding: 0 6px;
+  }
+  .dbc-tabs-sel { padding: 7px 10px 4px; font-size: 11px; color: #8a8a8a; }
+  .dbc-tables { flex: 1; overflow: auto; padding: 0 6px 10px; }
+  .dbc-table {
+    display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 5px;
+    font-size: 12.5px; color: #cfcfcf; cursor: pointer;
+  }
+  .dbc-table:hover { background: #2a2d2e; }
+  .dbc-table.on { background: #094771; color: #ffffff; }
+  .dbc-table .bi { flex: none; color: #9a9a9a; }
+  .dbc-table.on .bi { color: #ffffff; }
+  .dbc-tn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dbc-tc { flex: none; font-size: 10.5px; color: #7a7a7a; }
+
+  .dbc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .dbc-bar {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px; border-bottom: 1px solid #2e2e2f;
+  }
+  .dbc-cur { font-size: 12.5px; color: #e0e0e0; font-weight: 600; }
+  .dbc-sp { flex: 1; }
+  .dbc-mini {
+    flex: none; height: 24px; min-width: 24px; padding: 0 7px; border-radius: 5px; cursor: pointer;
+    background: #2d2d30; border: 1px solid #3a3a3a; color: #d0d0d0; font-size: 12px;
+  }
+  .dbc-mini:hover { background: #3a3d41; color: #ffffff; }
+  .dbc-mini:disabled { opacity: .45; cursor: default; }
+  .dbc-sql { flex: none; border-bottom: 1px solid #2e2e2f; padding: 8px 12px; background: #1b1b1d; }
+  .dbc-sql-in {
+    width: 100%; box-sizing: border-box; min-height: 70px; max-height: 200px; resize: vertical;
+    background: #141415; color: #dcdcdc; border: 1px solid #333333; border-radius: 6px;
+    padding: 8px 10px; font-size: 12.5px; line-height: 1.6; outline: none;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .dbc-sql-in:focus { border-color: #0e639c; }
+  .dbc-sql-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .dbc-sql-msg { flex: 1; min-width: 0; font-size: 11.5px; color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; }
+  .dbc-grid-wrap { flex: 1; min-height: 0; overflow: auto; }
+  .dbc-pager {
+    flex: none; display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-top: 1px solid #2e2e2f; font-size: 11.5px; color: #8a8a8a;
+  }
+  .dbc-pg-info { flex: none; }
+  .dbc-limit {
+    height: 24px; font-size: 11.5px; background: #2d2d30; color: #d0d0d0;
+    border: 1px solid #3a3a3a; border-radius: 5px;
+  }
+  .dbc-grid { border-collapse: collapse; width: 100%; font-size: 12px; }
+  .dbc-grid th {
+    position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap;
+    background: #262628; color: #b8b8b8; font-weight: 600;
+    padding: 6px 10px; border-bottom: 1px solid #3a3a3a; border-right: 1px solid #2e2e2f;
+  }
+  .dbc-grid td {
+    padding: 5px 10px; border-bottom: 1px solid #2a2a2b; border-right: 1px solid #262626;
+    color: #d6d6d6; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .dbc-grid tbody tr:hover td { background: #26262a; }
+  .dbc-grid .dbc-null { color: #6a6a6a; font-style: italic; }
+  .dbc-empty { padding: 18px; color: #7a7a7a; font-size: 12.5px; text-align: center; }

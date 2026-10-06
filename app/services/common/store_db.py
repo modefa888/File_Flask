@@ -271,6 +271,21 @@ CREATE TABLE IF NOT EXISTS ai_undo_snapshots (
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_undo_created ON ai_undo_snapshots(created_at);
+
+-- 数据库连接工具：连接配置（密码用 services/common/secret.py 加密后落库）
+CREATE TABLE IF NOT EXISTS db_conns (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL DEFAULT '',
+    kind       TEXT NOT NULL DEFAULT 'sqlite',   -- sqlite / mysql / postgres
+    host       TEXT DEFAULT '',
+    port       INTEGER DEFAULT 0,
+    username   TEXT DEFAULT '',
+    password   TEXT DEFAULT '',                  -- enc:v1: 密文
+    dbname     TEXT DEFAULT '',                  -- 库名；sqlite 时是数据库文件路径
+    params     TEXT DEFAULT '',                  -- 额外连接参数
+    created_at REAL NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL DEFAULT 0
+);
 """
 
 

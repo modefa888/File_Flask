@@ -906,6 +906,45 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .sysai-pop-none { color: #999999; }
 :where(html.theme-light) .sysai-call-req { color: #5a6a7a; }
 :where(html.theme-light) .sysai-call-hd .sysai-call-req { color: #999999; }
+/* 数据库连接工具 */
+:where(html.theme-light) .dbc-item:hover { background: #f0f2f4; border-color: #e2e2e2; }
+:where(html.theme-light) .dbc-name { color: #1f2328; }
+:where(html.theme-light) .dbc-sub { color: #6b6b6b; }
+:where(html.theme-light) .dbc-act { color: #5a5a5a; }
+:where(html.theme-light) .dbc-act:hover { background: #e4e6e8; color: #1f2328; }
+:where(html.theme-light) .dbc-in { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .dbc-in:focus { border-color: #0098ff; }
+:where(html.theme-light) .dbc-kind { background: #f2f2f2; border-color: #d4d4d4; color: #3a3a3a; }
+:where(html.theme-light) .dbc-kind:hover { background: #e8e8e8; color: #1f2328; }
+:where(html.theme-light) .dbc-kind.on { background: #cde3f8; border-color: #a8c8e8; color: #0b3d63; }
+:where(html.theme-light) .dbc-tip { background: #eef6fd; border-color: #cfe4f5; color: #2b6a94; }
+:where(html.theme-light) .dbc-msg { color: #6b6b6b; }
+:where(html.theme-light) .dbc-msg.err { color: #c0392b; }
+:where(html.theme-light) .dbc-modal .dbc-test { border-color: #cecece; color: #3a3a3a; }
+:where(html.theme-light) .dbc-modal .dbc-test:hover { border-color: #a8a8a8; color: #1f2328; }
+:where(html.theme-light) .dbc { background: #ffffff; }
+:where(html.theme-light) .dbc-side { background: #f8f8f8; border-right-color: #e4e4e4; }
+:where(html.theme-light) .dbc-side-hd { border-bottom-color: #e4e4e4; }
+:where(html.theme-light) .dbc-db-sel { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .dbc-tabs-sel { color: #6b6b6b; }
+:where(html.theme-light) .dbc-table { color: #24292f; }
+:where(html.theme-light) .dbc-table:hover { background: #eef1f4; }
+:where(html.theme-light) .dbc-table.on { background: #cde3f8; color: #0b3d63; }
+:where(html.theme-light) .dbc-table.on .bi { color: #0b3d63; }
+:where(html.theme-light) .dbc-bar { border-bottom-color: #e4e4e4; }
+:where(html.theme-light) .dbc-cur { color: #1f2328; }
+:where(html.theme-light) .dbc-mini { background: #f2f2f2; border-color: #cecece; color: #1f2328; }
+:where(html.theme-light) .dbc-mini:hover { background: #e4eaf2; }
+:where(html.theme-light) .dbc-sql { background: #f6f8fa; border-bottom-color: #e4e4e4; }
+:where(html.theme-light) .dbc-sql-in { background: #ffffff; color: #24292f; border-color: #d4d4d4; }
+:where(html.theme-light) .dbc-sql-msg { color: #6b6b6b; }
+:where(html.theme-light) .dbc-grid th { background: #f2f4f6; color: #4a4a4a; border-bottom-color: #d8d8d8; border-right-color: #e4e4e4; }
+:where(html.theme-light) .dbc-grid td { color: #24292f; border-bottom-color: #ececec; border-right-color: #f0f0f0; }
+:where(html.theme-light) .dbc-grid tbody tr:hover td { background: #f4f7fa; }
+:where(html.theme-light) .dbc-grid .dbc-null { color: #999999; }
+:where(html.theme-light) .dbc-empty { color: #8a8a8a; }
+:where(html.theme-light) .dbc-pager { border-top-color: #e4e4e4; color: #6b6b6b; }
+:where(html.theme-light) .dbc-limit { background: #ffffff; color: #1f2328; border-color: #cecece; }
 :where(html.theme-light) .sysai-call.err .sysai-call-r { color: #c0392b; }
 :where(html.theme-light) .sysai-call-err { color: #a8544a; }
 :where(html.theme-light) .sysai-mod-desc { color: #6b6b6b; }

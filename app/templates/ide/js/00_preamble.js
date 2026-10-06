@@ -118,6 +118,8 @@
       const panel = localStorage.getItem("ide.session.panel");
       if (panel && typeof showPanel === "function") showPanel(panel);
       if (panel === "search" && typeof window.sessionRestoreSearch === "function") window.sessionRestoreSearch();
+      // 数据库连接面板：连接列表是懒加载的（点侧栏图标才拉取），会话恢复时要主动补一次，否则刷新后左栏空白
+      if (panel === "dbconn" && typeof loadDbConns === "function") loadDbConns();
       const raw = localStorage.getItem("ide.session.tabs");
       const list = raw ? JSON.parse(raw) : [];
       const activePath = localStorage.getItem("ide.session.activeTab") || "";
@@ -127,6 +129,14 @@
           let sec = t.settingsSec || "";
           try { sec = localStorage.getItem("ide.session.settingsSec") || sec; } catch (_) {}
           window.openSettingsTab(sec);
+          continue;
+        }
+        // 数据库连接视图（虚拟路径 \u0000db:<连接 id>）：不是真实文件，走 openFile 必然报「路径不存在」。
+        // 先加载连接列表，再按 id 还原成数据库视图标签。
+        if (typeof DBC_VIEW_PREFIX === "string" && t.path.indexOf(DBC_VIEW_PREFIX) === 0) {
+          if (typeof loadDbConns === "function") await loadDbConns();
+          const dbcConn = (typeof dbcFind === "function") ? dbcFind(t.path.slice(DBC_VIEW_PREFIX.length)) : null;
+          if (dbcConn && typeof openDbView === "function") openDbView(dbcConn);
           continue;
         }
         if (t.path.indexOf("\u0001") >= 0) continue;

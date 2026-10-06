@@ -26,6 +26,7 @@
       <div class="act" data-panel="runner" title="后台任务（保持运行 / 查看日志 / 停止）"><i class="bi bi-play-btn"></i><span class="runner-badge" id="actRunnerBadge" style="display:none">0</span></div>
       <div class="act" data-panel="env" title="运行环境（Node / Python / PHP 等）"><i class="bi bi-cpu"></i></div>
       <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
+      <div class="act" data-panel="dbconn" title="数据库（连接 SQLite / MySQL / PostgreSQL 并浏览管理）"><i class="bi bi-database"></i></div>
       <div class="act bottom" id="actSettings" title="设置 (Ctrl+,)"><i class="bi bi-gear"></i></div>
     </div>
 
@@ -127,6 +128,14 @@
         <div id="envSysBox" style="display:none"><div class="env-sys" id="envSys">展开后加载…</div></div>
       </div>
       <div class="side-panel" id="extPanel"><div class="ph">扩展市场暂未开放。</div></div>
+      <div class="side-panel" id="dbconnPanel">
+        <div class="dbc-tools">
+          <button class="g-btn block" id="dbcNew" title="新建一个数据库连接"><i class="bi bi-plus-lg"></i> 新建连接</button>
+          <button class="g-ico" id="dbcRefresh" title="重新读取连接列表"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+        <div class="s-hint" id="dbcHint">连接仅保存在本机，密码加密存储；打开连接后在右侧编辑器区域浏览表与数据（只读查询）。</div>
+        <div class="dbc-list" id="dbcList"></div>
+      </div>
     </div>
 
     <div class="splitter" id="splitter" title="拖动调整侧边栏宽度（双击恢复默认）"></div>

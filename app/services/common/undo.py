@@ -13,8 +13,9 @@
 changes 里的 id 可用于 /api/ai/undo 回撤（按相反顺序逐个恢复），
 也可用于 /api/ai/changes 查看差异。
 
-快照持久化在 SQLite（DATA_ROOT/.file_manager_ai_undo.db）里，
+快照持久化在统一存储库 data/storage/store.db 的 ai_undo_snapshots 表里，
 服务重启后仍可回撤；超出条数 / 总大小 / 保存天数上限时自动淘汰最早的记录。
+（原独立库 .file_manager_ai_undo.db 由 store_db.migrate_sqlite_once() 首次启动时一次性搬入。）
 """
 import difflib
 import glob
@@ -23,15 +24,12 @@ import pickle
 import re
 import shlex
 import shutil
-import sqlite3
 import threading
 import time
 import uuid
 import zlib
 
-from ... import config
-
-UNDO_DB = os.path.join(config.DATA_ROOT, ".file_manager_ai_undo.db")
+from .store_db import store_conn
 
 _LOCK = threading.Lock()          # 串行化写操作（sqlite 每次独立连接，锁只保护读改写逻辑）
 
@@ -52,38 +50,13 @@ _init_done = False
 
 
 def _conn():
-    conn = sqlite3.connect(UNDO_DB, timeout=30)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
+    """连接统一存储库（表结构见 store_db._SCHEMA）"""
+    return store_conn()
 
 
 def _init():
-    """建表（幂等，进程内只执行一次）。"""
+    """表已随 store_db 建好，这里只保留调用点。"""
     global _init_done
-    if _init_done:
-        return
-    conn = _conn()
-    try:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS ai_undo_snapshots (
-                cid        TEXT PRIMARY KEY,
-                path       TEXT NOT NULL,
-                kind       TEXT NOT NULL,      -- file / dir / absent
-                before     BLOB,               -- 改前内容（pickle+zlib；dir 含整个目录）
-                after      BLOB,               -- 改后内容（file）
-                action     TEXT DEFAULT '',    -- created / modified / deleted / unchanged / ''(未标注)
-                diff       TEXT DEFAULT '',    -- unified diff（annotate 时生成）
-                truncated  INTEGER DEFAULT 0,
-                rel        TEXT DEFAULT '',    -- 项目内相对路径（展示用）
-                data_len   INTEGER DEFAULT 0,  -- before+after 字节数（用于总量淘汰）
-                created_at REAL NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_undo_created ON ai_undo_snapshots(created_at);
-        """)
-        conn.commit()
-    finally:
-        conn.close()
     _init_done = True
 
 

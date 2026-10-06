@@ -2,16 +2,15 @@
 
 对话（conversations）按 user_id 隔离，每条对话下挂多条消息（messages）。
 消息中图片以 dataURL 形式完整保存（images 字段存 JSON 数组），保证多端回放一致。
+
+表（ai_conversations / ai_messages / ai_prefs）已并入统一存储库 data/storage/store.db，
+建表由 store_db 的 _SCHEMA 幂等完成；旧独立库 .file_manager_ai_chat.db 由
+store_db.migrate_sqlite_once() 在首次启动时一次性搬入。
 """
-import os
 import json
 import time
-import sqlite3
 
-from ... import config
-
-
-CHAT_DB = os.path.join(config.DATA_ROOT, ".file_manager_ai_chat.db")
+from ..common.store_db import store_conn
 
 # 单条消息图片 dataURL 上限（与 ai.py 的 _MAX_IMAGE_DATAURL 对齐）
 _MAX_IMAGE_DATAURL = 9_000_000
@@ -19,44 +18,13 @@ _MAX_IMAGE_PARTS = 8
 
 
 def _conn():
-    conn = sqlite3.connect(CHAT_DB, timeout=30)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
+    """连接统一存储库（表结构见 store_db._SCHEMA）"""
+    return store_conn()
 
 
 def init_chat_db():
-    """建表（幂等）。"""
-    conn = _conn()
-    try:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS ai_conversations (
-                id         TEXT PRIMARY KEY,
-                user_id    TEXT NOT NULL,
-                title      TEXT DEFAULT '',
-                created_at REAL NOT NULL,
-                updated_at REAL NOT NULL,
-                extra      TEXT DEFAULT ''          -- JSON：mem / cmp / cmpLen / savedTok / stats
-            );
-            CREATE TABLE IF NOT EXISTS ai_messages (
-                conv_id  TEXT NOT NULL,
-                mid      TEXT NOT NULL,
-                user_id  TEXT NOT NULL,
-                role     TEXT NOT NULL,
-                text     TEXT DEFAULT '',
-                images   TEXT DEFAULT '',           -- JSON 数组：图片 dataURL（完整保存）
-                reasoning TEXT DEFAULT '',
-                meta     TEXT DEFAULT '',           -- JSON：{ms, ts, steps, files}
-                seq      INTEGER NOT NULL,
-                created_at REAL NOT NULL,
-                PRIMARY KEY (conv_id, mid)
-            );
-            CREATE INDEX IF NOT EXISTS idx_ai_conv_user ON ai_conversations(user_id, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_ai_msg_user ON ai_messages(user_id, conv_id, seq);
-        """)
-        conn.commit()
-    finally:
-        conn.close()
+    """表已随 store_db 建好，保留此函数只为兼容启动时的调用。"""
+    return
 
 
 def _clean_images(images):

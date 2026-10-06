@@ -11,7 +11,10 @@
     plugin_history   插件登记簿：安装 / 卸载历史
     notify_history   通知历史（最新一条与游标放 store_meta）
     shares           分享记录（原独立库 data/storage/shares.db）
-    store_meta       通用键值（含「旧 JSON 是否已导入」标记）
+    ai_conversations / ai_messages / ai_prefs    AI 对话历史（原独立库 .file_manager_ai_chat.db）
+    ai_undo_snapshots                           AI 文件改动快照（原独立库 .file_manager_ai_undo.db）
+    ai_usage / ai_calls                        系统 AI 调用计数与明细
+    store_meta       通用键值（含「旧 JSON / 旧库是否已导入」标记）
 
 设计约定与 share_store.py 一致：
   - WAL + synchronous=NORMAL；每次操作独立连接，用完即关；
@@ -26,7 +29,7 @@ import os
 import sqlite3
 import threading
 
-from ...config import _STORE_DB_FILE
+from ...config import _STORE_DB_FILE, AI_CHAT_LEGACY_DB, AI_UNDO_LEGACY_DB
 from ...log import get_logger
 
 _log = get_logger()
@@ -214,6 +217,51 @@ CREATE TABLE IF NOT EXISTS ai_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_calls_mod ON ai_calls(module, id);
 CREATE INDEX IF NOT EXISTS idx_ai_calls_day ON ai_calls(module, day);
+
+-- AI 对话历史（原独立库 data/.file_manager_ai_chat.db，表结构保持一致以便直接搬运）
+CREATE TABLE IF NOT EXISTS ai_conversations (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    title      TEXT DEFAULT '',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    extra      TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS ai_messages (
+    conv_id   TEXT NOT NULL,
+    mid       TEXT NOT NULL,
+    user_id   TEXT NOT NULL,
+    role      TEXT NOT NULL,
+    text      TEXT DEFAULT '',
+    images    TEXT DEFAULT '',
+    reasoning TEXT DEFAULT '',
+    meta      TEXT DEFAULT '',
+    seq       INTEGER NOT NULL,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (conv_id, mid)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_conv_user ON ai_conversations(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_msg_user ON ai_messages(user_id, conv_id, seq);
+CREATE TABLE IF NOT EXISTS ai_prefs (
+    user_id  TEXT PRIMARY KEY,
+    cur_conv TEXT DEFAULT ''
+);
+
+-- AI 文件改动快照（原独立库 data/.file_manager_ai_undo.db）
+CREATE TABLE IF NOT EXISTS ai_undo_snapshots (
+    cid        TEXT PRIMARY KEY,
+    path       TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    before     BLOB,
+    after      BLOB,
+    action     TEXT DEFAULT '',
+    diff       TEXT DEFAULT '',
+    truncated  INTEGER DEFAULT 0,
+    rel        TEXT DEFAULT '',
+    data_len   INTEGER DEFAULT 0,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_undo_created ON ai_undo_snapshots(created_at);
 """
 
 
@@ -443,5 +491,52 @@ def migrate_json_once(marker, json_path, handler):
         _log.warning("迁移 %s 失败：%s", marker, e)
 
 
+def migrate_sqlite_once(marker, db_path, tables, delete_after=True):
+    """把旧的独立 SQLite 库里的表一次性并入 store.db。
+
+    两边表结构一致，用 ATTACH + INSERT OR IGNORE 搬运（重复执行也不会产生重复数据），
+    成功后写标记；delete_after=True 时连同 -wal/-shm 一起删掉旧库文件。
+    """
+    if get_meta(marker):
+        return
+    if not db_path or not os.path.isfile(db_path):
+        return
+    try:
+        with _lock:
+            conn = store_conn()
+            try:
+                conn.execute("ATTACH DATABASE ? AS legacy", (db_path,))
+                for t in tables:
+                    if not conn.execute("SELECT 1 FROM legacy.sqlite_master "
+                                        "WHERE type='table' AND name=?", (t,)).fetchone():
+                        continue                       # 旧库里没有这张表：跳过
+                    main_cols = [r["name"] for r in conn.execute(f"PRAGMA main.table_info({t})")]
+                    old_cols = [r["name"] for r in conn.execute(f"PRAGMA legacy.table_info({t})")]
+                    use = [c for c in old_cols if c in main_cols]     # 只搬两边都有的列
+                    if not use:
+                        continue
+                    cols = ", ".join('"' + c + '"' for c in use)
+                    conn.execute(f"INSERT OR IGNORE INTO main.{t} ({cols}) "
+                                 f"SELECT {cols} FROM legacy.{t}")
+                conn.execute("INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, '1')", (marker,))
+                conn.commit()
+            finally:
+                conn.close()                       # 关闭连接即自动 DETACH
+        _log.info("已迁移旧数据库到 store.db：%s（%s）", marker, "、".join(tables))
+        if delete_after:
+            for p in (db_path, db_path + "-wal", db_path + "-shm"):
+                try:
+                    if os.path.isfile(p):
+                        os.remove(p)
+                except OSError as e:
+                    _log.warning("删除旧库文件失败 %s：%s", p, e)
+    except Exception as e:            # 迁移失败不能影响启动
+        _log.warning("迁移 %s 失败：%s", marker, e)
+
+
 init_store_db()
 hold_wal_files()
+# 旧独立库一次性并入（表结构与本库一致，ATTACH + INSERT OR IGNORE 搬运，成功后删掉旧文件）
+migrate_sqlite_once("table_migrated:ai_chat", AI_CHAT_LEGACY_DB,
+                    ["ai_conversations", "ai_messages", "ai_prefs"])
+migrate_sqlite_once("table_migrated:ai_undo", AI_UNDO_LEGACY_DB, ["ai_undo_snapshots"])

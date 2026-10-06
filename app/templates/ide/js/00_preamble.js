@@ -182,10 +182,12 @@
         .filter(it => showAllFiles || !TREE_IGNORE.has(it.name))
         .sort((a, b) => (b.is_dir - a.is_dir) || a.name.localeCompare(b.name, "zh"));
       if (!items.length) {
-        const e = document.createElement("div");
-        e.className = "tree-row"; e.style.paddingLeft = (depth * 14 + 26) + "px"; e.style.color = "#666";
-        e.innerHTML = '<span class="nm">空文件夹</span>';
-        container.appendChild(e);
+        // 空目录：不插入任何占位行（展开后一片空白即表示空），
+        // 只把该行的展开/收起三角藏起来；目录行本身照常可以点选 / 右键 / 收起。
+        // 用 visibility 而非删除：保留 16px 占位，缩进对齐不受影响。
+        const hostRow = container.previousElementSibling;
+        const tw = hostRow && hostRow.querySelector(".twist");
+        if (tw) tw.style.visibility = "hidden";
         return;
       }
       items.forEach(it => renderNode(it, container, depth + 1));

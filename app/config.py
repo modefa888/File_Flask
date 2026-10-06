@@ -203,6 +203,11 @@ _SHARE_DB_FILE = os.path.join(_STORAGE_DIR, "shares.db")
 # （视频封面索引 / 目录缓存 / 删除历史 / 压缩历史 / 插件登记簿 / 通知历史）
 _STORE_DB_FILE = os.path.join(_STORAGE_DIR, "store.db")
 
+# 旧的独立 SQLite 库：已并入 store.db
+# （表：ai_conversations / ai_messages / ai_prefs / ai_undo_snapshots）
+AI_CHAT_LEGACY_DB = os.path.join(_DATA_ROOT, ".file_manager_ai_chat.db")
+AI_UNDO_LEGACY_DB = os.path.join(_DATA_ROOT, ".file_manager_ai_undo.db")
+
 # AI 助手配置（OpenAI 兼容接口）：已迁入 store.db 的
 # ai_providers / ai_models / ai_active / notify_cfg 表
 AI_CONFIG_FILE = os.path.join(_STORAGE_DIR, ".file_manager_ai.json")

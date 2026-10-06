@@ -275,6 +275,15 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .set-sec .set-desc { color: #6b6b6b; }
 :where(html.theme-light) .set-row .set-desc { color: #6b6b6b; }
 :where(html.theme-light) .notify-card { background: #f8f8f8; border-color: #e0e0e0; box-shadow: 0 2px 8px rgba(0, 0, 0, .06); }
+/* 分组标题：深色下是浅蓝 #9cdcfe，白底上几乎看不见，换成设置页主色深蓝 */
+:where(html.theme-light) .notify-card-title { color: #0a6aa8; }
+/* 通知预览卡片同理：深色用的浅蓝/近白色在白色卡片上不可读 */
+:where(html.theme-light) .notify-preview-app { color: #0a6aa8; }
+:where(html.theme-light) .notify-preview-title { color: #1f2328; }
+:where(html.theme-light) .notify-preview-body { color: #444444; }
+:where(html.theme-light) .notify-preview-tag { color: #1a7f37; background: rgba(26, 127, 55, .12); }
+:where(html.theme-light) .notify-preview-note { color: #8a6a00; }
+:where(html.theme-light) .notify-preview-note code { color: #a0522d; background: rgba(160, 82, 45, .1); }
 :where(html.theme-light) .notify-label { color: #1f2328; }
 :where(html.theme-light) .notify-desc { color: #6b6b6b; }
 :where(html.theme-light) .notify-input, :where(html.theme-light) .notify-select {

@@ -26,6 +26,7 @@
   function openPreview(item, contextItems) {
     // 上一次看图留下的缩略图观察器先清掉（缩略图条马上会重建）
     if (_pvThumbObserver) { _pvThumbObserver.disconnect(); _pvThumbObserver = null; }
+    document.getElementById("previewBody").classList.remove("fullscreen");   // 复位上一次的全屏态
     var ext = extOf(item.name);
     var abs = itemAbs(item);
     // 音频走独立播放器，不占用预览遮罩（避免遮罩停留在“加载中…”）
@@ -485,24 +486,18 @@
       '<div class="pv-head">' +
         '<span class="pv-title">' + esc(item.name) + '</span>' +
         '<span class="pv-badge">未修改</span>' +
+        '<button type="button" class="pv-tbtn" data-op="copy" title="复制">📋</button>' +
+        '<button type="button" class="pv-tbtn" data-op="edit" title="编辑">✏️</button>' +
+        '<button type="button" class="pv-tbtn hide" data-op="save" title="保存">💾</button>' +
+        '<button type="button" class="pv-tbtn hide" data-op="cancel" title="取消">✖️</button>' +
+        '<button type="button" class="pv-tbtn" data-op="more" title="更多">⋯</button>' +
         '<button type="button" class="pv-close" data-op="close">✕</button>' +
       '</div>' +
       '<div class="pv-meta"></div>' +
-      '<div class="pv-ops">' +
-        '<button type="button" data-op="copy">📋 复制</button>' +
+      '<div class="pv-more">' +
         '<button type="button" data-op="wrap">↩️ 换行</button>' +
         '<button type="button" data-op="search">🔍 搜索</button>' +
         '<button type="button" data-op="download">⬇️ 下载</button>' +
-        '<button type="button" data-op="edit">✏️ 编辑</button>' +
-        '<button type="button" class="hide" data-op="save">💾 保存</button>' +
-        '<button type="button" class="hide" data-op="cancel">✖️ 取消</button>' +
-        '<div class="pv-confirm">' +
-          '<div>确认下载该文件？</div>' +
-          '<div class="pv-confirm-btns">' +
-            '<button type="button" class="yes" data-op="dl-yes">确认下载</button>' +
-            '<button type="button" data-op="dl-no">取消</button>' +
-          '</div>' +
-        '</div>' +
       '</div>' +
       '<div class="pv-search">' +
         '<input type="text" placeholder="搜索关键字…">' +
@@ -573,6 +568,9 @@
     card.appendChild(pre);
     body.innerHTML = "";
     body.appendChild(card);
+    // 文本预览铺满整屏：代码行较长、内容较多，全屏看/编辑更实用
+    card.classList.add("full");
+    body.classList.add("fullscreen");
     // 文本预览使用卡片内关闭按钮，隐藏遮罩右上角的关闭圆钮
     document.getElementById("previewClose").style.display = "none";
 
@@ -648,6 +646,7 @@
     function navHit(d) { if (editing) goEditHit(editHitIdx + d); else goHit(hitIdx + d); }
 
     card.querySelector('[data-op="search"]').addEventListener("click", function () {
+      moreMenu.classList.remove("show");
       var show = !sbar.classList.contains("show");
       sbar.classList.toggle("show", show);
       this.classList.toggle("on", show);
@@ -676,37 +675,30 @@
       pre.classList.toggle("wrap", !wrapOn);
       this.classList.toggle("on", !wrapOn);
     });
+    // 复制：用统一的复制方法（含 iOS 兼容与失败提示）
     card.querySelector('[data-op="copy"]').addEventListener("click", function () {
-      var btn = this;
-      function ok() { btn.textContent = "✅ 已复制"; setTimeout(function () { btn.textContent = "📋 复制"; }, 1200); }
-      function fallbackCopy() {
-        var ta = document.createElement("textarea");
-        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
-        document.body.appendChild(ta); ta.select();
-        try { document.execCommand("copy"); ok(); } catch (e) { toast("复制失败", "error"); }
-        document.body.removeChild(ta);
-      }
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(ok, fallbackCopy);
-      } else fallbackCopy();
+      copyText(text);
     });
-    // 下载需二次确认（自定义悬浮框）
-    var confirmBox = card.querySelector(".pv-confirm");
-    card.querySelector('[data-op="download"]').addEventListener("click", function (e) {
+    // ---- ⋯ 更多菜单：点开 / 收起，点别处自动收起 ----
+    var moreMenu = card.querySelector(".pv-more");
+    card.querySelector('[data-op="more"]').addEventListener("click", function (e) {
       e.stopPropagation();
-      confirmBox.classList.toggle("show");
-    });
-    card.querySelector('[data-op="dl-yes"]').addEventListener("click", function () {
-      confirmBox.classList.remove("show");
-      download(item);
-    });
-    card.querySelector('[data-op="dl-no"]').addEventListener("click", function () {
-      confirmBox.classList.remove("show");
+      moreMenu.classList.toggle("show");
     });
     card.addEventListener("click", function (e) {
-      if (!(e.target.closest && e.target.closest('[data-op="download"], .pv-confirm'))) {
-        confirmBox.classList.remove("show");
+      if (!(e.target.closest && e.target.closest('.pv-more, [data-op="more"]'))) {
+        moreMenu.classList.remove("show");
       }
+    });
+    // 下载：收起菜单 + 二次确认（与图片查看器一致，用全局确认框）
+    card.querySelector('[data-op="download"]').addEventListener("click", function () {
+      moreMenu.classList.remove("show");
+      confirmBox({
+        title: "下载文件",
+        message: "确认下载「" + item.name + "」？",
+        okText: "下载",
+        onOk: function () { download(item); }
+      });
     });
 
     // ---- 编辑 / 保存 ----

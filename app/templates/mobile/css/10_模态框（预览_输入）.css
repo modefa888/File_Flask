@@ -15,12 +15,19 @@
 
   /* 文本预览卡片：文件名 + 操作栏 + 固定大小内容区 */
   .pv-card {
+    position: relative;                 /* ⋯ 更多菜单以卡片为定位基准 */
     display: flex; flex-direction: column; width: 92vw; height: 84vh;
     background: #fff; border-radius: 12px; overflow: hidden;
     box-shadow: 0 4px 20px rgba(0,0,0,.15);
   }
+  /* 编辑模式：卡片铺满整屏（小屏能多看到几行代码），并避开刘海/底部横条 */
+  .preview-body.fullscreen { width: 100%; height: 100%; padding: 0; }
+  .pv-card.full {
+    width: 100%; height: 100%; border-radius: 0; box-shadow: none;
+    padding-top: var(--safe-top); padding-bottom: var(--safe-bottom);
+  }
   .pv-head {
-    display: flex; align-items: center; gap: 10px;
+    display: flex; align-items: center; gap: 7px;
     padding: 8px 10px 0 14px; font-size: 14px; font-weight: 600; color: #1a1a1a;
   }
   .pv-meta {
@@ -38,19 +45,31 @@
     flex: none; width: 30px; height: 30px; border: none; border-radius: 50%;
     background: #f0f1f3; color: #444; font-size: 15px; cursor: pointer;
   }
-  .pv-ops { position: relative; display: flex; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #ececec; }
-  .pv-confirm {
-    display: none; position: absolute; top: calc(100% + 8px); right: 8px; z-index: 5;
-    background: #fff; border: 1px solid #e3e5e8; border-radius: 10px;
-    box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 12px 14px;
-    font-size: 13px; color: #333; white-space: nowrap;
+  /* 顶栏图标按钮（复制 / 编辑 / 保存 / 取消 / 更多） */
+  .pv-head .pv-tbtn {
+    flex: none; width: 30px; height: 30px; padding: 0; line-height: 1;
+    border: none; border-radius: 8px; background: #f0f1f3; color: #444;
+    font-size: 14px; cursor: pointer;
   }
-  .pv-confirm.show { display: block; }
-  .pv-confirm-btns { display: flex; gap: 8px; margin-top: 10px; }
-  .pv-confirm-btns button { padding: 6px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; border: 1px solid #dcdfe4; background: #f5f6f8; color: #333; }
-  .pv-confirm-btns .yes { background: #1a73e8; border-color: #1a73e8; color: #fff; }
-  .pv-ops button.hide { display: none; }
-  .pv-ops button:disabled { opacity: .45; }
+  .pv-head .pv-tbtn.on { background: #e8f0fe; color: #1a73e8; }
+  .pv-head .pv-tbtn.hide { display: none; }
+  .pv-head .pv-tbtn:disabled { opacity: .45; }
+
+  /* ⋯ 更多：从右上角浮出的菜单 */
+  .pv-more {
+    display: none; position: absolute; right: 10px; top: 40px; z-index: 8;
+    background: #fff; border: 1px solid #e3e5e8; border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 6px; min-width: 136px;
+  }
+  .pv-more.show { display: block; }
+  .pv-more button {
+    display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box;
+    padding: 9px 10px; border: none; background: none; border-radius: 8px;
+    font-size: 13px; color: #333; text-align: left; cursor: pointer;
+  }
+  .pv-more button.on { background: #e8f0fe; color: #1a73e8; }
+  .pv-more button.hide { display: none; }
+  .pv-more button:active { background: #f1f5f9; }
   .pv-editwrap { flex: 1; min-height: 0; display: flex; overflow: hidden; }
   .pv-gutter {
     flex: none; width: 48px; box-sizing: border-box; overflow: hidden;
@@ -75,11 +94,6 @@
     display: block; margin: 8px auto 0; padding: 4px 16px; font-size: 12px;
     border-radius: 14px; border: 1px solid #cfd8ea; background: #fff; color: #1a73e8;
   }
-  .pv-ops button {
-    flex: 1; padding: 7px 0; font-size: 13px; border-radius: 8px; cursor: pointer;
-    border: 1px solid #dcdfe4; background: #f5f6f8; color: #333;
-  }
-  .pv-ops button.on { background: #e8f0fe; border-color: #1a73e8; color: #1a73e8; }
   .pv-pre {
     position: relative; flex: 1; min-height: 0; margin: 0; overflow: auto;
     padding: 10px 14px 10px 0; background: #fff; color: #1a1a1a;

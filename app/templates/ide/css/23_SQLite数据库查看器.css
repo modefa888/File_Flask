@@ -32,7 +32,8 @@
 .dbv-icount { font-size: 10.5px; color: #777; flex: none; }
 .dbv-item.active .dbv-icount { color: #9fd0ff; }
 /* 右侧数据区 */
-.dbv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* position: relative 是 SQL 悬浮查询窗的定位参照（只在数据区内浮动，不盖左侧表列表） */
+.dbv-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .dbv-toolbar {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 12px; border-bottom: 1px solid #333; background: #252526;
@@ -67,8 +68,83 @@
 .dbv-table td { color: #ccc; }
 .dbv-table tbody tr:nth-child(even) { background: rgba(255,255,255,.025); }
 .dbv-table tbody tr:hover { background: rgba(79,195,247,.08); }
-.dbv-rownum { color: #666; text-align: right !important; background: #262626; font-size: 11px; min-width: 44px; }
+/* 序号列：auto 表格布局下 width:1% 表示「尽量窄」，多余宽度会让给数据列，
+   否则只有一两列时会被撑成半张表那么宽 */
+.dbv-rownum {
+  width: 1%; min-width: 44px; white-space: nowrap;
+  color: #666; text-align: right !important; background: #262626; font-size: 11px;
+}
 .dbv-null { color: #666; font-style: italic; }
 .dbv-empty { padding: 24px; color: #777; text-align: center; }
 .dbv-err { padding: 24px; color: #c66; text-align: center; }
 .dbv-nodata { text-align: center !important; color: #777; padding: 24px !important; }
+/* SQL 查询窗：工具栏「SQL」按钮开的悬浮窗，可拖动、可全屏，不占数据表空间 */
+.dbv-sql-toggle.on { background: #094771; border-color: #0e639c; color: #ffffff; }
+/* 块级布局而非 column flex：flex 子项会被压缩，而 input/textarea 的自动最小高度
+   对表单元素等于 0，一挤就只剩 padding，变成一条细线。 */
+.dbv-sql {
+  position: absolute; z-index: 40; top: 44px; right: 16px;
+  width: 680px; max-width: calc(100% - 32px); display: block;
+  background: #252526; border: 1px solid #454545; border-radius: 8px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .55);
+}
+.dbv-sql[hidden] { display: none; }
+/* 全屏：铺满数据区，标题栏保留（用于还原与关闭） */
+.dbv-sql.max { top: 0; right: 0; bottom: 0; left: 0; width: auto; max-width: none; border-radius: 0; }
+.dbv-sql-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px 6px 12px; border-bottom: 1px solid #3a3a3a;
+  cursor: move; user-select: none;
+}
+.dbv-sql.max .dbv-sql-head { cursor: default; }
+.dbv-sql-title { flex: none; font-size: 12px; font-weight: 600; color: #e0e0e0; white-space: nowrap; }
+.dbv-sql-title .bi { color: #4fc3f7; margin-right: 4px; }
+/* 窄窗口下让提示文字先被省略，避免把头部撑破 */
+.dbv-sql-hint {
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  font-size: 11px; color: #777; white-space: nowrap;
+}
+/* 一句话生成 SQL：输入框 + 图标按钮（生成中转圈） */
+.dbv-sql-ai { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; }
+.dbv-sql-ai-input {
+  flex: 1; min-width: 0; box-sizing: border-box; height: 26px;
+  background: #1b1b1b; color: #e6e6e6; border: 1px solid #444; border-radius: 4px;
+  padding: 0 8px; font-size: 12.5px; font-family: inherit; outline: none;
+}
+.dbv-sql-ai-input:focus { border-color: #0098ff; }
+.dbv-sql-ai-input:disabled { opacity: .6; }
+.dbv-sql-ai-run { flex: none; }
+.dbv-sql-ai-run .bi { display: inline-block; }
+/* AI 请求中：图标转圈 + 彩色流光（渐变作用在图标的 ::before 字形上） */
+.dbv-sql-ai-run.loading .bi { animation: dbvSpin .9s linear infinite; }
+.dbv-sql-ai-run.loading .bi::before {
+  background: linear-gradient(90deg, #22d3ee, #a855f7, #f472b6, #fbbf24, #22d3ee);
+  background-size: 400% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  /* 只靠 -webkit-text-fill-color 置透明：不支持渐变文字的浏览器该属性同样无效，
+     图标会保留原来的灰色而不是消失 */
+  -webkit-text-fill-color: transparent;
+  animation: dbvFlow 2.4s linear infinite;
+}
+@keyframes dbvSpin { to { transform: rotate(360deg); } }
+@keyframes dbvFlow { from { background-position: 0 0; } to { background-position: 400% 0; } }
+/* SQL 编辑框 */
+.dbv-sql-input {
+  display: block; box-sizing: border-box; width: calc(100% - 24px);
+  margin: 8px 12px 0; height: 88px; min-height: 56px; resize: vertical;
+  background: #1b1b1b; color: #e6e6e6; border: 1px solid #444; border-radius: 4px;
+  padding: 6px 8px; outline: none; font-size: 12.5px; line-height: 1.5;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+.dbv-sql-input:focus { border-color: #0098ff; }
+/* 全屏时编辑框撑满剩余高度（标题 33 + AI 行 34 + 上下间距 45） */
+.dbv-sql.max .dbv-sql-input { height: calc(100% - 112px); resize: none; }
+/* 底部：状态 + 操作 */
+.dbv-sql-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px 8px; }
+.dbv-sql-bar .dbv-btn { flex: none; }
+.dbv-sql-msg { flex: 1; min-width: 0; font-size: 11.5px; line-height: 1.5; color: #888; }
+.dbv-sql-msg.ok { color: #7fc98a; }
+.dbv-sql-msg.err { color: #e08a8a; }
+.dbv-sql-run .bi { margin-right: 4px; }
+.dbv-ok { padding: 24px; text-align: center; color: #7fc98a; }

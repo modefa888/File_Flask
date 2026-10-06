@@ -259,6 +259,10 @@
       sh:    ["bi-terminal", "#4ec9b0"], bash: ["bi-terminal", "#4ec9b0"], zsh: ["bi-terminal", "#4ec9b0"],
       bat:   ["bi-terminal", "#4ec9b0"], cmd: ["bi-terminal", "#4ec9b0"], ps1: ["bi-terminal", "#4ec9b0"],
       sql:   ["bi-database", "#519aba"],
+      // SQLite 数据库文件（与后端 _SQLITE_EXTS 一致）：seti 主题未收录这些扩展名，
+      // 这里不显式指定就会落到默认的通用文件图标
+      db:    ["bi-database", "#519aba"], sqlite: ["bi-database", "#519aba"],
+      sqlite3: ["bi-database", "#519aba"], db3: ["bi-database", "#519aba"],
       xls:   ["bi-file-earmark-spreadsheet", "#8dc149"], xlsx: ["bi-file-earmark-spreadsheet", "#8dc149"],
       xlsm:  ["bi-file-earmark-spreadsheet", "#8dc149"], xlsb: ["bi-file-earmark-spreadsheet", "#8dc149"],
       et:    ["bi-file-earmark-spreadsheet", "#8dc149"], ett: ["bi-file-earmark-spreadsheet", "#8dc149"],

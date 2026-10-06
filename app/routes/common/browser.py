@@ -339,6 +339,14 @@ _SQLITE_TABLE_MAX = 200          # 最多列出的表/视图数
 _SQLITE_ROWS_DEFAULT = 100       # 每页默认行数
 _SQLITE_ROWS_MAX = 500           # 每页最大行数
 _SQLITE_CELL_MAX = 1000          # 单元格显示截断长度（避免超大 BLOB/文本撑爆响应）
+_SQLITE_SQL_MAX = 20000          # SQL 文本长度上限
+_SQLITE_QUERY_MAX = 2000         # 查询结果最多返回行数
+_SQLITE_QUERY_TIMEOUT = 5        # 单条查询最长执行秒数（超出即中断，避免拖死服务）
+_SQLITE_NL_MAX = 500             # 「一句话生成 SQL」描述长度上限
+_SQLITE_NL_TIMEOUT = 60          # 调 AI 生成 SQL 的超时秒数
+_SQLITE_NL_CTX = 40000           # 提示词总长度上限（表结构 + 需求）
+_SQLITE_SCHEMA_TABLES = 60       # 表结构最多提供给 AI 的表数
+_SQLITE_SCHEMA_CHARS = 400       # 单张表建表语句截断长度
 
 
 def _is_sqlite_file(ext):
@@ -460,6 +468,243 @@ def api_sqlite_rows():
         })
     except Exception as e:
         return jsonify({"error": f"读取数据失败: {str(e)}"}), 500
+
+
+def _sqlite_query_error(e):
+    """把 sqlite3 的报错翻译成更易懂的中文提示"""
+    msg = str(e)
+    if "readonly database" in msg:
+        return "只读模式：不支持写操作（INSERT / UPDATE / DELETE / CREATE / DROP 等）"
+    if "one statement at a time" in msg:
+        return "一次只能执行一条 SQL 语句，请分多次运行"
+    if msg == "interrupted":
+        return f"查询执行超过 {_SQLITE_QUERY_TIMEOUT} 秒，已中断"
+    if "no such table" in msg:
+        return "表不存在：" + msg
+    if "no such column" in msg:
+        return "列不存在：" + msg
+    if "syntax error" in msg or "incomplete input" in msg or "unrecognized token" in msg:
+        return "SQL 语法错误：" + msg
+    return "执行失败：" + msg
+
+
+@bp.route("/api/sqlite/query", methods=["POST"])
+def api_sqlite_query():
+    """执行单条 SQL（只读连接，因此只能查询）。
+
+    写操作由 SQLite 自身以 "readonly database" 拒绝，无需再做语句解析；
+    多语句同样被 sqlite3 拒绝（一次一条）；长查询靠 progress handler 按截止时间中断。
+    """
+    data = request.get_json(silent=True) or {}
+    target_path = os.path.abspath(os.path.normpath(data.get("path") or ""))
+    sql = (data.get("sql") or "").strip()
+    if not os.path.isfile(target_path):
+        return jsonify({"error": "文件不存在"}), 404
+    if not _is_sqlite_file(os.path.splitext(target_path)[1].lower().lstrip(".")):
+        return jsonify({"error": "不是 SQLite 数据库文件"}), 400
+    if not sql:
+        return jsonify({"error": "请输入要执行的 SQL"}), 400
+    if len(sql) > _SQLITE_SQL_MAX:
+        return jsonify({"error": f"SQL 过长（上限 {_SQLITE_SQL_MAX} 字符）"}), 400
+    try:
+        limit = min(max(int(data.get("limit", _SQLITE_ROWS_DEFAULT)), 1), _SQLITE_QUERY_MAX)
+    except (TypeError, ValueError):
+        limit = _SQLITE_ROWS_DEFAULT
+
+    t0 = time.time()
+    con = None
+    try:
+        con = _sqlite_connect_ro(target_path)
+        deadline = t0 + _SQLITE_QUERY_TIMEOUT
+        # 每 2 万条 VM 指令检查一次，超时返回非 0 让 SQLite 抛出 interrupted
+        con.set_progress_handler(lambda: 1 if time.time() > deadline else 0, 20000)
+        cur = con.cursor()
+        cur.execute(sql)
+        columns = [d[0] for d in (cur.description or [])]
+        raw = cur.fetchmany(limit + 1) if cur.description else []
+        truncated = len(raw) > limit
+        return jsonify({
+            "columns": columns,
+            "rows": [[_sqlite_cell(v) for v in row] for row in raw[:limit]],
+            "row_count": min(len(raw), limit),
+            "truncated": truncated,
+            "limit": limit,
+            "elapsed_ms": int((time.time() - t0) * 1000),
+        })
+    except Exception as e:
+        return jsonify({
+            "error": _sqlite_query_error(e),
+            "elapsed_ms": int((time.time() - t0) * 1000),
+        }), 400
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
+
+
+# 「一句话生成 SQL」：只读的语句白名单开头关键字
+_SQL_READONLY_START = re.compile(r"^\s*(?:--[^\n]*\n|\s)*(select|with|explain|pragma)\b", re.I)
+_SQL_WRITE_WORDS = re.compile(r"\b(insert|update|delete|drop|alter|create|attach|detach|vacuum|reindex)\b", re.I)
+
+_SQLITE_NL_SYS = (
+    "你是 SQLite 查询生成器。根据用户的一句话需求和给定的数据库结构，生成一条可直接执行的 SQLite 查询语句。\n"
+    "硬性要求：\n"
+    "1. 只输出 SQL 本身：不要解释、不要 Markdown 代码块、不要用 ``` 包裹、不要输出多条语句；\n"
+    "2. 只能生成只读查询（SELECT / WITH / EXPLAIN / PRAGMA），绝不生成任何写操作；\n"
+    "3. 表名与列名必须严格取自给定结构，不要臆造；结构里的中文表名/列名可直接使用；\n"
+    "4. 除用户明确要求全部数据外，都加 LIMIT 限制返回行数（默认 100）；\n"
+    "5. 若该需求用现有结构无法完成，只输出一行：-- 无法生成：<原因>"
+)
+
+
+def _sqlite_schema_dump(cur):
+    """把库结构整理成给 AI 看的文本（建表语句 + 行数，超长部分截断）"""
+    rows = cur.execute(
+        "SELECT name, type, sql FROM sqlite_master "
+        "WHERE type IN ('table','view') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' "
+        "ORDER BY type, name").fetchall()
+    parts = []
+    for name, ttype, ddl in rows[:_SQLITE_SCHEMA_TABLES]:
+        try:
+            n = cur.execute(f"SELECT COUNT(*) FROM {_sqlite_quote_ident(name)}").fetchone()[0]
+        except Exception:
+            n = None
+        body = (ddl or "").strip()
+        if len(body) > _SQLITE_SCHEMA_CHARS:
+            body = body[:_SQLITE_SCHEMA_CHARS] + " …"
+        parts.append(f"-- {ttype} {name}（{n if n is not None else '?'} 行）\n{body}")
+    if len(rows) > _SQLITE_SCHEMA_TABLES:
+        parts.append(f"-- 另有 {len(rows) - _SQLITE_SCHEMA_TABLES} 张表未列出")
+    return "\n\n".join(parts)
+
+
+def _first_semi(line):
+    """行内「字符串字面量之外」的第一个分号位置；行内注释之后的分号不算，没有则 None"""
+    q = None
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if q:
+            if ch == q:
+                if q == "'" and line[i + 1:i + 2] == "'":     # '' 是转义的单引号
+                    i += 2
+                    continue
+                q = None
+        elif ch in ("'", '"', "`"):
+            q = ch
+        elif ch == "-" and line[i + 1:i + 2] == "-":
+            return None
+        elif ch == ";":
+            return i
+        i += 1
+    return None
+
+
+def _clean_sql(text):
+    """从模型输出里抠出 SQL：去代码围栏、去前缀说明、截到第一条语句结尾"""
+    s = (text or "").strip()
+    m = re.search(r"```(?:sql)?\s*(.+?)(?:```|\Z)", s, re.S | re.I)
+    if m:
+        s = m.group(1).strip()
+    lines = s.splitlines()
+    start = next((i for i, ln in enumerate(lines)
+                  if re.match(r"^\s*(select|with|explain|pragma|--)", ln, re.I)), None)
+    if start is None:
+        return ""       # 通篇不含 SQL：交给上层提示「没有返回可用的 SQL」
+    out = []
+    for ln in lines[start:]:
+        cut = _first_semi(ln)
+        if cut is not None:                   # 到第一条语句结尾即停，丢掉后面的解释
+            out.append(ln[:cut + 1])
+            break
+        out.append(ln)
+    return "\n".join(out).strip()[: _SQLITE_SQL_MAX]
+
+
+@bp.route("/api/sqlite/nl2sql", methods=["POST"])
+def api_sqlite_nl2sql():
+    """一句话生成 SQL：用系统 AI（设置 → AI 助手 当前的接口/模型）产出只读查询语句。
+
+    只负责生成、不负责执行；生成的语句回到前端让用户确认后再走 /api/sqlite/query，
+    那里同样只读，构成双重保险。
+    """
+    data = request.get_json(silent=True) or {}
+    question = str(data.get("question") or "").strip()
+    target_path = os.path.abspath(os.path.normpath(data.get("path") or ""))
+    if not question:
+        return jsonify({"error": "请先用一句话描述你想查什么"}), 400
+    if len(question) > _SQLITE_NL_MAX:
+        return jsonify({"error": f"描述过长（上限 {_SQLITE_NL_MAX} 字）"}), 400
+    if not os.path.isfile(target_path):
+        return jsonify({"error": "文件不存在"}), 404
+    if not _is_sqlite_file(os.path.splitext(target_path)[1].lower().lstrip(".")):
+        return jsonify({"error": "不是 SQLite 数据库文件"}), 400
+
+    from ..ide.ai import _load_cfg        # 复用 AI 助手配置（函数内导入，避免模块循环依赖）
+    cfg = _load_cfg()
+    if not cfg["providers"] or not cfg["active"].get("model"):
+        return jsonify({"error": "尚未配置 AI 接口：请到「设置 → AI 助手」添加接口",
+                        "need_config": True}), 400
+
+    want_pid = str(data.get("provider_id") or "")
+    want_model = str(data.get("model") or "")
+    provider = next((p for p in cfg["providers"] if p["id"] == want_pid), None)
+    if provider is None:
+        provider = next((p for p in cfg["providers"] if p["id"] == cfg["active"].get("provider")),
+                        cfg["providers"][0])
+    model = want_model or cfg["active"].get("model") or (provider["models"][0] if provider["models"] else "")
+
+    try:
+        con = _sqlite_connect_ro(target_path)
+        try:
+            schema = _sqlite_schema_dump(con.cursor())
+        finally:
+            con.close()
+    except Exception as e:
+        return jsonify({"error": f"无法读取数据库结构: {str(e)}"}), 500
+
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    content = ("[数据库表结构]\n" + schema + "\n\n[查询需求]\n" + question)[:_SQLITE_NL_CTX]
+    payload = json.dumps({"model": model, "stream": False, "messages": [
+        {"role": "system", "content": _SQLITE_NL_SYS},
+        {"role": "user", "content": content}]}).encode("utf-8")
+
+    import urllib.error
+    import urllib.request
+    t0 = time.time()
+    req = urllib.request.Request(url, data=payload, method="POST", headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+    try:
+        resp = urllib.request.urlopen(req, timeout=_SQLITE_NL_TIMEOUT)
+        obj = json.loads(resp.read().decode("utf-8"))
+        text = (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")[:200]
+        return jsonify({"error": f"AI 接口返回 {e.code}：{detail}"}), 502
+    except Exception as e:
+        return jsonify({"error": f"调用 AI 接口失败：{str(e)}"}), 502
+
+    sql = _clean_sql(text)
+    if not sql:
+        if _SQL_WRITE_WORDS.search(text or ""):
+            return jsonify({"error": "模型生成的是写操作语句，已丢弃（此处只用于查询），请换个说法重试"}), 400
+        return jsonify({"error": "模型没有返回可用的 SQL，请换个说法或换个模型"}), 502
+    if sql.startswith("--"):            # 模型按要求回了「-- 无法生成：<原因>」
+        return jsonify({"error": sql.lstrip("- ").splitlines()[0][:200]
+                        or "无法根据当前结构生成 SQL", "sql": sql}), 400
+    if not _SQL_READONLY_START.match(sql) or _SQL_WRITE_WORDS.search(sql):
+        return jsonify({"error": "模型生成的不是只读查询语句，已丢弃，请换个说法重试",
+                        "sql": sql}), 400
+
+    _log.info("AI 生成 SQL：model=%s %dms sql=%s", model, int((time.time() - t0) * 1000), sql[:200])
+    return jsonify({
+        "sql": sql,
+        "model": model,
+        "elapsed_ms": int((time.time() - t0) * 1000),
+    })
 
 
 @bp.route("/api/raw/<path:fspath>")

@@ -160,6 +160,99 @@ function setupEnvView(tab) {
     cm.scrollIntoView({ line: cm.lastLine(), ch: 0 });
   }
 
+  // ---- 随机强值：密钥类字段一键生成 ----
+  // 名字里带 KEY / SECRET / SALT / TOKEN / PASSWORD 的视为「密钥类」，
+  // 控件旁给一个「随机强值」按钮，省得手动凑强度（如 SECRET_KEY、SECRET_SALT）。
+  var STRONG_NAME_RE = /(SECRET|SALT|TOKEN|PASSWORD|PASSWD|KEY)/i;
+  function needsStrongValue(key) { return STRONG_NAME_RE.test(key || ""); }
+
+  function randomStrong(len) {
+    len = len || 48;
+    // 字符集 64 个：256 % 64 === 0，按低 6 位取值不会有取模偏差
+    var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    var buf = new Uint8Array(len);
+    try { (window.crypto || window.msCrypto).getRandomValues(buf); }
+    catch (e) { for (var i = 0; i < len; i++) buf[i] = Math.floor(Math.random() * 256); }
+    var out = "";
+    for (var j = 0; j < len; j++) out += chars[buf[j] & 63];
+    return out;
+  }
+
+  // 可选的随机串长度（字符数）
+  var RAND_LENS = [16, 24, 32, 48, 64];
+  var randDismissBound = false;
+  var randAnchor = null;      // 当前浮层对应的按钮（再点同一个按钮 = 收起）
+
+  function closeRandPop() {
+    var el = document.querySelector(".env-rand-pop");
+    if (el) el.remove();
+    randAnchor = null;
+  }
+
+  // 位数选择浮层：挂到 body 上并 fixed 定位 —— 面板自身有 overflow，
+  // 内部绝对定位的浮层会被裁掉，只有脱离面板才不会被挡。
+  function openRandPop(anchor, input, key) {
+    randAnchor = anchor;
+    var pop = document.createElement("div");
+    pop.className = "env-rand-pop";
+    var title = document.createElement("div");
+    title.className = "env-rand-pop-title";
+    title.textContent = "随机强值位数";
+    pop.appendChild(title);
+    RAND_LENS.forEach(function (len) {
+      var item = document.createElement("button");
+      item.type = "button";
+      item.className = "env-rand-pop-item";
+      item.textContent = len + " 位";
+      item.addEventListener("click", function () {
+        closeRandPop();
+        input.value = randomStrong(len);
+        writeValue(key, input.value);
+        toast("已生成 " + len + " 位随机强值", "ok");
+      });
+      pop.appendChild(item);
+    });
+    document.body.appendChild(pop);
+    // 默认贴在按钮左下方；下方或右侧放不下时自动上翻 / 左移
+    var r = anchor.getBoundingClientRect();
+    var left = Math.min(r.left, window.innerWidth - pop.offsetWidth - 8);
+    var top = r.bottom + 6;
+    if (top + pop.offsetHeight > window.innerHeight - 8) top = r.top - pop.offsetHeight - 6;
+    pop.style.left = Math.max(8, left) + "px";
+    pop.style.top = Math.max(8, top) + "px";
+  }
+
+  // 关闭时机：点别处 / Esc / 滚动 / 改窗口大小（全局只绑一次）
+  function bindRandDismiss() {
+    if (randDismissBound) return;
+    randDismissBound = true;
+    document.addEventListener("mousedown", function (e) {
+      var t = e.target;
+      if (t && t.closest && t.closest(".env-rand-pop, .env-edit-rand")) return;
+      closeRandPop();
+    }, true);
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeRandPop(); }, true);
+    window.addEventListener("resize", closeRandPop);
+    window.addEventListener("scroll", closeRandPop, true);
+  }
+
+  function makeRandBtn(input, key) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "env-edit-rand";
+    btn.title = "生成随机强值（可选位数）";
+    btn.innerHTML = '<i class="bi bi-shuffle"></i>';
+    btn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+    btn.addEventListener("click", function () {
+      var same = (randAnchor === btn);  // 再点同一个按钮 = 收起
+      closeRandPop();
+      if (same) return;
+      bindRandDismiss();
+      openRandPop(btn, input, key);
+    });
+    return btn;
+  }
+
   // ---- 渲染：单个参数（一行一个，系统设置行样式）----
   function renderRow(it) {
     var meta = metaFor(it.key, it.value);
@@ -246,6 +339,7 @@ function setupEnvView(tab) {
         eye.innerHTML = show ? '<i class="bi bi-eye-slash"></i>' : '<i class="bi bi-eye"></i>';
       });
       pw.appendChild(input); pw.appendChild(eye);
+      if (needsStrongValue(it.key)) ctrl.appendChild(makeRandBtn(input, it.key));
       ctrl.appendChild(pw);
       input.addEventListener("input", function () { writeValue(it.key, input.value); });
     } else {
@@ -255,6 +349,7 @@ function setupEnvView(tab) {
       if (meta.min != null) input.min = meta.min;
       if (meta.max != null) input.max = meta.max;
       input.value = it.value;
+      if (needsStrongValue(it.key)) ctrl.appendChild(makeRandBtn(input, it.key));
       ctrl.appendChild(input);
       input.addEventListener("input", function () { writeValue(it.key, input.value); });
     }

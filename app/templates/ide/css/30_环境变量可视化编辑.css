@@ -57,8 +57,8 @@
   flex: 1; min-width: 0; font-style: normal; font-size: 11px; color: #8a8a8a;
   overflow: hidden; text-overflow: ellipsis;
 }
-.env-edit-ctrl { flex: none; display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
-.env-edit-ctrl.grow { width: 210px; }
+.env-edit-ctrl { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.env-edit-ctrl.grow { width: 240px; }
 .env-edit-ctrl input[type="text"],
 .env-edit-ctrl input[type="password"],
 .env-edit-ctrl input[type="number"],
@@ -68,8 +68,27 @@
   border-radius: 4px; padding: 6px 10px; font-size: 13px; font-family: inherit; text-align: left; outline: none;
 }
 .env-edit-ctrl input:focus, .env-edit-ctrl select:focus { border-color: #0098ff; }
-.env-edit-pw { position: relative; width: 100%; }
+.env-edit-pw { position: relative; flex: 1; min-width: 0; }
 .env-edit-pw input { padding-right: 30px; }
+/* 随机强值按钮：密钥类字段（SECRET_KEY / SECRET_SALT / API_KEY / AUTH_PASSWORD …）一键生成 */
+.env-edit-rand {
+  flex: none; background: transparent; border: none; color: #8a8a8a; cursor: pointer;
+  padding: 3px 6px; font-size: 12px; border-radius: 4px; line-height: 1;
+}
+.env-edit-rand:hover { color: #4fc1ff; background: #3a3d41; }
+/* 随机强值：位数选择浮层（挂在 body 上，fixed 定位，避免被面板 overflow 裁剪） */
+.env-rand-pop {
+  position: fixed; z-index: 2000; min-width: 104px; padding: 4px;
+  background: #252526; border: 1px solid #454545; border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .45);
+}
+.env-rand-pop-title { padding: 3px 8px 5px; font-size: 11px; color: #8a8a8a; }
+.env-rand-pop-item {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: transparent; border: none; border-radius: 4px;
+  padding: 5px 8px; font-size: 12px; font-family: inherit; color: #e6e6e6;
+}
+.env-rand-pop-item:hover { background: #094771; color: #ffffff; }
 .env-edit-eye {
   position: absolute; right: 3px; top: 50%; transform: translateY(-50%);
   background: transparent; border: none; color: #8a8a8a; cursor: pointer;

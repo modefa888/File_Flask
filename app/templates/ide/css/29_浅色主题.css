@@ -857,6 +857,16 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .dbv-item.active { background: #cde3f8; color: #1f2328; }
 :where(html.theme-light) .dbv-item.active .bi { color: #8a6a00; }
 :where(html.theme-light) .dbv-item.active .dbv-icount { color: #0b5c9a; }
+:where(html.theme-light) .dbv-sql-toggle.on { background: #cde3f8; border-color: #a8c8e8; color: #1f2328; }
+:where(html.theme-light) .dbv-sql { background: #ffffff; border-color: #d0d0d0; box-shadow: 0 14px 36px rgba(0, 0, 0, .18); }
+:where(html.theme-light) .dbv-sql-head { border-bottom-color: #e4e4e4; }
+:where(html.theme-light) .dbv-sql-title { color: #1f2328; }
+:where(html.theme-light) .dbv-sql-hint { color: #8a8a8a; }
+:where(html.theme-light) .dbv-sql-input { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .dbv-sql-msg { color: #6b6b6b; }
+:where(html.theme-light) .dbv-sql-msg.ok, :where(html.theme-light) .dbv-ok { color: #1a7f37; }
+:where(html.theme-light) .dbv-sql-msg.err { color: #c0392b; }
+:where(html.theme-light) .dbv-sql-ai-input { background: #ffffff; color: #1f2328; border-color: #cecece; }
 
 /* ---------- 通知设置（24） ---------- */
 :where(html.theme-light) .notify-label-wrap code,
@@ -911,4 +921,10 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .env-edit-open i { color: #005fb8; }
 :where(html.theme-light) .env-edit-eye { color: #6b6b6b; }
 :where(html.theme-light) .env-edit-eye:hover { color: #000000; }
+:where(html.theme-light) .env-edit-rand { color: #6b6b6b; }
+:where(html.theme-light) .env-edit-rand:hover { color: #005fb8; background: #dcdcdc; }
+:where(html.theme-light) .env-rand-pop { background: #ffffff; border-color: #d0d0d0; box-shadow: 0 8px 22px rgba(0, 0, 0, .18); }
+:where(html.theme-light) .env-rand-pop-title { color: #6b6b6b; }
+:where(html.theme-light) .env-rand-pop-item { color: #1f2328; }
+:where(html.theme-light) .env-rand-pop-item:hover { background: #e8f2fe; color: #005fb8; }
 :where(html.theme-light) .env-edit-switch-track::after { background: #ffffff; }

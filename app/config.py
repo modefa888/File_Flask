@@ -3,6 +3,34 @@ import os
 import shutil
 import sys
 
+# ===== 从 .env 加载环境变量（账号密码等系统参数集中存放于项目根 .env）=====
+# load_dotenv() 无参会从 dotenv 包目录向上查找，找不到项目根，故显式指定路径。
+try:
+    from dotenv import load_dotenv
+    _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
+except Exception:
+    # 未安装 python-dotenv 时退化为纯环境变量，不影响既有运行
+    pass
+
+def _env_str(name, default):
+    v = os.environ.get(name)
+    if v is None or v == "":
+        return default
+    return v
+
+def _env_int(name, default):
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+def _env_bool(name, default):
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return v.strip().lower() in ("1","true","yes","on","y")
+
 # 是否以冻结的可执行文件运行（PyInstaller 打包后为 True）
 _IS_FROZEN = bool(getattr(sys, "frozen", False))
 
@@ -12,22 +40,23 @@ TEMPLATE_FOLDER = os.path.join(BASE_DIR, "templates")
 STATIC_FOLDER = os.path.join(BASE_DIR, "static")
 
 # Flask 配置
-SECRET_KEY = "change-me-in-production"
-DEBUG = False
-HOST = "0.0.0.0"
-PORT = 5001
+SECRET_KEY = _env_str("SECRET_KEY", "change-me-in-production")
+DEBUG = _env_bool("DEBUG", False)
+HOST = _env_str("HOST", "0.0.0.0")
+PORT = _env_int("PORT", 5001)
 
 # 默认起始路径
-DEFAULT_START_PATH = os.path.sep if os.name != "nt" else os.environ.get("SystemDrive", "C:") + "\\"
+_DEFAULT_START = os.path.sep if os.name != "nt" else os.environ.get("SystemDrive", "C:") + "\\"
+DEFAULT_START_PATH = _env_str("DEFAULT_START_PATH", _DEFAULT_START)
 
 # ===== 执行权限（IDE 的“运行”与“终端”会在服务器上执行命令）=====
 # 仅在本机 / 内网受信任环境使用；若服务要暴露到公网，请改为 False 关闭执行能力。
-ENABLE_EXEC = True
+ENABLE_EXEC = _env_bool("ENABLE_EXEC", True)
 # 终端命令安全校验：True=拦截危险命令（可在此调整规则），False=不校验（有风险）
-EXEC_ENFORCE_SAFETY = True
+EXEC_ENFORCE_SAFETY = _env_bool("EXEC_ENFORCE_SAFETY", True)
 # 「运行环境」面板的一键安装：True=允许通过内置白名单方案下载官方包安装到 ~/.local（无需管理员）
 # 关闭后，面板仍会显示安装方案与系统包命令，但不会自动下载执行。
-ENABLE_AUTO_INSTALL = True
+ENABLE_AUTO_INSTALL = _env_bool("ENABLE_AUTO_INSTALL", True)
 
 # ===== 「运行当前文件」(F5) 的超时设置 =====
 # 前台运行会实时推送日志。超过下面的秒数后按 RUN_TIMEOUT_ACTION 处理：
@@ -35,9 +64,9 @@ ENABLE_AUTO_INSTALL = True
 #                   不再计时，不会把刚启动好、能正常访问的服务杀掉（推荐，默认）；
 #   "kill"       —— 直接终止整个进程组（适合避免写飞的脚本一直占着资源）。
 # 想彻底不超时，直接用 Ctrl+F5「后台运行（服务模式）」。
-RUN_TIMEOUT = 30            # 默认超时（秒）
-RUN_TIMEOUT_MAX = 300       # 允许前端传入的最大超时（秒）
-RUN_TIMEOUT_ACTION = "background"   # 超时后：background=转为后台继续跑 / kill=终止
+RUN_TIMEOUT = _env_int("RUN_TIMEOUT", 30)            # 默认超时（秒）
+RUN_TIMEOUT_MAX = _env_int("RUN_TIMEOUT_MAX", 300)       # 允许前端传入的最大超时（秒）
+RUN_TIMEOUT_ACTION = _env_str("RUN_TIMEOUT_ACTION", "background")   # 超时后：background=转为后台继续跑 / kill=终止
 
 # ===== Demo / 小游戏目录（与 data 平级，独立于默认浏览根）=====
 DEMO_DIR = os.path.join(os.path.dirname(BASE_DIR), "demo")
@@ -128,9 +157,9 @@ EXEC_CONFIRM_PATTERNS = [
     (r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*\s+\.\.", "删除上级目录内容"),
 ]
 
-# ===== 登录认证 =====
-AUTH_USERNAME = "admin"
-AUTH_PASSWORD = "admin123"
+# ===== 登录认证（账号密码从 .env 读取，避免明文散落在源码）=====
+AUTH_USERNAME = _env_str("AUTH_USERNAME", "admin")
+AUTH_PASSWORD = _env_str("AUTH_PASSWORD", "admin123")
 
 # ===== 运行时数据（保存在应用目录下）=====
 # 源码运行时放到项目根目录的 data/；打包为可执行文件后放到可执行文件旁的 data/，

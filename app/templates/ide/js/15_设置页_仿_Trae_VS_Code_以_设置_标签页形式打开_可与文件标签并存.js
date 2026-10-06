@@ -4,7 +4,7 @@
   const IDE_SETTINGS = Object.assign(
     { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
       showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true,
-      httpProxy: "", theme: "dark" },
+      httpProxy: "", theme: "dark", playerTheme: "auto" },
     (() => { try { return JSON.parse(localStorage.getItem("ide.settings") || "{}"); } catch (_) { return {}; } })()
   );
   function ideIsLight() { return IDE_SETTINGS.theme === "light"; }                 // 当前是否浅色（白底）主题
@@ -34,6 +34,8 @@
       g.classList.toggle("cm-s-default", ideIsLight());
       g.classList.toggle("cm-s-material-darker", !ideIsLight());
     });
+    // 视频播放器皮肤：白天 / 黑夜 / 跟随编辑器（auto 时界面主题一变播放器跟着变）
+    if (typeof applyVideoPlayerTheme === "function") applyVideoPlayerTheme();
   }
 
   const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真实文件冲突）
@@ -71,8 +73,9 @@
         '<div class="set-navitem" data-sec="sec-network"><i class="bi bi-globe2"></i>网络/代理</div>' +
       '</div>' +
       '<div class="set-content">' +
-        '<div class="set-sec" id="sec-appearance"><h2 data-kw="外观 主题 背景 颜色 深色 浅色 白 黑 theme dark light">外观</h2>' +
-          '<div class="set-row" data-kw="外观 主题 界面 颜色 背景 深色 浅色 白 黑 theme dark light"><div class="set-info"><div class="set-label">界面主题</div><div class="set-desc">深色（默认）与浅色（白色背景）之间切换，立即生效并记住选择</div></div><select id="setTheme"><option value="dark">深色</option><option value="light">浅色（白色背景）</option></select></div>' +
+        '<div class="set-sec" id="sec-appearance"><h2 data-kw="外观 主题 背景 颜色 深色 浅色 白 黑 白天 黑夜 theme dark light">外观</h2>' +
+          '<div class="set-row" data-kw="外观 主题 界面 颜色 背景 深色 浅色 白 黑 白天 黑夜 theme dark light"><div class="set-info"><div class="set-label">界面主题</div><div class="set-desc">黑夜（深色，默认）与白天（白色背景）之间切换，立即生效并记住选择</div></div><select id="setTheme"><option value="dark">黑夜（深色）</option><option value="light">白天（白色背景）</option></select></div>' +
+          '<div class="set-row" data-kw="外观 主题 播放器 视频 皮肤 白天 黑夜 跟随编辑器 player video theme skin light dark auto"><div class="set-info"><div class="set-label">播放器主题</div><div class="set-desc">标签页内嵌视频播放器的皮肤：白天（浅色控制条与播放列表）/ 黑夜（深色，默认）/ 跟随编辑器（跟随上面的「界面主题」）</div></div><select id="setPlayerTheme"><option value="auto">跟随编辑器</option><option value="light">白天（浅色）</option><option value="dark">黑夜（深色）</option></select></div>' +
         '</div>' +
         '<div class="set-sec" id="sec-editor"><h2>编辑器</h2>' +
           '<div class="set-row" data-kw="字体 字号 font size"><div class="set-info"><div class="set-label">字体大小</div><div class="set-desc">编辑器代码字体大小（10–24）</div></div><input type="number" min="10" max="24" id="setFontSize"></div>' +
@@ -229,6 +232,7 @@
     q("#setRestoreSession").checked = IDE_SETTINGS.restoreSession !== false;
     q("#setHttpProxy").value = IDE_SETTINGS.httpProxy || "";
     q("#setTheme").value = ideIsLight() ? "light" : "dark";
+    q("#setPlayerTheme").value = ["light", "dark"].indexOf(IDE_SETTINGS.playerTheme) >= 0 ? IDE_SETTINGS.playerTheme : "auto";
     q("#setFontSize").addEventListener("change", e => {
       const v = Math.max(10, Math.min(24, parseInt(e.target.value, 10) || 13));
       IDE_SETTINGS.fontSize = v; e.target.value = v; saveIdeSettings(); applyIdeSettings();
@@ -289,16 +293,25 @@
       saveIdeSettings(); ideSettingSet("httpProxy", IDE_SETTINGS.httpProxy);
       toast(IDE_SETTINGS.httpProxy ? "已保存默认代理" : "已设为直连（不使用代理）", "ok");
     });
-    // 界面主题：深色 / 浅色（白色背景）切换，立即生效
+    // 界面主题：黑夜 / 白天（白色背景）切换，立即生效
     q("#setTheme").addEventListener("change", e => {
       IDE_SETTINGS.theme = e.target.value === "light" ? "light" : "dark";
       saveIdeSettings(); applyIdeSettings();
-      toast(ideIsLight() ? "已切换到浅色主题" : "已切换到深色主题", "ok");
+      toast(ideIsLight() ? "已切换到白天主题" : "已切换到黑夜主题", "ok");
+    });
+    // 播放器主题：白天 / 黑夜 / 跟随编辑器（auto 跟随「界面主题」，界面一换播放器跟着换）
+    q("#setPlayerTheme").addEventListener("change", e => {
+      const v = e.target.value === "light" ? "light" : (e.target.value === "dark" ? "dark" : "auto");
+      IDE_SETTINGS.playerTheme = v;
+      saveIdeSettings(); ideSettingSet("playerTheme", v);
+      if (typeof applyVideoPlayerTheme === "function") applyVideoPlayerTheme();
+      toast(v === "auto" ? "播放器已跟随编辑器主题" : (v === "light" ? "播放器已切换到白天皮肤" : "播放器已切换到黑夜皮肤"), "ok");
     });
     q("#setClearRecent").onclick = () => { localStorage.removeItem("ide.recentFiles"); toast("已清除最近打开记录", "ok"); };
     q("#setReset").onclick = () => {
       Object.assign(IDE_SETTINGS, { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
-        showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true, httpProxy: "", theme: "dark" });
+        showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true, httpProxy: "",
+        theme: "dark", playerTheme: "auto" });
       saveIdeSettings(); applyIdeSettings();
       q("#setFontSize").value = 13; q("#setLineWrap").checked = false; q("#setActiveLine").checked = true;
       q("#setIndent").value = 4; q("#setHints").checked = true;
@@ -306,6 +319,7 @@
       q("#setRestoreSession").checked = true;
       q("#setHttpProxy").value = "";
       q("#setTheme").value = "dark";
+      q("#setPlayerTheme").value = "auto";
       // 同步重置各开关的运行时状态
       showAllFiles = false; showHidden = false;
       gitViewMode = "list"; gitCommitFileMode = "tree";

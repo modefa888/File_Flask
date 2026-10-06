@@ -21,6 +21,26 @@
   })();
   var _vpvSave = () => { try { localStorage.setItem("ide.videoPlayer", JSON.stringify(_vpvStore)); } catch (_) {} };
 
+  /* ---------- 播放器主题：白天 / 黑夜 / 跟随编辑器 ----------
+     偏好在 ide.settings.playerTheme（light / dark / auto），由「设置 → 外观 → 播放器主题」写入；
+     auto（默认）= 跟随「界面主题」，界面切浅色播放器也变白天，切深色跟着变回黑夜。
+     解析结果以 vpv-light 类挂在 .vpv-wrap 上，白天皮肤见 28_标签页内嵌视频播放器.css。 */
+  function vpvThemeIsLight() {
+    var pref = "auto", ide = "dark";
+    try {
+      var s = JSON.parse(localStorage.getItem("ide.settings") || "{}") || {};
+      pref = s.playerTheme || "auto";
+      ide = s.theme || "dark";
+    } catch (_) { }
+    if (pref === "light" || pref === "dark") return pref === "light";
+    return ide === "light";
+  }
+  // 切换主题 / 打开新播放器时调用：一次性同步页面上所有播放器实例
+  function applyVideoPlayerTheme() {
+    var light = vpvThemeIsLight();
+    document.querySelectorAll(".vpv-wrap").forEach(function (w) { w.classList.toggle("vpv-light", light); });
+  }
+
   // 全局唯一播放器：切换视频时复用同一标签页重跑 setupVideoView，
   // 旧实例挂在 document/window 上的监听（快捷键等）必须先移除，否则会双重触发
   var _vpvCleanups = [];
@@ -84,7 +104,7 @@
               '</div>' +
               '<button class="vpv-btn vpv-mode" title="播放模式：顺序播放"><i class="bi bi-list-ol"></i></button>' +
               '<button class="vpv-btn vpv-rotate" title="旋转画面 90°"><i class="bi bi-arrow-clockwise"></i></button>' +
-              '<button class="vpv-btn vpv-pip" title="画中画"><i class="bi bi-picture-in-picture"></i></button>' +
+              '<button class="vpv-btn vpv-pip" title="画中画"><svg class="vpv-svg" viewBox="0 0 16 16" fill="currentColor" width="1em" height="1em" aria-hidden="true"><path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 2h-13zM1 3.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-9z"/><path d="M7.5 6a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h5a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-5z"/></svg></button>' +
               '<button class="vpv-btn vpv-full" title="全屏 (F)"><i class="bi bi-fullscreen"></i></button>' +
             '</div>' +
           '</div>' +
@@ -96,6 +116,7 @@
       '</div>';
 
     const wrap = host.querySelector(".vpv-wrap");
+    wrap.classList.toggle("vpv-light", vpvThemeIsLight());   // 白天 / 黑夜 / 跟随编辑器
     const stage = host.querySelector(".vpv-stage");
     const video = host.querySelector("video");
     const poster = host.querySelector(".vpv-poster");

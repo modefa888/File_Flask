@@ -215,7 +215,7 @@
       '</div>' +
 
       '<div class="notify-card notifyEmailOpts">' +
-        '<div class="notify-card-title"><i class="bi bi-envelope-gear"></i> SMTP 设置</div>' +
+        '<div class="notify-card-title"><i class="bi bi-envelope-at"></i> SMTP 设置</div>' +
         '<div class="notify-row stack set-row" data-kw="收件人 to">' +
           '<div class="notify-label-wrap"><div class="notify-label">收件人地址</div><div class="notify-desc">接收通知的邮箱，多个用英文逗号分隔。</div></div>' +
           '<input class="notify-input" id="notifyTo" placeholder="me@example.com">' +

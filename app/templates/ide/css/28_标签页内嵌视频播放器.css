@@ -203,6 +203,9 @@
 }
 .vpv-btn:hover { background: rgba(255, 255, 255, 0.14); }
 .vpv-btn.active { color: #60a5fa; }
+/* 画中画图标：Bootstrap Icons v1.10.5 没有 picture-in-picture 字形，
+   改用内联 SVG（与分享页播放器 .vpc-svg 同一份路径），fill=currentColor 跟随按钮颜色 */
+.vpv-svg { width: 1em; height: 1em; }
 .vpv-time {
   font-size: 0.75rem;
   color: #cbd5e1;
@@ -347,3 +350,71 @@
   .vpv-side { display: none; }
   .vpv-side-toggle { display: none; }
 }
+
+/* ================================================================
+ * 白天（浅色）皮肤
+ * 「设置 → 外观 → 播放器主题」选「白天」，或选「跟随编辑器」且界面主题为白天时，
+ * 由 22_视频播放器 js 在 .vpv-wrap 上挂 .vpv-light（函数 vpvThemeIsLight）。
+ * 只覆盖播放器自身配色，与 29_浅色主题.css 的界面覆盖互不干扰。
+ * ================================================================ */
+.vpv-wrap.vpv-light { background: #f3f3f3; }
+
+/* 舞台留白（视频等比缩放后的上下/左右空白）跟随白天，控制条改成白色渐变 + 深色文字：
+   控制条压在画面上，渐变不透明度足够高才保证深色图标/文字在亮画面上也看得清 */
+.vpv-wrap.vpv-light .vpv-stage { background: #f3f3f3; }
+.vpv-wrap.vpv-light .vpv-controls {
+  background: linear-gradient(transparent, rgba(255, 255, 255, 0.92));
+}
+.vpv-wrap.vpv-light .vpv-btn { color: #1f2328; }
+.vpv-wrap.vpv-light .vpv-btn:hover { background: rgba(0, 0, 0, 0.08); }
+.vpv-wrap.vpv-light .vpv-btn.active { color: #005fb8; }
+.vpv-wrap.vpv-light .vpv-time { color: #333333; }
+.vpv-wrap.vpv-light .vpv-track { background: rgba(0, 0, 0, 0.18); }
+.vpv-wrap.vpv-light .vpv-buffered { background: rgba(0, 0, 0, 0.28); }
+.vpv-wrap.vpv-light .vpv-played { background: #005fb8; }
+.vpv-wrap.vpv-light .vpv-knob { background: #005fb8; box-shadow: 0 0 0 2px #ffffff, 0 1px 4px rgba(0, 0, 0, 0.35); }
+.vpv-wrap.vpv-light .vpv-vol-range { accent-color: #005fb8; }
+
+/* 倍速菜单 */
+.vpv-wrap.vpv-light .vpv-speed-menu {
+  border-color: #dcdcdc;
+  background: #ffffff;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.18);
+}
+.vpv-wrap.vpv-light .vpv-speed-item { color: #333333; }
+.vpv-wrap.vpv-light .vpv-speed-item:hover { background: #f0f0f0; }
+.vpv-wrap.vpv-light .vpv-speed-item.active { color: #005fb8; }
+
+/* 封面层 / 文件大小徽标 / 操作提示气泡：都浮在画面上，用浅底 + 深字 */
+.vpv-wrap.vpv-light .vpv-poster { background-color: #f3f3f3; }
+.vpv-wrap.vpv-light .vpv-poster .vpv-name {
+  color: #1f2328;
+  background: linear-gradient(transparent, rgba(255, 255, 255, 0.88));
+}
+.vpv-wrap.vpv-light .vpv-info {
+  background: rgba(255, 255, 255, 0.88);
+  color: #1f2328;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+.vpv-wrap.vpv-light .vpv-seek-tip {
+  background: rgba(255, 255, 255, 0.94);
+  color: #1f2328;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+.vpv-wrap.vpv-light .vpv-side-toggle {
+  border-color: rgba(0, 0, 0, 0.14);
+  color: #1f2328;
+  background: rgba(255, 255, 255, 0.86);
+}
+.vpv-wrap.vpv-light .vpv-side-toggle:hover { background: rgba(255, 255, 255, 0.98); }
+
+/* 右侧播放列表 */
+.vpv-wrap.vpv-light .vpv-side { background: #f3f3f3; border-left-color: #e0e0e0; }
+.vpv-wrap.vpv-light .vpv-pl-head { color: #5a5a5a; border-bottom-color: #e4e4e4; }
+.vpv-wrap.vpv-light .vpv-pl-count { color: #8a8a8a; }
+.vpv-wrap.vpv-light .vpv-pl-empty { color: #8a8a8a; }
+.vpv-wrap.vpv-light .vpv-pl-row:hover { background: #e8e8e8; }
+.vpv-wrap.vpv-light .vpv-pl-row.cur { background: #cde3f8; border-left-color: #005fb8; }
+.vpv-wrap.vpv-light .vpv-pl-name { color: #1f2328; }
+.vpv-wrap.vpv-light .vpv-pl-row.cur .vpv-pl-name { color: #005fb8; }
+.vpv-wrap.vpv-light .vpv-pl-dur { color: #8a8a8a; }

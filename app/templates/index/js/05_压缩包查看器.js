@@ -69,7 +69,7 @@
                         <div class="zip-title-row">
                             <div class="zip-title"><i class="bi bi-file-zip"></i><span id="zipTitleName">${_escHtml(displayName)}</span>${nestedHint}</div>
                             <div class="zip-actions">
-                                <button class="btn btn-extract" id="zipExtractBtn"><i class="bi bi-unarchive"></i> 解压</button>
+                                <button class="btn btn-extract" id="zipExtractBtn"><i class="bi bi-box-arrow-up"></i> 解压</button>
                                 <button class="btn btn-close-zip" id="zipCloseBtn"><i class="bi bi-x-lg"></i></button>
                             </div>
                         </div>

@@ -99,8 +99,14 @@
 <style>
 {% include 'ide/css/28_标签页内嵌视频播放器.css' %}
 </style>
+<style>
+{% include 'ide/css/29_浅色主题.css' %}
+</style>
 </head>
 <body>
+<script>/* 首屏按已保存的主题立即上色，避免深色闪一下再变浅 */
+try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'light') document.documentElement.classList.add('theme-light'); } catch (e) {}
+</script>
 {% include 'ide/partials/body.html' %}
 <script src="/static/vendor/codemirror/codemirror.min.js"></script>
 <!-- dialog 插件：search 插件没有它时会退化成原生 prompt() 弹窗 -->

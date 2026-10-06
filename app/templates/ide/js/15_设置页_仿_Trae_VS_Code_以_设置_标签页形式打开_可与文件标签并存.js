@@ -4,9 +4,11 @@
   const IDE_SETTINGS = Object.assign(
     { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
       showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true,
-      httpProxy: "" },
+      httpProxy: "", theme: "dark" },
     (() => { try { return JSON.parse(localStorage.getItem("ide.settings") || "{}"); } catch (_) { return {}; } })()
   );
+  function ideIsLight() { return IDE_SETTINGS.theme === "light"; }                 // 当前是否浅色（白底）主题
+  function ideCmTheme() { return ideIsLight() ? "default" : "material-darker"; }   // CodeMirror 主题名
   function saveIdeSettings() {
     // 合并写入：保留其它模块通过 ideSettingSet 写入的开关键，避免整对象覆盖丢失
     let cur = {};
@@ -16,13 +18,21 @@
   function applyIdeSettings() {
     document.documentElement.style.setProperty("--cm-font-size", IDE_SETTINGS.fontSize + "px");
     document.body.classList.toggle("hide-nm-hints", !IDE_SETTINGS.hints);
+    // 界面主题：在 <html> 上加 theme-light 类，浅色样式表 (29_浅色主题.css) 据此覆盖
+    document.documentElement.classList.toggle("theme-light", ideIsLight());
     tabs.forEach(t => {
       if (!t.cm) return;
       t.cm.setOption("lineWrapping", IDE_SETTINGS.lineWrap);
       t.cm.setOption("styleActiveLine", IDE_SETTINGS.activeLine && !t.big);
       t.cm.setOption("indentUnit", IDE_SETTINGS.indent);
       t.cm.setOption("tabSize", IDE_SETTINGS.indent);
+      t.cm.setOption("theme", ideCmTheme());
       t.cm.refresh();
+    });
+    // 已打开的差异视图：切换 CodeMirror 主题类，让语法着色跟随深浅
+    document.querySelectorAll(".sd-grid").forEach(g => {
+      g.classList.toggle("cm-s-default", ideIsLight());
+      g.classList.toggle("cm-s-material-darker", !ideIsLight());
     });
   }
 
@@ -49,6 +59,7 @@
     host.innerHTML =
     '<div class="set-layout">' +
       '<div class="set-nav"><h1>设置</h1><input class="set-search" placeholder="搜索设置项" autocomplete="off" spellcheck="false">' +
+        '<div class="set-navitem" data-sec="sec-appearance"><i class="bi bi-palette"></i>外观</div>' +
         '<div class="set-navitem" data-sec="sec-editor"><i class="bi bi-sliders"></i>编辑器</div>' +
         '<div class="set-navitem" data-sec="sec-files"><i class="bi bi-folder2"></i>文件</div>' +
         '<div class="set-navitem" data-sec="sec-keys"><i class="bi bi-keyboard"></i>快捷键</div>' +
@@ -60,6 +71,9 @@
         '<div class="set-navitem" data-sec="sec-network"><i class="bi bi-globe2"></i>网络/代理</div>' +
       '</div>' +
       '<div class="set-content">' +
+        '<div class="set-sec" id="sec-appearance"><h2 data-kw="外观 主题 背景 颜色 深色 浅色 白 黑 theme dark light">外观</h2>' +
+          '<div class="set-row" data-kw="外观 主题 界面 颜色 背景 深色 浅色 白 黑 theme dark light"><div class="set-info"><div class="set-label">界面主题</div><div class="set-desc">深色（默认）与浅色（白色背景）之间切换，立即生效并记住选择</div></div><select id="setTheme"><option value="dark">深色</option><option value="light">浅色（白色背景）</option></select></div>' +
+        '</div>' +
         '<div class="set-sec" id="sec-editor"><h2>编辑器</h2>' +
           '<div class="set-row" data-kw="字体 字号 font size"><div class="set-info"><div class="set-label">字体大小</div><div class="set-desc">编辑器代码字体大小（10–24）</div></div><input type="number" min="10" max="24" id="setFontSize"></div>' +
           '<div class="set-row" data-kw="换行 wrap line"><div class="set-info"><div class="set-label">自动换行</div><div class="set-desc">过长的行折行显示，不出现横向滚动条</div></div><input type="checkbox" id="setLineWrap"></div>' +
@@ -214,6 +228,7 @@
     q("#setGitCommitMode").value = IDE_SETTINGS.gitCommitFileMode === "list" ? "list" : "tree";
     q("#setRestoreSession").checked = IDE_SETTINGS.restoreSession !== false;
     q("#setHttpProxy").value = IDE_SETTINGS.httpProxy || "";
+    q("#setTheme").value = ideIsLight() ? "light" : "dark";
     q("#setFontSize").addEventListener("change", e => {
       const v = Math.max(10, Math.min(24, parseInt(e.target.value, 10) || 13));
       IDE_SETTINGS.fontSize = v; e.target.value = v; saveIdeSettings(); applyIdeSettings();
@@ -274,16 +289,23 @@
       saveIdeSettings(); ideSettingSet("httpProxy", IDE_SETTINGS.httpProxy);
       toast(IDE_SETTINGS.httpProxy ? "已保存默认代理" : "已设为直连（不使用代理）", "ok");
     });
+    // 界面主题：深色 / 浅色（白色背景）切换，立即生效
+    q("#setTheme").addEventListener("change", e => {
+      IDE_SETTINGS.theme = e.target.value === "light" ? "light" : "dark";
+      saveIdeSettings(); applyIdeSettings();
+      toast(ideIsLight() ? "已切换到浅色主题" : "已切换到深色主题", "ok");
+    });
     q("#setClearRecent").onclick = () => { localStorage.removeItem("ide.recentFiles"); toast("已清除最近打开记录", "ok"); };
     q("#setReset").onclick = () => {
       Object.assign(IDE_SETTINGS, { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
-        showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true, httpProxy: "" });
+        showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true, httpProxy: "", theme: "dark" });
       saveIdeSettings(); applyIdeSettings();
       q("#setFontSize").value = 13; q("#setLineWrap").checked = false; q("#setActiveLine").checked = true;
       q("#setIndent").value = 4; q("#setHints").checked = true;
       q("#setShowAll").checked = false; q("#setGitView").value = "list"; q("#setGitCommitMode").value = "tree";
       q("#setRestoreSession").checked = true;
       q("#setHttpProxy").value = "";
+      q("#setTheme").value = "dark";
       // 同步重置各开关的运行时状态
       showAllFiles = false; showHidden = false;
       gitViewMode = "list"; gitCommitFileMode = "tree";

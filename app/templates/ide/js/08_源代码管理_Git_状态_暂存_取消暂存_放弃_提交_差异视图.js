@@ -1045,7 +1045,7 @@
     const hasNew = rows.some(r => r.l2 != null);
     const single = !hasOld || !hasNew;           // 新文件 / 删除文件：只渲染非空一侧
     const grid = document.createElement("div");
-    grid.className = "sd-grid cm-s-material-darker";   // 复用 CodeMirror 主题，token 配色与「源码」视图一致
+    grid.className = "sd-grid " + (ideThemeLight() ? "cm-s-default" : "cm-s-material-darker");   // 复用 CodeMirror 主题，token 配色与「源码」视图一致
     grid.style.gridTemplateColumns = single ? "1fr" : "1fr 1fr";
     grid.style.minWidth = single ? "480px" : "860px";
     const cell = (cls, ln, tx, ranges) => {
@@ -1377,7 +1377,7 @@
       if (tab._diffScrollFn) tab._diffScrollFn();
       const text = tab.srcText || "";
       tab.cm = CodeMirror(tab.cmBox, {
-        value: text, mode: "text/plain", theme: "material-darker",
+        value: text, mode: "text/plain", theme: ideThemeLight() ? "default" : "material-darker",
         lineNumbers: true, lineWrapping: false, readOnly: true, styleActiveLine: true,
       });
       // 源码视图：套用对应语言的语法高亮

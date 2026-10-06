@@ -81,6 +81,8 @@
       s[k] = v; localStorage.setItem("ide.settings", JSON.stringify(s));
     } catch (_) { }
   }
+  // 是否使用浅色（白色背景）主题：由「设置 → 外观 → 界面主题」写入 localStorage
+  function ideThemeLight() { return ideSettingGet("theme", "dark") === "light"; }
   /* ---------- 会话持久化：侧边栏面板 + 打开的文件标签 ---------- */
   function sessionSavePanel(name) {
     if (!ideSettingGet("restoreSession", true)) return;
@@ -937,7 +939,7 @@
         host.innerHTML = "";
         // 容器此刻已可见（active），CodeMirror 才能测量正确，避免内容压住行号/错位
         tab.cm = CodeMirror(host, {
-          value: text, mode: big ? "text/plain" : (mode || "text/plain"), theme: "material-darker",
+          value: text, mode: big ? "text/plain" : (mode || "text/plain"), theme: ideThemeLight() ? "default" : "material-darker",
           lineNumbers: true, lineWrapping: IDE_SETTINGS.lineWrap, indentUnit: IDE_SETTINGS.indent, tabSize: IDE_SETTINGS.indent,
           styleActiveLine: IDE_SETTINGS.activeLine && !big, matchBrackets: !big, autoCloseBrackets: true,
           phrases: CM_PHRASES,

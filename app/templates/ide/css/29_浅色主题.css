@@ -2,10 +2,18 @@
    浅色（白色背景）主题
    ----------------------------------------------------------------
    IDE 默认是深色主题，颜色硬编码散落在各 CSS 文件里。
-   这里不改动原有文件，统一用 html.theme-light 提高优先级做覆盖：
+   这里不改动原有文件，在末尾统一覆盖一层浅色配色：
    html 上是否带 theme-light 由「设置 → 外观 → 界面主题」控制，
    可在深色 / 浅色之间随时切换（localStorage 持久化）。
    需要在深色下保持深底的区域（视频舞台等）不做覆盖。
+
+   作用域统一写作 :where(html.theme-light)，而不是 html.theme-light：
+   :where() 不贡献特异性，所以本文件的选择器与原始选择器「同权重」，
+   仅靠本文件最后加载取胜 —— 这样原始规则里的状态样式
+   （.tab.active、.s-mode.active、.x:hover、.x:focus 等）权重要么更高、
+   要么与我显式写的状态规则相等，都不会被我的基础规则压掉。
+   若改成 html.theme-light（多 1 类 + 1 元素），基础规则会连
+   激活态/悬停态一起覆盖掉（例如搜索面板「文件名」标签会变成蓝底灰字）。
    ================================================================ */
 
 /* ---------- 全局底色 / 文字 / 滚动条 ---------- */
@@ -704,3 +712,166 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ai-lb-bar button { color: #333333; }
 :where(html.theme-light) .ai-lb-bar button:hover { background: #e0e0e0; color: #000000; }
 :where(html.theme-light) .ai-lb-bar .pct { color: #5a6a7a; }
+
+/* ================================================================
+   补充：原本为深色底调校的「强调色 / 状态变体」
+   ----------------------------------------------------------------
+   基础覆盖把背景变白后，两类样式会出问题：
+   1) 原本是浅色文字（为深色底设计），白底上对比度不足甚至看不见；
+   2) 原本是深色块的「选中 / 开启」状态，与浅色界面不协调。
+   这里按组件给出浅色等价配色。选择器与原始规则特异性相同，
+   仅依靠本文件最后加载生效，因此仍不会压掉原始的状态/悬停规则。
+   ================================================================ */
+
+/* ---------- 底部面板 / 终端 ANSI（12） ---------- */
+:where(html.theme-light) .term-body .t-fg31 { color: #c0392b; }
+:where(html.theme-light) .term-body .t-fg32 { color: #2f8f3f; }
+:where(html.theme-light) .term-body .t-fg33 { color: #8a5a00; }
+:where(html.theme-light) .term-body .t-fg34 { color: #0b6bcb; }
+:where(html.theme-light) .term-body .t-fg35 { color: #8230b0; }
+:where(html.theme-light) .term-body .t-fg36 { color: #0f7b87; }
+:where(html.theme-light) .term-body .t-fg91 { color: #c0392b; }
+:where(html.theme-light) .term-body .t-fg92 { color: #2f8f3f; }
+:where(html.theme-light) .term-body .t-fg93 { color: #8a5a00; }
+:where(html.theme-light) .term-body .t-fg94 { color: #0b6bcb; }
+:where(html.theme-light) .term-body .t-fg95 { color: #8230b0; }
+:where(html.theme-light) .term-body .t-fg96 { color: #0f7b87; }
+/* ANSI 背景色：改成浅色底，否则深底 + 深色正文会看不清 */
+:where(html.theme-light) .term-body .t-bg40 { background: #dcdfe4; }
+:where(html.theme-light) .term-body .t-bg41 { background: #f5d4d4; }
+:where(html.theme-light) .term-body .t-bg42 { background: #d7f0dc; }
+:where(html.theme-light) .term-body .t-bg43 { background: #f7edcf; }
+:where(html.theme-light) .term-body .t-bg44 { background: #d6e9fb; }
+:where(html.theme-light) .term-body .t-bg45 { background: #ecdff2; }
+:where(html.theme-light) .term-body .t-bg46 { background: #d6eef1; }
+:where(html.theme-light) .term-body .t-bg47 { background: #e2e2e2; }
+:where(html.theme-light) .term-prompt .tp-user { color: #1a7f37; }
+:where(html.theme-light) .term-body .term-err { color: #c0392b; }
+:where(html.theme-light) .bp-log-tab .lt-x:hover { color: #c0392b; }
+:where(html.theme-light) .bp-btn.danger { color: #c0392b; }
+:where(html.theme-light) .bp-btn.danger:hover { background: #fbe0e0; color: #a02b2b; }
+
+/* ---------- 源代码管理 / 更改汇总（04、05） ---------- */
+:where(html.theme-light) .git-head .bi-git { color: #a06400; }
+:where(html.theme-light) .g-ai-split #gitGenMsgMore { color: #5a5a5a; }
+:where(html.theme-light) .git-file .gf-st { color: #8a5a00; }
+:where(html.theme-light) .git-commit-file .gf-st { color: #8a5a00; }
+:where(html.theme-light) .git-dir .git-dir-ic { color: #8a5a00; }
+:where(html.theme-light) .git-commit-dir .gcf-ic { color: #8a5a00; }
+:where(html.theme-light) .git-commit-dir .gcf-tw { color: #5a5a5a; }
+:where(html.theme-light) .git-hover-card .ghc-author .bi { color: #005fb8; }
+:where(html.theme-light) .git-hover-card .ghc-stats .ins { color: #1a7f37; }
+:where(html.theme-light) .diff-tools .dt-stat .dt-add { color: #1a7f37; }
+:where(html.theme-light) .ad-file-head .ad-stat .ad-add { color: #1a7f37; }
+:where(html.theme-light) .ad-tools .ad-count .ad-add { color: #1a7f37; }
+:where(html.theme-light) .ad-file-head .ad-tag.staged { background: #dff3e4; color: #1a7f37; }
+:where(html.theme-light) .ad-file-head .ad-tag.new { background: #dceafc; color: #0b5c9a; }
+:where(html.theme-light) .ad-file-head .ad-tag.add { background: #dff3e4; color: #1a7f37; }
+:where(html.theme-light) .ad-file-head .ad-tag.mod { background: #fbf3d9; color: #8a5a00; }
+:where(html.theme-light) .ad-file-head .ad-tag.del { background: #fbe0e0; color: #c0392b; }
+
+/* ---------- AI 助手面板（09） ---------- */
+:where(html.theme-light) .ai-hist-row .rm:hover { color: #c0392b; background: #fbe0e0; }
+:where(html.theme-light) .ai-chg-head .bi { color: #a06400; }
+:where(html.theme-light) .ai-chg-head .ai-chg-all { color: #005fb8; }
+:where(html.theme-light) .ai-chg-chip.add { border-color: #9dd3a8; }
+:where(html.theme-light) .ai-chg-chip.add .bi { color: #1a7f37; }
+:where(html.theme-light) .ai-chg-chip.mod { border-color: #e0cfa0; }
+:where(html.theme-light) .ai-chg-chip.mod .bi { color: #8a5a00; }
+:where(html.theme-light) .ai-chg-chip.del { border-color: #e8b0b0; }
+:where(html.theme-light) .ai-chg-chip.del .bi { color: #c0392b; }
+:where(html.theme-light) .ai-row .bubble .ai-tag-chip {
+  background: #dcebfa; border-color: #b8d4ea; color: #0b5c9a;
+}
+:where(html.theme-light) .ai-row .bubble .ai-tag-chip.custom {
+  background: #ece0fb; border-color: #cdb8ea; color: #6a3fb0;
+}
+:where(html.theme-light) .ai-input #aiText .ai-tag { background: #dcebfa; color: #0b5c9a; }
+:where(html.theme-light) .ai-input #aiText .ai-tag.custom { background: #ece0fb; color: #6a3fb0; }
+:where(html.theme-light) .ai-perm.ro { color: #8a5a00; }
+:where(html.theme-light) .ai-perm.full { color: #c0392b; }
+:where(html.theme-light) .ai-perm-opt { color: #333333; }
+:where(html.theme-light) .ai-perm-opt:hover { background: #f0f0f0; }
+:where(html.theme-light) .ai-perm-opt .bi { color: #7a8794; }
+:where(html.theme-light) .ai-perm-opt .bi-check2 { color: #005fb8; }
+:where(html.theme-light) .ai-perm-opt.on { background: #e3f0fb; }
+:where(html.theme-light) .ai-perm-opt.on .t { color: #0b5c9a; }
+:where(html.theme-light) .ai-agent-btn.on { background: #dff3e4; border-color: #8fd0a0; color: #1a7f37; }
+:where(html.theme-light) .ai-web-btn.on { background: #dceafc; border-color: #8ab4d8; color: #0b5c9a; }
+:where(html.theme-light) .ai-skill-btn.on { background: #ece0fb; border-color: #c0a8e8; color: #6a3fb0; }
+:where(html.theme-light) .ai-skill-opt.on { background: #e3f0fb; border-left-color: #0a6aa8; color: #0b5c9a; }
+:where(html.theme-light) .ai-skill-opt.on .bi-check2 { color: #005fb8; }
+:where(html.theme-light) .ai-skill-opt .sub { color: #8a5a00; }
+:where(html.theme-light) .ai-skill-opt .ai-sk-del:hover:not(.dis) { color: #c0392b; }
+:where(html.theme-light) .ai-hsk-item .bi { color: #7a8794; }
+:where(html.theme-light) .ai-hsk-item .sent { color: #1a7f37; }
+:where(html.theme-light) .ai-step .st-ic { color: #005fb8; }
+:where(html.theme-light) .ai-step .st-res .ok { color: #1a7f37; }
+:where(html.theme-light) .ai-step .st-res .bad { color: #c0392b; }
+:where(html.theme-light) .ai-step .st-res .deny { color: #8a5a00; }
+:where(html.theme-light) .ai-steps-head .ttl { color: #33404d; }
+:where(html.theme-light) .ai-steps-head .spin { color: #005fb8; }
+:where(html.theme-light) .ai-skedit-pop .p-badge.ov { background: #fbf3d9; color: #8a5a00; }
+:where(html.theme-light) .ai-skedit-pop .p-del { color: #c0392b; }
+:where(html.theme-light) .ai-skedit-pop .p-del:hover { background: #fbe0e0; color: #a02b2b; }
+:where(html.theme-light) .ai-skedit-pop .p-reset { color: #8a5a00; }
+:where(html.theme-light) .ai-skedit-pop .p-reset:hover { background: #fbf3d9; }
+:where(html.theme-light) .ai-ask.allowed { border-color: #8fd0a0; color: #1a7f37; }
+:where(html.theme-light) .ai-ask.denied { border-color: #e8b0b0; color: #c0392b; }
+:where(html.theme-light) .ai-ask .btns button.ok { background: #dff3e4; border-color: #8fd0a0; color: #1a7f37; }
+:where(html.theme-light) .ai-ask .btns button.no:hover { background: #fbe0e0; border-color: #e8b0b0; color: #a02b2b; }
+:where(html.theme-light) .ai-set-tip { color: #a0522d; }
+:where(html.theme-light) .ai-set-tip.ok { color: #1a7f37; }
+/* AI 代码块语法着色（代码块底色已转浅，需换成深色 token） */
+:where(html.theme-light) .hl-k { color: #8230b0; }
+:where(html.theme-light) .hl-s { color: #2f8f3f; }
+:where(html.theme-light) .hl-n { color: #a0522d; }
+:where(html.theme-light) .hl-c { color: #6b6b6b; }
+:where(html.theme-light) .hl-f { color: #0b6bcb; }
+:where(html.theme-light) .hl-a { color: #8a5a00; }
+:where(html.theme-light) .hl-o { color: #0f7b87; }
+
+/* ---------- 搜索面板（03） ---------- */
+:where(html.theme-light) .s-hint.err { color: #c0392b; }
+
+/* ---------- 运行环境面板（14） ---------- */
+:where(html.theme-light) .env-var .v { color: #a0522d; }
+:where(html.theme-light) .env-var .x:hover { color: #c0392b; }
+:where(html.theme-light) .env-out .err { color: #c0392b; }
+:where(html.theme-light) .env-btn.warn { border-color: #d0b070; color: #8a5a00; }
+:where(html.theme-light) .env-sum.err { color: #c0392b; }
+
+/* ---------- 通用弹窗（18） ---------- */
+:where(html.theme-light) .ide-modal .m-title .bi { color: #005fb8; }
+:where(html.theme-light) .ide-modal.danger .m-title .bi { color: #c0392b; }
+:where(html.theme-light) .ide-modal .m-foot .m-gen:disabled {
+  background: #e0e0e0; border-color: #cecece; color: #9a9a9a;
+}
+
+/* ---------- Markdown 工具条（22） ---------- */
+:where(html.theme-light) .req-toolbar .status.ok i { color: #1a7f37; }
+:where(html.theme-light) .req-toolbar .status.warn i { color: #8a5a00; }
+
+/* ---------- SQLite 查看器（23） ---------- */
+:where(html.theme-light) .dbv-title .bi { color: #005fb8; }
+:where(html.theme-light) .dbv-item.active { background: #cde3f8; color: #1f2328; }
+:where(html.theme-light) .dbv-item.active .bi { color: #8a6a00; }
+:where(html.theme-light) .dbv-item.active .dbv-icount { color: #0b5c9a; }
+
+/* ---------- 通知设置（24） ---------- */
+:where(html.theme-light) .notify-label-wrap code,
+:where(html.theme-light) .notify-desc code,
+:where(html.theme-light) .notify-preview-note code { color: #a0522d; }
+:where(html.theme-light) .notify-channel-card .notify-icon { color: #005fb8; }
+:where(html.theme-light) .notify-channel-card.email .notify-icon { color: #a07800; }
+:where(html.theme-light) .notify-preset .bi { color: #005fb8; }
+:where(html.theme-light) .notify-hch.ok { background: #dff3e4; color: #1a7f37; }
+:where(html.theme-light) .notify-hch.fail { background: #fbe0e0; color: #c0392b; }
+
+/* ---------- 设置页 Git 认证（26） ---------- */
+:where(html.theme-light) #sec-git-creds .gc-tip-info { background: #e3f0fb; color: #0b5c9a; }
+:where(html.theme-light) #sec-git-creds .gc-tip-ok { background: #dff3e4; color: #1a7f37; }
+:where(html.theme-light) #sec-git-creds .gc-tip-warn { background: #fbf3d9; color: #8a5a00; }
+:where(html.theme-light) #sec-git-creds .gc-tip-err { background: #fbe0e0; color: #c0392b; }
+:where(html.theme-light) #sec-git-creds .gc-sum-ok { color: #1a7f37; }
+:where(html.theme-light) #sec-git-creds .gc-link { color: #005fb8; }

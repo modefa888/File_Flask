@@ -963,6 +963,8 @@
         else if (["html", "htm"].includes(ext)) setupHtmlView(tab);
         else if (name === ".gitignore") setupGitignoreView(tab);
         else if (name.toLowerCase() === "requirements.txt") setupRequirementsView(tab);
+        // .env / .env.local / .env.example 等：可视化编辑浮框（setupEnvView 见 23_ 文件）
+        else if (/^\.env(\.[A-Za-z0-9_-]+)?$/.test(name)) setupEnvView(tab);
         // 竞态防护：加载期间用户又点了其它文件（activate 过别的标签 / 又发起新打开），
         // 则本次不抢焦点，只把内容挂好留在后台标签里（用户最后一次点击优先）
         if (active === tab) { scheduleRefresh(tab); }

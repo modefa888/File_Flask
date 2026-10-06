@@ -1,0 +1,139 @@
+/* ===== 项目根 .env 可视化编辑浮框 =====
+   独立前缀 env-edit-：避免与 14_运行环境面板 的 .env-* 类名冲突。
+   配色 / 圆角 / 字号对齐 IDE 系统风格（面板 #252526、卡片行 #242425、
+   输入框 #1e1e1e、主按钮 #0d7ec4、图标色 #4fc1ff，与设置页 / 通用弹窗一致）。 */
+.env-edit-panel {
+  position: absolute; top: 10px; right: 16px; z-index: 30;
+  width: 520px; max-width: calc(100% - 32px);
+  max-height: calc(100% - 20px);
+  display: flex; flex-direction: column;
+  background: #252526; border: 1px solid #454545; border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .55);
+  font-size: 12px; color: #cccccc; overflow: hidden;
+}
+.env-edit-panel.hidden { display: none; }
+/* 标题栏：与 .ide-modal .m-title 一致 */
+.env-edit-head {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  padding: 12px 16px; border-bottom: 1px solid #333333;
+}
+.env-edit-head .title { display: flex; align-items: center; gap: 8px; color: #ffffff; font-size: 13px; font-weight: 600; }
+.env-edit-head .title i { color: #4fc1ff; }
+.env-edit-head .sub { color: #8a8a8a; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px; }
+.env-edit-head .spacer { flex: 1; }
+.env-edit-head button {
+  background: transparent; border: none; color: #aaaaaa; cursor: pointer;
+  padding: 3px 6px; border-radius: 4px; font-size: 12px; display: flex; align-items: center;
+}
+.env-edit-head button:hover { background: #3a3d41; color: #ffffff; }
+.env-edit-body { overflow-y: auto; padding: 12px 14px; }
+.env-edit-empty { color: #8a8a8a; padding: 12px 4px; }
+.env-edit-group { margin-bottom: 6px; }
+.env-edit-group-title {
+  font-size: 12px; color: #dddddd; font-weight: 600;
+  margin: 6px 0 8px; padding-left: 8px; border-left: 2px solid #4fc1ff;
+}
+/* 一行一个参数：系统设置行样式（左信息 + 右控件） */
+.env-edit-row {
+  display: flex; align-items: center; gap: 14px;
+  background: #242425; border: 1px solid #303031; border-radius: 8px;
+  padding: 9px 14px; margin-bottom: 6px;
+}
+.env-edit-row:hover { border-color: #3c3c3d; }
+.env-edit-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.env-edit-name {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #e2e2e2; font-size: 13px;
+}
+.env-edit-meta {
+  display: flex; align-items: baseline; gap: 6px; min-width: 0;
+  overflow: hidden; white-space: nowrap;
+}
+.env-edit-meta code {
+  flex: none; font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; color: #4fc1ff; background: transparent;
+}
+.env-edit-meta em {
+  flex: 1; min-width: 0; font-style: normal; font-size: 11px; color: #8a8a8a;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.env-edit-ctrl { flex: none; display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
+.env-edit-ctrl.grow { width: 210px; }
+.env-edit-ctrl input[type="text"],
+.env-edit-ctrl input[type="password"],
+.env-edit-ctrl input[type="number"],
+.env-edit-ctrl select {
+  width: 100%; box-sizing: border-box;
+  background: #1e1e1e; color: #e6e6e6; border: 1px solid #454545;
+  border-radius: 4px; padding: 6px 10px; font-size: 13px; font-family: inherit; text-align: left; outline: none;
+}
+.env-edit-ctrl input:focus, .env-edit-ctrl select:focus { border-color: #0098ff; }
+.env-edit-pw { position: relative; width: 100%; }
+.env-edit-pw input { padding-right: 30px; }
+.env-edit-eye {
+  position: absolute; right: 3px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: none; color: #8a8a8a; cursor: pointer;
+  padding: 2px 5px; font-size: 12px; border-radius: 3px;
+}
+.env-edit-eye:hover { color: #e6e6e6; }
+/* bool 开关（对齐系统主色 #0d7ec4） */
+.env-edit-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.env-edit-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.env-edit-switch-track {
+  position: relative; width: 34px; height: 18px; border-radius: 9px;
+  background: #3c3c3d; transition: background .15s; flex: none;
+}
+.env-edit-switch-track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: #cfcfcf; transition: transform .15s;
+}
+.env-edit-switch input:checked + .env-edit-switch-track { background: #0d7ec4; }
+.env-edit-switch input:checked + .env-edit-switch-track::after { transform: translateX(16px); background: #ffffff; }
+.env-edit-switch-txt { color: #aaaaaa; font-size: 11px; }
+/* 新增字段表单 */
+.env-edit-new {
+  display: flex; align-items: center; gap: 6px;
+  background: #242425; border: 1px dashed #3c3c3d; border-radius: 8px;
+  padding: 8px 10px; margin-bottom: 6px;
+}
+.env-edit-new input {
+  background: #1e1e1e; border: 1px solid #454545; color: #e6e6e6;
+  border-radius: 4px; padding: 6px 10px; font-size: 13px; outline: none;
+  font-family: inherit; min-width: 0;
+}
+.env-edit-new input:focus { border-color: #0098ff; }
+.env-edit-new input.bad { border-color: #a33b3b; }
+.env-edit-new .env-edit-new-key {
+  width: 168px; flex: none; text-transform: uppercase;
+  font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+}
+.env-edit-new .env-edit-new-val { flex: 1; }
+.env-edit-new button { flex: none; border-radius: 4px; padding: 6px 12px; font-size: 12px; cursor: pointer; border: none; }
+.env-edit-new .env-edit-new-ok { background: #0d7ec4; color: #ffffff; }
+.env-edit-new .env-edit-new-ok:hover { background: #0a6aa8; }
+.env-edit-new .env-edit-new-no { background: #3a3d41; color: #cccccc; }
+.env-edit-new .env-edit-new-no:hover { background: #45494e; }
+/* 底部工具条（新增字段入口） */
+.env-edit-foot {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-top: 1px solid #333333; background: #252526;
+}
+.env-edit-add {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #2f2f30; color: #dcdcdc; border: 1px solid #3c3c3d;
+  border-radius: 5px; font-size: 12px; padding: 5px 12px; cursor: pointer; font-family: inherit;
+}
+.env-edit-add:hover { background: #3a3a3b; color: #ffffff; }
+.env-edit-add i { color: #4fc1ff; }
+.env-edit-tip { color: #8a8a8a; font-size: 11px; }
+/* 收起后的悬浮按钮 */
+.env-edit-open {
+  position: absolute; top: 8px; right: 16px; z-index: 30;
+  display: inline-flex; align-items: center; gap: 5px;
+  background: #252526; border: 1px solid #454545; border-radius: 6px;
+  color: #cccccc; font-size: 12px; padding: 4px 10px; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .45); opacity: .5; transition: opacity .15s;
+  font-family: inherit;
+}
+.env-edit-open:hover { opacity: 1; color: #ffffff; }
+.env-edit-open i { color: #4fc1ff; }

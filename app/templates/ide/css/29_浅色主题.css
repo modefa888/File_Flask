@@ -875,3 +875,40 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) #sec-git-creds .gc-tip-err { background: #fbe0e0; color: #c0392b; }
 :where(html.theme-light) #sec-git-creds .gc-sum-ok { color: #1a7f37; }
 :where(html.theme-light) #sec-git-creds .gc-link { color: #005fb8; }
+
+/* ---------- .env 可视化编辑浮框（30，独立前缀 env-edit-） ---------- */
+:where(html.theme-light) .env-edit-panel { background: #f3f3f3; border-color: #d0d0d0; color: #1f2328; box-shadow: 0 12px 36px rgba(0, 0, 0, .18); }
+:where(html.theme-light) .env-edit-head { background: #e8e8e8; border-bottom-color: #d0d0d0; }
+:where(html.theme-light) .env-edit-head .title { color: #1f2328; }
+:where(html.theme-light) .env-edit-head button { color: #5a5a5a; }
+:where(html.theme-light) .env-edit-head button:hover { background: #dcdcdc; color: #000000; }
+:where(html.theme-light) .env-edit-row { background: #ffffff; border-color: #e0e0e0; }
+:where(html.theme-light) .env-edit-row:hover { border-color: #c8c8c8; }
+:where(html.theme-light) .env-edit-group-title { color: #005fb8; border-left-color: #0078d4; }
+:where(html.theme-light) .env-edit-name { color: #1f2328; }
+:where(html.theme-light) .env-edit-meta code { color: #0a5cc0; }
+:where(html.theme-light) .env-edit-meta em,
+:where(html.theme-light) .env-edit-switch-txt,
+:where(html.theme-light) .env-edit-tip,
+:where(html.theme-light) .env-edit-empty { color: #6b6b6b; }
+:where(html.theme-light) .env-edit-ctrl input[type="text"],
+:where(html.theme-light) .env-edit-ctrl input[type="password"],
+:where(html.theme-light) .env-edit-ctrl input[type="number"],
+:where(html.theme-light) .env-edit-ctrl select,
+:where(html.theme-light) .env-edit-new input { background: #ffffff; color: #1f2328; border-color: #c8c8c8; }
+:where(html.theme-light) .env-edit-switch-track { background: #c4c4c4; }
+:where(html.theme-light) .env-edit-switch input:checked + .env-edit-switch-track { background: #0078d4; }
+:where(html.theme-light) .env-edit-foot { border-top-color: #d0d0d0; background: #f3f3f3; }
+:where(html.theme-light) .env-edit-add { background: #e8e8e8; border-color: #cecece; color: #333333; }
+:where(html.theme-light) .env-edit-add:hover { background: #dcdcdc; color: #000000; }
+:where(html.theme-light) .env-edit-new { background: #ffffff; border-color: #cecece; }
+:where(html.theme-light) .env-edit-new .env-edit-new-no { background: #e8e8e8; color: #333333; }
+:where(html.theme-light) .env-edit-open { background: #f3f3f3; border-color: #d0d0d0; color: #1f2328; }
+:where(html.theme-light) .env-edit-open:hover { color: #000000; }
+/* 深色下的亮青图标 / 灰滑块在白底上对比度不足，换成浅色等价色 */
+:where(html.theme-light) .env-edit-head .title i,
+:where(html.theme-light) .env-edit-add i,
+:where(html.theme-light) .env-edit-open i { color: #005fb8; }
+:where(html.theme-light) .env-edit-eye { color: #6b6b6b; }
+:where(html.theme-light) .env-edit-eye:hover { color: #000000; }
+:where(html.theme-light) .env-edit-switch-track::after { background: #ffffff; }

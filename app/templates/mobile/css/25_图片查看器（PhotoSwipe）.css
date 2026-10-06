@@ -1,0 +1,78 @@
+  /* ===== 图片查看器（PhotoSwipe）=====
+     PhotoSwipe 自身样式位于 static/vendor/photoswipe/photoswipe.css，
+     这里只做主题色调 + 顶部标题栏 + 底部缩略图条的定制。 */
+  .pswp {
+    --pswp-bg: #0b0b0d;
+    --pswp-transition-duration: 300ms;
+  }
+  /* 顶栏：给 iOS 刘海留出安全区，高度自适应，元素垂直居中 */
+  .pswp__top-bar {
+    height: auto; min-height: 56px;
+    padding: calc(2px + var(--safe-top)) 4px 2px;
+    align-items: center;
+  }
+  /* 顶部渐隐，保证按钮在浅色图片上依旧清晰 */
+  .pswp__top-bar::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0;
+    height: calc(72px + var(--safe-top)); pointer-events: none;
+    background: linear-gradient(180deg, rgba(0,0,0,.6), rgba(0,0,0,0));
+  }
+  /* 顶栏里的按钮 / 计数器 / 加载圈一律不收缩：否则长文件名会把它们压扁挤在一起 */
+  .pswp__top-bar > * { flex: none; }
+  /* PhotoSwipe 给加载指示器带了 margin-right:auto，会把右侧按钮组拆成两半，这里取消，
+     保证「旋转 / 下载 / 分享 / 缩放 / 关闭」始终连成一排靠右显示 */
+  .pswp__top-bar > .pswp__preloader { margin-right: 0; }
+
+  /* 当前文件名：浮在图片下方、缩略图条之上（过长省略，不用 flex 否则省略号失效） */
+  .pswp-fname {
+    position: absolute; left: 0; right: 0; z-index: 13;
+    bottom: calc(74px + var(--safe-bottom));
+    padding: 0 16px;
+    color: #fff; font-size: 13px; text-align: center;
+    text-shadow: 0 1px 4px rgba(0,0,0,.85);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    pointer-events: none;
+  }
+  /* 计数器 "24 / 28"：靠左显示，单行不换行 */
+  .pswp__counter {
+    flex: none; white-space: nowrap; margin-right: auto;
+    margin-top: 0; height: 56px; line-height: 56px;
+  }
+  /* 旋转 90/270：图片先按“未旋转”的宽高摆在容器正中，再整体旋转；
+     旋转后的视觉尺寸正好等于容器尺寸，因此不会偏移，也不会留下黑边 */
+  .pswp__img.pswp-rot-q {
+    position: absolute !important;
+    left: 50% !important; top: 50% !important;
+    width: var(--pswp-rot-w) !important;
+    height: var(--pswp-rot-h) !important;
+    transform-origin: 50% 50% !important;
+    transition: transform .25s ease;
+  }
+  .pswp__img.pswp-rot-q.rot-90 { transform: translate(-50%, -50%) rotate(90deg) !important; }
+  .pswp__img.pswp-rot-q.rot-270 { transform: translate(-50%, -50%) rotate(270deg) !important; }
+
+  /* 底部缩略图条：横向滚动，点击切图 */
+  .pswp-tb {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 12;
+    padding: 10px 8px calc(8px + var(--safe-bottom));
+    background: linear-gradient(0deg, rgba(0,0,0,.7), rgba(0,0,0,0));
+  }
+  .pswp-tb-track {
+    display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .pswp-tb-track::-webkit-scrollbar { display: none; }
+  .pswp-tb-item {
+    flex: none; width: 54px; height: 54px; box-sizing: border-box;
+    padding: 0; border: 2px solid transparent; border-radius: 8px;
+    overflow: hidden; background: #22252b; cursor: pointer;
+    -webkit-appearance: none; appearance: none;
+  }
+  .pswp-tb-item img {
+    display: block; width: 100%; height: 100%; object-fit: cover;
+  }
+  .pswp-tb-item.cur { border-color: #4a9eff; }
+  .pswp-tb-loading {
+    flex: none; width: 100%; padding: 14px 0; text-align: center;
+    color: rgba(255,255,255,.7); font-size: 12px;
+  }

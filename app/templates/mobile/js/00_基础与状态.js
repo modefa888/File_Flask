@@ -18,7 +18,7 @@
   })();
   var pendingOp = null;   // 待执行的移动/复制: { mode: "move"|"copy", paths: [...] }
   var lpFired = false;    // 长按已触发标记，用于抑制随后的 click
-  var MOBILE_IMG_EXT = ["jpg","jpeg","png","gif","bmp","webp","heic","tiff","svg"];
+  var MOBILE_IMG_EXT = ["jpg","jpeg","png","gif","bmp","webp","heic","tif","tiff","svg"];
   var VIDEO_EXT = ["mp4","webm","mkv","mov","avi","flv","wmv","m4v","mpg","mpeg","ts","3gp","ogv"];
   var AUDIO_EXT = ["mp3","wav","ogg","flac","aac","m4a","opus","wma","mid","midi"];
   var TEXT_EXT = ["txt","md","log","json","csv","xml","yml","yaml","ini","conf","cfg","toml","py","js","ts","css","html","htm","sh","bat","c","cpp","h","java","go","rs","php","sql","gitignore"];

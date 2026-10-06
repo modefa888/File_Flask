@@ -178,6 +178,12 @@ _INDEX_DB_NEW = _INDEX_DB_FILE + ".new"
 # 缩略图磁盘缓存目录（视频封面等，源文件未修改时直接复用，避免重复 ffmpeg 抽帧）
 _THUMB_CACHE_DIR = os.path.join(_DATA_ROOT, ".file_manager_thumbs")
 os.makedirs(_THUMB_CACHE_DIR, exist_ok=True)
+_COVER_DIR = os.path.join(_DATA_ROOT, ".file_manager_covers")
+os.makedirs(_COVER_DIR, exist_ok=True)
+# 视频封面持久化缓存：以「视频名 + 大小」的 hash 为键（不依赖 mtime，跨重启稳定复用），
+# 封面图按 hash 存进 _COVER_DIR 子文件夹，索引写进该目录的 index.json，下次请求直接读本地。
+_COVER_DIR = os.path.join(_DATA_ROOT, ".file_manager_covers")
+os.makedirs(_COVER_DIR, exist_ok=True)
 # 缩略图缓存上限（条目数），超出后按最久未使用清理
 _THUMB_CACHE_MAX_ENTRIES = 2000
 # 进程内内存缓存容量（LRU，单位：条）。这是唯一占用服务器内存的缓存层。

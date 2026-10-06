@@ -80,15 +80,10 @@
         (d.items || []).forEach(function (x) { if (!hit && x.abs_path === abs) hit = x; });
         if (!hit) return;
         _shareExisting = hit;
-        var mvEl = document.getElementById("ssMaxViews");
-        if (mvEl) mvEl.value = hit.max_views || 0;
-        var pwdEl = document.getElementById("ssPwd");
-        if (pwdEl && hit.has_password) pwdEl.placeholder = "已设置密码，留空表示保持不变";
-        var hint = document.getElementById("ssCreateHint");
-        if (hint) {
-          hint.innerHTML = "该文件已有分享（已访问 " + (hit.views || 0) + " 次 · " +
-            esc(hit.expires_str || "") + "），生成后会更新这条链接的设置。";
-        }
+        // 该文件已有分享：直接展示已有链接 / 二维码，不再让用户重新点一次“生成”；
+        // 想改有效期、密码、次数上限可点结果页里的「⚙️ 修改设置」。
+        _shareRec = hit;
+        renderShareResult();
       })
       .catch(function () {});
   }
@@ -177,6 +172,7 @@
       '<div class="ss-btns">' +
         (canShare ? '<button class="ss-btn" id="ssSysShare">📤 系统分享</button>' : '') +
         '<button class="ss-btn" id="ssOpenLink">🌐 打开链接</button>' +
+        (rec.id ? '<button class="ss-btn" id="ssEditShare">⚙️ 修改设置</button>' : '') +
         '<button class="ss-btn wide" id="ssManage">🔗 查看全部分享</button>' +
         (rec.id ? '<button class="ss-btn danger wide" id="ssCancelShare">🗑️ 取消该分享</button>' : '') +
       '</div>' +
@@ -195,6 +191,8 @@
     if (sys) sys.addEventListener("click", function () {
       navigator.share({ title: rec.name || "文件分享", url: url }).catch(function () {});
     });
+    var edit = document.getElementById("ssEditShare");
+    if (edit) edit.addEventListener("click", function () { openShareSettings(rec); });
     document.getElementById("ssManage").addEventListener("click", function () {
       shareSheetClose();
       openSharePage();

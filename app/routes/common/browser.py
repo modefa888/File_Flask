@@ -26,7 +26,7 @@ from ...services.common.filecore import (
 )
 from ...services.common.thumbnail import (
     _get_thumbnail_bytes, _get_preview_bytes, _extract_video_frame,
-    _clear_disk_cache as _clear_thumb_cache, get_video_duration,
+    _clear_disk_cache as _clear_thumb_cache, get_video_duration, get_video_cover,
 )
 
 
@@ -724,7 +724,12 @@ def api_thumbnail():
         resp.headers["Cache-Control"] = "public, max-age=604800"
         return resp
 
-    data, content_type = _get_thumbnail_bytes(target_path)
+    ext = os.path.splitext(target_path)[1].lower().lstrip(".")
+    if ext in _VIDEO_EXTS:
+        # 视频：走「视频名+大小 hash」持久化封面缓存（index.json + 本地图片），跨重启复用，不重复抽帧
+        data, content_type = get_video_cover(target_path)
+    else:
+        data, content_type = _get_thumbnail_bytes(target_path)
     if data is None:
         return jsonify({"error": "无法生成缩略图"}), 400
 
@@ -734,6 +739,44 @@ def api_thumbnail():
     if etag:
         resp.headers["ETag"] = etag
     return resp
+
+
+@bp.route("/api/imagesize", methods=["POST"])
+def api_imagesize():
+    """批量获取图片原始尺寸（只读文件头，不解码整图）。
+
+    移动版图片查看器（PhotoSwipe）在打开前需要每张图的真实宽高用于缩放与占位布局，
+    这里一次性批量返回，避免前端逐张下载完才知道尺寸导致布局跳动。
+    请求体：{"paths": ["/abs/a.jpg", "/abs/b.png"]}
+    返回：  {"sizes": {"/abs/a.jpg": [w, h], "/abs/b.png": null}}
+    """
+    data = request.get_json(silent=True) or {}
+    paths = data.get("paths") or []
+    if not isinstance(paths, list):
+        return jsonify({"error": "参数格式错误"}), 400
+    if len(paths) > 2000:
+        paths = paths[:2000]
+
+    try:
+        from PIL import Image
+    except ImportError:
+        _log.warning("GET /api/imagesize -> Pillow 不可用，返回空尺寸")
+        return jsonify({"sizes": {}})
+
+    sizes = {}
+    for p in paths:
+        key = str(p)
+        try:
+            target = os.path.abspath(os.path.normpath(key))
+            if not os.path.isfile(target):
+                sizes[key] = None
+                continue
+            # Image.open 惰性解析，仅读取文件头即可拿到尺寸（不触发像素解码）
+            with Image.open(target) as im:
+                sizes[key] = [int(im.width), int(im.height)]
+        except Exception:
+            sizes[key] = None
+    return jsonify({"sizes": sizes})
 
 
 @bp.route("/api/video_duration")

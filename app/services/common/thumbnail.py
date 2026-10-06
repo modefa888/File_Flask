@@ -7,6 +7,7 @@
 """
 import os
 import io
+import json
 import hashlib
 import tempfile
 import subprocess
@@ -17,6 +18,7 @@ import mimetypes
 from ...config import (
     _IMAGE_EXTS, _VIDEO_EXTS, FFMPEG_BIN, FFPROBE_BIN,
     _THUMB_CACHE_DIR, _THUMB_CACHE_MAX_ENTRIES, _THUMB_MEM_CACHE_MAX,
+    _COVER_DIR, DATA_ROOT,
 )
 
 # 图片缩略图最长边（像素）。兼顾网格小图清晰度与预览大图加载速度。
@@ -203,6 +205,8 @@ def _get_thumbnail_bytes(file_path, use_cache=True):
 _PREVIEW_MAX_SIDE = 2560
 _PREVIEW_QUALITY = 88
 _PREVIEW_DIRECT_MAX = 3 * 1024 * 1024   # 原图 ≤3MB 时直接返回原图（保留 GIF 动图、不重复编码）
+# 浏览器不原生支持、必须由服务端转码才能预览的图片格式（原图直出会显示空白）
+_NEED_TRANSCODE_EXTS = {"tif", "tiff", "heic", "heif", "avif"}
 
 
 def _get_preview_bytes(file_path, max_side=_PREVIEW_MAX_SIDE, use_cache=True):
@@ -224,7 +228,7 @@ def _get_preview_bytes(file_path, max_side=_PREVIEW_MAX_SIDE, use_cache=True):
         size = os.path.getsize(file_path)
     except OSError:
         size = 0
-    if size and size <= _PREVIEW_DIRECT_MAX:
+    if size and size <= _PREVIEW_DIRECT_MAX and ext not in _NEED_TRANSCODE_EXTS:
         try:
             with open(file_path, "rb") as f:
                 return f.read(), mime_type
@@ -324,6 +328,106 @@ def _extract_video_frame(video_path):
     finally:
         _VIDEO_THUMB_SEM.release()
     return None, None
+
+
+# ========== 视频封面持久化缓存（以 视频名+大小 的 hash 为键，跨重启复用） ==========
+# 封面图按 hash 存进 _COVER_DIR 子文件夹，索引写进该目录的 index.json：
+#   { "<hash>": {"name": 视频名, "size": 字节, "file": "<hash>.jpg", "type": "image/jpeg"} }
+# 下次请求同一视频（同名同大小）时直接读本地封面，不再跑 ffmpeg 抽帧。
+_COVER_INDEX_FILE = os.path.join(_COVER_DIR, "index.json")
+_COVER_INDEX_LOCK = threading.Lock()
+_COVER_MEM_CACHE_MAX = 200
+_COVER_MEM_CACHE = OrderedDict()
+_COVER_MEM_CACHE_LOCK = threading.Lock()
+
+
+def _cover_key(file_path):
+    """以「视频名 + 大小」生成唯一 hash 键（不依赖 mtime，跨重启稳定）"""
+    name = os.path.basename(file_path)
+    try:
+        size = os.path.getsize(file_path)
+    except OSError:
+        size = 0
+    return hashlib.sha1(("%s|%d" % (name, size)).encode("utf-8", "ignore")).hexdigest()
+
+
+def _cover_index_load():
+    try:
+        with open(_COVER_INDEX_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _cover_index_save(idx):
+    tmp = _COVER_INDEX_FILE + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(idx, f, ensure_ascii=False)
+        os.replace(tmp, _COVER_INDEX_FILE)   # 原子替换，避免并发写坏 JSON
+    except OSError:
+        pass
+
+
+def get_video_cover(file_path):
+    """获取视频封面：优先读本地持久化封面（index.json 索引），没有才抽帧并落盘。
+
+    返回 (data, content_type)；失败返回 (None, None)。
+    """
+    key = _cover_key(file_path)
+    # 1) 内存缓存（热点加速）
+    with _COVER_MEM_CACHE_LOCK:
+        item = _COVER_MEM_CACHE.get(key)
+        if item is not None:
+            _COVER_MEM_CACHE.move_to_end(key)
+            return item
+    # 2) 本地持久化封面（index.json + data/.file_manager_covers/<hash>.jpg）
+    with _COVER_INDEX_LOCK:
+        idx = _cover_index_load()
+        entry = idx.get(key)
+        if entry:
+            fpath = os.path.join(_COVER_DIR, entry.get("file", ""))
+            if fpath and os.path.isfile(fpath):
+                try:
+                    with open(fpath, "rb") as f:
+                        data = f.read()
+                    result = (data, entry.get("type") or "image/jpeg")
+                    with _COVER_MEM_CACHE_LOCK:
+                        _COVER_MEM_CACHE[key] = result
+                        _COVER_MEM_CACHE.move_to_end(key)
+                        while len(_COVER_MEM_CACHE) > _COVER_MEM_CACHE_MAX:
+                            _COVER_MEM_CACHE.popitem(last=False)
+                    return result
+                except OSError:
+                    pass
+    # 3) 抽帧并落盘
+    data, ctype = _extract_video_frame(file_path)
+    if not data:
+        return None, None
+    ctype = ctype or "image/jpeg"
+    fname = key + ".jpg"
+    fpath = os.path.join(_COVER_DIR, fname)
+    try:
+        with open(fpath, "wb") as f:
+            f.write(data)
+    except OSError:
+        pass   # 写盘失败也要能返回封面（只是没持久化）
+    try:
+        size = os.path.getsize(file_path)
+    except OSError:
+        size = 0
+    with _COVER_INDEX_LOCK:
+        idx = _cover_index_load()
+        idx[key] = {"name": os.path.basename(file_path), "size": size, "file": fname, "type": ctype}
+        _cover_index_save(idx)
+    result = (data, ctype)
+    with _COVER_MEM_CACHE_LOCK:
+        _COVER_MEM_CACHE[key] = result
+        _COVER_MEM_CACHE.move_to_end(key)
+        while len(_COVER_MEM_CACHE) > _COVER_MEM_CACHE_MAX:
+            _COVER_MEM_CACHE.popitem(last=False)
+    return result
 
 
 # ========== 视频时长探测（ffprobe，供播放列表异步显示） ==========

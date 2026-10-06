@@ -3,7 +3,7 @@
   function trIco(name, isDir) {
     if (isDir) return "📁";
     var e = (name.split(".").pop() || "").toLowerCase();
-    if (["jpg","jpeg","png","gif","webp","bmp","svg","ico"].indexOf(e) >= 0) return "🖼️";
+    if (["jpg","jpeg","png","gif","webp","bmp","tif","tiff","heic","svg","ico"].indexOf(e) >= 0) return "🖼️";
     if (["mp4","mkv","avi","mov","wmv","flv","ts","webm","m4v"].indexOf(e) >= 0) return "🎬";
     if (["mp3","flac","wav","aac","ogg","m4a","wma"].indexOf(e) >= 0) return "🎵";
     if (["zip","rar","7z","tar","gz","bz2","xz"].indexOf(e) >= 0) return "🗜️";

@@ -1,5 +1,5 @@
   // ---------- 预览 ----------
-  // 缩略图懒加载：底部横向列表可能有上百张，逐个创建 <img> 并设 src 会一次性并发
+  // 缩略图懒加载：横向缩略图条可能有上百张，逐个创建 <img> 并设 src 会一次性并发
   // 几十上百个请求（横向滚动容器里 loading="lazy" 基本不生效）。
   // 这里改为先只记 URL，元素进入可视区附近才真正加载。
   var _pvThumbObserver = null;
@@ -24,7 +24,7 @@
   }
 
   function openPreview(item, contextItems) {
-    // 上一次预览留下的缩略图观察器先清掉（底部列表马上会重建）
+    // 上一次看图留下的缩略图观察器先清掉（缩略图条马上会重建）
     if (_pvThumbObserver) { _pvThumbObserver.disconnect(); _pvThumbObserver = null; }
     var ext = extOf(item.name);
     var abs = itemAbs(item);
@@ -38,16 +38,17 @@
       vpOpenVideo(item, abs, contextItems);
       return;
     }
+    // 图片走 PhotoSwipe 全屏看图器（自带缩放 / 滑动切换），不占用预览遮罩
+    if (MOBILE_IMG_EXT.indexOf(ext) >= 0) {
+      openImageGallery(item, contextItems);
+      return;
+    }
     var mask = document.getElementById("previewMask");
     var body = document.getElementById("previewBody");
     body.innerHTML = '<div class="preview-msg">加载中…</div>';
     document.getElementById("previewClose").style.display = "";
     mask.classList.add("show");
 
-    if (MOBILE_IMG_EXT.indexOf(ext) >= 0) {
-      buildImagePreview(item, abs);
-      return;
-    }
     if (TEXT_EXT.indexOf(ext) >= 0) {
       fetchTimeout("/api/preview?path=" + encodeURIComponent(abs), 15000)
         .then(function (r) { return r.json(); })
@@ -128,281 +129,352 @@
       });
   }
 
-  // 图片预览卡片：文件名 + 可缩放看图区（双指捏合/双击/滚轮）+ 同级图片列表
-  function buildImagePreview(item, abs) {
-    var body = document.getElementById("previewBody");
-    var card = document.createElement("div");
-    card.className = "pv-card";
-    card.innerHTML =
-      '<div class="pv-head">' +
-        '<span class="pv-title">' + esc(item.name) + '</span>' +
-        '<button type="button" class="pv-close" data-op="close">✕</button>' +
-      '</div>' +
-      '<div class="pv-imgarea"><img class="pv-img" draggable="false" alt="' + esc(item.name) + '"></div>' +
-      '<div class="pv-vlist"><div class="pv-vload">加载图片…</div></div>';
-    body.innerHTML = "";
-    body.appendChild(card);
-    document.getElementById("previewClose").style.display = "none";
-
-    var title = card.querySelector(".pv-title");
-    var img = card.querySelector("img");
-    var area = card.querySelector(".pv-imgarea");
-    var listEl = card.querySelector(".pv-vlist");
+  // 图片查看器：PhotoSwipe（全屏看图，自带双指缩放 / 双击放大 / 左右滑动切换 / 下滑关闭）
+  // 打开前批量取原图真实尺寸（服务端只读文件头），避免初始构图跳动、双击放大比例不准。
+  function openImageGallery(item, contextItems) {
+    var abs = itemAbs(item);
     var dirAbs = abs.slice(0, abs.lastIndexOf("/")) || "/";
-
-    // ===== 缩放 / 拖动（transform: translate + scale，1x~8x），未放大时横滑切图 =====
-    var scale = 1, tx = 0, ty = 0, MIN_S = 1, MAX_S = 8, imgToken = 0;
-    var imgList = [];      // 同级图片顺序表 [{path, name}]，供左右滑动切换
-    var curPath = "";
-    function apply(anim) {
-      img.classList.toggle("anim", !!anim);
-      img.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")";
-    }
-    // 把平移量夹在合法范围内：放大后不能拖出边界，未占满时保持居中
-    function clampT() {
-      var aw = area.clientWidth, ah = area.clientHeight;
-      var iw = img.clientWidth * scale, ih = img.clientHeight * scale;
-      var ox = (aw - img.clientWidth) / 2, oy = (ah - img.clientHeight) / 2;
-      if (iw <= aw) tx = (aw - iw) / 2 - ox;
-      else tx = Math.max(aw - iw - ox, Math.min(-ox, tx));
-      if (ih <= ah) ty = (ah - ih) / 2 - oy;
-      else ty = Math.max(ah - ih - oy, Math.min(-oy, ty));
-    }
-    function resetZoom() {
-      scale = 1; tx = 0; ty = 0; apply(true);
-    }
-    // 围绕某点缩放到 s（保持该点下的图像位置不动）
-    function zoomAt(mx, my, s, anim) {
-      var k = s / scale;
-      tx = mx - (mx - tx) * k;
-      ty = my - (my - ty) * k;
-      scale = s;
-      clampT(); apply(anim);
-    }
-    function dblTap(cx, cy) {
-      var rect = area.getBoundingClientRect();
-      if (scale > 1.02) resetZoom();
-      else zoomAt(cx - rect.left, cy - rect.top, 2.5, true);
-    }
-
-    var pinch = null, pan = null, lastTap = 0, lastTapX = 0, lastTapY = 0;
-    function tdist(t) {
-      var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
-      return Math.sqrt(dx * dx + dy * dy) || 1;
-    }
-    area.addEventListener("touchstart", function (e) {
-      if (e.touches.length === 2) {
-        var rect = area.getBoundingClientRect(), t = e.touches;
-        pinch = {
-          d0: tdist(t), s0: scale, tx0: tx, ty0: ty,
-          mx: (t[0].clientX + t[1].clientX) / 2 - rect.left,
-          my: (t[0].clientY + t[1].clientY) / 2 - rect.top,
-        };
-        pan = null;
-      } else if (e.touches.length === 1) {
-        pinch = null;
-        var now = Date.now();
-        // 双击：300ms 内二次点按
-        if (now - lastTap < 300 &&
-            Math.abs(e.touches[0].clientX - lastTapX) < 40 &&
-            Math.abs(e.touches[0].clientY - lastTapY) < 40) {
-          lastTap = 0;
-          dblTap(e.touches[0].clientX, e.touches[0].clientY);
-          pan = null;
-          return;
-        }
-        lastTap = now; lastTapX = e.touches[0].clientX; lastTapY = e.touches[0].clientY;
-        pan = { x: e.touches[0].clientX, y: e.touches[0].clientY, tx: tx, ty: ty, t0: Date.now() };
-      }
-    }, { passive: false });
-    area.addEventListener("touchmove", function (e) {
-      e.preventDefault();   // 阻止页面滚动/浏览器默认缩放
-      if (pinch && e.touches.length === 2) {
-        var rect = area.getBoundingClientRect();
-        var s = Math.min(MAX_S, Math.max(MIN_S, pinch.s0 * tdist(e.touches) / pinch.d0));
-        var mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
-        var my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
-        var k = s / pinch.s0;
-        tx = mx - (mx - pinch.tx0) * k;
-        ty = my - (my - pinch.ty0) * k;
-        scale = s;
-        clampT(); apply(false);
-      } else if (pan && e.touches.length === 1) {
-        var dx = e.touches[0].clientX - pan.x;
-        if (scale > 1.02) {
-          tx = pan.tx + dx;
-          ty = pan.ty + (e.touches[0].clientY - pan.y);
-          clampT(); apply(false);
-        } else {
-          // 未放大：横向跟手滑动，松手按距离/速度切上一张或下一张
-          tx = pan.tx + dx; ty = 0;
-          apply(false);
-        }
-      }
-    }, { passive: false });
-    area.addEventListener("touchend", function (e) {
-      if (e.touches.length < 2) pinch = null;
-      if (e.touches.length === 0) {
-        if (scale > 1.02) {
-          clampT(); apply(true);
-        } else {
-          var dx = tx;
-          var fast = pan && (Date.now() - pan.t0) < 250 && Math.abs(dx) > 40;
-          if (Math.abs(dx) > area.clientWidth * 0.25 || fast) {
-            if (!step(dx < 0 ? 1 : -1)) resetZoom();
-          } else {
-            resetZoom();
-          }
-        }
-        pan = null;
-      }
-    });
-    area.addEventListener("touchcancel", function () {
-      pinch = null; pan = null;
-      if (scale <= 1.02) resetZoom(); else { clampT(); apply(true); }
-    });
-    // 桌面端：滚轮缩放
-    area.addEventListener("wheel", function (e) {
-      e.preventDefault();
-      var rect = area.getBoundingClientRect();
-      var s = Math.min(MAX_S, Math.max(MIN_S, scale * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
-      zoomAt(e.clientX - rect.left, e.clientY - rect.top, s, false);
-      if (scale <= 1.001) resetZoom();
-    }, { passive: false });
-
-    // 同步底部列表高亮并滚动到可视位置
-    function markCur(path) {
-      Array.prototype.forEach.call(listEl.children, function (n) {
-        if (n.classList && n.classList.contains("pv-vitem")) {
-          n.classList.toggle("cur", n.getAttribute("data-path") === path);
-        }
-      });
-      var cur = listEl.querySelector(".pv-vitem.cur");
-      if (cur) try { cur.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" }); } catch (e) {}
-    }
-    // 左右切换：dir=1 下一张，-1 上一张；返回 false 表示已到头
-    function step(dir) {
-      var idx = -1, i;
-      for (i = 0; i < imgList.length; i++) {
-        if (imgList[i].path === curPath) { idx = i; break; }
-      }
-      if (idx < 0) return false;
-      var n = idx + dir;
-      if (n < 0 || n >= imgList.length) return false;
-      var it = imgList[n];
-      // 当前图滑出，新图从对侧滑入
-      tx = -dir * area.clientWidth; ty = 0; apply(true);
-      setTimeout(function () {
-        setImg(it.path, it.name);                       // 换图并复位（带动画从当前位移回 0）
-        tx = dir * area.clientWidth; ty = 0; apply(false);   // 瞬移到进入侧
-        requestAnimationFrame(function () {
-          requestAnimationFrame(function () { resetZoom(); });  // 滑入
-        });
-      }, 180);
-      return true;
-    }
-
-    // ===== 图片加载：img 只加载 /api/image 的清晰预览图（服务端按最长边 2560px 降采样） =====
-    // 缩略图（/api/thumbnail，最长边 512px）只作为加载期间的背景占位。
-    // 原来是把缩略图直接设进 img、等原图就绪再替换，一旦原图加载慢或解码失败，
-    // 预览里就一直停在压缩封面上，看着像"最终结果"。
-    function setImg(path, name) {
-      var tk = ++imgToken;
-      curPath = path;
-      title.textContent = name;
-      markCur(path);
-      area.style.backgroundImage = 'url("/api/thumbnail?path=' + encodeURIComponent(path) + '")';
-      area.style.backgroundSize = "contain";
-      area.style.backgroundPosition = "center";
-      area.style.backgroundRepeat = "no-repeat";
-      img.style.transition = "opacity .2s ease";
-      img.style.opacity = "0";             // 原图就绪前先露出背景缩略图
-      img.onload = function () {
-        if (tk !== imgToken) return;
-        img.style.opacity = "1";           // 原图到位 → 淡入覆盖占位
-        resetZoom();                       // 尺寸就绪后重算缩放边界
-      };
-      img.onerror = function () {
-        if (tk !== imgToken) return;
-        // 用 HEAD 探出具体原因：401=会话过期（会表现为"只有缩略图、很模糊"）
-        fetch(img.src, { method: "HEAD", credentials: "same-origin" }).then(function (r) {
-          if (tk !== imgToken) return;
-          if (r.status === 401) {
-            toast("登录已过期，请重新登录后再预览", "error");
-            return;
-          }
-          // 非 401：尝试回退原图直出（/api/raw），避免只能看模糊缩略图
-          var rawTk = tk;
-          img.onerror = function () {
-            if (rawTk !== imgToken) return;
-            toast("图片加载失败（当前显示的是缩略图）", "error");
-          };
-          img.src = "/api/raw?path=" + encodeURIComponent(path) + "&_=" + Date.now();
-        }).catch(function () {
-          if (tk !== imgToken) return;
-          // 网络异常时也回退原图
-          var rawTk = tk;
-          img.onerror = function () {
-            if (rawTk !== imgToken) return;
-            toast("图片加载失败（当前显示的是缩略图）", "error");
-          };
-          img.src = "/api/raw?path=" + encodeURIComponent(path) + "&_=" + Date.now();
-        });
-      };
-      resetZoom();
-      // 清晰预览图：服务端按最长边 2560px 降采样（原图几十 MB 时也能秒开、不糊）
-      img.src = "/api/image?path=" + encodeURIComponent(path);
-    }
-
-    function renderImgs(items) {
-      var imgs = (items || []).filter(function (it) {
-        return !isDir(it) && MOBILE_IMG_EXT.indexOf(extOf(it.name)) >= 0;
-      });
-      imgList = imgs.map(function (it) {
-        return { path: it.abs_path || joinPath(dirAbs, it.name), name: it.name };
-      });
-      if (!imgs.length) {
-        listEl.innerHTML = '<div class="pv-vempty">当前文件夹没有其他图片</div>';
-        return;
-      }
-      listEl.innerHTML = "";
-      if (_pvThumbObserver) {          // 列表重建：先丢弃旧观察目标，避免残留
-        _pvThumbObserver.disconnect();
-        _pvThumbObserver = null;
-      }
-      imgList.forEach(function (it) {
-        var row = document.createElement("div");
-        row.className = "pv-vitem img" + (it.path === curPath ? " cur" : "");
-        row.setAttribute("data-path", it.path);
-        var t = document.createElement("img");
-        t.loading = "lazy";
-        t.alt = "";
-        t.dataset.src = "/api/thumbnail?path=" + encodeURIComponent(it.path);   // 进入可视区才加载
-        t.onerror = function () { t.style.display = "none"; row.classList.add("noimg"); };
-        var nm = document.createElement("span");
-        nm.className = "pv-vname"; nm.textContent = it.name; nm.title = it.name;
-        row.appendChild(t); row.appendChild(nm);
-        row.addEventListener("click", function () { setImg(it.path, it.name); });
-        listEl.appendChild(row);
-        observePvThumb(t);
-      });
-      markCur(curPath);
-    }
-
-    setImg(abs, item.name);
-
-    if (normDirPath(dirAbs) === normDirPath(state.path) && state.items && state.items.length) {
-      renderImgs(state.items);
-    } else {
-      loadSiblingsInto(listEl, dirAbs, renderImgs);
-    }
-
-    card.querySelector('[data-op="close"]').addEventListener("click", function () {
-      var mask = document.getElementById("previewMask");
+    // 预览遮罩若残留（例如刚看完文本），先收起，避免盖住看图器
+    var mask = document.getElementById("previewMask");
+    if (mask && mask.classList.contains("show")) {
       mask.classList.remove("show");
       document.getElementById("previewBody").innerHTML = "";
       document.getElementById("previewClose").style.display = "";
+    }
+
+    function open(list) {
+      if (!list.length) list = [{ path: abs, name: item.name }];
+      pswpOpen(list, abs);
+    }
+
+    var ctx = pswpCollect(contextItems, dirAbs);
+    if (ctx.length > 1) { open(ctx); return; }          // 媒体集合 / 搜索结果等上下文优先
+    if (normDirPath(dirAbs) === normDirPath(state.path) && state.items && state.items.length) {
+      var cur = pswpCollect(state.items, dirAbs);
+      if (cur.length) { open(cur); return; }            // 当前目录：可左右滑动切换同级图片
+    }
+    // 媒体集合里的图片不一定在当前目录：拉同级目录补齐
+    fetchTimeout("/api/files?path=" + encodeURIComponent(dirAbs) + "&limit=0&offset=0", 10000)
+      .then(function (r) { return r.json(); })
+      .then(function (d) { open(pswpCollect(d.items || [], dirAbs)); })
+      .catch(function () { open([]); });
+  }
+
+  // 目录项 → 图片列表（过滤目录与非图片）
+  function pswpCollect(items, dirAbs) {
+    var out = [];
+    (items || []).forEach(function (it) {
+      if (isDir(it) || MOBILE_IMG_EXT.indexOf(extOf(it.name)) < 0) return;
+      out.push({ path: it.abs_path || joinPath(dirAbs, it.name), name: it.name });
     });
+    return out;
+  }
+
+  // 批量取原图尺寸（服务端只读文件头，很快）
+  function pswpFetchSizes(paths) {
+    return fetchTimeout("/api/imagesize", 10000, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths: paths })
+    }).then(function (r) { return r.json(); })
+      .then(function (d) { return (d && d.sizes) || {}; })
+      .catch(function () { return {}; });
+  }
+
+  // 尺寸缺失（接口异常 / SVG 等无法解析）时，用缩略图的实际像素补上：
+  // 比例正确才能避免图片被拉伸，缩略图本身随后会被查看器当占位图复用（走浏览器缓存）。
+  function pswpFillSizes(list, sizes) {
+    var jobs = [];
+    list.forEach(function (it) {
+      if (sizes[it.path]) return;
+      jobs.push(new Promise(function (resolve) {
+        var im = new Image();
+        im.onload = function () {
+          if (im.naturalWidth && im.naturalHeight) sizes[it.path] = [im.naturalWidth, im.naturalHeight];
+          resolve();
+        };
+        im.onerror = function () { resolve(); };
+        im.src = "/api/thumbnail?path=" + encodeURIComponent(it.path);
+      }));
+    });
+    return Promise.all(jobs).then(function () { return sizes; });
+  }
+
+  // 浏览器不能直接渲染的格式（TIFF / HEIC 等）交给服务端转码成 JPEG，
+  // 其余图片仍走 /api/raw 原图直出。
+  var PSWP_TRANSCODE_EXT = ["tif", "tiff", "heic", "heif", "avif"];
+  function pswpSlideSrc(path, stamp) {
+    if (PSWP_TRANSCODE_EXT.indexOf(extOf(path)) >= 0) {
+      return "/api/image?path=" + encodeURIComponent(path) + "&max=2560&_=" + stamp;
+    }
+    return "/api/raw?path=" + encodeURIComponent(path) + "&_=" + stamp;
+  }
+
+  function pswpOpen(list, curPath) {
+    if (typeof window.PhotoSwipe !== "function") {
+      toast("图片查看器组件未加载，请刷新页面重试", "error");
+      return;
+    }
+    var index = 0, i;
+    for (i = 0; i < list.length; i++) { if (list[i].path === curPath) { index = i; break; } }
+    var paths = list.map(function (it) { return it.path; });
+    pswpFetchSizes(paths)
+      .then(function (sizes) { return pswpFillSizes(list, sizes); })
+      .then(function (sizes) {
+        var stamp = String(Date.now());
+        var ds = list.map(function (it) {
+          var s = sizes[it.path];
+          var w = Number(s && s[0]) || 1200;
+          var h = Number(s && s[1]) || 1600;
+          return {
+            src: pswpSlideSrc(it.path, stamp),   // 原图直出（浏览器不支持的格式自动走服务端转码）
+            width: Math.max(1, Math.round(w)),
+            height: Math.max(1, Math.round(h)),
+            alt: it.name,
+            name: it.name,
+            absPath: it.path,
+            // 只给底部缩略图条用；不设 msrc/element，避免缩略图被渲染进看图区
+            thumb: "/api/thumbnail?path=" + encodeURIComponent(it.path)
+          };
+        });
+        pswpShow(ds, index);
+      });
+  }
+
+  function pswpShow(ds, index) {
+    var pswp = new window.PhotoSwipe({
+      dataSource: ds,
+      index: index,
+      bgOpacity: 1,                 // 完全不透明：否则下层列表页会隐约透出来
+      showHideAnimationType: "fade",
+      initialZoomLevel: "fit",
+      secondaryZoomLevel: 1,        // 双击放大到 100% 像素
+      maxZoomLevel: 4,
+      spacing: 0.08,
+      preload: [1, 2],
+      loop: false,
+      pinchToClose: true,
+      closeOnVerticalDrag: true,
+      wheelToZoom: true,
+      clickToCloseNonZoomable: false,
+      imageClickAction: "zoom-or-close",
+      bgClickAction: "close",
+      tapAction: "toggle-controls",
+      doubleTapAction: "zoom",
+      maxWidthToAnimate: 4000,
+      errorMsg: "图片加载失败",
+      closeTitle: "关闭",
+      zoomTitle: "缩放",
+      arrowPrevTitle: "上一张",
+      arrowNextTitle: "下一张",
+      indexIndicatorSep: " / ",
+      mainClass: "pswp--imgviewer"
+    });
+    // 锁住列表页滚动（用内联样式而不是 .lock 类，避免和确认框的 lock 互相抵消）
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    pswpRaiseDialogs(true);
+    pswp.on("uiRegister", function () { pswpRegisterUI(pswp); });
+    // 内容重建（切图回来 / 延迟加载完成）后按记录的角度恢复旋转
+    pswp.on("change", function () { pswpApplyRot(pswp.currSlide); });
+    pswp.on("contentLoad", function () { pswpApplyRot(pswp.currSlide); });
+    // 缩放 / 拖动时同步旋转尺寸（第二个参数 true = 不重试，避免高频调用堆积定时器）
+    pswp.on("zoomPanUpdate", function () { pswpApplyRot(pswp.currSlide, true); });
+    pswp.on("close", function () {
+      document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
+      pswpRaiseDialogs(false);
+      if (_pvThumbObserver) { _pvThumbObserver.disconnect(); _pvThumbObserver = null; }
+      // 收起动画结束后销毁实例与 DOM，避免多次打开堆积节点
+      setTimeout(function () { try { pswp.destroy(); } catch (e) {} }, 400);
+    });
+    pswp.init();
+  }
+
+  // 看图器层级是 100000，项目里的确认框 / 下载进度框 / 分享面板都在它下面。
+  // 打开看图器期间临时把它们提到最上层，这样二次确认、分享面板都能浮在图片之上。
+  function pswpRaiseDialogs(on) {
+    var ids = ["confirmBox", "dlProgBox", "delProgBox",
+               "shareMask", "shareSheet", "sharePage", "toastWrap"];
+    ids.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.zIndex = on ? "100001" : "";
+    });
+  }
+
+  // ---------- 图片旋转 ----------
+  // 旋转时交换图片宽高并让 PhotoSwipe 按新方向重排；图片本身按“未旋转”的比例定尺寸后整体旋转，
+  // 旋转后的视觉尺寸正好等于容器，因此居中、撑满、不留黑边。
+  // 旋转落点：优先 content 容器（.pswp__content，或它自身就是 <img>）。
+  // holderElement（.pswp__zoom-wrap）承载 PhotoSwipe 的 translate/scale，绝不能加旋转。
+  function pswpRotTarget(slide) {
+    if (!slide) return null;
+    var content = slide.content && slide.content.element;
+    var holder = slide.holderElement;
+    var list = [];
+    if (content && content !== holder) list.push(content);
+    if (holder) list.push(holder);
+    for (var i = 0; i < list.length; i++) {
+      var r = list[i];
+      if (!r || typeof r.querySelector !== "function") continue;
+      if (r.tagName === "IMG") return r;          // 内容本身就是图片
+      var im = r.querySelector("img");
+      if (im) return im;
+    }
+    // 兜底：看图器内水平方向可见的那张图（前后各有一张预加载的）
+    var all = document.querySelectorAll(".pswp .pswp__img");
+    for (var k = 0; k < all.length; k++) {
+      var rct = all[k].getBoundingClientRect();
+      if (rct.width > 0 && rct.left < window.innerWidth && rct.right > 0) return all[k];
+    }
+    return null;
+  }
+
+  function pswpApplyRot(slide, retry) {
+    if (!slide || !slide.data) return;
+    var rot = Number(slide.data.rot) || 0;
+    var img = pswpRotTarget(slide);
+    if (!img) {
+      // 内容还没创建好（刚切过来）时补一次
+      if (!retry) setTimeout(function () { pswpApplyRot(slide, true); }, 150);
+      return;
+    }
+    if (!rot) {                                   // 0°：清掉旋转样式
+      img.classList.remove("pswp-rot-q", "rot-90", "rot-270");
+      img.style.transform = "";
+      img.style.transformOrigin = "";
+      return;
+    }
+    if (rot % 180 === 0) {                        // 180°：比例不变，直接翻转
+      img.classList.remove("pswp-rot-q", "rot-90", "rot-270");
+      img.style.transformOrigin = "50% 50%";
+      img.style.transform = "rotate(" + rot + "deg)";
+      return;
+    }
+    // 90 / 270：按“未旋转”的比例给图片定尺寸（宽高互换）再整体旋转。
+    // 尺寸统一由 slide 尺寸 × 当前缩放算出（幂等），缩放/拖动时同步刷新即可，无需读 DOM。
+    var zoom = Number(slide.currZoomLevel) || 1;
+    var w = (Number(slide.width) || 0) * zoom;
+    var h = (Number(slide.height) || 0) * zoom;
+    if (!w || !h) {
+      if (!retry) setTimeout(function () { pswpApplyRot(slide, true); }, 150);
+      return;
+    }
+    img.style.setProperty("--pswp-rot-w", h + "px");
+    img.style.setProperty("--pswp-rot-h", w + "px");
+    img.classList.add("pswp-rot-q", "rot-" + rot);
+  }
+
+  function pswpRotate(pswp) {
+    var slide = pswp && pswp.currSlide;
+    if (!slide || !slide.data) return;
+    var d = slide.data;
+    d.rot = ((Number(d.rot) || 0) + 90) % 360;   // 记录角度，切回来仍保持
+    // 90/270 时交换宽高：让 PhotoSwipe 按旋转后的方向重新布局并重算缩放边界
+    if (d.rot % 180 === 90) {
+      var t = d.width; d.width = d.height; d.height = t;
+    }
+    // 不用 refreshSlideContent —— 它会重建内容并重新下载原图；
+    // 把新尺寸同步给当前 slide，让 PhotoSwipe 重算布局与缩放边界就够了
+    try {
+      slide.width = d.width;
+      slide.height = d.height;
+    } catch (e) {}
+    if (pswp.updateSize) pswp.updateSize(true);
+    pswpApplyRot(slide);
+    setTimeout(function () { pswpApplyRot(slide, true); }, 80);   // 布局完成后校正一次
+  }
+
+  function pswpRegisterUI(pswp) {
+    // 当前文件名：放在图片下方（顶栏只留计数器与操作按钮）
+    pswp.ui.registerElement({
+      name: "filename", className: "pswp-fname", order: 50, isButton: false, appendTo: "root",
+      onInit: function (el) {
+        function upd() {
+          var s = pswp.currSlide;
+          el.textContent = (s && s.data && s.data.name) || "";
+        }
+        upd();
+        pswp.on("change", upd);
+      }
+    });
+    // 旋转（每次顺时针 90°）
+    pswp.ui.registerElement({
+      name: "rotate", order: 6, isButton: true, appendTo: "bar",
+      title: "旋转", ariaLabel: "旋转",
+      html: { isCustomSVG: true, size: 24, inner: '<path d="M15.55 5.55L11 1v3.07C7.06 4.56 4 7.92 4 12s3.05 7.44 7 7.93v-2.02c-2.84-.48-5-2.94-5-5.91s2.16-5.43 5-5.91V10l4.55-4.45zM19.93 11a7.9 7.9 0 0 0-1.62-3.89l-1.42 1.42c.54.75.88 1.6 1.02 2.47h2.02zM13 17.91v2.02c1.39-.22 2.68-.74 3.81-1.47l-1.44-1.44c-.73.53-1.55.86-2.37.89zm3.89-1.62l1.42 1.42A7.9 7.9 0 0 0 19.93 13h-2.02c-.14.87-.48 1.72-1.02 2.47z"/>' },
+      onClick: function (e, el, pswp) { pswpRotate(pswp); }
+    });
+    // 下载当前图片
+    pswp.ui.registerElement({
+      name: "download", order: 8, isButton: true, appendTo: "bar",
+      title: "下载", ariaLabel: "下载",
+      html: { isCustomSVG: true, size: 24, inner: '<path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>' },
+      onClick: function (e, el, pswp) {
+        var s = pswp.currSlide;
+        if (!s || !s.data || !s.data.absPath) return;
+        var item = { name: s.data.name, abs_path: s.data.absPath };
+        // 二次确认后再下载（确认框已被临时提到看图器之上，不用退出看图）
+        confirmBox({
+          title: "下载文件",
+          message: "确认下载「" + item.name + "」？",
+          okText: "下载",
+          onOk: function () { download(item); }
+        });
+      }
+    });
+    // 分享当前图片
+    pswp.ui.registerElement({
+      name: "share", order: 9, isButton: true, appendTo: "bar",
+      title: "分享", ariaLabel: "分享",
+      html: { isCustomSVG: true, size: 24, inner: '<path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/>' },
+      onClick: function (e, el, pswp) {
+        var s = pswp.currSlide;
+        if (!s || !s.data || !s.data.absPath) return;
+        // 分享面板层级已在打开看图器时提升，直接浮在图片上方，不退出预览
+        openShareSheet({ name: s.data.name, abs_path: s.data.absPath });
+      }
+    });
+    // 底部缩略图条（同级图片，点击切图）
+    pswp.ui.registerElement({
+      name: "thumbbar", className: "pswp-tb", order: 100, isButton: false, appendTo: "root",
+      html: '<div class="pswp-tb-track"></div>',
+      onInit: function (el) { pswpBuildThumbBar(el.querySelector(".pswp-tb-track"), pswp); }
+    });
+  }
+
+  function pswpBuildThumbBar(track, pswp) {
+    if (!track) return;
+    var n = pswp.getNumItems ? pswp.getNumItems() : 0;
+    if (n <= 1) { track.parentNode.style.display = "none"; return; }
+    for (var i = 0; i < n; i++) {
+      var d = pswp.getItemData(i) || {};
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "pswp-tb-item" + (i === pswp.currIndex ? " cur" : "");
+      btn.setAttribute("data-i", i);
+      btn.title = d.name || "";
+      var im = document.createElement("img");
+      im.alt = "";
+      im.dataset.src = d.thumb;           // 进入可视区附近才真正加载
+      btn.appendChild(im);
+      (function (idx) {
+        btn.addEventListener("click", function () { pswp.goTo(idx); });
+      })(i);
+      track.appendChild(btn);
+      observePvThumb(im);
+    }
+    pswpMarkThumb(track, pswp.currIndex);
+    pswp.on("change", function () { pswpMarkThumb(track, pswp.currIndex); });
+  }
+
+  function pswpMarkThumb(track, idx) {
+    var nodes = track.children;
+    for (var i = 0; i < nodes.length; i++) {
+      nodes[i].classList.toggle("cur", Number(nodes[i].getAttribute("data-i")) === idx);
+    }
+    var cur = track.querySelector(".pswp-tb-item.cur");
+    if (cur) try { cur.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" }); } catch (e) {}
   }
   // 文本预览卡片：文件名 + 操作栏（含搜索）+ 带行号的内容区
   function buildTextPreview(item, text) {

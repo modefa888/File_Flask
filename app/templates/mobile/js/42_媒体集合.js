@@ -2,8 +2,18 @@
   var _md = {
     type: "all", keyword: "", page: 0, size: 30,
     total: 0, pages: 0, loading: false, items: [], token: 0,
-    min_size: 0, max_size: 0
+    min_size: 0, max_size: 0, lastSig: ""
   };
+  // 切换结果缓存：条件签名 -> {page,total,pages,items}。
+  // 切回已经看过的分类 / 页时直接渲染缓存，不再重复请求。
+  var _mdCache = {};
+
+  // 各条件（不含页码）最后浏览的页码：切走再切回来停在原来那一页
+  var _mdPageMem = {};
+
+  // 各面板最后停留的滚动位置：切回来仍停在原来的位置
+  var _mdScrollMem = {};
+
   var MD_CAT = {
     image: { label: "图片", ico: "🖼️", color: "#059669" },
     video: { label: "视频", ico: "🎬", color: "#dc2626" },
@@ -93,6 +103,11 @@
   function openMediaPage() {
     document.getElementById("mediaPage").classList.add("show");
     document.body.classList.add("lock");
+    _mdCache = {};          // 每次打开都重新取数据，避免看到已删除 / 已改动的旧列表
+    _mdPageMem = {};        // 页码记忆一并重置
+    _mdScrollMem = {};      // 滚动位置记忆一并重置
+    var mb = document.getElementById("mdBody");
+    if (mb) mb.innerHTML = "";   // 同时清掉上一次留下的结果面板与提示
     _md.type = "all";
     _md.keyword = "";
     var kw = document.getElementById("mdKeyword");
@@ -112,21 +127,53 @@
     _md.loading = false;
   }
 
-  // 翻页加载：一次只取一页并整体替换（不再滚动懒加载）
+  // 不含页码的条件键：用来记住每个分类 / 搜索 / 筛选各自看到第几页
+  function mdCondKey() {
+    mdApplyFilter();
+    return _md.type + "|" + _md.keyword + "|" + _md.size +
+      "|" + mdCatFilterParam() + "|" + _md.min_size + "|" + _md.max_size;
+  }
+
+  // 切回某个分类时，恢复上次浏览的页码
+  function mdRememberedPage() {
+    var p = parseInt(_mdPageMem[mdCondKey()], 10);
+    return p > 0 ? p : 1;
+  }
+
+  // 加载一页数据：结果按条件签名缓存，并渲染到独立面板，切回来直接复用
   function mdLoad(page) {
-    if (_md.loading) return;
     page = Math.max(1, parseInt(page, 10) || 1);
     var body = document.getElementById("mdBody");
+    mdApplyFilter();
+    var catParam = mdCatFilterParam();
+    // condKey = 不含页码的条件；sig = 条件 + 页码，任一变化都会得到不同的键
+    var condKey = _md.type + "|" + _md.keyword + "|" + _md.size +
+      "|" + catParam + "|" + _md.min_size + "|" + _md.max_size;
+    var sig = condKey + "|" + page;
+
+    // 命中缓存：直接渲染，切分类 / 切回来都不再发请求
+    var hit = _mdCache[sig];
+    if (hit) {
+      _md.token++;          // 作废在途请求，避免它的响应回来覆盖当前列表
+      _md.loading = false;
+      _md.lastSig = sig;
+      _md.page = hit.page; _md.total = hit.total; _md.pages = hit.pages;
+      _md.items = hit.items;
+      _mdPageMem[condKey] = _md.page;
+      mdRender();               // 位置由 mdShowPane 按记忆恢复
+      return;
+    }
+    // 只有「条件完全相同」的重复点击（连点翻页）才忽略
+    if (_md.loading && sig === _md.lastSig) return;
+    _md.lastSig = sig;
     _md.loading = true;
     _md.items = [];
-    body.innerHTML = '<div class="md-empty">加载中…</div>';
+    mdShowMsg("加载中…");
     var tk = ++_md.token;
-    mdApplyFilter();
     var params = "type=" + encodeURIComponent(_md.type) +
       "&keyword=" + encodeURIComponent(_md.keyword) +
       "&page=" + page + "&page_size=" + _md.size;
     // 「全部」视图：带上各分类自己的区间，列表与统计都按分类规则合并
-    var catParam = mdCatFilterParam();
     if (catParam) params += "&filters=" + encodeURIComponent(catParam);
     params += "&min_size=" + (_md.min_size || 0) + "&max_size=" + (_md.max_size || 0);
     fetchTimeout("/api/media/collection?" + params, 25000)
@@ -135,7 +182,7 @@
         if (tk !== _md.token) return;
         _md.loading = false;
         if (d.error) {
-          body.innerHTML = '<div class="md-empty">' + esc(d.error) + '</div>';
+          mdShowMsg(esc(d.error));
           mdStat("");
           return;
         }
@@ -143,56 +190,139 @@
         _md.total = d.total || 0;
         _md.pages = d.total_pages || 0;
         _md.items = d.items || [];
-        mdRender();
-        body.scrollTop = 0;                 // 翻页后回到顶部
+        // 写入缓存，下次切回同一分类 / 同一页直接复用
+        _mdCache[sig] = { page: _md.page, total: _md.total, pages: _md.pages, items: _md.items };
+        _mdPageMem[condKey] = _md.page;      // 记住该分类看到第几页
+        mdRender();                          // 新页面无位置记忆，自然回到顶部
       })
       .catch(function () {
         if (tk !== _md.token) return;
         _md.loading = false;
-        body.innerHTML = '<div class="md-empty">加载失败，请重试</div>';
+        mdShowMsg("加载失败，请重试");
         mdStat("");
       });
   }
 
-  function mdRender() {
+  // 切换结果面板：已渲染过的条件直接复用原面板 —— 里面的图片元素不重建，
+  // 所以切分类不会再发一遍缩略图请求，也不会有重新加载的闪烁。
+  function mdShowPane(sig) {
     var body = document.getElementById("mdBody");
-    var items = _md.items;
-    mdStat((_md.total || 0).toLocaleString() + " 个");
-    if (!items.length) {
-      body.innerHTML = '<div class="md-empty"><span class="md-empty-ico">🖼️</span><br>没有找到媒体文件<br>（换个分类或清空关键字再试）</div>';
-      return;
-    }
-    var h = '<div class="md-grid">' + items.map(function (it, i) {
-      var c = MD_CAT[it.category] || MD_CAT.other;
-      return '<div class="md-card" data-i="' + i + '">' +
-        '<div class="md-thumb">' +
-          '<div class="md-fb">' + c.ico + '</div>' +
-          '<img loading="lazy" alt="" src="/api/thumbnail?path=' + encodeURIComponent(it.path) + '" onerror="this.remove()">' +
-          '<span class="md-cat" style="background:' + c.color + '">' + c.label + '</span>' +
-          '<button class="md-more" data-act="more" title="更多操作">⋯</button>' +
-        '</div>' +
-        '<div class="md-info">' +
-          '<div class="md-name">' + esc(it.name) + '</div>' +
-          '<div class="md-sub">' + mdSize(it.size) + (it.ext ? ' · ' + esc(String(it.ext).toUpperCase()) : '') + '</div>' +
-        '</div>' +
-      '</div>';
-    }).join("") + '</div>';
-    // 分页条
-    var pages = Math.max(1, _md.pages || 1);
-    h += '<div class="md-pager">' +
-      '<button class="md-pg-btn" data-pg="prev"' + (_md.page <= 1 ? " disabled" : "") + '>‹ 上一页</button>' +
-      '<span class="md-pg-info">第 ' + _md.page + ' / ' + pages + ' 页</span>' +
-      '<button class="md-pg-btn" data-pg="next"' + (_md.page >= pages ? " disabled" : "") + '>下一页 ›</button>' +
-    '</div>';
-    body.innerHTML = h;
+    Array.prototype.forEach.call(body.querySelectorAll(".md-pane"), function (p) {
+      p.style.display = (p.getAttribute("data-sig") === sig) ? "" : "none";
+    });
+    var msg = body.querySelector(".md-msg");
+    if (msg) msg.style.display = "none";
+    body.scrollTop = _mdScrollMem[sig] || 0;   // 回到上次停留的位置
   }
 
-  // 点分页按钮：翻页；点卡片：预览；点 ⋯：完整操作菜单（分享、下载、删除…）
+  // 实时记录当前面板的滚动位置，切回来时才能恢复到原处
+  document.getElementById("mdBody").addEventListener("scroll", function () {
+    if (_md.lastSig) _mdScrollMem[_md.lastSig] = this.scrollTop;
+  }, { passive: true });
+
+  // 加载中 / 出错 / 空结果提示：隐藏所有面板，只显示一条居中提示
+  function mdShowMsg(html) {
+    var body = document.getElementById("mdBody");
+    Array.prototype.forEach.call(body.querySelectorAll(".md-pane"), function (p) { p.style.display = "none"; });
+    var msg = body.querySelector(".md-msg");
+    if (!msg) {
+      msg = document.createElement("div");
+      msg.className = "md-empty md-msg";
+      body.appendChild(msg);
+    }
+    msg.innerHTML = html;
+    msg.style.display = "";
+    body.scrollTop = 0;
+  }
+
+  function mdRender() {
+    var body = document.getElementById("mdBody");
+    var sig = _md.lastSig;
+    var items = _md.items;
+    mdStat((_md.total || 0).toLocaleString() + " 个");
+
+    // 这个条件已经渲染过：直接显示原面板，不重建 DOM
+    var cached = _mdCache[sig];
+    if (cached && cached.pane && cached.pane.parentNode === body) {
+      mdShowPane(sig);
+      return;
+    }
+
+    var pane = document.createElement("div");
+    pane.className = "md-pane";
+    pane.setAttribute("data-sig", sig);
+    var h;
+    if (!items.length) {
+      h = '<div class="md-empty"><span class="md-empty-ico">🖼️</span><br>没有找到媒体文件<br>（换个分类或清空关键字再试）</div>';
+    } else {
+      h = '<div class="md-grid">' + items.map(function (it, i) {
+        var c = MD_CAT[it.category] || MD_CAT.other;
+        // 只有图片 / 视频才有缩略图；音频等类型直接用图标，省掉无谓的 thumbnail 请求
+        var thumbHtml = (it.category === "image" || it.category === "video")
+          ? '<img loading="lazy" alt="" src="/api/thumbnail?path=' + encodeURIComponent(it.path) + '" onerror="this.remove()">'
+          : "";
+        return '<div class="md-card" data-i="' + i + '">' +
+          '<div class="md-thumb">' +
+            '<div class="md-fb">' + c.ico + '</div>' +
+            thumbHtml +
+            '<span class="md-cat" style="background:' + c.color + '">' + c.label + '</span>' +
+            '<button class="md-more" data-act="more" title="更多操作">⋯</button>' +
+          '</div>' +
+          '<div class="md-info">' +
+            '<div class="md-name">' + esc(it.name) + '</div>' +
+            '<div class="md-sub">' + mdSize(it.size) + (it.ext ? ' · ' + esc(String(it.ext).toUpperCase()) : '') + '</div>' +
+          '</div>' +
+        '</div>';
+      }).join("") + '</div>';
+      // 分页条
+      var pages = Math.max(1, _md.pages || 1);
+      h += '<div class="md-pager">' +
+        '<button class="md-pg-btn" data-pg="prev"' + (_md.page <= 1 ? " disabled" : "") + '>‹ 上一页</button>' +
+        '<span class="md-pg-info">第 ' +
+          '<input class="md-pg-input" type="number" inputmode="numeric" min="1" max="' + pages +
+          '" value="' + _md.page + '"> / ' + pages + ' 页</span>' +
+        '<button class="md-pg-btn" data-pg="go">跳转</button>' +
+        '<button class="md-pg-btn" data-pg="next"' + (_md.page >= pages ? " disabled" : "") + '>下一页 ›</button>' +
+      '</div>';
+    }
+    pane.innerHTML = h;
+    body.appendChild(pane);
+    if (cached) cached.pane = pane;      // 挂到缓存上，下次切换直接复用
+    mdShowPane(sig);
+  }
+
+  // 跳到页码输入框里指定的页（超出范围自动夹在 1 ~ 总页数之间）
+  function mdGotoTyped(btn) {
+    var pane = btn && btn.closest ? btn.closest(".md-pane") : null;
+    var inp = pane && pane.querySelector(".md-pg-input");
+    if (!inp) return;
+    var total = Math.max(1, _md.pages || 1);
+    var p = parseInt(inp.value, 10);
+    if (!(p > 0)) p = 1;
+    p = Math.max(1, Math.min(total, p));
+    inp.value = p;
+    if (p === _md.page) return;
+    mdLoad(p);
+  }
+
+  // 页码输入框里回车 = 点「跳转」
+  document.getElementById("mdBody").addEventListener("keydown", function (e) {
+    if (e.key !== "Enter") return;
+    var inp = e.target.closest && e.target.closest(".md-pg-input");
+    if (!inp) return;
+    e.preventDefault();
+    var pager = inp.closest(".md-pager");
+    mdGotoTyped(pager && pager.querySelector('[data-pg="go"]'));
+  });
+
+  // 点分页按钮：翻页 / 跳页；点卡片：预览；点 ⋯：完整操作菜单（分享、下载、删除…）
   document.getElementById("mdBody").addEventListener("click", function (e) {
     var pg = e.target.closest && e.target.closest("[data-pg]");
     if (pg) {
       if (pg.disabled) return;
-      mdLoad(pg.getAttribute("data-pg") === "next" ? _md.page + 1 : _md.page - 1);
+      var act = pg.getAttribute("data-pg");
+      if (act === "go") { mdGotoTyped(pg); return; }
+      mdLoad(act === "next" ? _md.page + 1 : _md.page - 1);
       return;
     }
     var card = e.target.closest && e.target.closest(".md-card");
@@ -219,7 +349,7 @@
       });
       _md.type = b.getAttribute("data-type");
       mdUpdateFilterBadge();
-      mdLoad(1);
+      mdLoad(mdRememberedPage());   // 回到该分类上次浏览的页码
     });
   });
 

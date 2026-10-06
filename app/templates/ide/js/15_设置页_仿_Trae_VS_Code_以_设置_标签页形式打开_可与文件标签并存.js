@@ -146,7 +146,7 @@
               '<label class="set-switch sysai-sw" data-mod="summary" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
             '<div class="sysai-mod"><i class="bi bi-puzzle"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">插件宿主 AI<span class="sysai-stat" data-stat="plugin"></span></div>' +
-              '<div class="sysai-mod-desc">插件通过 host.ai 调用当前接口与模型</div></div><code>POST /api/ai/chat</code>' +
+              '<div class="sysai-mod-desc">插件通过 host.ai 调用当前接口与模型</div></div><code>POST /api/ai/plugin</code>' +
               '<label class="set-switch sysai-sw" data-mod="plugin" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
             '<div class="sysai-mod"><i class="bi bi-cloud-download"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">拉取模型列表<span class="sysai-stat" data-stat="models"></span></div>' +

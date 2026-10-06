@@ -440,15 +440,12 @@
     const btn = document.getElementById("sysAiSave");
     if (btn) btn.onclick = async () => {
       const v = sel.value;
-      const sys = v ? { provider: v.split("\u0001")[0], model: v.split("\u0001").slice(1).join("\u0001") }
-                    : { provider: "", model: "" };
+      const pick = v ? { provider: v.split("\u0001")[0], model: v.split("\u0001").slice(1).join("\u0001") }
+                     : { provider: "", model: "" };
       if (tip) { tip.className = "ai-set-tip"; tip.textContent = "保存中…"; }
       try {
-        const r = await fetch("/api/ai/config", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sys: sys }) });
-        const d = await r.json();
-        if (d.error) { if (tip) tip.textContent = d.error; return; }
-        AI.sys = d.sys || {};
+        // 合并式保存：只改「默认接口 / 模型」，不动各模块的单独指定与启用开关
+        await sysAiPatchSys(pick);
         if (tip) { tip.className = "ai-set-tip ok"; tip.textContent = "已保存 ✓"; setTimeout(() => { tip.textContent = ""; }, 2500); }
         toast("系统 AI 设置已保存", "ok");
       } catch (e) { if (tip) tip.textContent = "保存失败：" + e; }
@@ -456,6 +453,7 @@
     };
     sysAiBindSwitches();
     sysAiSyncSwitches();
+    sysAiFillModSelects();                     // 每个模块的「单独指定模型」下拉
     sysAiBindUsageReset();
     sysAiBindModRows();
   }
@@ -570,18 +568,76 @@
       }
     };
   }
-  /* 模块启停：POST 只改 off 列表，接口/模型沿用当前选择 */
-  function sysAiSaveSys(off, okMsg) {
+  /* 合并式保存系统 AI 设置：只改传入的字段，其余（off / per_module / provider / model）保持原样。
+     整体覆盖会把别处刚改的值冲掉（历史上顶部「保存」就会把模块开关状态清空），所以统一走这里。 */
+  async function sysAiPatchSys(patch, okMsg) {
     const cur = AI.sys || {};
-    return fetch("/api/ai/config", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sys: { provider: cur.provider || "", model: cur.model || "", off: off } }) })
-      .then(r => r.json())
-      .then(d => {
-        if (d.error) throw new Error(d.error);
-        AI.sys = d.sys || {};                 // 以后端落库结果为准
-        if (okMsg) toast(okMsg, "ok");
-        return AI.sys;
-      });
+    const sys = {
+      provider: cur.provider || "", model: cur.model || "",
+      off: (cur.off || []).slice(),
+      per_module: Object.assign({}, cur.per_module || {}),
+    };
+    Object.assign(sys, patch || {});
+    const r = await fetch("/api/ai/config", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sys: sys }) });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    AI.sys = d.sys || {};                     // 以后端落库结果为准
+    if (okMsg) toast(okMsg, "ok");
+    // 停用状态变了：通知各功能入口（SQL 的 AI 生成、新建项目的 AI 生成…）跟着显示 / 隐藏
+    if (typeof window.refreshSysAiOff === "function") window.refreshSysAiOff();
+    return AI.sys;
+  }
+
+  /* 模块启停：只改 off 列表 */
+  function sysAiSaveSys(off, okMsg) {
+    return sysAiPatchSys({ off: off }, okMsg);
+  }
+
+  /* 每个模块单独指定接口 / 模型（留空 = 用顶部那套默认；再没有就跟随 AI 助手） */
+  function sysAiFillModSelects() {
+    const provs = AI.providers || [];
+    const per = (AI.sys || {}).per_module || {};
+    document.querySelectorAll(".sysai-sw").forEach(lb => {
+      const mod = lb.dataset.mod;
+      const row = lb.closest(".sysai-mod");
+      if (!mod || !row) return;
+      let sel = row.querySelector(".sysai-model");
+      if (!sel) {
+        sel = document.createElement("select");
+        sel.className = "sysai-model";
+        sel.title = "该功能单独使用的接口 / 模型（默认 = 用上面的设置）";
+        row.insertBefore(sel, lb);            // 放在开关左边
+      }
+      sel.innerHTML = "";
+      const dflt = document.createElement("option");
+      dflt.value = "";
+      dflt.textContent = "默认模型";
+      sel.appendChild(dflt);
+      provs.forEach(p => (p.models || []).forEach(m => {
+        const o = document.createElement("option");
+        o.value = p.id + "\u0001" + m;
+        o.textContent = p.name + " · " + m;
+        sel.appendChild(o);
+      }));
+      const cur = per[mod] || {};
+      sel.value = cur.provider ? (cur.provider + "\u0001" + (cur.model || "")) : "";
+      sel.disabled = !provs.length;
+      sel.onchange = async () => {
+        const v = sel.value;
+        const per2 = Object.assign({}, (AI.sys || {}).per_module || {});
+        if (v) per2[mod] = { provider: v.split("\u0001")[0], model: v.split("\u0001").slice(1).join("\u0001") };
+        else delete per2[mod];
+        sel.disabled = true;
+        try {
+          await sysAiPatchSys({ per_module: per2 }, "已保存该功能的模型选择");
+        } catch (e) {
+          toast("保存失败：" + (e.message || e), "err");
+        } finally {
+          sysAiFillModSelects();
+        }
+      };
+    });
   }
   function sysAiSyncSwitches() {
     const off = (AI.sys || {}).off || [];

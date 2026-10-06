@@ -106,6 +106,8 @@
 }
 /* 一句话生成 SQL：输入框 + 图标按钮（生成中转圈） */
 .dbv-sql-ai { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; }
+/* 该功能在「设置 → 系统 AI」里被停用 → 整行收起（flex 会盖掉 hidden 的默认样式） */
+.dbv-sql-ai[hidden] { display: none; }
 .dbv-sql-ai-input {
   flex: 1; min-width: 0; box-sizing: border-box; height: 26px;
   background: #1b1b1b; color: #e6e6e6; border: 1px solid #444; border-radius: 4px;

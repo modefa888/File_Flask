@@ -132,6 +132,14 @@
     const sqlToggle = host.querySelector(".dbv-sql-toggle");
     let sqlSeq = 0;
 
+    // 该功能在「设置 → 系统 AI」里被停用时，整行 AI 输入都收起来（后端也会拒绝调用）
+    const aiRow = host.querySelector(".dbv-sql-ai");
+    if (typeof onSysAiOffChange === "function") {
+      onSysAiOffChange(() => {
+        if (aiRow) aiRow.hidden = (typeof sysAiOff === "function") && sysAiOff("nl2sql");
+      });
+    }
+
     function setSqlPanel(show) {
       sqlPanel.hidden = !show;
       sqlToggle.classList.toggle("on", show);

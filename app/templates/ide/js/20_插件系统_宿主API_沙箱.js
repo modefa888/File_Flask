@@ -399,7 +399,8 @@
   };
 
   // ---------- 系统 AI（使用「设置」里配置的接口与默认模型）----------
-  // 转发到后端的 /api/ai/chat（SSE 流式）；不传 provider_id/model 即走系统默认。
+  // 转发到后端的 /api/ai/plugin（SSE 流式）—— 插件宿主的独立入口，
+  // 在「设置 → 系统 AI」里对应「插件宿主 AI」一行，可单独启停、单独选模型。
   IDE.ai = {
     /**
      * 使用系统设置的 AI 与默认模型对话（流式）。
@@ -409,11 +410,11 @@
      */
     async chat(messages, opts) {
       opts = opts || {};
-      const body = { messages: messages, source: "plugin" };   // 标记来源：设置里可按「插件宿主 AI」单独启停
+      const body = { messages: messages, source: "plugin" };   // source 保留：兼容只认它的旧后端
       if (opts.webSearch) body.web_search = true;
       if (opts.skills) body.skills = opts.skills;
       if (opts.perm) body.perm = opts.perm;
-      const resp = await fetch("/api/ai/chat", {
+      const resp = await fetch("/api/ai/plugin", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
         body: JSON.stringify(body)

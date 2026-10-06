@@ -3,6 +3,7 @@
 GET  /api/ai/config            读取配置（key 脱敏返回）
 POST /api/ai/config            保存配置：{providers:[...]} 整体替换 / {active:{provider,model}} 切换
 POST /api/ai/chat              流式对话（SSE）：{messages:[{role, content}], provider_id?, model?}
+POST /api/ai/plugin            流式对话（SSE）：插件宿主专用入口，模块记为 plugin
 
 配置保存在 data/storage/.file_manager_ai.json：
     {
@@ -121,6 +122,21 @@ _SYS_MODULES = ("chat", "plugin", "agent", "commit", "nl2sql", "summary", "model
 _AI_CALLS_KEEP = 2000            # 调用明细最多保留多少条（超出从最旧的开始删）
 
 
+def _clean_per_module(raw) -> dict:
+    """规范化 per_module：{模块: {provider, model}}，只保留已知模块与有值的项。"""
+    out = {}
+    if isinstance(raw, dict):
+        for m in _SYS_MODULES:
+            v = raw.get(m)
+            if not isinstance(v, dict):
+                continue
+            pid = str(v.get("provider") or "")
+            model = str(v.get("model") or "")
+            if pid or model:
+                out[m] = {"provider": pid, "model": model}
+    return out
+
+
 def _load_sys() -> dict:
     """读取系统 AI 配置（缺失或损坏时返回空配置）"""
     raw = get_meta(_SYS_META_KEY, "")
@@ -136,16 +152,19 @@ def _load_sys() -> dict:
         "provider": str(data.get("provider") or ""),
         "model": str(data.get("model") or ""),
         "off": [m for m in (data.get("off") or []) if m in _SYS_MODULES],
+        # 每个模块可以单独指定接口 / 模型；留空则用上面的全局默认（再没有就跟随 AI 助手）
+        "per_module": _clean_per_module(data.get("per_module")),
     }
 
 
 def _save_sys(sys) -> None:
-    """写回系统 AI 配置（off 只保留已知模块，避免脏数据堆积）"""
+    """写回系统 AI 配置（off / per_module 只保留已知模块，避免脏数据堆积）"""
     s = sys if isinstance(sys, dict) else {}
     set_meta(_SYS_META_KEY, json.dumps({
         "provider": str(s.get("provider") or ""),
         "model": str(s.get("model") or ""),
         "off": [m for m in (s.get("off") or []) if m in _SYS_MODULES],
+        "per_module": _clean_per_module(s.get("per_module")),
     }, ensure_ascii=False))
 
 
@@ -162,8 +181,14 @@ def _sys_pick(cfg: dict, module: str = ""):
     if not providers:
         return None, "", "尚未配置 AI 接口：请到「设置 → AI 助手」添加接口"
     active = cfg.get("active") or {}
-    want_pid = str(sys.get("provider") or "")
-    want_model = str(sys.get("model") or "")
+    # 优先级：本模块单独指定 > 「系统 AI」全局默认 > 跟随 AI 助手当前选择
+    per = (sys.get("per_module") or {}).get(module) if module else None
+    if isinstance(per, dict) and (per.get("provider") or per.get("model")):
+        want_pid = str(per.get("provider") or "")
+        want_model = str(per.get("model") or "")
+    else:
+        want_pid = str(sys.get("provider") or "")
+        want_model = str(sys.get("model") or "")
     provider = next((p for p in providers if p["id"] == want_pid), None)
     if provider is not None:
         # 单独指定了接口：模型也从该接口取，否则会拿到 active 里属于别的接口的模型名
@@ -194,6 +219,17 @@ def _override_pick(cfg: dict, provider, model, data):
 def _sys_disabled(cfg: dict, module: str) -> bool:
     """该模块是否已在「设置 → 系统 AI」中被关闭"""
     return bool(module) and module in ((cfg.get("sys") or {}).get("off") or [])
+
+
+def _sys_err_response(err: str, **extra):
+    """把 _sys_pick 的错误转成响应：模块被停用 → 403（前端据此隐藏入口），其余 400。
+
+    extra 会并入响应体（如 need_config），便于前端区分「没配置」和「被停用」。
+    """
+    disabled = "已在「设置 → 系统 AI」中关闭" in str(err or "")
+    body = {"error": err, "disabled": disabled}
+    body.update(extra)
+    return jsonify(body), (403 if disabled else 400)
 
 
 def _log_ai_call(module: str, ok: bool, ms: int = 0, error: str = "") -> None:
@@ -448,7 +484,7 @@ def api_ai_config_get():
         "providers": [{k: (v if k != "api_key" else _mask_key(v)) for k, v in p.items()}
                       for p in cfg["providers"]],
         "active": cfg["active"],
-        "sys": cfg.get("sys") or {"provider": "", "model": "", "off": []},
+        "sys": cfg.get("sys") or {"provider": "", "model": "", "off": [], "per_module": {}},
         "configured": all([cfg["providers"], cfg["active"].get("model")]),
     })
 
@@ -562,7 +598,25 @@ def api_ai_config_set():
             off = s.get("off")
             if not isinstance(off, list):
                 off = _load_sys()["off"]        # 只改接口/模型时保留原有启停状态
-            _save_sys({"provider": pid, "model": mdl, "off": off})
+            # 每个模块可单独指定接口 / 模型；没传就保留原值，传了则逐项校验后落库
+            per = s.get("per_module")
+            if not isinstance(per, dict):
+                per = _load_sys()["per_module"]
+            else:
+                valid = {}
+                for m, v in per.items():
+                    if m not in _SYS_MODULES or not isinstance(v, dict):
+                        continue
+                    p2 = str(v.get("provider") or "")
+                    m2 = str(v.get("model") or "")
+                    if p2 and not any(p["id"] == p2 for p in cfg["providers"]):
+                        continue                # 接口不存在，丢弃该项（不影响其它）
+                    if p2 and m2 and not any(p["id"] == p2 and m2 in p["models"] for p in cfg["providers"]):
+                        continue                # 模型不属于该接口
+                    if p2 or m2:
+                        valid[m] = {"provider": p2, "model": m2}
+                per = valid
+            _save_sys({"provider": pid, "model": mdl, "off": off, "per_module": per})
         _save_cfg(cfg)
     masked = {p["id"]: _mask_key(p["api_key"]) for p in cfg["providers"]}
     return jsonify({"ok": True, "sys": _load_sys(),          # 回传落库结果，前端据此刷新（不再“假成功”）
@@ -818,18 +872,26 @@ def api_ai_notify_history_clear():
 
 
 @bp.route("/api/ai/chat", methods=["POST"])
+@bp.route("/api/ai/plugin", methods=["POST"])
 def api_ai_chat():
+    """流式对话（SSE）：{messages:[{role, content}], provider_id?, model?}
+
+    插件宿主用独立入口 /api/ai/plugin —— 实现相同、模块不同，这样它在「设置 → 系统 AI」
+    里是独立一行：单独计调用次数、单独启停、单独选模型，而不是和 AI 助手挤在一起。
+    两个路径共用这个 view；顺带保留 source=plugin 的旧写法，兼容已发布的插件。
+    """
     cfg = _load_cfg()
     data = request.get_json(silent=True) or {}
     msgs = data.get("messages") or []
     if not isinstance(msgs, list) or not msgs:
         return jsonify({"error": "messages 不能为空"}), 400
 
-    # 插件通过 host.ai 调用会带 source=plugin，按独立模块计入启停控制
-    module = "plugin" if str(data.get("source") or "") == "plugin" else "chat"
+    is_plugin = (str(data.get("source") or "") == "plugin"
+                 or request.path.endswith("/ai/plugin"))
+    module = "plugin" if is_plugin else "chat"
     provider, model, err = _sys_pick(cfg, module)
     if err:
-        return jsonify({"error": err, "need_config": not cfg.get("providers")}), 400
+        return _sys_err_response(err, need_config=not cfg.get("providers"))
     # 请求里显式指定的接口/模型优先（AI 面板顶部的模型下拉）
     provider, model = _override_pick(cfg, provider, model, data)
 
@@ -1133,7 +1195,7 @@ def api_ai_summarize():
 
     provider, model, err = _sys_pick(cfg, "summary")
     if err:
-        return jsonify({"error": err, "need_config": not cfg.get("providers")}), 400
+        return _sys_err_response(err, need_config=not cfg.get("providers"))
     provider, model = _override_pick(cfg, provider, model, data)
 
     convo = []
@@ -1399,7 +1461,7 @@ def api_ai_commit_message():
     data = request.get_json(silent=True) or {}
     provider, model, err = _sys_pick(cfg, "commit")
     if err:
-        return jsonify({"error": err, "need_config": not cfg.get("providers")}), 400
+        return _sys_err_response(err, need_config=not cfg.get("providers"))
     repo = str(data.get("repo") or "").strip()
     if not repo or not os.path.isdir(repo):
         return jsonify({"error": "项目目录不存在，请先打开一个项目"}), 400

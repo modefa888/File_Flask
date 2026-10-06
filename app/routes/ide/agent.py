@@ -38,7 +38,7 @@ from ...services.common.safety import check_command, is_delete_command
 from ...services.ide.web_search import search_web, format_results
 from ...services.common import undo
 from .ai import (_clean_content, _load_cfg, _sys_pick, _override_pick, _log_ai_call,
-                 _open_stream, _sse, _inject_system_time,
+                 _open_stream, _sse, _inject_system_time, _sys_err_response,
                  _inject_web_search, _SKILL_PROMPTS, _is_retryable_status, _is_retryable_text,
                  _retry_wait, _RETRY_MAX, _last_user_text, _fire_notify_async)
 
@@ -1049,7 +1049,7 @@ def api_ai_agent():
     data = request.get_json(silent=True) or {}
     provider, model, err = _sys_pick(cfg, "agent")
     if err:
-        return jsonify({"error": err, "need_config": not cfg.get("providers")}), 400
+        return _sys_err_response(err, need_config=not cfg.get("providers"))
     provider, model = _override_pick(cfg, provider, model, data)
 
     msgs = data.get("messages") or []

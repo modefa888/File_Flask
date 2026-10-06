@@ -319,6 +319,9 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .np-prog-i.ok { color: #1f2328; }
 :where(html.theme-light) .np-prog-i.ok .bi { color: #1a7f37; }
 :where(html.theme-light) .np-prog-i.bad .bi { color: #c0392b; }
+:where(html.theme-light) .sysai-mod .sysai-model { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .sysai-mod .sysai-model:hover { border-color: #a8a8a8; }
+:where(html.theme-light) .sysai-mod .sysai-model:focus { border-color: #0098ff; }
 :where(html.theme-light) .notify-label { color: #1f2328; }
 :where(html.theme-light) .notify-desc { color: #6b6b6b; }
 :where(html.theme-light) .notify-input, :where(html.theme-light) .notify-select {

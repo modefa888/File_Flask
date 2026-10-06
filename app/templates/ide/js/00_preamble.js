@@ -155,6 +155,23 @@
   // 特殊命名的中文说明从 /static/special_hints.json 加载（便于单独维护）
   let SPECIAL_NAME_HINTS = {};
 
+  /* 系统 AI 模块的启用状态：设置页可单独停用某模块，停用后「后端接口 + 前端入口」都不可用。
+     这里缓存一份，功能模块（SQL 的一句话生成、新建项目的 AI 生成…）据此决定入口是否显示。 */
+  let SYS_AI_OFF = [];
+  const SYS_AI_OFF_HOOKS = [];
+  function sysAiOff(mod) { return SYS_AI_OFF.indexOf(mod) >= 0; }
+  function onSysAiOffChange(fn) { SYS_AI_OFF_HOOKS.push(fn); try { fn(); } catch (e) { /* 忽略 */ } }
+  window.refreshSysAiOff = async function () {
+    try {
+      const r = await fetch("/api/ai/config");
+      const d = await r.json();
+      SYS_AI_OFF = (d && d.sys && d.sys.off) || [];
+    } catch (e) { SYS_AI_OFF = []; }
+    SYS_AI_OFF_HOOKS.forEach(fn => { try { fn(); } catch (e) { /* 忽略 */ } });
+  };
+  window.sysAiOff = sysAiOff;
+  window.onSysAiOffChange = onSysAiOffChange;
+
   async function apiFiles(path, showHidden) {
     const url = "/api/files?path=" + encodeURIComponent(path) + (showHidden ? "&hidden=1" : "");
     const r = await fetch(url);

@@ -270,7 +270,8 @@ def api_projects_create():
     if template == scaffold.AI_KEY:
         files, aerr = _ai_generate_files(info["brief"], name)
         if aerr:
-            return jsonify({"error": aerr, "need_config": "尚未配置 AI" in aerr}), 400
+            from ..ide.ai import _sys_err_response          # 函数内导入，与 _ai_generate_files 保持一致
+            return _sys_err_response(aerr, need_config="尚未配置 AI" in aerr)
     else:
         files = scaffold.render(template, name)
 
@@ -314,7 +315,9 @@ def api_projects_create_stream():
             yield ev({"stage": "ai", "msg": "正在让 AI 规划项目结构，请稍候…"})
             files, aerr = _ai_generate_files(info["brief"], name)
             if aerr:
-                yield ev({"stage": "error", "msg": aerr, "need_config": "尚未配置 AI" in aerr})
+                yield ev({"stage": "error", "msg": aerr,
+                          "need_config": "尚未配置 AI" in aerr,
+                          "disabled": "已在「设置 → 系统 AI」中关闭" in aerr})
                 return
         else:
             files = scaffold.render(template, name)
@@ -862,11 +865,11 @@ def api_sqlite_nl2sql():
     if not _is_sqlite_file(os.path.splitext(target_path)[1].lower().lstrip(".")):
         return jsonify({"error": "不是 SQLite 数据库文件"}), 400
 
-    from ..ide.ai import _load_cfg, _sys_pick, _log_ai_call   # 复用系统 AI 配置（函数内导入，避免模块循环依赖）
+    from ..ide.ai import _load_cfg, _sys_pick, _log_ai_call, _sys_err_response   # 函数内导入，避免模块循环依赖
     cfg = _load_cfg()
     provider, model, err = _sys_pick(cfg, "nl2sql")
     if err:
-        return jsonify({"error": err, "need_config": not cfg.get("providers")}), 400
+        return _sys_err_response(err, need_config=not cfg.get("providers"))
 
     t_start = time.time()
 

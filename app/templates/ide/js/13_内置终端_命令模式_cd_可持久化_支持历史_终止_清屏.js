@@ -603,7 +603,11 @@
       let tpl = "blank";
 
       function renderTpls() {
-        tplsEl.innerHTML = TPLS.map(t =>
+        // 「AI 生成」在「设置 → 系统 AI」里被停用时不出现在可选列表里（后端也会拒绝）
+        const aiOff = (typeof sysAiOff === "function") && sysAiOff("scaffold");
+        if (aiOff && tpl === AI_TPL) tpl = "blank";        // 正选着被停用的项 → 回退到空项目
+        const list = TPLS.filter(t => !(aiOff && t.key === AI_TPL));
+        tplsEl.innerHTML = list.map(t =>
           '<button type="button" class="np-tpl-i' + (t.key === tpl ? " on" : "") +
             '" data-k="' + esc(t.key) + '" title="' + esc(t.hint || t.label) + '">' +
             '<i class="bi ' + esc(t.icon || "bi-folder2") + '"></i>' + esc(t.label) + "</button>").join("");

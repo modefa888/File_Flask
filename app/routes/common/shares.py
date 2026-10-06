@@ -1,6 +1,6 @@
 """文件分享：短链 + 访问密码 + 有效期 + 访问次数限制。
 
-存储：SQLite（data/storage/shares.db，见 services/common/share_store.py）。
+存储：SQLite（统一库 data/storage/store.db 的 shares 表，见 services/common/share_store.py）。
 
 管理接口（需登录）：
 - POST   /api/share          {path, password?, expires_in?|expires_at?, max_views?, note?}

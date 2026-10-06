@@ -1,7 +1,11 @@
 """分享记录存储层（SQLite）。
 
-表 shares 保存短链 token、原文件绝对路径、访问密码哈希、有效期、
-最大访问次数、访问量等，供 /api/share 系列与 /share/<token> 使用。
+表 shares 位于统一的 store.db，保存短链 token、原文件绝对路径、访问密码哈希、
+有效期、最大访问次数、访问量等，供 /api/share 系列与 /share/<token> 使用。
+
+历史迁移（均只执行一次，标记写进 store_meta）：
+  - 旧的独立库 data/storage/shares.db  → store.db 的 shares 表；
+  - 更早的 .share_links.json           → 同上（shares 表为空时）。
 """
 import hashlib
 import json
@@ -13,6 +17,7 @@ import time
 
 from ...config import _SHARE_DB_FILE, _STORAGE_DIR
 from ...log import get_logger
+from .store_db import store_conn, store_tx, get_meta, set_meta
 
 _log = get_logger()
 _lock = threading.RLock()
@@ -28,40 +33,44 @@ EXPIRE_PRESETS = {
 
 
 def _conn():
-    conn = sqlite3.connect(_SHARE_DB_FILE, timeout=15)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
+    """本模块所有连接都走统一的 store.db（shares 表由 store_db 建好）。"""
+    return store_conn()
 
 
-def _init_share_db():
-    with _lock:
-        conn = _conn()
+def _migrate_from_shares_db():
+    """把旧的独立 data/storage/shares.db 迁入 store.db（一次性，仅 shares 表为空时复制）。"""
+    marker = "db_migrated:shares"
+    if get_meta(marker):
+        return
+    legacy = _SHARE_DB_FILE
+    if not os.path.isfile(legacy):
+        set_meta(marker, "1")        # 没有旧库：直接标记，省得每次启动都查一遍
+        return
+    try:
+        lconn = sqlite3.connect(legacy, timeout=15)
+        lconn.row_factory = sqlite3.Row
         try:
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS shares (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    token TEXT UNIQUE NOT NULL,
-                    abs_path TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    size INTEGER DEFAULT 0,
-                    is_dir INTEGER DEFAULT 0,
-                    password_hash TEXT DEFAULT '',
-                    expires_at INTEGER DEFAULT 0,
-                    max_views INTEGER DEFAULT 0,
-                    views INTEGER DEFAULT 0,
-                    created_at INTEGER DEFAULT 0,
-                    last_view_at INTEGER DEFAULT 0,
-                    revoked INTEGER DEFAULT 0,
-                    note TEXT DEFAULT ''
-                );
-                CREATE INDEX IF NOT EXISTS idx_shares_path ON shares(abs_path);
-                CREATE INDEX IF NOT EXISTS idx_shares_token ON shares(token);
-            """)
-            conn.commit()
+            rows = [dict(r) for r in lconn.execute("SELECT * FROM shares")]
         finally:
-            conn.close()
+            lconn.close()
+    except sqlite3.Error as e:
+        _log.warning("读取旧 shares.db 失败，稍后重试：%s", e)
+        return
+    cols = ("token", "abs_path", "name", "size", "is_dir", "password_hash", "expires_at",
+            "max_views", "views", "created_at", "last_view_at", "revoked", "note")
+    try:
+        with store_tx() as conn:
+            if not conn.execute("SELECT COUNT(*) FROM shares").fetchone()[0]:
+                sql = ("INSERT OR IGNORE INTO shares (" + ",".join(cols) + ") VALUES ("
+                       + ",".join(["?"] * len(cols)) + ")")
+                for r in rows:
+                    conn.execute(sql, tuple(r.get(c) for c in cols))
+            conn.execute("INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, '1')",
+                         (marker,))
+        if rows:
+            _log.info("已把旧 shares.db 的 %d 条分享迁入 store.db", len(rows))
+    except Exception as e:
+        _log.warning("迁移旧 shares.db 失败：%s", e)
 
 
 def _pw_hash(pw):
@@ -283,5 +292,5 @@ def _migrate_legacy_json():
             conn.close()
 
 
-_init_share_db()
+_migrate_from_shares_db()
 _migrate_legacy_json()

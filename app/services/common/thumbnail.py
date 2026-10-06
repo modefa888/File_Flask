@@ -7,7 +7,6 @@
 """
 import os
 import io
-import json
 import hashlib
 import tempfile
 import subprocess
@@ -20,6 +19,7 @@ from ...config import (
     _THUMB_CACHE_DIR, _THUMB_CACHE_MAX_ENTRIES, _THUMB_MEM_CACHE_MAX,
     _COVER_DIR, DATA_ROOT,
 )
+from .store_db import store_conn, store_tx, migrate_json_once
 
 # 图片缩略图最长边（像素）。兼顾网格小图清晰度与预览大图加载速度。
 _THUMB_IMAGE_SIZE = (512, 512)
@@ -331,9 +331,9 @@ def _extract_video_frame(video_path):
 
 
 # ========== 视频封面持久化缓存（以 视频名+大小 的 hash 为键，跨重启复用） ==========
-# 封面图按 hash 存进 _COVER_DIR 子文件夹，索引写进该目录的 index.json：
-#   { "<hash>": {"name": 视频名, "size": 字节, "file": "<hash>.jpg", "type": "image/jpeg"} }
-# 下次请求同一视频（同名同大小）时直接读本地封面，不再跑 ffmpeg 抽帧。
+# 索引落在 store.db 的 video_covers 表：key = sha1(视频名|大小) -> {name, size, file, type}
+# 封面图仍以文件形式存在 _COVER_DIR/<hash>.jpg。下次请求同一视频（同名同大小）时
+# 直接读本地封面，不再跑 ffmpeg 抽帧。
 _COVER_INDEX_FILE = os.path.join(_COVER_DIR, "index.json")
 _COVER_INDEX_LOCK = threading.Lock()
 _COVER_MEM_CACHE_MAX = 200
@@ -351,23 +351,51 @@ def _cover_key(file_path):
     return hashlib.sha1(("%s|%d" % (name, size)).encode("utf-8", "ignore")).hexdigest()
 
 
-def _cover_index_load():
+def _cover_index_get(key):
+    """按 key 查封面索引条目；没有返回 None。"""
     try:
-        with open(_COVER_INDEX_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+        conn = store_conn()
+        try:
+            row = conn.execute(
+                "SELECT name, size, file, type FROM video_covers WHERE key=?", (key,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+    except Exception:
+        return None
 
 
-def _cover_index_save(idx):
-    tmp = _COVER_INDEX_FILE + ".tmp"
+def _cover_index_put(key, name, size, fname, ctype):
+    """行级 upsert 一条封面索引（不再全量重写整个 JSON）。"""
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(idx, f, ensure_ascii=False)
-        os.replace(tmp, _COVER_INDEX_FILE)   # 原子替换，避免并发写坏 JSON
-    except OSError:
+        with store_tx() as conn:
+            conn.execute(
+                "INSERT INTO video_covers (key, name, size, file, type) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(key) DO UPDATE SET name=excluded.name, size=excluded.size, "
+                "file=excluded.file, type=excluded.type",
+                (key, name or "", int(size or 0), fname or "", ctype or "image/jpeg"))
+    except Exception:
         pass
+
+
+def _migrate_legacy_cover_index():
+    """旧版 data/.file_manager_covers/index.json 一次性导入。"""
+    def _import(conn, data):
+        if not isinstance(data, dict):
+            return
+        for key, e in data.items():
+            if not isinstance(e, dict):
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO video_covers (key, name, size, file, type) "
+                "VALUES (?,?,?,?,?)",
+                (key, e.get("name") or "", int(e.get("size") or 0),
+                 e.get("file") or "", e.get("type") or "image/jpeg"))
+
+    migrate_json_once("json_migrated:video_covers", _COVER_INDEX_FILE, _import)
+
+
+_migrate_legacy_cover_index()
 
 
 def get_video_cover(file_path):
@@ -382,10 +410,9 @@ def get_video_cover(file_path):
         if item is not None:
             _COVER_MEM_CACHE.move_to_end(key)
             return item
-    # 2) 本地持久化封面（index.json + data/.file_manager_covers/<hash>.jpg）
+    # 2) 本地持久化封面（store.db 索引 + data/.file_manager_covers/<hash>.jpg）
     with _COVER_INDEX_LOCK:
-        idx = _cover_index_load()
-        entry = idx.get(key)
+        entry = _cover_index_get(key)
         if entry:
             fpath = os.path.join(_COVER_DIR, entry.get("file", ""))
             if fpath and os.path.isfile(fpath):
@@ -418,9 +445,7 @@ def get_video_cover(file_path):
     except OSError:
         size = 0
     with _COVER_INDEX_LOCK:
-        idx = _cover_index_load()
-        idx[key] = {"name": os.path.basename(file_path), "size": size, "file": fname, "type": ctype}
-        _cover_index_save(idx)
+        _cover_index_put(key, os.path.basename(file_path), size, fname, ctype)
     result = (data, ctype)
     with _COVER_MEM_CACHE_LOCK:
         _COVER_MEM_CACHE[key] = result

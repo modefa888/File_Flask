@@ -189,8 +189,11 @@ _TRASH_DIR = os.path.join(_DATA_ROOT, ".file_manager_trash")
 os.makedirs(_TRASH_DIR, exist_ok=True)
 # 删除历史
 _DELETE_HISTORY_FILE = os.path.join(_STORAGE_DIR, ".file_manager_delete_history.json")
-# 分享记录数据库（SQLite）
+# 旧版分享记录数据库（SQLite）：已迁入 store.db，此路径仅供一次性迁移使用
 _SHARE_DB_FILE = os.path.join(_STORAGE_DIR, "shares.db")
+# 通用存储数据库（SQLite）：原本散落的多个 JSON 存储集中到此库按业务分表
+# （视频封面索引 / 目录缓存 / 删除历史 / 压缩历史 / 插件登记簿 / 通知历史）
+_STORE_DB_FILE = os.path.join(_STORAGE_DIR, "store.db")
 
 # AI 助手配置（OpenAI 兼容接口：base_url / api_key / model）
 AI_CONFIG_FILE = os.path.join(_STORAGE_DIR, ".file_manager_ai.json")

@@ -32,6 +32,7 @@ from flask import Blueprint, request, jsonify, send_file, send_from_directory
 
 from ... import config
 from ...log import get_logger
+from ...services.common.store_db import store_conn, store_tx, migrate_json_once
 
 _log = get_logger()
 
@@ -57,25 +58,88 @@ def _remove_path(path):
 
 
 def _load_registry():
-    """读取插件登记簿（data/plugins/registry.json）。"""
+    """读取插件登记簿（store.db 的 plugin_registry / plugin_history 表）。"""
+    plugins = {}
+    history = []
     try:
-        with open(REGISTRY_FILE, encoding="utf-8") as f:
-            data = json.load(f)
+        conn = store_conn()
+        try:
+            for r in conn.execute(
+                    "SELECT id, name, version, status, installed_at, uninstalled_at, updated_at "
+                    "FROM plugin_registry"):
+                plugins[r["id"]] = {
+                    "id": r["id"], "name": r["name"], "version": r["version"],
+                    "status": r["status"], "installed_at": r["installed_at"],
+                    "uninstalled_at": r["uninstalled_at"], "updated_at": r["updated_at"],
+                }
+            for r in conn.execute(
+                    "SELECT action, id, name, version, at FROM plugin_history ORDER BY seq ASC"):
+                history.append({"action": r["action"], "id": r["id"], "name": r["name"],
+                                "version": r["version"], "at": r["at"]})
+        finally:
+            conn.close()
     except Exception:
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
-    data.setdefault("plugins", {})
-    data.setdefault("history", [])
-    return data
+        pass
+    return {"plugins": plugins, "history": history}
 
 
 def _save_registry(data):
+    """整表覆盖写入插件登记簿（保持调用方原有的「读-改-写」语义）。"""
+    data = data if isinstance(data, dict) else {}
+    plugins = data.get("plugins") if isinstance(data.get("plugins"), dict) else {}
+    history = data.get("history") if isinstance(data.get("history"), list) else []
     try:
-        with open(REGISTRY_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        with store_tx() as conn:
+            conn.execute("DELETE FROM plugin_registry")
+            for pid, e in plugins.items():
+                e = e if isinstance(e, dict) else {}
+                conn.execute(
+                    "INSERT OR REPLACE INTO plugin_registry "
+                    "(id, name, version, status, installed_at, uninstalled_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (str(pid), e.get("name") or str(pid), e.get("version") or "0.0.0",
+                     e.get("status") or "", e.get("installed_at"), e.get("uninstalled_at"),
+                     e.get("updated_at")))
+            conn.execute("DELETE FROM plugin_history")
+            for it in history[-500:]:
+                if not isinstance(it, dict):
+                    continue
+                conn.execute(
+                    "INSERT INTO plugin_history (action, id, name, version, at) "
+                    "VALUES (?,?,?,?,?)",
+                    (it.get("action") or "", it.get("id") or "", it.get("name") or "",
+                     it.get("version") or "0.0.0", it.get("at") or ""))
     except Exception as e:
         _log.warning("写入插件登记簿失败: %s", e)
+
+
+def _migrate_legacy_registry():
+    """旧版 data/plugins/registry.json 一次性导入。"""
+    def _import(conn, data):
+        if not isinstance(data, dict):
+            return
+        plugins = data.get("plugins") if isinstance(data.get("plugins"), dict) else {}
+        for pid, e in plugins.items():
+            e = e if isinstance(e, dict) else {}
+            conn.execute(
+                "INSERT OR REPLACE INTO plugin_registry "
+                "(id, name, version, status, installed_at, uninstalled_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (str(pid), e.get("name") or str(pid), e.get("version") or "0.0.0",
+                 e.get("status") or "", e.get("installed_at"), e.get("uninstalled_at"),
+                 e.get("updated_at")))
+        for it in (data.get("history") if isinstance(data.get("history"), list) else []):
+            if not isinstance(it, dict):
+                continue
+            conn.execute(
+                "INSERT INTO plugin_history (action, id, name, version, at) VALUES (?,?,?,?,?)",
+                (it.get("action") or "", it.get("id") or "", it.get("name") or "",
+                 it.get("version") or "0.0.0", it.get("at") or ""))
+
+    migrate_json_once("json_migrated:plugin_registry", REGISTRY_FILE, _import)
+
+
+_migrate_legacy_registry()
 
 
 def _registry_record(action, meta):
@@ -154,7 +218,7 @@ def list_plugins():
 
 @bp.route("/api/plugins/registry", methods=["GET"])
 def plugin_registry():
-    """查看插件登记簿：已安装 / 已卸载历史（data/plugins/registry.json）。"""
+    """查看插件登记簿：已安装 / 已卸载历史（store.db 的 plugin_registry / plugin_history 表）。"""
     return jsonify(_load_registry())
 
 

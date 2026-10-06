@@ -9,24 +9,82 @@ from datetime import datetime
 
 from ...config import DEFAULT_START_PATH, _DIR_SIZE_CACHE_FILE, _LIST_CACHE_FILE
 from .db import _get_index_conn
+from .store_db import store_conn, store_tx, migrate_json_once
 
 
 # 目录大小缓存（基于 mtime 判断是否需要重新计算）
+# 内存结构：path -> {"size": int|None, "dir_mtime": float, "ts": float}
 _DIR_SIZE_CACHE = {}
-# 目录列表缓存（目录未变动则秒回）
+# 目录列表缓存（目录未变动则秒回）：ckey -> {"v":3, "mtime":.., "items":[...], "partial":bool}
 _LIST_CACHE = {}
+# 待写回的脏行：key -> entry（None 表示该行已删除）
+_DIR_SIZE_DIRTY = {}
+_LIST_DIRTY = {}
+# 列表缓存是否被整体清空（伪文件系统清理时）
+_LIST_CLEAR_ALL = False
 
-try:
-    with open(_DIR_SIZE_CACHE_FILE, "r", encoding="utf-8") as _f:
-        _DIR_SIZE_CACHE = json.load(_f)
-except (OSError, json.JSONDecodeError):
-    _DIR_SIZE_CACHE = {}
 
-try:
-    with open(_LIST_CACHE_FILE, "r", encoding="utf-8") as _f:
-        _LIST_CACHE = json.load(_f)
-except (OSError, json.JSONDecodeError):
-    _LIST_CACHE = {}
+def _migrate_legacy_caches():
+    """旧版 .file_manager_cache.json / .file_manager_list_cache.json 一次性导入 store.db。"""
+    def _import_size(conn, data):
+        if not isinstance(data, dict):
+            return
+        for path, e in data.items():
+            if not isinstance(e, dict):
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO dir_size (path, size, dir_mtime, ts) VALUES (?,?,?,?)",
+                (path, e.get("size"), e.get("dir_mtime", 0) or 0, e.get("ts", 0) or 0))
+
+    def _import_list(conn, data):
+        if not isinstance(data, dict):
+            return
+        for ckey, e in data.items():
+            if not isinstance(e, dict):
+                continue
+            path, _, hidden = ckey.partition("\x00")
+            if not path:
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO dir_list (path, show_hidden, mtime, partial, items) "
+                "VALUES (?,?,?,?,?)",
+                (path, 1 if hidden == "1" else 0, e.get("mtime", 0) or 0,
+                 1 if e.get("partial") else 0,
+                 json.dumps(e.get("items") or [], ensure_ascii=False)))
+
+    migrate_json_once("json_migrated:dir_size", _DIR_SIZE_CACHE_FILE, _import_size)
+    migrate_json_once("json_migrated:dir_list", _LIST_CACHE_FILE, _import_list)
+
+
+def _load_caches_from_db():
+    """启动时从 store.db 载入两份缓存（DB 是持久层，内存是热点加速层）。"""
+    global _DIR_SIZE_CACHE, _LIST_CACHE
+    try:
+        conn = store_conn()
+        try:
+            _DIR_SIZE_CACHE = {
+                r["path"]: {"size": r["size"], "dir_mtime": r["dir_mtime"], "ts": r["ts"]}
+                for r in conn.execute("SELECT path, size, dir_mtime, ts FROM dir_size")
+            }
+            loaded = {}
+            for r in conn.execute("SELECT path, show_hidden, mtime, partial, items FROM dir_list"):
+                ckey = r["path"] + "\x00" + ("1" if r["show_hidden"] else "0")
+                try:
+                    items = json.loads(r["items"] or "[]")
+                except ValueError:
+                    items = []
+                loaded[ckey] = {"v": 3, "mtime": r["mtime"], "items": items,
+                                "partial": bool(r["partial"])}
+            _LIST_CACHE = loaded
+        finally:
+            conn.close()
+    except Exception:
+        _DIR_SIZE_CACHE = {}
+        _LIST_CACHE = {}
+
+
+_migrate_legacy_caches()
+_load_caches_from_db()
 
 
 # ---------- 伪文件系统（proc / sysfs / tmpfs 等）----------
@@ -97,36 +155,94 @@ def format_size(size_bytes):
         return f"{size_bytes / 1024 / 1024 / 1024:.2f} GB"
 
 
+def _set_dir_size(path, entry):
+    _DIR_SIZE_CACHE[path] = entry
+    _DIR_SIZE_DIRTY[path] = entry
+
+
+def _pop_dir_size(path):
+    """从内存与 store.db 中移除一条目录大小缓存。"""
+    if path in _DIR_SIZE_CACHE or path in _DIR_SIZE_DIRTY:
+        _DIR_SIZE_CACHE.pop(path, None)
+        _DIR_SIZE_DIRTY[path] = None
+
+
+def _set_list_entry(ckey, entry):
+    _LIST_CACHE[ckey] = entry
+    _LIST_DIRTY[ckey] = entry
+
+
+def _pop_list_entry(ckey):
+    if ckey in _LIST_CACHE or ckey in _LIST_DIRTY:
+        _LIST_CACHE.pop(ckey, None)
+        _LIST_DIRTY[ckey] = None
+
+
 def _save_cache():
-    """将目录大小缓存持久化到磁盘"""
+    """把脏的目录大小缓存行级同步到 store.db（不再全量重写整个文件）。"""
+    if not _DIR_SIZE_DIRTY:
+        return
     try:
-        with open(_DIR_SIZE_CACHE_FILE, "w", encoding="utf-8") as _f:
-            json.dump(_DIR_SIZE_CACHE, _f, ensure_ascii=False)
-    except OSError:
+        with store_tx() as conn:
+            for path, entry in list(_DIR_SIZE_DIRTY.items()):
+                if entry is None:
+                    conn.execute("DELETE FROM dir_size WHERE path=?", (path,))
+                else:
+                    conn.execute(
+                        "INSERT INTO dir_size (path, size, dir_mtime, ts) VALUES (?,?,?,?) "
+                        "ON CONFLICT(path) DO UPDATE SET size=excluded.size, "
+                        "dir_mtime=excluded.dir_mtime, ts=excluded.ts",
+                        (path, entry.get("size"), entry.get("dir_mtime", 0) or 0,
+                         entry.get("ts", 0) or 0))
+        _DIR_SIZE_DIRTY.clear()
+    except Exception:
         pass
 
 
 def _save_list_cache():
-    """将目录列表缓存持久化到磁盘"""
+    """把脏的目录列表缓存行级同步到 store.db。"""
+    global _LIST_CLEAR_ALL
+    if not _LIST_DIRTY and not _LIST_CLEAR_ALL:
+        return
     try:
-        with open(_LIST_CACHE_FILE, "w", encoding="utf-8") as _f:
-            json.dump(_LIST_CACHE, _f, ensure_ascii=False)
-    except OSError:
+        with store_tx() as conn:
+            if _LIST_CLEAR_ALL:
+                conn.execute("DELETE FROM dir_list")
+                _LIST_CLEAR_ALL = False
+                _LIST_DIRTY.clear()
+                return
+            for ckey, entry in list(_LIST_DIRTY.items()):
+                path, _, hidden = ckey.partition("\x00")
+                if not path:
+                    continue
+                sh = 1 if hidden == "1" else 0
+                if entry is None:
+                    conn.execute("DELETE FROM dir_list WHERE path=? AND show_hidden=?", (path, sh))
+                else:
+                    conn.execute(
+                        "INSERT INTO dir_list (path, show_hidden, mtime, partial, items) "
+                        "VALUES (?,?,?,?,?) ON CONFLICT(path, show_hidden) DO UPDATE SET "
+                        "mtime=excluded.mtime, partial=excluded.partial, items=excluded.items",
+                        (path, sh, entry.get("mtime", 0) or 0,
+                         1 if entry.get("partial") else 0,
+                         json.dumps(entry.get("items") or [], ensure_ascii=False)))
+        _LIST_DIRTY.clear()
+    except Exception:
         pass
 
 
 def _invalidate_list_cache(path):
     """删除指定目录的列表缓存（文件操作后调用），同时清理两种 show_hidden 变体。"""
     for _f in (True, False):
-        _LIST_CACHE.pop(_list_cache_key(path, _f), None)
-    _LIST_CACHE.pop(path, None)  # 兼容旧版（无 show_hidden 后缀）缓存
+        _pop_list_entry(_list_cache_key(path, _f))
+    _pop_list_entry(path)  # 兼容旧版（无 show_hidden 后缀）缓存
     _save_list_cache()
 
 
 def _invalidate_dir_size(dir_path):
     """删除指定目录的大小缓存"""
-    _DIR_SIZE_CACHE.pop(dir_path, None)
-    _DIR_SIZE_CACHE.pop(dir_path.replace("\\", "/"), None)
+    _pop_dir_size(dir_path)
+    _pop_dir_size(dir_path.replace("\\", "/"))
     _save_cache()
 
 
@@ -134,14 +250,18 @@ def _purge_pseudo_fs_cache():
     """清掉伪文件系统带来的脏统计：历史缓存里 /proc 之类的"大小"是虚拟值
     （/proc/kcore 恒为 128TB），会让根目录总大小显示成上百 TB。
     这里既清目录大小缓存，也清列表缓存——后者存的是目录项快照，同样带着旧数字。"""
+    global _LIST_CLEAR_ALL
     dirty = False
     for mp in _pseudo_mount_points():
-        if _DIR_SIZE_CACHE.pop(mp, None) is not None:
+        if _DIR_SIZE_CACHE.get(mp) is not None:
+            _pop_dir_size(mp)
             dirty = True
     if dirty:
         _save_cache()
     if _LIST_CACHE:
         _LIST_CACHE.clear()
+        _LIST_DIRTY.clear()
+        _LIST_CLEAR_ALL = True
         _save_list_cache()
 
 
@@ -184,7 +304,7 @@ def get_dir_size(dir_path):
     except Exception:
         pass
 
-    _DIR_SIZE_CACHE[dir_path] = {"size": result, "dir_mtime": current_mtime, "ts": time.time()}
+    _set_dir_size(dir_path, {"size": result, "dir_mtime": current_mtime, "ts": time.time()})
     _save_cache()
     return result
 
@@ -303,15 +423,15 @@ def _bg_compute_dir_size(dir_path):
                 mtime = os.stat(dir_path).st_mtime
             except OSError:
                 mtime = 0
-            _DIR_SIZE_CACHE[dir_path] = {"size": size, "dir_mtime": mtime, "ts": time.time()}
+            _set_dir_size(dir_path, {"size": size, "dir_mtime": mtime, "ts": time.time()})
             _save_cache()
     finally:
         with _SIZE_PENDING_LOCK:
             _SIZE_PENDING.discard(dir_path)
         # 失效父目录的列表缓存（含两种 show_hidden 变体），下次加载列表即可带上真实大小
         for _f in (True, False):
-            _LIST_CACHE.pop(_list_cache_key(os.path.dirname(dir_path), _f), None)
-        _LIST_CACHE.pop(os.path.dirname(dir_path), None)
+            _pop_list_entry(_list_cache_key(os.path.dirname(dir_path), _f))
+        _pop_list_entry(os.path.dirname(dir_path))
 
 
 def _ensure_dir_size_async(dir_path):
@@ -441,10 +561,10 @@ def list_directory(path, get_sizes=False, show_hidden=False):
 
     # 凡列表中仍有"计算中…/大小未知"的目录，视为不完整快照：
     # get_sizes=True 时忽略缓存重建，以补齐大小（重建仅 scandir+缓存查询，毫秒级）
-    _LIST_CACHE[ckey] = {
+    _set_list_entry(ckey, {
         "v": 3, "mtime": dir_mtime, "items": items,
         "partial": any(x["is_dir"] and x.get("size_str") in ("大小未知", "计算中…") for x in items),
-    }
+    })
     _save_list_cache()
     return items
 

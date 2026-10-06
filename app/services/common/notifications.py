@@ -23,7 +23,7 @@
 配置与"AI 助手"共用同一个 JSON 文件（data/storage/.file_manager_ai.json），
 新增字段 "notify"；键脱敏在读取时做（api_key 除外，SMTP 的 password 会脱敏返回）。
 
-同时会维护一份"最新通知 + 最近列表"（data/storage/.file_manager_notify_latest.json），
+同时会维护一份"最新通知 + 最近列表"（store.db 的 notify_history 表 + store_meta），
 供前端标题栏 / 状态栏做轮询，用于浏览器内的可见提示与历史查看。
 """
 from __future__ import annotations
@@ -50,6 +50,7 @@ from email.utils import formataddr, formatdate, make_msgid
 from typing import Any, Dict, List, Optional, Tuple
 
 from app import config
+from app.services.common.store_db import store_conn, store_tx, migrate_json_once
 
 
 _log = logging.getLogger("file_mgr.notify")
@@ -279,24 +280,88 @@ def save_notify_cfg(user_cfg: dict) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _read_latest() -> Dict[str, Any]:
+    """读取「最新通知 + 历史」（store.db：notify_history 表 + store_meta 的 latest/cursor）。"""
     try:
-        with open(NOTIFY_LATEST_FILE, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        if not isinstance(d, dict):
-            return {"latest": None, "history": [], "cursor": 0}
-        d.setdefault("history", [])
-        d.setdefault("cursor", 0)
-        return d
-    except (OSError, ValueError):
+        conn = store_conn()
+        try:
+            meta = {r["key"]: r["value"] for r in conn.execute(
+                "SELECT key, value FROM store_meta WHERE key LIKE 'notify.%'")}
+            hist = []
+            # 插入顺序即「最新在前」，故按 seq 升序还原
+            for r in conn.execute("SELECT rec FROM notify_history ORDER BY seq ASC"):
+                try:
+                    rec = json.loads(r["rec"] or "{}")
+                except ValueError:
+                    continue
+                if isinstance(rec, dict):
+                    hist.append(rec)
+        finally:
+            conn.close()
+        latest = None
+        raw = meta.get("notify.latest")
+        if raw:
+            try:
+                latest = json.loads(raw)
+            except ValueError:
+                latest = None
+        return {
+            "latest": latest,
+            "history": hist,
+            "cursor": int(meta.get("notify.cursor") or 0),
+            "latest_at": int(meta.get("notify.latest_at") or 0),
+        }
+    except Exception:
         return {"latest": None, "history": [], "cursor": 0}
 
 
 def _write_latest(d: Dict[str, Any]) -> None:
+    """整表覆盖写入（保持调用方原有的「读-改-写」语义）。"""
     try:
-        with open(NOTIFY_LATEST_FILE, "w", encoding="utf-8") as f:
-            json.dump(d, f, ensure_ascii=False, indent=2)
+        latest = d.get("latest")
+        hist = d.get("history") if isinstance(d.get("history"), list) else []
+        with store_tx() as conn:
+            conn.execute("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('notify.latest', ?)",
+                         (json.dumps(latest, ensure_ascii=False) if latest else "",))
+            conn.execute("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('notify.cursor', ?)",
+                         (str(int(d.get("cursor") or 0)),))
+            conn.execute("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('notify.latest_at', ?)",
+                         (str(int(d.get("latest_at") or 0)),))
+            conn.execute("DELETE FROM notify_history")
+            for rec in hist[:200]:
+                if not isinstance(rec, dict):
+                    continue
+                conn.execute("INSERT INTO notify_history (id, ts, rec) VALUES (?,?,?)",
+                             (str(rec.get("id") or ""), int(rec.get("ts") or 0),
+                              json.dumps(rec, ensure_ascii=False)))
     except Exception:
         _log.exception("写入 notify latest 失败")
+
+
+def _migrate_legacy_notify() -> None:
+    """旧版 data/storage/.file_manager_notify_latest.json 一次性导入。"""
+    def _import(conn, data):
+        if not isinstance(data, dict):
+            return
+        latest = data.get("latest")
+        if latest:
+            conn.execute(
+                "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('notify.latest', ?)",
+                (json.dumps(latest, ensure_ascii=False),))
+        conn.execute("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('notify.cursor', ?)",
+                     (str(int(data.get("cursor") or 0)),))
+        conn.execute("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('notify.latest_at', ?)",
+                     (str(int(data.get("latest_at") or 0)),))
+        for rec in (data.get("history") if isinstance(data.get("history"), list) else [])[:200]:
+            if not isinstance(rec, dict):
+                continue
+            conn.execute("INSERT INTO notify_history (id, ts, rec) VALUES (?,?,?)",
+                         (str(rec.get("id") or ""), int(rec.get("ts") or 0),
+                          json.dumps(rec, ensure_ascii=False)))
+
+    migrate_json_once("json_migrated:notify_latest", NOTIFY_LATEST_FILE, _import)
+
+
+_migrate_legacy_notify()
 
 
 def append_history(rec: Dict[str, Any]) -> int:

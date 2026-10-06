@@ -8,7 +8,6 @@ POST /api/git/discard    {repo, files[]}        放弃更改（仅已跟踪文�
 POST /api/git/commit     {repo, message, all}   提交
 POST /api/git/init       {repo}                 初始化仓库
 """
-import json
 import os
 import re
 import shutil
@@ -19,6 +18,7 @@ from flask import Blueprint, request, jsonify
 
 from ... import config
 from ...log import get_logger
+from ...services.common.store_db import store_conn, store_tx, migrate_legacy_dict
 
 
 _log = get_logger()
@@ -29,21 +29,39 @@ _MAX_DIFF_BYTES = 512 * 1024
 
 
 def _load_git_creds():
+    """Git 认证信息（一行一个字段）。"""
+    out = {}
     try:
-        with open(config.GIT_CREDENTIALS_FILE, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        if isinstance(d, dict):
-            return d
-    except (OSError, ValueError):
+        conn = store_conn()
+        try:
+            for r in conn.execute("SELECT name, value FROM git_creds"):
+                out[str(r["name"])] = r["value"]
+        finally:
+            conn.close()
+    except Exception:
         pass
-    return {}
+    return out
 
 
 def _save_git_creds(creds):
-    tmp = config.GIT_CREDENTIALS_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(creds, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, config.GIT_CREDENTIALS_FILE)
+    """整表覆盖写入（一行一个字段）。"""
+    creds = creds if isinstance(creds, dict) else {}
+    with store_tx() as conn:
+        conn.execute("DELETE FROM git_creds")
+        for k, v in creds.items():
+            conn.execute("INSERT INTO git_creds (name, value) VALUES (?,?)", (str(k), str(v)))
+
+
+def _import_git_creds(creds) -> None:
+    with store_tx() as conn:
+        conn.execute("DELETE FROM git_creds")
+        for k, v in (creds or {}).items():
+            conn.execute("INSERT INTO git_creds (name, value) VALUES (?,?)", (str(k), str(v)))
+
+
+# 旧版 .file_manager_git_credentials.json（或上一版 kv 键）一次性导入
+migrate_legacy_dict("table_migrated:git_creds", "git_creds",
+                    config.GIT_CREDENTIALS_FILE, _import_git_creds)
 
 
 def _mask_token(token):

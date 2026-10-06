@@ -32,10 +32,15 @@
     return r.json();
   }
 
+  // SQLite 的内部临时文件（-wal / -shm / -journal）会随连接开关瞬间出现 / 消失。
+  // 若把它们计入结构签名，数据库一有读写就会「看起来目录变了」→ 整树重建（抖动）。
+  const DB_VOLATILE_RE = /\.(?:db|db3|sqlite|sqlite3)-(?:wal|shm|journal)$/i;
+
   // 仅比较目录结构：名称 + 是否目录。忽略 mtime/size，
   // 否则频繁写盘的目录会让树每隔几秒重建一次（抖动）。
   function itemsSig(items) {
     return (items || [])
+      .filter(it => !DB_VOLATILE_RE.test(it.name))
       .filter(it => showAllFiles || !TREE_IGNORE.has(it.name))
       .map(it => (it.is_dir ? "d:" : "f:") + it.name)
       .sort()

@@ -32,6 +32,7 @@ import uuid
 from flask import Blueprint, request, jsonify, Response
 
 from ...log import get_logger
+from ...services.common.store_db import store_conn, store_tx, migrate_legacy_list
 
 
 _log = get_logger()
@@ -109,24 +110,50 @@ def _reg_path() -> str:
 
 
 def _read_registry() -> list:
+    """运行任务注册表（一行一个任务，record 为任务字段 JSON）。"""
     try:
-        with open(_reg_path(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
+        conn = store_conn()
+        try:
+            rows = conn.execute("SELECT record FROM runner_tasks ORDER BY seq ASC").fetchall()
+        finally:
+            conn.close()
+        out = []
+        for r in rows:
+            try:
+                rec = json.loads(r["record"] or "{}")
+            except ValueError:
+                continue
+            if isinstance(rec, dict):
+                out.append(rec)
+        return out
+    except Exception:
         return []
-    return data if isinstance(data, list) else []
 
 
 def _write_registry_locked() -> None:
-    """把任务注册表落盘（必须已持有 _LOCK）。"""
+    """整表覆盖写入任务注册表（必须已持有 _LOCK）。"""
     payload = [t.to_record() for t in _TASKS.values()]
-    tmp = _reg_path() + ".tmp"
+    _write_registry_rows(payload)
+
+
+def _write_registry_rows(records) -> None:
+    """把任务记录写成「一行一个任务」。"""
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, _reg_path())
-    except OSError as e:
+        with store_tx() as conn:
+            conn.execute("DELETE FROM runner_tasks")
+            for i, rec in enumerate(records or []):
+                if not isinstance(rec, dict):
+                    continue
+                conn.execute(
+                    "INSERT INTO runner_tasks (seq, id, record) VALUES (?,?,?)",
+                    (i, str(rec.get("id") or ""), json.dumps(rec, ensure_ascii=False)))
+    except Exception as e:
         _log.warning("保存运行任务注册表失败：%s", e)
+
+
+# 旧版 .file_runner_tasks.json（或上一版 kv 键）一次性导入
+migrate_legacy_list("table_migrated:runner_tasks", "runner_tasks",
+                    _reg_path(), _write_registry_rows)
 
 
 def _persist() -> None:

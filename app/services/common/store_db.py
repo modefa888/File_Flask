@@ -103,12 +103,74 @@ CREATE TABLE IF NOT EXISTS plugin_history (
     version TEXT DEFAULT '0.0.0',
     at      TEXT DEFAULT ''
 );
+-- 收藏夹（一行一个收藏；seq 决定展示顺序，越小越靠前）
+CREATE TABLE IF NOT EXISTS favorites (
+    seq        INTEGER PRIMARY KEY,
+    path       TEXT NOT NULL,
+    name       TEXT DEFAULT '',
+    added      INTEGER DEFAULT 0,
+    group_name TEXT DEFAULT ''
+);
+-- 收藏分组顺序（一行一个分组）
+CREATE TABLE IF NOT EXISTS fav_groups (
+    seq  INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+-- 最近打开的目录（一行一个目录；seq 越小越新）
+CREATE TABLE IF NOT EXISTS recent_folders (
+    seq       INTEGER PRIMARY KEY,
+    path      TEXT NOT NULL,
+    opened_at REAL DEFAULT 0
+);
+-- 运行任务注册表（一行一个任务）
+CREATE TABLE IF NOT EXISTS runner_tasks (
+    seq    INTEGER PRIMARY KEY,
+    id     TEXT NOT NULL,
+    record TEXT DEFAULT '{}'
+);
 -- 通知历史
 CREATE TABLE IF NOT EXISTS notify_history (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id  TEXT,
     ts  INTEGER DEFAULT 0,
     rec TEXT DEFAULT '{}'
+);
+-- 运行环境自定义配置（一行一项：kind=overrides 解释器路径 / kind=env 环境变量）
+CREATE TABLE IF NOT EXISTS env_cfg (
+    kind  TEXT NOT NULL,
+    name  TEXT NOT NULL,
+    value TEXT DEFAULT '',
+    PRIMARY KEY (kind, name)
+);
+-- Git 认证信息（一行一个字段：type / token）
+CREATE TABLE IF NOT EXISTS git_creds (
+    name  TEXT PRIMARY KEY,
+    value TEXT DEFAULT ''
+);
+-- AI 接口（一行一个接口）
+CREATE TABLE IF NOT EXISTS ai_providers (
+    seq      INTEGER PRIMARY KEY,
+    id       TEXT NOT NULL,
+    name     TEXT DEFAULT '',
+    base_url TEXT DEFAULT '',
+    api_key  TEXT DEFAULT ''
+);
+-- AI 接口的模型列表（一行一个模型）
+CREATE TABLE IF NOT EXISTS ai_models (
+    seq         INTEGER PRIMARY KEY,
+    provider_id TEXT NOT NULL,
+    name        TEXT NOT NULL
+);
+-- AI 当前激活的接口 / 模型（单行）
+CREATE TABLE IF NOT EXISTS ai_active (
+    id       INTEGER PRIMARY KEY CHECK (id = 1),
+    provider TEXT DEFAULT '',
+    model    TEXT DEFAULT ''
+);
+-- 通知配置（一行一个配置项；key 为点号路径，如 smtp.host、channels.desktop）
+CREATE TABLE IF NOT EXISTS notify_cfg (
+    key   TEXT PRIMARY KEY,
+    value TEXT DEFAULT ''
 );
 -- 分享记录（原独立库 data/storage/shares.db）
 CREATE TABLE IF NOT EXISTS shares (
@@ -167,6 +229,28 @@ def init_store_db():
             conn.close()
 
 
+# 常驻连接：进程内一直持有（不做实际读写，只在建表后打开一次）。
+# 目的：让 SQLite 的 -wal / -shm 这两个内部文件【稳定存在】。
+# 否则每次开关连接都会让它们出现 / 消失（WAL 模式下最后一个连接关闭时会
+# 自动 checkpoint 并删掉它们），被前端「文件树自动刷新」当成目录内容变化，
+# 于是每隔几秒整树重建一次 —— 表现为资源管理器列表不断抖动。
+_keepalive_conn = None
+
+
+def hold_wal_files():
+    """建立常驻连接以稳定 -wal / -shm（重复调用无副作用）。"""
+    global _keepalive_conn
+    if _keepalive_conn is not None:
+        return
+    try:
+        conn = store_conn()
+        conn.execute("SELECT 1").fetchone()
+        _keepalive_conn = conn
+    except Exception:
+        _keepalive_conn = None
+
+
+
 def get_meta(key, default=None):
     with _lock:
         conn = store_conn()
@@ -181,6 +265,129 @@ def set_meta(key, value):
     with store_tx() as conn:
         conn.execute("INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)",
                      (key, str(value)))
+
+
+def kv_get(key, default=None):
+    """读取旧 kv_store 中的某个键（仅供一次性迁移用；表已删除时返回 default）。"""
+    try:
+        with _lock:
+            conn = store_conn()
+            try:
+                row = conn.execute("SELECT value FROM kv_store WHERE key=?", (key,)).fetchone()
+            finally:
+                conn.close()
+    except sqlite3.Error:
+        return default
+    if row is None:
+        return default
+    try:
+        return json.loads(row["value"])
+    except (TypeError, ValueError):
+        return default
+
+
+def kv_delete(key):
+    """删除旧 kv_store 中的某个键（表已删除时静默忽略）。"""
+    try:
+        with store_tx() as conn:
+            conn.execute("DELETE FROM kv_store WHERE key=?", (key,))
+    except sqlite3.Error:
+        pass
+
+
+def flatten_cfg(obj, prefix="", out=None):
+    """把嵌套配置展平成 {点号路径: JSON 标量文本}，供「一行一条」存表。"""
+    if out is None:
+        out = {}
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            flatten_cfg(v, (prefix + "." + str(k)) if prefix else str(k), out)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            flatten_cfg(v, (prefix + "." + str(i)) if prefix else str(i), out)
+    else:
+        out[prefix] = json.dumps(obj, ensure_ascii=False)
+    return out
+
+
+def unflatten_cfg(rows):
+    """把 {点号路径: 文本} 还原成嵌套结构（纯数字 key 的层级还原为数组）。"""
+    root = {}
+    for path, raw in (rows or {}).items():
+        try:
+            val = json.loads(raw)
+        except (TypeError, ValueError):
+            val = raw
+        segs = str(path).split(".")
+        cur = root
+        for s in segs[:-1]:
+            nxt = cur.get(s)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                cur[s] = nxt
+            cur = nxt
+        cur[segs[-1]] = val
+    return _dict_to_lists(root)
+
+
+def _dict_to_lists(node):
+    if isinstance(node, dict):
+        conv = {k: _dict_to_lists(v) for k, v in node.items()}
+        if conv and all(str(k).isdigit() for k in conv):
+            return [conv[k] for k in sorted(conv, key=lambda x: int(x))]
+        return conv
+    return node
+
+
+def finalize_kv_migration():
+    """迁移收尾：kv_store 已无数据时删掉这张表（重复调用 / 表不存在都安全）。"""
+    try:
+        with store_tx() as conn:
+            n = conn.execute("SELECT COUNT(*) FROM kv_store").fetchone()[0]
+            if n == 0:
+                conn.execute("DROP TABLE kv_store")
+    except sqlite3.Error:
+        pass
+
+
+def migrate_legacy_list(marker, kv_key, json_path, saver):
+    """把「列表型」旧存储一次性导入对应的新表（导入后删掉 kv 里的旧键）。
+
+    迁移源优先取旧 JSON 文件，其次取上一版曾写进 kv_store 的旧键；
+    标记写进 store_meta，只执行一次；导入异常则不标记，下次启动重试。
+    """
+    if get_meta(marker):
+        return
+    data = read_json(json_path)
+    if not isinstance(data, list):
+        data = kv_get(kv_key, None)
+    if isinstance(data, list) and data:
+        try:
+            saver(data)
+        except Exception as e:
+            _log.warning("迁移 %s 失败：%s", marker, e)
+            return
+    kv_delete(kv_key)
+    set_meta(marker, "1")
+    finalize_kv_migration()
+
+
+def migrate_legacy_dict(marker, kv_key, json_path, saver):
+    """同 migrate_legacy_list，但迁移源是「对象型」配置。"""
+    if get_meta(marker):
+        return
+    data = read_json(json_path)
+    if not isinstance(data, dict):
+        data = kv_get(kv_key, None)
+    if isinstance(data, dict) and data:
+        try:
+            saver(data)
+        except Exception as e:
+            _log.warning("迁移 %s 失败：%s", marker, e)
+            return
+    kv_delete(kv_key)
+    set_meta(marker, "1")
+    finalize_kv_migration()
 
 
 def read_json(path):
@@ -214,3 +421,4 @@ def migrate_json_once(marker, json_path, handler):
 
 
 init_store_db()
+hold_wal_files()

@@ -50,7 +50,9 @@ from email.utils import formataddr, formatdate, make_msgid
 from typing import Any, Dict, List, Optional, Tuple
 
 from app import config
-from app.services.common.store_db import store_conn, store_tx, migrate_json_once
+from app.services.common.store_db import (
+    store_conn, store_tx, migrate_json_once, flatten_cfg, unflatten_cfg,
+)
 
 
 _log = logging.getLogger("file_mgr.notify")
@@ -118,14 +120,9 @@ _TOP_LEVEL_SCALARS = (
 
 
 def _read_cfg() -> Dict[str, Any]:
-    """深拷贝默认值；再合并磁盘 JSON 中的 notify 字段（缺失字段自动补齐）。"""
+    """深拷贝默认值；再合并库中的 notify 配置（缺失字段自动补齐）。"""
     cfg = json.loads(json.dumps(DEFAULT_NOTIFY_CFG))
-    try:
-        with open(config.AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-            disk = json.load(f) or {}
-    except (OSError, ValueError):
-        return cfg
-    saved = disk.get("notify") or {}
+    saved = _read_notify_cfg()
     if not isinstance(saved, dict):
         return cfg
     _merge(cfg, saved, "channels")
@@ -147,18 +144,32 @@ def _merge(base: dict, patch: dict, key: str) -> None:
         base.setdefault(key, {}).update(patch[key])
 
 
+def _read_notify_cfg() -> Dict[str, Any]:
+    """通知配置：一行一个配置项（key 为点号路径，如 smtp.host），读取时还原成嵌套结构。"""
+    try:
+        conn = store_conn()
+        try:
+            rows = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM notify_cfg")}
+        finally:
+            conn.close()
+    except Exception:
+        return {}
+    return unflatten_cfg(rows)
+
+
+def _write_notify_cfg(cfg: Dict[str, Any]) -> None:
+    """整表覆盖写入通知配置（嵌套结构展平成一行一项）。"""
+    rows = flatten_cfg(cfg or {})
+    with store_tx() as conn:
+        conn.execute("DELETE FROM notify_cfg")
+        for k, v in rows.items():
+            conn.execute("INSERT INTO notify_cfg (key, value) VALUES (?,?)", (k, v))
+
+
 def _write_cfg_patch(patch: Dict[str, Any]) -> None:
-    """把 patch 写回 data/storage/.file_manager_ai.json 的 notify 字段（保留其他字段）。"""
-    disk: Dict[str, Any] = {}
+    """把通知配置写进 notify_cfg 表（一行一个配置项）。"""
     try:
-        with open(config.AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-            disk = json.load(f) or {}
-    except (OSError, ValueError):
-        disk = {}
-    disk["notify"] = patch
-    try:
-        with open(config.AI_CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(disk, f, ensure_ascii=False, indent=2)
+        _write_notify_cfg(patch or {})
     except Exception:
         _log.exception("写入 notify 配置失败")
         raise
@@ -362,6 +373,8 @@ def _migrate_legacy_notify() -> None:
 
 
 _migrate_legacy_notify()
+# 说明：AI 配置（含 notify）的迁移统一由 app/routes/ide/ai.py 的 _migrate_ai_cfg() 负责，
+# 避免两个模块各自读取 / 删除同一份旧数据。
 
 
 def append_history(rec: Dict[str, Any]) -> int:

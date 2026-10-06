@@ -11,7 +11,6 @@
 - 配置操作走 TOOL_ACTIONS 白名单，参数经校验后用 argv 列表执行（不经过 shell），
   因此不存在命令注入面；接口也不会执行任意用户命令（那属于终端/运行的职责）。
 """
-import json
 import os
 import platform
 import re
@@ -23,11 +22,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 from ... import config
 from ...log import get_logger
+from ..common.store_db import store_conn, store_tx, migrate_legacy_dict
 
 
 _log = get_logger()
 
-# 用户自定义配置（解释器路径 / 环境变量）
+# 用户自定义配置（解释器路径 / 环境变量）：已迁入 store.db 的 env_cfg 表，
+# 此路径仅供启动时的一次性导入使用
 _CFG_FILE = os.path.join(config._STORAGE_DIR, ".file_flask_env.json")
 
 # 探测结果缓存时间（秒）：面板刷新走缓存，点「重新检测」强制刷新
@@ -203,32 +204,49 @@ _CATALOG_BY_ID = {it["id"]: it for it in CATALOG}
 # 自定义配置（解释器路径 / 环境变量）
 # ======================================================================
 def load_cfg() -> dict:
-    """读取用户自定义配置：{"overrides": {exe: path}, "env": {K: V}}。"""
-    with _cfg_lock:
+    """读取用户自定义配置：{"overrides": {exe: path}, "env": {K: V}}（一行一项）。"""
+    out = {"overrides": {}, "env": {}}
+    try:
+        conn = store_conn()
         try:
-            with open(_CFG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, ValueError):
-            return {"overrides": {}, "env": {}}
-    if not isinstance(data, dict):
-        return {"overrides": {}, "env": {}}
-    overrides = data.get("overrides") if isinstance(data.get("overrides"), dict) else {}
-    env = data.get("env") if isinstance(data.get("env"), dict) else {}
-    return {"overrides": {str(k): str(v) for k, v in overrides.items() if v},
-            "env": {str(k): str(v) for k, v in env.items()}}
+            for r in conn.execute("SELECT kind, name, value FROM env_cfg"):
+                if r["kind"] in out:
+                    out[r["kind"]][r["name"]] = r["value"]
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return out
 
 
 def save_cfg(cfg: dict) -> None:
-    payload = {
-        "overrides": {str(k): str(v) for k, v in (cfg.get("overrides") or {}).items() if v},
-        "env": {str(k): str(v) for k, v in (cfg.get("env") or {}).items()},
-        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
+    """整表覆盖写入（一行一项）。"""
+    overrides = {str(k): str(v) for k, v in (cfg.get("overrides") or {}).items() if v}
+    env = {str(k): str(v) for k, v in (cfg.get("env") or {}).items()}
     with _cfg_lock:
-        tmp = _CFG_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, _CFG_FILE)
+        with store_tx() as conn:
+            conn.execute("DELETE FROM env_cfg")
+            for kind, items in (("overrides", overrides), ("env", env)):
+                for k, v in items.items():
+                    conn.execute(
+                        "INSERT INTO env_cfg (kind, name, value) VALUES (?,?,?)", (kind, k, v))
+
+
+def _import_env_cfg(data) -> None:
+    """写入迁移数据（一行一项）。"""
+    overrides = data.get("overrides") if isinstance(data.get("overrides"), dict) else {}
+    env = data.get("env") if isinstance(data.get("env"), dict) else {}
+    with store_tx() as conn:
+        conn.execute("DELETE FROM env_cfg")
+        for kind, items in (("overrides", overrides), ("env", env)):
+            for k, v in items.items():
+                if v:
+                    conn.execute("INSERT INTO env_cfg (kind, name, value) VALUES (?,?,?)",
+                                 (kind, str(k), str(v)))
+
+
+# 旧版 .file_flask_env.json（或上一版 kv 键）一次性导入
+migrate_legacy_dict("table_migrated:env_cfg", "env_cfg", _CFG_FILE, _import_env_cfg)
 
 
 def get_overrides() -> dict:

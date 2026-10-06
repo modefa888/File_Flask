@@ -28,6 +28,10 @@ import urllib.request
 from flask import Blueprint, request, jsonify, Response
 
 from ... import config
+from ...services.common.store_db import (
+    store_conn, store_tx, flatten_cfg, read_json, get_meta, set_meta,
+    kv_get, kv_delete, finalize_kv_migration,
+)
 from ...log import get_logger
 from ...services.ide.web_search import search_web, format_results
 from ...services.common import undo
@@ -107,27 +111,28 @@ _MAX_IMAGE_PARTS = 8                  # 单次请求最多图片部件数
 
 
 def _load_cfg() -> dict:
-    """读取配置；旧版单接口格式自动迁移为 providers 列表。"""
+    """读取 AI 接口配置（接口一行一个、模型一行一个、激活项一行）并做规范化。"""
+    providers, active = [], {}
     try:
-        with open(config.AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-            d = json.load(f)
-    except (OSError, ValueError):
-        d = {}
-    if isinstance(d.get("providers"), list) and d["providers"]:
-        providers = d["providers"]
-        active = d.get("active") or {}
-    else:
-        # 旧格式迁移
-        providers = []
-        if d.get("base_url") and d.get("model"):
-            providers = [{
-                "id": "p1",
-                "name": "默认接口",
-                "base_url": str(d.get("base_url") or "").strip(),
-                "api_key": str(d.get("api_key") or "").strip(),
-                "models": [str(d.get("model") or "").strip()],
-            }]
-        active = {"provider": "p1", "model": providers and providers[0]["models"][0] or ""}
+        conn = store_conn()
+        try:
+            models_by_pid = {}
+            for r in conn.execute("SELECT provider_id, name FROM ai_models ORDER BY seq ASC"):
+                models_by_pid.setdefault(r["provider_id"], []).append(r["name"])
+            for r in conn.execute(
+                    "SELECT id, name, base_url, api_key FROM ai_providers ORDER BY seq ASC"):
+                providers.append({
+                    "id": r["id"], "name": r["name"], "base_url": r["base_url"],
+                    "api_key": r["api_key"], "models": models_by_pid.get(r["id"], []),
+                })
+            row = conn.execute("SELECT provider, model FROM ai_active WHERE id=1").fetchone()
+            if row:
+                active = {"provider": row["provider"], "model": row["model"]}
+        finally:
+            conn.close()
+    except Exception:
+        providers, active = [], {}
+
     clean, seen = [], set()
     for p in providers:
         if not isinstance(p, dict):
@@ -168,11 +173,82 @@ def _resolve_active(providers, active):
 
 
 def _save_cfg(cfg: dict) -> None:
-    tmp = config.AI_CONFIG_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"providers": cfg["providers"], "active": cfg["active"]},
-                  f, ensure_ascii=False, indent=2)
-    os.replace(tmp, config.AI_CONFIG_FILE)
+    """整表覆盖写入 providers / active（接口一行一个、模型一行一个）。"""
+    providers = cfg.get("providers") or []
+    active = cfg.get("active") or {}
+    with store_tx() as conn:
+        conn.execute("DELETE FROM ai_providers")
+        conn.execute("DELETE FROM ai_models")
+        mseq = 0        # ai_models.seq 全局唯一（读取时按 provider_id 分组，组内顺序仍正确）
+        for i, p in enumerate(providers):
+            if not isinstance(p, dict):
+                continue
+            pid = str(p.get("id") or "")
+            conn.execute(
+                "INSERT INTO ai_providers (seq, id, name, base_url, api_key) VALUES (?,?,?,?,?)",
+                (i, pid, str(p.get("name") or ""), str(p.get("base_url") or ""),
+                 str(p.get("api_key") or "")))
+            for m in (p.get("models") or []):
+                m = str(m).strip()
+                if m:
+                    conn.execute(
+                        "INSERT INTO ai_models (seq, provider_id, name) VALUES (?,?,?)",
+                        (mseq, pid, m))
+                    mseq += 1
+        conn.execute("DELETE FROM ai_active")
+        conn.execute("INSERT INTO ai_active (id, provider, model) VALUES (1, ?, ?)",
+                     (str(active.get("provider") or ""), str(active.get("model") or "")))
+
+
+def _write_notify_rows(cfg) -> None:
+    """通知配置一行一个配置项（key 为点号路径）。"""
+    rows = flatten_cfg(cfg or {})
+    with store_tx() as conn:
+        conn.execute("DELETE FROM notify_cfg")
+        for k, v in rows.items():
+            conn.execute("INSERT INTO notify_cfg (key, value) VALUES (?,?)", (k, v))
+
+
+def _import_ai_cfg(data) -> None:
+    """把旧配置对象拆进各表；兼容更早的「单接口」格式。"""
+    providers = data.get("providers")
+    if not isinstance(providers, list) or not providers:
+        providers = []
+        if data.get("base_url") and data.get("model"):
+            providers = [{
+                "id": "p1", "name": "默认接口",
+                "base_url": str(data.get("base_url") or "").strip(),
+                "api_key": str(data.get("api_key") or "").strip(),
+                "models": [str(data.get("model") or "").strip()],
+            }]
+    active = data.get("active") if isinstance(data.get("active"), dict) else {}
+    _save_cfg({"providers": providers, "active": active})
+    notify = data.get("notify")
+    if isinstance(notify, dict) and notify:
+        _write_notify_rows(notify)
+
+
+def _migrate_ai_cfg() -> None:
+    """旧 AI 配置（JSON 文件或上一版 kv 键）一次性拆进
+    ai_providers / ai_models / ai_active / notify_cfg。"""
+    marker = "table_migrated:ai_cfg"
+    if get_meta(marker):
+        return
+    data = read_json(config.AI_CONFIG_FILE)
+    if not isinstance(data, dict):
+        data = kv_get("ai_cfg", None)
+    if isinstance(data, dict) and data:
+        try:
+            _import_ai_cfg(data)
+        except Exception as e:
+            _log.warning("迁移 AI 配置失败：%s", e)
+            return
+    kv_delete("ai_cfg")
+    set_meta(marker, "1")
+    finalize_kv_migration()
+
+
+_migrate_ai_cfg()
 
 
 def _mask_key(key: str) -> str:

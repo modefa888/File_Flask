@@ -180,6 +180,7 @@ os.makedirs(_STORAGE_DIR, exist_ok=True)
 # 运行时数据：JSON 存储目录（公开常量，供各服务模块引用）
 STORAGE_DIR = _STORAGE_DIR
 
+# —— 以下旧存储路径均已迁入 store.db，常量仅用于启动时的一次性导入 ——
 # 目录大小缓存
 _DIR_SIZE_CACHE_FILE = os.path.join(_STORAGE_DIR, ".file_manager_cache.json")
 # 目录列表缓存
@@ -195,10 +196,11 @@ _SHARE_DB_FILE = os.path.join(_STORAGE_DIR, "shares.db")
 # （视频封面索引 / 目录缓存 / 删除历史 / 压缩历史 / 插件登记簿 / 通知历史）
 _STORE_DB_FILE = os.path.join(_STORAGE_DIR, "store.db")
 
-# AI 助手配置（OpenAI 兼容接口：base_url / api_key / model）
+# AI 助手配置（OpenAI 兼容接口）：已迁入 store.db 的
+# ai_providers / ai_models / ai_active / notify_cfg 表
 AI_CONFIG_FILE = os.path.join(_STORAGE_DIR, ".file_manager_ai.json")
 
-# Git 远程仓库认证信息（Token / SSH 等），仅保存在服务端
+# Git 远程仓库认证信息（Token / SSH 等），仅保存在服务端；已迁入 store.db 的 git_creds 表
 GIT_CREDENTIALS_FILE = os.path.join(_STORAGE_DIR, ".file_manager_git_credentials.json")
 
 # 持久化索引数据库

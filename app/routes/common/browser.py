@@ -28,6 +28,7 @@ from ...services.common.thumbnail import (
     _get_thumbnail_bytes, _get_preview_bytes, _extract_video_frame,
     _clear_disk_cache as _clear_thumb_cache, get_video_duration, get_video_cover,
 )
+from ...services.common.store_db import store_conn, store_tx, migrate_legacy_list
 
 
 _log = get_logger()
@@ -50,28 +51,37 @@ def _recent_path() -> str:
 
 
 def _recent_load() -> list:
+    """最近打开目录（一行一个，seq 顺序即展示顺序）。"""
     try:
-        with open(_recent_path(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
+        conn = store_conn()
+        try:
+            rows = conn.execute(
+                "SELECT path, opened_at FROM recent_folders ORDER BY seq ASC").fetchall()
+        finally:
+            conn.close()
+        return [{"path": r["path"], "opened_at": float(r["opened_at"] or 0)} for r in rows]
+    except Exception:
         return []
-    if not isinstance(data, list):
-        return []
-    out = []
-    for it in data:
-        if isinstance(it, dict) and it.get("path"):
-            out.append({"path": str(it["path"]), "opened_at": float(it.get("opened_at") or 0)})
-    return out
 
 
 def _recent_save(items: list) -> None:
-    tmp = _recent_path() + ".tmp"
+    """整表覆盖写入（列表下标即 seq，写入顺序 = 读取顺序）。"""
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(items, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, _recent_path())
-    except OSError as e:
+        with store_tx() as conn:
+            conn.execute("DELETE FROM recent_folders")
+            for i, it in enumerate(items or []):
+                if not isinstance(it, dict) or not it.get("path"):
+                    continue
+                conn.execute(
+                    "INSERT INTO recent_folders (seq, path, opened_at) VALUES (?,?,?)",
+                    (i, str(it["path"]), float(it.get("opened_at") or 0)))
+    except Exception as e:
         _log.warning("保存最近打开记录失败：%s", e)
+
+
+# 旧版 .file_recent_folders.json（或上一版 kv 键）一次性导入
+migrate_legacy_list("table_migrated:recent_folders", "recent_folders",
+                    _recent_path(), _recent_save)
 
 
 @bp.route("/api/recent/folders")
@@ -515,20 +525,39 @@ def _fav_file():
 
 
 def _load_favs():
+    """收藏夹（一行一个收藏，seq 顺序即展示顺序）。"""
     try:
-        with open(_fav_file(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except (OSError, ValueError):
+        conn = store_conn()
+        try:
+            rows = conn.execute(
+                "SELECT path, name, added, group_name FROM favorites ORDER BY seq ASC").fetchall()
+        finally:
+            conn.close()
+        out = []
+        for r in rows:
+            rec = {"path": r["path"], "name": r["name"], "added": r["added"]}
+            if r["group_name"]:
+                rec["group"] = r["group_name"]
+            out.append(rec)
+        return out
+    except Exception:
         return []
 
 
 def _save_favs(items):
-    os.makedirs(_STORAGE_DIR, exist_ok=True)
-    tmp = _fav_file() + ".tmp%d" % os.getpid()
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, _fav_file())
+    """整表覆盖写入（列表下标即 seq）。"""
+    try:
+        with store_tx() as conn:
+            conn.execute("DELETE FROM favorites")
+            for i, it in enumerate(items or []):
+                if not isinstance(it, dict):
+                    continue
+                conn.execute(
+                    "INSERT INTO favorites (seq, path, name, added, group_name) VALUES (?,?,?,?,?)",
+                    (i, str(it.get("path") or ""), str(it.get("name") or ""),
+                     int(it.get("added") or 0), str(it.get("group") or "")))
+    except Exception as e:
+        _log.warning("保存收藏夹失败：%s", e)
 
 
 def _groups_file():
@@ -536,21 +565,32 @@ def _groups_file():
 
 
 def _load_groups():
-    """分组展示顺序（拖动排序后持久化）；"__ungrouped__" 表示「其他」分区的位置"""
+    """分组展示顺序（一行一个分组）；"__ungrouped__" 表示「其他」分区的位置"""
     try:
-        with open(_groups_file(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return [str(g) for g in data] if isinstance(data, list) else []
-    except (OSError, ValueError):
+        conn = store_conn()
+        try:
+            rows = conn.execute("SELECT name FROM fav_groups ORDER BY seq ASC").fetchall()
+        finally:
+            conn.close()
+        return [str(r["name"]) for r in rows]
+    except Exception:
         return []
 
 
 def _save_groups(groups):
-    os.makedirs(_STORAGE_DIR, exist_ok=True)
-    tmp = _groups_file() + ".tmp%d" % os.getpid()
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(groups, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, _groups_file())
+    """整表覆盖写入（列表下标即 seq）。"""
+    try:
+        with store_tx() as conn:
+            conn.execute("DELETE FROM fav_groups")
+            for i, g in enumerate(groups or []):
+                conn.execute("INSERT INTO fav_groups (seq, name) VALUES (?,?)", (i, str(g)))
+    except Exception as e:
+        _log.warning("保存收藏分组失败：%s", e)
+
+
+# 旧版 favorites.json / fav_groups.json（或上一版 kv 键）一次性导入
+migrate_legacy_list("table_migrated:favorites", "favorites", _fav_file(), _save_favs)
+migrate_legacy_list("table_migrated:fav_groups", "fav_groups", _groups_file(), _save_groups)
 
 
 def _ensure_group(groups, name):

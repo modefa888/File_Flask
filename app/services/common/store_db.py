@@ -191,6 +191,29 @@ CREATE TABLE IF NOT EXISTS shares (
 );
 CREATE INDEX IF NOT EXISTS idx_shares_path ON shares(abs_path);
 CREATE INDEX IF NOT EXISTS idx_shares_token ON shares(token);
+
+-- 系统 AI 调用统计（设置 → 系统 AI 的模块清单显示次数）：按模块累计，一行一个模块
+CREATE TABLE IF NOT EXISTS ai_usage (
+    module     TEXT PRIMARY KEY,
+    ok         INTEGER NOT NULL DEFAULT 0,
+    fail       INTEGER NOT NULL DEFAULT 0,
+    last_at    TEXT DEFAULT '',
+    last_ms    INTEGER DEFAULT 0,
+    last_error TEXT DEFAULT ''
+);
+
+-- 系统 AI 调用明细（最近的每一次调用一行，用于「按天」维度与调用记录查看）
+CREATE TABLE IF NOT EXISTS ai_calls (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    module TEXT NOT NULL,
+    ok     INTEGER NOT NULL DEFAULT 1,
+    ms     INTEGER DEFAULT 0,
+    ts     TEXT NOT NULL DEFAULT '',
+    day    TEXT NOT NULL DEFAULT '',
+    error  TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ai_calls_mod ON ai_calls(module, id);
+CREATE INDEX IF NOT EXISTS idx_ai_calls_day ON ai_calls(module, day);
 """
 
 

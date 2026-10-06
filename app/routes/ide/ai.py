@@ -13,6 +13,7 @@ API Key 只存服务端、不下发给前端（GET 只回脱敏形式）；POST 
 对话走服务端代理；content 支持字符串或 OpenAI 图片数组（[{type:text},{type:image_url}]）。
 兼容所有 OpenAI 格式的服务（OpenAI / DeepSeek / Kimi / Qwen / SenseNova / Ollama / vLLM 等）。
 """
+import functools
 import json
 import os
 import re
@@ -25,7 +26,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from flask import Blueprint, request, jsonify, Response
+from flask import Blueprint, request, jsonify, Response, make_response
 
 from ... import config
 from ...services.common import secret, transport
@@ -111,6 +112,176 @@ _MAX_IMAGE_DATAURL = 9_000_000        # 单张图片 data URL 上限（约 6.7MB
 _MAX_IMAGE_PARTS = 8                  # 单次请求最多图片部件数
 
 
+# ---- 「系统 AI」（设置 → 系统 AI）：单独指定接口/模型 + 按模块启停 ----
+# 存 store_meta 表（键 ai_sys），值为 JSON：
+#   {"provider": "p1", "model": "xxx", "off": ["summary", "models"]}
+# provider/model 为空表示「跟随 AI 助手」（用 cfg["active"]）；off 里列出的模块禁止调用。
+_SYS_META_KEY = "ai_sys"
+_SYS_MODULES = ("chat", "plugin", "agent", "commit", "nl2sql", "summary", "models")
+_AI_CALLS_KEEP = 2000            # 调用明细最多保留多少条（超出从最旧的开始删）
+
+
+def _load_sys() -> dict:
+    """读取系统 AI 配置（缺失或损坏时返回空配置）"""
+    raw = get_meta(_SYS_META_KEY, "")
+    data = {}
+    if raw:
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else dict(raw)
+        except (TypeError, ValueError):
+            data = {}
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        "provider": str(data.get("provider") or ""),
+        "model": str(data.get("model") or ""),
+        "off": [m for m in (data.get("off") or []) if m in _SYS_MODULES],
+    }
+
+
+def _save_sys(sys) -> None:
+    """写回系统 AI 配置（off 只保留已知模块，避免脏数据堆积）"""
+    s = sys if isinstance(sys, dict) else {}
+    set_meta(_SYS_META_KEY, json.dumps({
+        "provider": str(s.get("provider") or ""),
+        "model": str(s.get("model") or ""),
+        "off": [m for m in (s.get("off") or []) if m in _SYS_MODULES],
+    }, ensure_ascii=False))
+
+
+def _sys_pick(cfg: dict, module: str = ""):
+    """按「系统 AI」设置解析某个模块实际要用的接口与模型。
+
+    返回 (provider, model, error)：error 非空时调用方应直接返回错误。
+    接口/模型未单独指定时跟随 AI 助手当前选择；模块被停用时直接拒绝。
+    """
+    sys = cfg.get("sys") or {}
+    if module and module in (sys.get("off") or []):
+        return None, "", "该功能已在「设置 → 系统 AI」中关闭，如需使用请在那里重新开启"
+    providers = cfg.get("providers") or []
+    if not providers:
+        return None, "", "尚未配置 AI 接口：请到「设置 → AI 助手」添加接口"
+    active = cfg.get("active") or {}
+    want_pid = str(sys.get("provider") or "")
+    want_model = str(sys.get("model") or "")
+    provider = next((p for p in providers if p["id"] == want_pid), None)
+    if provider is not None:
+        # 单独指定了接口：模型也从该接口取，否则会拿到 active 里属于别的接口的模型名
+        model = want_model or (provider["models"][0] if provider["models"] else "")
+    else:
+        provider = next((p for p in providers if p["id"] == active.get("provider")), providers[0])
+        model = want_model or active.get("model") or (provider["models"][0] if provider["models"] else "")
+    if not model:
+        return None, "", "尚未选择模型，请到「设置 → AI 助手」配置模型列表"
+    return provider, model, ""
+
+
+def _override_pick(cfg: dict, provider, model, data):
+    """请求里显式带 provider_id / model 时临时切换（AI 面板顶部的模型下拉走这条）"""
+    d = data or {}
+    want_pid = str(d.get("provider_id") or "")
+    want_model = str(d.get("model") or "")
+    if want_pid:
+        p2 = next((p for p in (cfg.get("providers") or []) if p["id"] == want_pid), None)
+        if p2:
+            provider = p2
+            model = want_model or (p2["models"][0] if p2["models"] else model)
+    elif want_model:
+        model = want_model
+    return provider, model
+
+
+def _sys_disabled(cfg: dict, module: str) -> bool:
+    """该模块是否已在「设置 → 系统 AI」中被关闭"""
+    return bool(module) and module in ((cfg.get("sys") or {}).get("off") or [])
+
+
+def _log_ai_call(module: str, ok: bool, ms: int = 0, error: str = "") -> None:
+    """记录一次系统 AI 调用：累计表（次数）+ 明细表（每次一行，供按天统计与查看）"""
+    if not module:
+        return
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    err = "" if ok else str(error or "")[:300]
+    try:
+        with store_tx() as conn:
+            conn.execute(
+                "INSERT INTO ai_usage (module, ok, fail, last_at, last_ms, last_error) "
+                "VALUES (?,?,?,?,?,?) ON CONFLICT(module) DO UPDATE SET "
+                "ok = ok + excluded.ok, fail = fail + excluded.fail, "
+                "last_at = excluded.last_at, last_ms = excluded.last_ms, "
+                "last_error = excluded.last_error",
+                (module, 1 if ok else 0, 0 if ok else 1, ts, int(ms or 0), err))
+            conn.execute(
+                "INSERT INTO ai_calls (module, ok, ms, ts, day, error) VALUES (?,?,?,?,?,?)",
+                (module, 1 if ok else 0, int(ms or 0), ts, ts[:10], err))
+            # 明细只留最近若干条：超量就按时间从旧到新裁掉，避免表无限增长
+            n = conn.execute("SELECT COUNT(*) AS n FROM ai_calls").fetchone()["n"]
+            if n > _AI_CALLS_KEEP:
+                conn.execute("DELETE FROM ai_calls WHERE id IN "
+                             "(SELECT id FROM ai_calls ORDER BY id ASC LIMIT ?)", (n - _AI_CALLS_KEEP,))
+    except Exception as e:
+        _log.warning("记录 AI 调用次数失败：%s", e)      # 统计出问题不能影响主流程
+
+
+def _resp_error(resp, code: int) -> str:
+    """从响应体里取错误文案（取不到就用状态码）"""
+    try:
+        body = resp.get_json(silent=True) or {}
+    except Exception:
+        body = {}
+    return str(body.get("error") or f"HTTP {code}")[:300]
+
+
+def _count_calls(module: str):
+    """端点装饰器：按模块累计调用次数（用于非流式接口）。
+
+    2xx 记成功、其它非 400 记失败；400 多是参数/配置问题，
+    其实并没有发起 AI 调用，所以不计入。
+    """
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            t0 = time.time()
+            try:
+                resp = fn(*args, **kwargs)
+            except Exception:
+                _log_ai_call(module, False, int((time.time() - t0) * 1000), "服务内部异常")
+                raise
+            # 端点可能返回 (jsonify, status) 元组，用 make_response 归一化后才能拿到真正的状态码
+            try:
+                r = make_response(resp)
+                code = r.status_code
+                err = _resp_error(r, code) if code >= 400 else ""
+            except Exception:
+                code, err = 200, ""
+            if code != 400:              # 400 多为参数/配置问题，没真正发起调用，不计入
+                _log_ai_call(module, code < 400, int((time.time() - t0) * 1000), err)
+            return resp
+        return wrapper
+    return deco
+
+
+def _usage_all() -> dict:
+    """各模块的累计调用统计（没出现过的模块也补 0，便于前端直接渲染）"""
+    out = {m: {"ok": 0, "fail": 0, "last_at": "", "last_ms": 0, "last_error": ""} for m in _SYS_MODULES}
+    try:
+        conn = store_conn()
+        try:
+            for r in conn.execute(
+                    "SELECT module, ok, fail, last_at, last_ms, last_error FROM ai_usage"):
+                if r["module"] in out:
+                    out[r["module"]] = {
+                        "ok": r["ok"] or 0, "fail": r["fail"] or 0,
+                        "last_at": r["last_at"] or "", "last_ms": r["last_ms"] or 0,
+                        "last_error": r["last_error"] or "",
+                    }
+        finally:
+            conn.close()
+    except Exception as e:
+        _log.warning("读取 AI 调用统计失败：%s", e)
+    return out
+
+
 def _load_cfg() -> dict:
     """读取 AI 接口配置（接口一行一个、模型一行一个、激活项一行）并做规范化。
 
@@ -161,7 +332,7 @@ def _load_cfg() -> dict:
             "models": models,
         })
     active = _resolve_active(clean, active)
-    cfg = {"providers": clean, "active": active}
+    cfg = {"providers": clean, "active": active, "sys": _load_sys()}
     if need_rewrite_key:
         try:
             _save_cfg(cfg)      # 历史明文 / 旧密钥：用当前密钥重写
@@ -277,8 +448,57 @@ def api_ai_config_get():
         "providers": [{k: (v if k != "api_key" else _mask_key(v)) for k, v in p.items()}
                       for p in cfg["providers"]],
         "active": cfg["active"],
+        "sys": cfg.get("sys") or {"provider": "", "model": "", "off": []},
         "configured": all([cfg["providers"], cfg["active"].get("model")]),
     })
+
+
+@bp.route("/api/ai/usage", methods=["GET"])
+def api_ai_usage():
+    """系统 AI 各模块的调用次数统计（成功 / 失败 / 最近一次）"""
+    return jsonify({"usage": _usage_all()})
+
+
+@bp.route("/api/ai/usage/detail", methods=["GET"])
+def api_ai_usage_detail():
+    """某模块的调用明细：最近 7 天按天汇总 + 最近若干次调用记录"""
+    module = str(request.args.get("module") or "")
+    if module not in _SYS_MODULES:
+        return jsonify({"error": "模块不存在"}), 400
+    try:
+        limit = min(max(int(request.args.get("limit", 50)), 1), 200)
+    except (TypeError, ValueError):
+        limit = 50
+    days, calls = [], []
+    try:
+        conn = store_conn()
+        try:
+            rows = conn.execute(
+                "SELECT day, SUM(ok) AS ok, COUNT(*) - SUM(ok) AS fail FROM ai_calls "
+                "WHERE module=? GROUP BY day ORDER BY day DESC LIMIT 7", (module,)).fetchall()
+            days = [{"day": r["day"], "ok": r["ok"] or 0, "fail": r["fail"] or 0} for r in rows][::-1]
+            rows = conn.execute(
+                "SELECT ts, ok, ms, error FROM ai_calls WHERE module=? ORDER BY id DESC LIMIT ?",
+                (module, limit)).fetchall()
+            calls = [{"ts": r["ts"], "ok": bool(r["ok"]), "ms": r["ms"] or 0,
+                      "error": r["error"] or ""} for r in rows]
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({"error": f"读取明细失败：{e}"}), 500
+    return jsonify({"module": module, "days": days, "calls": calls})
+
+
+@bp.route("/api/ai/usage", methods=["DELETE"])
+def api_ai_usage_clear():
+    """清空调用次数统计与明细"""
+    try:
+        with store_tx() as conn:
+            conn.execute("DELETE FROM ai_usage")
+            conn.execute("DELETE FROM ai_calls")
+    except Exception as e:
+        return jsonify({"error": f"清空失败：{e}"}), 500
+    return jsonify({"ok": True, "usage": _usage_all()})
 
 
 @bp.route("/api/ai/config", methods=["POST"])
@@ -329,9 +549,24 @@ def api_ai_config_set():
             a = data.get("active") or {}
             cfg["active"] = _resolve_active(cfg["providers"],
                                             {"provider": a.get("provider"), "model": a.get("model")})
+        if "sys" in data:
+            s = data.get("sys")
+            if not isinstance(s, dict):
+                return jsonify({"error": "sys 格式不正确"}), 400
+            pid = str(s.get("provider") or "")
+            mdl = str(s.get("model") or "")
+            if pid and not any(p["id"] == pid for p in cfg["providers"]):
+                return jsonify({"error": "所选的接口已不存在，请重新选择"}), 400
+            if pid and mdl and not any(p["id"] == pid and mdl in p["models"] for p in cfg["providers"]):
+                return jsonify({"error": "所选的模型不属于该接口，请重新选择"}), 400
+            off = s.get("off")
+            if not isinstance(off, list):
+                off = _load_sys()["off"]        # 只改接口/模型时保留原有启停状态
+            _save_sys({"provider": pid, "model": mdl, "off": off})
         _save_cfg(cfg)
     masked = {p["id"]: _mask_key(p["api_key"]) for p in cfg["providers"]}
-    return jsonify({"ok": True, "providers": [{**p, "api_key": masked[p["id"]]} for p in cfg["providers"]],
+    return jsonify({"ok": True, "sys": _load_sys(),          # 回传落库结果，前端据此刷新（不再“假成功”）
+                    "providers": [{**p, "api_key": masked[p["id"]]} for p in cfg["providers"]],
                     "active": cfg["active"]})
 
 
@@ -585,21 +820,18 @@ def api_ai_notify_history_clear():
 @bp.route("/api/ai/chat", methods=["POST"])
 def api_ai_chat():
     cfg = _load_cfg()
-    if not cfg["providers"] or not cfg["active"].get("model"):
-        return jsonify({"error": "AI 助手尚未配置：请先在设置里添加接口（地址 / API Key / 模型）"}), 400
     data = request.get_json(silent=True) or {}
     msgs = data.get("messages") or []
     if not isinstance(msgs, list) or not msgs:
         return jsonify({"error": "messages 不能为空"}), 400
 
-    # 指定 provider/model 则临时切换（前端模型下拉直接指定）
-    want_pid = str(data.get("provider_id") or "")
-    want_model = str(data.get("model") or "")
-    provider = next((p for p in cfg["providers"] if p["id"] == want_pid), None)
-    if provider is None:
-        provider = next((p for p in cfg["providers"] if p["id"] == cfg["active"].get("provider")),
-                        cfg["providers"][0])
-    model = want_model or cfg["active"].get("model") or (provider["models"][0] if provider["models"] else "")
+    # 插件通过 host.ai 调用会带 source=plugin，按独立模块计入启停控制
+    module = "plugin" if str(data.get("source") or "") == "plugin" else "chat"
+    provider, model, err = _sys_pick(cfg, module)
+    if err:
+        return jsonify({"error": err, "need_config": not cfg.get("providers")}), 400
+    # 请求里显式指定的接口/模型优先（AI 面板顶部的模型下拉）
+    provider, model = _override_pick(cfg, provider, model, data)
 
     clean = [{"role": str(m.get("role") or "user")[:16], "content": _clean_content(m.get("content"))}
              for m in msgs[:40]]
@@ -837,9 +1069,19 @@ def api_ai_chat():
         yield b"data: [DONE]\n\n"
 
     def _gen_with_notify():
+        t0 = time.time()
+        stream_err = ""
         try:
-            yield from gen()
+            for chunk in gen():
+                # 流里出现过 error 事件，即认为这次调用失败（真正成功与否只有这里看得到）
+                if not stream_err and b'"error"' in (chunk or b""):
+                    stream_err = "接口返回错误"
+                yield chunk
+        except Exception as e:
+            stream_err = str(e)
+            raise
         finally:
+            _log_ai_call(module, not stream_err, int((time.time() - t0) * 1000), stream_err)
             reply = "".join(text_parts)
             _fire_notify_async("chat", user_query, reply)
 
@@ -879,24 +1121,20 @@ _SUMMARY_SYS = ("你是记忆压缩器。请把对话历史压缩成一份简洁
 
 
 @bp.route("/api/ai/summarize", methods=["POST"])
+@_count_calls("summary")
 def api_ai_summarize():
     """dsh 式记忆压缩：把旧对话历史（可带旧摘要增量合并）压缩成简短记忆（非流式）。"""
     cfg = _load_cfg()
-    if not cfg["providers"] or not cfg["active"].get("model"):
-        return jsonify({"error": "AI 助手尚未配置"}), 400
     data = request.get_json(silent=True) or {}
     msgs = data.get("messages") or []
     prev = str(data.get("prev") or "")[:2000]
     if not isinstance(msgs, list) or not msgs:
         return jsonify({"error": "messages 不能为空"}), 400
 
-    want_pid = str(data.get("provider_id") or "")
-    want_model = str(data.get("model") or "")
-    provider = next((p for p in cfg["providers"] if p["id"] == want_pid), None)
-    if provider is None:
-        provider = next((p for p in cfg["providers"] if p["id"] == cfg["active"].get("provider")),
-                        cfg["providers"][0])
-    model = want_model or cfg["active"].get("model") or (provider["models"][0] if provider["models"] else "")
+    provider, model, err = _sys_pick(cfg, "summary")
+    if err:
+        return jsonify({"error": err, "need_config": not cfg.get("providers")}), 400
+    provider, model = _override_pick(cfg, provider, model, data)
 
     convo = []
     for m in msgs[:80]:
@@ -1154,13 +1392,14 @@ def _clean_message(text, limit=_COMMIT_MAX_LINE):
 
 
 @bp.route("/api/ai/commit-message", methods=["POST"])
+@_count_calls("commit")
 def api_ai_commit_message():
     """根据当前改动生成 Git 提交信息（非流式）。{repo} → {message, model, files}"""
     cfg = _load_cfg()
-    if not cfg["providers"] or not cfg["active"].get("model"):
-        return jsonify({"error": "尚未配置 AI 接口：请到「设置 → AI 助手」添加接口",
-                        "need_config": True}), 400
     data = request.get_json(silent=True) or {}
+    provider, model, err = _sys_pick(cfg, "commit")
+    if err:
+        return jsonify({"error": err, "need_config": not cfg.get("providers")}), 400
     repo = str(data.get("repo") or "").strip()
     if not repo or not os.path.isdir(repo):
         return jsonify({"error": "项目目录不存在，请先打开一个项目"}), 400
@@ -1174,13 +1413,7 @@ def api_ai_commit_message():
     if not info["body"]:
         return jsonify({"error": "没有检测到任何改动（暂存区与工作区都是空的）"}), 400
 
-    want_pid = str(data.get("provider_id") or "")
-    want_model = str(data.get("model") or "")
-    provider = next((p for p in cfg["providers"] if p["id"] == want_pid), None)
-    if provider is None:
-        provider = next((p for p in cfg["providers"] if p["id"] == cfg["active"].get("provider")),
-                        cfg["providers"][0])
-    model = want_model or cfg["active"].get("model") or (provider["models"][0] if provider["models"] else "")
+    provider, model = _override_pick(cfg, provider, model, data)
 
     head = "[当前分支] " + (info["branch"] or "-") + "\n[变更文件数] %d\n\n" % info["files"]
     base = provider["base_url"].rstrip("/")
@@ -1209,9 +1442,12 @@ def api_ai_commit_message():
 
 
 @bp.route("/api/ai/models", methods=["POST"])
+@_count_calls("models")
 def api_ai_models():
     """从 OpenAI 兼容接口拉取可用模型列表（GET /models），供设置页勾选。"""
     cfg = _load_cfg()
+    if _sys_disabled(cfg, "models"):
+        return jsonify({"error": "「拉取模型列表」已在「设置 → 系统 AI」中关闭"}), 400
     data = request.get_json(silent=True) or {}
     base = str(data.get("base_url") or "").strip().rstrip("/")
     key = str(data.get("api_key") or "")

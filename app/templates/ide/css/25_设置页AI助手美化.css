@@ -4,6 +4,78 @@
    功能不变：接口名/地址/Key/模型列表/自动获取/删除/添加/保存
    ================================================================ */
 
+/* ================================================================
+   设置 → 系统 AI：使用系统 AI 的模块清单
+   .sysai-* 只在设置页该分区使用
+   ================================================================ */
+.sysai-mods {
+  margin-top: 14px;
+  padding: 14px 16px 4px;
+  background: #242425;
+  border: 1px solid #303031;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
+}
+.sysai-mods-hd { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: #d8d8d8; }
+.sysai-mods-hd .bi { flex: none; font-size: 14px; color: #4fc3f7; }
+.sysai-mods-sp { flex: 1; }
+.sysai-all { padding: 3px 10px; font-size: 11.5px; }
+.sysai-all:disabled { opacity: .4; cursor: default; }
+.sysai-mods-desc { margin: 6px 0 4px; font-size: 12px; line-height: 1.65; color: #8a8a8a; }
+.sysai-mod {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 9px 0; border-top: 1px solid #2e2e2f;
+}
+.sysai-mod > .bi {
+  flex: none; width: 16px; margin-top: 2px;
+  font-size: 14px; text-align: center; color: #7fbcf0;
+}
+.sysai-mod-main { flex: 1; min-width: 0; }
+.sysai-mod-name { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; color: #e2e2e2; }
+/* 调用次数：成功绿 / 含失败红，鼠标悬停看最近一次时间与错误 */
+.sysai-stat {
+  margin-left: auto; flex: none; white-space: nowrap;
+  font-size: 11px; color: #777;
+}
+.sysai-stat.ok { color: #7fc98a; }
+.sysai-stat.has-fail { color: #e08a8a; }
+/* 点击模块行展开的调用明细 */
+.sysai-mod.clickable { cursor: pointer; }
+.sysai-mod.clickable:hover { background: rgba(255, 255, 255, .022); }
+.sysai-detail { padding: 10px 12px 12px; border-top: 1px solid #2e2e2f; background: #202021; }
+.sysai-detail-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.sysai-detail-title { font-size: 12px; font-weight: 600; color: #d8d8d8; }
+.sysai-detail-sub { font-size: 11px; color: #8a8a8a; }
+.sysai-detail-none { font-size: 11.5px; color: #777; }
+/* 最近 7 天迷你柱状：绿=成功、红=失败，堆叠在一列里 */
+.sysai-days { display: flex; align-items: flex-end; gap: 10px; min-height: 56px; margin-bottom: 10px; }
+.sysai-day { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.sysai-day-col { display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; }
+.sysai-day-ok { width: 16px; background: #3f9d55; border-radius: 2px 2px 0 0; }
+.sysai-day-fail { width: 16px; background: #c05555; border-radius: 2px 2px 0 0; }
+.sysai-day-lb { font-size: 10px; color: #777; }
+/* 每次调用一行 */
+.sysai-calls { max-height: 170px; overflow: auto; border: 1px solid #2e2e2f; border-radius: 6px; }
+.sysai-call { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: 11.5px; border-bottom: 1px solid #2a2a2b; }
+.sysai-call:last-child { border-bottom: none; }
+.sysai-call-ts { flex: none; width: 128px; font-size: 11px; color: #8a8a8a; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.sysai-call-r { flex: none; width: 30px; color: #7fc98a; }
+.sysai-call.err .sysai-call-r { color: #e08a8a; }
+.sysai-call-ms { flex: none; width: 62px; color: #777; }
+.sysai-call-err { flex: 1; min-width: 0; color: #c09090; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sysai-mod-desc { margin-top: 2px; font-size: 11.5px; line-height: 1.55; color: #8a8a8a; }
+.sysai-mod code {
+  flex: none; align-self: center; margin-left: 10px;
+  padding: 2px 6px; border-radius: 4px; white-space: nowrap;
+  background: #1b1b1b; border: 1px solid #333; color: #7ec7a1;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px;
+}
+.sysai-mod .sysai-sw { margin-left: 12px; align-self: center; }
+/* 已停用的模块整行变淡（开关保持原样，方便随时开回来） */
+.sysai-mod.off > .bi,
+.sysai-mod.off .sysai-mod-main,
+.sysai-mod.off code { opacity: .45; }
+
 /* 接口卡片 */
 .ai-prov {
   background: #242425;

@@ -409,7 +409,7 @@
      */
     async chat(messages, opts) {
       opts = opts || {};
-      const body = { messages: messages };
+      const body = { messages: messages, source: "plugin" };   // 标记来源：设置里可按「插件宿主 AI」单独启停
       if (opts.webSearch) body.web_search = true;
       if (opts.skills) body.skills = opts.skills;
       if (opts.perm) body.perm = opts.perm;

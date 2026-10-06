@@ -821,6 +821,29 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ai-ask .btns button.ok { background: #dff3e4; border-color: #8fd0a0; color: #1a7f37; }
 :where(html.theme-light) .ai-ask .btns button.no:hover { background: #fbe0e0; border-color: #e8b0b0; color: #a02b2b; }
 :where(html.theme-light) .ai-set-tip { color: #a0522d; }
+:where(html.theme-light) .sysai-mods { background: #f8f8f8; border-color: #e5e5e5; box-shadow: 0 2px 8px rgba(0, 0, 0, .06); }
+:where(html.theme-light) .sysai-mods-hd { color: #1f2328; }
+:where(html.theme-light) .sysai-mods-desc { color: #6b6b6b; }
+:where(html.theme-light) .sysai-mod { border-top-color: #e8e8e8; }
+:where(html.theme-light) .sysai-mod > .bi { color: #0a6aa8; }
+:where(html.theme-light) .sysai-mod-name { color: #1f2328; }
+:where(html.theme-light) .sysai-stat { color: #8a8a8a; }
+:where(html.theme-light) .sysai-stat.ok { color: #1a7f37; }
+:where(html.theme-light) .sysai-stat.has-fail { color: #c0392b; }
+:where(html.theme-light) .sysai-mod.clickable:hover { background: rgba(0, 0, 0, .022); }
+:where(html.theme-light) .sysai-detail { background: #fbfbfb; border-top-color: #e8e8e8; }
+:where(html.theme-light) .sysai-detail-title { color: #1f2328; }
+:where(html.theme-light) .sysai-detail-sub,
+:where(html.theme-light) .sysai-detail-none,
+:where(html.theme-light) .sysai-day-lb { color: #8a8a8a; }
+:where(html.theme-light) .sysai-calls { border-color: #e5e5e5; }
+:where(html.theme-light) .sysai-call { border-bottom-color: #eeeeee; }
+:where(html.theme-light) .sysai-call-ts { color: #8a8a8a; }
+:where(html.theme-light) .sysai-call-r { color: #1a7f37; }
+:where(html.theme-light) .sysai-call.err .sysai-call-r { color: #c0392b; }
+:where(html.theme-light) .sysai-call-err { color: #a8544a; }
+:where(html.theme-light) .sysai-mod-desc { color: #6b6b6b; }
+:where(html.theme-light) .sysai-mod code { background: #ffffff; border-color: #e0e0e0; color: #1a7f37; }
 :where(html.theme-light) .ai-set-tip.ok { color: #1a7f37; }
 /* AI 代码块语法着色（代码块底色已转浅，需换成深色 token） */
 :where(html.theme-light) .hl-k { color: #8230b0; }

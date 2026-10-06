@@ -642,19 +642,18 @@ def api_sqlite_nl2sql():
     if not _is_sqlite_file(os.path.splitext(target_path)[1].lower().lstrip(".")):
         return jsonify({"error": "不是 SQLite 数据库文件"}), 400
 
-    from ..ide.ai import _load_cfg        # 复用 AI 助手配置（函数内导入，避免模块循环依赖）
+    from ..ide.ai import _load_cfg, _sys_pick, _log_ai_call   # 复用系统 AI 配置（函数内导入，避免模块循环依赖）
     cfg = _load_cfg()
-    if not cfg["providers"] or not cfg["active"].get("model"):
-        return jsonify({"error": "尚未配置 AI 接口：请到「设置 → AI 助手」添加接口",
-                        "need_config": True}), 400
+    provider, model, err = _sys_pick(cfg, "nl2sql")
+    if err:
+        return jsonify({"error": err, "need_config": not cfg.get("providers")}), 400
 
-    want_pid = str(data.get("provider_id") or "")
-    want_model = str(data.get("model") or "")
-    provider = next((p for p in cfg["providers"] if p["id"] == want_pid), None)
-    if provider is None:
-        provider = next((p for p in cfg["providers"] if p["id"] == cfg["active"].get("provider")),
-                        cfg["providers"][0])
-    model = want_model or cfg["active"].get("model") or (provider["models"][0] if provider["models"] else "")
+    t_start = time.time()
+
+    def _fail(msg, code=502, **extra):
+        """统一失败出口：记一次失败调用再返回"""
+        _log_ai_call("nl2sql", False, int((time.time() - t_start) * 1000), msg)
+        return jsonify({"error": msg, **extra}), code
 
     try:
         con = _sqlite_connect_ro(target_path)
@@ -683,27 +682,27 @@ def api_sqlite_nl2sql():
         text = (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "ignore")[:200]
-        return jsonify({"error": f"AI 接口返回 {e.code}：{detail}"}), 502
+        return _fail(f"AI 接口返回 {e.code}：{detail}")
     except Exception as e:
-        return jsonify({"error": f"调用 AI 接口失败：{str(e)}"}), 502
+        return _fail(f"调用 AI 接口失败：{str(e)}")
 
     sql = _clean_sql(text)
     if not sql:
         if _SQL_WRITE_WORDS.search(text or ""):
-            return jsonify({"error": "模型生成的是写操作语句，已丢弃（此处只用于查询），请换个说法重试"}), 400
-        return jsonify({"error": "模型没有返回可用的 SQL，请换个说法或换个模型"}), 502
+            return _fail("模型生成的是写操作语句，已丢弃（此处只用于查询），请换个说法重试", 400)
+        return _fail("模型没有返回可用的 SQL，请换个说法或换个模型")
     if sql.startswith("--"):            # 模型按要求回了「-- 无法生成：<原因>」
-        return jsonify({"error": sql.lstrip("- ").splitlines()[0][:200]
-                        or "无法根据当前结构生成 SQL", "sql": sql}), 400
+        return _fail(sql.lstrip("- ").splitlines()[0][:200] or "无法根据当前结构生成 SQL", 400, sql=sql)
     if not _SQL_READONLY_START.match(sql) or _SQL_WRITE_WORDS.search(sql):
-        return jsonify({"error": "模型生成的不是只读查询语句，已丢弃，请换个说法重试",
-                        "sql": sql}), 400
+        return _fail("模型生成的不是只读查询语句，已丢弃，请换个说法重试", 400, sql=sql)
 
-    _log.info("AI 生成 SQL：model=%s %dms sql=%s", model, int((time.time() - t0) * 1000), sql[:200])
+    elapsed = int((time.time() - t0) * 1000)
+    _log_ai_call("nl2sql", True, elapsed)
+    _log.info("AI 生成 SQL：model=%s %dms sql=%s", model, elapsed, sql[:200])
     return jsonify({
         "sql": sql,
         "model": model,
-        "elapsed_ms": int((time.time() - t0) * 1000),
+        "elapsed_ms": elapsed,
     })
 
 

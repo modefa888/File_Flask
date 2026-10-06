@@ -37,7 +37,8 @@ from ...log import get_logger
 from ...services.common.safety import check_command, is_delete_command
 from ...services.ide.web_search import search_web, format_results
 from ...services.common import undo
-from .ai import (_clean_content, _load_cfg, _open_stream, _sse, _inject_system_time,
+from .ai import (_clean_content, _load_cfg, _sys_pick, _override_pick, _log_ai_call,
+                 _open_stream, _sse, _inject_system_time,
                  _inject_web_search, _SKILL_PROMPTS, _is_retryable_status, _is_retryable_text,
                  _retry_wait, _RETRY_MAX, _last_user_text, _fire_notify_async)
 
@@ -1045,18 +1046,11 @@ def api_run_changes():
 @bp.route("/api/ai/agent", methods=["POST"])
 def api_ai_agent():
     cfg = _load_cfg()
-    if not cfg["providers"]:
-        return jsonify({"error": "尚未配置 AI 接口：请到「设置 → AI 助手」添加接口", "need_config": True}), 400
     data = request.get_json(silent=True) or {}
-    want_pid = str(data.get("provider_id") or "")
-    want_model = str(data.get("model") or "")
-    provider = next((p for p in cfg["providers"] if p["id"] == want_pid), None)
-    if provider is None:
-        provider = next((p for p in cfg["providers"] if p["id"] == cfg["active"].get("provider")),
-                        cfg["providers"][0])
-    model = want_model or cfg["active"].get("model") or (provider["models"][0] if provider["models"] else "")
-    if not model:
-        return jsonify({"error": "尚未选择模型，请到「设置 → AI 助手」配置模型列表"}), 400
+    provider, model, err = _sys_pick(cfg, "agent")
+    if err:
+        return jsonify({"error": err, "need_config": not cfg.get("providers")}), 400
+    provider, model = _override_pick(cfg, provider, model, data)
 
     msgs = data.get("messages") or []
     if not isinstance(msgs, list) or not msgs:
@@ -1121,7 +1115,22 @@ def api_ai_agent():
             _fire_notify_async("agent", user_query, answer_text)
             yield _sse({"type": "done"})
 
-    return Response(gen(), mimetype="text/event-stream",
+    def _gen_counted():
+        """包一层用于统计调用次数（成功与否只有把流读完才知道）"""
+        t0 = time.time()
+        err = ""
+        try:
+            for chunk in gen():
+                if not err and b'"error"' in (chunk or b""):
+                    err = "接口返回错误"
+                yield chunk
+        except Exception as e:  # noqa: BLE001
+            err = str(e)
+            raise
+        finally:
+            _log_ai_call("agent", not err, int((time.time() - t0) * 1000), err)
+
+    return Response(_gen_counted(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 

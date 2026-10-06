@@ -452,12 +452,186 @@
         if (tip) { tip.className = "ai-set-tip ok"; tip.textContent = "已保存 ✓"; setTimeout(() => { tip.textContent = ""; }, 2500); }
         toast("系统 AI 设置已保存", "ok");
       } catch (e) { if (tip) tip.textContent = "保存失败：" + e; }
+      sysAiSyncSwitches();
+    };
+    sysAiBindSwitches();
+    sysAiSyncSwitches();
+    sysAiBindUsageReset();
+    sysAiBindModRows();
+  }
+  /* 点击模块行 → 行内展开调用明细（最近 7 天柱状 + 最近调用记录） */
+  var SYS_MOD_TITLE = {
+    chat: "AI 助手对话", plugin: "插件宿主 AI", agent: "Agent 任务", commit: "生成提交信息",
+    nl2sql: "一句话生成 SQL", summary: "对话记忆压缩", models: "拉取模型列表",
+  };
+  var sysAiDetailMod = "";
+  function sysAiCloseDetail() {
+    var el = document.getElementById("sysAiDetail");
+    if (el) el.remove();
+    sysAiDetailMod = "";
+  }
+  async function sysAiToggleDetail(row) {
+    var mod = row.dataset.modRow;
+    if (!mod) return;
+    if (sysAiDetailMod === mod) { sysAiCloseDetail(); return; }
+    sysAiCloseDetail();
+    var box = document.createElement("div");
+    box.className = "sysai-detail";
+    box.id = "sysAiDetail";
+    box.innerHTML = '<div class="sysai-detail-hd">' +
+        '<span class="sysai-detail-title">' + esc(SYS_MOD_TITLE[mod] || mod) + " · 调用明细</span>" +
+        '<span class="sysai-mods-sp"></span>' +
+        '<span class="sysai-detail-sub">加载中…</span>' +
+        '<button class="ai-set-btn sysai-all sysai-detail-close">收起</button></div>';
+    row.after(box);                       // 紧跟被点的模块展开，不跳到清单末尾
+    sysAiDetailMod = mod;
+    box.querySelector(".sysai-detail-close").onclick = sysAiCloseDetail;
+    try {
+      var d = await (await fetch("/api/ai/usage/detail?module=" + encodeURIComponent(mod))).json();
+      if (d.error) throw new Error(d.error);
+      sysAiRenderDetail(box, d);
+    } catch (e) {
+      box.querySelector(".sysai-detail-sub").textContent = "读取失败：" + (e.message || e);
+    }
+  }
+  function sysAiRenderDetail(box, d) {
+    var days = d.days || [], calls = d.calls || [];
+    var total = days.reduce(function (s, x) { return s + x.ok + x.fail; }, 0);
+    box.querySelector(".sysai-detail-sub").textContent =
+      days.length ? "最近 " + days.length + " 天共 " + total + " 次" : "暂无记录";
+    var max = Math.max.apply(null, [1].concat(days.map(function (x) { return x.ok + x.fail; })));
+    var html = '<div class="sysai-days">' + (days.length ? days.map(function (x) {
+      var oh = x.ok ? Math.max(Math.round(x.ok / max * 34), 2) : 0;
+      var fh = x.fail ? Math.max(Math.round(x.fail / max * 34), 2) : 0;
+      return '<div class="sysai-day" title="' + esc(x.day) + "：成功 " + x.ok + " · 失败 " + x.fail + '">' +
+        '<div class="sysai-day-col">' +
+          (fh ? '<div class="sysai-day-fail" style="height:' + fh + 'px"></div>' : "") +
+          (oh ? '<div class="sysai-day-ok" style="height:' + oh + 'px"></div>' : "") +
+        '</div><div class="sysai-day-lb">' + esc(x.day.slice(5)) + "</div></div>";
+    }).join("") : '<span class="sysai-detail-none">最近 7 天没有调用</span>') + "</div>";
+    html += '<div class="sysai-calls">' + (calls.length ? calls.map(function (c) {
+      return '<div class="sysai-call' + (c.ok ? "" : " err") + '">' +
+        '<span class="sysai-call-ts">' + esc(c.ts) + "</span>" +
+        '<span class="sysai-call-r">' + (c.ok ? "成功" : "失败") + "</span>" +
+        '<span class="sysai-call-ms">' + (c.ms ? c.ms + " ms" : "-") + "</span>" +
+        '<span class="sysai-call-err">' + esc(c.error || "") + "</span></div>";
+    }).join("") : '<div class="sysai-detail-none">还没有调用记录</div>') + "</div>";
+    box.insertAdjacentHTML("beforeend", html);
+  }
+  function sysAiBindModRows() {
+    document.querySelectorAll(".sysai-mod[data-mod-row]").forEach(function (row) {
+      row.classList.add("clickable");
+      row.onclick = function (e) {
+        if (e.target.closest && e.target.closest(".sysai-sw")) return;   // 点开关不展开明细
+        sysAiToggleDetail(row);
+      };
+    });
+  }
+  /* 调用次数统计：读 /api/ai/usage 填到每行的 .sysai-stat 上 */
+  function sysAiRenderUsage(u) {
+    document.querySelectorAll(".sysai-stat").forEach(sp => {
+      const d = (u || {})[sp.dataset.stat];
+      if (!d || (!d.ok && !d.fail)) {
+        sp.textContent = "暂无调用";
+        sp.className = "sysai-stat";
+        sp.title = "";
+        return;
+      }
+      sp.textContent = d.fail ? "成功 " + d.ok + " · 失败 " + d.fail : "成功 " + d.ok;
+      sp.className = "sysai-stat" + (d.fail ? " has-fail" : " ok");
+      sp.title = "共 " + (d.ok + d.fail) + " 次" +
+        (d.last_at ? "；最近一次 " + d.last_at + (d.last_ms ? "（" + d.last_ms + " ms）" : "") : "") +
+        (d.last_error ? "；最近错误：" + d.last_error : "");
+    });
+  }
+  async function sysAiLoadUsage() {
+    try {
+      const r = await fetch("/api/ai/usage");
+      const d = await r.json();
+      if (!d.error) sysAiRenderUsage(d.usage || {});
+    } catch (_) { /* 统计拿不到不影响设置页 */ }
+  }
+  function sysAiBindUsageReset() {
+    const btn = document.getElementById("sysAiUsageReset");
+    if (!btn) return;
+    btn.onclick = async () => {
+      const ok = await uiConfirm("重置调用统计", "把各模块的成功 / 失败次数清零？（不影响其他设置）", "重置", false);
+      if (!ok) return;
+      btn.disabled = true;
+      try {
+        const d = await (await fetch("/api/ai/usage", { method: "DELETE" })).json();
+        if (d.error) throw new Error(d.error);
+        sysAiRenderUsage(d.usage || {});
+        toast("调用统计已重置", "ok");
+      } catch (e) {
+        toast("重置失败：" + (e.message || e), "warn");
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  }
+  /* 模块启停：POST 只改 off 列表，接口/模型沿用当前选择 */
+  function sysAiSaveSys(off, okMsg) {
+    const cur = AI.sys || {};
+    return fetch("/api/ai/config", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sys: { provider: cur.provider || "", model: cur.model || "", off: off } }) })
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) throw new Error(d.error);
+        AI.sys = d.sys || {};                 // 以后端落库结果为准
+        if (okMsg) toast(okMsg, "ok");
+        return AI.sys;
+      });
+  }
+  function sysAiSyncSwitches() {
+    const off = (AI.sys || {}).off || [];
+    document.querySelectorAll(".sysai-sw").forEach(lb => {
+      const inp = lb.querySelector("input");
+      if (!inp) return;
+      inp.checked = off.indexOf(lb.dataset.mod) < 0;
+      inp.disabled = false;
+      const row = lb.closest(".sysai-mod");
+      if (row) {
+        row.classList.toggle("off", !inp.checked);   // 停用的整行变淡
+        row.dataset.modRow = lb.dataset.mod;         // 供「点击看明细」识别模块
+      }
+    });
+    const all = document.getElementById("sysAiAllOn");
+    if (all) all.disabled = !off.length;
+  }
+  function sysAiBindSwitches() {
+    document.querySelectorAll(".sysai-sw").forEach(lb => {
+      const inp = lb.querySelector("input");
+      if (!inp) return;
+      inp.onchange = async () => {              // 用 onchange 赋值，重复挂载也不会叠加监听
+        const mod = lb.dataset.mod;
+        const on = inp.checked;
+        const off = ((AI.sys || {}).off || []).filter(m => m !== mod);
+        if (!on) off.push(mod);
+        inp.disabled = true;
+        try {
+          await sysAiSaveSys(off, on ? "已启用该模块" : "已停用该模块");
+        } catch (e) {
+          inp.checked = !on;                    // 保存失败回滚，避免界面与实际不一致
+          toast("保存失败：" + (e.message || e), "warn");
+        } finally {
+          sysAiSyncSwitches();
+        }
+      };
+    });
+    const all = document.getElementById("sysAiAllOn");
+    if (all) all.onclick = async () => {
+      all.disabled = true;
+      try { await sysAiSaveSys([], "已全部启用"); }
+      catch (e) { toast("保存失败：" + (e.message || e), "warn"); }
+      finally { sysAiSyncSwitches(); }
     };
   }
   // 设置页打开时：确保配置已加载再渲染下拉（避免与 aiLoadCfg 互相递归）
   async function sysAiEnsure() {
     if (!(AI.providers || []).length) await aiLoadCfg();
     sysAiMountSettings();
+    sysAiLoadUsage();        // 调用次数统计（异步，不阻塞设置页渲染）
   }
   function aiCollectProviders() {
     return Array.from($("aiProvList").querySelectorAll(".ai-prov")).map(card => ({

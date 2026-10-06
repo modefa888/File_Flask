@@ -395,6 +395,8 @@
       }
     }
     insertAtCursor(tab.cm, Array.from(keep).join("\n") + "\n");
+    // 点击「插入」后走标准保存流程：弹「确认保存修改」，确认即落盘并刷新文件树忽略状态
+    await saveTab(tab);
   }
   async function renderGiTree(container, path, depth, selected, existingRules) {
     try {

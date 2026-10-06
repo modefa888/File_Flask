@@ -72,8 +72,6 @@ RUN_TIMEOUT_ACTION = _env_str("RUN_TIMEOUT_ACTION", "background")   # 超时后�
 DEMO_DIR = os.path.join(os.path.dirname(BASE_DIR), "demo")
 if not os.path.isdir(DEMO_DIR):
     os.makedirs(DEMO_DIR, exist_ok=True)
-# Demo 管理页元数据（名称/标签/图标/顺序/启用等，存于 data/ 下）
-DEMO_MANIFEST = os.path.join(os.path.dirname(BASE_DIR), "data", "demo_games.json")
 # 系统关键目录（删除/改权限时直接拦截）
 _SYS_DIRS = r"(/etc|/usr|/boot|/bin|/sbin|/lib|/lib64|/var|/opt|/proc|/sys|/dev|/root|/srv|/System|/Volumes|/Applications)"
 

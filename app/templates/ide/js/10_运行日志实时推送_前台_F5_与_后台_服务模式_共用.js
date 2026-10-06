@@ -63,6 +63,8 @@
 
   function selectLogTab(id) {
     currentLogId = id;
+    // 记住"正在看哪个任务的日志"，刷新后据此把输出面板接回来
+    try { localStorage.setItem("ide.run.lastLog", id); } catch (e) { /* 隐私模式等，忽略 */ }
     document.querySelectorAll(".bp-log-tab").forEach(b => b.classList.toggle("active", b.dataset.task === id));
     // 重绘该任务的完整缓冲（切换标签时）
     const L = LOGS[id], body = $("logBody");
@@ -113,7 +115,11 @@
       currentLogId = null;
       const rest = Object.keys(LOGS);
       if (rest.length) selectLogTab(rest[rest.length - 1]);
-      else { setBottomPane("output"); $("bpLogTabs").style.display = "none"; }
+      else {
+        setBottomPane("output");
+        $("bpLogTabs").style.display = "none";
+        try { localStorage.removeItem("ide.run.lastLog"); } catch (e) { /* 忽略 */ }
+      }
     }
   }
 
@@ -240,6 +246,11 @@
       const L = LOGS[id];
       if (L && !L.done && L.target) map[L.target] = id;
     });
+    /* 刷新后恢复：后端持久化了任务，本次会话还没有对应的日志标签，
+       但程序其实仍在跑 —— 不把它们算进去，行号旁的按钮会退回 ▶（点了还会重复启动）。 */
+    (window.RUNNER && RUNNER.tasks || []).forEach(t => {
+      if (t.running && t.target) map[t.target] = t.id;
+    });
     return map;
   }
 
@@ -247,6 +258,24 @@
     if (typeof window.setRunningTargets === "function") window.setRunningTargets(runningTargets());
   }
   window.syncRunButtons = syncRunButtons;              // 11_ 后台任务面板恢复任务后也要刷一次
+
+  /* 刷新后：若后端仍有前台任务在跑，「输出」面板显示的就是它的输出 ——
+     接回 RUNBG，从 offset 0 回放历史，再继续实时推送（不然刷新后这块是空的）。 */
+  function restoreFgOnLoad(tasks) {
+    if (RUNBG.id) return;                              // 本次会话已在跟踪，不重复接管
+    const fg = (tasks || []).filter(t => t.running && (t.mode || "fg") === "fg")[0];
+    if (!fg) return;
+    RUNBG.id = fg.id; RUNBG.offset = 0;
+    RUNBG.name = fg.name || ""; RUNBG.target = fg.target || "";
+    RUNBG.mode = "fg"; RUNBG.timeout = 0; RUNBG.args = ""; RUNBG.promoted = false;
+    toggleBottom(true, "output");
+    opLine("$ " + fg.command + "    （工作目录：" + fg.cwd + "）", "op-cmd");
+    opLine("  pid " + (fg.pid || "-") + " · 刷新前就在运行，已接回输出并继续跟踪", "op-dim");
+    bpKillMode();
+    fgStream();                                        // offset 0：回放历史 + 继续推送
+    syncRunButtons();
+  }
+  window.restoreFgOnLoad = restoreFgOnLoad;
 
   // F5 前台运行：输出走「输出」面板（会结束的脚本，打印完就退出）
   function startRunStream(d, target, mode, argsStr) {

@@ -35,6 +35,8 @@
       RUNNER.tasks = d.tasks || [];
       setRunnerBadge(d.running || 0);
       renderRunnerList();
+      // 行号旁的 ▶/⏸ 跟随后端真实状态（刷新后也不会退回 ▶）
+      if (window.syncRunButtons) window.syncRunButtons();
       if (opts && opts.autofocus) maybeAttachOnLoad();
     } catch (e) {
       if (!(opts && opts.silent) && $("runnerHint")) {
@@ -96,9 +98,22 @@
     loadRunnerList({ silent: true });
   }
 
+  /* 项目名：任务的工作目录名（cwd 就是所在项目根目录，如 .../CODE/api-node）。
+     确认框里只显示它，不再铺开整条命令行与路径 —— 想看完整路径可在任务列表里悬停。 */
+  function taskProject(t) {
+    const cwd = String((t && t.cwd) || "").replace(/\/+$/, "");
+    if (cwd && cwd !== "/" && cwd !== "." && cwd !== "..") {
+      const n = cwd.split("/").pop();
+      if (n) return n;
+    }
+    const parts = String((t && t.target) || "").replace(/\/+$/, "").split("/");
+    return parts.length >= 2 ? parts[parts.length - 2] : (parts.pop() || "");
+  }
   async function stopTaskById(t) {
     if (t.running) {
-      const ok = await uiConfirm("停止任务", "确定终止「" + t.name + "」吗？\n" + t.command, "停止", false);
+      const proj = taskProject(t);
+      const ok = await uiConfirm("停止任务",
+        "确定终止「" + t.name + "」吗？" + (proj ? "\n项目：" + proj : ""), "停止", false);
       if (!ok) return;
     }
     try {
@@ -131,8 +146,33 @@
     }
   }
 
-  // 页面重新打开时不自动打开日志：只有手动点「查看日志」才显示（避免干扰）
-  function maybeAttachOnLoad() { /* 已停用：日志标签仅手动打开 */ }
+  /* 刷新后恢复：把刷新前正在查看的那个任务接回来（重建日志标签、回放历史并继续推送）。
+     只在"确实看过"时才恢复 —— 没看过就不弹面板，避免平白干扰。 */
+  function maybeAttachOnLoad() {
+    let last = "";
+    try { last = localStorage.getItem("ide.run.lastLog") || ""; } catch (e) { last = ""; }
+    if (!last) return;
+    const t = (RUNNER.tasks || []).filter(x => x.id === last)[0];
+    if (!t) {                                    // 任务已被移除 / 清理 → 忘掉它
+      try { localStorage.removeItem("ide.run.lastLog"); } catch (e) { /* 忽略 */ }
+      return;
+    }
+    attachTask(t);
+  }
+
+  /* 页面加载后主动同步一次后端状态：刷新前在跑的任务要恢复成
+     「行号旁 ⏸」＋「上次在看的输出面板」，而不是退回到未运行的样子。 */
+  function restoreRunnerState() {
+    loadRunnerList({ silent: true }).then(() => {
+      if (window.restoreFgOnLoad) window.restoreFgOnLoad(RUNNER.tasks);   // 前台：接回「输出」面板
+      maybeAttachOnLoad();                                                // 后台：接回上次看的日志
+    });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", restoreRunnerState);
+  } else {
+    setTimeout(restoreRunnerState, 0);           // 等 01_ 注册好 setRunningTargets
+  }
 
   // 面板可见时每 3s 刷新一次状态（不可见就停，不产生无谓请求）
   function runnerTick() {

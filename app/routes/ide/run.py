@@ -48,10 +48,13 @@ def _timeout_limits() -> tuple:
 
 
 def _timeout_action() -> str:
-    """前台超时后的动作：config.RUN_TIMEOUT_ACTION（background / kill）。"""
+    """前台超时后的动作：config.RUN_TIMEOUT_ACTION（keep / background / kill）。
+
+    keep（默认）只提醒一次，不再自动做任何处理 —— 转后台或终止都由用户手动决定。
+    """
     from ... import config
-    act = str(getattr(config, "RUN_TIMEOUT_ACTION", "background") or "background").lower()
-    return act if act in ("background", "kill") else "background"
+    act = str(getattr(config, "RUN_TIMEOUT_ACTION", "keep") or "keep").lower()
+    return act if act in ("keep", "background", "kill") else "keep"
 
 
 # 扩展名 → (解释器, 显示名)。解释器需存在于 PATH 中。
@@ -292,13 +295,22 @@ class _BgTask:
             return False
         return True
 
-    def promote_to_background(self) -> None:
-        """超时后进程仍在运行：转为后台任务，不再计时（避免打断已启动的服务）。"""
+    def promote_to_background(self, auto: bool = False) -> None:
+        """把仍在运行的前台任务转为后台任务：不再计时，也不会再被超时看门狗处理。
+
+        默认由用户点「转后台」手动触发；auto=True 只在
+        config.RUN_TIMEOUT_ACTION = "background"（旧行为）时使用。
+        """
         with self.cond:
+            if self.mode == "bg":
+                return                     # 已经是后台，重复调用无副作用
             self.mode = "bg"
             self.timeout = None
             self.promoted = True
-        self.add(f"⏱ 已超过 {self.timeout_used}s 仍在运行，已自动转为后台运行（不再计时，可在「后台任务」面板结束）", "head")
+        if auto:
+            self.add(f"⏱ 已超过 {self.timeout_used}s 仍在运行，已自动转为后台运行（不再计时）", "head")
+        else:
+            self.add("⏱ 已手动转为后台运行（不再计时，可在「后台任务」面板结束）", "head")
         _persist()
 
     def duration(self) -> float:
@@ -470,8 +482,10 @@ def _tail_log(task) -> None:
 def _watchdog(task) -> None:
     """前台超时看门狗：到点后按 config.RUN_TIMEOUT_ACTION 处理。
 
-    默认 "background"：进程仍在运行（多为 Web 服务 / 常驻程序）时自动转为后台，
-    不再计时，避免刚启动好、能正常访问的服务被超时杀掉；"kill" 则直接终止。
+    keep（默认）：只提醒一次，之后不再介入 —— 进程继续在前台跑，
+                  转后台还是终止，完全由用户点按钮决定；
+    background  ：自动转后台（旧行为，仍可用配置打开）；
+    kill        ：直接终止。
     """
     if not task.timeout:
         return
@@ -483,11 +497,17 @@ def _watchdog(task) -> None:
             continue
         if task.is_done() or not task.is_alive():
             return
-        if _timeout_action() == "kill":
+        action = _timeout_action()
+        if action == "kill":
             task.timed_out = True
             _kill_task(task)
-        else:
-            task.promote_to_background()
+            return
+        if action == "background":
+            task.promote_to_background(auto=True)
+            return
+        # keep：只提醒，不自动转后台也不杀进程
+        task.add(f"⏱ 已运行超过 {task.timeout_used}s 仍在运行；"
+                 "点右上「↓」可转为后台常驻，点「⊘」可终止", "head")
         return
 
 
@@ -666,6 +686,26 @@ def api_run_stop():
     _log.info("POST /api/run/stop id=%s target=%s", tid, task.target)
     _kill_task(task)
     return jsonify({"ok": True, "killed": True})
+
+
+@bp.route("/api/run/promote", methods=["POST"])
+def api_run_promote():
+    """手动把前台运行中的任务转为后台：不再计时，前端切到「运行日志」标签继续跟踪。
+
+    超时不再自动转后台（config.RUN_TIMEOUT_ACTION 默认 keep），这里是那个手动入口。
+    """
+    data = request.get_json(silent=True) or {}
+    tid = (data.get("id") or "").strip()
+    task = _get_task(tid)
+    if not task:
+        return _fail("任务不存在或已过期", 404)
+    if not task.is_alive():
+        return _fail("任务已结束，无需转后台")
+    if task.mode == "bg":
+        return jsonify({"ok": True, "already_bg": True})
+    task.promote_to_background(auto=False)
+    _log.info("POST /api/run/promote id=%s target=%s", tid, task.target)
+    return jsonify({"ok": True, "id": tid, "mode": "bg"})
 
 
 @bp.route("/api/run/remove", methods=["POST"])

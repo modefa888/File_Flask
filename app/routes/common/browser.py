@@ -24,6 +24,7 @@ from ...services.common.filecore import (
     safe_path, format_size, list_directory, _SIZE_PENDING, _SIZE_PENDING_LOCK,
     _DIR_SIZE_CACHE, _ensure_dir_size_async,
 )
+from ...services.common import scaffold
 from ...services.common.thumbnail import (
     _get_thumbnail_bytes, _get_preview_bytes, _extract_video_frame,
     _clear_disk_cache as _clear_thumb_cache, get_video_duration, get_video_cover,
@@ -50,8 +51,25 @@ def _recent_path() -> str:
     return os.path.join(_STORAGE_DIR, _RECENT_DIR_FILE)
 
 
+def _norm_dir_path(path: str) -> str:
+    """目录路径规范化：绝对化并压掉多余的前导/尾随斜杠（'//home/x/' -> '/home/x'）。
+
+    前导双斜杠在 POSIX 下另有含义，normpath 会原样保留，这里统一成单斜杠，
+    避免同一目录以 '/x' 和 '//x' 两种形式各存一条。
+    """
+    p = os.path.abspath(os.path.normpath(str(path or "").strip()))
+    if p == "/":
+        return "/"
+    return "/" + p.lstrip("/").rstrip("/")
+
+
 def _recent_load() -> list:
-    """最近打开目录（一行一个，seq 顺序即展示顺序）。"""
+    """最近打开目录（一行一个，seq 顺序即展示顺序）。
+
+    只保留绝对路径：早期版本允许手输路径，可能存进相对路径（如 "m3u8_web"），
+    而 /api/files 对失效路径会「回退到最近存在的上级目录」并照常返回 200，
+    于是点进去会显示成别的文件夹的内容（路径栏与内容对不上）。发现脏数据直接丢弃并回写。
+    """
     try:
         conn = store_conn()
         try:
@@ -59,9 +77,13 @@ def _recent_load() -> list:
                 "SELECT path, opened_at FROM recent_folders ORDER BY seq ASC").fetchall()
         finally:
             conn.close()
-        return [{"path": r["path"], "opened_at": float(r["opened_at"] or 0)} for r in rows]
     except Exception:
         return []
+    items = [{"path": r["path"], "opened_at": float(r["opened_at"] or 0)} for r in rows]
+    keep = [it for it in items if str(it["path"]).startswith("/")]
+    if len(keep) != len(items):
+        _recent_save(keep)          # 顺手把脏数据从库里清掉，不用每次过滤
+    return keep
 
 
 def _recent_save(items: list) -> None:
@@ -102,7 +124,11 @@ def api_recent_folders_add():
     path = (data.get("path") or "").strip()
     if not path:
         return jsonify({"error": "缺少路径"}), 400
-    path = os.path.abspath(os.path.normpath(path))
+    if not path.startswith("/"):
+        # 相对路径会在服务端按工作目录解析，存下来必然指向错误位置，
+        # 读的时候又会被 /api/files 回退到别的目录，干脆拒收
+        return jsonify({"error": "只接受绝对路径"}), 400
+    path = _norm_dir_path(path)
     with _RECENT_LOCK:
         items = _recent_load()
         items = [x for x in items if x["path"] != path]
@@ -119,11 +145,205 @@ def api_recent_folders_remove():
     path = (data.get("path") or "").strip()
     if not path:
         return jsonify({"error": "缺少路径"}), 400
-    path = os.path.abspath(os.path.normpath(path))
+    path = _norm_dir_path(path)
     with _RECENT_LOCK:
         items = [x for x in _recent_load() if x["path"] != path]
         _recent_save(items)
     return jsonify({"ok": True, "folders": items})
+
+
+_PROJECT_BRIEF_MAX = 500         # 「AI 生成」时项目描述的字符上限
+_PROJECT_AI_TIMEOUT = 90         # 调 AI 生成脚手架的超时秒数
+
+
+def _ai_generate_files(brief, name):
+    """用系统 AI 按一句话描述生成项目文件清单。
+
+    返回 (files, error)；error 非空时 files 为空、调用方应直接报错。
+    统一走 _sys_pick：自动跟随「设置 → 系统 AI」选定的接口/模型，
+    并且该模块被停用时直接拒绝（与其它系统 AI 模块一致）。
+    """
+    from ..ide.ai import _load_cfg, _sys_pick, _log_ai_call   # 函数内导入，避免模块循环依赖
+    cfg = _load_cfg()
+    provider, model, err = _sys_pick(cfg, "scaffold")
+    if err:
+        return [], err
+
+    t0 = time.time()
+
+    def _fail(msg):
+        """统一失败出口：记一次失败调用再返回。"""
+        _log_ai_call("scaffold", False, int((time.time() - t0) * 1000), msg)
+        return [], msg
+
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    user = f"[项目名]\n{name}\n\n[项目描述]\n{brief}"
+    # max_tokens 给足：脚手架是一个较大的 JSON，太小会被截断成非法 JSON
+    payload = json.dumps({"model": model, "stream": False, "max_tokens": 8192, "messages": [
+        {"role": "system", "content": scaffold.AI_SYS},
+        {"role": "user", "content": user}]}).encode("utf-8")
+
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(url, data=payload, method="POST", headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+    try:
+        resp = urllib.request.urlopen(req, timeout=_PROJECT_AI_TIMEOUT)
+        obj = json.loads(resp.read().decode("utf-8"))
+        text = (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")[:200]
+        return _fail(f"AI 接口返回 {e.code}：{detail}")
+    except Exception as e:
+        return _fail(f"调用 AI 接口失败：{str(e)}")
+
+    files = scaffold.parse_manifest(text)
+    if not files:
+        return _fail("AI 没有返回可用的文件清单，请换个说法或换个模型")
+
+    _log_ai_call("scaffold", True, int((time.time() - t0) * 1000))
+    return files, ""
+
+
+def _project_prep(data):
+    """新建项目的公共参数校验与目标路径计算（/create 与 /create-stream 共用）。
+
+    返回 (info, err)：err 非空时是 (response, status) 元组，调用方直接 return 它。
+    """
+    parent = (data.get("parent") or "").strip()
+    name = (data.get("name") or "").strip()
+    template = (data.get("template") or "blank").strip()
+    brief = (data.get("brief") or "").strip()
+    if not parent:
+        return None, (jsonify({"error": "请选择项目要创建在哪个目录"}), 400)
+    if not parent.startswith("/"):
+        return None, (jsonify({"error": "位置必须是绝对路径"}), 400)
+    if not name:
+        return None, (jsonify({"error": "请输入项目名"}), 400)
+    if name in (".", "..") or "/" in name or "\\" in name:
+        return None, (jsonify({"error": "项目名不能包含路径分隔符"}), 400)
+    if any(ch in name for ch in '<>:"|?*'):
+        return None, (jsonify({"error": '项目名不能包含 < > : " | ? * 等字符'}), 400)
+    if len(name) > 128:
+        return None, (jsonify({"error": "项目名过长（上限 128 字符）"}), 400)
+    if template not in ("", "blank", scaffold.AI_KEY) and template not in scaffold.TEMPLATES:
+        return None, (jsonify({"error": f"未知的初始框架：{template}"}), 400)
+    if template == scaffold.AI_KEY and not brief:
+        return None, (jsonify({"error": "选择「AI 生成」后，请先用一句话描述你的项目"}), 400)
+    if len(brief) > _PROJECT_BRIEF_MAX:
+        return None, (jsonify({"error": f"描述过长（上限 {_PROJECT_BRIEF_MAX} 字）"}), 400)
+
+    parent_abs = safe_path(parent)
+    target = os.path.abspath(os.path.normpath(os.path.join(parent_abs, name)))
+    if target == parent_abs or target == "/":
+        return None, (jsonify({"error": "项目名无效"}), 400)
+    if os.path.exists(target):
+        return None, (jsonify({"error": f"目录已存在：{target}", "exists": True}), 409)
+    return {"parent_abs": parent_abs, "target": target, "name": name,
+            "template": template or "blank", "brief": brief}, None
+
+
+@bp.route("/api/projects/templates")
+def api_projects_templates():
+    """新建项目可选的初始框架（内置模板 + AI 生成），供前端渲染选项"""
+    items = [{"key": k, "label": v["label"], "icon": v["icon"], "hint": v["hint"]}
+             for k, v in scaffold.TEMPLATES.items()]
+    items.append({"key": scaffold.AI_KEY, "label": "AI 生成", "icon": "bi-stars",
+                  "hint": "用一句话描述项目，由系统 AI 生成初始框架"})
+    return jsonify({"ok": True, "templates": items, "brief_max": _PROJECT_BRIEF_MAX})
+
+
+@bp.route("/api/projects/create", methods=["POST"])
+def api_projects_create():
+    """新建项目：在「任意位置」创建项目目录，不受当前工作区限制。
+
+    与 /api/files/create 的区别：那个是在已存在的目录里建一级子项（父目录必须存在），
+    这里是从零建项目 —— 父目录不存在会逐级建出来，便于「选个位置 → 输入名字 → 立刻开干」。
+    """
+    info, err = _project_prep(request.get_json(silent=True) or {})
+    if err:
+        return err
+    name, target, template = info["name"], info["target"], info["template"]
+
+    # 先把文件清单准备好再落盘：AI 失败 / 框架非法时不会留下一个空目录
+    if template == scaffold.AI_KEY:
+        files, aerr = _ai_generate_files(info["brief"], name)
+        if aerr:
+            return jsonify({"error": aerr, "need_config": "尚未配置 AI" in aerr}), 400
+    else:
+        files = scaffold.render(template, name)
+
+    try:
+        os.makedirs(target)              # 父目录不存在时一并建出来
+    except PermissionError:
+        return jsonify({"error": f"没有权限在此处创建：{target}"}), 403
+    except Exception as e:
+        return jsonify({"error": f"创建失败：{str(e)}"}), 500
+
+    written, skipped = scaffold.write_manifest(target, files)
+    _log.info("新建项目：%s（框架=%s，写入 %d 个文件）", target, template, len(written))
+    return jsonify({"ok": True, "path": target, "name": name,
+                    "template": template, "files": written, "skipped": skipped})
+
+
+@bp.route("/api/projects/create-stream", methods=["POST"])
+def api_projects_create_stream():
+    """新建项目的流式版本：以 SSE 逐步回报「AI 规划 → 逐个写文件」的进度。
+
+    参数与 /api/projects/create 完全一致；一次性接口保留给不需要进度的调用方，
+    前端用它做动态进度（哪个文件正在创建、创建到第几个、哪些被跳过）。
+    """
+    info, err = _project_prep(request.get_json(silent=True) or {})
+
+    def ev(obj):
+        return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
+
+    def gen():
+        if err:
+            resp, code = err
+            try:
+                msg = (resp.get_json(silent=True) or {}).get("error") or "参数有误"
+            except Exception:
+                msg = "参数有误"
+            yield ev({"stage": "error", "msg": msg, "code": code})
+            return
+
+        name, target, template = info["name"], info["target"], info["template"]
+        if template == scaffold.AI_KEY:
+            yield ev({"stage": "ai", "msg": "正在让 AI 规划项目结构，请稍候…"})
+            files, aerr = _ai_generate_files(info["brief"], name)
+            if aerr:
+                yield ev({"stage": "error", "msg": aerr, "need_config": "尚未配置 AI" in aerr})
+                return
+        else:
+            files = scaffold.render(template, name)
+        total = len(files)
+        yield ev({"stage": "plan", "files": [f["path"] for f in files], "n": total,
+                  "msg": (f"已规划 {total} 个文件" if total else "空项目：不创建文件")})
+
+        try:
+            os.makedirs(target)              # 父目录不存在时一并建出来
+        except PermissionError:
+            yield ev({"stage": "error", "msg": f"没有权限在此处创建：{target}"})
+            return
+        except Exception as e:
+            yield ev({"stage": "error", "msg": f"创建失败：{str(e)}"})
+            return
+
+        written, skipped = [], []
+        for i, f in enumerate(files, 1):
+            w, s = scaffold.write_manifest(target, [f])   # 一次一个文件，便于逐个回报
+            written += w
+            skipped += s
+            yield ev({"stage": "file", "path": f["path"], "i": i, "n": total, "ok": bool(w)})
+            time.sleep(0.05)          # 本地写文件是毫秒级，稍作停留让前端能逐条点亮
+        yield ev({"stage": "done", "path": target, "name": name, "template": template,
+                  "written": written, "skipped": skipped})
+        _log.info("新建项目（流式）：%s（框架=%s，写入 %d 个文件）", target, template, len(written))
+
+    return FlaskResponse(gen(), mimetype="text/event-stream",
+                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @bp.route("/api/system")

@@ -166,13 +166,15 @@
 
   // 底部面板右侧按钮随当前标签变化：清空=清当前内容；⊘=仅在有可终止对象时显示
   function bpKillMode() {
-    const clear = $("bpClear"), kill = $("bpKill");
+    const clear = $("bpClear"), kill = $("bpKill"), toBg = $("bpToBg");
     if (!clear || !kill) return;
+    const noBg = () => { if (toBg) toBg.style.display = "none"; };
     if (bottomPane === "term") {
       kill.style.display = "";
       kill.classList.remove("danger");
       kill.innerHTML = '<i class="bi bi-x-circle"></i>';
       kill.title = "结束当前终端会话";
+      noBg();
     } else if (bottomPane === "log") {
       const L = currentLogId ? LOGS[currentLogId] : null;
       const running = !!(L && !L.done);
@@ -180,14 +182,41 @@
       kill.classList.toggle("danger", running);
       kill.innerHTML = '<i class="bi bi-stop-fill"></i>';
       kill.title = running ? "终止「" + L.name + "」" : "";
+      noBg();                                          // 后台任务 / 日志标签无需再转
     } else {                                           // 输出
-      // 前台运行中，或已超时转后台但仍在运行（输出面板显示的就是它的输出）→ 都显示 ⊘
+      // 前台运行中，或已转后台但仍在运行（输出面板显示的就是它的输出）→ 都显示 ⊘
       const running = !!(RUNBG.id && (!LOGS[RUNBG.id] || !LOGS[RUNBG.id].done));
       kill.style.display = running ? "" : "none";
       kill.classList.toggle("danger", running);
       kill.innerHTML = '<i class="bi bi-stop-fill"></i>';
       kill.title = running ? "终止正在运行的程序" + (RUNBG.mode === "bg" ? "（已转后台）" : "") : "";
+      // 「转后台」只在仍是前台且确实在跑时出现（超时不再自动转，这里是唯一入口）
+      if (toBg) {
+        toBg.style.display = (running && RUNBG.mode !== "bg") ? "" : "none";
+        toBg.title = "转为后台运行（不再计时，可在「后台任务」查看）";
+      }
     }
+  }
+
+  // 手动把前台运行中的任务转为后台（超时不再自动转，这里就是那个手动入口）。
+  // 转成后后端会推送 mode=bg 的帧，applyFgData 会接着建「运行日志」标签继续跟踪。
+  if ($("bpToBg")) {
+    $("bpToBg").onclick = async () => {
+      const tid = RUNBG.id;
+      if (!tid || RUNBG.mode === "bg") return;
+      try {
+        const r = await fetch("/api/run/promote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: tid })
+        });
+        const d = await r.json();
+        if (d.error) { toast("转后台失败：" + d.error, "err"); return; }
+        toast("已转为后台运行，可在「后台任务」面板结束", "ok");
+      } catch (e) {
+        toast("转后台失败：" + (e.message || e), "err");
+      }
+    };
   }
 
   // 前台运行结束后清理状态（后台任务由 endLog 负责）
@@ -207,7 +236,7 @@
     if (mode === "fg") {
       toggleBottom(true, "output");
       opLine("$ " + d.command + "    （工作目录：" + d.cwd + "）", "op-cmd");
-      opLine("  pid " + d.pid + " · 超时上限 " + (d.timeout || 0) + "s（到点仍在运行会自动转后台）", "op-dim");
+      opLine("  pid " + d.pid + " · 超时提醒 " + (d.timeout || 0) + "s（到点只提醒，不会自动转后台或终止；可点右上「↓」手动转后台）", "op-dim");
       bpKillMode();
       fgStream();
       return;
@@ -270,12 +299,12 @@
     (d.lines || []).forEach(l => opLine(l.m, runLineClass(l.c)));
     if (d.mode) RUNBG.mode = d.mode;
     if (d.mode === "bg" && !RUNBG.promoted) {
-      // 超时自动转后台：建日志标签接续跟踪，输出面板保留已打印内容
+      // 转后台（由用户点右上「↓」手动触发）：建日志标签接续跟踪，输出面板保留已打印内容
       RUNBG.promoted = true;
       ensureLogTab({ id: RUNBG.id, name: RUNBG.name });
-      logPush(RUNBG.id, "⏱ 已超时自动转为后台运行，后续日志请看「运行日志」标签", "op-head");
+      logPush(RUNBG.id, "⏱ 已转为后台运行，后续日志请看「运行日志」标签", "op-head");
       streamLog(RUNBG.id);
-      toast("运行超过 " + (d.timeout_used || RUNBG.timeout) + "s，已自动转为后台运行", "warn");
+      bpKillMode();                                    // 已转后台 → 收起「转后台」按钮
     }
     if (d.done) {
       const okExit = d.exit_code === 0;

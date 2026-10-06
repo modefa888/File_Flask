@@ -73,7 +73,9 @@ ENABLE_AUTO_INSTALL = _env_bool("ENABLE_AUTO_INSTALL", True)
 # 想彻底不超时，直接用 Ctrl+F5「后台运行（服务模式）」。
 RUN_TIMEOUT = _env_int("RUN_TIMEOUT", 30)            # 默认超时（秒）
 RUN_TIMEOUT_MAX = _env_int("RUN_TIMEOUT_MAX", 300)       # 允许前端传入的最大超时（秒）
-RUN_TIMEOUT_ACTION = _env_str("RUN_TIMEOUT_ACTION", "background")   # 超时后：background=转为后台继续跑 / kill=终止
+# 超时后怎么办：keep=只提醒一次、不自动处理（默认，转后台或终止都由用户手动决定）
+#              background=自动转为后台继续跑（旧行为） / kill=自动终止
+RUN_TIMEOUT_ACTION = _env_str("RUN_TIMEOUT_ACTION", "keep")
 
 # ===== Demo / 小游戏目录（与 data 平级，独立于默认浏览根）=====
 DEMO_DIR = os.path.join(os.path.dirname(BASE_DIR), "demo")

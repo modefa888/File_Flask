@@ -55,7 +55,7 @@
     list.forEach(t => {
       const item = document.createElement("div");
       item.className = "runner-item" + (t.running ? " running" : "");
-      const tag = t.mode === "bg" ? (t.promoted ? "后台·超时转" : "后台") : "前台";
+      const tag = t.mode === "bg" ? (t.promoted ? "后台·已转" : "后台") : "前台";
       const status = t.running
         ? '<span class="dot"></span>运行中'
         : '<span class="dot off"></span>已结束' +

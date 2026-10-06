@@ -344,7 +344,12 @@
      最近打开存到服务端（data/storage/.file_recent_folders.json），不同设备 / 浏览器都能看到同一份记录 */
   let RECENT = [];                           // [{path, name, opened_at, exists}]
 
-  function recentFolders() { return RECENT.map(x => x.path); }
+  // 只认绝对路径且仍然存在的记录：相对路径会被后端当成失效路径回退到别的目录
+  function recentOk(x) {
+    return !!x && typeof x.path === "string" && x.path.startsWith("/") && x.exists !== false;
+  }
+
+  function recentFolders() { return RECENT.filter(recentOk).map(x => x.path); }
 
   async function loadRecentFolders() {
     try {
@@ -366,14 +371,145 @@
     } catch (e) { /* 忽略：记录失败不影响打开文件夹 */ }
   }
 
+  /* 可视化文件夹选择器：列表里只有文件夹（选不到文件），单击即进入；
+     顶部可跳上级 / 当前项目 / 根目录，底部按钮确认当前所在目录。
+     返回 Promise<string|null>（取消为 null）。
+
+     可作为子层嵌在别的对话框里（如「新建项目」点「浏览」）：此时把下层对话框整体隐藏，
+     而不是清空 overlay —— 原来是直接 ov.innerHTML = ""，会把外层连同已填内容一起销毁，
+     表现为「选完目录后整个新建项目窗口就没了」。
+     文案可用 opts 定制：{ title, okText, hint }。 */
+  function pickFolderDialog(startPath, opts) {
+    opts = opts || {};
+    return new Promise((resolve) => {
+      const ov = $("modalOverlay");
+      const outer = ov.querySelector(".ide-modal");     // 下层对话框（若有）
+      const prevKeydown = ov.onkeydown;
+      const prevMousedown = ov.onmousedown;
+      if (outer) outer.style.display = "none";
+      // 起点必须是绝对路径：相对路径会被后端回退到最近存在的上级目录，
+      // 结果就是「路径栏写着 A、列表却是 B 的内容」。这里先归一化。
+      let cur = String(startPath || "").replace(/\/+$/, "");
+      if (!cur.startsWith("/")) cur = (ROOT && ROOT.startsWith("/")) ? ROOT.replace(/\/+$/, "") : "/";
+      let busy = false;
+      const box = document.createElement("div");
+      box.className = "ide-modal wide";
+      box.innerHTML =
+        '<div class="m-title"><i class="bi bi-folder2-open"></i><span>' + esc(opts.title || "打开文件夹") + "</span></div>" +
+        '<div class="m-body">' +
+          '<div class="fp-bar">' +
+            '<button class="fp-nav fp-up" title="上一级"><i class="bi bi-arrow-up"></i></button>' +
+            '<div class="fp-path" title="当前文件夹"></div>' +
+            '<button class="fp-nav fp-project">当前项目</button>' +
+            '<button class="fp-nav fp-root">根目录</button>' +
+          "</div>" +
+          '<div class="fp-recent"></div>' +
+          '<div class="fp-notice" hidden></div>' +
+          '<div class="fp-list"></div>' +
+          '<div class="fp-hint">' + esc(opts.hint || "这里只显示文件夹；单击文件夹进入下一级，确认后打开当前所在的文件夹。") + "</div>" +
+        "</div>" +
+        '<div class="m-foot"><button class="m-cancel">取消</button>' +
+        '<button class="m-ok">' + esc(opts.okText || "打开此文件夹") + "</button></div>";
+      ov.appendChild(box);                              // 不清空 overlay：下层对话框要留着
+      ov.classList.add("show");
+      const list = box.querySelector(".fp-list");
+      const pathEl = box.querySelector(".fp-path");
+      const recentEl = box.querySelector(".fp-recent");
+      const noticeEl = box.querySelector(".fp-notice");
+      const close = (val) => {
+        box.remove();
+        if (outer) outer.style.display = "";             // 原样恢复下层对话框（DOM 未重建，已填内容还在）
+        else ov.classList.remove("show");
+        ov.onkeydown = prevKeydown;
+        ov.onmousedown = prevMousedown;
+        resolve(val);
+      };
+
+      function notice(msg) {
+        noticeEl.textContent = msg || "";
+        noticeEl.hidden = !msg;
+      }
+
+      const parentOf = (p) => {
+        const s = String(p || "").replace(/\/+$/, "");
+        const i = s.lastIndexOf("/");
+        return i <= 0 ? "/" : s.slice(0, i);
+      };
+
+      function renderRecent() {
+        const items = RECENT.filter(recentOk).slice(0, 5);
+        recentEl.innerHTML = items.length
+          ? '<span class="fp-recent-lb">最近：</span>' + items.map(x =>
+              '<a class="fp-recent-i" data-path="' + esc(x.path) + '" title="' + esc(x.path) + '">' +
+              esc(x.name || String(x.path).split("/").pop() || x.path) + "</a>").join("")
+          : "";
+        recentEl.querySelectorAll(".fp-recent-i").forEach(a => { a.onclick = () => go(a.dataset.path); });
+      }
+
+      async function go(path) {
+        let target = String(path || "").replace(/\/+$/, "");
+        if (!target.startsWith("/")) {        // 相对路径一律不认（后端会把它回退到别的目录）
+          target = (ROOT && ROOT.startsWith("/")) ? ROOT.replace(/\/+$/, "") : "/";
+        }
+        if (!target) target = "/";
+        if (busy) return;
+        busy = true;
+        pathEl.textContent = target;
+        list.innerHTML = '<div class="fp-empty">加载中…</div>';
+        notice("");
+        try {
+          // 只取目录：文件根本不出现在列表里，从交互上就选不到文件
+          const d = await apiFiles(target, true);
+          // 后端对失效路径会「逐级回退到最近存在的上级目录」并照常返回 200，
+          // 所以以它返回的实际目录为准，否则路径栏会显示一个其实没打开的位置
+          const actual = String(d.current_path_abs || "").replace(/\/+$/, "");
+          if (actual && actual !== target) {
+            cur = actual;
+            pathEl.textContent = actual;
+            notice("「" + target + "」不存在，已回到 " + actual);
+          } else {
+            cur = target;
+          }
+          const dirs = (d.items || []).filter(it => it.is_dir)
+            .sort((a, b) => a.name.localeCompare(b.name, "zh"));
+          if (!dirs.length) {
+            list.innerHTML = '<div class="fp-empty">这个文件夹里没有子文件夹</div>';
+            return;
+          }
+          list.innerHTML = dirs.map(it => {
+            const full = it.path || (cur === "/" ? "/" + it.name : cur + "/" + it.name);
+            return '<div class="fp-item" data-path="' + esc(full) + '">' +
+              '<i class="bi bi-folder2"></i><span class="fp-name">' + esc(it.name) + "</span></div>";
+          }).join("");
+          list.querySelectorAll(".fp-item").forEach(el => { el.onclick = () => go(el.dataset.path); });
+          list.scrollTop = 0;
+        } catch (e) {
+          list.innerHTML = '<div class="fp-empty fp-err">' + esc(e.message || "无法读取该文件夹") + "</div>";
+        } finally {
+          busy = false;
+        }
+      }
+
+      box.querySelector(".fp-up").onclick = () => go(parentOf(cur));
+      box.querySelector(".fp-project").onclick = () => { if (ROOT) go(ROOT); };
+      box.querySelector(".fp-root").onclick = () => go("/");
+      box.querySelector(".m-cancel").onclick = () => close(null);
+      box.querySelector(".m-ok").onclick = () => close(cur);
+      ov.onmousedown = (e) => { if (e.target === ov) close(null); };
+      ov.onkeydown = (e) => {
+        if (e.key === "Escape") { e.preventDefault(); close(null); }
+        else if (e.key === "Enter") { e.preventDefault(); close(cur); }
+      };
+      renderRecent();
+      go(cur);
+      box.querySelector(".m-ok").focus();
+    });
+  }
+
   async function openFolderDialog() {
-    const recent = recentFolders();
-    const def = ROOT || recent[0] || "";
-    const tip = recent.length ? "（最近：" + recent.slice(0, 3).join("、") + "）" : "";
-    const p = await uiPrompt("打开文件夹", def, "输入文件夹的绝对路径" + tip);
-    if (!p || !p.trim()) return;
-    let path = p.trim();
-    if (path.length > 1) path = path.replace(/\/+$/, "");      // 去掉尾部斜杠（保留根 "/"）
+    await loadRecentFolders();                       // 「最近」列表用于快速跳转
+    const path = await pickFolderDialog(ROOT || recentFolders()[0] || "/");
+    if (!path) return;
     try {
       const r = await fetch("/api/files?path=" + encodeURIComponent(path));
       const d = await r.json();
@@ -385,6 +521,275 @@
     } catch (e) {
       toast("无法打开：" + (e.message || e), "err");
     }
+  }
+
+  /* ---------- 新建项目：选「系统任意位置」的目录 + 项目名 → 创建目录 → 打开为项目 ----------
+     与「打开文件夹」的区别：从零建目录（父目录不存在会一并建出），
+     且位置不受当前工作区限制 —— 浏览用的是同一个全盘可用的目录选择器。 */
+  function newProjectDialog() {
+    return new Promise((resolve) => {
+      const ov = $("modalOverlay");
+      let busy = false;
+      const box = document.createElement("div");
+      box.className = "ide-modal np-modal wide";
+      box.innerHTML =
+        '<div class="m-title"><i class="bi bi-diagram-3"></i><span>新建项目</span></div>' +
+        '<div class="m-body">' +
+          '<div class="np-row"><span class="np-lb">位置</span>' +
+            '<div class="np-loc">' +
+              '<input class="np-loc-input" spellcheck="false" autocomplete="off" placeholder="项目创建在哪个目录，如 /home/you/Desktop/CODE">' +
+              '<button class="np-pick" title="浏览文件夹…"><i class="bi bi-folder2-open"></i></button>' +
+            "</div>" +
+          "</div>" +
+          '<div class="np-row"><span class="np-lb">项目名</span>' +
+            '<input class="np-name-input" spellcheck="false" autocomplete="off" placeholder="my-project">' +
+          "</div>" +
+          '<div class="np-row np-row-tpl"><span class="np-lb">初始框架</span>' +
+            '<div class="np-tpl"></div>' +
+          "</div>" +
+          '<div class="np-row np-brief-row" hidden><span class="np-lb"></span>' +
+            '<input class="np-brief" spellcheck="false" autocomplete="off" placeholder="✨ 一句话描述你的项目，如：一个带用户登录和 SQLite 的 Flask 博客">' +
+          "</div>" +
+          '<div class="np-preview">即将创建：<b class="np-preview-path">—</b></div>' +
+          '<div class="np-tip"><i class="bi bi-info-circle"></i>位置可选系统任意可用目录（不受当前工作区限制），不存在时会自动逐级创建。</div>' +
+          '<div class="np-prog" hidden>' +
+            '<div class="np-prog-hd"><span class="np-prog-ic"><i class="bi bi-hourglass-split"></i></span>' +
+              '<span class="np-prog-msg"></span></div>' +
+            '<div class="np-prog-list"></div>' +
+          "</div>" +
+          '<div class="np-msg"></div>' +
+        "</div>" +
+        '<div class="m-foot"><button class="m-cancel">取消</button>' +
+        '<button class="m-ok">创建并打开</button></div>';
+      ov.innerHTML = "";
+      ov.appendChild(box);
+      ov.classList.add("show");
+      const locInp = box.querySelector(".np-loc-input");
+      const nameInp = box.querySelector(".np-name-input");
+      const tplsEl = box.querySelector(".np-tpl");
+      const briefRow = box.querySelector(".np-brief-row");
+      const briefInp = box.querySelector(".np-brief");
+      const progEl = box.querySelector(".np-prog");
+      const progIc = box.querySelector(".np-prog-ic");
+      const progMsg = box.querySelector(".np-prog-msg");
+      const progList = box.querySelector(".np-prog-list");
+      const previewEl = box.querySelector(".np-preview-path");
+      const msgEl = box.querySelector(".np-msg");
+      const okBtn = box.querySelector(".m-ok");
+      const close = (val) => { ov.classList.remove("show"); ov.innerHTML = ""; ov.onkeydown = null; resolve(val); };
+
+      function say(msg, err) {
+        msgEl.textContent = msg || "";
+        msgEl.className = "np-msg" + (err ? " err" : "");
+      }
+      function cleanName() { return nameInp.value.trim().replace(/^\/+|\/+$/g, ""); }
+      function targetOf() {
+        const p = locInp.value.trim().replace(/\/+$/, "");
+        const n = cleanName();
+        if (!p || !n) return "";
+        return (p === "/" ? "" : p) + "/" + n;
+      }
+      function nameError(n) {
+        if (!n) return "请输入项目名";
+        if (n === "." || n === "..") return "项目名无效";
+        if (/[\/\\]/.test(n)) return "项目名不能包含路径分隔符";
+        if (/[<>:"|?*]/.test(n)) return '项目名不能包含 < > : " | ? * 等字符';
+        if (n.length > 128) return "项目名过长（上限 128 字符）";
+        return "";
+      }
+      // ---- 初始框架：内置模板 + AI 生成（列表来自后端，避免两边各维护一份）----
+      const AI_TPL = "ai";               // 与后端 scaffold.AI_KEY 一致
+      let TPLS = [{ key: "blank", label: "空项目", icon: "bi-folder2", hint: "只建目录" }];
+      let tpl = "blank";
+
+      function renderTpls() {
+        tplsEl.innerHTML = TPLS.map(t =>
+          '<button type="button" class="np-tpl-i' + (t.key === tpl ? " on" : "") +
+            '" data-k="' + esc(t.key) + '" title="' + esc(t.hint || t.label) + '">' +
+            '<i class="bi ' + esc(t.icon || "bi-folder2") + '"></i>' + esc(t.label) + "</button>").join("");
+        tplsEl.querySelectorAll(".np-tpl-i").forEach(b => {
+          b.onclick = () => {
+            tpl = b.dataset.k;
+            renderTpls();
+            refresh();
+            if (tpl === AI_TPL) briefInp.focus();
+          };
+        });
+      }
+
+      function loadTpls() {
+        fetch("/api/projects/templates")
+          .then(r => r.json())
+          .then(d => {
+            if (d && d.templates && d.templates.length) { TPLS = d.templates; renderTpls(); refresh(); }
+          })
+          .catch(() => { /* 拉不到就保持只有「空项目」，不影响创建 */ });
+      }
+
+      function refresh() {
+        const p = locInp.value.trim();
+        previewEl.textContent = targetOf() || "—";
+        briefRow.hidden = (tpl !== AI_TPL);          // 只有选「AI 生成」才要描述
+        okBtn.disabled = !p.startsWith("/") || !!nameError(cleanName()) ||
+                         (tpl === AI_TPL && !briefInp.value.trim());
+      }
+
+      // ---- 创建进度：逐条列出框架里的文件，边写边点亮 ----
+      let progRows = {};
+      function progReset() {
+        progRows = {};
+        progList.innerHTML = "";
+        progMsg.textContent = "";
+        progIc.className = "np-prog-ic";
+        progIc.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+        progEl.hidden = true;
+      }
+      function progShow(msg) {
+        progEl.hidden = false;
+        if (msg) progMsg.textContent = msg;
+      }
+      function progPlan(files) {
+        progRows = {};
+        progList.innerHTML = "";
+        files.forEach(p => {
+          const row = document.createElement("div");
+          row.className = "np-prog-i";
+          row.innerHTML = '<i class="bi bi-circle"></i><span></span>';
+          row.querySelector("span").textContent = p;       // 用 textContent 塞路径，避免注入
+          progList.appendChild(row);
+          progRows[p] = row;
+        });
+      }
+      function progFile(path, ok) {
+        const row = progRows[path];
+        if (!row) return;
+        row.classList.add(ok ? "ok" : "bad");
+        row.querySelector("i").className = "bi " + (ok ? "bi-check-circle-fill" : "bi-exclamation-circle-fill");
+      }
+
+      // 流式创建：后端按 SSE 逐步回报阶段，这里逐帧回调
+      async function createStream(payload, onEvent) {
+        const resp = await fetch("/api/projects/create-stream", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok || !resp.body) throw new Error("HTTP " + resp.status);
+        const reader = resp.body.getReader();
+        const dec = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          buf += dec.decode(chunk.value, { stream: true });
+          let k;
+          while ((k = buf.indexOf("\n\n")) >= 0) {
+            const raw = buf.slice(0, k);
+            buf = buf.slice(k + 2);
+            const line = raw.split("\n").find(l => l.indexOf("data:") === 0);
+            if (!line) continue;
+            try { onEvent(JSON.parse(line.slice(5).trim())); } catch (e) { /* 忽略坏帧 */ }
+          }
+        }
+      }
+
+      async function submit() {
+        if (busy) return;
+        const rawParent = locInp.value.trim();
+        const name = cleanName();
+        if (!rawParent) { say("请选择项目要创建在哪个目录", true); locInp.focus(); return; }
+        if (!rawParent.startsWith("/")) { say("位置必须是绝对路径", true); locInp.focus(); return; }
+        const bad = nameError(name);
+        if (bad) { say(bad, true); nameInp.focus(); return; }
+        const brief = briefInp.value.trim();
+        if (tpl === AI_TPL && !brief) { say("请先用一句话描述你的项目", true); briefInp.focus(); return; }
+        busy = true;
+        okBtn.disabled = true;
+        okBtn.textContent = tpl === AI_TPL ? "AI 生成中…" : "创建中…";
+        say("", false);
+        progReset();
+        progShow(tpl === AI_TPL ? "正在让 AI 规划项目结构，请稍候…" : "正在创建项目…");
+        if (tpl === AI_TPL) progIc.className = "np-prog-ic loading";
+        let result = null;
+        try {
+          await createStream({
+            parent: rawParent.replace(/\/+$/, "") || "/", name, template: tpl, brief,
+          }, evt => {
+            if (evt.stage === "ai") {
+              progIc.className = "np-prog-ic loading";
+              progShow(evt.msg);
+            } else if (evt.stage === "plan") {
+              progIc.className = "np-prog-ic";
+              progShow(evt.msg);
+              progPlan(evt.files || []);
+            } else if (evt.stage === "file") {
+              progFile(evt.path, evt.ok);
+              progShow("正在创建 " + evt.i + " / " + evt.n + "：" + evt.path);
+            } else if (evt.stage === "done") {
+              result = evt;
+            } else if (evt.stage === "error") {
+              result = { error: evt.msg, need_config: evt.need_config };
+            }
+          });
+          if (!result) { say("连接中断，未能确认创建结果，请刷新页面查看", true); return; }
+          if (result.error) {
+            progIc.className = "np-prog-ic err";
+            progIc.innerHTML = '<i class="bi bi-x-circle-fill"></i>';
+            progShow("失败：" + result.error);
+            say(result.error, true);
+            return;
+          }
+          const nok = (result.written || []).length;
+          const nskip = (result.skipped || []).length;
+          progIc.className = "np-prog-ic ok";
+          progIc.innerHTML = '<i class="bi bi-check-circle-fill"></i>';
+          progShow("完成：创建 " + nok + " 个文件" + (nskip ? "，跳过 " + nskip + " 个" : ""));
+          await new Promise(r => setTimeout(r, 450));   // 让「完成」状态停留一下，便于看清
+          close(result.path);                           // 成功后把新路径交回调用方去打开
+        } catch (e) {
+          say("创建失败：" + (e.message || e), true);
+        } finally {
+          busy = false;
+          okBtn.disabled = false;
+          okBtn.textContent = "创建并打开";
+        }
+      }
+
+      box.querySelector(".np-pick").onclick = async () => {
+        const cur = locInp.value.trim();
+        const picked = await pickFolderDialog(cur.startsWith("/") ? cur : (ROOT || "/"), {
+          title: "选择项目位置",
+          okText: "选择此文件夹",
+          hint: "单击文件夹进入下一级；确认后把当前位置作为项目的创建位置。",
+        });
+        if (picked) { locInp.value = picked; refresh(); nameInp.focus(); }
+      };
+      locInp.addEventListener("input", refresh);
+      nameInp.addEventListener("input", refresh);
+      briefInp.addEventListener("input", refresh);
+      okBtn.onclick = submit;
+      renderTpls();
+      loadTpls();
+      box.querySelector(".m-cancel").onclick = () => close(null);
+      ov.onmousedown = (e) => { if (e.target === ov) close(null); };
+      ov.onkeydown = (e) => {
+        if (e.key === "Escape") { e.preventDefault(); close(null); }
+        else if (e.key === "Enter") { e.preventDefault(); submit(); }
+      };
+      locInp.value = (ROOT || recentFolders()[0] || "").replace(/\/+$/, "");
+      refresh();
+      nameInp.focus();
+    });
+  }
+
+  /* 新建项目入口：建好后记为最近打开，并按当前情况打开
+     （没有主项目 → 直接跳转；已有主项目 → 追加为工作区里的第二个项目，与「打开文件夹」一致） */
+  async function newProjectFlow() {
+    await loadRecentFolders();
+    const path = await newProjectDialog();
+    if (!path) return;
+    addRecentFolder(path);
+    if (ROOT) { addWorkspaceFolder(path); return; }
+    location.href = "/ide?path=" + encodeURIComponent(path);
   }
 
   async function newInRoot(isDir) {

@@ -729,7 +729,7 @@
         ["资源管理器按键", "选中文件后：Enter 打开，Ctrl+Enter 侧边打开，F2 重命名，Delete 删除，Ctrl+C/X/V 复制剪切粘贴，Ctrl+Alt+C 复制路径，Ctrl+Shift+Alt+C 复制相对路径"],
       ]},
       { head: "运行", items: [
-        ["F5", "运行当前文件（日志实时推送，超时仍在运行会自动转后台）"],
+        ["F5", "运行当前文件（日志实时推送，超时可手动转后台）"],
         ["Ctrl+F5", "后台运行（服务模式：Web 服务等常驻程序，不超时、可停止）"],
         ["Ctrl+`", "显示 / 隐藏输出面板　拖动面板上沿可调整高度（双击恢复默认）"],
         ["菜单 · 运行", "运行环境管理…（也可点活动栏「运行环境」图标）"],
@@ -764,6 +764,7 @@
       { label: "新建文件", sc: "Ctrl+N", icon: "bi-file-earmark-plus", act: () => newInRoot(false) },
       { label: "新建文件夹", icon: "bi-folder-plus", act: () => newInRoot(true) },
       { label: "打开文件夹…", icon: "bi-folder-symlink", act: openFolderDialog },
+      { label: "新建项目…", icon: "bi-diagram-3", act: newProjectFlow },
       { label: "最近打开", icon: "bi-clock-history", sub: () => {
           if (!RECENT.length) return [{ label: "（暂无最近打开的文件夹）", icon: "bi-dash", disabled: true }];
           return RECENT.map(f => f.exists ? ({

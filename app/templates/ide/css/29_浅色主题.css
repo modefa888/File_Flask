@@ -284,6 +284,41 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .notify-preview-tag { color: #1a7f37; background: rgba(26, 127, 55, .12); }
 :where(html.theme-light) .notify-preview-note { color: #8a6a00; }
 :where(html.theme-light) .notify-preview-note code { color: #a0522d; background: rgba(160, 82, 45, .1); }
+/* 可视化文件夹选择器 */
+:where(html.theme-light) .fp-nav { background: #ececec; border-color: #cecece; color: #333333; }
+:where(html.theme-light) .fp-nav:hover { background: #e0e0e0; color: #000000; }
+:where(html.theme-light) .fp-path { background: #ffffff; border-color: #d0d0d0; color: #0a6aa8; }
+:where(html.theme-light) .fp-recent { color: #8a8a8a; }
+:where(html.theme-light) .fp-recent-i { color: #0a6aa8; }
+:where(html.theme-light) .fp-list { background: #ffffff; border-color: #dcdcdc; }
+:where(html.theme-light) .fp-item { color: #1f2328; }
+:where(html.theme-light) .fp-item:hover { background: #cde3f8; color: #101418; }
+:where(html.theme-light) .fp-empty, :where(html.theme-light) .fp-hint { color: #8a8a8a; }
+:where(html.theme-light) .fp-notice { background: #fff6e0; border-color: #e8d49a; color: #8a6a00; }
+:where(html.theme-light) .np-lb { color: #4a4a4a; }
+:where(html.theme-light) .np-loc-input, :where(html.theme-light) .np-name-input, :where(html.theme-light) .np-brief { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .np-loc-input:focus, :where(html.theme-light) .np-name-input:focus, :where(html.theme-light) .np-brief:focus { border-color: #0098ff; }
+:where(html.theme-light) .np-tpl-i { background: #f2f2f2; border-color: #d4d4d4; color: #3a3a3a; }
+:where(html.theme-light) .np-tpl-i .bi { color: #7a7a7a; }
+:where(html.theme-light) .np-tpl-i:hover { background: #e8e8e8; color: #1f2328; }
+:where(html.theme-light) .np-tpl-i.on { background: #cde3f8; border-color: #a8c8e8; color: #0b3d63; }
+:where(html.theme-light) .np-tpl-i.on .bi { color: #005fb8; }
+:where(html.theme-light) .np-pick { background: #f2f2f2; border-color: #cecece; color: #1f2328; }
+:where(html.theme-light) .np-pick:hover { background: #e4eaf2; color: #005fb8; }
+:where(html.theme-light) .np-preview { color: #6b6b6b; }
+:where(html.theme-light) .np-preview-path { color: #005fb8; }
+:where(html.theme-light) .np-tip { background: #eef6fd; border-color: #cfe4f5; color: #2b6a94; }
+:where(html.theme-light) .np-msg { color: #6b6b6b; }
+:where(html.theme-light) .np-msg.err { color: #c0392b; }
+:where(html.theme-light) .np-prog { background: #ffffff; border-color: #d4d4d4; }
+:where(html.theme-light) .np-prog-hd { background: #f4f4f4; border-bottom-color: #e4e4e4; color: #3a3a3a; }
+:where(html.theme-light) .np-prog-ic { color: #0098ff; }
+:where(html.theme-light) .np-prog-ic.ok { color: #1a7f37; }
+:where(html.theme-light) .np-prog-ic.err { color: #c0392b; }
+:where(html.theme-light) .np-prog-i { color: #9a9a9a; }
+:where(html.theme-light) .np-prog-i.ok { color: #1f2328; }
+:where(html.theme-light) .np-prog-i.ok .bi { color: #1a7f37; }
+:where(html.theme-light) .np-prog-i.bad .bi { color: #c0392b; }
 :where(html.theme-light) .notify-label { color: #1f2328; }
 :where(html.theme-light) .notify-desc { color: #6b6b6b; }
 :where(html.theme-light) .notify-input, :where(html.theme-light) .notify-select {

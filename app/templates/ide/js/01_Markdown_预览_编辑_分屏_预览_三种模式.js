@@ -349,6 +349,232 @@
     check();
   }
 
+  /* package.json：检测 node_modules 里哪些依赖已安装，在编辑器内显示并支持一键安装。
+     与 requirements.txt 那条工具栏同一套样式（复用 .req-toolbar），额外带 npm-toolbar 便于区分 */
+  function setupPackageJsonView(tab) {
+    if (tab.host.querySelector(".npm-toolbar")) return;
+
+    // 行首标记：与 requirements.txt 共用同一套 gutter 与样式（绿勾 / 黄三角），行号保留
+    tab.cm.setOption("gutters", ["CodeMirror-linenumbers", "pip-status-gutter"]);
+    tab.cm.refresh();
+
+    const tb = document.createElement("div");
+    tb.className = "req-toolbar npm-toolbar";
+    tb.innerHTML = '<span class="status"><i class="bi bi-info-circle"></i><span class="t">准备检测…</span></span>' +
+      '<select class="index-select" title="安装时使用的 npm 镜像源">' +
+      '<option value="">默认源</option>' +
+      '<option value="npmmirror">淘宝</option>' +
+      '<option value="tencent">腾讯</option>' +
+      '<option value="huawei">华为</option>' +
+      '<option value="npm">npm 官方</option>' +
+      '</select>' +
+      '<button class="refresh" title="重新检测"><i class="bi bi-arrow-clockwise"></i>刷新</button>' +
+      '<button class="install" title="安装 package.json 中所有缺失依赖" disabled><i class="bi bi-box-arrow-in-down"></i>一键安装缺失</button>';
+    tab.host.appendChild(tb);
+
+    tab.npmState = { checking: false, installing: false, data: null, error: null };
+
+    const statusEl = tb.querySelector(".status");
+    const textEl = tb.querySelector(".status .t");
+    const indexSelect = tb.querySelector(".index-select");
+    const refreshBtn = tb.querySelector("button.refresh");
+    const installBtn = tb.querySelector("button.install");
+
+    const savedReg = localStorage.getItem("cb-npm-registry");
+    if (savedReg && indexSelect.querySelector('option[value="' + savedReg + '"]')) {
+      indexSelect.value = savedReg;
+    }
+    indexSelect.addEventListener("change", () => {
+      localStorage.setItem("cb-npm-registry", indexSelect.value);
+    });
+
+    function setSpin(el, on) {
+      if (on) {
+        if (!el.querySelector(".spin")) {
+          const s = document.createElement("span");
+          s.innerHTML = '<i class="spin"></i>';
+          el.insertBefore(s, el.firstChild);
+        }
+      } else {
+        const s = el.querySelector(".spin");
+        if (s) s.remove();
+      }
+    }
+
+    // package.json 是 JSON，行号得自己找：扫出各依赖段里 "name": "spec" 所在的行
+    function scanDepLines() {
+      const lines = (tab.cm ? tab.cm.getValue() : "").split(/\r?\n/);
+      const found = {};
+      let inDeps = false;
+      for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trim();
+        if (/^"(dependencies|devDependencies|peerDependencies|optionalDependencies)"\s*:\s*\{/.test(t)) {
+          inDeps = true;
+          continue;
+        }
+        if (!inDeps) continue;
+        if (t.charAt(0) === "}") { inDeps = false; continue; }
+        const m = t.match(/^"([^"]+)"\s*:\s*"/);
+        if (m) found[m[1]] = i;
+      }
+      return found;
+    }
+
+    function makeMarker(cls, title, handler) {
+      const el = document.createElement("div");
+      el.className = "cm-pip-" + cls;
+      el.title = title;
+      el.innerHTML = cls === "ok" ? '<i class="bi bi-check-circle"></i>'
+                                  : '<i class="bi bi-exclamation-triangle"></i>';
+      if (handler) el.addEventListener("click", handler);
+      return el;
+    }
+
+    function clearMarks() {
+      if (!tab.cm) return;
+      const last = tab.cm.lineCount();
+      for (let i = 0; i < last; i++) tab.cm.setGutterMarker(i, "pip-status-gutter", null);
+    }
+
+    function markLines(d) {
+      if (!tab.cm || !d) return;
+      const lines = scanDepLines();
+      d.items.forEach(it => {
+        const line = lines[it.name];
+        if (line === undefined) return;     // 名字刚改过 / 不在依赖段里，找不到行就不标
+        if (it.installed) {
+          tab.cm.setGutterMarker(line, "pip-status-gutter",
+            makeMarker("ok", it.name + (it.version ? " " + it.version : "") + " 已安装"));
+        } else {
+          tab.cm.setGutterMarker(line, "pip-status-gutter",
+            makeMarker("miss", it.name + (it.spec ? " " + it.spec : "") + " 未安装\n点击单独安装",
+              () => installPackages([it.name])));
+        }
+      });
+    }
+
+    function render() {
+      const st = tab.npmState;
+      const d = st.data;
+      clearMarks();                          // 每次重绘先清旧标记，避免残留
+      if (st.error) {
+        statusEl.className = "status err";
+        textEl.textContent = st.error;
+        installBtn.disabled = true;
+        return;
+      }
+      if (st.checking) {
+        statusEl.className = "status";
+        textEl.textContent = "检测中…";
+        installBtn.disabled = true;
+        return;
+      }
+      if (!d) {
+        statusEl.className = "status";
+        textEl.textContent = "准备检测…";
+        installBtn.disabled = true;
+        return;
+      }
+      if (!d.total) {
+        statusEl.className = "status ok";
+        textEl.textContent = "package.json 里没有声明依赖";
+        installBtn.disabled = true;
+        return;
+      }
+      const dev = d.items.filter(it => it.dev).length;
+      statusEl.className = "status " + (d.missing ? "warn" : "ok");
+      textEl.textContent = "node_modules：" + d.installed + " 已安装 / " + d.missing + " 未安装" +
+        (dev ? " · " + dev + " 个 dev" : "") +
+        (d.npm_ok ? "" : " · 未找到 npm");
+      installBtn.disabled = d.missing === 0 || !d.npm_ok || st.installing;
+      markLines(d);                          // 行首逐条标记（已装=绿勾 / 缺失=黄三角）
+    }
+
+    async function check() {
+      tab.npmState.checking = true;
+      tab.npmState.error = null;
+      render();
+      try {
+        const r = await fetch("/api/npm/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: tab.path })
+        });
+        const raw = await r.text();
+        let d;
+        try {
+          d = JSON.parse(raw);
+        } catch (parseErr) {
+          if (raw.trim().startsWith("<")) {
+            throw new Error("接口返回 HTML，说明后端还没加载新路由，请重启服务后刷新页面");
+          }
+          throw parseErr;
+        }
+        tab.npmState.checking = false;
+        if (d.error) { tab.npmState.error = d.error; tab.npmState.data = null; }
+        else { tab.npmState.data = d; tab.npmState.error = null; }
+      } catch (e) {
+        tab.npmState.checking = false;
+        tab.npmState.error = "检测失败：" + (e.message || e);
+      }
+      render();
+    }
+
+    async function installPackages(packages, allMissing) {
+      if (tab.npmState.installing) return;
+      tab.npmState.installing = true;
+      const oldHtml = installBtn.innerHTML;
+      installBtn.disabled = true;
+      refreshBtn.disabled = true;
+      installBtn.innerHTML = '<i class="spin"></i>安装中…';
+      setSpin(installBtn, true);
+      try {
+        const body = { path: tab.path, registry: indexSelect.value };
+        if (allMissing) body.all_missing = true;
+        else if (packages && packages.length) body.packages = packages;
+        const r = await fetch("/api/npm/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const raw = await r.text();
+        let d;
+        try {
+          d = JSON.parse(raw);
+        } catch (parseErr) {
+          if (raw.trim().startsWith("<")) {
+            throw new Error("接口返回 HTML，请重启服务后刷新页面");
+          }
+          throw parseErr;
+        }
+        if (d.ok) toast("npm 安装完成", "ok");
+        else {
+          const tail = (d.stderr || "").trim().split("\n").slice(-2).join(" ");
+          toast("安装失败：" + (d.error || tail || "未知错误"), "err");
+        }
+      } catch (e) {
+        toast("安装失败：" + (e.message || e), "err");
+      } finally {
+        tab.npmState.installing = false;
+        installBtn.innerHTML = oldHtml;
+        refreshBtn.disabled = false;
+        setSpin(installBtn, false);
+        render();
+        check();          // 装完立刻重检，数字马上就对
+      }
+    }
+
+    refreshBtn.addEventListener("click", () => check());
+    installBtn.addEventListener("click", () => installPackages(null, true));
+    // 依赖名/版本可能刚被编辑，改动后自动重检
+    tab.cm.on("change", () => {
+      if (tab.npmTimer) clearTimeout(tab.npmTimer);
+      tab.npmTimer = setTimeout(() => check(), 800);
+    });
+
+    check();
+  }
+
   // 解析 .gitignore 内容为归一化规则列表（去掉注释 / 空行 / 前后斜杠 / 取反规则）
   function parseGitignoreRules(text) {
     return (text || "").split(/\r?\n/).map(l => l.trim())

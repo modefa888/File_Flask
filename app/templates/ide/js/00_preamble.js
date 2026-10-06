@@ -177,6 +177,13 @@
     try {
       const d = await apiFiles(path, showHidden);
       spinner.remove();
+      // 附加项目（_strict）：后端遇到失效路径会「逐级回退到最近存在的上级目录」并照常返回 200，
+      // 这里必须识别出来 —— 否则会把别的目录的内容当成该项目的（历史现象：子项目里显示主项目内容）。
+      // 用响应里的 current_path_abs（回退后的实际目录）与请求路径比对即可判断是否发生了回退。
+      if (container._strict && d.current_path_abs &&
+          d.current_path_abs.replace(/\/+$/, "") !== String(path).replace(/\/+$/, "")) {
+        throw new Error("路径不存在：" + path);
+      }
       // 剔除依赖 / 环境目录（任何项目通用）：node_modules、venv、__pycache__ 等
       const items = (d.items || [])
         .filter(it => showAllFiles || !TREE_IGNORE.has(it.name))
@@ -592,7 +599,12 @@
      注意：搜索 / Git / 终端等仍以主项目（ROOT）为准，附加项目主要提供浏览与编辑。 */
   let extraRoots = (() => {
     const v = ideSettingGet("extraRoots", []);
-    return Array.isArray(v) ? v.filter(x => typeof x === "string" && x) : [];
+    // 只接受绝对路径：早期「打开文件夹」支持手输，可能存进了相对路径（如 "m3u8_web"），
+    // 那种路径会失效并被后端回退，表现为「子项目里显示的是别的项目内容」，这里顺手清掉。
+    const raw = Array.isArray(v) ? v : [];
+    const list = raw.filter(x => typeof x === "string" && x.startsWith("/"));
+    if (list.length !== raw.length) ideSettingSet("extraRoots", list);
+    return list;
   })();
   function saveExtraRoots() { ideSettingSet("extraRoots", extraRoots); }
 
@@ -614,6 +626,7 @@
     const kids = document.createElement("div");
     kids.className = "tree-children" + (open ? " open" : "");
     kids._base = base; kids._loaded = false;
+    kids._strict = true;   // 附加项目：路径失效要报错，不接受后端「向上回退」后的内容
     sec.appendChild(head); sec.appendChild(kids);
     head.addEventListener("click", (e) => {
       if (e.target.closest(".ws-rm")) return;
@@ -651,6 +664,7 @@
     updateSideRootName();
   }
   function addWorkspaceFolder(path) {
+    if (!path || !String(path).startsWith("/")) { toast("只能添加绝对路径的文件夹", "err"); return; }
     if (path === ROOT) { toast("该文件夹已是主项目"); return; }
     if (extraRoots.includes(path)) { toast("该项目已在工作区中"); return; }
     extraRoots.push(path); saveExtraRoots();
@@ -969,6 +983,7 @@
         else if (["html", "htm"].includes(ext)) setupHtmlView(tab);
         else if (name === ".gitignore") setupGitignoreView(tab);
         else if (name.toLowerCase() === "requirements.txt") setupRequirementsView(tab);
+        else if (name.toLowerCase() === "package.json") setupPackageJsonView(tab);
         // .env / .env.local / .env.example 等：可视化编辑浮框（setupEnvView 见 23_ 文件）
         else if (/^\.env(\.[A-Za-z0-9_-]+)?$/.test(name)) setupEnvView(tab);
         // 竞态防护：加载期间用户又点了其它文件（activate 过别的标签 / 又发起新打开），

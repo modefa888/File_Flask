@@ -136,6 +136,10 @@
               '<div class="sysai-mod-name">一句话生成 SQL<span class="sysai-stat" data-stat="nl2sql"></span></div>' +
               '<div class="sysai-mod-desc">数据库查看器里把自然语言翻译成查询语句</div></div><code>POST /api/sqlite/nl2sql</code>' +
               '<label class="set-switch sysai-sw" data-mod="nl2sql" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+            '<div class="sysai-mod"><i class="bi bi-diagram-3"></i><div class="sysai-mod-main">' +
+              '<div class="sysai-mod-name">新建项目 AI<span class="sysai-stat" data-stat="scaffold"></span></div>' +
+              '<div class="sysai-mod-desc">新建项目时按一句话描述生成项目初始框架</div></div><code>POST /api/projects/create</code>' +
+              '<label class="set-switch sysai-sw" data-mod="scaffold" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
             '<div class="sysai-mod"><i class="bi bi-collection"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">对话记忆压缩<span class="sysai-stat" data-stat="summary"></span></div>' +
               '<div class="sysai-mod-desc">长对话自动压缩成记忆摘要，节省上下文</div></div><code>POST /api/ai/summarize</code>' +

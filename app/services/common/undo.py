@@ -190,6 +190,147 @@ def snapshot_any(path):
     return _record(entry)
 
 
+# ---------------------------------------------------------------- 命令路径识别
+# 会改动文件的命令：执行前必须按参数里的路径快照，否则 rm / mv / cp / > 造成的
+# 删除、新建既无法回撤，也不会出现在消息下方的「文件变更」模块里。
+# 值 = 路径当前不存在时是否也要快照（True：该位置是「将要被创建」的，缺失状态才有意义）。
+_CMD_WRITE = {
+    "rm": False, "rmdir": False, "unlink": False, "truncate": False, "sed": False,
+    "chmod": False, "chown": False, "gzip": False, "gunzip": False, "tar": False,
+    "mv": True, "cp": True, "install": True, "rsync": True, "ln": True,
+    "mkdir": True, "touch": True, "tee": True, "zip": True, "unzip": True, "dd": True,
+}
+_CMD_OPS = (";", "&&", "||", "|", "&")
+_SHELL_META = set("*?[]{}$`\"'\\<>|&;()")
+
+
+def _cmd_tokens(cmd):
+    """shell 命令 → token 列表（保留 ; | & < > 等运算符，引号内内容不拆）。"""
+    try:
+        lx = shlex.shlex(cmd, posix=True, punctuation_chars=";|&<>")
+        lx.whitespace_split = True
+        lx.commenters = ""
+        return list(lx)
+    except ValueError:
+        return []
+
+
+def _expand_cmd_path(tok, root):
+    """命令参数 → 真实绝对路径列表（通配符展开；明显不是路径时返回空）。"""
+    t = str(tok or "").strip()
+    if not t or t.startswith("-") or t == "/dev/null":
+        return []
+    if any(ch in t for ch in "*?["):                      # rm -rf data/*.db 之类
+        pat = t if os.path.isabs(t) else os.path.join(root or ".", t)
+        return [os.path.abspath(p) for p in sorted(glob.glob(pat))][:_MAX_PATHS]
+    if any(ch in t for ch in _SHELL_META):
+        return []                                         # 还含 shell 元字符：不是普通路径
+    if "=" in t and "/" not in t:
+        return []                                         # dd bs=1M 之类的 k=v 参数
+    p = os.path.expanduser(t)
+    if not os.path.isabs(p):
+        p = os.path.join(root or os.getcwd(), p)
+    return [os.path.abspath(os.path.normpath(p))]
+
+
+def _inside_root(path, root_abs):
+    if not root_abs:
+        return True
+    try:
+        return os.path.commonpath([path, root_abs]) == root_abs
+    except ValueError:
+        return False
+
+
+def _paths_in_command(cmd, root=""):
+    """从 shell 命令里保守识别可能被改动的路径（按出现顺序去重）。
+
+    只认「写操作子命令的参数」和「重定向目标」：识别不到只是不记录该改动，
+    不会误判成改动。项目（root）之外的路径不记录——与「文件变更」展示范围一致，
+    也避免误快照系统巨量目录。
+    """
+    root_abs = os.path.abspath(root) if root else ""
+    out, seen = [], set()
+
+    def add(p, allow_missing):
+        if len(out) >= _MAX_PATHS:
+            return
+        if root_abs and not _inside_root(p, root_abs):
+            return
+        if not os.path.exists(p):
+            if not allow_missing:
+                return          # rm / sed 这类命令：路径本来就不存在，无需记录
+            if not os.path.isdir(os.path.dirname(p) or "/"):
+                return          # 父目录不存在：多半不是真路径（例如 sed 的替换表达式）
+        if p in seen:
+            return
+        seen.add(p)
+        out.append(p)
+
+    toks = _cmd_tokens(cmd)
+    argv = []
+    cwd = root_abs or os.getcwd()      # 跟随命令里的 cd，保证相对路径解析正确
+
+    def scan():
+        """识别一条简单命令（argv[0] 是写操作命令时，快照它的路径参数）。"""
+        nonlocal cwd
+        if not argv:
+            return
+        name = os.path.basename(argv[0])
+        if name == "cd":               # cd 改变后续相对路径的基准
+            if len(argv) > 1 and not argv[1].startswith("-"):
+                for p in _expand_cmd_path(argv[1], cwd):
+                    if os.path.isdir(p):
+                        cwd = p
+            return
+        allow_missing = _CMD_WRITE.get(name)
+        if allow_missing is None:
+            return
+        for a in argv[1:]:
+            for p in _expand_cmd_path(a, cwd):
+                add(p, allow_missing)
+
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if t and t[-1] == ">" and all(ch in "<>&0123456789" for ch in t):
+            # 重定向（> 、>> 、2> 、&>）：紧随其后的 token 是要写入的路径
+            if i + 1 < len(toks) and t.find(">") >= 0:
+                for p in _expand_cmd_path(toks[i + 1], cwd):
+                    add(p, True)
+            i += 2 if i + 1 < len(toks) else 1
+            continue
+        if t in _CMD_OPS:
+            scan()
+            argv = []
+            i += 1
+            continue
+        argv.append(t)
+        i += 1
+    scan()
+    return out
+
+
+def snapshot_for_command(cmd, root=""):
+    """执行命令前调用：按命令里出现的路径逐个快照。
+
+    返回 (ids, complete)：ids 是快照记录 id（会被 undo.collect() 一并收集，
+    供回撤与「文件变更」模块）；complete=False 表示有路径过大等原因没记全。
+    """
+    if not cmd:
+        return [], True
+    paths = _paths_in_command(cmd, root)
+    ids = []
+    complete = len(paths) < _MAX_PATHS
+    for p in paths[:_MAX_PATHS]:
+        cid = snapshot_any(p)
+        if cid:
+            ids.append(cid)
+        else:
+            complete = False
+    return ids, complete
+
+
 def annotate(ids):
     """工具执行后调用：对照快照与当前磁盘状态，推断每个改动的动作类型，
     并保存「改后内容 + 差异文本」到数据库（目录型快照只记动作，不生成差异）。"""

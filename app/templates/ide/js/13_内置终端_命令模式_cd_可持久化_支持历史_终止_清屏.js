@@ -409,6 +409,7 @@
           '<div class="fp-hint">' + esc(opts.hint || "这里只显示文件夹；单击文件夹进入下一级，确认后打开当前所在的文件夹。") + "</div>" +
         "</div>" +
         '<div class="m-foot"><button class="m-cancel">取消</button>' +
+        (opts.extraText ? '<button class="m-extra">' + esc(opts.extraText) + "</button>" : "") +
         '<button class="m-ok">' + esc(opts.okText || "打开此文件夹") + "</button></div>";
       ov.appendChild(box);                              // 不清空 overlay：下层对话框要留着
       ov.classList.add("show");
@@ -477,7 +478,10 @@
             return;
           }
           list.innerHTML = dirs.map(it => {
-            const full = it.path || (cur === "/" ? "/" + it.name : cur + "/" + it.name);
+            // /api/files 每个条目的 path 是「相对当前目录」的（见 filecore.get_file_info），
+            // 直接当完整路径用会命中 go() 的「非绝对路径回退 ROOT」分支，点任意文件夹都会跳回项目根。
+            // 与主资源管理器一致：只有以 / 开头才当地址，否则用「当前目录 + 名称」拼绝对路径。
+            const full = (it.path && it.path.startsWith("/")) ? it.path : (cur === "/" ? "/" + it.name : cur + "/" + it.name);
             return '<div class="fp-item" data-path="' + esc(full) + '">' +
               '<i class="bi bi-folder2"></i><span class="fp-name">' + esc(it.name) + "</span></div>";
           }).join("");
@@ -494,11 +498,12 @@
       box.querySelector(".fp-project").onclick = () => { if (ROOT) go(ROOT); };
       box.querySelector(".fp-root").onclick = () => go("/");
       box.querySelector(".m-cancel").onclick = () => close(null);
-      box.querySelector(".m-ok").onclick = () => close(cur);
+      box.querySelector(".m-ok").onclick = () => close({ path: cur, action: "ok" });
+      if (opts.extraText) box.querySelector(".m-extra").onclick = () => close({ path: cur, action: "extra" });
       ov.onmousedown = (e) => { if (e.target === ov) close(null); };
       ov.onkeydown = (e) => {
         if (e.key === "Escape") { e.preventDefault(); close(null); }
-        else if (e.key === "Enter") { e.preventDefault(); close(cur); }
+        else if (e.key === "Enter") { e.preventDefault(); close({ path: cur, action: "ok" }); }
       };
       renderRecent();
       go(cur);
@@ -508,15 +513,23 @@
 
   async function openFolderDialog() {
     await loadRecentFolders();                       // 「最近」列表用于快速跳转
-    const path = await pickFolderDialog(ROOT || recentFolders()[0] || "/");
-    if (!path) return;
+    // 已有主项目时提供「添加到工作区」选项：默认点「打开此文件夹」直接切换工作区，
+    // 搜索 / 终端 / AI 全部跟随选中的文件夹；需要保留多项目再点「添加到工作区」。
+    const opts = { title: "打开文件夹" };
+    if (ROOT) opts.extraText = "添加到工作区";
+    const res = await pickFolderDialog(ROOT || recentFolders()[0] || "/", opts);
+    if (!res) return;
+    const path = res.path;
     try {
       const r = await fetch("/api/files?path=" + encodeURIComponent(path));
       const d = await r.json();
       if (d.error) { toast("无法打开：" + d.error, "err"); return; }
       addRecentFolder(path);
-      // 已有主项目：不再跳转，而是把新文件夹「添加为第二个项目」，与主项目在资源管理器同级显示
-      if (ROOT) { addWorkspaceFolder(path); return; }
+      if (res.action === "extra") {                  // 添加到工作区：与「当前项目」同级显示（仅浏览/编辑）
+        addWorkspaceFolder(path);
+        return;
+      }
+      // 默认：切换工作区 —— 选中的文件夹成为主项目，搜索 / 终端 / AI 全部跟随它
       location.href = "/ide?path=" + encodeURIComponent(path);
     } catch (e) {
       toast("无法打开：" + (e.message || e), "err");
@@ -765,7 +778,7 @@
           okText: "选择此文件夹",
           hint: "单击文件夹进入下一级；确认后把当前位置作为项目的创建位置。",
         });
-        if (picked) { locInp.value = picked; refresh(); nameInp.focus(); }
+        if (picked && picked.path) { locInp.value = picked.path; refresh(); nameInp.focus(); }
       };
       locInp.addEventListener("input", refresh);
       nameInp.addEventListener("input", refresh);

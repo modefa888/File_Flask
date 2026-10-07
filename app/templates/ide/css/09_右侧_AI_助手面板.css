@@ -449,7 +449,7 @@
   /* 智能体的工具调用步骤 */
   .ai-step { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: #9aa4b2;
     background: #232327; border: 1px solid #33333a; border-radius: 6px; padding: 4px 8px; cursor: pointer;
-    align-self: flex-start; max-width: 100%; }
+    align-self: flex-start; max-width: 100%; min-width: 0; box-sizing: border-box; }
   .ai-step .st-ic { color: #7fb3e0; display: inline-flex; }
   .ai-step .st-name { color: #cfe3f7; }
   .ai-step .st-arg { color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
@@ -459,11 +459,13 @@
   .ai-step .st-res .deny { color: #e2c08a; }
   .ai-step .st-detail { flex: 1 0 100%; display: none; margin: 4px 0 0; padding: 6px 8px; max-height: 260px;
     overflow: auto; background: #17171a; border: 1px solid #2c2c33; border-radius: 5px; color: #cfe3d8;
-    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; line-height: 16px; white-space: pre-wrap; }
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; line-height: 16px;
+    white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+    min-width: 0; max-width: 100%; box-sizing: border-box; }
   .ai-step .st-detail.open { display: block; }
   /* 工具调用步骤整体收进一个可折叠区域（默认只占一行，点击展开） */
   .ai-steps { align-self: stretch; margin-top: 5px; border: 1px solid #33333a; border-radius: 6px;
-    background: #1f1f23; overflow: hidden; }
+    background: #1f1f23; overflow: hidden; min-width: 0; max-width: 100%; }
   .ai-steps-head { display: flex; align-items: center; gap: 6px; padding: 4px 8px; cursor: pointer;
     font-size: 11px; color: #9aa4b2; user-select: none; }
   .ai-steps-head:hover { background: #26262b; }

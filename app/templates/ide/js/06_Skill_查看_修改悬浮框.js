@@ -1436,10 +1436,13 @@
         : "已执行 " + box._list.length + " 步";
       box._head.querySelector(".sum").textContent = aiStepsSummary(box._list);
     };
-    box._head.onclick = () => {
-      const collapsed = box.classList.toggle("collapsed");
+    box._setCollapsed = function (collapsed) {           // 统一控制展开/折叠，供点击与「执行完成后自动折叠」复用
+      box.classList.toggle("collapsed", collapsed);
       box._head.querySelector(".tw").className =
         "bi " + (collapsed ? "bi-chevron-right" : "bi-chevron-down") + " tw";
+    };
+    box._head.onclick = () => {
+      box._setCollapsed(!box.classList.contains("collapsed"));
     };
     (steps || []).forEach(s => {                       // 回放历史时一次性填充
       const row = aiStepRow(s);
@@ -1573,7 +1576,7 @@
       }
       aiScrollToBottom(true);
     }
-    if (stepsBox) { stepsBox._pending = 0; stepsBox._paint(); }
+    if (stepsBox) { stepsBox._pending = 0; stepsBox._paint(); stepsBox._setCollapsed(true); }  // 本轮结束：自动折叠为一行
     return { text: text, steps: steps, changes: changes };
   }
 
@@ -1973,7 +1976,7 @@
         bodyB.innerHTML = aiMd(acc.replace(/^\s+/, "")) + '<span class="ai-cursor"></span>';   // 边流边渲染 MD
         aiScrollToBottom();
       }
-      if (chatStepsBox) { chatStepsBox._pending = 0; chatStepsBox._paint(); }
+      if (chatStepsBox) { chatStepsBox._pending = 0; chatStepsBox._paint(); chatStepsBox._setCollapsed(true); }  // 本轮结束：自动折叠为一行
       const out = acc.replace(/^\s+/, "");
       bodyB.innerHTML = aiMd(out) || (chatSteps.length ? "（已完成工具调用）" : "（空回复）");
       thinkB.parentElement.style.display = thinking.trim() ? "" : "none";

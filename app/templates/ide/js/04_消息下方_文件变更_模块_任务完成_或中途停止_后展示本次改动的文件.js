@@ -24,6 +24,8 @@
       });
     });
     if (!items.length) return null;
+    // 删除的文件排在最后：先看新建/修改，最后看本轮删掉了什么（sort 稳定，同组保持原顺序）
+    items.sort((a, b) => (a.action === "deleted" ? 1 : 0) - (b.action === "deleted" ? 1 : 0));
     const box = document.createElement("div");
     box.className = "ai-chg";
     const head = document.createElement("div");
@@ -113,7 +115,9 @@
     if (!files.length) { box.innerHTML = '<div class="ad-loading">没有可显示的变更。</div>'; return; }
     const wrap = document.createElement("div");
     wrap.className = "ad-wrap";
-    files.forEach(f => wrap.appendChild(aiChangeFileBlock(tab, f)));
+    // 删除的文件排在最后（与消息下方「文件变更」一致；sort 稳定，同组保持原顺序）
+    const ordered = files.slice().sort((a, b) => (a.action === "deleted" ? 1 : 0) - (b.action === "deleted" ? 1 : 0));
+    ordered.forEach(f => wrap.appendChild(aiChangeFileBlock(tab, f)));
     box.appendChild(wrap);
   }
   function aiChangeFileBlock(tab, f) {

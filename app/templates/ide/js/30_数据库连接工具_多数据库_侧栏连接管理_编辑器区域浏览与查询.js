@@ -23,6 +23,30 @@
     return (c.host || "") + (c.port ? ":" + c.port : "") + (c.dbname ? " / " + c.dbname : "");
   }
 
+  /* ---------- 「新建数据库」的类型支持 ----------
+     只有 MySQL / MariaDB、PostgreSQL 能在服务器上建库；SQLite 是「一个文件一个库」、
+     Redis 的库是编号（0-15）、MongoDB 的库随数据自动创建，这三种没有「建库」这一步，
+     点按后给出对应引导（而不是报一句看不懂的错）。 */
+  var DBC_NEWDB_HINT = {
+    sqlite: "SQLite 是「一个文件一个库」，请用「新建连接」选择已有的 .db / .sqlite 文件",
+    redis: "Redis 的库是编号（0-15）的，不用新建：连接里把「库名」填成想要的下标即可",
+    mongodb: "MongoDB 的库不用预先创建，写入第一个集合时自动生成",
+  };
+  var DBC_NAME_RE = /^[A-Za-z0-9_\u4e00-\u9fff-]{1,64}$/;   // 与后端 api_db_database 的校验保持一致
+  var DBC_CHARSETS = [["utf8mb4", "utf8mb4（推荐，支持 emoji）"], ["utf8", "utf8"],
+                      ["gbk", "gbk（中文）"], ["latin1", "latin1"]];
+  function dbcCanNewDb(kind) { return kind === "mysql" || kind === "postgres"; }
+  function dbcNewDbBlockedTip() {
+    if (!DBC.conns.length) return "还没有连接：先点上方「新建连接」添加一个 MySQL / PostgreSQL 连接";
+    var seen = {}, tips = [];
+    DBC.conns.forEach(function (c) {
+      if (dbcCanNewDb(c.kind) || seen[c.kind]) return;
+      seen[c.kind] = 1;
+      if (DBC_NEWDB_HINT[c.kind]) tips.push(DBC_NEWDB_HINT[c.kind]);
+    });
+    return tips.join("；") || "当前连接都不支持新建数据库";
+  }
+
   /* ---------- 每个连接在编辑器区域的浏览状态（选中的库 / 表 / SQL 文本等）----------
      刷新后据此还原，避免每次都回到初始（第一张表、SQL 窗关闭）。按连接 id 存 localStorage。 */
   function dbcStateKey(id) { return "ide.dbconn.state." + id; }
@@ -80,6 +104,9 @@
           '<div class="dbc-name">' + esc(c.name) + '</div>' +
           '<div class="dbc-sub">' + esc(k.label) + ' · ' + esc(dbcSub(c)) + '</div>' +
         '</div>' +
+        (dbcCanNewDb(c.kind)
+          ? '<button class="dbc-act dbc-newdb" title="新建数据库"><i class="bi bi-database-add"></i></button>'
+          : "") +
         '<button class="dbc-act dbc-edit" title="编辑"><i class="bi bi-pencil"></i></button>' +
         '<button class="dbc-act dbc-del" title="删除"><i class="bi bi-trash"></i></button>' +
       '</div>';
@@ -90,6 +117,8 @@
       it.querySelector(".dbc-main").onclick = function () { openDbView(c); };
       it.querySelector(".dbc-ico").onclick = function () { openDbView(c); };
       it.querySelector(".dbc-edit").onclick = function (e) { e.stopPropagation(); dbcDialog(c); };
+      var ndb = it.querySelector(".dbc-newdb");            // 只有 MySQL / PG 的连接才有这个按钮
+      if (ndb) ndb.onclick = function (e) { e.stopPropagation(); dbcNewDbRun(c); };
       it.querySelector(".dbc-del").onclick = async function (e) {
         e.stopPropagation();
         var ok = await uiConfirm("删除连接", "确定删除连接「" + c.name + "」吗？\n（只删除保存的配置，不影响数据库本身）",
@@ -246,6 +275,111 @@
       };
       nameIn.focus();
     });
+  }
+
+  /* ---------- 新建数据库（MySQL / MariaDB、PostgreSQL）----------
+     后端 /api/db/database 执行 CREATE DATABASE；建库是结构级操作、不可回撤，弹窗里先说明后果。
+     conn 传空时由用户先选连接（下拉里只列支持建库的连接）。 */
+  function dbcNewDbDialog(conn) {
+    return new Promise(function (resolve) {
+      var usable = DBC.conns.filter(function (c) { return dbcCanNewDb(c.kind); });
+      if (conn && !dbcCanNewDb(conn.kind)) {
+        toast("「" + conn.name + "」不支持新建数据库：" + (DBC_NEWDB_HINT[conn.kind] || conn.kind), "err");
+        resolve(null); return;
+      }
+      if (!conn && !usable.length) { toast(dbcNewDbBlockedTip(), "err"); resolve(null); return; }
+
+      var ov = $("modalOverlay");
+      var box = document.createElement("div");
+      box.className = "ide-modal dbc-modal";
+      box.innerHTML =
+        '<div class="m-title"><i class="bi bi-database-add"></i><span>新建数据库</span></div>' +
+        '<div class="m-body">' +
+          (conn ? "" : '<div class="dbc-row"><span class="dbc-lb">连接</span>' +
+            '<select class="dbc-in dbc-nd-conn">' + usable.map(function (c) {
+              return '<option value="' + escAttr(c.id) + '">' + esc(c.name) + " · " +
+                esc(dbcKind(c.kind).label) + "</option>";
+            }).join("") + "</select></div>") +
+          '<div class="dbc-row"><span class="dbc-lb">库名</span>' +
+            '<input class="dbc-in dbc-nd-name" spellcheck="false" placeholder="my_database"></div>' +
+          '<div class="dbc-row dbc-nd-cs-row" hidden><span class="dbc-lb">字符集</span>' +
+            '<select class="dbc-in dbc-nd-charset">' + DBC_CHARSETS.map(function (x) {
+              return '<option value="' + x[0] + '">' + x[1] + "</option>"; }).join("") +
+            "</select></div>" +
+          '<div class="dbc-tip"><i class="bi bi-info-circle"></i><span class="dbc-tip-t"></span></div>' +
+          '<div class="dbc-msg"></div>' +
+        "</div>" +
+        '<div class="m-foot"><button class="m-cancel">取消</button><button class="m-ok">创建</button></div>';
+      ov.innerHTML = "";
+      ov.appendChild(box);
+      ov.classList.add("show");
+
+      var connSel = box.querySelector(".dbc-nd-conn");
+      var nameIn = box.querySelector(".dbc-nd-name");
+      var csRow = box.querySelector(".dbc-nd-cs-row");
+      var csSel = box.querySelector(".dbc-nd-charset");
+      var tipEl = box.querySelector(".dbc-tip-t"), msgEl = box.querySelector(".dbc-msg");
+      var okBtn = box.querySelector(".m-ok");
+      var busy = false;
+
+      function target() { return conn || dbcFind(connSel ? connSel.value : "") || usable[0]; }
+      function close(v) {
+        ov.classList.remove("show"); ov.innerHTML = "";
+        ov.onkeydown = null; ov.onmousedown = null;
+        resolve(v);
+      }
+      function say(msg, isErr) {
+        msgEl.textContent = msg || "";
+        msgEl.className = "dbc-msg" + (isErr ? " err" : "");
+      }
+      function refresh() {
+        var c = target();
+        if (!c) return;
+        csRow.hidden = c.kind !== "mysql";     // 只有 MySQL / MariaDB 需要挑字符集
+        tipEl.textContent = "将在「" + c.name + "」（" + dbcKind(c.kind).label +
+          "）上执行 CREATE DATABASE；建库不可回撤，建好后可在上方「库」下拉里切换。";
+      }
+      async function create() {
+        if (busy) return;
+        var c = target();
+        var name = nameIn.value.trim();
+        if (!c) { say("请选择连接", true); return; }
+        if (!name) { say("请填写数据库名", true); nameIn.focus(); return; }
+        if (!DBC_NAME_RE.test(name)) {
+          say("库名只允许字母、数字、下划线、中划线和中文，最多 64 个字符", true); nameIn.focus(); return;
+        }
+        busy = true; okBtn.disabled = true; okBtn.textContent = "创建中…";
+        try {
+          await dbcApi("/api/db/database", { method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conn: c.id, action: "create", name: name,
+                                   charset: csRow.hidden ? "" : csSel.value }) });
+          close({ connId: c.id, name: name });
+        } catch (e) { say(e.message || String(e), true); }
+        finally { busy = false; okBtn.disabled = false; okBtn.textContent = "创建"; }
+      }
+
+      if (connSel) connSel.onchange = refresh;
+      okBtn.onclick = create;
+      box.querySelector(".m-cancel").onclick = function () { close(null); };
+      ov.onmousedown = function (e) { if (e.target === ov) close(null); };
+      ov.onkeydown = function (e) {
+        if (e.key === "Escape") { e.preventDefault(); close(null); }
+        else if (e.key === "Enter" && !busy) { e.preventDefault(); create(); }
+      };
+      refresh();
+      nameIn.focus();
+    });
+  }
+
+  /* 「新建数据库」入口统一走这里：建完把已经打开的那个连接视图的「库」下拉刷一遍 */
+  async function dbcNewDbRun(conn) {
+    if (!DBC.loaded) await loadDbConns();
+    var r = await dbcNewDbDialog(conn);
+    if (!r) return;
+    toast("已创建数据库：" + r.name, "ok");
+    var tab = findTab(DBC_VIEW_PREFIX + r.connId);
+    if (tab && typeof tab.dbcReloadSchema === "function") tab.dbcReloadSchema();
   }
 
   /* ---------- 编辑器区域：数据库视图 ---------- */
@@ -1940,6 +2074,8 @@
     //（结构会按记录还原选中的库 / 表）
     if (saved.sql) sqlIn.value = saved.sql;
     if (saved.sqlOpen) setSqlPanel(true);   // 显示时再夹一次边界，适配当前窗口尺寸
+    /* 左栏「新建数据库」成功后由 dbcNewDbRun 调用：重算库下拉，新库要能立刻出现在里面 */
+    tab.dbcReloadSchema = function () { loadSchema(); };
     loadSchema();
     refreshUndo();                          // 工具栏「回撤」上的可回撤步数
   }
@@ -1952,6 +2088,7 @@
         if (r) { toast("已保存连接", "ok"); await loadDbConns(true); }
       };
     }
+    if ($("dbcNewDb")) $("dbcNewDb").onclick = function () { dbcNewDbRun(null); };
     if ($("dbcRefresh")) $("dbcRefresh").onclick = function () { loadDbConns(true); };
   }
   dbcInit();

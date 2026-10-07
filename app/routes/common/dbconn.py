@@ -2565,6 +2565,84 @@ def api_db_row_soft_delete():
     return jsonify({"ok": True, "updated": n, "write_id": wid, "soft_col": soft_col, "mode": mode})
 
 
+# --------------------------------------------------------------------------- 库级操作
+
+# 数据库名白名单：字母 / 数字 / 下划线 / 中划线 / 中文；空格、引号、分号、斜杠等一律拒绝
+_DB_NAME_RE = re.compile(r"^[A-Za-z0-9_\u4e00-\u9fff-]{1,64}$")
+# MySQL 建库时字符集 → 默认排序规则（表里没列到的按 <charset>_general_ci 拼）
+_DB_COLLATE = {"utf8mb4": "utf8mb4_general_ci", "utf8": "utf8_general_ci",
+               "utf8mb3": "utf8_general_ci", "latin1": "latin1_swedish_ci",
+               "gbk": "gbk_chinese_ci", "big5": "big5_chinese_ci", "ascii": "ascii_general_ci"}
+# 没有「建库」这一步的类型：给一句能直接照做的引导，而不是丢个语法错误给用户
+_DB_NEW_UNSUPPORTED = {
+    "sqlite": "SQLite 是「一个文件一个库」，请用「新建连接」选择已有的 .db / .sqlite 文件",
+    "redis": "Redis 的库是编号（0-15）的，不用新建：连接里把「库名」填成想要的下标即可",
+    "mongodb": "MongoDB 的库不用预先创建，写入第一个集合时自动生成",
+}
+
+
+def _create_database_sql(kind, name, charset=""):
+    """拼「新建数据库」语句（库名已过白名单，再由 _quote 按方言转义）"""
+    if kind != "mysql":
+        return "CREATE DATABASE %s" % _quote(kind, name)          # PostgreSQL
+    sql = "CREATE DATABASE %s" % _quote(kind, name)
+    cs = (charset or "").strip().lower()
+    if cs:
+        if not re.match(r"^[a-z0-9_]{1,32}$", cs):
+            raise RuntimeError("字符集不合法：%s" % charset)
+        sql += " CHARACTER SET %s COLLATE %s" % (cs, _DB_COLLATE.get(cs, "%s_general_ci" % cs))
+    return sql
+
+
+@bp.route("/api/db/database", methods=["POST"])
+def api_db_database():
+    """库级操作：目前只有「新建数据库」（MySQL / MariaDB、PostgreSQL）。
+
+    建库是结构级操作、不可回撤（前端会强提示），库名白名单校验后再按方言转义；
+    其它类型没有「建库」这一步，直接返回对应的引导文案。
+    """
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("conn") or "")
+    action = str(data.get("action") or "create")
+    name = str(data.get("name") or "").strip()
+    if action != "create":
+        return jsonify({"error": "未知操作：%s" % action}), 400
+    if not name:
+        return jsonify({"error": "请填写数据库名"}), 400
+    if not _DB_NAME_RE.match(name):
+        return jsonify({"error": "数据库名不合法：只允许字母、数字、下划线、中划线和中文，最多 64 个字符"}), 400
+    conf = _load_conf(cid, with_password=True)
+    if not conf:
+        return jsonify({"error": "连接不存在"}), 404
+    kind = conf.get("kind") or "sqlite"
+    if kind not in ("mysql", "postgres"):
+        return jsonify({"error": "该类型不支持新建数据库：%s" % _DB_NEW_UNSUPPORTED.get(kind, kind)}), 400
+    try:
+        sql = _create_database_sql(kind, name, str(data.get("charset") or ""))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+    use = dict(conf)
+    # MySQL 建库不需要先连进某个库：连接里记的库万一被删了，也不该连建库都做不了
+    if kind == "mysql":
+        use["dbname"] = ""
+    try:
+        with _LOCK:
+            conn, _k = _open(use, writable=True)
+            try:
+                cur = conn.cursor()
+                cur.execute(sql)
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
+            finally:
+                _close(conn, kind)
+    except Exception as e:
+        return jsonify({"error": "新建数据库失败：%s" % e}), 400
+    _log.info("新建数据库：kind=%s name=%s", kind, name)
+    return jsonify({"ok": True, "name": name, "sql": sql})
+
+
 @bp.route("/api/db/table", methods=["POST"])
 def api_db_table():
     """表级操作（各类库按自己的语义落地）：

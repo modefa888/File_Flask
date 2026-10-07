@@ -1086,3 +1086,46 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .env-rand-pop-item { color: #1f2328; }
 :where(html.theme-light) .env-rand-pop-item:hover { background: #e8f2fe; color: #005fb8; }
 :where(html.theme-light) .env-edit-switch-track::after { background: #ffffff; }
+/* 表结构设计弹窗 / 结构信息表（浅色） */
+:where(html.theme-light) .dbc-dz-tb { background: #ffffff; border-color: #d0d7de; }
+:where(html.theme-light) .dbc-info-t th, :where(html.theme-light) .dbc-dz-t th {
+  background: #f0f0f0; color: #005fb8; border-bottom-color: #d8d8d8; border-right-color: #e4e4e4;
+}
+:where(html.theme-light) .dbc-dz-t td { border-bottom-color: #ececec; border-right-color: #f0f0f0; }
+:where(html.theme-light) .dbc-info-t td { color: #24292f; border-bottom-color: #ececec; border-right-color: #f0f0f0; }
+:where(html.theme-light) .dbc-dz-t input[type="checkbox"] { accent-color: #0078d4; }
+:where(html.theme-light) .dbc-dz-t .dbc-dz-del { color: #5a5a5a; }
+:where(html.theme-light) .dbc-dz-t .dbc-dz-del:hover { background: #e4e6e8; color: #c0392b; }
+:where(html.theme-light) .dbc-new-table { color: #005fb8; }
+:where(html.theme-light) .dbc-new-table:hover { background: #cde3f8; border-color: #a8c8e8; color: #0b3d63; }
+/* 表结构弹窗的「常用定义」预设面板 / 下拉按钮（浅色） */
+:where(html.theme-light) .dbc-dz-pick { background: #f0f2f4; border-color: #d0d7de; color: #005fb8; }
+:where(html.theme-light) .dbc-dz-pick:hover { background: #cde3f8; border-color: #a8c8e8; color: #0b3d63; }
+:where(html.theme-light) .dbc-pz {
+  background: #ffffff; border-color: #d0d7de; box-shadow: 0 6px 24px rgba(0, 0, 0, .18);
+}
+:where(html.theme-light) .dbc-pz-i { color: #24292f; }
+:where(html.theme-light) .dbc-pz-i:hover { background: #cde3f8; color: #0b3d63; }
+:where(html.theme-light) .dbc-pz-h { color: #6b7580; }
+/* 当前表名旁的「编辑表结构」笔（浅色） */
+:where(html.theme-light) .dbc-cur { color: #1f2328; }
+:where(html.theme-light) .dbc-cur-edit { color: #005fb8; }
+:where(html.theme-light) .dbc-cur-edit:hover { background: #cde3f8; border-color: #a8c8e8; color: #0b3d63; }
+/* 「AI 推荐表设计」：标题栏入口 + 一句话描述行（浅色） */
+:where(html.theme-light) .dbc-modal .m-title .dbc-dz-aibtn {
+  background: #f3eefd; border-color: #d9cdf2; color: #5b3fa8;
+}
+:where(html.theme-light) .dbc-modal .m-title .dbc-dz-aibtn:hover:not(:disabled) {
+  background: #e7ddfa; border-color: #b9a5e6; color: #3f2a75;
+}
+:where(html.theme-light) .dbc-dz-ai { background: #f7f4fe; border-color: #ddd3f3; }
+:where(html.theme-light) .dbc-dz-ai .dbc-dz-aigo {
+  background: #6b52b5; border-color: #6b52b5; color: #ffffff;
+}
+:where(html.theme-light) .dbc-dz-ai .dbc-dz-aigo:hover:not(:disabled) {
+  background: #5b43a0; border-color: #5b43a0; color: #ffffff;
+}
+:where(html.theme-light) .dbc-dz-ai .dbc-dz-aix { color: #6b5f8a; }
+:where(html.theme-light) .dbc-dz-ai .dbc-dz-aix:hover { background: #e7e0f7; color: #241a3f; }
+:where(html.theme-light) .dbc-dz-ai .dbc-dz-aimsg { color: #5d5380; }
+:where(html.theme-light) .dbc-dz-ai .dbc-dz-aimsg.err { color: #c0392b; }

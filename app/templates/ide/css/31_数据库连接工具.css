@@ -122,7 +122,15 @@
     flex: none; display: flex; align-items: center; gap: 8px;
     padding: 7px 12px; border-bottom: 1px solid #2e2e2f;
   }
-  .dbc-cur { font-size: 12.5px; color: #e0e0e0; font-weight: 600; }
+  .dbc-cur { font-size: 12.5px; color: #e0e0e0; font-weight: 600; max-width: 46%; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  /* 当前表名旁边的笔：编辑表结构（.dbc-bar 有 8px gap，负 margin 让它贴着表名） */
+  .dbc-cur-edit {
+    margin-left: -5px; height: 22px; min-width: 22px; padding: 0 5px; font-size: 11px;
+    background: transparent; border-color: transparent; color: #9fd0ff;
+  }
+  .dbc-cur-edit:hover { background: #0e4a75; border-color: #0e639c; color: #ffffff; }
+  .dbc-cur-edit[hidden] { display: none; }
   .dbc-sp { flex: 1; }
   .dbc-mini {
     flex: none; height: 24px; min-width: 24px; padding: 0 7px; border-radius: 5px; cursor: pointer;
@@ -258,3 +266,95 @@
   .dbc-grid tbody tr.on td { background: #094771; color: #ffffff; }
   .dbc-grid .dbc-null { color: #6a6a6a; font-style: italic; }
   .dbc-empty { padding: 18px; color: #7a7a7a; font-size: 12.5px; text-align: center; }
+
+  /* ---------- 表结构设计弹窗（新建表 / 改列结构） ---------- */
+  .dbc-dz { width: 720px; }
+  .dbc-dz-tb {
+    max-height: 44vh; overflow: auto; margin-top: 4px;
+    border: 1px solid #3a3a3a; border-radius: 5px; background: #1b1b1b;
+  }
+  .dbc-dz-t { border-collapse: collapse; width: 100%; font-size: 12px; }
+  .dbc-dz-t th {
+    position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap;
+    background: #262628; color: #9fd0ff; font-weight: 600; padding: 5px 8px;
+    border-bottom: 1px solid #3a3a3a; border-right: 1px solid #2e2e2f;
+  }
+  .dbc-dz-t td {
+    padding: 4px 6px; border-bottom: 1px solid #2a2a2b; border-right: 1px solid #262626;
+    vertical-align: middle;
+  }
+  .dbc-dz-t td.dbc-dz-c { width: 1%; text-align: center; white-space: nowrap; }
+  .dbc-dz-t input[type="checkbox"] { accent-color: #0e639c; cursor: pointer; }
+  .dbc-dz-t input[type="checkbox"]:disabled { opacity: .55; cursor: default; }
+  .dbc-dz .dbc-in {
+    height: 26px; font-size: 12px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .dbc-dz-name { flex: 1; }
+  .dbc-dz-n { width: 150px; }
+  .dbc-dz-df { width: 140px; }
+  .dbc-dz-t .dbc-dz-del { border-color: transparent; background: transparent; color: #a0a0a0; }
+  .dbc-dz-t .dbc-dz-del:hover { background: #3a3d41; color: #e06c75; }
+  .dbc-dz-bar { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .dbc-dz-bar .dbc-sp { flex: 1; }
+  .dbc-dz-msg { margin-top: 0; flex: none; max-width: 62%; text-align: right; }
+  /* 类型 / 默认值：输入框 + 「▾」预设按钮 */
+  .dbc-dz-tpw, .dbc-dz-dfw { display: flex; align-items: center; gap: 3px; min-width: 0; }
+  .dbc-dz-tpw .dbc-dz-tp, .dbc-dz-dfw .dbc-dz-df { flex: 1; width: auto; min-width: 0; }
+  .dbc-dz-t td:nth-child(2) { width: 42%; }
+  .dbc-dz-t td:nth-child(4) { width: 17%; }
+  .dbc-dz-pick {
+    flex: none; height: 26px; min-width: 22px; padding: 0 4px; font-size: 9px;
+    background: #2a2a2c; border-color: #3a3a3a; color: #9fd0ff;
+  }
+  .dbc-dz-pick:hover { background: #0e4a75; border-color: #0e639c; color: #ffffff; }
+  /* 「AI 推荐表设计」：标题栏右侧的入口 + 展开后的一句话描述行 */
+  .dbc-modal .m-title .dbc-dz-aibtn { color: #d6c6f5; border-color: #4a3f68; background: #322b45; }
+  .dbc-modal .m-title .dbc-dz-aibtn:hover:not(:disabled) {
+    background: #453a63; border-color: #6a55a0; color: #ffffff;
+  }
+  .dbc-modal .m-title .dbc-dz-aibtn .bi { color: inherit; }
+  .dbc-modal .m-title .dbc-dz-aibtn[hidden] { display: none; }
+  .dbc-dz-ai {
+    margin-bottom: 10px; padding: 8px 9px; border-radius: 6px;
+    background: #262235; border: 1px solid #3f3757;
+  }
+  .dbc-dz-ai[hidden] { display: none; }
+  .dbc-dz-air { display: flex; align-items: center; gap: 7px; }
+  .dbc-dz-ai .dbc-dz-aiq { flex: 1; min-width: 0; height: 28px; font-family: inherit; }
+  .dbc-dz-ai .dbc-dz-aigo {
+    flex: none; height: 28px; background: #4b3f78; border-color: #6a55a0; color: #efe8ff;
+  }
+  .dbc-dz-ai .dbc-dz-aigo:hover:not(:disabled) { background: #5b4c92; color: #ffffff; }
+  .dbc-dz-ai .dbc-dz-aigo .bi { color: inherit; }
+  .dbc-dz-ai .dbc-dz-aix {
+    flex: none; height: 28px; background: transparent; border-color: transparent; color: #a99fc4;
+  }
+  .dbc-dz-ai .dbc-dz-aix:hover { background: #3a3350; color: #ffffff; }
+  .dbc-dz-ai .dbc-dz-aimsg { margin-top: 6px; color: #b6acd0; }
+  /* 常用定义预设面板：挂在弹窗遮罩上，所以得盖过 .ide-modal */
+  .dbc-pz {
+    position: fixed; z-index: 10080; min-width: 176px; max-width: 380px; max-height: 268px;
+    overflow: auto; padding: 4px; background: #252526; border: 1px solid #454545;
+    border-radius: 5px; box-shadow: 0 6px 24px rgba(0, 0, 0, .55);
+  }
+  .dbc-pz-i {
+    padding: 5px 9px; border-radius: 4px; cursor: pointer; font-size: 12px; color: #d4d4d4;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .dbc-pz-i:hover { background: #094771; color: #ffffff; }
+  .dbc-pz-h { padding: 6px 9px 2px; font-size: 11px; color: #8a8a8a; }
+  /* 表 / 集合结构信息表（如 MongoDB 集合字段列表） */
+  .dbc-info-t { border-collapse: collapse; width: 100%; font-size: 12px; }
+  .dbc-info-t th {
+    text-align: left; background: #262628; color: #9fd0ff; font-weight: 600; padding: 5px 9px;
+    border-bottom: 1px solid #3a3a3a; border-right: 1px solid #2e2e2f;
+  }
+  .dbc-info-t td {
+    padding: 5px 9px; color: #d6d6d6; border-bottom: 1px solid #2a2a2b; border-right: 1px solid #262626;
+    font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-all;
+  }
+  /* 侧栏「＋」新建表 / 集合 / key：给点强调色，别被刷新按钮淹没 */
+  .dbc-new-table { color: #9fd0ff; }
+  .dbc-new-table:hover { background: #0e4a75; border-color: #0e639c; color: #ffffff; }

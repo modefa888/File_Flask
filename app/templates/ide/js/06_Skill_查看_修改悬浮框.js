@@ -460,7 +460,8 @@
   /* 点击模块行 → 行内展开调用明细（最近 7 天柱状 + 最近调用记录） */
   var SYS_MOD_TITLE = {
     chat: "AI 助手对话", plugin: "插件宿主 AI", agent: "Agent 任务", commit: "生成提交信息",
-    nl2sql: "一句话生成 SQL", summary: "对话记忆压缩", models: "拉取模型列表",
+    nl2sql: "一句话生成 SQL", tabledesign: "AI 推荐表设计", summary: "对话记忆压缩",
+    models: "拉取模型列表",
   };
   var sysAiDetailMod = "";
   function sysAiCloseDetail() {

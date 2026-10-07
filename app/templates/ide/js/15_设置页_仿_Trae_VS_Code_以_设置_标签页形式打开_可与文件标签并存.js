@@ -137,6 +137,10 @@
               '<div class="sysai-mod-desc">数据库查看器 / 连接工具里把自然语言翻译成 SQL、Redis 命令或 Mongo 查询</div></div><code>POST /api/db/nl2sql</code>' +
               '<label class="set-switch sysai-sw" data-mod="nl2sql" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
             '<div class="sysai-mod"><i class="bi bi-diagram-3"></i><div class="sysai-mod-main">' +
+              '<div class="sysai-mod-name">AI 推荐表设计<span class="sysai-stat" data-stat="tabledesign"></span></div>' +
+              '<div class="sysai-mod-desc">表结构设计弹窗里按一句话描述推荐表名与列定义</div></div><code>POST /api/db/table/ai-design</code>' +
+              '<label class="set-switch sysai-sw" data-mod="tabledesign" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+            '<div class="sysai-mod"><i class="bi bi-diagram-3"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">新建项目 AI<span class="sysai-stat" data-stat="scaffold"></span></div>' +
               '<div class="sysai-mod-desc">新建项目时按一句话描述生成项目初始框架</div></div><code>POST /api/projects/create</code>' +
               '<label class="set-switch sysai-sw" data-mod="scaffold" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +

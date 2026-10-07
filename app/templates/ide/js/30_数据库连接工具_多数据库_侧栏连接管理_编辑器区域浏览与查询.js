@@ -273,6 +273,7 @@
         '<div class="dbc-side">' +
           '<div class="dbc-side-hd">' +
             '<select class="dbc-db-sel" title="切换数据库"></select>' +
+            '<button class="dbc-mini dbc-new-table" title="新建表 / 集合 / Key"><i class="bi bi-file-plus"></i></button>' +
             '<button class="dbc-mini dbc-refresh" title="刷新结构与数据"><i class="bi bi-arrow-clockwise"></i></button>' +
           "</div>" +
           '<div class="dbc-tabs-sel">表 / 视图</div>' +
@@ -281,6 +282,8 @@
         '<div class="dbc-main">' +
           '<div class="dbc-bar">' +
             '<span class="dbc-cur" title="当前表">—</span>' +
+            '<button class="dbc-mini dbc-cur-edit" title="编辑表结构" hidden>' +
+              '<i class="bi bi-pencil"></i></button>' +
             '<span class="dbc-sp"></span>' +
             '<button class="dbc-mini dbc-add-row" title="在当前表 / 集合里新增一行"><i class="bi bi-plus-lg"></i> 新增行</button>' +
             '<button class="dbc-mini dbc-undo" title="回撤最近一次增 / 删 / 改（表级操作不可回撤）"><i class="bi bi-arrow-counterclockwise"></i> 回撤<span class="dbc-undo-n"></span></button>' +
@@ -339,6 +342,25 @@
     var gridBox = tab.host.querySelector(".dbc-grid-wrap");
     var pagerEl = tab.host.querySelector(".dbc-pager");
     var curEl = tab.host.querySelector(".dbc-cur");
+    var curEditEl = tab.host.querySelector(".dbc-cur-edit");
+    /* 当前表名旁边的笔：SQL 库开表结构设计弹窗，MongoDB 看集合字段；
+       Redis 没有结构概念、视图不能改结构，这两种情况直接藏起来 */
+    function curIsView() {
+      var hit = null;
+      tabsBox.querySelectorAll(".dbc-table").forEach(function (x) {
+        if (!hit && x.dataset.name === state.table) hit = x;
+      });
+      return !!(hit && String(hit.dataset.kind || "").toLowerCase().indexOf("view") >= 0);
+    }
+    function setCur(label, editable) {
+      curEl.textContent = label;
+      var can = !!editable && !!state.table && !isRedis && !curIsView();
+      curEditEl.hidden = !can;
+      if (can) {
+        curEditEl.title = isMongo ? "查看集合字段（采样首条文档）"
+                                  : "编辑表结构（加列 / 改列 / 删列 / 重命名）";
+      }
+    }
     var sqlBox = tab.host.querySelector(".dbc-sql");
     var sqlIn = tab.host.querySelector(".dbc-sql-input");
     var sqlMsg = tab.host.querySelector(".dbc-sql-msg");
@@ -395,14 +417,16 @@
         tabsBox.innerHTML = list.length
           ? list.map(function (t) {
               return '<div class="dbc-table" data-name="' + escAttr(t.name) + '" data-schema="' +
-                escAttr(t.schema || "") + '" title="' + escAttr(t.name) + '">' +
+                escAttr(t.schema || "") + '" data-kind="' + escAttr(t.kind || "") +
+                '" title="' + escAttr(t.name) + '">' +
                 '<i class="bi ' + (String(t.kind).toLowerCase().indexOf("view") >= 0 ? "bi-eye" : "bi-table") + '"></i>' +
                 '<span class="dbc-tn">' + esc(t.name) + "</span>" +
                 '<span class="dbc-tc">' + (t.rows === null || t.rows === undefined ? "" : t.rows) + "</span>" +
-                '<button class="dbc-to" title="表操作（新建 / 重命名 / 清空 / 删除）"><i class="bi bi-three-dots"></i></button>' +
+                '<button class="dbc-to" title="更多操作（新建 / 表结构 / 重命名 / 清空 / 删除）"><i class="bi bi-three-dots"></i></button>' +
                 "</div>";
             }).join("")
-          : '<div class="dbc-empty">' + (isRedis ? "这个库里没有 key" : (isMongo ? "这个库里没有集合" : "这个库里没有表")) + "</div>";
+          : '<div class="dbc-empty">' + (isRedis ? "这个库里没有 key" : (isMongo ? "这个库里没有集合" : "这个库里没有表")) +
+            "<br>点左上角「＋」新建</div>";
         tabsBox.querySelectorAll(".dbc-table").forEach(function (it) {
           it.onclick = function () {
             state.table = it.dataset.name;
@@ -430,7 +454,11 @@
         });
         var target = pick || tabsBox.querySelector(".dbc-table");
         if (target) target.onclick();
-        else { curEl.textContent = "—"; gridBox.innerHTML = '<div class="dbc-empty">选择左侧的表查看数据</div>'; pagerEl.innerHTML = ""; }
+        else {
+          setCur("—", false);
+          gridBox.innerHTML = '<div class="dbc-empty">选择左侧的表查看数据</div>';
+          pagerEl.innerHTML = "";
+        }
       } catch (e) {
         // 上次记住的库已不可用（被删 / 改名）：退回连接自身的库重试一次，避免卡死
         if (!_schemaRetry && state.db && state.db !== (conn.dbname || "")) {
@@ -447,7 +475,7 @@
       if (!state.table) return;
       var seq = ++state.seq;
       gridBox.innerHTML = '<div class="dbc-empty">加载中…</div>';
-      curEl.textContent = state.table;
+      setCur(state.table, true);
       try {
         var d = await dbcApi("/api/db/rows?conn=" + encodeURIComponent(conn.id) +
                              "&dbname=" + encodeURIComponent(state.db) +
@@ -487,7 +515,7 @@
       sqlMsg.className = "dbc-sql-msg";
       sqlMsg.textContent = "执行中…";
       gridBox.innerHTML = '<div class="dbc-empty">执行中…</div>';
-      curEl.textContent = "查询结果";
+      setCur("查询结果", false);         // 结果未必来自当前表，笔先收起来
       try {
         var d = await dbcApi("/api/db/query", { method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -883,63 +911,656 @@
       } catch (e) { toast(e.message || String(e), "err"); }
     };
 
-    // ---- 表 / 集合操作（右键或悬停出现的「⋯」）----
-    async function tableOp(body) {
+    // ---- 表 / 集合 / key 操作：全部走 /api/db/table，按库类型给对应语义 ----
+    var whatName = isRedis ? "key" : (isMongo ? "集合" : "表");
+    function postTable(body) {
+      return dbcApi("/api/db/table", { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Object.assign({ conn: conn.id, dbname: state.db }, body)) });
+    }
+    async function reloadSchema(keep) {
+      if (!keep) state.table = "";
+      await loadSchema();
+    }
+
+    /* 通用小表单弹窗：fields = [{key,label,placeholder,type,options,required}]，返回对象或 null */
+    function dbcFormModal(title, fields, okText) {
+      return new Promise(function (resolve) {
+        var ov = $("modalOverlay");
+        var box = document.createElement("div");
+        box.className = "ide-modal dbc-modal";
+        box.innerHTML =
+          '<div class="m-title"><i class="bi bi-plus-square"></i><span>' + esc(title) + "</span></div>" +
+          '<div class="m-body">' + fields.map(function (f) {
+            if (f.type === "select") {
+              return '<div class="dbc-row"><span class="dbc-lb">' + esc(f.label) + "</span>" +
+                '<select class="dbc-in dbc-fm">' +
+                (f.options || []).map(function (o) {
+                  return '<option value="' + escAttr(o) + '"' + (o === f.value ? " selected" : "") + ">" +
+                    esc(o) + "</option>";
+                }).join("") + "</select></div>";
+            }
+            return '<div class="dbc-row"><span class="dbc-lb">' + esc(f.label) + "</span>" +
+              '<input class="dbc-in dbc-fm" spellcheck="false" placeholder="' + escAttr(f.placeholder || "") +
+              '" value="' + escAttr(f.value || "") + '"></div>';
+          }).join("") + '<div class="dbc-msg"></div></div>' +
+          '<div class="m-foot"><button class="m-cancel">取消</button><button class="m-ok">' +
+          esc(okText || "确定") + "</button></div>";
+        ov.innerHTML = "";
+        ov.appendChild(box);
+        ov.classList.add("show");
+        var els = box.querySelectorAll(".dbc-fm");
+        var msg = box.querySelector(".dbc-msg");
+        function close(v) {
+          ov.classList.remove("show"); ov.innerHTML = "";
+          ov.onkeydown = null; ov.onmousedown = null;
+          resolve(v);
+        }
+        box.querySelector(".m-cancel").onclick = function () { close(null); };
+        box.querySelector(".m-ok").onclick = function () {
+          var out = {};
+          for (var i = 0; i < fields.length; i++) {
+            var v = els[i] ? els[i].value.trim() : "";
+            if (fields[i].required !== false && !v && fields[i].type !== "select") {
+              msg.textContent = "请填写「" + fields[i].label + "」";
+              return;
+            }
+            out[fields[i].key] = v;
+          }
+          close(out);
+        };
+        ov.onmousedown = function (e) { if (e.target === ov) close(null); };
+        ov.onkeydown = function (e) { if (e.key === "Escape") { e.preventDefault(); close(null); } };
+        if (els[0]) els[0].focus();
+      });
+    }
+
+    function quoteCol(kind, n) {
+      return kind === "mysql" ? "`" + String(n).replace(/`/g, "``") + "`"
+                              : '"' + String(n).replace(/"/g, '""') + '"';
+    }
+    function colDef(row) {
+      var s = String(row.type || "").trim();
+      if (!row.nullable) s += " NOT NULL";
+      if (row.def !== "" && row.def !== null && row.def !== undefined) s += " DEFAULT " + row.def;
+      return s.replace(/\s+/g, " ").trim();
+    }
+    // MySQL 的 CHANGE / MODIFY 要重建完整定义，带上 extra（auto_increment、
+    // on update CURRENT_TIMESTAMP 等），否则改列名 / 改类型时会把这些属性弄丢
+    function colDefKeep(row) {
+      var s = colDef(row);
+      if (row.extra) s += " " + String(row.extra).trim();
+      return s.replace(/\s+/g, " ").trim();
+    }
+
+    /* 表结构设计弹窗：
+        · 新建表：逐列填写（列名 / 类型定义 / 可空 / 默认值），底部「添加列」继续加；
+        · 已有表：直接改列名（= 重命名）、类型 / 可空 / 默认值（= 修改），或删除 / 新增列，
+          点「保存」时与读到的原始结构做 diff，只执行真正变化的那些 ALTER。 */
+    async function tableDesigner(tableName, sch) {
+      var isNew = !tableName;
+      var useSchema = sch || state.schema;
+      var rows = [], orig = [];
+      if (isNew) {
+        var auto = conn.kind === "sqlite" ? "INTEGER PRIMARY KEY AUTOINCREMENT"
+                 : conn.kind === "postgres" ? "SERIAL PRIMARY KEY"
+                 : "INT PRIMARY KEY AUTO_INCREMENT";
+        rows = [{ name: "id", type: auto, nullable: false, def: "", pk: true, old: false }];
+      } else {
+        try {
+          var d = await dbcApi("/api/db/table/columns?conn=" + encodeURIComponent(conn.id) +
+            "&dbname=" + encodeURIComponent(state.db) +
+            "&schema=" + encodeURIComponent(useSchema) + "&table=" + encodeURIComponent(tableName));
+          rows = (d.columns || []).map(function (c) {
+            return { name: c.name, type: c.type || "", nullable: !!c.nullable,
+                     def: (c.default === null || c.default === undefined) ? "" : String(c.default),
+                     pk: !!c.pk, old: true };
+          });
+          orig = rows.slice();
+        } catch (e) { toast(e.message || String(e), "err"); return; }
+        if (!rows.length) { toast("没有读到这张表的列结构", "warn"); return; }
+      }
+      var ov = $("modalOverlay");
+      var box = document.createElement("div");
+      box.className = "ide-modal wide dbc-modal dbc-dz";
+      box.innerHTML =
+        '<div class="m-title"><i class="bi bi-table"></i><span>' +
+          (isNew ? "新建表" : "表结构 · " + esc(tableName)) + "</span>" +
+          '<span class="dbc-sp"></span>' +
+          '<button class="dbc-mini dbc-dz-aibtn" title="用一句话描述，让 AI 推荐表名与列定义">' +
+            '<i class="bi bi-stars"></i> AI 推荐表设计</button>' +
+        "</div>" +
+        '<div class="m-body">' +
+          '<div class="dbc-dz-ai" hidden>' +
+            '<div class="dbc-dz-air">' +
+              '<input class="dbc-in dbc-dz-aiq" spellcheck="false" placeholder="' +
+                escAttr(isNew ? "用一句话描述这张表要存什么，如：电商订单表，含用户、商品、金额、状态、下单时间"
+                              : "描述要补充什么，如：加上物流单号、发货时间、售后状态") + '">' +
+              '<button class="dbc-mini dbc-dz-aigo"><i class="bi bi-stars"></i> 生成</button>' +
+              '<button class="dbc-mini dbc-dz-aix" title="收起"><i class="bi bi-x-lg"></i></button>' +
+            "</div>" +
+            '<div class="dbc-msg dbc-dz-aimsg"></div>' +
+          "</div>" +
+          '<div class="dbc-row"><span class="dbc-lb">表名</span>' +
+            '<input class="dbc-in dbc-dz-name" spellcheck="false" value="' + escAttr(tableName || "") +
+            '" placeholder="表名"></div>' +
+          '<div class="dbc-dz-tb scroll-thin"><table class="dbc-dz-t"><thead><tr>' +
+            "<th>列名</th><th>类型 / 定义</th><th>可空</th><th>默认值</th><th>主键</th><th></th>" +
+          "</tr></thead><tbody></tbody></table></div>" +
+          '<div class="dbc-dz-bar"><button class="dbc-mini dbc-dz-add">' +
+            '<i class="bi bi-plus-lg"></i> 添加列</button><span class="dbc-sp"></span>' +
+            '<span class="dbc-msg dbc-dz-msg"></span></div>' +
+          (isNew ? "" : '<div class="dbc-tip"><i class="bi bi-info-circle"></i><span>改列名=重命名列；' +
+            "改类型 / 可空 / 默认值=修改列；删除该行=删除列。表结构变更不可回撤。</span></div>") +
+        "</div>" +
+        '<div class="m-foot"><button class="m-cancel">取消</button><button class="m-ok">保存</button></div>';
+      ov.innerHTML = "";
+      ov.appendChild(box);
+      ov.classList.add("show");
+      var nameIn = box.querySelector(".dbc-dz-name");
+      var tbody = box.querySelector(".dbc-dz-t tbody");
+      var msg = box.querySelector(".dbc-dz-msg");
+      var okBtn = box.querySelector(".m-ok");
+      function say(t) { msg.textContent = t || ""; }
+
+      /* ---- AI 推荐表设计：一句话 → 一份列定义（+ 表名）。
+         结果只填进表单，落库仍然要点「保存」，所以模型给得不对也只是表单不对，取消即可。 */
+      var aiBox = box.querySelector(".dbc-dz-ai");
+      var aiBtn = box.querySelector(".dbc-dz-aibtn");
+      var aiQ = box.querySelector(".dbc-dz-aiq");
+      var aiGo = box.querySelector(".dbc-dz-aigo");
+      var aiMsg = box.querySelector(".dbc-dz-aimsg");
+      var aiBusy = false;
+      function aiSay(t, isErr) {
+        say("");
+        aiMsg.className = "dbc-msg dbc-dz-aimsg" + (isErr ? " err" : "");
+        aiMsg.textContent = t || "";
+      }
+      // 该功能在「设置 → 系统 AI」里被停用时，按钮直接不出现（后端也会拒绝调用）
+      if (typeof sysAiOff === "function" && sysAiOff("tabledesign")) aiBtn.hidden = true;
+      function aiToggle(on) {
+        aiBox.hidden = (on === undefined) ? !aiBox.hidden : !on;
+        if (!aiBox.hidden) aiQ.focus();
+      }
+      function setAiBusy(on) {
+        aiBusy = on;
+        aiGo.disabled = on; aiQ.disabled = on; aiBtn.disabled = on;
+        aiGo.innerHTML = '<i class="bi ' + (on ? "bi-arrow-repeat" : "bi-stars") + '"></i> ' +
+          (on ? "生成中…" : "生成");
+      }
+      /* 把 AI 的列合并进当前表单：
+         · 新建表：整表替换（AI 本来就是来设计整张表的），表名还空着就一并填上；
+         · 已有表：只补「库里还没有的列」，已有列一律不动 —— 改列在 SQLite 上不支持，
+           而且按位置比对很容易把新列误判成重命名，交给用户自己决定更稳。 */
+      async function applyAi(d) {
+        var cols = d.columns || [];
+        if (!cols.length) { aiSay("AI 没有给出可用的列", true); return; }
+        if (isNew) {
+          var trs = tbody.querySelectorAll("tr");
+          var auto = conn.kind === "sqlite" ? "INTEGER PRIMARY KEY AUTOINCREMENT"
+                   : conn.kind === "postgres" ? "SERIAL PRIMARY KEY" : "INT PRIMARY KEY AUTO_INCREMENT";
+          var untouched = trs.length === 1 &&
+            trs[0].querySelector(".dbc-dz-n").value.trim() === "id" &&
+            trs[0].querySelector(".dbc-dz-tp").value.trim() === auto;
+          if (!untouched) {
+            var okGo = await uiConfirm("应用 AI 建议",
+              "将用 AI 建议的 " + cols.length + " 列覆盖当前表单里填的内容（只是填表，还没保存，取消不影响数据库），确定？",
+              "覆盖", false);
+            if (!okGo) return;
+          }
+          rows = cols.map(function (c) {
+            return { name: c.name, type: c.type, nullable: !!c.nullable,
+                     def: c.default || "", pk: !!c.pk, old: false };
+          });
+          if (d.table && !nameIn.value.trim()) nameIn.value = d.table;
+          render();
+          aiSay("已按 AI 建议填充 " + rows.length + " 列" + (d.note ? "：" + d.note : "") + " · 确认后点「保存」");
+          return;
+        }
+        var have = {};
+        rows.forEach(function (r) { if (r.name) have[String(r.name).toLowerCase()] = 1; });
+        var added = [];
+        cols.forEach(function (c) {
+          var k = String(c.name).toLowerCase();
+          if (have[k]) return;                     // 已有列不动
+          have[k] = 1;
+          rows.push({ name: c.name, type: c.type, nullable: !!c.nullable,
+                      def: c.default || "", pk: false, old: false });
+          added.push(c.name);
+        });
+        if (!added.length) { aiSay("没有需要补充的新列，这张表已经覆盖了 AI 的建议"); return; }
+        render();
+        aiSay("已建议补充 " + added.length + " 列：" + added.join("、") +
+              "（原有列保持不变）· 确认后点「保存」");
+      }
+      async function aiGen() {
+        if (aiBusy) return;
+        var q = aiQ.value.trim();
+        if (!q) { aiSay("请先用一句话描述这张表要存什么", true); aiQ.focus(); return; }
+        setAiBusy(true);
+        aiSay("正在让 AI 设计「" + (isNew ? (nameIn.value.trim() || "新表") : tableName) + "」…");
+        try {
+          var d = await dbcApi("/api/db/table/ai-design", { method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conn: conn.id, dbname: state.db, schema: useSchema,
+                                   table: isNew ? "" : tableName, question: q }) });
+          await applyAi(d);
+        } catch (e) {
+          aiSay(e.message || String(e), true);
+        } finally { setAiBusy(false); }
+      }
+      aiBtn.onclick = function () { aiToggle(); };
+      box.querySelector(".dbc-dz-aix").onclick = function () { aiToggle(false); };
+      aiGo.onclick = aiGen;
+      aiQ.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); aiGen(); } };
+
+      /* ---- 常用定义预设：点列上的「▾」直接挑一个，也能继续手写 ---- */
+      function typePresets() {
+        if (conn.kind === "mysql") return [
+          { label: "主键 / 自增" },
+          "INT PRIMARY KEY AUTO_INCREMENT", "BIGINT PRIMARY KEY AUTO_INCREMENT",
+          { label: "整数 / 布尔" },
+          "INT", "INT NOT NULL DEFAULT 0", "BIGINT", "SMALLINT", "TINYINT(1) DEFAULT 0",
+          { label: "字符串" },
+          "VARCHAR(50)", "VARCHAR(255)", "VARCHAR(255) NOT NULL DEFAULT ''", "TEXT", "LONGTEXT",
+          "CHAR(36)",
+          { label: "数值" },
+          "DECIMAL(10,2)", "DOUBLE", "FLOAT",
+          { label: "时间" },
+          "DATETIME DEFAULT CURRENT_TIMESTAMP", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+          "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP", "DATE", "TIME",
+          { label: "其他" },
+          "JSON", "BLOB", "ENUM('a','b')",
+        ];
+        if (conn.kind === "postgres") return [
+          { label: "主键 / 自增" },
+          "SERIAL PRIMARY KEY", "BIGSERIAL PRIMARY KEY", "uuid PRIMARY KEY DEFAULT gen_random_uuid()",
+          { label: "整数 / 布尔" },
+          "integer", "integer NOT NULL DEFAULT 0", "bigint", "smallint", "boolean DEFAULT false",
+          { label: "字符串" },
+          "varchar(50)", "varchar(255)", "varchar(255) NOT NULL DEFAULT ''", "text", "char(36)",
+          { label: "数值" },
+          "numeric(10,2)", "double precision", "real",
+          { label: "时间" },
+          "timestamp DEFAULT now()", "timestamptz DEFAULT now()", "date", "time",
+          { label: "其他" },
+          "jsonb", "json", "bytea",
+        ];
+        return [
+          { label: "主键 / 自增" },
+          "INTEGER PRIMARY KEY AUTOINCREMENT",
+          { label: "整数 / 布尔" },
+          "INTEGER", "INTEGER NOT NULL", "INTEGER NOT NULL DEFAULT 0", "BIGINT", "BOOLEAN DEFAULT 0",
+          { label: "字符串" },
+          "TEXT", "TEXT NOT NULL", "VARCHAR(255)", "VARCHAR(50) NOT NULL DEFAULT ''",
+          { label: "数值 / 时间 / 其他" },
+          "REAL", "NUMERIC", "DECIMAL(10,2)", "DATETIME DEFAULT CURRENT_TIMESTAMP", "DATE", "BLOB",
+        ];
+      }
+      function defaultPresets() {
+        if (conn.kind === "postgres") return ["now()", "CURRENT_TIMESTAMP", "CURRENT_DATE",
+                                              "true", "false", "0", "''", "NULL"];
+        if (conn.kind === "mysql") return ["CURRENT_TIMESTAMP", "CURRENT_DATE", "0", "1", "''", "NULL"];
+        return ["CURRENT_TIMESTAMP", "0", "1", "''", "NULL"];
+      }
+      /* 挑完类型后把「NOT NULL / DEFAULT ?」拆到对应的勾选框和输入框里，
+         避免和 colDef() 再拼一次造成 `INT NOT NULL DEFAULT 0 DEFAULT 0` 这种重复 */
+      function applyTypePreset(tr, val) {
+        var tp = tr.querySelector(".dbc-dz-tp");
+        var nl = tr.querySelector(".dbc-dz-nl");
+        var df = tr.querySelector(".dbc-dz-df");
+        var s = String(val);
+        if (/ NOT NULL/i.test(s)) { s = s.replace(/ NOT NULL/i, ""); nl.checked = false; }
+        var i = s.toUpperCase().indexOf(" DEFAULT ");
+        if (i >= 0 && s.toUpperCase().indexOf(" ON UPDATE ") < 0) {
+          df.value = s.slice(i + 9).trim();
+          s = s.slice(0, i);
+        }
+        tp.value = s.replace(/\s+/g, " ").trim();
+        tp.focus();
+      }
+
+      /* 预设面板：挂在 #modalOverlay 上（弹窗遮罩 z-index 2500，普通下拉菜单 1001 会被压住），
+         用 fixed 定位贴在「▾」按钮下方，空间不够就翻到上方 */
+      var pz = null, pzAnchor = null;
+      function closePresets() {
+        if (pz && pz.parentNode) pz.parentNode.removeChild(pz);
+        pz = null; pzAnchor = null;
+        document.removeEventListener("mousedown", pzOutside, true);
+      }
+      function pzOutside(e) {
+        if (!pz) return;
+        if (pz.contains(e.target)) return;
+        if (pzAnchor && (pzAnchor === e.target || pzAnchor.contains(e.target))) return;
+        closePresets();
+      }
+      function openPresets(anchor, presets, onPick) {
+        closePresets();
+        var p = document.createElement("div");
+        p.className = "dbc-pz";
+        p.innerHTML = presets.map(function (x, i) {
+          return typeof x === "string"
+            ? '<div class="dbc-pz-i" data-i="' + i + '">' + esc(x) + "</div>"
+            : '<div class="dbc-pz-h">' + esc(x.label) + "</div>";
+        }).join("");
+        $("modalOverlay").appendChild(p);
+        var r = anchor.getBoundingClientRect(), w = p.offsetWidth, h = p.offsetHeight;
+        var top = r.bottom + 3;
+        if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 3);
+        p.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px";
+        p.style.top = top + "px";
+        Array.prototype.forEach.call(p.querySelectorAll(".dbc-pz-i"), function (el) {
+          el.onclick = function () { var v = presets[+el.dataset.i]; closePresets(); onPick(v); };
+        });
+        pz = p; pzAnchor = anchor;
+        setTimeout(function () { document.addEventListener("mousedown", pzOutside, true); }, 0);
+      }
+      function render() {
+        closePresets();
+        tbody.innerHTML = rows.map(function (r) {
+          return "<tr>" +
+            '<td><input class="dbc-in dbc-dz-n" spellcheck="false" value="' + escAttr(r.name) +
+              '" placeholder="列名"></td>' +
+            '<td><div class="dbc-dz-tpw"><input class="dbc-in dbc-dz-tp" spellcheck="false" value="' +
+              escAttr(r.type) + '" placeholder="' +
+              escAttr(conn.kind === "postgres" ? "类型，如 varchar(50)" : "类型 / 定义，如 int not null default 0") +
+              '"><button class="dbc-mini dbc-dz-pick dbc-dz-tp-pick" title="选择常用定义">' +
+              '<i class="bi bi-caret-down-fill"></i></button></div></td>' +
+            '<td class="dbc-dz-c"><input type="checkbox" class="dbc-dz-nl"' +
+              (r.nullable ? " checked" : "") + "></td>" +
+            '<td><div class="dbc-dz-dfw"><input class="dbc-in dbc-dz-df" spellcheck="false" value="' +
+              escAttr(String(r.def == null ? "" : r.def)) + '" placeholder="可空">' +
+              '<button class="dbc-mini dbc-dz-pick dbc-dz-df-pick" title="选择常用默认值">' +
+              '<i class="bi bi-caret-down-fill"></i></button></div></td>' +
+            '<td class="dbc-dz-c"><input type="checkbox" class="dbc-dz-pk"' +
+              (r.pk ? " checked" : "") + " disabled></td>" +
+            '<td class="dbc-dz-c"><button class="dbc-mini dbc-dz-del" title="删除这一列">' +
+              '<i class="bi bi-trash"></i></button></td>' +
+          "</tr>";
+        }).join("");
+        var trs = tbody.querySelectorAll("tr");
+        Array.prototype.forEach.call(tbody.querySelectorAll(".dbc-dz-del"), function (b, i) {
+          b.onclick = function () { rows.splice(i, 1); render(); };
+        });
+        Array.prototype.forEach.call(tbody.querySelectorAll(".dbc-dz-tp-pick"), function (b, i) {
+          b.onclick = function () {
+            openPresets(b, typePresets(), function (v) { applyTypePreset(trs[i], v); });
+          };
+        });
+        Array.prototype.forEach.call(tbody.querySelectorAll(".dbc-dz-df-pick"), function (b, i) {
+          b.onclick = function () {
+            openPresets(b, defaultPresets(), function (v) {
+              var f = trs[i].querySelector(".dbc-dz-df");
+              f.value = v;
+              f.focus();
+            });
+          };
+        });
+      }
+      function close() {
+        closePresets();
+        ov.classList.remove("show"); ov.innerHTML = "";
+        ov.onkeydown = null; ov.onmousedown = null;
+      }
+      render();
+      box.querySelector(".dbc-dz-add").onclick = function () {
+        rows.push({ name: "", type: "", nullable: true, def: "", pk: false, old: false });
+        render();
+        var ns = tbody.querySelectorAll(".dbc-dz-n");
+        if (ns.length) ns[ns.length - 1].focus();
+      };
+      box.querySelector(".m-cancel").onclick = close;
+      ov.onmousedown = function (e) { if (e.target === ov) close(); };
+      ov.onkeydown = function (e) { if (e.key === "Escape") { e.preventDefault(); close(); } };
+
+      okBtn.onclick = async function () {
+        var nm = nameIn.value.trim();
+        if (!nm) { say("请填写表名"); return; }
+        var cur = [];
+        Array.prototype.forEach.call(tbody.querySelectorAll("tr"), function (tr, i) {
+          cur.push({
+            name: tr.querySelector(".dbc-dz-n").value.trim(),
+            type: tr.querySelector(".dbc-dz-tp").value.trim(),
+            nullable: tr.querySelector(".dbc-dz-nl").checked,
+            def: tr.querySelector(".dbc-dz-df").value.trim(),
+            pk: rows[i] ? rows[i].pk : false,
+            old: rows[i] ? rows[i].old : false,
+            extra: rows[i] ? (rows[i].extra || "") : "",
+          });
+        });
+        if (!cur.length) { say("至少要有一列"); return; }
+        var seen = {};
+        for (var i = 0; i < cur.length; i++) {
+          if (!cur[i].name) { say("第 " + (i + 1) + " 列还没填列名"); return; }
+          if (seen[cur[i].name]) { say("列名重复：" + cur[i].name); return; }
+          if (!String(cur[i].type).trim()) { say("列「" + cur[i].name + "」还没填类型"); return; }
+          seen[cur[i].name] = 1;
+        }
+
+        // ---------- 新建 ----------
+        if (isNew) {
+          var defs = cur.map(function (c) { return quoteCol(conn.kind, c.name) + " " + colDef(c); });
+          var okNew = await uiConfirm("新建表",
+            "将创建「" + nm + "」，共 " + cur.length + " 列：\n" + defs.join(",\n"), "创建", false);
+          if (!okNew) return;
+          okBtn.disabled = true;
+          try {
+            await postTable({ action: "create", name: nm, columns: defs.join(", "), schema: useSchema });
+            toast("已新建表 " + nm, "ok");
+            close();
+            state.table = nm; state.schema = useSchema;
+            dbcSaveState(conn.id, { table: nm, schema: useSchema });
+            await loadSchema();
+          } catch (e) { say("创建失败：" + (e.message || String(e))); }
+          finally { okBtn.disabled = false; }
+          return;
+        }
+
+        // ---------- 改结构：与原始结构 diff ----------
+        var actions = [];
+        orig.forEach(function (o) {                     // 被删掉的列
+          if (rows.indexOf(o) < 0) actions.push({ op: "drop", column: o.name });
+        });
+        cur.forEach(function (c, i) {                   // 改名 / 改定义 / 新增
+          var o = rows[i];
+          if (!o || !o.old) {
+            actions.push({ op: "add", column: c.name, definition: colDef(c) });
+            return;
+          }
+          if (c.name !== o.name) {
+            actions.push({ op: "rename", column: o.name, new_name: c.name,
+                           definition: conn.kind === "mysql" ? colDefKeep(c) : "" });
+          }
+          var oldDef = (o.def === null || o.def === undefined) ? "" : String(o.def);
+          var parts = [];
+          if (c.type !== o.type) parts.push("type");
+          if (!!c.nullable !== !!o.nullable) parts.push("nullable");
+          if (c.def !== oldDef) parts.push("default");
+          if (parts.length) {
+            actions.push({ op: "modify", column: c.name, parts: parts,
+                           type: String(c.type || "").trim(), nullable: !!c.nullable, "default": c.def,
+                           definition: conn.kind === "mysql" ? colDefKeep(c) : colDef(c) });
+          }
+        });
+        var renameTo = (nm !== tableName) ? nm : "";
+        if (!actions.length && !renameTo) { say("没有检测到结构改动"); return; }
+        if (conn.kind === "sqlite" && actions.some(function (a) { return a.op === "modify"; })) {
+          say("SQLite 不支持修改列类型 / 约束，请改用 新增列 / 删除列 / 重命名列");
+          return;
+        }
+        var lines = [];
+        if (renameTo) lines.push("重命名表 → " + renameTo);
+        actions.forEach(function (a) {
+          var what = { type: "类型", nullable: "可空", "default": "默认值" };
+          lines.push({ add: "新增列 " + a.column + "  " + a.definition,
+                       drop: "删除列 " + a.column,
+                       rename: "重命名列 " + a.column + " → " + a.new_name,
+                       modify: "修改列 " + a.column + "（" +
+                         (a.parts || []).map(function (p) { return what[p] || p; }).join(" / ") + "）"
+                     }[a.op]);
+        });
+        var okGo = await uiConfirm("修改表结构",
+          "将对「" + tableName + "」执行 " + lines.length + " 处结构性变更：\n" + lines.join("\n") +
+          "\n\n表结构变更不可回撤，确定继续？", "执行", true);
+        if (!okGo) return;
+        okBtn.disabled = true;
+        try {
+          if (renameTo) {
+            await postTable({ action: "rename", table: tableName, schema: useSchema, new_name: renameTo });
+          }
+          for (var k = 0; k < actions.length; k++) {
+            say("正在执行 " + (k + 1) + " / " + actions.length + " …");
+            await postTable(Object.assign({ action: "alter", table: nm, schema: useSchema }, actions[k]));
+          }
+          toast("表结构已更新（" + lines.length + " 处）", "ok");
+          close();
+          state.table = nm; state.schema = useSchema;
+          dbcSaveState(conn.id, { table: nm, schema: useSchema });
+          await loadSchema();
+        } catch (e) {
+          say("失败：" + (e.message || String(e)));
+          await loadSchema();          // 前面几条可能已生效，刷新左侧避免状态对不上
+        } finally { okBtn.disabled = false; }
+      };
+    }
+
+    async function newTable() {
       try {
-        await dbcApi("/api/db/table", { method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(Object.assign({ conn: conn.id, dbname: state.db }, body)) });
-        toast("操作完成", "ok");
-        state.table = "";
-        loadSchema();
+        if (isRedis) {
+          var rk = await dbcFormModal("新建 key", [
+            { key: "name", label: "key", placeholder: "如 user:1" },
+            { key: "type", label: "类型", type: "select", options: ["string", "hash", "list"] },
+            { key: "field", label: "字段名", placeholder: "仅 hash 需要", required: false },
+            { key: "value", label: "值", placeholder: "可留空", required: false },
+          ], "创建");
+          if (!rk) return;
+          await postTable({ action: "create", name: rk.name, type: rk.type, field: rk.field, value: rk.value });
+          toast("已创建 key：" + rk.name, "ok");
+          await reloadSchema(false);
+          return;
+        }
+        if (isMongo) {
+          var cn = await uiPrompt("新建集合", "", "集合名");
+          if (!cn || !cn.trim()) return;
+          await postTable({ action: "create", name: cn.trim() });
+          toast("已创建集合 " + cn.trim(), "ok");
+          await reloadSchema(false);
+          return;
+        }
+        await tableDesigner("", state.schema);
       } catch (e) { toast(e.message || String(e), "err"); }
     }
-    async function newTable() {
-      if (isMongo) {
-        var cn = await uiPrompt("新建集合", "", "集合名");
-        if (!cn || !cn.trim()) return;
-        await tableOp({ action: "create", name: cn.trim() });
-        return;
-      }
-      var nm = await uiPrompt("新建表 · 表名", "", "例如 my_table");
-      if (!nm || !nm.trim()) return;
-      var auto = conn.kind === "sqlite" ? "INTEGER PRIMARY KEY AUTOINCREMENT"
-                                        : "INT PRIMARY KEY AUTO_INCREMENT";
-      var cols = await uiPrompt("新建表 · 列定义", "id " + auto + ", name VARCHAR(50)",
-                                "列定义，如 id INT PRIMARY KEY, name VARCHAR(50)");
-      if (!cols || !cols.trim()) return;
-      await tableOp({ action: "create", name: nm.trim(), columns: cols.trim() });
-    }
     async function renameTable(name, sch) {
-      var nn = await uiPrompt("重命名", name, "新的名称");
+      var nn = await uiPrompt("重命名" + whatName, name, "新的名称");
       if (!nn || !nn.trim() || nn.trim() === name) return;
-      await tableOp({ action: "rename", table: name, schema: sch, new_name: nn.trim() });
+      try {
+        await postTable({ action: "rename", table: name, schema: sch, new_name: nn.trim() });
+        toast("已重命名为 " + nn.trim(), "ok");
+        await reloadSchema(false);
+      } catch (e) { toast(e.message || String(e), "err"); }
     }
     async function truncateTable(name, sch) {
-      var what = isMongo ? "集合" : "表";
-      var ok = await uiConfirm("清空" + what,
-        "将删除「" + name + "」里的全部数据（结构保留），**且不可回撤**，确定继续？", "清空", true);
+      var ok = await uiConfirm("清空" + whatName,
+        "将删除「" + name + "」里的全部数据（结构保留），且不可回撤，确定继续？", "清空", true);
       if (!ok) return;
-      await tableOp({ action: "truncate", table: name, schema: sch });
+      try {
+        await postTable({ action: "truncate", table: name, schema: sch });
+        toast("已清空 " + name, "ok");
+        if (state.table === name) loadRows(0);
+      } catch (e) { toast(e.message || String(e), "err"); }
     }
     async function dropTable(name, sch) {
-      var what = isMongo ? "集合" : "表";
-      var ok = await uiConfirm("删除" + what,
-        "将删除「" + name + "」及其全部数据，**且不可回撤**，确定继续？", "删除", true);
+      var ok = await uiConfirm("删除" + whatName,
+        "将删除「" + name + "」及其全部数据，且不可回撤，确定继续？", "删除", true);
       if (!ok) return;
-      await tableOp({ action: "drop", table: name, schema: sch });
+      try {
+        await postTable({ action: "drop", table: name, schema: sch });
+        toast("已删除 " + name, "ok");
+        await reloadSchema(false);
+      } catch (e) { toast(e.message || String(e), "err"); }
     }
+    // MongoDB：采样首条文档，列出集合字段（没有固定结构，只看个大概）
+    async function showFields(name, sch) {
+      var cols;
+      try {
+        var d = await dbcApi("/api/db/table/columns?conn=" + encodeURIComponent(conn.id) +
+          "&dbname=" + encodeURIComponent(state.db) +
+          "&schema=" + encodeURIComponent(sch || state.schema) + "&table=" + encodeURIComponent(name));
+        cols = d.columns || [];
+      } catch (e) { toast(e.message || String(e), "err"); return; }
+      var html = cols.length
+        ? '<table class="dbc-info-t"><thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead><tbody>' +
+          cols.map(function (c) {
+            return "<tr><td>" + esc(c.name) + "</td><td>" + esc(c.type || "") + "</td><td>" +
+              (c.pk ? "主键" : "") + "</td></tr>";
+          }).join("") + "</tbody></table>"
+        : '<div class="m-msg">这个集合还没有文档，字段未知</div>';
+      await uiModal({ title: "集合字段 · " + name, wide: true, html: html,
+                      hideCancel: true, okText: "知道了" });
+    }
+    async function mongoAddField(name) {
+      var r = await dbcFormModal("为全部文档新增字段", [
+        { key: "field", label: "字段名", placeholder: "如 status" },
+        { key: "value", label: "默认值", placeholder: "可留空；数字 / true / null 按 JSON 解析", required: false },
+      ], "写入");
+      if (!r) return;
+      try {
+        await postTable({ action: "addfield", table: name, field: r.field, value: r.value });
+        toast("已为全部文档写入字段 " + r.field, "ok");
+        if (state.table === name) loadRows(state.offset);
+      } catch (e) { toast(e.message || String(e), "err"); }
+    }
+    async function redisExpireKey(name) {
+      var r = await dbcFormModal("设置 key 过期", [
+        { key: "seconds", label: "秒数", placeholder: "0 = 取消过期（永久）", value: "0" },
+      ], "设置");
+      if (!r) return;
+      try {
+        await postTable({ action: "expire", table: name, seconds: parseInt(r.seconds, 10) || 0 });
+        toast(parseInt(r.seconds, 10) > 0 ? "已设置过期" : "已设为永久", "ok");
+      } catch (e) { toast(e.message || String(e), "err"); }
+    }
+
     function tableMenu(name, sch, anchor) {
-      if (isRedis) { toast("Redis 没有「表」概念，可直接删除 key", "info"); return; }
-      var items = [{ label: isMongo ? "新建集合…" : "新建表…", icon: "bi-plus-square",
-                     act: function () { newTable(); } }];
-      if (name) {
-        items.push({ label: "重命名…", icon: "bi-input-cursor-text", disabled: isMongo,
-                     act: function () { renameTable(name, sch); } });
-        items.push({ label: isMongo ? "清空集合（删掉全部文档）" : "清空表（删掉全部数据）",
-                     icon: "bi-eraser", danger: true, act: function () { truncateTable(name, sch); } });
-        items.push({ label: isMongo ? "删除集合" : "删除表", icon: "bi-trash", danger: true,
-                     act: function () { dropTable(name, sch); } });
+      var items = [];
+      if (isRedis) {
+        items.push({ label: "新建 key…", icon: "bi-plus-square", act: function () { newTable(); } });
+        if (name) {
+          items.push({ label: "重命名 key…", icon: "bi-input-cursor-text",
+                       act: function () { renameTable(name, sch); } });
+          items.push({ label: "设置过期…", icon: "bi-clock",
+                       act: function () { redisExpireKey(name); } });
+          items.push({ label: "删除 key", icon: "bi-trash", danger: true,
+                       act: function () { dropTable(name, sch); } });
+        }
+      } else if (isMongo) {
+        items.push({ label: "新建集合…", icon: "bi-plus-square", act: function () { newTable(); } });
+        if (name) {
+          items.push({ divider: true });
+          items.push({ label: "查看字段…", icon: "bi-list-columns",
+                       act: function () { showFields(name, sch); } });
+          items.push({ label: "为全部文档新增字段…", icon: "bi-plus-circle",
+                       act: function () { mongoAddField(name); } });
+          items.push({ label: "重命名集合…", icon: "bi-input-cursor-text",
+                       act: function () { renameTable(name, sch); } });
+          items.push({ label: "清空集合（删掉全部文档）", icon: "bi-eraser", danger: true,
+                       act: function () { truncateTable(name, sch); } });
+          items.push({ label: "删除集合", icon: "bi-trash", danger: true,
+                       act: function () { dropTable(name, sch); } });
+        }
+      } else {
+        items.push({ label: "新建表…", icon: "bi-plus-square", act: function () { newTable(); } });
+        if (name) {
+          items.push({ divider: true });
+          items.push({ label: "表结构（查看 / 修改）…", icon: "bi-table",
+                       act: function () { tableDesigner(name, sch); } });
+          items.push({ label: "重命名表…", icon: "bi-input-cursor-text",
+                       act: function () { renameTable(name, sch); } });
+          items.push({ label: "清空表（删掉全部数据）", icon: "bi-eraser", danger: true,
+                       act: function () { truncateTable(name, sch); } });
+          items.push({ label: "删除表", icon: "bi-trash", danger: true,
+                       act: function () { dropTable(name, sch); } });
+        }
       }
       MENUS.dbcTable = items;
       openDrop("dbcTable", anchor);
@@ -952,6 +1573,14 @@
     };
     tab.host.querySelector(".dbc-refresh").onclick = function () {
       if (state.table) { loadRows(state.offset); } else { loadSchema(); }
+    };
+    // 侧栏「＋」：新建表 / 集合 / key（表列表为空时也能从这里进）
+    tab.host.querySelector(".dbc-new-table").onclick = function () { newTable(); };
+    // 当前表名旁边的笔：直接进表结构设计（MongoDB 则看集合字段）
+    curEditEl.onclick = function () {
+      if (!state.table) { toast("请先在左侧选一张表 / 集合", "warn"); return; }
+      if (isMongo) showFields(state.table, state.schema);
+      else tableDesigner(state.table, state.schema);
     };
     sqlToggle.onclick = function () { setSqlPanel(sqlBox.hidden); };
     tab.host.querySelector(".dbc-sql-close").onclick = function () { setSqlPanel(false); };

@@ -37,6 +37,9 @@ _CELL_MAX = 2000                 # 单个单元格最长字符数（超出截断
 _NL_MAX = 500                    # 「一句话生成 SQL」描述长度上限
 _NL_TIMEOUT = 60                 # 调 AI 生成 SQL 的超时秒数
 _NL_CTX = 40000                  # 提示词总长度上限（表结构 + 需求）
+_TD_MAX = 500                    # 「AI 推荐表设计」需求描述长度上限
+_TD_COLS = 60                    # 一次最多采纳多少列
+_TD_TYPE = 64                    # 单个类型定义长度上限
 _NL_TABLES = 60                  # 表结构最多提供给 AI 的表数
 _NOSQL_LIST_MAX = 300            # Redis key / 列表类浏览一次最多列出多少条
 
@@ -559,6 +562,24 @@ _NL_SYS_MONGO = (
     "注意：必须输出 JSON，不要输出 db.集合.find(...) 这类 shell 写法。"
 )
 
+_TD_SYS = (
+    "你是 {dialect} 表结构设计助手。根据用户的一句话需求（可能附带已有表结构），"
+    "设计或补齐这张表，并只以一个 JSON 对象返回。\n"
+    "硬性要求：\n"
+    "1. 只输出 JSON 本身：不要解释、不要 Markdown 代码块、不要用 ``` 包裹；\n"
+    "2. JSON 结构固定为：{{\"table\": \"表名\", \"note\": \"一句话说明\", \"columns\": "
+    "[{{\"name\": \"列名\", \"type\": \"类型\", \"nullable\": true, \"default\": \"\", \"pk\": false}}]}}；\n"
+    "3. type 只写纯类型（本库可用：{types}），不要带 NOT NULL / DEFAULT / PRIMARY KEY / "
+    "AUTO_INCREMENT / UNIQUE，这些分别由 nullable / default / pk 表达；\n"
+    "4. 列名用小写蛇形英文，第一列是主键 id（pk=true、nullable=false）；\n"
+    "5. default 写值的字面量：字符串带单引号、数字 / 布尔 / 函数不带引号（时间用 {now}），"
+    "没有默认值就写空字符串；\n"
+    "6. 表里必须有 created_at 与 updated_at 两个时间字段；\n"
+    "7. 用户给了已有表结构时，必须保留原有列名与原义，只做补齐 / 优化，不要改名、不要臆造；\n"
+    "8. 列数控制在 20 列以内，不要设计外键；\n"
+    "9. 需求完全无法理解时，只输出 {{\"error\": \"简短原因\"}}。"
+)
+
 
 def _row_vals(r):
     """统一取值：DictCursor 给 dict、sqlite3 给 Row/元组，都转成列表"""
@@ -936,6 +957,221 @@ def _pk_columns(cur, kind, dbname, schema, table):
         return [_row_vals(r)[0] for r in cur.fetchall()]
     except Exception:
         return []
+
+
+def _columns_info(cur, kind, dbname, schema, table):
+    """取表的列结构：[{name, type, nullable, default, pk, extra}]
+
+    供「表结构设计」弹窗展示与比对（改列 / 删列 / 重命名列时的原始值）。
+    """
+    out = []
+    if kind == "sqlite":
+        cur.execute("PRAGMA table_info(%s)" % _quote(kind, table))
+        for r in cur.fetchall():
+            v = list(r.values()) if isinstance(r, dict) else list(r)
+            out.append({"name": v[1], "type": v[2] or "", "nullable": not bool(v[3]),
+                        "default": v[4], "pk": bool(v[5]), "extra": ""})
+        return out
+    if kind == "mysql":
+        cur.execute("SELECT column_name, column_type, is_nullable, column_default, column_key, extra "
+                    "FROM information_schema.columns WHERE table_schema = %s AND table_name = %s "
+                    "ORDER BY ordinal_position", (dbname or "", table))
+        for r in cur.fetchall():
+            v = list(r.values()) if isinstance(r, dict) else list(r)
+            out.append({"name": v[0], "type": v[1] or "", "nullable": str(v[2]).upper() == "YES",
+                        "default": v[3], "pk": str(v[4]).upper() == "PRI", "extra": v[5] or ""})
+        return out
+    # PostgreSQL：data_type 不带长度，按需把长度补回去，便于原样回填
+    cur.execute("SELECT column_name, data_type, is_nullable, column_default, "
+                "character_maximum_length, numeric_precision "
+                "FROM information_schema.columns WHERE table_schema = %s AND table_name = %s "
+                "ORDER BY ordinal_position", (schema or "public", table))
+    pk = set(_pk_columns(cur, kind, dbname, schema, table))
+    for r in cur.fetchall():
+        v = list(r.values()) if isinstance(r, dict) else list(r)
+        name, dtype = v[0], v[1] or ""
+        if dtype in ("character varying", "character") and isinstance(v[4], int):
+            dtype = ("varchar(%d)" if dtype == "character varying" else "char(%d)") % v[4]
+        elif dtype in ("numeric", "decimal") and isinstance(v[5], int):
+            dtype = "numeric(%d)" % v[5]
+        out.append({"name": name, "type": dtype, "nullable": str(v[2]).upper() == "YES",
+                    "default": v[3], "pk": name in pk, "extra": ""})
+    return out
+
+
+def _alter_sql(kind, ref, op, col, new_name, definition, extra=None):
+    """把「改列结构」翻译成各方言的 ALTER TABLE 语句（可能多句）
+
+    extra 里带结构化信息（parts=改动项 / type / nullable / default）：PostgreSQL
+    改列要按「类型 / 可空 / 默认值」拆成多条 ALTER COLUMN，不能像 MySQL 那样一句 MODIFY 搞定。
+    """
+    q = lambda n: _quote(kind, n)
+    e = extra or {}
+    parts = e.get("parts") or []
+    if op == "add":
+        if not definition:
+            raise RuntimeError("请填写列定义，如 age INT NOT NULL DEFAULT 0")
+        return ["ALTER TABLE %s ADD COLUMN %s %s" % (ref, q(col), definition)]
+    if op == "drop":
+        return ["ALTER TABLE %s DROP COLUMN %s" % (ref, q(col))]
+    if op == "rename":
+        if not new_name:
+            raise RuntimeError("请填写新的列名")
+        if kind == "mysql" and definition:
+            # 用 CHANGE COLUMN 而不是 RENAME COLUMN：后者要 MySQL 8 / MariaDB 10.5+，
+            # 且 CHANGE 能一并保住类型 / 默认值 / auto_increment 等属性（definition 里带上）
+            return ["ALTER TABLE %s CHANGE COLUMN %s %s %s" % (ref, q(col), q(new_name), definition)]
+        return ["ALTER TABLE %s RENAME COLUMN %s TO %s" % (ref, q(col), q(new_name))]
+    if op == "modify":
+        if kind == "mysql":
+            if not definition:
+                raise RuntimeError("请填写新的列定义")
+            return ["ALTER TABLE %s MODIFY COLUMN %s %s" % (ref, q(col), definition)]
+        if kind == "postgres":
+            out = []
+            ctype = str(e.get("type") or "").strip()
+            if "type" in parts and ctype:
+                # USING 让隐式转换不了的老数据也能改
+                out.append("ALTER TABLE %s ALTER COLUMN %s TYPE %s USING %s::%s"
+                           % (ref, q(col), ctype, q(col), ctype))
+            if "nullable" in parts:
+                out.append("ALTER TABLE %s ALTER COLUMN %s %s NOT NULL"
+                           % (ref, q(col), "SET" if e.get("nullable") is False else "DROP"))
+            if "default" in parts:
+                d = str(e.get("default") or "").strip()
+                out.append("ALTER TABLE %s ALTER COLUMN %s %s"
+                           % (ref, q(col), ("SET DEFAULT " + d) if d else "DROP DEFAULT"))
+            if not out:
+                raise RuntimeError("没有检测到可执行的列改动")
+            return out
+        raise RuntimeError("SQLite 只支持 新增 / 删除 / 重命名 列，不支持修改列类型")
+    raise RuntimeError("未知的列操作：%s" % op)
+
+
+def _table_op_sql(use, kind, schema, action, table, name, data):
+    """SQL 库的表级操作：新建 / 重命名 / 清空 / 删除 / 改列结构"""
+    conn, _k = _open(use, writable=True)
+    try:
+        cur = conn.cursor()
+        dbs = use.get("dbname") or ""
+        ref = _table_ref(kind, dbs, schema, table)
+        if action == "create":
+            cols = str(data.get("columns") or "").strip()
+            if not name:
+                raise RuntimeError("请填写表名")
+            if not cols:
+                raise RuntimeError("请至少定义一列")
+            cur.execute("CREATE TABLE %s (%s)" % (_quote(kind, name), cols))
+        elif action == "rename":
+            new = str(data.get("new_name") or "").strip()
+            if not new:
+                raise RuntimeError("请填写新表名")
+            if kind == "mysql":
+                cur.execute("RENAME TABLE %s TO %s" % (ref, _table_ref(kind, dbs, schema, new)))
+            else:
+                cur.execute("ALTER TABLE %s RENAME TO %s" % (ref, _quote(kind, new)))
+        elif action == "truncate":
+            cur.execute(("TRUNCATE TABLE %s" if kind in ("mysql", "postgres") else "DELETE FROM %s") % ref)
+        elif action == "drop":
+            cur.execute("DROP TABLE %s" % ref)
+        elif action == "alter":
+            op = str(data.get("op") or "")
+            col = str(data.get("column") or "").strip()
+            if op != "add" and not col:
+                raise RuntimeError("请选择要操作的列")
+            for stmt in _alter_sql(kind, ref, op, col, str(data.get("new_name") or "").strip(),
+                                   str(data.get("definition") or "").strip(),
+                                   {"parts": data.get("parts") or [],
+                                    "type": data.get("type") or "",
+                                    "nullable": data.get("nullable"),
+                                    "default": data.get("default")}):
+                cur.execute(stmt)
+        else:
+            raise RuntimeError("该操作不适用于 %s" % kind)
+        conn.commit()
+    finally:
+        _close(conn, kind)
+
+
+def _mongo_value(v):
+    """把前端输入还原成合适类型：能当 JSON 解析就解析（数字 / 布尔 / null / 对象）"""
+    if not isinstance(v, str):
+        return v
+    s = v.strip()
+    if s == "":
+        return ""
+    try:
+        return json.loads(s)
+    except Exception:
+        return v
+
+
+def _table_op_mongo(use, action, table, name, data):
+    """MongoDB 的「表」操作（集合）：新建 / 重命名 / 清空 / 删除 / 批量加字段"""
+    conn, _k = _open(use, writable=True)
+    try:
+        db = conn[use.get("dbname") or ""]
+        if action == "create":
+            if not name:
+                raise RuntimeError("请填写集合名")
+            db.create_collection(name)
+        elif action == "rename":
+            new = str(data.get("new_name") or "").strip()
+            if not new:
+                raise RuntimeError("请填写新的集合名")
+            db[table].rename(new)
+        elif action == "truncate":
+            db[table].delete_many({})
+        elif action == "drop":
+            db.drop_collection(table)
+        elif action == "addfield":
+            f = str(data.get("field") or "").strip()
+            if not f:
+                raise RuntimeError("请填写字段名")
+            db[table].update_many({}, {"$set": {f: _mongo_value(data.get("value"))}})
+        else:
+            raise RuntimeError("该操作不适用于 MongoDB")
+    finally:
+        _close(conn, kind)
+
+
+def _table_op_redis(use, action, table, name, data):
+    """Redis 的「表」操作（key）：新建 / 重命名 / 设置过期 / 删除"""
+    conn, _k = _open(use, writable=True)
+    try:
+        if action == "create":
+            if not name:
+                raise RuntimeError("请填写 key 名")
+            t = str(data.get("type") or "string").lower()
+            val = str(data.get("value") or "")
+            if t == "hash":
+                f = str(data.get("field") or "").strip()
+                if not f:
+                    raise RuntimeError("哈希类型需要填写字段名")
+                conn.hset(name, f, val)
+            elif t == "list":
+                conn.rpush(name, val)
+            else:
+                conn.set(name, val)
+        elif action == "rename":
+            new = str(data.get("new_name") or "").strip()
+            if not new:
+                raise RuntimeError("请填写新的 key 名")
+            if not conn.exists(table):
+                raise RuntimeError("key 不存在：%s" % table)
+            conn.rename(table, new)
+        elif action == "expire":
+            sec = int(data.get("seconds") or 0)
+            if sec > 0:
+                conn.expire(table, sec)
+            else:
+                conn.persist(table)
+        elif action == "drop":
+            conn.delete(table)
+        else:
+            raise RuntimeError("Redis 只支持 新建 / 重命名 / 设置过期 / 删除 key")
+    finally:
+        _close(conn, kind)
 
 
 def _mongo_id(v):
@@ -1429,6 +1665,47 @@ def api_db_schema():
                     "databases": dbs, "tables": tables})
 
 
+@bp.route("/api/db/table/columns", methods=["GET"])
+def api_db_table_columns():
+    """表结构：列名 / 类型 / 是否可空 / 默认值 / 是否主键
+
+    MongoDB 没有固定结构，改采样首条文档的字段充当「列」。
+    """
+    cid = str(request.args.get("conn") or "")
+    dbname = str(request.args.get("dbname") or "")
+    schema = str(request.args.get("schema") or "")
+    table = str(request.args.get("table") or "")
+    if not table:
+        return jsonify({"error": "缺少表名"}), 400
+    conf = _load_conf(cid, with_password=True)
+    if not conf:
+        return jsonify({"error": "连接不存在"}), 404
+    if (conf.get("kind") or "") == "redis":
+        return jsonify({"error": "Redis 没有列结构"}), 400
+    use = _pick(conf, dbname)
+    try:
+        with _LOCK:
+            conn, kind = _open(use)
+            try:
+                if kind == "mongodb":
+                    doc = conn[use.get("dbname") or ""][table].find_one({})
+                    if doc:
+                        cols = [{"name": k, "type": type(v).__name__, "nullable": True,
+                                 "default": None, "pk": (k == "_id"), "extra": ""}
+                                for k, v in doc.items()]
+                    else:
+                        cols = [{"name": "_id", "type": "ObjectId", "nullable": False,
+                                 "default": None, "pk": True, "extra": ""}]
+                else:
+                    cur = conn.cursor()
+                    cols = _columns_info(cur, kind, use.get("dbname") or "", schema, table)
+            finally:
+                _close(conn, kind)
+    except Exception as e:
+        return jsonify({"error": "读取表结构失败：%s" % e}), 500
+    return jsonify({"table": table, "kind": kind, "columns": cols})
+
+
 @bp.route("/api/db/rows", methods=["GET"])
 def api_db_rows():
     """表数据分页浏览"""
@@ -1723,9 +2000,13 @@ def api_db_row_delete():
 
 @bp.route("/api/db/table", methods=["POST"])
 def api_db_table():
-    """表级操作：create / rename / truncate / drop（MongoDB 对应集合）。
+    """表级操作（各类库按自己的语义落地）：
 
-    清空 / 删除 / 重命名都会动到结构或大量数据，**不支持回撤**，界面上会强提示。
+      · SQL（SQLite / MySQL / PostgreSQL）：create / rename / truncate / drop / alter（改列结构）
+      · MongoDB：create / rename / truncate / drop / addfield（给所有文档批量加字段）
+      · Redis：create（新建 key）/ rename / expire（设置过期）/ drop（删除 key）
+
+    清空 / 删除 / 重命名 / 改结构都会动到结构或大量数据，**不支持回撤**，界面上会强提示。
     """
     data = request.get_json(silent=True) or {}
     cid = str(data.get("conn") or "")
@@ -1733,71 +2014,33 @@ def api_db_table():
     schema = str(data.get("schema") or "")
     action = str(data.get("action") or "")
     table = str(data.get("table") or "").strip()
-    if action not in ("create", "rename", "truncate", "drop"):
+    name = str(data.get("name") or "").strip()
+    if action not in ("create", "rename", "truncate", "drop", "alter", "addfield", "expire"):
         return jsonify({"error": "未知操作：%s" % action}), 400
     if action != "create" and not table:
-        return jsonify({"error": "缺少表名"}), 400
+        return jsonify({"error": "缺少表名 / 集合名 / key"}), 400
     conf = _load_conf(cid, with_password=True)
     if not conf:
         return jsonify({"error": "连接不存在"}), 404
     use = _pick(conf, dbname)
     kind = conf.get("kind") or "sqlite"
-    if kind == "redis":
-        return jsonify({"error": "Redis 没有「表」概念，可直接删除 key"}), 400
-    name = str(data.get("name") or "").strip()
     try:
         with _LOCK:
-            if kind == "mongodb":
-                conn, _k = _open(use, writable=True)
-                try:
-                    db = conn[use.get("dbname") or ""]
-                    if action == "create":
-                        if not name:
-                            raise RuntimeError("请填写集合名")
-                        db.create_collection(name)
-                    elif action == "truncate":
-                        db[table].delete_many({})
-                    elif action == "drop":
-                        db.drop_collection(table)
-                    else:
-                        raise RuntimeError("MongoDB 暂不支持重命名集合")
-                finally:
-                    _close(conn, kind)
+            if kind == "redis":
+                _table_op_redis(use, action, table, name, data)
+            elif kind == "mongodb":
+                _table_op_mongo(use, action, table, name, data)
             else:
-                conn, _k = _open(use, writable=True)
-                try:
-                    cur = conn.cursor()
-                    ref = _table_ref(kind, use.get("dbname") or "", schema, table)
-                    if action == "create":
-                        cols = str(data.get("columns") or "").strip()
-                        if not name:
-                            raise RuntimeError("请填写表名")
-                        if not cols:
-                            raise RuntimeError("请填写列定义")
-                        cur.execute("CREATE TABLE %s (%s)" % (_quote(kind, name), cols))
-                    elif action == "rename":
-                        new = str(data.get("new_name") or "").strip()
-                        if not new:
-                            raise RuntimeError("请填写新表名")
-                        if kind == "mysql":
-                            cur.execute("RENAME TABLE %s TO %s" % (
-                                ref, _table_ref(kind, use.get("dbname") or "", schema, new)))
-                        else:
-                            cur.execute("ALTER TABLE %s RENAME TO %s" % (ref, _quote(kind, new)))
-                    elif action == "truncate":
-                        cur.execute(("TRUNCATE TABLE %s" if kind in ("mysql", "postgres")
-                                     else "DELETE FROM %s") % ref)
-                    else:
-                        cur.execute("DROP TABLE %s" % ref)
-                    conn.commit()
-                finally:
-                    _close(conn, kind)
+                _table_op_sql(use, kind, schema, action, table, name, data)
     except Exception as e:
         return jsonify({"error": "操作失败：%s" % e}), 400
-    summary = {"create": "新建表 " + (name or ""),
-               "rename": "重命名 %s → %s" % (table, str(data.get("new_name") or "")),
-               "truncate": "清空 " + table,
-               "drop": "删除 " + table}.get(action, action)
+    label = {"create": "新建 ", "rename": "重命名 %s → %s" % (table, str(data.get("new_name") or "")),
+             "truncate": "清空 " + table, "drop": "删除 " + table,
+             "alter": "%s 列结构" % {"add": "新增", "drop": "删除", "modify": "修改",
+                                     "rename": "重命名"}.get(str(data.get("op") or ""), "调整"),
+             "addfield": "为全部文档新增字段 " + str(data.get("field") or ""),
+             "expire": "设置过期 " + table}.get(action, action)
+    summary = (label + (name or "")) if action == "create" else label
     wid = _log_write(cid, kind, use.get("dbname") or "", schema, table or name, action, summary,
                      undoable=False)
     _log.info("表操作：kind=%s %s %s", kind, action, table or name)
@@ -1982,3 +2225,214 @@ def api_db_nl2sql():
     _log_ai_call("nl2sql", True, elapsed)
     _log.info("AI 生成查询：kind=%s model=%s %dms out=%s", kind, model, elapsed, out[:200])
     return jsonify({"sql": out, "model": model, "elapsed_ms": elapsed})
+
+
+# --------------------------------------------------------------------------- AI 推荐表设计
+# 给「表结构设计」弹窗用：一句话描述 → 一份列定义，回填到弹窗里让用户过目 / 修改后再保存。
+# 只生成、不落库（保存仍然走 /api/db/table），所以模型出错最坏也只是表单填得不对。
+
+def _td_split_def(s):
+    """把模型给的「类型 / 定义」拆成 (纯类型, 默认值)。
+
+    弹窗把类型、可空、默认值分开存，保存时再用 colDef() 拼回一句 DDL；
+    不拆干净就会拼出 `INT NOT NULL DEFAULT 0 DEFAULT 0` 这种重复定义。
+    """
+    t = re.sub(r"[\r\n;]+", " ", str(s or ""))
+    t = re.sub(r"\s+", " ", t).strip()
+    t = re.sub(r"\bNOT\s+NULL\b", "", t, flags=re.I)
+    t = re.sub(r"\bPRIMARY\s+KEY\b", "", t, flags=re.I)
+    t = re.sub(r"\bUNIQUE\b", "", t, flags=re.I)
+    t = re.sub(r"\bAUTO_?INCREMENT\b", "", t, flags=re.I)   # 自增跟着主键一起补，见 _td_pk_def
+    dflt = ""
+    m = re.search(r"\bDEFAULT\b\s*(.+)$", t, flags=re.I)
+    if m:
+        dflt = m.group(1).strip()
+        t = t[:m.start()]
+    return re.sub(r"\s+", " ", t).strip().strip(",")[:_TD_TYPE], _td_clean_default(dflt)
+
+
+def _td_clean_default(v):
+    """默认值：掐掉换行 / 分号，留 `'abc'` / `0` / `now()` 这类字面量原样"""
+    s = re.sub(r"[\r\n;]+", " ", str(v if v is not None else ""))
+    s = re.sub(r"\s+", " ", s).strip()
+    if s.lower() in ("", "none", "null", "无", "-", "--"):
+        return ""
+    return s[:80]
+
+
+def _td_columns(raw):
+    """把模型返回的 columns 规整成弹窗的四要素：清列名、去重、限长、类型必填"""
+    out, seen = [], set()
+    for c in (raw or []):
+        if not isinstance(c, dict):
+            continue
+        name = re.sub(r"[\s\"'`;,\-]+", "_", str(c.get("name") or "")).strip("_")
+        if not name or name in seen:
+            continue
+        typ, dflt = _td_split_def(c.get("type"))
+        if not typ:
+            continue
+        nv = c.get("nullable")
+        pk = bool(c.get("pk"))
+        seen.add(name)
+        out.append({"name": name, "type": typ, "nullable": True if nv is None else bool(nv),
+                    "default": _td_clean_default(c.get("default")) or dflt, "pk": pk})
+        if len(out) >= _TD_COLS:
+            break
+    return out
+
+
+def _td_pk_def(kind, typ):
+    """把主键写进「类型定义」里。
+
+    新建表时弹窗是把整句类型定义拼进 CREATE TABLE 的，只给 pk 标记建不出主键；
+    这也和弹窗里新建表的默认行（INTEGER PRIMARY KEY AUTOINCREMENT 之类）保持一致。
+    """
+    t = (typ or "").strip()
+    low = t.lower()
+    if "primary key" in low:
+        return t
+    base = low.split("(")[0].strip()
+    ints = ("int", "integer", "smallint", "bigint", "tinyint", "serial", "bigserial")
+    if kind == "postgres" and base in ints:
+        return ("BIGSERIAL" if base in ("bigint", "bigserial") else "SERIAL") + " PRIMARY KEY"
+    if kind == "sqlite" and base in ints:
+        return "INTEGER PRIMARY KEY AUTOINCREMENT"
+    if kind == "mysql" and base in ints:
+        return t + " PRIMARY KEY AUTO_INCREMENT"
+    return t + " PRIMARY KEY"
+
+
+@bp.route("/api/db/table/ai-design", methods=["POST"])
+def api_db_table_ai_design():
+    """AI 推荐表设计：一句话需求（+ 已有表结构）→ 表名与列定义。
+
+    只服务 SQL 库（Redis 是 key、MongoDB 是 schemaless，都没有「表结构」可设计）。
+    返回的列定义会填进弹窗，用户确认后仍由 /api/db/table 落库。
+    """
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("conn") or "")
+    dbname = str(data.get("dbname") or "")
+    schema = str(data.get("schema") or "")
+    table = str(data.get("table") or "").strip()
+    question = str(data.get("question") or "").strip()
+    if not question:
+        return jsonify({"error": "请先用一句话描述这张表要存什么"}), 400
+    if len(question) > _TD_MAX:
+        return jsonify({"error": "描述过长（上限 %d 字）" % _TD_MAX}), 400
+    conf = _load_conf(cid, with_password=True)
+    if not conf:
+        return jsonify({"error": "连接不存在"}), 404
+    kind = conf.get("kind") or "sqlite"
+    if kind not in ("sqlite", "mysql", "postgres"):
+        return jsonify({"error": "只有 SQLite / MySQL / PostgreSQL 支持设计表结构"}), 400
+    use = _pick(conf, dbname)
+    dbname = use.get("dbname") or ""
+
+    from ..ide.ai import _load_cfg, _sys_pick, _log_ai_call, _sys_err_response   # 函数内导入，避免模块循环依赖
+    cfg = _load_cfg()
+    provider, model, err = _sys_pick(cfg, "tabledesign")
+    if err:
+        return _sys_err_response(err, need_config=not cfg.get("providers"))
+
+    t_start = time.time()
+
+    def _fail(msg, code=502, **extra):
+        _log_ai_call("tabledesign", False, int((time.time() - t_start) * 1000), msg)
+        return jsonify({"error": msg, **extra}), code
+
+    # 上下文：改已有表 → 带上它的列结构；新建表 → 带上库里的表名，免得重名
+    ctx = ""
+    try:
+        with _LOCK:
+            conn, _k = _open(use)
+            try:
+                cur = conn.cursor()
+                _timeout_guard(conn, kind)
+                if table:
+                    cols = _columns_info(cur, kind, dbname, schema, table)
+                    if cols:
+                        ctx = "[表 %s 的现有结构]\n%s\n\n" % (table, "\n".join(
+                            "  %s %s%s%s" % (c["name"], c["type"],
+                                            "" if c["nullable"] else " NOT NULL",
+                                            (" DEFAULT " + str(c["default"])) if c["default"] is not None else "")
+                            for c in cols))
+                else:
+                    names = [t["name"] for t in _list_tables(cur, kind, dbname)][:_NL_TABLES]
+                    if names:
+                        ctx = "[库里已有的表（新表不要重名）]\n  " + "、".join(names) + "\n\n"
+            finally:
+                _close(conn, kind)
+    except Exception as e:
+        return jsonify({"error": "无法读取数据库结构：%s" % e}), 500
+
+    dialect = {"sqlite": "SQLite", "mysql": "MySQL", "postgres": "PostgreSQL"}.get(kind, kind)
+    sys_prompt = _TD_SYS.format(
+        dialect=dialect,
+        types={"sqlite": "INTEGER / TEXT / REAL / BLOB / NUMERIC",
+               "mysql": "INT / BIGINT / VARCHAR(255) / TEXT / DECIMAL(10,2) / DATETIME / DATE / JSON / TINYINT(1)",
+               "postgres": "integer / bigint / varchar(255) / text / numeric(10,2) / timestamp / date / boolean / jsonb"}[kind],
+        now={"sqlite": "CURRENT_TIMESTAMP", "mysql": "CURRENT_TIMESTAMP", "postgres": "now()"}[kind],
+    )
+    content = (ctx + "[设计要求]\n" + question)[:_NL_CTX]
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    payload = json.dumps({"model": model, "stream": False, "messages": [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": content}]}).encode("utf-8")
+
+    import urllib.error
+    import urllib.request
+    t0 = time.time()
+    req = urllib.request.Request(url, data=payload, method="POST", headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+    try:
+        resp = urllib.request.urlopen(req, timeout=_NL_TIMEOUT)
+        obj = json.loads(resp.read().decode("utf-8"))
+        text = (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")[:200]
+        return _fail("AI 接口返回 %s：%s" % (e.code, detail))
+    except Exception as e:
+        return _fail("调用 AI 接口失败：%s" % e)
+
+    _log.info("AI 推荐表结构：kind=%s model=%s text=%s", kind, model, _excerpt(text, 300))
+
+    out = _clean_json(text)
+    spec = None
+    if out:
+        try:
+            spec = json.loads(out)
+        except Exception:
+            spec = None
+    if not isinstance(spec, dict):
+        return _fail("模型没有返回可用的 JSON，请换个说法或换个模型（模型原话：%s）" % _excerpt(text))
+    if spec.get("error"):
+        return _fail(str(spec["error"])[:200], 400)
+
+    cols = _td_columns(spec.get("columns"))
+    if not cols:
+        return _fail("模型没有给出可用的列定义，请换个说法或换个模型（模型原话：%s）" % _excerpt(text))
+    if not table:                                  # 新建表：主键必须写进类型，否则建不出主键
+        first = None
+        for c in cols:
+            if not c["pk"]:
+                continue
+            if first is None:
+                first = c
+                c["type"] = _td_pk_def(kind, c["type"])
+                c["nullable"] = False
+            else:
+                c["pk"] = False                    # 一个表只能有一个主键
+        if first is None:                          # 模型漏了主键就补在第一列上，否则这张表没法改 / 删行
+            first = cols[0]
+            first["pk"] = True
+            first["nullable"] = False
+            first["type"] = _td_pk_def(kind, first["type"])
+
+    name = re.sub(r"[\s\"'`;,\-./]+", "_", str(spec.get("table") or "")).strip("_")[:_TD_TYPE]
+    elapsed = int((time.time() - t0) * 1000)
+    _log_ai_call("tabledesign", True, elapsed)
+    _log.info("AI 推荐表结构：kind=%s model=%s %dms table=%s %d 列", kind, model, elapsed, name, len(cols))
+    return jsonify({"table": name, "columns": cols, "note": str(spec.get("note") or "")[:200],
+                    "model": model, "elapsed_ms": elapsed})

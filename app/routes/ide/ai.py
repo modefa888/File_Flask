@@ -118,7 +118,8 @@ _MAX_IMAGE_PARTS = 8                  # 单次请求最多图片部件数
 #   {"provider": "p1", "model": "xxx", "off": ["summary", "models"]}
 # provider/model 为空表示「跟随 AI 助手」（用 cfg["active"]）；off 里列出的模块禁止调用。
 _SYS_META_KEY = "ai_sys"
-_SYS_MODULES = ("chat", "plugin", "agent", "commit", "nl2sql", "summary", "models", "scaffold")
+_SYS_MODULES = ("chat", "plugin", "agent", "commit", "nl2sql", "tabledesign", "summary", "models",
+                "scaffold")
 _AI_CALLS_KEEP = 2000            # 调用明细最多保留多少条（超出从最旧的开始删）
 _AI_DETAIL_CHARS = 1500          # 明细里保存的请求 / 响应摘要上限（点开能看清这次做了什么）
 

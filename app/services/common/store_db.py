@@ -228,13 +228,17 @@ CREATE INDEX IF NOT EXISTS idx_ai_calls_mod ON ai_calls(module, id);
 CREATE INDEX IF NOT EXISTS idx_ai_calls_day ON ai_calls(module, day);
 
 -- AI 对话历史（原独立库 data/.file_manager_ai_chat.db，表结构保持一致以便直接搬运）
+-- root：对话所属的项目根目录（IDE 的 ROOT）。空串 = 还没绑定项目（旧数据），
+-- 首次进入某个项目时由 chatdb.adopt_unassigned() 一次性划归该项目，
+-- 这样「打开另一个项目」看到的是各自独立的对话列表。
 CREATE TABLE IF NOT EXISTS ai_conversations (
     id         TEXT PRIMARY KEY,
     user_id    TEXT NOT NULL,
     title      TEXT DEFAULT '',
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
-    extra      TEXT DEFAULT ''
+    extra      TEXT DEFAULT '',
+    root       TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS ai_messages (
     conv_id   TEXT NOT NULL,
@@ -251,9 +255,11 @@ CREATE TABLE IF NOT EXISTS ai_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_conv_user ON ai_conversations(user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_msg_user ON ai_messages(user_id, conv_id, seq);
+-- cur_conv：旧版单值（兼容未绑定项目的场景）；cur_roots：{项目根目录: 当前会话 id}
 CREATE TABLE IF NOT EXISTS ai_prefs (
-    user_id  TEXT PRIMARY KEY,
-    cur_conv TEXT DEFAULT ''
+    user_id   TEXT PRIMARY KEY,
+    cur_conv  TEXT DEFAULT '',
+    cur_roots TEXT DEFAULT '{}'
 );
 
 -- AI 文件改动快照（原独立库 data/.file_manager_ai_undo.db）
@@ -345,7 +351,8 @@ def init_store_db():
 
 
 def _migrate_ai_columns(conn):
-    """老库补列：ai_calls.model / tokens_in / tokens_out、ai_usage.tokens_in / tokens_out。
+    """老库补列：ai_calls.model / tokens_in / tokens_out、ai_usage.tokens_in / tokens_out，
+    以及「对话按项目隔离」用的 ai_conversations.root / ai_prefs.cur_roots。
 
     CREATE TABLE IF NOT EXISTS 对已存在的表不会补列，所以这里手工加；
     SQLite 的 ADD COLUMN 没有 IF NOT EXISTS，先查 PRAGMA，缺了才加（故可反复执行）。
@@ -359,6 +366,8 @@ def _migrate_ai_columns(conn):
         ("ai_calls", "resp", "TEXT DEFAULT ''"),
         ("ai_usage", "tokens_in", "INTEGER DEFAULT 0"),
         ("ai_usage", "tokens_out", "INTEGER DEFAULT 0"),
+        ("ai_conversations", "root", "TEXT DEFAULT ''"),
+        ("ai_prefs", "cur_roots", "TEXT DEFAULT '{}'"),
     ):
         try:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}
@@ -366,6 +375,14 @@ def _migrate_ai_columns(conn):
                 conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, col, decl))
         except Exception as e:
             _log.warning("给 %s 补列 %s 失败：%s", table, col, e)
+
+    # 按项目查会话用的索引：必须等上面的 root 列补完才能建
+    # （老库先跑 _SCHEMA 时还没有 root 列，索引写在 _SCHEMA 里会直接报错）
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_conv_root "
+                     "ON ai_conversations(user_id, root, updated_at DESC)")
+    except Exception as e:
+        _log.warning("创建会话按项目索引失败：%s", e)
 
 
 # 常驻连接：进程内一直持有（不做实际读写，只在建表后打开一次）。

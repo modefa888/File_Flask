@@ -667,9 +667,19 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ai-hist-row.on .tt { color: #005fb8; }
 :where(html.theme-light) .ai-hist-row .tm { color: #8a8a8a; }
 :where(html.theme-light) .ai-hist-empty { color: #8a8a8a; }
+:where(html.theme-light) .ai-hist-empty .sub { color: #a0a0a6; }
 :where(html.theme-light) .ai-msgs { background: transparent; }
 :where(html.theme-light) .ai-empty { color: #8a8a8a; }
-:where(html.theme-light) .ai-empty .t { color: #6b6b6b; }
+/* 空会话中间提示卡片 */
+:where(html.theme-light) .ai-hero-title { color: #1f2328; }
+:where(html.theme-light) .ai-hero-spark { color: #2f9cf4; }
+:where(html.theme-light) .ai-hero-sub { color: #8a8a8a; }
+:where(html.theme-light) .ai-hero-card { background: #fbfbfb; border-color: #e2e2e2; }
+:where(html.theme-light) .ai-hero-hd { color: #3a3a3a; }
+:where(html.theme-light) .ai-hero-hd .bi, :where(html.theme-light) .ai-hero-hd b { color: #0b6fc0; }
+:where(html.theme-light) .ai-hero-list li { color: #55595f; }
+:where(html.theme-light) .ai-hero-list li::before { background: #b9b9bf; }
+:where(html.theme-light) .ai-hero-tip { color: #8a8a8a; }
 :where(html.theme-light) .ai-row .who { color: #8a8a8a; }
 :where(html.theme-light) .ai-row .bubble { color: #1f2328; }
 :where(html.theme-light) .ai-row.user .bubble { background: #d7e8f8; }

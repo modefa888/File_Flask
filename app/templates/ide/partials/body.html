@@ -218,10 +218,21 @@
       </div>
       <div class="ai-hist" id="aiHist" style="display:none"></div>
       <div class="ai-msgs scroll-thin" id="aiMsgs">
+        <!-- 空会话时的中间提示：首屏静态占位，加载后由 aiRenderAll() 按当前项目重绘 -->
         <div class="ai-empty" id="aiEmpty">
-          <i class="bi bi-stars"></i>
-          <div class="t">AI 助手</div>
-          <div class="s" id="aiEmptySub">先在设置里配置 OpenAI 兼容接口，即可开始对话。支持解释代码、排查报错、生成片段。</div>
+          <div class="ai-hero">
+            <div class="ai-hero-title">让想法成为现实<i class="bi bi-stars ai-hero-spark"></i></div>
+            <div class="ai-hero-sub">一站式产品工作室，助你规划、开发和发布应用。</div>
+            <div class="ai-hero-card">
+              <div class="ai-hero-hd"><i class="bi bi-flag"></i><span>欢迎来到在线编程世界</span></div>
+              <ul class="ai-hero-list">
+                <li>快速 MVP 原型开发</li>
+                <li>按设计稿生成可维护源码</li>
+                <li>零后端经验也能开发动态网站</li>
+              </ul>
+            </div>
+            <div class="ai-hero-tip"><i class="bi bi-folder2-open"></i> 打开一个文件夹后，对话记录会自动绑定该项目</div>
+          </div>
         </div>
       </div>
       <div class="ai-imgs" id="aiImgs" style="display:none"></div>

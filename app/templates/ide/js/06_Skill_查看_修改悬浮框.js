@@ -1189,7 +1189,11 @@
     const box = $("aiHist");
     // 按「最后消息时间」倒序展示，与后端列表顺序一致（发消息后该行更新并置顶）
     const list = AI.sessions.slice().sort((a, b) => (b.time || 0) - (a.time || 0));
-    box.innerHTML = list.length ? "" : '<div class="ai-hist-empty">暂无历史对话</div>';
+    // 对话按项目隔离：空列表说明「这个项目」还没有对话，提示里点明归属避免误解
+    const pn = (typeof aiProjectName === "function") ? aiProjectName() : "";
+    box.innerHTML = list.length ? "" : '<div class="ai-hist-empty">' +
+      (pn ? '项目「' + esc(pn) + '」暂无历史对话' : "暂无历史对话") +
+      '<div class="sub">对话记录随项目保存，切换项目各自独立</div></div>';
     list.forEach(s => {
       const row = document.createElement("div");
       row.className = "ai-hist-row" + (s.id === AI.curId ? " on" : "");

@@ -306,9 +306,7 @@
   function aiRenderAll() {
     aiRenderFiles();                     // 附加文件的小卡片（右键「添加到 AI 对话」）
     const box = $("aiMsgs");
-    box.innerHTML = '<div class="ai-empty" id="aiEmpty" style="display:' + (AI.msgs.length ? "none" : "") + '">' +
-      '<i class="bi bi-stars"></i><div class="t">AI 助手</div>' +
-      '<div class="s">支持解释代码、排查报错、生成片段。可附带当前文件与图片提问。</div></div>';
+    box.innerHTML = aiEmptyHtml();       // 空会话时的中间提示（含当前项目名）
     AI.msgs.forEach((m, mi) => {
       const text = m.text || m.content || "";
       const imgs = m.images || [];

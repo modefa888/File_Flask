@@ -1,7 +1,8 @@
   /* ==================================================================
      AI 助手（右侧面板）：OpenAI 兼容接口的流式对话
      配置存服务端 data/storage/.file_manager_ai.json（Key 不回传）；
-     会话历史存 localStorage（按项目根目录区分）。
+     会话历史存服务端 SQLite，并按【项目根目录 ROOT】隔离：
+     切到别的项目只会看到那个项目自己的对话，没有历史时就是一段新对话。
      ================================================================== */
   const AI_DEFAULT_W = 400;
   // 内置 Skill 列表（与后端 _SKILL_PROMPTS 的 key 保持一致）
@@ -37,13 +38,64 @@
   function aiSessKey() { return "ide.ai.sessions." + aiRootKey(); }
   function aiCurKey() { return "ide.ai.cur." + aiRootKey(); }
   function aiHistKey() { return "ide.ai.chat." + aiRootKey(); }   // 旧版单会话键（仅用于迁移）
+  // 会话按项目根目录隔离：所有会话接口都带上 root（= IDE 的 ROOT）
+  function aiRootQ() { return "?root=" + encodeURIComponent(aiRootKey()); }
+  function aiRootBody(o) { return Object.assign({ root: aiRootKey() }, o || {}); }
+  /* 旧数据迁移：加 root 维度前的会话都没有项目归属（root 为空），
+     这里在【第一次】进入某个项目时把它们划归该项目，避免升级后历史列表突然变空。
+     用 localStorage 标记保证只做一次；之后新开的项目不会再去抢这些旧会话。 */
+  async function aiAdoptOnce() {
+    if (!aiRootKey()) return;                                  // 没打开文件夹：不参与归属
+    const flag = "ide.ai.bound." + aiRootKey();
+    try { if (localStorage.getItem(flag)) return; } catch (_) { return; }
+    try {
+      await fetch("/api/ai/sessions/adopt", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ root: aiRootKey() }),
+      });
+      try { localStorage.setItem(flag, "1"); } catch (_) {}
+    } catch (_) {}
+  }
+  function aiProjectName() {
+    const r = aiRootKey();
+    if (!r || r === "default") return "";
+    if (typeof baseName === "function") { try { return baseName(r) || ""; } catch (_) {} }
+    return r.split("/").pop() || "";
+  }
+  /* 消息区中间提示（参考欢迎页）：标题 + 副标题 + 项目卡片。
+     对话已按项目隔离，所以顺带显示当前项目名，让用户清楚记录的归属。 */
+  function aiEmptyHtml() {
+    const pname = aiProjectName();
+    const head = pname
+      ? '欢迎来到 <b>' + esc(pname) + '</b> 的编程世界'
+      : '欢迎来到在线编程世界';
+    const tip = pname
+      ? '对话已绑定项目「' + esc(pname) + '」，切换项目各自独立'
+      : '打开一个文件夹后，对话记录会自动绑定该项目';
+    return '<div class="ai-empty" id="aiEmpty" style="display:' + (AI.msgs.length ? "none" : "") + '">' +
+      '<div class="ai-hero">' +
+        '<div class="ai-hero-title">让想法成为现实<i class="bi bi-stars ai-hero-spark"></i></div>' +
+        '<div class="ai-hero-sub">一站式产品工作室，助你规划、开发和发布应用。</div>' +
+        '<div class="ai-hero-card">' +
+          '<div class="ai-hero-hd"><i class="bi bi-flag"></i><span>' + head + '</span></div>' +
+          '<ul class="ai-hero-list">' +
+            '<li>快速 MVP 原型开发</li>' +
+            '<li>按设计稿生成可维护源码</li>' +
+            '<li>零后端经验也能开发动态网站</li>' +
+          '</ul>' +
+        '</div>' +
+        '<div class="ai-hero-tip"><i class="bi bi-folder2-open"></i> ' + tip + '</div>' +
+      '</div>' +
+    '</div>';
+  }
   // —— 以下改为后端持久化（SQLite，跨设备/跨浏览器同步），不再写 localStorage ——
   function aiNewPid() { return "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
   async function aiLoadSessions() {
     AI.sessions = []; AI.curId = ""; AI.msgs = [];
     let ok = false;
     try {
-      const r = await fetch("/api/ai/sessions");
+      await aiAdoptOnce();                                     // 首次进入本项目：把旧会话划过来
+      const r = await fetch("/api/ai/sessions" + aiRootQ());
       const d = await r.json();
       if (r.ok && d.sessions) {
         AI.sessions = (d.sessions || []).map(s => ({
@@ -89,10 +141,10 @@
       try {
         await fetch("/api/ai/sessions", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+          body: JSON.stringify(aiRootBody({
             id: s.id, title: s.title || "新对话",
             extra: { mem: s.mem, cmp: s.cmp, cmpLen: s.cmpLen, savedTok: s.savedTok, stats: s.stats }, msgs,
-          }),
+          })),
         });
       } catch (_) {}
     }
@@ -172,7 +224,7 @@
     try {
       const r = await fetch("/api/ai/sessions", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: cid, title: s.title || "新对话", extra: aiSessionExtra(s), msgs: toSave, deleted }),
+        body: JSON.stringify(aiRootBody({ id: cid, title: s.title || "新对话", extra: aiSessionExtra(s), msgs: toSave, deleted })),
       });
       const d = await r.json();
       if (r.ok && d.saved_mids) {
@@ -188,7 +240,7 @@
     if (s._dirty) aiScheduleFlush();                // 保存期间又有变更，再保存一次
   }
   async function aiSetCur(id) {
-    try { await fetch("/api/ai/cur", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }); } catch (_) {}
+    try { await fetch("/api/ai/cur", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aiRootBody({ id })) }); } catch (_) {}
   }
   function applyAiWidth(w, save) {
     const max = Math.min(620, Math.max(300, window.innerWidth - 420));

@@ -8,7 +8,7 @@
     const tip = document.createElement("div");
     tip.className = "ide-tip";
     document.body.appendChild(tip);
-    let cur = null, timer = null;
+    let cur = null, timer = null, mx = 0, my = 0, hasMouse = false;
 
     function hide() {
       clearTimeout(timer); timer = null;
@@ -22,6 +22,26 @@
         cur = null;
       }
     }
+    /* 定位：跟着鼠标走（默认落在指针右下方，贴边自动翻到左侧/上方并夹回可视区）；
+       没有鼠标坐标时（比如键盘触发的悬停）退回「元素下方」。 */
+    function place(el) {
+      const tr = tip.getBoundingClientRect();
+      const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+      let left, top;
+      if (hasMouse) {
+        left = mx + 14;
+        top = my + 18;
+        if (left + tr.width > vw - 6) left = mx - tr.width - 12;      // 右边放不下 → 移到指针左侧
+        if (top + tr.height > vh - 6) top = my - tr.height - 12;      // 下面放不下 → 移到指针上方
+      } else {
+        const r = el.getBoundingClientRect();
+        left = r.left + Math.min(6, r.width / 2);
+        top = r.bottom + 8;
+        if (top + tr.height > vh - 6) top = r.top - tr.height - 8;
+      }
+      tip.style.left = Math.round(Math.max(6, Math.min(left, vw - tr.width - 6))) + "px";
+      tip.style.top = Math.round(Math.max(6, Math.min(top, vh - tr.height - 6))) + "px";
+    }
     function show(el) {
       const text = el.getAttribute("title") || el.dataset.tipText || "";
       if (!text.trim()) return;
@@ -29,16 +49,14 @@
       el.removeAttribute("title");            // 让浏览器原生提示闭嘴
       tip.textContent = text;
       tip.classList.add("show");
-      // 默认显示在元素下方，贴边时自动翻转/夹取
-      const r = el.getBoundingClientRect(), tr = tip.getBoundingClientRect();
-      const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
-      let left = Math.max(6, Math.min(r.left + Math.min(6, r.width / 2), vw - tr.width - 6));
-      let top = r.bottom + 8;
-      if (top + tr.height > vh - 6) top = Math.max(6, r.top - tr.height - 8);
-      tip.style.left = Math.round(left) + "px";
-      tip.style.top = Math.round(top) + "px";
+      place(el);
     }
 
+    // 记录指针位置：显示中跟着走，避免气泡停在原地、离鼠标很远
+    document.addEventListener("mousemove", (e) => {
+      mx = e.clientX; my = e.clientY; hasMouse = true;
+      if (cur && tip.classList.contains("show")) place(cur);
+    }, true);
     document.addEventListener("mouseover", (e) => {
       const el = e.target && e.target.closest ? e.target.closest("[title]") : null;
       if (!el || el === cur) return;

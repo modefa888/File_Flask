@@ -456,32 +456,105 @@
     sysAiFillModSelects();                     // 每个模块的「单独指定模型」下拉
     sysAiBindUsageReset();
     sysAiBindModRows();
+    sysAiBindBoard();                          // 「总统计」按钮：所有模块的调用汇总表
   }
-  /* 点击模块行 → 行内展开调用明细（最近 7 天柱状 + 最近调用记录） */
+  /* 点击模块行 → 弹窗展示调用明细（最近 7 天柱状 + 最近调用记录）。
+     顺序与「设置 → 系统 AI」里的模块清单一致，「总统计」表也按这个顺序排。 */
   var SYS_MOD_TITLE = {
-    chat: "AI 助手对话", plugin: "插件宿主 AI", agent: "Agent 任务", commit: "生成提交信息",
-    nl2sql: "一句话生成 SQL", tabledesign: "AI 推荐表设计", summary: "对话记忆压缩",
-    models: "拉取模型列表",
+    chat: "AI 助手对话", agent: "Agent 任务", commit: "生成提交信息",
+    nl2sql: "一句话生成查询", tabledesign: "AI 推荐表设计", scaffold: "新建项目 AI",
+    summary: "对话记忆压缩", plugin: "插件宿主 AI", models: "拉取模型列表",
   };
   var sysAiDetailMod = "";
+  /* 弹窗关闭统一走 sysAiBindOverlay：点「关闭」、点弹窗外面任意位置、按 Esc 都能关。
+     两个坑：
+       1) Esc 只挂在 overlay 元素上时，得先点一下弹窗让焦点落进去才收得到按键；
+       2) 点遮罩关闭依赖 e.target 正好是遮罩本身，弹窗铺得比较大 / 上层还有别的面板时
+          就点不着，看起来就像「只有点关闭按钮才关得掉」。
+     所以统一改成监听 document 捕获阶段的 mousedown：只要点在弹窗盒子外面就关。
+     另外「明细」是盖在「总览」上面的：sysAiOvLayer 记住最上层用的是哪一层遮罩，
+     关掉明细后把「点外面 / Esc」还给下面还开着的总览。 */
+  var sysAiOvClose = null;               // 最上层 AI 弹窗的关闭函数（null = 没有）
+  var sysAiOvLayer = null;               // 它所在的遮罩层
+  var sysAiOvBound = false;
+  /* 明细弹窗要用的遮罩：总览开着时另造一层压在上面（关掉明细就回到总览）；
+     总览没开（比如从设置页直接点模块行）时，仍旧用主遮罩。 */
+  function sysAiDetailLayer() {
+    var ov = $("modalOverlay");
+    if (!ov || !ov.querySelector(".sysai-board-box")) return ov;
+    var lay = document.getElementById("sysAiDetailLayer");
+    if (!lay) {
+      // 内嵌在 #modalOverlay 里面：既有的 .sysai-modal 尺寸规则（#modalOverlay .sysai-modal …）
+      // 对它一样生效，不用再写一套
+      lay = document.createElement("div");
+      lay.className = "sysai-detail-layer";
+      lay.id = "sysAiDetailLayer";
+      ov.appendChild(lay);
+    }
+    return lay;
+  }
   function sysAiCloseDetail() {
     sysAiCloseCallDetail();
+    var lay = document.getElementById("sysAiDetailLayer");
+    if (lay) { lay.classList.remove("show"); lay.innerHTML = ""; }   // 只收明细那一层
+    sysAiDetailMod = "";
     var ov = $("modalOverlay");
-    if (ov) {                             // 明细改为弹窗：关掉即恢复原样
+    var board = ov && ov.querySelector(".sysai-board-box");
+    if (ov && !board) {                  // 明细自己占着主遮罩 → 整层收掉
       ov.classList.remove("show");
       ov.innerHTML = "";
-      ov.onkeydown = null;
-      ov.onmousedown = null;
     }
-    sysAiDetailMod = "";
+    // 明细关掉后总览还开着：把「点外面 / Esc」继续交给它
+    if (board) { sysAiOvClose = sysAiCloseBoard; sysAiOvLayer = ov; }
+    else { sysAiOvClose = null; sysAiOvLayer = null; }
+  }
+  /* 统一的「怎么关」：点弹窗外面 / 按 Esc（都挂 document，不受遮罩层级和焦点位置影响） */
+  function sysAiBindOverlay(closeFn, layer) {
+    var ov = layer || $("modalOverlay");
+    if (!ov) return;
+    sysAiOvClose = closeFn;
+    sysAiOvLayer = ov;
+    if (sysAiOvBound) return;            // document 上只挂一次
+    sysAiOvBound = true;
+    function keep() {                    // 当前层还开着、且装的确实是我们的弹窗
+      var L = sysAiOvLayer;
+      if (!L || !L.isConnected || !L.classList.contains("show")) return null;
+      var dlg = L.querySelector(".ide-modal");
+      return dlg && dlg.classList.contains("sysai-modal") ? dlg : null;
+    }
+    document.addEventListener("mousedown", function (e) {
+      if (!sysAiOvClose) return;
+      var dlg = keep();
+      if (!dlg) { sysAiOvClose = null; sysAiOvLayer = null; return; }   // 已被别的弹窗顶掉
+      if (dlg.contains(e.target)) return;          // 点在弹窗里面 → 不关
+      var fn = sysAiOvClose;
+      sysAiOvClose = null;
+      sysAiOvLayer = null;
+      fn();
+    }, true);
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || !sysAiOvClose) return;
+      var dlg = keep();
+      if (!dlg) { sysAiOvClose = null; sysAiOvLayer = null; return; }   // 已被别的弹窗顶掉
+      e.preventDefault();
+      var fn = sysAiOvClose;
+      sysAiOvClose = null;
+      sysAiOvLayer = null;
+      fn();
+    });
   }
   /* 点模块行 → 弹窗展示调用明细（行内展开高度太挤，看不全几行） */
-  async function sysAiToggleDetail(row) {
+  function sysAiToggleDetail(row) {
     var mod = row.dataset.modRow;
     if (!mod) return;
     if (sysAiDetailMod === mod) { sysAiCloseDetail(); return; }   // 再点同一行收起
-    sysAiCloseDetail();
-    var ov = $("modalOverlay");
+    sysAiOpenDetail(mod);
+  }
+  /* 打开某个模块的调用明细弹窗（模块行、「总统计」表格里的行都走这里） */
+  async function sysAiOpenDetail(mod) {
+    if (!mod || !SYS_MOD_TITLE[mod]) return;
+    sysAiCloseDetail();                       // 先收掉上一个明细（总览不受影响）
+    var ov = sysAiDetailLayer();              // 总览开着 → 盖在它上面单独一层
     if (!ov) return;
     var box = document.createElement("div");
     box.className = "ide-modal wide sysai-modal";
@@ -496,11 +569,13 @@
     ov.appendChild(box);
     ov.classList.add("show");
     sysAiDetailMod = mod;
-    box.querySelector(".sysai-detail-close").onclick = function () { sysAiCloseDetail(); };
-    ov.onmousedown = function (e) { if (e.target === ov) sysAiCloseDetail(); };
-    ov.onkeydown = function (e) {
-      if (e.key === "Escape") { e.preventDefault(); sysAiCloseDetail(); }
-    };
+    var closeBtn = box.querySelector(".sysai-detail-close");
+    closeBtn.onclick = function () { sysAiCloseDetail(); };
+    if (ov.id === "sysAiDetailLayer") {       // 明细盖在总览上：按钮说「返回」更贴切
+      closeBtn.textContent = "返回";
+      closeBtn.title = "关掉明细，回到总览统计";
+    }
+    sysAiBindOverlay(sysAiCloseDetail, ov);   // 点外面任意位置 / 按 Esc 关明细，关完回到总览
     var body = box.querySelector(".m-body");
     try {
       // 一次多取些：弹窗空间够，比行内多得多
@@ -652,6 +727,7 @@
   }
   /* 调用次数统计：读 /api/ai/usage 填到每行的 .sysai-stat 上 */
   function sysAiRenderUsage(u) {
+    sysAiUsageCache = u || {};         // 顺手喂给「总统计」弹窗，点开时不必等网络
     document.querySelectorAll(".sysai-stat").forEach(sp => {
       const d = (u || {})[sp.dataset.stat];
       if (!d || (!d.ok && !d.fail)) {
@@ -701,6 +777,231 @@
         btn.disabled = false;
       }
     };
+  }
+  /* ---------------- 「总统计」：所有模块的调用汇总表（悬浮框） ---------------- */
+  var sysAiUsageCache = null;        // 最近一次 /api/ai/usage 的结果：弹窗先用它渲染，再拉新数据
+  /* 表格排序状态：key = 列（空 = 模块原始顺序），dir = -1 降序 / 1 升序。
+     点表头切换，状态存在这里，「刷新」或重画后继续保持。 */
+  var sysAiBoardSort = { key: "", dir: -1 };
+  function sysAiSortVal(r, k) {
+    var n = r.ok + r.fail;
+    if (k === "ok") return r.ok;
+    if (k === "fail") return r.fail;
+    if (k === "total") return n;
+    if (k === "rate") return n ? r.ok / n : -1;      // 没调用过的排最后
+    if (k === "tok") return r.tin + r.tout;
+    if (k === "last") return r.last_at || "";        // "2026-10-07 14:45:11" 直接按字符串比
+    return 0;
+  }
+  function sysAiBoardAttr(s) {       // 放进属性里的小转义（错误信息可能带引号）
+    return esc(s == null ? "" : s).replace(/"/g, "&quot;");
+  }
+  function sysAiCloseBoard() {
+    sysAiCloseDetail();                       // 明细（如果开着）一起收掉
+    var ov = $("modalOverlay");
+    if (ov && ov.querySelector(".sysai-board-box")) {
+      ov.classList.remove("show");            // 再收总览自己
+      ov.innerHTML = "";
+    }
+    sysAiOvClose = null;
+    sysAiOvLayer = null;
+  }
+  async function sysAiOpenBoard() {
+    var ov = $("modalOverlay");
+    if (!ov) return;
+    var box = document.createElement("div");
+    box.className = "ide-modal wide sysai-modal sysai-board-box";
+    box.innerHTML =
+      '<div class="m-title"><i class="bi bi-table"></i>' +
+        '<span>系统 AI · 所有模块使用统计</span>' +
+        '<span class="sysai-mods-sp"></span>' +
+        '<span class="sysai-detail-sub" id="sysAiBoardSub">加载中…</span>' +
+        '<button class="ai-set-btn sysai-all" id="sysAiBoardRefresh" title="重新读取统计">' +
+          '<i class="bi bi-arrow-clockwise"></i> 刷新</button>' +
+        '<button class="ai-set-btn sysai-all sysai-board-close">关闭</button></div>' +
+      '<div class="m-body sysai-board-body"><div class="sysai-detail-none">加载中…</div></div>';
+    ov.innerHTML = "";
+    ov.appendChild(box);
+    ov.classList.add("show");
+    box.querySelector(".sysai-board-close").onclick = sysAiCloseBoard;
+    sysAiBindOverlay(sysAiCloseBoard);        // 点弹窗外面任意位置 / 按 Esc 也能关
+    var body = box.querySelector(".m-body");
+    if (sysAiUsageCache) sysAiRenderBoard(body, sysAiUsageCache);   // 有缓存先画，避免白屏
+    var load = async function () {
+      try {
+        var d = await (await fetch("/api/ai/usage")).json();
+        if (d.error) throw new Error(d.error);
+        sysAiRenderBoard(body, d.usage || {});
+      } catch (e) {
+        body.innerHTML = '<div class="sysai-detail-none">读取失败：' + esc(e.message || e) + "</div>";
+      }
+    };
+    box.querySelector("#sysAiBoardRefresh").onclick = load;
+    await load();
+  }
+  function sysAiRenderBoard(box, u) {
+    sysAiUsageCache = u;
+    var tot = { ok: 0, fail: 0, tin: 0, tout: 0 };
+    var rows = Object.keys(SYS_MOD_TITLE).map(function (m) {
+      var d = u[m] || {};
+      var ok = d.ok || 0, fail = d.fail || 0;
+      tot.ok += ok; tot.fail += fail;
+      tot.tin += d.tokens_in || 0; tot.tout += d.tokens_out || 0;
+      return { m: m, ok: ok, fail: fail, tin: d.tokens_in || 0, tout: d.tokens_out || 0,
+               last_at: d.last_at || "", last_ms: d.last_ms || 0, err: d.last_error || "" };
+    });
+    if (sysAiBoardSort.key) {                  // 点过表头才排序，没点保持模块原始顺序
+      var sk = sysAiBoardSort.key, sd = sysAiBoardSort.dir;
+      rows.sort(function (a, b) {
+        var va = sysAiSortVal(a, sk), vb = sysAiSortVal(b, sk);
+        if (va === vb) return (b.ok + b.fail) - (a.ok + a.fail);   // 同值按调用次数兜底，顺序稳定
+        return va > vb ? sd : -sd;
+      });
+    }
+    var all = tot.ok + tot.fail;
+    var sub = document.getElementById("sysAiBoardSub");
+    if (sub) {
+      sub.textContent = all
+        ? "共 " + all + " 次调用 · 成功 " + tot.ok + " · 失败 " + tot.fail
+        : "还没有任何调用记录";
+    }
+    var cards =
+      '<div class="sysai-board-card"><b>' + all + "</b><span>总调用</span></div>" +
+      '<div class="sysai-board-card ok"><b>' + tot.ok + "</b><span>成功</span></div>" +
+      '<div class="sysai-board-card bad"><b>' + tot.fail + "</b><span>失败</span></div>" +
+      '<div class="sysai-board-card"><b>' + (all ? Math.round(tot.ok / all * 100) + "%" : "-") +
+        "</b><span>成功率</span></div>" +
+      '<div class="sysai-board-card"><b>' + sysAiFmtTok(tot.tin + tot.tout) +
+        "</b><span>累计 tokens</span></div>";
+    var body = rows.map(function (r) {
+      var n = r.ok + r.fail;
+      var tk = (r.tin || r.tout) ? sysAiFmtTok(r.tin) + " → " + sysAiFmtTok(r.tout) : "-";
+      var last = r.last_at ? (r.last_at + (r.last_ms ? " · " + r.last_ms + " ms" : "")) : "-";
+      return '<div class="sysai-board-row' + (r.fail ? " has-fail" : "") + (n ? " clickable" : "") +
+        '" data-board-mod="' + sysAiBoardAttr(r.m) + '">' +
+        '<span class="sb-name">' + esc(SYS_MOD_TITLE[r.m] || r.m) + "</span>" +
+        '<span class="sb-num ok">' + r.ok + "</span>" +
+        '<span class="sb-num' + (r.fail ? " bad" : "") + '">' + r.fail + "</span>" +
+        '<span class="sb-num">' + n + "</span>" +
+        '<span class="sb-num">' + (n ? Math.round(r.ok / n * 100) + "%" : "-") + "</span>" +
+        '<span class="sb-tok">' + esc(tk) + "</span>" +
+        '<span class="sb-last">' + esc(last) + "</span>" +
+        '<span class="sb-err" title="' + sysAiBoardAttr(r.err) + '">' +
+          (r.err ? esc(r.err) : '<span class="sysai-pop-none">-</span>') + "</span></div>";
+    }).join("");
+    var sum = '<div class="sysai-board-row sum">' +
+      '<span class="sb-name">全部模块</span>' +
+      '<span class="sb-num ok">' + tot.ok + "</span>" +
+      '<span class="sb-num' + (tot.fail ? " bad" : "") + '">' + tot.fail + "</span>" +
+      '<span class="sb-num">' + all + "</span>" +
+      '<span class="sb-num">' + (all ? Math.round(tot.ok / all * 100) + "%" : "-") + "</span>" +
+      '<span class="sb-tok">' + sysAiFmtTok(tot.tin) + " → " + sysAiFmtTok(tot.tout) + "</span>" +
+      '<span class="sb-last">-</span><span class="sb-err sysai-pop-none">-</span></div>';
+    // 表头：能排序的列挂 data-sort（模块 / 最近错误不参与排序），当前排序列带箭头
+    var cols = [
+      ["sb-name", "", "模块"],
+      ["sb-num", "ok", "成功"],
+      ["sb-num", "fail", "失败"],
+      ["sb-num", "total", "合计"],
+      ["sb-num", "rate", "成功率"],
+      ["sb-tok", "tok", "tokens（入 → 出）"],
+      ["sb-last", "last", "最近调用"],
+      ["sb-err", "", "最近错误 / 说明"]
+    ];
+    var hd = '<div class="sysai-board-row hd">' + cols.map(function (c) {
+      if (!c[1]) {                     // 模块列：点一下恢复默认顺序；错误说明列不可点
+        return c[0] === "sb-name"
+          ? '<span class="sb-name sortable" data-reset="1" title="点击：恢复模块默认顺序">模块</span>'
+          : '<span class="' + c[0] + '">' + c[2] + "</span>";
+      }
+      var on = sysAiBoardSort.key === c[1];
+      var next = on && sysAiBoardSort.dir < 0 ? "升序" : "降序";
+      return '<span class="' + c[0] + " sortable" + (on ? " on" : "") + '" data-sort="' + c[1] +
+        '" title="点击按「' + c[2].replace("（入 → 出）", "") + "」" + next + '排序">' + c[2] +
+        (on ? '<i class="bi bi-caret-' + (sysAiBoardSort.dir < 0 ? "down" : "up") + '-fill"></i>' : "") +
+        "</span>";
+    }).join("") + "</div>";
+    box.innerHTML =
+      '<div class="sysai-board">' +
+        '<div class="sysai-board-sum">' + cards + "</div>" +
+        '<div class="sysai-board-tb scroll-thin">' + hd +
+          (all ? body + sum
+               : '<div class="sysai-detail-none" style="padding:10px 12px">还没有任何 AI 调用记录</div>') +
+        "</div>" +
+        sysAiBoardChart(rows, tot) +
+      "</div>";
+    // 点表头排序：同一列再点一下反过来，换列则从降序开始；用缓存重画，不再请求接口
+    box.querySelectorAll(".sysai-board-row.hd .sortable").forEach(function (th) {
+      th.onclick = function () {
+        if (th.dataset.reset) { sysAiBoardSort.key = ""; sysAiBoardSort.dir = -1; }   // 点「模块」→ 还原默认顺序
+        else {
+          var k = th.dataset.sort;
+          if (sysAiBoardSort.key === k) sysAiBoardSort.dir = -sysAiBoardSort.dir;
+          else { sysAiBoardSort.key = k; sysAiBoardSort.dir = -1; }
+        }
+        var tb = box.querySelector(".sysai-board-tb");
+        var st = tb ? tb.scrollTop : 0;
+        sysAiRenderBoard(box, sysAiUsageCache);
+        var tb2 = box.querySelector(".sysai-board-tb");
+        if (tb2) tb2.scrollTop = st;              // 保持原来的滚动位置
+      };
+    });
+    // 表格行 / 图表横条都能点：跳到该模块的调用明细（最近 7 天柱状 + 调用列表）
+    box.querySelectorAll(".sysai-board-row[data-board-mod], .sysai-bar-row[data-board-mod]")
+      .forEach(function (row) {
+        if (row.classList.contains("sysai-board-row") && !row.classList.contains("clickable")) return;
+        row.onclick = function () { sysAiOpenDetail(row.dataset.boardMod); };
+      });
+  }
+  /* 图表区：左边各模块调用次数堆叠横条（绿=成功 / 红=失败，长度按最多的那个模块归一），
+     右边整体成功率环 + 成功 / 失败 / tokens 概要。用纯 SVG + div 画，不引第三方库。 */
+  function sysAiBoardChart(rows, tot) {
+    var all = tot.ok + tot.fail;
+    var max = Math.max.apply(null, [1].concat(rows.map(function (r) { return r.ok + r.fail; })));
+    var list = rows.filter(function (r) { return r.ok + r.fail > 0; });
+    if (!sysAiBoardSort.key) {             // 没点表头排序时：按调用次数从多到少（图表原本的顺序）
+      list.sort(function (a, b) { return (b.ok + b.fail) - (a.ok + a.fail); });
+    }                                      // 点过表头排序时，横条顺序跟着表格一起走（rows 已排好）
+    var bars = list.length ? list.map(function (r) {
+      var okW = (r.ok / max * 100).toFixed(2), badW = (r.fail / max * 100).toFixed(2);
+      return '<div class="sysai-bar-row clickable" data-board-mod="' + sysAiBoardAttr(r.m) +
+        '" title="' + sysAiBoardAttr(SYS_MOD_TITLE[r.m] || r.m) + "：成功 " + r.ok + " · 失败 " + r.fail +
+        '，点击查看调用明细">' +
+        '<span class="sysai-bar-nm">' + esc(SYS_MOD_TITLE[r.m] || r.m) + "</span>" +
+        '<span class="sysai-bar-track">' +
+          (r.ok ? '<span class="sysai-bar-ok" style="width:' + okW + '%"></span>' : "") +
+          (r.fail ? '<span class="sysai-bar-fail" style="width:' + badW + '%"></span>' : "") +
+        "</span>" +
+        '<span class="sysai-bar-vl" title="成功 / 失败">' + r.ok + " / " + r.fail + "</span></div>";
+    }).join("") : '<div class="sysai-detail-none">还没有调用记录，图表暂无数据</div>';
+    var pct = all ? tot.ok / all * 100 : 0;
+    // r=15.915 → 周长 100，所以 dasharray 直接写百分比；offset 25 让起点落在 12 点方向
+    var ring = '<svg viewBox="0 0 42 42">' +
+      '<circle class="sysai-ring-bg" cx="21" cy="21" r="15.915"></circle>' +
+      (all ? '<circle class="sysai-ring-ok" cx="21" cy="21" r="15.915" stroke-dasharray="' +
+               pct.toFixed(2) + " " + (100 - pct).toFixed(2) + '" stroke-dashoffset="25"></circle>' : "") +
+      (tot.fail ? '<circle class="sysai-ring-bad" cx="21" cy="21" r="15.915" stroke-dasharray="' +
+               (100 - pct).toFixed(2) + " " + pct.toFixed(2) + '" stroke-dashoffset="' +
+               (25 - pct).toFixed(2) + '"></circle>' : "") +
+      "</svg>";
+    return '<div class="sysai-chart">' +
+      '<div class="sysai-chart-l">' +
+        '<div class="sysai-chart-hd"><i class="bi bi-bar-chart"></i>各模块调用次数' +
+          '<span class="sysai-legend"><span class="ok"><i></i>成功</span>' +
+          '<span class="bad"><i></i>失败</span></span></div>' +
+        '<div class="sysai-bars">' + bars + "</div></div>" +
+      '<div class="sysai-chart-r">' +
+        '<div class="sysai-ring">' + ring +
+          '<div class="sysai-ring-c"><b>' + (all ? Math.round(pct) + "%" : "—") +
+          "</b><span>成功率</span></div></div>" +
+        '<div class="sysai-ring-t">成功 <b class="ok">' + tot.ok + '</b> · 失败 <b class="bad">' +
+          tot.fail + "</b></div>" +
+        '<div class="sysai-ring-t2">累计 ' + sysAiFmtTok(tot.tin + tot.tout) + " tokens</div>" +
+      "</div></div>";
+  }
+  function sysAiBindBoard() {
+    var btn = document.getElementById("sysAiBoard");
+    if (btn) btn.onclick = sysAiOpenBoard;
   }
   /* 合并式保存系统 AI 设置：只改传入的字段，其余（off / per_module / provider / model）保持原样。
      整体覆盖会把别处刚改的值冲掉（历史上顶部「保存」就会把模块开关状态清空），所以统一走这里。 */

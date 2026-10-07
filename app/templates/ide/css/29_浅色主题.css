@@ -992,6 +992,41 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .sysai-call-err { color: #a8544a; }
 :where(html.theme-light) .sysai-mod-desc { color: #6b6b6b; }
 :where(html.theme-light) .sysai-mod code { background: #ffffff; border-color: #e0e0e0; color: #1a7f37; }
+/* 「总统计」悬浮框（所有模块的调用汇总表） */
+:where(html.theme-light) .sysai-board-card { background: #f8f8f8; border-color: #e5e5e5; }
+:where(html.theme-light) .sysai-board-card b { color: #1f2328; }
+:where(html.theme-light) .sysai-board-card span { color: #6b6b6b; }
+:where(html.theme-light) .sysai-board-card.ok b { color: #1a7f37; }
+:where(html.theme-light) .sysai-board-card.bad b { color: #c0392b; }
+:where(html.theme-light) .sysai-board-tb { border-color: #e5e5e5; }
+:where(html.theme-light) .sysai-board-row { color: #1f2328; border-bottom-color: #eeeeee; }
+:where(html.theme-light) .sysai-board-row.hd { color: #8a8a8a; background: #f6f8fa; }
+:where(html.theme-light) .sysai-board-row.clickable:hover { background: #f6f8fa; }
+:where(html.theme-light) .sysai-board-row.sum { color: #1f2328; background: #f6f8fa; border-top-color: #dddddd; }
+:where(html.theme-light) .sysai-board-row .sb-num.ok { color: #1a7f37; }
+:where(html.theme-light) .sysai-board-row .sb-num.bad { color: #c0392b; }
+:where(html.theme-light) .sysai-board-row .sb-tok { color: #3f6a3f; }
+:where(html.theme-light) .sysai-board-row .sb-last { color: #8a8a8a; }
+:where(html.theme-light) .sysai-board-row .sb-err { color: #8a8a8a; }
+:where(html.theme-light) .sysai-board-row.has-fail .sb-err { color: #c0392b; }
+:where(html.theme-light) .sysai-board-row.hd .sortable:hover { color: #57606a; }
+:where(html.theme-light) .sysai-board-row.hd .sortable.on { color: #0969da; }
+/* 「总统计」弹窗里的图表（各模块调用次数横条 + 成功率环） */
+:where(html.theme-light) .sysai-chart-r { border-left-color: #e5e5e5; }
+:where(html.theme-light) .sysai-chart-hd { color: #1f2328; }
+:where(html.theme-light) .sysai-chart-hd .bi { color: #0a6aa8; }
+:where(html.theme-light) .sysai-bar-nm { color: #3a3a3a; }
+:where(html.theme-light) .sysai-bar-track { background: rgba(0, 0, 0, .07); }
+:where(html.theme-light) .sysai-bar-row.clickable:hover .sysai-bar-nm { color: #000000; }
+:where(html.theme-light) .sysai-bar-row.clickable:hover .sysai-bar-track { background: rgba(0, 0, 0, .12); }
+:where(html.theme-light) .sysai-bar-vl { color: #6b6b6b; }
+:where(html.theme-light) .sysai-ring-bg { stroke: #e0e0e0; }
+:where(html.theme-light) .sysai-ring-c b { color: #1f2328; }
+:where(html.theme-light) .sysai-ring-c span { color: #8a8a8a; }
+:where(html.theme-light) .sysai-ring-t { color: #5a5a5a; }
+:where(html.theme-light) .sysai-ring-t b.ok { color: #1a7f37; }
+:where(html.theme-light) .sysai-ring-t b.bad { color: #c0392b; }
+:where(html.theme-light) .sysai-ring-t2 { color: #8a8a8a; }
 :where(html.theme-light) .ai-set-tip.ok { color: #1a7f37; }
 /* AI 代码块语法着色（代码块底色已转浅，需换成深色 token） */
 :where(html.theme-light) .hl-k { color: #8230b0; }

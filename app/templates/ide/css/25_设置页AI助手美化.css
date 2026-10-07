@@ -98,6 +98,12 @@
   white-space: pre-wrap; word-break: break-word;
 }
 .sysai-pop-none { color: #777777; }
+/* 明细弹窗叠在「总览」之上：内嵌在 #modalOverlay 里的一层，单独铺满 + 更高层级 */
+.sysai-detail-layer {
+  position: absolute; inset: 0; z-index: 1; display: none;
+  align-items: center; justify-content: center; background: rgba(0, 0, 0, .45);
+}
+.sysai-detail-layer.show { display: flex; }
 /* 调用明细改为弹窗：宽度随屏幕走（上限 1400px），正文区直接占满高度，
    这样一屏能看很多条，不用在小窗口里滚动。
    用 #modalOverlay 提权：通用弹窗里的 .ide-modal.wide .m-body 更具体，
@@ -150,6 +156,98 @@
 .sysai-mod.off > .bi,
 .sysai-mod.off .sysai-mod-main,
 .sysai-mod.off code { opacity: .45; }
+
+/* 「总统计」悬浮框：所有模块的调用汇总（顶部汇总卡 + 一张表，点行看该模块明细） */
+.sysai-board { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.sysai-board-sum { display: flex; flex: none; gap: 10px; margin-bottom: 12px; }
+.sysai-board-card {
+  flex: 1; min-width: 0; padding: 9px 12px; border-radius: 7px;
+  background: #242425; border: 1px solid #333333; text-align: center;
+}
+.sysai-board-card b { display: block; font-size: 17px; font-weight: 600; color: #e2e2e2; }
+.sysai-board-card span { font-size: 11px; color: #8a8a8a; }
+.sysai-board-card.ok b { color: #7fc98a; }
+.sysai-board-card.bad b { color: #e08a8a; }
+.sysai-board-tb {
+  flex: 1; min-height: 0; max-height: 62vh; overflow: auto;
+  border: 1px solid #2e2e2f; border-radius: 6px;
+}
+.sysai-board-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  font-size: 12px; color: #d6d6d6; border-bottom: 1px solid #2a2a2b;
+}
+.sysai-board-row:last-child { border-bottom: none; }
+.sysai-board-row.hd { color: #8a8a8a; background: #232324; position: sticky; top: 0; z-index: 1; }
+.sysai-board-row.clickable { cursor: pointer; }
+.sysai-board-row.clickable:hover { background: #2a2d30; }
+.sysai-board-row.sum { font-weight: 600; color: #e2e2e2; border-top: 1px solid #333333; background: #232324; }
+.sysai-board-row .sb-name { flex: 1.25; min-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sysai-board-row .sb-num { flex: none; width: 58px; text-align: right; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.sysai-board-row .sb-num.ok { color: #7fc98a; }
+.sysai-board-row .sb-num.bad { color: #e08a8a; }
+.sysai-board-row .sb-tok { flex: none; width: 132px; text-align: right; color: #8aa88a; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.sysai-board-row .sb-last { flex: none; width: 158px; color: #8a8a8a; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sysai-board-row .sb-err { flex: 1.4; min-width: 0; color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sysai-board-row.has-fail .sb-err { color: #e08a8a; }
+/* 表头排序：可点列悬停变色，当前排序列高亮 + 箭头（点同一列切换升降序） */
+.sysai-board-row.hd .sortable { cursor: pointer; user-select: none; }
+.sysai-board-row.hd .sortable:hover { color: #cfcfcf; }
+.sysai-board-row.hd .sortable.on { color: #8ab4f8; }
+.sysai-board-row.hd .sortable i { font-size: 9px; margin-left: 2px; vertical-align: 1px; }
+/* 总统计弹窗高度跟着内容走（汇总卡 + 表格 + 图表），不留一大片空白 */
+#modalOverlay .sysai-modal .m-body.sysai-board-body { height: auto; max-height: 86vh; }
+#modalOverlay .sysai-modal .sysai-board-body .sysai-board { height: auto; }
+#modalOverlay .sysai-modal .sysai-board-body .sysai-board-tb { flex: none; max-height: 40vh; }
+/* ---- 图表区：左 = 各模块调用次数堆叠横条，右 = 整体成功率环 ---- */
+.sysai-chart { display: flex; flex: none; gap: 18px; margin-top: 16px; }
+.sysai-chart-l { flex: 1.7; min-width: 0; }
+.sysai-chart-r {
+  flex: none; width: 190px; padding-left: 18px;
+  border-left: 1px solid #2e2e2f;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.sysai-chart-hd {
+  display: flex; align-items: center; gap: 7px; margin-bottom: 9px;
+  font-size: 12px; font-weight: 600; color: #d8d8d8;
+}
+.sysai-chart-hd .bi { flex: none; font-size: 13px; color: #4fc3f7; }
+.sysai-legend { margin-left: auto; display: flex; gap: 10px; font-size: 11px; font-weight: 400; color: #8a8a8a; }
+.sysai-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.sysai-legend .ok i { background: #3f9d55; }
+.sysai-legend .bad i { background: #c05555; }
+.sysai-bars { display: flex; flex-direction: column; gap: 3px; }
+.sysai-bar-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.sysai-bar-row.clickable { cursor: pointer; }
+.sysai-bar-nm { flex: none; width: 104px; color: #c8c8c8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sysai-bar-track {
+  flex: 1; min-width: 0; height: 13px; display: flex; overflow: hidden; border-radius: 3px;
+  background: rgba(255, 255, 255, .05);
+}
+.sysai-bar-ok { height: 100%; background: #3f9d55; }
+.sysai-bar-fail { height: 100%; background: #c05555; }
+.sysai-bar-vl {
+  flex: none; width: 74px; text-align: right; color: #8a8a8a;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+.sysai-bar-row.clickable:hover .sysai-bar-nm { color: #ffffff; }
+.sysai-bar-row.clickable:hover .sysai-bar-track { background: rgba(255, 255, 255, .11); }
+/* 成功率环：r=15.915 → 周长正好 100，dasharray 直接写百分比 */
+.sysai-ring { position: relative; width: 128px; height: 128px; }
+.sysai-ring svg { width: 100%; height: 100%; display: block; }
+.sysai-ring circle { fill: none; stroke-width: 4.2; }
+.sysai-ring-bg { stroke: #333333; }
+.sysai-ring-ok { stroke: #3f9d55; }
+.sysai-ring-bad { stroke: #c05555; }
+.sysai-ring-c {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.sysai-ring-c b { font-size: 21px; font-weight: 600; color: #e2e2e2; }
+.sysai-ring-c span { font-size: 11px; color: #8a8a8a; }
+.sysai-ring-t { margin-top: 9px; font-size: 11.5px; color: #8a8a8a; }
+.sysai-ring-t b.ok { color: #7fc98a; }
+.sysai-ring-t b.bad { color: #e08a8a; }
+.sysai-ring-t2 { margin-top: 3px; font-size: 11px; color: #777777; }
 
 /* 接口卡片 */
 .ai-prov {

@@ -116,6 +116,7 @@
           '<div class="sysai-mods" data-kw="系统 ai 使用模块 功能 清单 提交信息 sql agent 插件 摘要 模型">' +
             '<div class="sysai-mods-hd"><i class="bi bi-diagram-3"></i>使用系统 AI 的模块' +
               '<span class="sysai-mods-sp"></span>' +
+              '<button class="ai-set-btn sysai-all" id="sysAiBoard" title="所有模块的调用汇总（成功 / 失败 / 耗时 / tokens），点行看明细"><i class="bi bi-table"></i> 总统计</button>' +
               '<button class="ai-set-btn sysai-all" id="sysAiUsageReset" title="把各模块的成功 / 失败次数清零">重置统计</button>' +
               '<button class="ai-set-btn sysai-all" id="sysAiAllOn" title="把所有已停用的模块重新启用">全部启用</button>' +
             '</div>' +

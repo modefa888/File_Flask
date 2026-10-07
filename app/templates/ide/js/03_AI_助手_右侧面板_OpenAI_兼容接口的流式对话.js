@@ -119,6 +119,14 @@
     return { mem: s.mem || "", cmp: s.cmp || 0, cmpLen: s.cmpLen || 0, savedTok: s.savedTok || 0, stats: s.stats || null };
   }
   let _aiFlushTimer = null, _aiFlushing = false;
+  function aiLastMsgTs(msgs) {                        // 会话最后一条消息的时间（列表显示用）
+    const arr = msgs || [];
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const t = arr[i] && arr[i].ts;
+      if (t) return t;
+    }
+    return 0;
+  }
   function aiPersistCurrent() {
     if (!AI.curId) AI.curId = "s" + Date.now().toString(36);
     let s = AI.sessions.find(x => x.id === AI.curId);
@@ -128,7 +136,8 @@
         const first = AI.msgs.find(m => m.role === "user");
         s.title = ((first && (first.text || "")) || "新对话").slice(0, 24);
       }
-      s.time = Date.now();
+      // 时间只跟最后一条消息走：切换 / 打开会话、回撤改动等不发消息的操作不再把时间刷成当前时间
+      s.time = aiLastMsgTs(AI.msgs) || s.time || Date.now();
     }
     s.msgs = AI.msgs;
     for (const m of AI.msgs) if (!m.pid) m.pid = aiNewPid();

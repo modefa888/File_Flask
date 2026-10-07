@@ -50,18 +50,27 @@ def _clean_meta(meta):
 
 
 def list_conversations(user_id):
-    """返回会话列表（不含消息），按 updated_at 倒序。"""
+    """返回会话列表（不含消息），按「最后一条消息的时间」倒序。
+
+    时间口径说明：列表显示 / 排序都用【最后一条消息的入库时间】，而不是
+    ai_conversations.updated_at —— 后者在切换会话、回撤改动、仅改 extra 等
+    非发消息场景也会被刷新，导致「打开会话时间就变了」。没有消息的会话
+    才回退到 updated_at。
+    """
     conn = _conn()
     try:
         rows = conn.execute(
-            "SELECT c.id, c.title, c.created_at, c.updated_at, c.extra, "
+            "SELECT c.id, c.title, c.created_at, "
+            "COALESCE((SELECT MAX(m.created_at) FROM ai_messages m "
+            "          WHERE m.conv_id=c.id AND m.user_id=c.user_id), c.updated_at) AS last_at, "
+            "c.extra, "
             "(SELECT COUNT(*) FROM ai_messages m WHERE m.conv_id=c.id) AS cnt "
-            "FROM ai_conversations c WHERE c.user_id=? ORDER BY c.updated_at DESC",
+            "FROM ai_conversations c WHERE c.user_id=? ORDER BY last_at DESC",
             (user_id,),
         ).fetchall()
         return [{
             "id": r[0], "title": r[1], "created_at": r[2], "updated_at": r[3],
-            "msg_count": r[5], "extra": json.loads(r[4]) if r[4] else {},
+            "extra": json.loads(r[4]) if r[4] else {}, "msg_count": r[5],
         } for r in rows]
     finally:
         conn.close()

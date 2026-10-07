@@ -265,6 +265,10 @@
     background: #2f2a1e; border: 1px solid #4a3f28; border-radius: 4px; padding: 2px 6px;
     font-size: 11px; color: #e2c08a; cursor: pointer; }
   .ai-file-chip:hover { border-color: #6b5a36; }
+  /* 文件夹（附加的是目录结构，不是文件内容）：偏蓝，和文件卡片区分开 */
+  .ai-file-chip.is-dir { background: #22303a; border-color: #35505f; color: #8ec8e8; }
+  .ai-file-chip.is-dir:hover { border-color: #4a7286; }
+  .ai-file-chip.is-dir .rm { color: #7fa8bd; }
   .ai-file-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ai-file-chip .rm { background: none; border: none; color: #b9a97f; cursor: pointer; padding: 0 0 0 2px; font-size: 11px; line-height: 1; }
   .ai-file-chip .rm:hover { color: #ff8a8a; }

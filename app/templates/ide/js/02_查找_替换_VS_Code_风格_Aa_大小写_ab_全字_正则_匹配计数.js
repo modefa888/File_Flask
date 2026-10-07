@@ -359,6 +359,17 @@
       list.push({ label: "在文件管理器中打开", act: () => revealInManager(destDir) });
       return list;
     }});
+    // 文件与文件夹都能加进 AI 对话：文件带内容，文件夹带目录结构（只列名称，不读内容）
+    // 多选（Ctrl 点选 / Shift 范围选）时对整个选区生效——右键已选中项即批量操作，与 VS Code 一致
+    const selItems = treeSelectedItems();
+    items.push({
+      label: selItems.length > 1
+        ? "添加 " + selItems.length + " 项到 AI 对话"
+        : (isDir ? "添加到 AI 对话（目录结构）" : "添加到 AI 对话"),
+      act: () => selItems.length > 1
+        ? aiAddManyFromTree(selItems)
+        : aiAddFileFromTree(path, name, isDir),
+    });
     if (!isDir) {
       const isBase = !!(compareBase && compareBase.path === path);
       items.push({ divider: true });
@@ -368,8 +379,6 @@
         items.push({ label: "与「" + compareBase.name + "」比较", act: () => ctxAction("compare-with") });
       }
       items.push({ label: "打开时间线", act: () => ctxAction("timeline") });
-      items.push({ divider: true });
-      items.push({ label: "添加到 AI 对话", act: () => aiAddFileFromTree(path, name) });
     }
     items.push({ divider: true });
     if (!isDir) {

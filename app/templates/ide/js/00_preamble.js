@@ -420,6 +420,10 @@
   function setTreeSelFromRow(r) { // 让 treeSel 指向某行（供 F2 / Delete / Ctrl+C 等快捷键使用）
     if (r) treeSel = { path: r.dataset.path, name: r.dataset.name, isDir: r.dataset.isdir === "1" };
   }
+  function treeSelectedItems() {  // 当前选中的树行（按 DOM 顺序）：供「添加到 AI 对话」等批量操作使用
+    return [...explorerPanel.querySelectorAll(".tree-row.selected")]
+      .map(r => ({ path: r.dataset.path, name: r.dataset.name, isDir: r.dataset.isdir === "1" }));
+  }
 
   function renderNode(it, container, depth) {
     const full = (it.path && it.path.startsWith("/")) ? it.path : container._base + "/" + it.name;

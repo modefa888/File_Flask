@@ -1588,30 +1588,125 @@
     return { text: text, steps: steps, changes: changes };
   }
 
-  /* ---------- 附加文件到对话：资源管理器右键「添加到 AI 对话」→ 输入框上方出现小卡片 ---------- */
-  const AI_FILE_LIMIT = 6;          // 最多同时附加几个文件
+  /* ---------- 附加文件 / 文件夹到对话：资源管理器右键「添加到 AI 对话」→ 输入框上方出现小卡片 ---------- */
+  const AI_FILE_LIMIT = 6;          // 最多同时附加几项（文件 / 文件夹）
   const AI_FILE_CHARS = 8000;       // 单个文件最多带入多少字符
-  async function aiAddFileFromTree(path, name) {
+  const AI_DIR_CHARS = 6000;        // 文件夹目录结构最多带入多少字符
+  const AI_DIR_ENTRIES = 400;       // 目录结构最多列出多少条
+  const AI_DIR_DEPTH = 4;           // 目录结构最多往下展开几层
+  /* 文件夹 → 目录结构清单（缩进文本树）：让 AI 知道这个目录里有什么。
+     只列名称、不读内容，避免把大文件 / 二进制 / .env 内容塞进上下文；
+     过滤规则与资源管理器一致（依赖目录走 TREE_IGNORE，隐藏文件跟随「显示全部」开关）。 */
+  async function aiDirDigest(dirPath) {
+    const lines = [];
+    let dirs = 0, files = 0, truncated = false, folded = 0;
+    const showAll = (typeof showAllFiles !== "undefined") && !!showAllFiles;
+    const showHid = (typeof showHidden !== "undefined") && !!showHidden;
+    const walk = async (p, depth) => {
+      let d;
+      try { d = await apiFiles(p, showHid); }
+      catch (_) { if (!depth) throw new Error("目录读取失败"); return; }
+      const items = (d.items || [])
+        .filter(it => showAll || !TREE_IGNORE.has(it.name))
+        .sort((a, b) => (b.is_dir - a.is_dir) || a.name.localeCompare(b.name, "zh"));
+      for (const it of items) {
+        if (lines.length >= AI_DIR_ENTRIES) { truncated = true; return; }
+        const deep = depth + 1;
+        if (it.is_dir) {
+          dirs++;
+          lines.push("  ".repeat(deep) + it.name + "/");
+          if (deep < AI_DIR_DEPTH) await walk(p + "/" + it.name, deep);
+          else folded++;                       // 超过层数上限：只列目录名，不再往下
+        } else {
+          files++;
+          lines.push("  ".repeat(deep) + it.name);
+        }
+      }
+    };
+    await walk(dirPath, 0);
+    if (!lines.length) return "（空目录）";
+    const note = [];
+    if (truncated) note.push("已达 " + AI_DIR_ENTRIES + " 条上限，其余未列出");
+    if (folded) note.push(folded + " 个目录超过 " + AI_DIR_DEPTH + " 层未展开");
+    return "共 " + dirs + " 个目录 / " + files + " 个文件"
+      + (note.length ? "（" + note.join("；") + "）" : "") + "\n" + lines.join("\n");
+  }
+  /* 单项附加内核：只做读取 + 入列，不弹提示（提示交给调用方，便于批量时汇总成一条）。
+     返回 { ok:true } 或 { ok:false, reason:"dup"|"limit"|"unsupported"|"err", msg } */
+  async function aiAttachOne(path, name, isDir, opts) {
+    opts = opts || {};
     if (!Array.isArray(AI.files)) AI.files = [];
-    if (AI.files.some(f => f.path === path)) {
-      toggleAI(true);
-      toast(name + " 已经在 AI 对话里了", "info");
+    if (AI.files.some(f => f.path === path)) return { ok: false, reason: "dup" };
+    if (AI.files.length >= AI_FILE_LIMIT) return { ok: false, reason: "limit" };
+    let text = "";
+    if (isDir) {
+      if (!opts.quiet) toast("正在整理目录结构：" + name, "info");   // 目录要逐层读取，先给个反馈（toast 是单例，完成后再覆盖）
+      try { text = await aiDirDigest(path); }
+      catch (e) { return { ok: false, reason: "err", msg: "无法读取目录 " + name + "：" + (e.message || e) }; }
+    } else {
+      try {
+        const res = await loadFileText(path, name);
+        if (res.unsupported) return { ok: false, reason: "unsupported" };
+        if (res.error) return { ok: false, reason: "err", msg: "无法读取 " + name + "：" + res.error };
+        text = res.text || "";
+      } catch (e) { return { ok: false, reason: "err", msg: "无法读取 " + name + "：" + (e.message || e) }; }
+    }
+    const cap = isDir ? AI_DIR_CHARS : AI_FILE_CHARS;
+    if (text.length > cap) text = text.slice(0, cap) + "\n…（内容过长已截断）";
+    AI.files.push({ path: path, name: name, text: text, isDir: !!isDir });
+    return { ok: true };
+  }
+  async function aiAddFileFromTree(path, name, isDir) {
+    const r = await aiAttachOne(path, name, isDir);
+    if (!r.ok) {
+      toggleAI(true);                          // 即使没加成也把面板亮出来，让用户看到现有卡片
+      if (r.reason === "dup") toast(name + " 已经在 AI 对话里了", "info");
+      else if (r.reason === "limit") toast("最多同时附加 " + AI_FILE_LIMIT + " 个文件 / 文件夹", "warn");
+      else if (r.reason === "unsupported") toast("该文件类型不支持作为文本附加：" + name, "warn");
+      else toast(r.msg || "添加失败", "err");
       return;
     }
-    if (AI.files.length >= AI_FILE_LIMIT) { toast("最多同时附加 " + AI_FILE_LIMIT + " 个文件", "warn"); return; }
-    let text = "";
-    try {
-      const res = await loadFileText(path, name);
-      if (res.unsupported) { toast("该文件类型不支持作为文本附加：" + name, "warn"); return; }
-      if (res.error) { toast("无法读取 " + name + "：" + res.error, "err"); return; }
-      text = res.text || "";
-    } catch (e) { toast("无法读取 " + name + "：" + (e.message || e), "err"); return; }
-    if (text.length > AI_FILE_CHARS) text = text.slice(0, AI_FILE_CHARS) + "\n…（内容过长已截断）";
-    AI.files.push({ path: path, name: name, text: text });
     toggleAI(true);                            // 面板没打开时自动打开
     aiRenderFiles();
     const t = $("aiText"); if (t) t.focus();   // 焦点给输入框，直接接着提问
-    toast("已添加到 AI 对话：" + name, "ok");
+    toast((isDir ? "已添加目录结构：" : "已添加到 AI 对话：") + name, "ok");
+  }
+  /* 多选批量添加：把选中的文件 / 文件夹一次性加进对话。
+     逐项失败（重复 / 不支持 / 读取失败）只跳过，最后汇总成一条提示，避免 toast 刷屏。 */
+  async function aiAddManyFromTree(items) {
+    if (!Array.isArray(AI.files)) AI.files = [];
+    const list = (items || []).filter(x => x && x.path);
+    if (!list.length) return;
+    toggleAI(true);                            // 面板没打开时自动打开
+    toast("正在整理 " + list.length + " 项…", "info");   // 目录要逐层读取，先给反馈（完成后被汇总提示覆盖）
+    const added = [], dup = [], bad = [];
+    let hitLimit = false;
+    for (const it of list) {
+      const r = await aiAttachOne(it.path, it.name, it.isDir, { quiet: true });
+      if (r.ok) { added.push(!!it.isDir); continue; }
+      if (r.reason === "dup") { dup.push(it.name); continue; }
+      if (r.reason === "limit") { hitLimit = true; break; }   // 已达上限，后面的都放不下，不必再读
+      bad.push(r.msg || (it.name + "（不支持的类型）"));   // r.msg 里已含条目名，不再重复拼接
+    }
+    if (added.length) {
+      aiRenderFiles();
+      const t = $("aiText"); if (t) t.focus();   // 焦点给输入框，直接接着提问
+    }
+    if (bad.length) console.warn("[AI] 以下条目未能加入对话：", bad);
+    const nDir = added.filter(Boolean).length, nFile = added.length - nDir;
+    const parts = [];
+    if (nFile) parts.push(nFile + " 个文件");
+    if (nDir) parts.push(nDir + " 个目录结构");
+    let msg = added.length ? ("已添加 " + parts.join(" + ") + " 到 AI 对话") : "没有可添加的项";
+    const skipped = list.length - added.length;
+    if (skipped) {
+      const why = [];
+      if (dup.length) why.push(dup.length + " 项已在对话中");
+      if (bad.length) why.push(bad.length + " 项读取失败或不支持");
+      if (hitLimit) why.push("已达 " + AI_FILE_LIMIT + " 项上限");
+      msg += "，跳过 " + skipped + " 项（" + why.join("；") + "）";
+    }
+    toast(msg, added.length ? "ok" : "warn");
   }
   function aiRenderFiles() {
     const box = $("aiFiles");
@@ -1621,15 +1716,20 @@
     box.innerHTML = "";
     list.forEach((f, i) => {
       const chip = document.createElement("span");
-      chip.className = "ai-file-chip";
-      chip.title = f.path + "（点击打开，× 移除）";
-      chip.innerHTML = '<i class="bi bi-file-earmark-text"></i><span class="nm"></span>';
+      chip.className = "ai-file-chip" + (f.isDir ? " is-dir" : "");
+      chip.title = f.path + (f.isDir ? "（目录结构，点击在资源管理器中定位）" : "（点击打开，× 移除）");
+      chip.innerHTML = '<i class="bi ' + (f.isDir ? "bi-folder2" : "bi-file-earmark-text") +
+        '"></i><span class="nm"></span>';
       chip.querySelector(".nm").textContent = f.name;
       const rm = document.createElement("button");
       rm.className = "rm"; rm.title = "从对话中移除"; rm.textContent = "×";
       rm.addEventListener("click", (e) => { e.stopPropagation(); AI.files.splice(i, 1); aiRenderFiles(); });
       chip.appendChild(rm);
-      chip.addEventListener("click", () => openFile(f.path, f.name));
+      // 文件夹没有可打开的编辑器标签，改成在资源管理器里展开定位
+      chip.addEventListener("click", () => {
+        if (!f.isDir) { openFile(f.path, f.name); return; }
+        if (typeof revealInTree === "function") revealInTree(f.path);
+      });
       box.appendChild(chip);
     });
     // 卡片出现/消失会改变输入框高度：消息列表原本贴底时保持贴底，避免最后一条被挤出可视区
@@ -1642,9 +1742,10 @@
       if (text.length > 6000) text = text.slice(0, 6000) + "\n…（内容过长已截断）";
       out += "\n\n【参考：当前打开文件 " + active.name + "】\n```\n" + text + "\n```";
     }
-    (AI.files || []).forEach(f => {            // 从资源管理器附加进来的文件
+    (AI.files || []).forEach(f => {            // 从资源管理器附加进来的文件 / 文件夹
       if (!f.text) return;
-      out += "\n\n【参考：文件 " + relPathOf(f.path) + "】\n```\n" + f.text + "\n```";
+      out += "\n\n【参考：" + (f.isDir ? "目录结构 " : "文件 ") + relPathOf(f.path) +
+        "】\n```\n" + f.text + "\n```";
     });
     return out;
   }
@@ -1737,7 +1838,7 @@
     let userMsgForPending = null;
     if (!reuse) {
       const userText = text || (imgs.length ? "（见图）" : "");
-      const attFiles = (AI.files || []).map(f => f.name);          // 本条消息附带的文件（消息上方显示）
+      const attFiles = (AI.files || []).map(f => f.isDir ? f.name + "/" : f.name);   // 本条消息附带的文件 / 文件夹（消息上方显示）
       const userMsg = { role: "user", pid: aiNewPid(), text: userText, ts: Date.now(),
                         imgs: imgs.length || undefined,
                         images: imgs.length ? imgs : undefined,

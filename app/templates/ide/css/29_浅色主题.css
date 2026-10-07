@@ -723,6 +723,8 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ai-file-chip, :where(html.theme-light) .ai-bfile {
   background: #fbf3d9; border-color: #e5d9b0; color: #8a6a00;
 }
+:where(html.theme-light) .ai-file-chip.is-dir { background: #e8f2fa; border-color: #bcd8ea; color: #14587f; }
+:where(html.theme-light) .ai-file-chip.is-dir .rm { color: #4a7f9e; }
 :where(html.theme-light) .ai-file-chip .rm { color: #8a7a4a; }
 :where(html.theme-light) .ai-input { border-top-color: #e0e0e0; background: #f0f0f0; }
 :where(html.theme-light) .ai-input #aiText { background: #ffffff; border-color: #cecece; color: #1f2328; }

@@ -2088,7 +2088,6 @@
         if (r) { toast("已保存连接", "ok"); await loadDbConns(true); }
       };
     }
-    if ($("dbcNewDb")) $("dbcNewDb").onclick = function () { dbcNewDbRun(null); };
     if ($("dbcRefresh")) $("dbcRefresh").onclick = function () { loadDbConns(true); };
   }
   dbcInit();

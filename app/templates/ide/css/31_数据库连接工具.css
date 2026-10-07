@@ -9,7 +9,6 @@
   /* ---------- 左栏面板 ---------- */
   .dbc-tools { display: flex; align-items: center; gap: 6px; padding: 8px 10px 0; }
   .dbc-tools .g-btn { flex: 1; }
-  .dbc-tools-sub { padding-top: 6px; }        /* 第二行（新建数据库）与上一行贴紧一些 */
   .dbc-list { padding: 8px 8px 12px; overflow: auto; flex: 1; }
   .dbc-item {
     position: relative; display: flex; align-items: center; gap: 8px;

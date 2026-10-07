@@ -12,12 +12,15 @@
 """
 import json
 import os
+import random
 import re
 import shlex
 import sqlite3
 import threading
 import time
 import uuid
+
+from datetime import datetime, timedelta
 
 from flask import Blueprint, jsonify, request
 
@@ -41,6 +44,8 @@ _TD_MAX = 500                    # 「AI 推荐表设计」需求描述长度上
 _TD_COLS = 60                    # 一次最多采纳多少列
 _TD_TYPE = 64                    # 单个类型定义长度上限
 _NL_TABLES = 60                  # 表结构最多提供给 AI 的表数
+_FAKE_MAX = 200                  # 「随机数据」一次最多生成 / 写入多少行
+_FAKE_SKIP_MAX = 8               # 提示里最多列出几个「不写入」的列名
 _NOSQL_LIST_MAX = 300            # Redis key / 列表类浏览一次最多列出多少条
 
 KINDS = {
@@ -850,7 +855,7 @@ def _nosql_schema(conn, kind, use):
     return [{"name": n, "current": n == dbname} for n in names], tables, dbname
 
 
-def _nosql_rows(conn, kind, use, table, limit, offset):
+def _nosql_rows(conn, kind, use, table, limit, offset, include_deleted=False):
     """非关系型库的数据行：Redis → 某个 key 的值；MongoDB → 某个集合的文档"""
     if kind == "redis":
         return _redis_rows(conn, table, limit, offset)
@@ -860,7 +865,10 @@ def _nosql_rows(conn, kind, use, table, limit, offset):
         total = int(coll.estimated_document_count())
     except Exception:
         pass
-    docs = list(coll.find({}).skip(offset).limit(limit))
+    filt = {}                                         # 默认过滤掉 is_deleted=1 的文档（假删除）
+    if not include_deleted:
+        filt = {"$or": [{"is_deleted": {"$ne": 1}}, {"is_deleted": {"$exists": False}}]}
+    docs = list(coll.find(filt).skip(offset).limit(limit))
     cols = []
     for d in docs:
         for k in d.keys():
@@ -943,6 +951,14 @@ def _pk_columns(cur, kind, dbname, schema, table):
             rows = cur.execute("PRAGMA table_info(%s)" % _quote(kind, table)).fetchall()
             return [r[1] for r in sorted((r for r in rows if r[5]), key=lambda r: r[5])]
         if kind == "mysql":
+            # 先用 columns.column_key（与「表结构」用的是同一张表，权限要求最低），
+            # 取不到再退回 key_column_usage（个别库 / 账号对后者可见性受限）
+            cur.execute("SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = %s AND table_name = %s AND column_key = 'PRI' "
+                        "ORDER BY ordinal_position", (dbname, table))
+            pk = [_row_vals(r)[0] for r in cur.fetchall()]
+            if pk:
+                return pk
             cur.execute("SELECT column_name FROM information_schema.key_column_usage "
                         "WHERE table_schema = %s AND table_name = %s AND constraint_name = 'PRIMARY' "
                         "ORDER BY ordinal_position", (dbname, table))
@@ -957,6 +973,41 @@ def _pk_columns(cur, kind, dbname, schema, table):
         return [_row_vals(r)[0] for r in cur.fetchall()]
     except Exception:
         return []
+
+
+def _autoinc_column(cur, kind, dbname, schema, table):
+    """找「单列自增 / 标识列」（没有主键时的兜底）：回撤要靠它把新行删掉"""
+    try:
+        if kind == "mysql":
+            cur.execute("SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = %s AND table_name = %s "
+                        "AND LOWER(extra) LIKE '%%auto_increment%%' ORDER BY ordinal_position",
+                        (dbname, table))
+        elif kind == "sqlite":
+            rows = cur.execute("PRAGMA table_info(%s)" % _quote(kind, table)).fetchall()
+            for r in rows:
+                v = list(r.values()) if isinstance(r, dict) else list(r)
+                if v[5] and str(v[2]).upper() == "INTEGER":     # INTEGER PRIMARY KEY 即 rowid
+                    return v[1]
+            return ""
+        else:
+            cur.execute("SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = %s AND table_name = %s "
+                        "AND (is_identity = 'YES' OR column_default LIKE 'nextval(%%') "
+                        "ORDER BY ordinal_position", (schema or "public", table))
+        rows = cur.fetchall()
+        return _row_vals(rows[0])[0] if len(rows) == 1 else ""     # 多个自增列无法唯一定位
+    except Exception:
+        return ""
+
+
+def _insert_key_cols(cur, kind, dbname, schema, table):
+    """新行回撤要用的「键列」：主键优先；没有主键退回单列自增 / 标识列；都没有返回 []"""
+    pk = _pk_columns(cur, kind, dbname, schema, table)
+    if pk:
+        return pk
+    ai = _autoinc_column(cur, kind, dbname, schema, table)
+    return [ai] if ai else []
 
 
 def _columns_info(cur, kind, dbname, schema, table):
@@ -997,6 +1048,202 @@ def _columns_info(cur, kind, dbname, schema, table):
         out.append({"name": name, "type": dtype, "nullable": str(v[2]).upper() == "YES",
                     "default": v[3], "pk": name in pk, "extra": ""})
     return out
+
+
+# ---------------------------------------------------------- 随机测试数据（纯规则造数，不用 AI）
+# 「新增行」面板里的「随机数据」用：按「列名语义优先、类型次之」造一份像样的值，
+# 既能填进表单让人先改，也能直接批量写入（见 /api/db/row/fake、/api/db/row/insert-many）。
+_FAKE_NONE = object()            # 哨兵：这列不写值（交给数据库：自增 / 默认值）
+
+_FAKE_WORDS = ("测试数据", "演示样例", "临时记录", "常规分组", "批量导入", "示例内容",
+               "华东区", "华南区", "华北区", "内部使用", "自动生成", "待补充说明")
+_FAKE_REMARKS = ("随机生成的测试数据，可直接删除", "联调用样例数据，无实际含义",
+                 "批量造数生成，请勿用于生产环境", "演示数据，用于验证页面展示效果")
+_FAKE_STATUS = ("待处理", "处理中", "已完成", "已取消", "已关闭")
+_FAKE_SURNAME = "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦许何吕施张孔曹严华金魏陶姜"
+_FAKE_GIVEN = "伟芳娜秀英敏静丽强磊军洋勇艳杰娟涛明超平刚金梅鑫宇浩然子轩雨欣思远嘉怡"
+_FAKE_CITY = ("北京", "上海", "广州", "深圳", "杭州", "成都", "武汉", "西安", "南京", "重庆",
+              "苏州", "天津", "长沙", "青岛", "郑州", "厦门", "合肥", "福州", "济南", "宁波")
+_FAKE_ROAD = ("中山", "人民", "解放", "建设", "长江", "黄河", "科技园", "创业", "新华",
+              "和谐", "光明", "朝阳", "幸福", "淮河", "文一")
+_FAKE_NO_PREFIX = ("SO", "NO", "OD", "TK")
+
+_FAKE_INT_TYPES = ("int", "integer", "tinyint", "smallint", "mediumint", "bigint", "serial",
+                   "bigserial", "smallserial", "int2", "int4", "int8", "year")
+_FAKE_REAL_TYPES = ("real", "double", "float", "decimal", "numeric", "money")
+_FAKE_TEXT_TYPES = ("char", "varchar", "nvarchar", "nchar", "text", "tinytext", "mediumtext",
+                    "longtext", "clob", "citext", "string", "xml")
+_FAKE_BIN_TYPES = ("blob", "bytea", "binary", "varbinary", "tinyblob", "mediumblob", "longblob",
+                   "image", "bit varying")
+
+
+def _fake_family(typ):
+    """把各方言的类型名归到造数家族：int / real / bool / datetime / date / time / text /
+    json / enum / uuid / ip / binary / other"""
+    t = re.sub(r"\s+", " ", (typ or "").strip().lower())
+    base = re.split(r"[(\s]", t, 1)[0] if t else ""
+    if base in ("enum", "set"):
+        return "enum"
+    if base in _FAKE_INT_TYPES:
+        return "int"
+    if base in _FAKE_REAL_TYPES or t.startswith("double precision"):
+        return "real"
+    if base in ("bool", "boolean", "bit"):
+        return "bool"
+    if base in ("timestamp", "datetime", "smalldatetime", "timestamptz"):
+        return "datetime"
+    if base == "date":
+        return "date"
+    if base == "time":
+        return "time"
+    if base in ("json", "jsonb"):
+        return "json"
+    if base in _FAKE_BIN_TYPES:
+        return "binary"
+    if base in ("inet", "cidr"):
+        return "ip"
+    if base in ("uuid", "uniqueidentifier"):
+        return "uuid"
+    if base in _FAKE_TEXT_TYPES or "char" in base:
+        return "text"
+    return "other"
+
+
+def _fake_meta(typ):
+    """从类型里抠出长度 / 小数位 / 枚举候选值（造值时要照着来，别超长也别超精度）"""
+    t = (typ or "").strip()
+    low = t.lower()
+    size = scale = None
+    m = re.search(r"\(([^)]*)\)", low)
+    if m:
+        nums = re.findall(r"\d+", m.group(1))
+        if nums:
+            size = int(nums[0])
+            if len(nums) > 1:                        # decimal(10,2)
+                scale = int(nums[1])
+    opts = []
+    if "enum" in low or "set(" in low:
+        opts = re.findall(r"'([^']*)'", t) or re.findall(r'"([^"]*)"', t)
+    return size, scale, opts
+
+
+def _fake_cols(cur, kind, dbname, schema, table):
+    """取列结构，并判定哪些列不该写值：自增主键（交给库分配）、生成列、二进制列"""
+    ident = set()
+    if kind == "postgres":                            # PG10+ 的 identity 列 column_default 是空的
+        try:
+            cur.execute("SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = %s AND table_name = %s AND is_identity = 'YES'",
+                        (schema or "public", table))
+            ident = {_row_vals(r)[0] for r in cur.fetchall()}
+        except Exception:
+            ident = set()
+    out = []
+    for c in _columns_info(cur, kind, dbname, schema, table):
+        t = (c.get("type") or "").lower()
+        extra = (c.get("extra") or "").lower()
+        dflt = str(c.get("default") or "").lower()
+        fam = _fake_family(c.get("type"))
+        size, scale, opts = _fake_meta(c.get("type"))
+        auto = ("auto_increment" in extra or "nextval(" in dflt or c["name"] in ident
+                or (kind == "sqlite" and c["pk"] and "int" in t))
+        gen = "generated" in extra or "virtual" in extra or "stored" in extra
+        out.append({"name": c["name"], "type": c.get("type") or "", "fam": fam,
+                    "size": size, "scale": scale, "opts": opts,
+                    "pk": bool(c["pk"]), "nullable": bool(c["nullable"]),
+                    "skip": bool(auto or gen or fam == "binary")})
+    return out
+
+
+def _fake_value(rng, c, now, i=0):
+    """造一个值；返回 _FAKE_NONE 表示这列留空（不写入），返回 None 表示写入 NULL
+
+    i 是这一批里的行号：邮箱 / 编号这类常带唯一约束的字段用它错开，免得批量一写就撞唯一键。
+    """
+    if c["skip"]:
+        return _FAKE_NONE
+    n = (c["name"] or "").lower()
+    fam, size, scale, opts = c["fam"], c["size"], c["scale"], c["opts"]
+    if fam == "enum":
+        return rng.choice(opts) if opts else _FAKE_NONE
+    if fam == "uuid":
+        return str(uuid.uuid4())
+    if fam == "ip":
+        return "192.168.%d.%d" % (rng.randint(0, 255), rng.randint(1, 254))
+    if fam == "json":
+        return json.dumps({"key": "测试", "n": rng.randint(1, 999), "ok": True}, ensure_ascii=False)
+    # ---- 时间类：名字带生日就往几十年前推，其余取近 90 天内 ----
+    if fam in ("date", "datetime", "time") or (fam == "int" and re.search(r"(^|_)(at|time|date|ts)$", n)):
+        if re.search(r"(birth|born|生日)", n):
+            dt = now - timedelta(days=rng.randint(365 * 20, 365 * 40))
+        else:
+            dt = now - timedelta(seconds=rng.randint(0, 90 * 86400))
+        if fam == "date":
+            return dt.strftime("%Y-%m-%d")
+        if fam == "time":
+            return dt.strftime("%H:%M:%S")
+        if fam == "int":                              # 时间戳列
+            return int(dt.timestamp())
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    if fam == "bool":
+        return rng.choice([True, False])
+    # ---- 名字能看出语义的常见字段，给得像真的 ----
+    if re.search(r"(email|mail)$", n):
+        return "user%d@example.com" % (rng.randint(10000, 999999) * 100 + i)
+    if re.search(r"(phone|mobile|tel)", n):
+        return "1" + rng.choice("3578") + "".join(rng.choice("0123456789") for _ in range(9))
+    if re.search(r"(url|link|website|homepage|avatar|photo|img|image)", n) and fam in ("text", "other"):
+        return "https://example.com/" + "".join(rng.choice("0123456789abcdef") for _ in range(8))
+    if re.search(r"(^|_)(user_?name|real_?name|full_?name|nick_?name|contact|owner|author|operator)$", n):
+        return rng.choice(_FAKE_SURNAME) + "".join(rng.choice(_FAKE_GIVEN)
+                                                   for _ in range(rng.choice((1, 2))))
+    if re.search(r"(address|addr|location|city|region|province|district)", n) and fam in ("text", "other"):
+        return "%s市%s路%d号" % (rng.choice(_FAKE_CITY), rng.choice(_FAKE_ROAD), rng.randint(1, 999))
+    if re.search(r"(remark|note|memo|comment|content|desc|detail|reason|message|intro)", n):
+        return rng.choice(_FAKE_REMARKS)
+    if re.search(r"(title|subject|name|label|tag|keyword)", n) and fam in ("text", "other"):
+        return "%s%d" % (rng.choice(_FAKE_WORDS), rng.randint(1, 99))
+    if re.search(r"(status|state|stage|type|kind|category|level|gender|source|mode)", n):
+        if fam in ("int", "real"):
+            return rng.randint(0, 3)
+        return rng.choice(_FAKE_STATUS)
+    if re.search(r"(no|code|sn|serial|number|num|bill|trade)$", n) and fam in ("text", "other"):
+        return "%s%s%04d%02d" % (rng.choice(_FAKE_NO_PREFIX), now.strftime("%Y%m%d"),
+                                 rng.randint(0, 9999), i + 1)
+    if re.search(r"^(is_|has_|can_|enable|disable|deleted|active)", n):
+        v = rng.choice([True, False])
+        return v if fam == "bool" else (1 if v else 0) if fam in ("int", "real") else "是" if v else "否"
+    # ---- 名字没线索就按类型造 ----
+    if fam == "int":
+        return rng.randint(0, 1) if size == 1 else rng.randint(1, 99999)   # tinyint(1) 当布尔用
+    if fam == "real":
+        sc = scale if scale is not None else 2
+        lim = max(1, min(9999, 10 ** max(1, (size or 6) - sc) - 1))         # 别超 precision
+        return round(rng.uniform(0, lim), sc)
+    if fam in ("text", "other"):
+        s = "%s%d" % (rng.choice(_FAKE_WORDS), rng.randint(1, 999))
+        return s[:max(1, size)] if size else s                              # varchar(n) 别超长
+    return _FAKE_NONE
+
+
+def _fake_rows(cols, count, now, rng=None):
+    """造 count 行：返回 (行列表, 不写入的列名)"""
+    rng = rng or random.Random()
+    rows, skipped = [], []
+    for i in range(count):
+        row = {}
+        for c in cols:
+            v = _fake_value(rng, c, now, i)
+            if v is _FAKE_NONE:
+                if c["name"] not in skipped:
+                    skipped.append(c["name"])
+                continue
+            # 可空列偶尔留个 NULL，顺便把「空值」这条路径也测到（主键列不给 NULL）
+            if v is not None and c["nullable"] and not c["pk"] and rng.random() < 0.08:
+                v = None
+            row[c["name"]] = v
+        rows.append(row)
+    return rows, skipped
 
 
 def _alter_sql(kind, ref, op, col, new_name, definition, extra=None):
@@ -1312,7 +1559,8 @@ def _mark_undone(wid):
 
 def _op_name(op):
     return {"insert": "新增行", "update": "修改行", "delete": "删除行", "truncate": "清空",
-            "drop": "删除", "create": "新建", "hash": "哈希字段", "rename": "重命名"}.get(op, op)
+            "drop": "删除", "create": "新建", "hash": "哈希字段", "rename": "重命名",
+            "soft_delete": "假删除行"}.get(op, op)
 
 
 # ------------------------------------------------------------------ 行：增 / 删
@@ -1348,18 +1596,68 @@ def _insert_sql(use, kind, schema, table, values):
     conn, _k = _open(use, writable=True)
     try:
         cur = conn.cursor()
-        cur.execute(sql, list(values.values()))
-        n = cur.rowcount
-        pk = _pk_columns(cur, kind, use.get("dbname") or "", schema, table)
+        # 键列必须在 INSERT 之前算好：一是 PG 的 RETURNING 要拼进语句，
+        # 二是 pymysql 再跑一次 SELECT 会把 lastrowid 重置成 0。
+        kcols = _insert_key_cols(cur, kind, use.get("dbname") or "", schema, table)
         key = None
-        if pk and all(c in values for c in pk):
-            key = dict((c, values[c]) for c in pk)
-        elif len(pk) == 1 and kind in ("sqlite", "mysql"):
-            rid = getattr(cur, "lastrowid", None)
-            if rid is not None:
-                key = {pk[0]: rid}
+        if kcols and all(c in values for c in kcols):          # 键值自己填了，直接记
+            cur.execute(sql, list(values.values()))
+            key = dict((c, values[c]) for c in kcols)
+        elif len(kcols) == 1 and kind == "postgres":            # PG 没有 lastrowid，用 RETURNING 取回
+            cur.execute(sql + " RETURNING %s" % _quote(kind, kcols[0]), list(values.values()))
+            r = cur.fetchone()
+            if r is not None:
+                key = {kcols[0]: _row_vals(r)[0]}
+        else:
+            cur.execute(sql, list(values.values()))
+            if len(kcols) == 1 and kind in ("sqlite", "mysql"):
+                rid = getattr(cur, "lastrowid", None)
+                if rid:                                        # 0 / None 视为没拿到自增 id
+                    key = {kcols[0]: rid}
+        n = cur.rowcount
         conn.commit()
         return key, n
+    finally:
+        _close(conn, kind)
+
+
+def _insert_many_sql(use, kind, schema, table, rows):
+    """批量插入（一个连接、一个事务）；返回 (新行主键列表, 插入行数)
+
+    「随机数据」一次写几十行，逐行走 _insert_sql 会开几十个连接、也记几十条回撤日志，
+    这里一次写完只留一条。
+    """
+    ref = _table_ref(kind, use.get("dbname") or "", schema, table)
+    ph = "?" if kind == "sqlite" else "%s"
+    conn, _k = _open(use, writable=True)
+    try:
+        cur = conn.cursor()
+        kcols = _insert_key_cols(cur, kind, use.get("dbname") or "", schema, table)
+        keys, n = [], 0
+        for values in rows:
+            cols = list(values.keys())
+            if not cols:
+                continue
+            sql = "INSERT INTO %s (%s) VALUES (%s)" % (ref, ", ".join(_quote(kind, c) for c in cols),
+                                                      ", ".join([ph] * len(cols)))
+            if kcols and all(c in values for c in kcols):          # 键值自己填了
+                cur.execute(sql, list(values.values()))
+                keys.append(dict((c, values[c]) for c in kcols))
+            elif len(kcols) == 1 and kind == "postgres":
+                # PG 没有 lastrowid，用 RETURNING 把新主键拿回来（回撤要靠它）
+                cur.execute(sql + " RETURNING %s" % _quote(kind, kcols[0]))
+                r = cur.fetchone()
+                if r is not None:
+                    keys.append({kcols[0]: _row_vals(r)[0]})
+            else:
+                cur.execute(sql, list(values.values()))
+                if len(kcols) == 1 and kind in ("sqlite", "mysql"):
+                    rid = getattr(cur, "lastrowid", None)
+                    if rid:                                        # 0 / None 视为没拿到自增 id
+                        keys.append({kcols[0]: rid})
+            n += 1
+        conn.commit()
+        return keys, n
     finally:
         _close(conn, kind)
 
@@ -1379,6 +1677,66 @@ def _delete_sql(use, kind, schema, table, key):
         _close(conn, kind)
 
 
+# ------------------------------------------------------------------ 逻辑删除（假删除）
+# 约定：表里若存在 deleted_at / is_deleted / del_flag 之类「软删除列」，删除时只把它标记为已删除，
+# 不真正 DELETE；列表默认过滤掉已删除的行。没有这种列时，按需自动补一个 is_deleted 标志列。
+_SOFTDEL_TS_NAMES = {"deleted_at", "is_deleted_at", "delete_time", "deleted_time",
+                     "delete_at", "remove_time", "removed_at", "deleted_on", "is_deleted_at"}
+_SOFTDEL_FLAG_NAMES = {"is_deleted", "deleted", "del_flag", "is_del", "delete_flag",
+                       "deleted_flag", "is_removed", "removed", "is_remove", "remove_flag",
+                       "is_deleted_flag"}
+
+
+def _col_name_types(cur, kind, dbname, schema, table):
+    """返回 [(列名, 类型), ...]；供探查软删除列 / 自动加列。失败返回 []。"""
+    try:
+        if kind == "sqlite":
+            rows = cur.execute("PRAGMA table_info(%s)" % _quote(kind, table)).fetchall()
+            return [(r[1], (r[2] or "")) for r in rows]
+        cur.execute("SELECT column_name, data_type FROM information_schema.columns "
+                    "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+                    (dbname if kind == "mysql" else (schema or "public"), table))
+        return [(_row_vals(r)[0], _row_vals(r)[1]) for r in cur.fetchall()]
+    except Exception:
+        return []
+
+
+def _detect_soft_col(cur, kind, dbname, schema, table):
+    """只读探查软删除列：(列名, 'flag'|'timestamp') 或 (None, None)。不会改库。"""
+    cols = _col_name_types(cur, kind, dbname, schema, table)
+    for name, _t in cols:
+        if str(name).lower() in _SOFTDEL_TS_NAMES:
+            return name, "timestamp"
+    for name, _t in cols:
+        if str(name).lower() in _SOFTDEL_FLAG_NAMES:
+            return name, "flag"
+    return None, None
+
+
+def _add_soft_col(cur, use, kind, schema, table):
+    """自动补一个 is_deleted 标志列（只读路径不会调用，仅删除时按需补）。返回 (列名, 'flag')。"""
+    ref = _table_ref(kind, use.get("dbname") or "", schema, table)
+    if kind == "mysql":
+        cur.execute("ALTER TABLE %s ADD COLUMN %s TINYINT(1) NOT NULL DEFAULT 0"
+                    % (ref, _quote(kind, "is_deleted")))
+    elif kind == "sqlite":
+        cur.execute("ALTER TABLE %s ADD COLUMN %s INTEGER NOT NULL DEFAULT 0"
+                    % (ref, _quote(kind, "is_deleted")))
+    else:   # postgres
+        cur.execute('ALTER TABLE %s ADD COLUMN %s SMALLINT NOT NULL DEFAULT 0'
+                    % (ref, _quote(kind, "is_deleted")))
+    return "is_deleted", "flag"
+
+
+def _soft_set_value(kind, mode, restore):
+    """返回 (占位符或表达式, 参数值 或 None)：flag -> 0/1；timestamp -> NOW()/NULL。"""
+    if mode == "timestamp":
+        if restore:
+            return "NULL", None
+        return ("NOW()" if kind != "sqlite" else "datetime('now')"), None
+    return ("?" if kind == "sqlite" else "%s"), (0 if restore else 1)
+
+
 # ------------------------------------------------------------------ 回撤
 
 def _undo_sql(use, kind, schema, table, op, before, after):
@@ -1387,7 +1745,7 @@ def _undo_sql(use, kind, schema, table, op, before, after):
         cur = conn.cursor()
         ph = "?" if kind == "sqlite" else "%s"
         ref = _table_ref(kind, use.get("dbname") or "", schema, table)
-        if op == "update":
+        if op in ("update", "soft_delete"):
             old = before.get("set") or {}
             if not old:
                 raise RuntimeError("没有可回撤的旧值")
@@ -1400,11 +1758,14 @@ def _undo_sql(use, kind, schema, table, op, before, after):
             cur.execute("INSERT INTO %s (%s) VALUES (%s)" % (
                 ref, ", ".join(_quote(kind, c) for c in cols), ", ".join([ph] * len(cols))), row)
         elif op == "insert":
-            key = after.get("key") or {}
-            if not key:
-                raise RuntimeError("这条新增没记下主键，无法回撤")
-            whr = " AND ".join("%s = %s" % (_quote(kind, c), ph) for c in key)
-            cur.execute("DELETE FROM %s WHERE %s" % (ref, whr), list(key.values()))
+            # 单行记 key，批量插入记 keys（「随机数据」一次写多行，回撤时一起删）
+            keys = after.get("keys") or ([after.get("key")] if after.get("key") else [])
+            keys = [k for k in keys if k]
+            if not keys:
+                raise RuntimeError("这条新增没记下主键（该表可能既无主键也无自增列），无法回撤")
+            for key in keys:
+                whr = " AND ".join("%s = %s" % (_quote(kind, c), ph) for c in key)
+                cur.execute("DELETE FROM %s WHERE %s" % (ref, whr), list(key.values()))
         else:
             raise RuntimeError("该操作不支持回撤")
         conn.commit()
@@ -1425,6 +1786,8 @@ def _undo_mongo(use, table, op, before, after):
             coll.insert_one(doc)
         elif op == "insert":
             coll.delete_one({"_id": _mongo_id(after.get("id"))})
+        elif op == "soft_delete":
+            coll.update_one({"_id": _mongo_id(before.get("id"))}, {"$set": before.get("set") or {}})
         else:
             raise RuntimeError("该操作不支持回撤")
     finally:
@@ -1720,6 +2083,7 @@ def api_db_rows():
         offset = max(int(request.args.get("offset", 0)), 0)
     except (TypeError, ValueError):
         limit, offset = _PAGE_DEFAULT, 0
+    include_deleted = request.args.get("include_deleted") == "1"
     conf = _load_conf(cid, with_password=True)
     if not conf:
         return jsonify({"error": "连接不存在"}), 404
@@ -1729,13 +2093,15 @@ def api_db_rows():
             conn, kind = _open(use)
             try:
                 pk = []                          # 主键列（编辑行时用来定位）
+                soft_col, soft_mode = None, None
                 if kind in _NOSQL:
                     dbn = use.get("dbname") or ""
                     if kind == "mongodb" and table not in conn[dbn].list_collection_names():
                         return jsonify({"error": "集合不存在：%s" % table}), 404
-                    cols, rows, total = _nosql_rows(conn, kind, use, table, limit, offset)
-                    if kind == "mongodb" and "_id" in cols:
+                    cols, rows, total = _nosql_rows(conn, kind, use, table, limit, offset, include_deleted)
+                    if kind == "mongodb":
                         pk = ["_id"]
+                        soft_col, soft_mode = "is_deleted", "flag"   # Mongo 约定用 is_deleted 字段
                 else:
                     cur = conn.cursor()
                     names = {t["name"] for t in _list_tables(cur, kind, use.get("dbname") or "")}
@@ -1743,21 +2109,27 @@ def api_db_rows():
                         return jsonify({"error": "表不存在：%s" % table}), 404
                     pk = _pk_columns(cur, kind, use.get("dbname") or "", schema, table)
                     ref = _table_ref(kind, use.get("dbname") or "", schema, table)
+                    soft_col, soft_mode = _detect_soft_col(cur, kind, use.get("dbname") or "", schema, table)
+                    where = ""
+                    if soft_col and not include_deleted:      # 默认过滤掉已逻辑删除的行
+                        where = " WHERE " + (_quote(kind, soft_col) + " IS NULL" if soft_mode == "timestamp"
+                                            else "COALESCE(%s,0)=0" % _quote(kind, soft_col))
                     total = None
                     try:
-                        cur.execute("SELECT COUNT(*) FROM %s" % ref)
+                        cur.execute("SELECT COUNT(*) FROM %s%s" % (ref, where))
                         row = cur.fetchone()
                         total = list(row.values())[0] if isinstance(row, dict) else row[0]
                     except Exception:
                         pass
-                    cur.execute("SELECT * FROM %s LIMIT %d OFFSET %d" % (ref, limit, offset))
+                    cur.execute("SELECT * FROM %s%s LIMIT %d OFFSET %d" % (ref, where, limit, offset))
                     cols, rows = _rows_of(cur, kind)
             finally:
                 _close(conn, kind)
     except Exception as e:
         return jsonify({"error": "读取数据失败：%s" % e}), 500
     return jsonify({"table": table, "columns": cols, "rows": rows, "pk": pk,
-                    "total": total, "limit": limit, "offset": offset})
+                    "total": total, "limit": limit, "offset": offset,
+                    "soft_col": soft_col, "soft_mode": soft_mode})
 
 
 @bp.route("/api/db/query", methods=["POST"])
@@ -1909,6 +2281,7 @@ def api_db_row_insert():
     use = _pick(conf, dbname)
     kind = conf.get("kind") or "sqlite"
     before = after = after_text = None
+    key = None
     try:
         with _LOCK:
             if kind == "redis":
@@ -1938,11 +2311,114 @@ def api_db_row_insert():
                 after = {"key": key}
     except Exception as e:
         return jsonify({"error": "新增失败：%s" % e}), 400
+    undone_key = key if isinstance(key, dict) and key else None
+    if kind in ("redis", "mongodb"):
+        can_undo = True                                   # Redis 靠 before 快照，Mongo 靠 inserted_id
+        note = ""
+    else:
+        can_undo = bool(undone_key)                       # SQL：没拿到主键就回撤不了
+        note = "" if can_undo else "（无主键，不可回撤）"
     wid = _log_write(cid, kind, use.get("dbname") or "", schema, table, "insert",
-                     "新增一行（%d 个字段）" % len(values), before=before,
-                     after=after, after_text=after_text)
-    _log.info("新增数据行：kind=%s table=%s 字段=%s", kind, table, list(values))
+                     "新增一行（%d 个字段）%s" % (len(values), note),
+                     before=before, after=after, after_text=after_text, undoable=can_undo)
+    _log.info("新增数据行：kind=%s table=%s 字段=%s 可回撤=%s", kind, table, list(values), can_undo)
     return jsonify({"ok": True, "inserted": n, "write_id": wid})
+
+
+@bp.route("/api/db/row/fake", methods=["POST"])
+def api_db_row_fake():
+    """按表结构随机生成测试数据（纯规则，不调用 AI）。
+
+    只造数不落库：返回 {columns, rows, skipped}，前端可以填进「新增行」表单让人先改，
+    也可以原样丢给 /api/db/row/insert-many 一次写入多行。
+    """
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("conn") or "")
+    dbname = str(data.get("dbname") or "")
+    schema = str(data.get("schema") or "")
+    table = str(data.get("table") or "")
+    if not table:
+        return jsonify({"error": "缺少表名"}), 400
+    try:
+        count = min(max(int(data.get("count", 1)), 1), _FAKE_MAX)
+    except (TypeError, ValueError):
+        count = 1
+    conf = _load_conf(cid, with_password=True)
+    if not conf:
+        return jsonify({"error": "连接不存在"}), 404
+    kind = conf.get("kind") or "sqlite"
+    if kind in _NOSQL:
+        return jsonify({"error": "只有 SQLite / MySQL / PostgreSQL 能按表结构造数"}), 400
+    use = _pick(conf, dbname)
+    try:
+        with _LOCK:
+            conn, kind = _open(use)
+            try:
+                cur = conn.cursor()
+                names = {t["name"] for t in _list_tables(cur, kind, use.get("dbname") or "")}
+                if table not in names:               # 表名必须真实存在，避免拼接注入
+                    return jsonify({"error": "表不存在：%s" % table}), 404
+                cols = _fake_cols(cur, kind, use.get("dbname") or "", schema, table)
+            finally:
+                _close(conn, kind)
+    except Exception as e:
+        return jsonify({"error": "读取表结构失败：%s" % e}), 500
+    if not cols or all(c["skip"] for c in cols):
+        return jsonify({"error": "这张表没有可造数的列（都是自增 / 二进制 / 生成列）"}), 400
+    rows, skipped = _fake_rows(cols, count, datetime.now())
+    _log.info("随机生成测试数据：kind=%s table=%s %d 行 跳过=%s",
+              kind, table, len(rows), skipped)
+    return jsonify({"columns": [c["name"] for c in cols], "rows": rows,
+                    "skipped": skipped[:_FAKE_SKIP_MAX], "max": _FAKE_MAX})
+
+
+@bp.route("/api/db/row/insert-many", methods=["POST"])
+def api_db_row_insert_many():
+    """批量新增（给「随机数据」用）：一个事务写入多行，整体只记 1 条可回撤日志。"""
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("conn") or "")
+    dbname = str(data.get("dbname") or "")
+    schema = str(data.get("schema") or "")
+    table = str(data.get("table") or "")
+    raw = data.get("rows") if isinstance(data.get("rows"), list) else []
+    rows = [dict(r) for r in raw[:_FAKE_MAX] if isinstance(r, dict) and r]
+    if not table:
+        return jsonify({"error": "缺少表名"}), 400
+    if not rows:
+        return jsonify({"error": "没有要写入的数据"}), 400
+    conf = _load_conf(cid, with_password=True)
+    if not conf:
+        return jsonify({"error": "连接不存在"}), 404
+    kind = conf.get("kind") or "sqlite"
+    if kind in _NOSQL:
+        return jsonify({"error": "批量新增只支持 SQLite / MySQL / PostgreSQL"}), 400
+    use = _pick(conf, dbname)
+    try:
+        with _LOCK:
+            conn, kind = _open(use)
+            try:
+                cur = conn.cursor()
+                names = {t["name"] for t in _list_tables(cur, kind, use.get("dbname") or "")}
+                if table not in names:
+                    return jsonify({"error": "表不存在：%s" % table}), 404
+                # 字段名必须来自这张表：值走参数化，列名是拼进 SQL 的，得先挡一道
+                known = {c["name"] for c in _columns_info(cur, kind, use.get("dbname") or "",
+                                                          schema, table)}
+            finally:
+                _close(conn, kind)
+        bad = set()
+        for r in rows:
+            bad |= {c for c in r if c not in known}
+        if bad:
+            return jsonify({"error": "字段不存在：%s" % "、".join(sorted(bad)[:8])}), 400
+        keys, n = _insert_many_sql(use, kind, schema, table, rows)
+    except Exception as e:
+        return jsonify({"error": "批量新增失败：%s" % e}), 400
+    wid = _log_write(cid, kind, use.get("dbname") or "", schema, table, "insert",
+                     "批量新增 %d 行（随机数据）%s" % (n, "" if keys else "（无主键，不可回撤）"),
+                     after={"keys": keys}, undoable=bool(keys))
+    _log.info("批量新增：kind=%s table=%s 行数=%d 可回撤=%s", kind, table, n, bool(keys))
+    return jsonify({"ok": True, "inserted": n, "undoable": bool(keys), "write_id": wid})
 
 
 @bp.route("/api/db/row/delete", methods=["POST"])
@@ -1996,6 +2472,80 @@ def api_db_row_delete():
                      "删除一行", before=before, before_text=before_text)
     _log.info("删除数据行：kind=%s table=%s", kind, table)
     return jsonify({"ok": True, "deleted": n, "write_id": wid})
+
+
+@bp.route("/api/db/row/soft-delete", methods=["POST"])
+def api_db_row_soft_delete():
+    """逻辑删除（假删除）：把软删除列标记为已删除，列表默认过滤掉；可回撤还原。
+
+    restore=true 时把标记清零（恢复这一行）。Redis 不支持（没有行概念），请走真删除。
+    """
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("conn") or "")
+    dbname = str(data.get("dbname") or "")
+    schema = str(data.get("schema") or "")
+    table = str(data.get("table") or "")
+    key = data.get("key") if isinstance(data.get("key"), dict) else {}
+    restore = bool(data.get("restore"))
+    if not key:
+        return jsonify({"error": "缺少定位这一行的主键"}), 400
+    conf = _load_conf(cid, with_password=True)
+    if not conf:
+        return jsonify({"error": "连接不存在"}), 404
+    use = _pick(conf, dbname)
+    kind = conf.get("kind") or "sqlite"
+    if kind == "redis":
+        return jsonify({"error": "Redis 不支持逻辑删除（请用行详情里的真删除）"}), 400
+    try:
+        with _LOCK:
+            conn, _k = _open(use, writable=True)
+            try:
+                cur = conn.cursor()
+                if kind == "mongodb":
+                    coll = conn[use.get("dbname") or ""][table]
+                    doc_id = _mongo_id(key.get("_id"))
+                    doc = coll.find_one({"_id": doc_id})
+                    if doc is None:
+                        raise RuntimeError("没找到这条记录")
+                    scol = "is_deleted"
+                    old_val = doc.get(scol)
+                    coll.update_one({"_id": doc_id}, {"$set": {scol: (0 if restore else 1)}})
+                    n = 1
+                    wid = _log_write(cid, kind, use.get("dbname") or "", schema, table, "soft_delete",
+                                     "还原一行" if restore else "假删除一行",
+                                     before={"id": str(key.get("_id")), "set": {scol: old_val}},
+                                     undoable=True)
+                    soft_col, mode = scol, "flag"
+                else:
+                    ref = _table_ref(kind, use.get("dbname") or "", schema, table)
+                    soft_col, mode = _detect_soft_col(cur, kind, use.get("dbname") or "", schema, table)
+                    if soft_col is None:                          # 没有软删除列就自动补一个
+                        soft_col, mode = _add_soft_col(cur, use, kind, schema, table)
+                        conn.commit()
+                    ph = "?" if kind == "sqlite" else "%s"
+                    whr = " AND ".join("%s = %s" % (_quote(kind, c), ph) for c in key)
+                    cur.execute("SELECT %s FROM %s WHERE %s LIMIT 1" %
+                                (_quote(kind, soft_col), ref, whr), list(key.values()))
+                    rr = cur.fetchone()
+                    old_val = _row_vals(rr)[0] if rr else (None if mode == "timestamp" else 0)
+                    set_sql, set_param = _soft_set_value(kind, mode, restore)
+                    if set_param is None:                         # timestamp 模式：NOW()/NULL 直接拼
+                        cur.execute("UPDATE %s SET %s = %s WHERE %s" % (ref, _quote(kind, soft_col), set_sql, whr),
+                                    list(key.values()))
+                    else:
+                        cur.execute("UPDATE %s SET %s = %s WHERE %s" % (ref, _quote(kind, soft_col), ph, whr),
+                                    [set_param] + list(key.values()))
+                    n = cur.rowcount
+                    conn.commit()
+                    wid = _log_write(cid, kind, use.get("dbname") or "", schema, table, "soft_delete",
+                                     "还原一行" if restore else "假删除一行",
+                                     before={"key": key, "set": {soft_col: old_val}}, undoable=True)
+            finally:
+                _close(conn, kind)
+    except Exception as e:
+        return jsonify({"error": "操作失败：%s" % e}), 400
+    _log.info("逻辑删除：kind=%s table=%s restore=%s", kind, table, restore)
+    return jsonify({"ok": True, "updated": n, "write_id": wid, "soft_col": soft_col, "mode": mode})
 
 
 @bp.route("/api/db/table", methods=["POST"])

@@ -286,7 +286,7 @@
               '<i class="bi bi-pencil"></i></button>' +
             '<span class="dbc-sp"></span>' +
             '<button class="dbc-mini dbc-add-row" title="在当前表 / 集合里新增一行"><i class="bi bi-plus-lg"></i> 新增行</button>' +
-            '<button class="dbc-mini dbc-undo" title="回撤最近一次增 / 删 / 改（表级操作不可回撤）"><i class="bi bi-arrow-counterclockwise"></i> 回撤<span class="dbc-undo-n"></span></button>' +
+            '<button class="dbc-mini dbc-undo" title="查看最近写操作，可选择性回撤（表级操作不可回撤）"><i class="bi bi-arrow-counterclockwise"></i> 回撤<span class="dbc-undo-n"></span></button>' +
             '<button class="dbc-mini dbc-sql-toggle" title="显示 / 隐藏 SQL 执行区"><i class="bi bi-terminal"></i> <span class="dbc-sql-btn-t">SQL</span></button>' +
           "</div>" +
           '<div class="dbc-grid-wrap scroll-thin"></div>' +
@@ -322,10 +322,12 @@
             "</div>" +
             '<div class="dbc-row-body scroll-thin"></div>' +
             '<div class="dbc-sql-bar"><span class="dbc-sql-msg dbc-row-info"></span>' +
-              '<button class="dbc-mini dbc-row-del"><i class="bi bi-trash"></i> 删除</button>' +
+              '<button class="dbc-mini dbc-row-del"><i class="bi bi-trash3"></i> 假删除</button>' +
               '<button class="dbc-mini dbc-row-edit"><i class="bi bi-pencil"></i> 编辑</button>' +
               '<button class="dbc-mini dbc-row-save" hidden><i class="bi bi-check-lg"></i> 保存</button>' +
               '<button class="dbc-mini dbc-row-cancel" hidden>取消</button>' +
+              '<button class="dbc-mini dbc-row-fake" hidden title="按表结构随机造数（纯规则，不调用 AI）">' +
+                '<i class="bi bi-shuffle"></i> 随机数据</button>' +
               '<button class="dbc-mini dbc-row-copy"><i class="bi bi-clipboard"></i> 复制 JSON</button></div>' +
           "</div>" +
         "</div>" +
@@ -334,7 +336,7 @@
     var saved = dbcLoadState(conn.id);        // 上次的浏览状态（刷新后还原）
     var state = { db: saved.db || conn.dbname || "", table: saved.table || "",
                   schema: saved.schema || "", limit: saved.limit || 100, offset: 0,
-                  total: null, seq: 0, kind: conn.kind };
+                  total: null, seq: 0, kind: conn.kind, includeDeleted: false };
     tab.dbcState = state;
 
     var dbSel = tab.host.querySelector(".dbc-db-sel");
@@ -385,18 +387,37 @@
 
     function err(e) { return '<div class="dbc-empty">' + esc(e.message || e) + "</div>"; }
 
+    function isSoftDeleted(row) {
+      var sc = lastGrid.softCol, sm = lastGrid.softMode;
+      if (!sc) return false;
+      var i = lastGrid.cols.indexOf(sc);
+      if (i < 0) return false;
+      var v = row[i];
+      if (sm === "timestamp") return !(v === null || v === undefined || v === "");
+      return v === 1 || v === true || v === "1";
+    }
     function drawGrid(cols, rows, emptyText, opts) {
       lastGrid = { cols: (cols && cols.length) ? cols : [], rows: rows || [] };   // 供「行详情」取用
       if (!cols || !cols.length) return '<div class="dbc-empty">' + esc(emptyText || "没有数据") + "</div>";
-      var head = "<tr>" + cols.map(function (c) { return "<th>" + esc(c) + "</th>"; }).join("") + "</tr>";
+      var actions = !!(opts && opts.actions);
+      var head = (actions ? "<th class=\"dbc-ract-h\"></th>" : "") +
+                 cols.map(function (c) { return "<th>" + esc(c) + "</th>"; }).join("");
       var body = rows.length
-        ? rows.map(function (r) {
-            return "<tr>" + r.map(function (v) {
+        ? rows.map(function (r, ri) {
+            var act = "";
+            if (actions) {
+              act = isSoftDeleted(r)
+                ? '<button class="dbc-mini dbc-rrestore" title="恢复（取消假删除）"><i class="bi bi-arrow-counterclockwise"></i></button>'
+                : '<button class="dbc-mini dbc-rdel" title="假删除这一行"><i class="bi bi-trash3"></i></button>';
+              act = '<td class="dbc-ract">' + act + "</td>";
+            }
+            var cls = isSoftDeleted(r) ? ' class="dbc-del"' : "";
+            return "<tr data-ri=\"" + ri + "\"" + cls + ">" + act + r.map(function (v) {
               if (v === null || v === undefined) return '<td class="dbc-null">NULL</td>';
               return "<td>" + esc(v) + "</td>";
             }).join("") + "</tr>";
           }).join("")
-        : '<tr><td class="dbc-empty" colspan="' + cols.length + '">没有数据</td></tr>';
+        : '<tr><td class="dbc-empty" colspan="' + (cols.length + (actions ? 1 : 0)) + '">没有数据</td></tr>';
       var cls = (opts && opts.single) ? "dbc-grid single" : "dbc-grid";
       return '<table class="' + cls + '"><thead>' + head + "</thead><tbody>" + body + "</tbody></table>";
     }
@@ -481,15 +502,24 @@
                              "&dbname=" + encodeURIComponent(state.db) +
                              "&schema=" + encodeURIComponent(state.schema) +
                              "&table=" + encodeURIComponent(state.table) +
-                             "&limit=" + state.limit + "&offset=" + (offset || 0));
+                             "&limit=" + state.limit + "&offset=" + (offset || 0) +
+                             (state.includeDeleted ? "&include_deleted=1" : ""));
         if (seq !== state.seq) return;                    // 快速切换时丢弃过期结果
         state.offset = d.offset || 0;
         state.total = d.total;
-        gridBox.innerHTML = drawGrid(d.columns, d.rows, "表里没有数据");
+        lastGrid.softCol = d.soft_col || null;
+        lastGrid.softMode = d.soft_mode || null;
+        gridBox.innerHTML = drawGrid(d.columns, d.rows, "表里没有数据",
+                                      { actions: state.kind !== "redis" });
         lastGrid.pk = d.pk || [];            // 主键（编辑行时用来定位）
         var from = d.rows.length ? state.offset + 1 : 0;
         var to = state.offset + d.rows.length;
+        var softBtn = lastGrid.softCol
+          ? '<button class="dbc-mini dbc-toggle-del' + (state.includeDeleted ? " on" : "") + '" title="切换是否显示已逻辑删除的行">'
+            + (state.includeDeleted ? "隐藏已删除" : "显示已删除") + "</button>"
+          : "";
         pagerEl.innerHTML =
+          softBtn +
           '<span class="dbc-pg-info">' + (state.total === null || state.total === undefined
             ? "第 " + from + "-" + to + " 行"
             : "第 " + from + "-" + to + " 行 / 共 " + state.total + " 行") + "</span>" +
@@ -503,6 +533,8 @@
         lim.onchange = function () { state.limit = parseInt(lim.value, 10) || 100; loadRows(0); };
         pagerEl.querySelector(".dbc-prev").onclick = function () { loadRows(Math.max(0, state.offset - state.limit)); };
         pagerEl.querySelector(".dbc-next").onclick = function () { loadRows(state.offset + state.limit); };
+        var sbtn = pagerEl.querySelector(".dbc-toggle-del");
+        if (sbtn) sbtn.onclick = function () { state.includeDeleted = !state.includeDeleted; loadRows(0); };
       } catch (e) {
         if (seq === state.seq) gridBox.innerHTML = err(e);
       }
@@ -712,6 +744,8 @@
       rowDelBtn.hidden = (mode !== "view");
       rowSaveBtn.hidden = (mode === "view");
       rowCancelBtn.hidden = (mode === "view");
+      // 随机造数只在「新增行」里有意义：Redis / MongoDB 没有可依的列类型，直接不给入口
+      fakeBtn.hidden = (mode !== "insert") || conn.kind === "redis" || conn.kind === "mongodb";
       rowTitleEl.innerHTML = '<i class="bi ' + (mode === "insert" ? "bi-plus-square" : "bi-list-columns-reverse") +
         '"></i>' + (mode === "insert" ? "新增行" : "行详情");
     }
@@ -729,6 +763,16 @@
       setRowPanel(true);
     }
     gridBox.addEventListener("click", function (e) {
+      var actBtn = e.target.closest ? e.target.closest(".dbc-rdel, .dbc-rrestore") : null;
+      if (actBtn) {                                   // 操作列：假删除 / 恢复，不触发行详情
+        e.stopPropagation();
+        var tr = actBtn.closest("tr");
+        var ri = tr ? parseInt(tr.getAttribute("data-ri"), 10) : -1;
+        if (ri < 0 || !lastGrid.rows[ri]) return;
+        if (actBtn.classList.contains("dbc-rrestore")) softDelRow(ri, true);
+        else softDelRow(ri, false);
+        return;
+      }
       var tr = e.target && e.target.closest ? e.target.closest("tr") : null;
       if (!tr || !tr.parentNode || tr.parentNode.tagName !== "TBODY") return;   // 表头 / 空数据行不算
       var kids = tr.parentNode.children;
@@ -751,9 +795,35 @@
         }).join("") + "</tbody></table>";
       rowBody.scrollTop = 0;
       rowInfo.textContent = "新增到「" + state.table + "」· 留空的字段不写入 · 保存后可用「回撤」撤销";
+      rowInfo.title = "";
       setRowPanel(true);
       var first = rowBody.querySelector(".dbc-row-in");
       if (first) first.focus();
+    }
+    // 列表里点图标：逻辑删除（假删除）/ 恢复（取消标记）；写库并记一条可回撤的日志
+    async function softDelRow(ri, restore) {
+      var rec = lastGrid.rows[ri];
+      var pk = lastGrid.pk || [];
+      if (!pk.length) { toast("该表没有主键，无法定位这一行做假删除", "warn"); return; }
+      var key = {};
+      for (var i = 0; i < pk.length; i++) {
+        var idx = lastGrid.cols.indexOf(pk[i]);
+        key[pk[i]] = rec[idx];
+      }
+      var ok = await uiConfirm(restore ? "恢复这一行" : "假删除这一行",
+        "将把「" + (state.table || "") + "」第 " + (ri + 1) + " 行标记为" +
+        (restore ? "未删除（可回撤）" : "已删除，列表默认隐藏（可回撤）") + "，确定继续？",
+        restore ? "恢复" : "假删除", true);
+      if (!ok) return;
+      try {
+        await dbcApi("/api/db/row/soft-delete", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conn: conn.id, dbname: state.db, schema: state.schema,
+                                 table: state.table, key: key, restore: !!restore }) });
+        toast((restore ? "已恢复 1 行" : "已假删除 1 行（可回撤）"), "ok");
+        loadRows(state.offset);
+        refreshUndo();
+      } catch (e) { toast(e.message || String(e), "err"); }
     }
     // 进入编辑：值单元格换成输入框（原值放 data-v 里比对）
     rowEditBtn.onclick = function () {
@@ -771,6 +841,7 @@
       });
       setRowMode("edit");
       rowInfo.textContent = "编辑中 · 改完点「保存」会直接写入数据库（空串会写成空字符串，NULL 留空即不改动）";
+      rowInfo.title = "";
       var first = rowBody.querySelector(".dbc-row-in");
       if (first) first.focus();
     };
@@ -781,6 +852,90 @@
       rowBody.innerHTML = rowTableHtml(curRow.cols, curRow.rec);
       rowInfo.textContent = (state.table ? state.table + " · " : "") + "第 " + (curRow.idx + 1) + " 行";
     };
+    /* ---- 随机数据：后端按「列名语义 + 列类型」纯规则造数（不调用 AI）----
+       「填充表单」只填不写库，人还能改；「插入 N 行」批量写入，整体只记 1 条回撤 ---- */
+    var fakeBtn = tab.host.querySelector(".dbc-row-fake");
+    var fakePz = null, fakeBusy = false;
+    function fakeClose() {
+      if (fakePz && fakePz.parentNode) fakePz.parentNode.removeChild(fakePz);
+      fakePz = null;
+      document.removeEventListener("mousedown", fakeOutside, true);
+    }
+    function fakeOutside(e) {
+      if (!fakePz) return;
+      if (fakePz.contains(e.target) || (fakeBtn && fakeBtn.contains(e.target))) return;
+      fakeClose();
+    }
+    function fakeMenu() {
+      fakeClose();
+      var items = [
+        { fill: 1, text: "填充表单 · 1 行（先不写库，可改完再点保存）" },
+        { head: "直接写入数据库（记 1 条回撤）" },
+        { n: 5, text: "插入 5 行" }, { n: 10, text: "插入 10 行" },
+        { n: 20, text: "插入 20 行" }, { n: 50, text: "插入 50 行" },
+      ];
+      var p = document.createElement("div");
+      p.className = "dbc-pz";
+      p.innerHTML = items.map(function (x, i) {
+        return x.head ? '<div class="dbc-pz-h">' + esc(x.head) + "</div>"
+                      : '<div class="dbc-pz-i" data-i="' + i + '">' + esc(x.text) + "</div>";
+      }).join("");
+      document.body.appendChild(p);
+      var r = fakeBtn.getBoundingClientRect(), w = p.offsetWidth, h = p.offsetHeight;
+      var top = r.top - h - 4;                                  // 面板在窗口底部，默认往上弹
+      if (top < 8) top = Math.min(window.innerHeight - h - 8, r.bottom + 4);
+      p.style.left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)) + "px";
+      p.style.top = Math.max(8, top) + "px";
+      Array.prototype.forEach.call(p.querySelectorAll(".dbc-pz-i"), function (el) {
+        el.onclick = function () { var v = items[+el.dataset.i]; fakeClose(); fakeGen(v); };
+      });
+      fakePz = p;
+      setTimeout(function () { document.addEventListener("mousedown", fakeOutside, true); }, 0);
+    }
+    async function fakeGen(item) {
+      if (fakeBusy) return;
+      fakeBusy = true;
+      var count = item.fill || item.n;
+      rowInfo.textContent = "正在按表结构生成 " + count + " 行随机数据…";
+      rowInfo.title = "";
+      try {
+        var d = await dbcApi("/api/db/row/fake", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conn: conn.id, dbname: state.db, schema: state.schema,
+                                 table: state.table, count: count }) });
+        var data = d.rows || [];
+        if (!data.length) { rowInfo.textContent = "没有生成到可用数据"; return; }
+        var skipped = d.skipped || [];
+        var extra = skipped.length ? "（" + skipped.length + " 列不写入，悬浮查看）" : "";
+        if (item.fill) {                                       // 只填表单，先不落库
+          var ins = rowBody.querySelectorAll(".dbc-row-in");
+          lastGrid.cols.forEach(function (c, i) {
+            var v = data[0][c];
+            if (ins[i]) ins[i].value = (v === null || v === undefined) ? "" : String(v);
+          });
+          rowInfo.textContent = "已填充 1 行随机数据" + extra + " · 可改完点「保存」";
+          rowInfo.title = skipped.length ? "以下列不写入：" + skipped.join("、") : "";
+          return;
+        }
+        var ok = await uiConfirm("插入 " + data.length + " 行随机数据",
+          "将往「" + (state.table || "") + "」写入 " + data.length + " 行测试数据，确定继续？" +
+          "（之后可用「回撤」整体撤销）", "插入", true);
+        if (!ok) { rowInfo.textContent = ""; rowInfo.title = ""; return; }
+        var res = await dbcApi("/api/db/row/insert-many", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conn: conn.id, dbname: state.db, schema: state.schema,
+                                 table: state.table, rows: data }) });
+        toast("已插入 " + (res.inserted || data.length) + " 行随机数据" +
+              (res.undoable ? "（可回撤）" : ""), "ok");
+        setRowPanel(false);
+        loadRows(state.offset);
+        refreshUndo();
+      } catch (e) {
+        rowInfo.textContent = e.message || String(e);
+      } finally { fakeBusy = false; }
+    }
+    fakeBtn.onclick = fakeMenu;
+
     async function saveRow() {
       var ins = Array.prototype.slice.call(rowBody.querySelectorAll(".dbc-row-in"));
       if (rowMode === "insert") {                              // ---- 新增
@@ -851,21 +1006,22 @@
       } finally { rowSaveBtn.disabled = false; }
     }
     rowSaveBtn.onclick = saveRow;
-    // 删除这一行（后端删前会留档，可回撤）
+    // 假删除这一行（逻辑删除：标记软删除列，列表默认隐藏，可回撤还原）
     rowDelBtn.onclick = async function () {
       if (!curRow || !canEditRow(curRow.cols, curRow.rec)) return;
       var key = {};
       (lastGrid.pk || []).forEach(function (c) { key[c] = curRow.rec[curRow.cols.indexOf(c)]; });
-      var ok = await uiConfirm("删除这一行",
-        "将从「" + (state.table || "") + "」删除第 " + (curRow.idx + 1) + " 行，确定继续？（之后可用「回撤」恢复）",
-        "删除", true);
+      var ok = await uiConfirm("假删除这一行",
+        "将把「" + (state.table || "") + "」第 " + (curRow.idx + 1) +
+        " 行标记为已删除（数据库行仍在，列表默认隐藏，之后可用「回撤」恢复）",
+        "假删除", true);
       if (!ok) return;
       try {
-        await dbcApi("/api/db/row/delete", { method: "POST",
+        await dbcApi("/api/db/row/soft-delete", { method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ conn: conn.id, dbname: state.db, schema: state.schema,
                                  table: state.table, key: key }) });
-        toast("已删除 1 行（可回撤）", "ok");
+        toast("已假删除 1 行（可回撤）", "ok");
         setRowPanel(false);
         loadRows(state.offset);
         refreshUndo();
@@ -880,36 +1036,99 @@
       copyText(JSON.stringify(obj, null, 2));
     };
 
-    // ---- 回撤：撤销最近一次「增 / 删 / 改」（表级操作不可回撤）----
+    // ---- 回撤：点「回撤」展开最近写操作列表，可选择性回撤；表头保留「直接回撤最近一次」----
     var undoBtn = tab.host.querySelector(".dbc-undo");
     var undoN = tab.host.querySelector(".dbc-undo-n");
+    var undoPz = null;
+    var UNDO_OP = { insert: "新增", update: "修改", delete: "删除", truncate: "清空",
+                    drop: "删除", create: "新建", hash: "哈希", rename: "重命名", soft_delete: "假删除" };
+    function undoClose() {
+      if (undoPz && undoPz.parentNode) undoPz.parentNode.removeChild(undoPz);
+      undoPz = null;
+      document.removeEventListener("mousedown", undoOutside, true);
+    }
+    function undoOutside(e) {
+      if (!undoPz) return;
+      if (undoPz.contains(e.target) || (undoBtn && undoBtn.contains(e.target))) return;
+      undoClose();
+    }
+    function undoTime(ts) {                                   // 秒 → 今天显示 HH:MM:SS，跨天带日期
+      var d = new Date((ts || 0) * 1000), n = new Date();
+      var p = function (x) { return (x < 10 ? "0" : "") + x; };
+      var hm = p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+      return (d.toDateString() === n.toDateString()) ? hm
+             : (p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()));
+    }
     function refreshUndo() {
       dbcApi("/api/db/writes?conn=" + encodeURIComponent(conn.id)).then(function (d) {
         var n = d.undoable || 0;
         undoN.textContent = n ? " " + n : "";
         undoBtn.disabled = !n;
-        undoBtn.title = n ? ("可回撤 " + n + " 步；最近：" + ((d.writes[0] || {}).summary || ""))
+        undoBtn.title = n ? ("可回撤 " + n + " 步；最近：" + ((d.writes[0] || {}).summary || "") + "（点击查看列表）")
                           : "没有可回撤的操作（表级操作不可回撤）";
       }).catch(function () { /* 忽略 */ });
     }
-    undoBtn.onclick = async function () {
-      var d = {};
-      try { d = await dbcApi("/api/db/writes?conn=" + encodeURIComponent(conn.id)); } catch (e) { /* 忽略 */ }
-      var next = (d.writes || []).filter(function (w) { return w.undoable && !w.undone; })[0];
-      if (!next) { toast("没有可回撤的操作", "info"); return; }
+    // 回撤某一条记录（w 来自 /api/db/writes）；成功返回 true
+    async function doUndo(w) {
       var ok = await uiConfirm("回撤操作",
-        "将撤销最近一次「" + next.table + " · " + next.summary + "」，把数据恢复成操作前的样子，确定继续？",
+        "将撤销「" + (w.table || "") + " · " + (w.summary || "") + "」，把数据恢复成操作前的样子，确定继续？",
         "回撤", false);
-      if (!ok) return;
+      if (!ok) return false;
       try {
         var r = await dbcApi("/api/db/undo", { method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ conn: conn.id, id: next.id }) });
+          body: JSON.stringify({ conn: conn.id, id: w.id }) });
         toast("已回撤：" + (((r.undo || {}).summary) || ""), "ok");
         if (state.table) loadRows(state.offset);
         refreshUndo();
-      } catch (e) { toast(e.message || String(e), "err"); }
-    };
+        return true;
+      } catch (e) { toast(e.message || String(e), "err"); return false; }
+    }
+    async function undoMenu() {
+      undoClose();
+      var d = {};
+      try { d = await dbcApi("/api/db/writes?conn=" + encodeURIComponent(conn.id)); } catch (e) { /* 忽略 */ }
+      var ws = (d.writes || []).slice(0, 30);
+      var first = ws.filter(function (w) { return w.undoable && !w.undone; })[0];
+      var p = document.createElement("div");
+      p.className = "dbc-undopz";
+      p.innerHTML =
+        '<div class="dbc-undopz-h"><span>最近写操作（可单独回撤）</span>' +
+          '<button class="dbc-undopz-quick"' + (first ? "" : " disabled") + '>' +
+            '<i class="bi bi-arrow-counterclockwise"></i> 直接回撤最近一次</button></div>' +
+        '<div class="dbc-undopz-list scroll-thin">' +
+        (ws.length ? ws.map(function (w, i) {
+          var can = w.undoable && !w.undone;
+          var tail = w.undone ? '<span class="dbc-undopz-s">已回撤</span>'
+                   : (!w.undoable ? '<span class="dbc-undopz-s">不可回撤</span>'
+                   : '<button class="dbc-mini dbc-undopz-go" data-i="' + i + '">回撤</button>');
+          return '<div class="dbc-undopz-r' + (can ? "" : " off") + '">' +
+            '<span class="dbc-undopz-op v-' + escAttr(w.op || "") + '">' +
+              esc(UNDO_OP[w.op] || w.op || "") + "</span>" +
+            '<span class="dbc-undopz-tx"><b>' + esc(w.table || "") + "</b> · " + esc(w.summary || "") + "</span>" +
+            '<span class="dbc-undopz-t">' + esc(undoTime(w.created_at)) + "</span>" + tail + "</div>";
+        }).join("") : '<div class="dbc-undopz-e">暂无写操作</div>') +
+        "</div>";
+      document.body.appendChild(p);
+      var r = undoBtn.getBoundingClientRect(), w2 = p.offsetWidth, h = p.offsetHeight;
+      var top = r.bottom + 4;                                  // 工具栏在顶部，默认往下弹
+      if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 4);
+      p.style.left = Math.max(8, Math.min(r.right - w2, window.innerWidth - w2 - 8)) + "px";
+      p.style.top = Math.max(8, top) + "px";
+      if (first) {
+        p.querySelector(".dbc-undopz-quick").onclick = async function () {
+          if (await doUndo(first)) undoClose();
+        };
+      }
+      Array.prototype.forEach.call(p.querySelectorAll(".dbc-undopz-go"), function (el) {
+        el.onclick = async function () {
+          if (await doUndo(ws[+el.dataset.i])) undoClose();
+        };
+      });
+      undoPz = p;
+      setTimeout(function () { document.addEventListener("mousedown", undoOutside, true); }, 0);
+    }
+    undoBtn.onclick = function () { undoMenu(); };
 
     // ---- 表 / 集合 / key 操作：全部走 /api/db/table，按库类型给对应语义 ----
     var whatName = isRedis ? "key" : (isMongo ? "集合" : "表");

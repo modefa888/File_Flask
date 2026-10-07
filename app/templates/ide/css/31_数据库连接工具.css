@@ -115,6 +115,11 @@
   .dbc-undo-n { color: #9fd0ff; }
   .dbc-undo:disabled .dbc-undo-n { color: inherit; }
   .dbc-sql .dbc-mini.dbc-row-del:hover:not(:disabled) { color: #e06c75; border-color: #e06c75; }
+  /* 「新增行」里的「随机数据」：造数入口，给个蓝色侧重 */
+  .dbc-sql .dbc-mini.dbc-row-fake { color: #9fd0ff; }
+  .dbc-sql .dbc-mini.dbc-row-fake:hover:not(:disabled) {
+    background: #0e4a75; border-color: #0e639c; color: #ffffff;
+  }
 
   /* position: relative 是 SQL 悬浮查询窗的定位参照（只在数据区内浮动，不盖左侧表列表） */
   .dbc-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -230,7 +235,8 @@
   }
   .dbc-row-tb td.dbc-row-k { width: 1%; min-width: 110px; white-space: nowrap; color: #9fd0ff; }
   .dbc-row-tb td.dbc-null { color: #6a6a6a; font-style: italic; }
-  .dbc-row-info { white-space: nowrap; }
+  /* nowrap + 省略号：文案过长时截断，避免盖住右侧按钮（完整文案见 title 悬浮提示） */
+  .dbc-row-info { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* 编辑态：值单元格换成输入框 */
   .dbc-row-in {
     width: 100%; box-sizing: border-box; min-height: 26px; resize: vertical;
@@ -265,6 +271,17 @@
   .dbc-grid tbody tr:hover td { background: #26262a; }
   .dbc-grid tbody tr.on td { background: #094771; color: #ffffff; }
   .dbc-grid .dbc-null { color: #6a6a6a; font-style: italic; }
+  /* 逻辑删除：每行操作列（假删除 / 恢复） */
+  .dbc-grid th.dbc-ract-h, .dbc-grid td.dbc-ract { width: 34px; text-align: center;
+    padding: 2px 3px; border-right: none; }
+  .dbc-grid td.dbc-ract:hover { background: #26262a; }
+  .dbc-grid .dbc-rdel, .dbc-grid .dbc-rrestore { padding: 1px 6px; font-size: 13px; }
+  .dbc-grid .dbc-rdel:hover:not(:disabled) { color: #e06c75; border-color: #e06c75; }
+  .dbc-grid .dbc-rrestore { color: #9fd0ff; }
+  .dbc-grid .dbc-rrestore:hover:not(:disabled) { color: #9fd0ff; border-color: #9fd0ff; }
+  .dbc-grid tbody tr.dbc-del td { color: #7a7a7a; }
+  .dbc-grid tbody tr.dbc-del td.dbc-null { color: #5a5a5a; }
+  .dbc-toggle-del.on { color: #9fd0ff; border-color: #4a7390; }
   .dbc-empty { padding: 18px; color: #7a7a7a; font-size: 12.5px; text-align: center; }
 
   /* ---------- 表结构设计弹窗（新建表 / 改列结构） ---------- */
@@ -345,6 +362,43 @@
   }
   .dbc-pz-i:hover { background: #094771; color: #ffffff; }
   .dbc-pz-h { padding: 6px 9px 2px; font-size: 11px; color: #8a8a8a; }
+  /* 「回撤」下拉：列出最近写操作，逐条选择性回撤；表头带「直接回撤最近一次」快捷 */
+  .dbc-undopz {
+    position: fixed; z-index: 10080; width: 400px; max-width: 92vw;
+    background: #252526; border: 1px solid #454545; border-radius: 6px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .55); overflow: hidden;
+  }
+  .dbc-undopz-h {
+    display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+    border-bottom: 1px solid #3a3a3a; font-size: 11.5px; color: #8a8a8a;
+  }
+  .dbc-undopz-h > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dbc-undopz-quick {
+    flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 9px;
+    font-size: 12px; cursor: pointer; background: #2d2d30; border: 1px solid #3a3a3a;
+    border-radius: 5px; color: #9fd0ff;
+  }
+  .dbc-undopz-quick:hover:not(:disabled) { background: #094771; border-color: #0e639c; color: #ffffff; }
+  .dbc-undopz-quick:disabled { opacity: .45; cursor: default; }
+  .dbc-undopz-list { max-height: 300px; overflow: auto; padding: 4px; }
+  .dbc-undopz-r { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 4px; font-size: 12px; }
+  .dbc-undopz-r:hover { background: #2a2d2e; }
+  .dbc-undopz-r.off { opacity: .55; }
+  .dbc-undopz-op {
+    flex: none; width: 36px; text-align: center; padding: 1px 0; border-radius: 3px;
+    font-size: 11px; background: #333333; color: #cfcfcf;
+  }
+  .dbc-undopz-op.v-insert { background: #173a24; color: #7fc98a; }
+  .dbc-undopz-op.v-update { background: #14314a; color: #9fd0ff; }
+  .dbc-undopz-op.v-delete { background: #3a1d1d; color: #e08a8a; }
+  .dbc-undopz-tx {
+    flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    color: #d4d4d4; font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .dbc-undopz-tx b { color: #9fd0ff; font-weight: 600; }
+  .dbc-undopz-t { flex: none; color: #7a7a7a; font-size: 11px; }
+  .dbc-undopz-s { flex: none; color: #7a7a7a; font-size: 11px; }
+  .dbc-undopz-e { padding: 14px 10px; text-align: center; color: #7a7a7a; font-size: 12px; }
   /* 表 / 集合结构信息表（如 MongoDB 集合字段列表） */
   .dbc-info-t { border-collapse: collapse; width: 100%; font-size: 12px; }
   .dbc-info-t th {

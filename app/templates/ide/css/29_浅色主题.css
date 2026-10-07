@@ -960,11 +960,16 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .dbc-grid th { background: #f0f0f0; color: #005fb8; border-bottom-color: #d8d8d8; border-right-color: #e4e4e4; }
 :where(html.theme-light) .dbc-grid td { color: #24292f; border-bottom-color: #ececec; border-right-color: #f0f0f0; }
 :where(html.theme-light) .dbc-grid tbody tr:hover td { background: #f4f7fa; }
+:where(html.theme-light) .dbc-grid td.dbc-ract:hover { background: #f4f7fa; }
 :where(html.theme-light) .dbc-grid tbody tr.on td { background: #cde3f8; color: #0b3d63; }
 :where(html.theme-light) .dbc-to { color: #5a5a5a; }
 :where(html.theme-light) .dbc-to:hover { background: #e4e6e8; color: #1f2328; }
 :where(html.theme-light) .dbc-undo-n { color: #005fb8; }
 :where(html.theme-light) .dbc-sql .dbc-mini.dbc-row-del:hover:not(:disabled) { color: #c0392b; border-color: #c0392b; }
+:where(html.theme-light) .dbc-sql .dbc-mini.dbc-row-fake { color: #005fb8; }
+:where(html.theme-light) .dbc-sql .dbc-mini.dbc-row-fake:hover:not(:disabled) {
+  background: #cde3f8; border-color: #a8c8e8; color: #0b3d63;
+}
 :where(html.theme-light) .dbc-row-body { background: #ffffff; border-color: #d0d7de; }
 :where(html.theme-light) .dbc-row-tb th { background: #f0f0f0; color: #005fb8; border-bottom-color: #d8d8d8; border-right-color: #e4e4e4; }
 :where(html.theme-light) .dbc-row-tb td { color: #24292f; border-bottom-color: #ececec; border-right-color: #f0f0f0; }
@@ -1107,6 +1112,17 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .dbc-pz-i { color: #24292f; }
 :where(html.theme-light) .dbc-pz-i:hover { background: #cde3f8; color: #0b3d63; }
 :where(html.theme-light) .dbc-pz-h { color: #6b7580; }
+/* 「回撤」下拉（浅色） */
+:where(html.theme-light) .dbc-undopz { background: #ffffff; border-color: #d0d7de; box-shadow: 0 8px 28px rgba(0, 0, 0, .18); }
+:where(html.theme-light) .dbc-undopz-h { border-bottom-color: #e5e9ee; color: #6b7580; }
+:where(html.theme-light) .dbc-undopz-quick { background: #f0f2f4; border-color: #d0d7de; color: #005fb8; }
+:where(html.theme-light) .dbc-undopz-quick:hover:not(:disabled) { background: #cde3f8; border-color: #a8c8e8; color: #0b3d63; }
+:where(html.theme-light) .dbc-undopz-r:hover { background: #eef3f8; }
+:where(html.theme-light) .dbc-undopz-tx { color: #24292f; }
+:where(html.theme-light) .dbc-undopz-tx b { color: #005fb8; }
+:where(html.theme-light) .dbc-undopz-t,
+:where(html.theme-light) .dbc-undopz-s,
+:where(html.theme-light) .dbc-undopz-e { color: #6b7580; }
 /* 当前表名旁的「编辑表结构」笔（浅色） */
 :where(html.theme-light) .dbc-cur { color: #1f2328; }
 :where(html.theme-light) .dbc-cur-edit { color: #005fb8; }

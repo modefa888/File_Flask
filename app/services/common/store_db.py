@@ -286,6 +286,25 @@ CREATE TABLE IF NOT EXISTS db_conns (
     created_at REAL NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL DEFAULT 0
 );
+
+-- 数据库连接工具：写操作日志（新增 / 修改 / 删除 / 清空，前三种可回撤）
+-- before_json：回撤要用的旧数据（修改=旧值、删除=整行）；after_json：新增时记下新行主键（回撤=删掉它）
+CREATE TABLE IF NOT EXISTS db_write_log (
+    id          TEXT PRIMARY KEY,
+    conn_id     TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT '',
+    dbname      TEXT DEFAULT '',
+    tbl_schema  TEXT DEFAULT '',
+    tbl         TEXT DEFAULT '',
+    op          TEXT NOT NULL,                   -- insert / update / delete / truncate
+    summary     TEXT DEFAULT '',
+    before_json TEXT DEFAULT '',
+    after_json  TEXT DEFAULT '',
+    undoable    INTEGER NOT NULL DEFAULT 1,
+    undone      INTEGER NOT NULL DEFAULT 0,
+    created_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dbwrite_created ON db_write_log(created_at);
 """
 
 

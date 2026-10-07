@@ -961,6 +961,10 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .dbc-grid td { color: #24292f; border-bottom-color: #ececec; border-right-color: #f0f0f0; }
 :where(html.theme-light) .dbc-grid tbody tr:hover td { background: #f4f7fa; }
 :where(html.theme-light) .dbc-grid tbody tr.on td { background: #cde3f8; color: #0b3d63; }
+:where(html.theme-light) .dbc-to { color: #5a5a5a; }
+:where(html.theme-light) .dbc-to:hover { background: #e4e6e8; color: #1f2328; }
+:where(html.theme-light) .dbc-undo-n { color: #005fb8; }
+:where(html.theme-light) .dbc-sql .dbc-mini.dbc-row-del:hover:not(:disabled) { color: #c0392b; border-color: #c0392b; }
 :where(html.theme-light) .dbc-row-body { background: #ffffff; border-color: #d0d7de; }
 :where(html.theme-light) .dbc-row-tb th { background: #f0f0f0; color: #005fb8; border-bottom-color: #d8d8d8; border-right-color: #e4e4e4; }
 :where(html.theme-light) .dbc-row-tb td { color: #24292f; border-bottom-color: #ececec; border-right-color: #f0f0f0; }

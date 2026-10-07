@@ -282,6 +282,8 @@
           '<div class="dbc-bar">' +
             '<span class="dbc-cur" title="当前表">—</span>' +
             '<span class="dbc-sp"></span>' +
+            '<button class="dbc-mini dbc-add-row" title="在当前表 / 集合里新增一行"><i class="bi bi-plus-lg"></i> 新增行</button>' +
+            '<button class="dbc-mini dbc-undo" title="回撤最近一次增 / 删 / 改（表级操作不可回撤）"><i class="bi bi-arrow-counterclockwise"></i> 回撤<span class="dbc-undo-n"></span></button>' +
             '<button class="dbc-mini dbc-sql-toggle" title="显示 / 隐藏 SQL 执行区"><i class="bi bi-terminal"></i> <span class="dbc-sql-btn-t">SQL</span></button>' +
           "</div>" +
           '<div class="dbc-grid-wrap scroll-thin"></div>' +
@@ -317,6 +319,7 @@
             "</div>" +
             '<div class="dbc-row-body scroll-thin"></div>' +
             '<div class="dbc-sql-bar"><span class="dbc-sql-msg dbc-row-info"></span>' +
+              '<button class="dbc-mini dbc-row-del"><i class="bi bi-trash"></i> 删除</button>' +
               '<button class="dbc-mini dbc-row-edit"><i class="bi bi-pencil"></i> 编辑</button>' +
               '<button class="dbc-mini dbc-row-save" hidden><i class="bi bi-check-lg"></i> 保存</button>' +
               '<button class="dbc-mini dbc-row-cancel" hidden>取消</button>' +
@@ -395,9 +398,11 @@
                 escAttr(t.schema || "") + '" title="' + escAttr(t.name) + '">' +
                 '<i class="bi ' + (String(t.kind).toLowerCase().indexOf("view") >= 0 ? "bi-eye" : "bi-table") + '"></i>' +
                 '<span class="dbc-tn">' + esc(t.name) + "</span>" +
-                '<span class="dbc-tc">' + (t.rows === null || t.rows === undefined ? "" : t.rows) + "</span></div>";
+                '<span class="dbc-tc">' + (t.rows === null || t.rows === undefined ? "" : t.rows) + "</span>" +
+                '<button class="dbc-to" title="表操作（新建 / 重命名 / 清空 / 删除）"><i class="bi bi-three-dots"></i></button>' +
+                "</div>";
             }).join("")
-          : '<div class="dbc-empty">这个库里没有表</div>';
+          : '<div class="dbc-empty">' + (isRedis ? "这个库里没有 key" : (isMongo ? "这个库里没有集合" : "这个库里没有表")) + "</div>";
         tabsBox.querySelectorAll(".dbc-table").forEach(function (it) {
           it.onclick = function () {
             state.table = it.dataset.name;
@@ -407,6 +412,15 @@
               x.classList.toggle("on", x === it);
             });
             loadRows(0);
+          };
+          // 表 / 集合操作：悬停出现的「⋯」或右键
+          it.querySelector(".dbc-to").onclick = function (e) {
+            e.stopPropagation();
+            tableMenu(it.dataset.name, it.dataset.schema, e.currentTarget);
+          };
+          it.oncontextmenu = function (e) {
+            e.preventDefault();
+            tableMenu(it.dataset.name, it.dataset.schema, it);
           };
         });
         // 优先还原上次选中的表；该表不存在（或没记录）时退回第一张
@@ -628,8 +642,10 @@
     var rowBody = tab.host.querySelector(".dbc-row-body");
     var rowInfo = tab.host.querySelector(".dbc-row-info");
     var rowEditBtn = tab.host.querySelector(".dbc-row-edit");
+    var rowDelBtn = tab.host.querySelector(".dbc-row-del");
     var rowSaveBtn = tab.host.querySelector(".dbc-row-save");
     var rowCancelBtn = tab.host.querySelector(".dbc-row-cancel");
+    var rowTitleEl = tab.host.querySelector(".dbc-row .dbc-sql-title");
     var rowCard = makeCard(rowBox, tab.host.querySelector(".dbc-row .dbc-sql-head"),
                            tab.host.querySelector(".dbc-row-max"), "row");
     var curRow = null;
@@ -659,23 +675,29 @@
       }
       return true;
     }
-    function setEditMode(on) {
-      rowBox.classList.toggle("editing", !!on);
-      rowEditBtn.hidden = !!on;
-      rowSaveBtn.hidden = !on;
-      rowCancelBtn.hidden = !on;
+    // 面板三种模式：view（只读）/ edit（改这一行）/ insert（新增一行）
+    var rowMode = "view";
+    function setRowMode(mode) {
+      rowMode = mode;
+      rowBox.classList.toggle("editing", mode !== "view");
+      rowEditBtn.hidden = (mode !== "view");
+      rowDelBtn.hidden = (mode !== "view");
+      rowSaveBtn.hidden = (mode === "view");
+      rowCancelBtn.hidden = (mode === "view");
+      rowTitleEl.innerHTML = '<i class="bi ' + (mode === "insert" ? "bi-plus-square" : "bi-list-columns-reverse") +
+        '"></i>' + (mode === "insert" ? "新增行" : "行详情");
     }
     function openRow(idx) {
       var cols = lastGrid.cols, rec = lastGrid.rows[idx];
       if (!cols.length || !rec) return;
       curRow = { cols: cols, rec: rec, idx: idx };
-      setEditMode(false);
+      setRowMode("view");
       rowBody.innerHTML = rowTableHtml(cols, rec);
       rowBody.scrollTop = 0;
       var can = canEditRow(cols, rec);
-      rowEditBtn.hidden = !can;
+      rowEditBtn.hidden = rowDelBtn.hidden = !can;
       rowInfo.textContent = (state.table ? state.table + " · " : "") + "第 " + (idx + 1) + " 行 · " +
-        cols.length + " 个字段" + (can ? "" : "（缺主键，不可编辑）");
+        cols.length + " 个字段" + (can ? "" : "（缺主键，不可改 / 删）");
       setRowPanel(true);
     }
     gridBox.addEventListener("click", function (e) {
@@ -687,6 +709,24 @@
       Array.prototype.forEach.call(kids, function (r) { r.classList.toggle("on", r === tr); });
       openRow(idx);
     });
+    // 新增行：按当前列渲染一组空输入框（留空的字段不写入）
+    function openInsert() {
+      if (!state.table) { toast("请先在左侧选一张表 / 集合", "warn"); return; }
+      if (!lastGrid.cols.length) { toast("请先选中一张表读到字段列表", "warn"); return; }
+      curRow = null;
+      setRowMode("insert");
+      rowBody.innerHTML = '<table class="dbc-row-tb"><thead><tr><th>字段</th><th>值</th></tr></thead><tbody>' +
+        lastGrid.cols.map(function (c) {
+          return '<tr><td class="dbc-row-k">' + esc(c) + "</td><td>" +
+            '<textarea class="dbc-row-in" rows="1" spellcheck="false" placeholder="留空则不写入该字段"></textarea>' +
+            "</td></tr>";
+        }).join("") + "</tbody></table>";
+      rowBody.scrollTop = 0;
+      rowInfo.textContent = "新增到「" + state.table + "」· 留空的字段不写入 · 保存后可用「回撤」撤销";
+      setRowPanel(true);
+      var first = rowBody.querySelector(".dbc-row-in");
+      if (first) first.focus();
+    }
     // 进入编辑：值单元格换成输入框（原值放 data-v 里比对）
     rowEditBtn.onclick = function () {
       if (!curRow) return;
@@ -701,20 +741,47 @@
         td.textContent = "";
         td.appendChild(ta);
       });
-      setEditMode(true);
+      setRowMode("edit");
       rowInfo.textContent = "编辑中 · 改完点「保存」会直接写入数据库（空串会写成空字符串，NULL 留空即不改动）";
       var first = rowBody.querySelector(".dbc-row-in");
       if (first) first.focus();
     };
     rowCancelBtn.onclick = function () {
-      if (!curRow) return;
-      setEditMode(false);
+      if (rowMode === "view") return;
+      if (rowMode === "insert" || !curRow) { setRowPanel(false); return; }
+      setRowMode("view");
       rowBody.innerHTML = rowTableHtml(curRow.cols, curRow.rec);
       rowInfo.textContent = (state.table ? state.table + " · " : "") + "第 " + (curRow.idx + 1) + " 行";
     };
-    rowSaveBtn.onclick = async function () {
-      if (!curRow || !canEditRow(curRow.cols, curRow.rec)) return;
+    async function saveRow() {
       var ins = Array.prototype.slice.call(rowBody.querySelectorAll(".dbc-row-in"));
+      if (rowMode === "insert") {                              // ---- 新增
+        var values = {};
+        lastGrid.cols.forEach(function (c, i) {
+          var v = ins[i] ? ins[i].value : "";
+          if (v !== "") values[c] = v;                         // 留空 = 不写入该字段
+        });
+        if (!Object.keys(values).length) { rowInfo.textContent = "至少填一个字段"; return; }
+        var okAdd = await uiConfirm("新增一行",
+          "将往「" + (state.table || "") + "」插入 1 行（" + Object.keys(values).length + " 个字段），确定继续？",
+          "新增", false);
+        if (!okAdd) return;
+        rowSaveBtn.disabled = true;
+        try {
+          await dbcApi("/api/db/row/insert", { method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conn: conn.id, dbname: state.db, schema: state.schema,
+                                   table: state.table, values: values }) });
+          toast("已新增 1 行", "ok");
+          setRowPanel(false);
+          loadRows(state.offset);
+          refreshUndo();
+        } catch (e) { rowInfo.textContent = e.message || String(e); }
+        finally { rowSaveBtn.disabled = false; }
+        return;
+      }
+      // ---- 修改
+      if (!curRow || !canEditRow(curRow.cols, curRow.rec)) return;
       var changes = {}, key = {}, n = 0;
       curRow.cols.forEach(function (c, i) {
         var before = curRow.rec[i];
@@ -746,14 +813,37 @@
           var td = tr && tr.children[i];
           if (td) { td.classList.remove("dbc-null"); td.textContent = changes[c]; }
         });
-        setEditMode(false);
+        setRowMode("view");
         rowBody.innerHTML = rowTableHtml(curRow.cols, curRow.rec);
-        rowInfo.textContent = "已保存 " + n + " 处改动（影响 " + (d.updated || 0) + " 行）";
+        rowInfo.textContent = "已保存 " + n + " 处改动（影响 " + (d.updated || 0) + " 行）· 可「回撤」";
         toast("已保存 " + n + " 处改动", "ok");
+        refreshUndo();
       } catch (e) {
         rowInfo.textContent = e.message || String(e);
       } finally { rowSaveBtn.disabled = false; }
+    }
+    rowSaveBtn.onclick = saveRow;
+    // 删除这一行（后端删前会留档，可回撤）
+    rowDelBtn.onclick = async function () {
+      if (!curRow || !canEditRow(curRow.cols, curRow.rec)) return;
+      var key = {};
+      (lastGrid.pk || []).forEach(function (c) { key[c] = curRow.rec[curRow.cols.indexOf(c)]; });
+      var ok = await uiConfirm("删除这一行",
+        "将从「" + (state.table || "") + "」删除第 " + (curRow.idx + 1) + " 行，确定继续？（之后可用「回撤」恢复）",
+        "删除", true);
+      if (!ok) return;
+      try {
+        await dbcApi("/api/db/row/delete", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conn: conn.id, dbname: state.db, schema: state.schema,
+                                 table: state.table, key: key }) });
+        toast("已删除 1 行（可回撤）", "ok");
+        setRowPanel(false);
+        loadRows(state.offset);
+        refreshUndo();
+      } catch (e) { rowInfo.textContent = e.message || String(e); }
     };
+    tab.host.querySelector(".dbc-add-row").onclick = openInsert;
     tab.host.querySelector(".dbc-row-close").onclick = function () { setRowPanel(false); };
     tab.host.querySelector(".dbc-row-copy").onclick = function () {
       if (!curRow) return;
@@ -761,6 +851,99 @@
       curRow.cols.forEach(function (c, i) { obj[c] = (curRow.rec[i] === undefined ? null : curRow.rec[i]); });
       copyText(JSON.stringify(obj, null, 2));
     };
+
+    // ---- 回撤：撤销最近一次「增 / 删 / 改」（表级操作不可回撤）----
+    var undoBtn = tab.host.querySelector(".dbc-undo");
+    var undoN = tab.host.querySelector(".dbc-undo-n");
+    function refreshUndo() {
+      dbcApi("/api/db/writes?conn=" + encodeURIComponent(conn.id)).then(function (d) {
+        var n = d.undoable || 0;
+        undoN.textContent = n ? " " + n : "";
+        undoBtn.disabled = !n;
+        undoBtn.title = n ? ("可回撤 " + n + " 步；最近：" + ((d.writes[0] || {}).summary || ""))
+                          : "没有可回撤的操作（表级操作不可回撤）";
+      }).catch(function () { /* 忽略 */ });
+    }
+    undoBtn.onclick = async function () {
+      var d = {};
+      try { d = await dbcApi("/api/db/writes?conn=" + encodeURIComponent(conn.id)); } catch (e) { /* 忽略 */ }
+      var next = (d.writes || []).filter(function (w) { return w.undoable && !w.undone; })[0];
+      if (!next) { toast("没有可回撤的操作", "info"); return; }
+      var ok = await uiConfirm("回撤操作",
+        "将撤销最近一次「" + next.table + " · " + next.summary + "」，把数据恢复成操作前的样子，确定继续？",
+        "回撤", false);
+      if (!ok) return;
+      try {
+        var r = await dbcApi("/api/db/undo", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conn: conn.id, id: next.id }) });
+        toast("已回撤：" + (((r.undo || {}).summary) || ""), "ok");
+        if (state.table) loadRows(state.offset);
+        refreshUndo();
+      } catch (e) { toast(e.message || String(e), "err"); }
+    };
+
+    // ---- 表 / 集合操作（右键或悬停出现的「⋯」）----
+    async function tableOp(body) {
+      try {
+        await dbcApi("/api/db/table", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(Object.assign({ conn: conn.id, dbname: state.db }, body)) });
+        toast("操作完成", "ok");
+        state.table = "";
+        loadSchema();
+      } catch (e) { toast(e.message || String(e), "err"); }
+    }
+    async function newTable() {
+      if (isMongo) {
+        var cn = await uiPrompt("新建集合", "", "集合名");
+        if (!cn || !cn.trim()) return;
+        await tableOp({ action: "create", name: cn.trim() });
+        return;
+      }
+      var nm = await uiPrompt("新建表 · 表名", "", "例如 my_table");
+      if (!nm || !nm.trim()) return;
+      var auto = conn.kind === "sqlite" ? "INTEGER PRIMARY KEY AUTOINCREMENT"
+                                        : "INT PRIMARY KEY AUTO_INCREMENT";
+      var cols = await uiPrompt("新建表 · 列定义", "id " + auto + ", name VARCHAR(50)",
+                                "列定义，如 id INT PRIMARY KEY, name VARCHAR(50)");
+      if (!cols || !cols.trim()) return;
+      await tableOp({ action: "create", name: nm.trim(), columns: cols.trim() });
+    }
+    async function renameTable(name, sch) {
+      var nn = await uiPrompt("重命名", name, "新的名称");
+      if (!nn || !nn.trim() || nn.trim() === name) return;
+      await tableOp({ action: "rename", table: name, schema: sch, new_name: nn.trim() });
+    }
+    async function truncateTable(name, sch) {
+      var what = isMongo ? "集合" : "表";
+      var ok = await uiConfirm("清空" + what,
+        "将删除「" + name + "」里的全部数据（结构保留），**且不可回撤**，确定继续？", "清空", true);
+      if (!ok) return;
+      await tableOp({ action: "truncate", table: name, schema: sch });
+    }
+    async function dropTable(name, sch) {
+      var what = isMongo ? "集合" : "表";
+      var ok = await uiConfirm("删除" + what,
+        "将删除「" + name + "」及其全部数据，**且不可回撤**，确定继续？", "删除", true);
+      if (!ok) return;
+      await tableOp({ action: "drop", table: name, schema: sch });
+    }
+    function tableMenu(name, sch, anchor) {
+      if (isRedis) { toast("Redis 没有「表」概念，可直接删除 key", "info"); return; }
+      var items = [{ label: isMongo ? "新建集合…" : "新建表…", icon: "bi-plus-square",
+                     act: function () { newTable(); } }];
+      if (name) {
+        items.push({ label: "重命名…", icon: "bi-input-cursor-text", disabled: isMongo,
+                     act: function () { renameTable(name, sch); } });
+        items.push({ label: isMongo ? "清空集合（删掉全部文档）" : "清空表（删掉全部数据）",
+                     icon: "bi-eraser", danger: true, act: function () { truncateTable(name, sch); } });
+        items.push({ label: isMongo ? "删除集合" : "删除表", icon: "bi-trash", danger: true,
+                     act: function () { dropTable(name, sch); } });
+      }
+      MENUS.dbcTable = items;
+      openDrop("dbcTable", anchor);
+    }
 
     dbSel.onchange = function () {
       state.db = dbSel.value; state.table = ""; state.schema = "";
@@ -797,6 +980,7 @@
     if (saved.sql) sqlIn.value = saved.sql;
     if (saved.sqlOpen) setSqlPanel(true);   // 显示时再夹一次边界，适配当前窗口尺寸
     loadSchema();
+    refreshUndo();                          // 工具栏「回撤」上的可回撤步数
   }
 
   function dbcInit() {

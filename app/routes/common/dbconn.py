@@ -971,27 +971,279 @@ def _update_sql(use, kind, schema, table, key, changes):
 
 
 def _update_redis(r, key, row_key, changes):
-    """Redis 的「编辑行」：按 key 的类型写回（string / hash / list）"""
+    """Redis 的「编辑行」：按 key 的类型写回（string / hash / list）；返回 (行数, 写前快照)"""
     t = r.type(key)
     new = changes.get("值")
     if t == "string":
         if new is None:
             raise RuntimeError("没有需要保存的改动")
+        snap = _redis_snapshot(r, key)
         r.set(key, new)
-        return 1
+        return 1, snap
     if t == "hash":
         f = row_key.get("字段")
         if f is None or new is None:
             raise RuntimeError("哈希行需要「字段」与新值")
+        snap = _redis_snapshot(r, key)
         r.hset(key, f, new)
-        return 1
+        return 1, snap
     if t == "list":
         i = row_key.get("索引")
         if i is None or new is None:
             raise RuntimeError("列表行需要「索引」与新值")
+        snap = _redis_snapshot(r, key)
         r.lset(key, int(i), new)
-        return 1
+        return 1, snap
     raise RuntimeError("暂不支持直接编辑 %s 类型的 key" % t)
+
+
+# ------------------------------------------------------------ 写操作日志（供「回撤」用）
+
+def _json_dump(v):
+    try:
+        return json.dumps(v, ensure_ascii=False, default=str)
+    except Exception:
+        return ""
+
+
+def _json_load(s, default=None):
+    try:
+        return json.loads(s) if s else default
+    except Exception:
+        return default
+
+
+def _log_write(cid, kind, dbname, schema, tbl, op, summary, before=None, after=None,
+               before_text=None, after_text=None, undoable=True):
+    """记一次写操作（存本机 store.db，不碰目标库）；返回日志 id。
+
+    before/after 走 JSON；MongoDB 需要保住 ObjectId / 日期类型时，用 before_text / after_text
+    直接传「扩展 JSON」文本。
+    """
+    rec = (uuid.uuid4().hex[:12], cid, kind or "", dbname or "", schema or "", tbl or "", op,
+           summary or "",
+           before_text if before_text is not None else (_json_dump(before) if before is not None else ""),
+           after_text if after_text is not None else (_json_dump(after) if after is not None else ""),
+           1 if undoable else 0, 0, time.time())
+    try:
+        with store_tx() as c:
+            c.execute("INSERT INTO db_write_log (id, conn_id, kind, dbname, tbl_schema, tbl, op, summary,"
+                      " before_json, after_json, undoable, undone, created_at)"
+                      " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rec)
+        return rec[0]
+    except Exception as e:
+        _log.warning("记录写操作失败：%s", e)
+        return ""
+
+
+def _list_writes(cid, limit=30):
+    out = []
+    try:
+        conn = store_conn()
+        try:
+            rows = conn.execute("SELECT id, op, tbl, summary, undoable, undone, created_at"
+                                " FROM db_write_log WHERE conn_id=? ORDER BY created_at DESC LIMIT ?",
+                                (cid, limit)).fetchall()
+        finally:
+            conn.close()
+        out = [{"id": r["id"], "op": r["op"], "table": r["tbl"], "summary": r["summary"],
+                "undoable": bool(r["undoable"]), "undone": bool(r["undone"]),
+                "created_at": float(r["created_at"])} for r in rows]
+    except Exception as e:
+        _log.warning("读取写操作日志失败：%s", e)
+    return out
+
+
+def _get_write(wid):
+    try:
+        conn = store_conn()
+        try:
+            r = conn.execute("SELECT * FROM db_write_log WHERE id=?", (wid,)).fetchone()
+        finally:
+            conn.close()
+        return dict(r) if r else None
+    except Exception:
+        return None
+
+
+def _mark_undone(wid):
+    try:
+        with store_tx() as c:
+            c.execute("UPDATE db_write_log SET undone=1 WHERE id=?", (wid,))
+    except Exception as e:
+        _log.warning("标记回撤失败：%s", e)
+
+
+def _op_name(op):
+    return {"insert": "新增行", "update": "修改行", "delete": "删除行", "truncate": "清空",
+            "drop": "删除", "create": "新建", "hash": "哈希字段", "rename": "重命名"}.get(op, op)
+
+
+# ------------------------------------------------------------------ 行：增 / 删
+
+def _fetch_row_sql(use, kind, schema, table, key):
+    """按主键取一整行（取原始值，不走 _cell 的截断），供删除时留档回撤"""
+    ref = _table_ref(kind, use.get("dbname") or "", schema, table)
+    ph = "?" if kind == "sqlite" else "%s"
+    whr = " AND ".join("%s = %s" % (_quote(kind, c), ph) for c in key)
+    conn, _k = _open(use)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM %s WHERE %s LIMIT 1" % (ref, whr), list(key.values()))
+        cols = [d[0] for d in (cur.description or [])]
+        rows = cur.fetchall()
+        if not rows:
+            return cols, None
+        r = rows[0]
+        return cols, (list(r.values()) if isinstance(r, dict) else list(r))
+    finally:
+        _close(conn, kind)
+
+
+def _insert_sql(use, kind, schema, table, values):
+    """插入一行；返回 (新行主键 或 None, 影响行数)"""
+    cols = list(values.keys())
+    if not cols:
+        raise RuntimeError("没有可插入的字段")
+    ref = _table_ref(kind, use.get("dbname") or "", schema, table)
+    ph = "?" if kind == "sqlite" else "%s"
+    sql = "INSERT INTO %s (%s) VALUES (%s)" % (ref, ", ".join(_quote(kind, c) for c in cols),
+                                               ", ".join([ph] * len(cols)))
+    conn, _k = _open(use, writable=True)
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, list(values.values()))
+        n = cur.rowcount
+        pk = _pk_columns(cur, kind, use.get("dbname") or "", schema, table)
+        key = None
+        if pk and all(c in values for c in pk):
+            key = dict((c, values[c]) for c in pk)
+        elif len(pk) == 1 and kind in ("sqlite", "mysql"):
+            rid = getattr(cur, "lastrowid", None)
+            if rid is not None:
+                key = {pk[0]: rid}
+        conn.commit()
+        return key, n
+    finally:
+        _close(conn, kind)
+
+
+def _delete_sql(use, kind, schema, table, key):
+    ref = _table_ref(kind, use.get("dbname") or "", schema, table)
+    ph = "?" if kind == "sqlite" else "%s"
+    whr = " AND ".join("%s = %s" % (_quote(kind, c), ph) for c in key)
+    conn, _k = _open(use, writable=True)
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM %s WHERE %s" % (ref, whr), list(key.values()))
+        n = cur.rowcount
+        conn.commit()
+        return n
+    finally:
+        _close(conn, kind)
+
+
+# ------------------------------------------------------------------ 回撤
+
+def _undo_sql(use, kind, schema, table, op, before, after):
+    conn, _k = _open(use, writable=True)
+    try:
+        cur = conn.cursor()
+        ph = "?" if kind == "sqlite" else "%s"
+        ref = _table_ref(kind, use.get("dbname") or "", schema, table)
+        if op == "update":
+            old = before.get("set") or {}
+            if not old:
+                raise RuntimeError("没有可回撤的旧值")
+            sets = ", ".join("%s = %s" % (_quote(kind, c), ph) for c in old)
+            whr = " AND ".join("%s = %s" % (_quote(kind, c), ph) for c in before["key"])
+            cur.execute("UPDATE %s SET %s WHERE %s" % (ref, sets, whr),
+                        list(old.values()) + list(before["key"].values()))
+        elif op == "delete":
+            cols, row = before.get("cols") or [], before.get("row") or []
+            cur.execute("INSERT INTO %s (%s) VALUES (%s)" % (
+                ref, ", ".join(_quote(kind, c) for c in cols), ", ".join([ph] * len(cols))), row)
+        elif op == "insert":
+            key = after.get("key") or {}
+            if not key:
+                raise RuntimeError("这条新增没记下主键，无法回撤")
+            whr = " AND ".join("%s = %s" % (_quote(kind, c), ph) for c in key)
+            cur.execute("DELETE FROM %s WHERE %s" % (ref, whr), list(key.values()))
+        else:
+            raise RuntimeError("该操作不支持回撤")
+        conn.commit()
+    finally:
+        _close(conn, kind)
+
+
+def _undo_mongo(use, table, op, before, after):
+    conn, _k = _open(use, writable=True)
+    try:
+        coll = conn[use.get("dbname") or ""][table]
+        if op == "update":
+            coll.update_one({"_id": _mongo_id(before.get("id"))}, {"$set": before.get("set") or {}})
+        elif op == "delete":
+            doc = before.get("doc")
+            if not doc:
+                raise RuntimeError("没有可回撤的文档")
+            coll.insert_one(doc)
+        elif op == "insert":
+            coll.delete_one({"_id": _mongo_id(after.get("id"))})
+        else:
+            raise RuntimeError("该操作不支持回撤")
+    finally:
+        _close(conn, _k)
+
+
+def _redis_snapshot(r, key):
+    """写之前把整个 key 存一份（类型 / 值 / TTL），回撤时整体还原"""
+    t = r.type(key)
+    if t == "none":
+        return {"exists": False}
+    try:
+        ttl = int(r.ttl(key))
+    except Exception:
+        ttl = -1
+    snap = {"exists": True, "type": t, "ttl": ttl, "value": None}
+    try:
+        if t == "string":
+            snap["value"] = r.get(key)
+        elif t == "hash":
+            snap["value"] = r.hgetall(key)
+        elif t == "list":
+            snap["value"] = r.lrange(key, 0, -1)
+        elif t == "set":
+            snap["value"] = list(r.smembers(key))
+        elif t == "zset":
+            snap["value"] = [[m, s] for m, s in r.zrange(key, 0, -1, withscores=True)]
+    except Exception:
+        pass
+    return snap
+
+
+def _undo_redis(use, key, snap):
+    """整体还原：先删掉当前 key，再按快照重建（类型 / 值 / TTL 都还原）"""
+    conn, _k = _open(use, writable=True)
+    try:
+        conn.delete(key)
+        if not snap or not snap.get("exists"):
+            return
+        t, v = snap.get("type"), snap.get("value")
+        if t == "string":
+            conn.set(key, v)
+        elif t == "hash" and v:
+            conn.hset(key, mapping=v)
+        elif t == "list" and v:
+            conn.rpush(key, *v)
+        elif t == "set" and v:
+            conn.sadd(key, *v)
+        elif t == "zset" and v:
+            conn.zadd(key, dict((m, s) for m, s in v))
+        ttl = snap.get("ttl")
+        if ttl and int(ttl) > 0:
+            conn.expire(key, int(ttl))
+    finally:
+        _close(conn, _k)
 
 
 # --------------------------------------------- 非关系型库的「一句话生成」上下文与清洗
@@ -1279,13 +1531,34 @@ def api_db_query():
                     "elapsed_ms": int((time.time() - t0) * 1000)})
 
 
+def _undo_write(row):
+    """执行一次回撤（按类型分派）；失败抛异常"""
+    op = row["op"]
+    kind = row["kind"] or "sqlite"
+    table = row["tbl"] or ""
+    if not row["undoable"]:
+        raise RuntimeError("「%s」不支持回撤" % _op_name(op))
+    conf = _load_conf(row["conn_id"], with_password=True)
+    if not conf:
+        raise RuntimeError("连接已不存在，无法回撤")
+    use = _pick(conf, row["dbname"] or "")
+    if kind == "mongodb":
+        from bson import json_util
+        before = json_util.loads(row["before_json"]) if row["before_json"] else {}
+        after = json_util.loads(row["after_json"]) if row["after_json"] else {}
+        _undo_mongo(use, table, op, before or {}, after or {})
+        return
+    before = _json_load(row["before_json"], {}) or {}
+    after = _json_load(row["after_json"], {}) or {}
+    if kind == "redis":
+        _undo_redis(use, table, before.get("snap"))
+        return
+    _undo_sql(use, kind, row["tbl_schema"] or "", table, op, before, after)
+
+
 @bp.route("/api/db/row/update", methods=["POST"])
 def api_db_row_update():
-    """按主键（MongoDB 按 _id）更新一行里的若干字段。
-
-    ⚠ 这是本工具里唯一会写库的接口：前端必须二次确认后才调用，
-    并且用单独的「可写连接」执行，不改变浏览 / 查询的只读约定。
-    """
+    """按主键（MongoDB 按 _id）更新一行里的若干字段；写完记一条可回撤的日志。"""
     data = request.get_json(silent=True) or {}
     cid = str(data.get("conn") or "")
     dbname = str(data.get("dbname") or "")
@@ -1304,28 +1577,271 @@ def api_db_row_update():
         return jsonify({"error": "连接不存在"}), 404
     use = _pick(conf, dbname)
     kind = conf.get("kind") or "sqlite"
+    before = before_text = None
     try:
         with _LOCK:
             if kind == "redis":
                 conn, _k = _open(use, writable=True)
                 try:
-                    n = _update_redis(conn, table, key, changes)
+                    n, snap = _update_redis(conn, table, key, changes)
                 finally:
                     _close(conn, kind)
+                before = {"snap": snap}
             elif kind == "mongodb":
+                from bson import json_util
                 conn, _k = _open(use, writable=True)
                 try:
-                    res = conn[use.get("dbname") or ""][table].update_one(
-                        {"_id": _mongo_id(key.get("_id"))}, {"$set": changes})
+                    coll = conn[use.get("dbname") or ""][table]
+                    doc_id = _mongo_id(key.get("_id"))
+                    old = coll.find_one({"_id": doc_id}) or {}
+                    res = coll.update_one({"_id": doc_id}, {"$set": changes})
                     n = int(getattr(res, "modified_count", 0))
                 finally:
                     _close(conn, kind)
+                before_text = json_util.dumps(
+                    {"id": key.get("_id"), "set": dict((c, old.get(c)) for c in changes)})
             else:
+                cols, old_row = _fetch_row_sql(use, kind, schema, table, key)
+                old_set = {}
+                for c in changes:
+                    old_set[c] = old_row[cols.index(c)] if (old_row and c in cols) else None
                 n = _update_sql(use, kind, schema, table, key, changes)
+                before = {"key": key, "set": old_set}
     except Exception as e:
         return jsonify({"error": "保存失败：%s" % e}), 400
+    wid = _log_write(cid, kind, use.get("dbname") or "", schema, table, "update",
+                     "修改 %d 处字段" % len(changes), before=before, before_text=before_text)
     _log.info("更新数据行：kind=%s table=%s 字段=%s 行数=%s", kind, table, list(changes), n)
-    return jsonify({"ok": True, "updated": n})
+    return jsonify({"ok": True, "updated": n, "write_id": wid})
+
+
+@bp.route("/api/db/row/insert", methods=["POST"])
+def api_db_row_insert():
+    """新增一行：SQL → INSERT；MongoDB → insertOne；Redis → 往哈希里加字段。"""
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("conn") or "")
+    dbname = str(data.get("dbname") or "")
+    schema = str(data.get("schema") or "")
+    table = str(data.get("table") or "")
+    values = data.get("values") if isinstance(data.get("values"), dict) else {}
+    if not values:
+        return jsonify({"error": "没有要写入的字段"}), 400
+    conf = _load_conf(cid, with_password=True)
+    if not conf:
+        return jsonify({"error": "连接不存在"}), 404
+    use = _pick(conf, dbname)
+    kind = conf.get("kind") or "sqlite"
+    before = after = after_text = None
+    try:
+        with _LOCK:
+            if kind == "redis":
+                conn, _k = _open(use, writable=True)
+                try:
+                    if conn.type(table) != "hash":
+                        raise RuntimeError("Redis 只支持往哈希类型的 key 里新增字段")
+                    f = str(values.get("字段") or "").strip()
+                    if not f:
+                        raise RuntimeError("请填写「字段」")
+                    before = {"snap": _redis_snapshot(conn, table)}
+                    conn.hset(table, f, values.get("值") or "")
+                    n = 1
+                finally:
+                    _close(conn, kind)
+            elif kind == "mongodb":
+                from bson import json_util
+                conn, _k = _open(use, writable=True)
+                try:
+                    res = conn[use.get("dbname") or ""][table].insert_one(values)
+                    n = 1
+                    after_text = json_util.dumps({"id": getattr(res, "inserted_id", None)})
+                finally:
+                    _close(conn, kind)
+            else:
+                key, n = _insert_sql(use, kind, schema, table, values)
+                after = {"key": key}
+    except Exception as e:
+        return jsonify({"error": "新增失败：%s" % e}), 400
+    wid = _log_write(cid, kind, use.get("dbname") or "", schema, table, "insert",
+                     "新增一行（%d 个字段）" % len(values), before=before,
+                     after=after, after_text=after_text)
+    _log.info("新增数据行：kind=%s table=%s 字段=%s", kind, table, list(values))
+    return jsonify({"ok": True, "inserted": n, "write_id": wid})
+
+
+@bp.route("/api/db/row/delete", methods=["POST"])
+def api_db_row_delete():
+    """按主键删除一行（Redis 是删掉整个 key）；删之前留档，便于回撤。"""
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("conn") or "")
+    dbname = str(data.get("dbname") or "")
+    schema = str(data.get("schema") or "")
+    table = str(data.get("table") or "")
+    key = data.get("key") if isinstance(data.get("key"), dict) else {}
+    if not key:
+        return jsonify({"error": "缺少定位这一行的主键"}), 400
+    conf = _load_conf(cid, with_password=True)
+    if not conf:
+        return jsonify({"error": "连接不存在"}), 404
+    use = _pick(conf, dbname)
+    kind = conf.get("kind") or "sqlite"
+    before = before_text = None
+    try:
+        with _LOCK:
+            if kind == "redis":
+                conn, _k = _open(use, writable=True)
+                try:
+                    before = {"snap": _redis_snapshot(conn, table)}
+                    n = int(conn.delete(table))
+                finally:
+                    _close(conn, kind)
+            elif kind == "mongodb":
+                from bson import json_util
+                conn, _k = _open(use, writable=True)
+                try:
+                    coll = conn[use.get("dbname") or ""][table]
+                    doc_id = _mongo_id(key.get("_id"))
+                    doc = coll.find_one({"_id": doc_id})
+                    if doc is None:
+                        raise RuntimeError("没找到这条记录")
+                    n = int(coll.delete_one({"_id": doc_id}).deleted_count)
+                finally:
+                    _close(conn, kind)
+                before_text = json_util.dumps({"doc": doc})
+            else:
+                cols, row = _fetch_row_sql(use, kind, schema, table, key)
+                if row is None:
+                    raise RuntimeError("没找到这条记录")
+                n = _delete_sql(use, kind, schema, table, key)
+                before = {"cols": cols, "row": row}
+    except Exception as e:
+        return jsonify({"error": "删除失败：%s" % e}), 400
+    wid = _log_write(cid, kind, use.get("dbname") or "", schema, table, "delete",
+                     "删除一行", before=before, before_text=before_text)
+    _log.info("删除数据行：kind=%s table=%s", kind, table)
+    return jsonify({"ok": True, "deleted": n, "write_id": wid})
+
+
+@bp.route("/api/db/table", methods=["POST"])
+def api_db_table():
+    """表级操作：create / rename / truncate / drop（MongoDB 对应集合）。
+
+    清空 / 删除 / 重命名都会动到结构或大量数据，**不支持回撤**，界面上会强提示。
+    """
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("conn") or "")
+    dbname = str(data.get("dbname") or "")
+    schema = str(data.get("schema") or "")
+    action = str(data.get("action") or "")
+    table = str(data.get("table") or "").strip()
+    if action not in ("create", "rename", "truncate", "drop"):
+        return jsonify({"error": "未知操作：%s" % action}), 400
+    if action != "create" and not table:
+        return jsonify({"error": "缺少表名"}), 400
+    conf = _load_conf(cid, with_password=True)
+    if not conf:
+        return jsonify({"error": "连接不存在"}), 404
+    use = _pick(conf, dbname)
+    kind = conf.get("kind") or "sqlite"
+    if kind == "redis":
+        return jsonify({"error": "Redis 没有「表」概念，可直接删除 key"}), 400
+    name = str(data.get("name") or "").strip()
+    try:
+        with _LOCK:
+            if kind == "mongodb":
+                conn, _k = _open(use, writable=True)
+                try:
+                    db = conn[use.get("dbname") or ""]
+                    if action == "create":
+                        if not name:
+                            raise RuntimeError("请填写集合名")
+                        db.create_collection(name)
+                    elif action == "truncate":
+                        db[table].delete_many({})
+                    elif action == "drop":
+                        db.drop_collection(table)
+                    else:
+                        raise RuntimeError("MongoDB 暂不支持重命名集合")
+                finally:
+                    _close(conn, kind)
+            else:
+                conn, _k = _open(use, writable=True)
+                try:
+                    cur = conn.cursor()
+                    ref = _table_ref(kind, use.get("dbname") or "", schema, table)
+                    if action == "create":
+                        cols = str(data.get("columns") or "").strip()
+                        if not name:
+                            raise RuntimeError("请填写表名")
+                        if not cols:
+                            raise RuntimeError("请填写列定义")
+                        cur.execute("CREATE TABLE %s (%s)" % (_quote(kind, name), cols))
+                    elif action == "rename":
+                        new = str(data.get("new_name") or "").strip()
+                        if not new:
+                            raise RuntimeError("请填写新表名")
+                        if kind == "mysql":
+                            cur.execute("RENAME TABLE %s TO %s" % (
+                                ref, _table_ref(kind, use.get("dbname") or "", schema, new)))
+                        else:
+                            cur.execute("ALTER TABLE %s RENAME TO %s" % (ref, _quote(kind, new)))
+                    elif action == "truncate":
+                        cur.execute(("TRUNCATE TABLE %s" if kind in ("mysql", "postgres")
+                                     else "DELETE FROM %s") % ref)
+                    else:
+                        cur.execute("DROP TABLE %s" % ref)
+                    conn.commit()
+                finally:
+                    _close(conn, kind)
+    except Exception as e:
+        return jsonify({"error": "操作失败：%s" % e}), 400
+    summary = {"create": "新建表 " + (name or ""),
+               "rename": "重命名 %s → %s" % (table, str(data.get("new_name") or "")),
+               "truncate": "清空 " + table,
+               "drop": "删除 " + table}.get(action, action)
+    wid = _log_write(cid, kind, use.get("dbname") or "", schema, table or name, action, summary,
+                     undoable=False)
+    _log.info("表操作：kind=%s %s %s", kind, action, table or name)
+    return jsonify({"ok": True, "write_id": wid})
+
+
+@bp.route("/api/db/writes", methods=["GET"])
+def api_db_writes():
+    """最近的写操作（供「回撤」入口展示）"""
+    cid = str(request.args.get("conn") or "")
+    if not cid:
+        return jsonify({"error": "缺少 conn"}), 400
+    writes = _list_writes(cid)
+    return jsonify({"writes": writes,
+                    "undoable": len([w for w in writes if w["undoable"] and not w["undone"]])})
+
+
+@bp.route("/api/db/undo", methods=["POST"])
+def api_db_undo():
+    """回撤一条写操作（不传 id 则回撤最近一条未回撤的）"""
+    data = request.get_json(silent=True) or {}
+    wid = str(data.get("id") or "")
+    if not wid:
+        cid = str(data.get("conn") or "")
+        for w in _list_writes(cid):
+            if w["undoable"] and not w["undone"]:
+                wid = w["id"]
+                break
+        if not wid:
+            return jsonify({"error": "没有可回撤的操作"}), 400
+    row = _get_write(wid)
+    if not row:
+        return jsonify({"error": "找不到这条操作记录"}), 404
+    if row["undone"]:
+        return jsonify({"error": "这条操作已经回撤过了"}), 400
+    try:
+        with _LOCK:
+            _undo_write(row)
+    except Exception as e:
+        return jsonify({"error": "回撤失败：%s" % e}), 400
+    _mark_undone(wid)
+    _log.info("回撤写操作：%s %s", row["op"], row["tbl"])
+    return jsonify({"ok": True, "undo": {"op": row["op"], "table": row["tbl"],
+                                         "summary": row["summary"]}})
 
 
 @bp.route("/api/db/nl2sql", methods=["POST"])

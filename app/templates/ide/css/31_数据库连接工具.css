@@ -104,6 +104,17 @@
   .dbc-tc { flex: none; font-size: 10.5px; color: #7a7a7a; }
   /* 选中的表：右侧行数用蓝色标出（与 SQLite 查看器一致） */
   .dbc-table.on .dbc-tc { color: #9fd0ff; }
+  /* 表项上的「⋯」：悬停才出现，点开表操作菜单 */
+  .dbc-to {
+    flex: none; display: none; width: 20px; height: 20px; border: none; border-radius: 4px;
+    background: transparent; color: #a0a0a0; cursor: pointer; font-size: 12px; padding: 0;
+  }
+  .dbc-table:hover .dbc-to { display: block; }
+  .dbc-to:hover { background: #3a3d41; color: #ffffff; }
+  /* 「回撤」按钮上的可回撤步数 / 删除按钮的警示色 */
+  .dbc-undo-n { color: #9fd0ff; }
+  .dbc-undo:disabled .dbc-undo-n { color: inherit; }
+  .dbc-sql .dbc-mini.dbc-row-del:hover:not(:disabled) { color: #e06c75; border-color: #e06c75; }
 
   /* position: relative 是 SQL 悬浮查询窗的定位参照（只在数据区内浮动，不盖左侧表列表） */
   .dbc-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }

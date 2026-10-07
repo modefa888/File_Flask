@@ -1073,8 +1073,8 @@
   document.addEventListener("contextmenu", () => closeDrop(), true);   // 在别处右键时收起菜单
 
   /* ---------- 侧边栏面板切换 ---------- */
-  const panels = { explorer: "explorerPanel", search: "searchPanel", git: "gitPanel", run: "runPanel", runner: "runnerPanel", env: "envPanel", ext: "extPanel", dbconn: "dbconnPanel" };
-  const titles = { explorer: "资源管理器", search: "搜索", git: "源代码管理", run: "运行和调试", runner: "后台任务", env: "运行环境", ext: "扩展", dbconn: "数据库" };
+  const panels = { explorer: "explorerPanel", search: "searchPanel", git: "gitPanel", run: "runPanel", runner: "runnerPanel", env: "envPanel", ext: "extPanel", dbconn: "dbconnPanel", api: "apiPanel" };
+  const titles = { explorer: "资源管理器", search: "搜索", git: "源代码管理", run: "运行和调试", runner: "后台任务", env: "运行环境", ext: "扩展", dbconn: "数据库", api: "API 调试" };
   function showPanel(name) {
     // 未知面板（例如会话恢复时插件面板尚未注册、或插件已被卸载）回退到资源管理器，
     // 否则下面的循环会把所有面板隐藏却没有目标可显示，导致侧栏空白。
@@ -1106,6 +1106,7 @@
     if (p === "runner") loadRunnerList().then(runnerTick);
     if (p === "env") loadEnv(false);
     if (p === "dbconn" && typeof loadDbConns === "function") loadDbConns();
+    if (p === "api" && typeof loadApiReqs === "function") loadApiReqs();
   });
   function toggleSidebar() {
     $("sidebar").classList.toggle("collapsed");

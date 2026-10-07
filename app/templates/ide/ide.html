@@ -108,6 +108,9 @@
 <style>
 {% include 'ide/css/32_进程资源管理器.css' %}
 </style>
+<style>
+{% include 'ide/css/33_HTTP请求工具_仿_Postman_接口调试.css' %}
+</style>
 {# 29_浅色主题 必须最后一个 <style> 加载：它的浅色覆盖与原始规则同权重，靠「后加载者胜」生效 #}
 <style>
 {% include 'ide/css/29_浅色主题.css' %}
@@ -163,6 +166,8 @@ try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'li
 {% include 'ide/js/30_数据库连接工具_多数据库_侧栏连接管理_编辑器区域浏览与查询.js' %}
 {# 进程资源管理器浮窗：须放在 16_（关闭大 IIFE）之前，才能复用闭包内的 $ / esc / toast / uiConfirm / toggleAI #}
 {% include 'ide/js/31_进程资源管理器_浮窗_CPU_内存_磁盘_网络_结束进程.js' %}
+{# API 调试（仿 Postman）：须放在 16_（关闭大 IIFE）之前，才能复用闭包内的 $ / esc / escAttr / toast / uiPrompt / uiModal / activate / findTab / renderTab / renderTabsAll / closeTab #}
+{% include 'ide/js/32_HTTP请求工具_仿_Postman_接口调试.js' %}
 {% include 'ide/js/16_自定义悬停提示_全局接管所有_title_属性.js' %}
 {% include 'ide/js/17_SQLite数据库查看器_db_sqlite只读浏览_表列表_分页数据.js' %}
 {# 标签页内嵌视频播放器：openFile 的视频分支调用 setupVideoView（全局函数，须在 IIFE 关闭后加载） #}

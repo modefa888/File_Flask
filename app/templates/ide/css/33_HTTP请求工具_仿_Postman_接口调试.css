@@ -1,0 +1,184 @@
+/* ===== API 调试（仿 Postman） ===== */
+.api-tools { display: flex; gap: 6px; padding: 8px; align-items: center; }
+.api-tools .g-btn.block { flex: 1; }
+.api-list { flex: 1; overflow: auto; padding: 0 4px 8px; }
+.api-empty { padding: 16px 12px; color: #7d7d7d; font-size: 12px; line-height: 1.6; }
+
+.api-item { position: relative; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 5px; cursor: pointer; color: #cfcfcf; }
+.api-item:hover { background: rgba(255,255,255,.05); }
+/* 已打开（标签页存在）但非当前：只留最左侧一个小圆点，不再铺底色。
+   原来 open 也铺底色，且颜色与 active 的底色几乎一样，多个请求都打开后
+   整列都是背景色，分不清哪个是当前正在编辑的（.open:not(.active) 才画点，
+   当前项已经用蓝色竖条表示了）。 */
+.api-item.open { background: transparent; }
+.api-item.open:not(.active):hover { background: rgba(255,255,255,.05); }
+.api-item.open:not(.active)::after {
+  content: ""; position: absolute; left: 2px; top: 50%; width: 6px; height: 6px;
+  margin-top: -3px; border-radius: 50%; background: #d08a2e;
+}
+/* 当前正在编辑的那一个：浅蓝底 + 左侧蓝色竖条 */
+.api-item.active { background: rgba(0,105,184,.18); box-shadow: inset 2px 0 0 #0e6cc4; }
+.api-m { flex: none; width: 42px; text-align: center; font-size: 10px; font-weight: 700; letter-spacing: .3px;
+  padding: 3px 0; border-radius: 4px; color: #fff; background: #555; }
+.api-m-get { background: #2e8b57; }
+.api-m-post { background: #c5862b; }
+.api-m-put { background: #2f6fb0; }
+.api-m-patch { background: #8957b0; }
+.api-m-delete { background: #b23b3b; }
+.api-m-head { background: #6a6a6a; }
+.api-m-options { background: #2f8f8f; }
+.api-main { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
+.api-name { font-size: 12.5px; color: #e6e6e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.api-sub { font-size: 11px; color: #808080; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.api-act { flex: none; border: none; background: transparent; color: #9a9a9a; cursor: pointer; padding: 3px 4px; border-radius: 4px; opacity: 0; }
+.api-item:hover .api-act { opacity: 1; }
+.api-act:hover { background: rgba(255,255,255,.1); color: #fff; }
+.api-del:hover { color: #ff6b6b; }
+
+/* ---------- 分组 ---------- */
+.api-group { margin-top: 2px; }
+.api-ghead { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 5px;
+  cursor: pointer; font-size: 12.5px; color: #cfcfcf; user-select: none; }
+.api-ghead:hover { background: rgba(255,255,255,.05); }
+.api-gchev { flex: none; width: 12px; font-size: 10px; color: #9a9a9a; }
+.api-gico { flex: none; color: #d8b26a; }
+.api-gname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: #dedede; }
+.api-gcount { flex: none; font-size: 10.5px; color: #8a8a8a; background: rgba(255,255,255,.08); border-radius: 8px; padding: 1px 6px; }
+.api-ghead .api-act { opacity: 0; }
+.api-ghead:hover .api-act { opacity: 1; }
+.api-gbody { padding-left: 10px; }
+.api-group.collapsed .api-gbody { display: none; }
+.api-gempty { margin: 2px 0 6px; padding: 8px; border: 1px dashed #3c3c3c; border-radius: 5px;
+  color: #7d7d7d; font-size: 11.5px; text-align: center; }
+
+/* 拖拽落点高亮：目标分组头 / 目标条目 / 列表空白（= 未分组）。
+   带上 :hover 是为了压过 .api-item.open:not(.active):hover（同为 4 个类，靠书写顺序取胜） */
+.api-list .api-ghead.drop-on, .api-list .api-ghead.drop-on:hover,
+.api-list .api-item.drop-on, .api-list .api-item.drop-on:hover {
+  background: rgba(0,105,184,.22); box-shadow: inset 2px 0 0 #0e6cc4;
+}
+.api-list.drop-on { background: rgba(0,105,184,.06); }
+.api-item.dragging { opacity: .45; }
+
+/* 「移动到分组」弹窗里的下拉框 */
+.api-mv-row { display: flex; align-items: center; gap: 10px; }
+.api-mv-row select { flex: 1; min-width: 0; background: #2d2d2d; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 5px; padding: 7px 9px; outline: none; }
+
+/* 编辑器区域 */
+.api-host { padding: 0; }
+.api { height: 100%; display: flex; flex-direction: column; background: #1e1e1e; color: #cfcfcf; font-size: 13px; }
+.api-bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #2a2a2a; }
+.api-method { flex: none; width: 96px; background: #2d2d2d; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 5px; padding: 7px 8px; font-weight: 700; outline: none; }
+.api-url { flex: 1; min-width: 0; background: #2d2d2d; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 5px; padding: 7px 10px; font-family: var(--mono, ui-monospace, Consolas, monospace); outline: none; }
+.api-url:focus, .api-method:focus { border-color: #0e6cc4; }
+.api-bar-sp { flex: 1; }
+.api-mini { flex: none; border: 1px solid #3c3c3c; background: #2d2d2d; color: #bdbdbd; border-radius: 5px; padding: 6px 9px; cursor: pointer; font-size: 12px; }
+.api-mini:hover { background: #383838; color: #fff; }
+.api-mini:disabled { opacity: .4; cursor: not-allowed; }
+.api-mini:disabled:hover { background: #2d2d2d; color: #bdbdbd; }
+.api-send { flex: none; }
+
+.api-req { display: flex; flex-direction: column; border-bottom: 1px solid #2a2a2a; }
+.api-tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid #2a2a2a; }
+.api-tab { border: none; background: transparent; color: #9a9a9a; padding: 9px 12px; cursor: pointer; font-size: 12.5px; border-bottom: 2px solid transparent; }
+.api-tab:hover { color: #e6e6e6; }
+.api-tab.active { color: #fff; border-bottom-color: #0e6cc4; }
+.api-badge { display: inline-block; min-width: 16px; text-align: center; font-size: 10px; background: #3c3c3c; color: #cfcfcf; border-radius: 8px; padding: 0 5px; margin-left: 4px; }
+.api-panes { padding: 12px; }
+/* 请求面板默认隐藏，只显示当前选中的那个。
+   注意：apiShowPane 用内联 style 控制显隐，激活时把 style 置空（""），
+   若不写 .active 规则，激活面板会回落到这里的 display:none，
+   结果「参数 / 请求头 / 请求体 / 认证」四个面板全部不可见。 */
+.api-pane { display: none; }
+.api-pane.active { display: block; }
+
+/* 请求头 / 参数 / 表单：行高固定 = td 上下内边距 3+3 + 输入框 30px = 36px，
+   外层 .api-kv-wrap 限高 6 行（6 × 36 = 216px），更多行用内部滚动条查看。
+   原来不限高时，几十行请求头会把下方响应区域整个挤出屏幕（.scroll-thin 负责细滚动条外观） */
+.api-kv { width: 100%; border-collapse: collapse; }
+.api-kv td { padding: 3px; height: 36px; box-sizing: border-box; vertical-align: middle; }
+.api-kv-c { width: 26px; text-align: center; }
+.api-kv-k, .api-kv-v { width: 50%; height: 30px; }
+.api-kv input { width: 100%; box-sizing: border-box; background: #2d2d2d; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 4px; padding: 6px 8px; outline: none; font-family: var(--mono, ui-monospace, Consolas, monospace); }
+.api-kv-wrap { max-height: 216px; overflow-y: auto; overflow-x: hidden; }
+.api-kv input:focus { border-color: #0e6cc4; }
+.api-kv-x { width: 28px; text-align: center; }
+.api-kv-del { border: none; background: transparent; color: #888; cursor: pointer; padding: 4px; border-radius: 4px; }
+.api-kv-del:hover { background: rgba(255,255,255,.1); color: #ff6b6b; }
+.api-add { margin-top: 8px; border: 1px dashed #444; background: transparent; color: #9a9a9a; border-radius: 5px; padding: 6px 10px; cursor: pointer; }
+.api-add:hover { background: rgba(255,255,255,.04); color: #e6e6e6; }
+
+.api-body-modes { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; flex-wrap: wrap; }
+.api-radio { color: #bdbdbd; cursor: pointer; }
+.api-raw { width: 100%; box-sizing: border-box; min-height: 140px; resize: vertical; background: #1b1b1b; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 6px; padding: 10px 12px; outline: none; font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12.5px; line-height: 1.5; }
+.api-raw:focus { border-color: #0e6cc4; }
+.api-form { margin-top: 2px; }
+.api-auth-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.api-lb { width: 56px; color: #9a9a9a; flex: none; }
+.api-auth-type, .api-auth-token, .api-auth-u, .api-auth-p { background: #2d2d2d; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 5px; padding: 7px 9px; outline: none; }
+.api-auth-type { width: 160px; }
+.api-auth-token, .api-auth-u, .api-auth-p { flex: 1; min-width: 0; }
+
+/* 响应 */
+.api-res { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.api-res-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #2a2a2a; }
+.api-res-meta { font-size: 12.5px; color: #9a9a9a; }
+.api-res-meta.ok { color: #4ec47a; }
+.api-res-meta.warn { color: #e0a64b; }
+.api-res-meta.err { color: #ff6b6b; }
+.api-res-meta.info { color: #5ab0e0; }
+.api-st { font-weight: 700; }
+.api-res-tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid #2a2a2a; }
+.api-rtab { border: none; background: transparent; color: #9a9a9a; padding: 8px 12px; cursor: pointer; font-size: 12.5px; border-bottom: 2px solid transparent; }
+.api-rtab:hover { color: #e6e6e6; }
+.api-rtab.active { color: #fff; border-bottom-color: #0e6cc4; }
+.api-res-body { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+.api-res-hint { color: #7d7d7d; font-size: 12.5px; padding: 20px 4px; }
+.api-res-err { color: #ff8a8a; font-size: 12.5px; padding: 12px; background: rgba(255,80,80,.08); border-radius: 6px; }
+.api-pre { margin: 0; white-space: pre-wrap; word-break: break-all; font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12.5px; line-height: 1.55; color: #d6d6d6; }
+.api-hdrs { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.api-hdrs td { padding: 5px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top; word-break: break-all; }
+.api-hk { color: #7fc3ff; font-weight: 600; white-space: nowrap; width: 1px; }
+.api-hv { color: #cfcfcf; font-family: var(--mono, ui-monospace, Consolas, monospace); }
+.api-img { max-width: 100%; border-radius: 6px; }
+
+.api-curl-in { width: 100%; box-sizing: border-box; min-height: 160px; resize: vertical; background: #1b1b1b; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 6px; padding: 10px; outline: none; font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12.5px; }
+
+/* ---------- 浅色主题覆盖 ---------- */
+:where(html.theme-light) .api { background: #ffffff; color: #1f2328; }
+:where(html.theme-light) .api-item { color: #1f2328; }
+:where(html.theme-light) .api-item:hover { background: #f0f0f0; }
+:where(html.theme-light) .api-item.open { background: transparent; }
+:where(html.theme-light) .api-item.open:not(.active):hover { background: #f0f0f0; }
+:where(html.theme-light) .api-item.open:not(.active)::after { background: #c07800; }
+:where(html.theme-light) .api-item.active { background: #dceaf8; box-shadow: inset 2px 0 0 #0e6cc4; }
+:where(html.theme-light) .api-sub { color: #8a8a8a; }
+:where(html.theme-light) .api-name { color: #1f2328; }
+:where(html.theme-light) .api-bar, :where(html.theme-light) .api-tabs, :where(html.theme-light) .api-req,
+:where(html.theme-light) .api-res-head, :where(html.theme-light) .api-res-tabs, :where(html.theme-light) .api-hdrs td { border-bottom-color: #e5e5e5; }
+:where(html.theme-light) .api-method, :where(html.theme-light) .api-url, :where(html.theme-light) .api-mini,
+:where(html.theme-light) .api-kv input, :where(html.theme-light) .api-raw, :where(html.theme-light) .api-auth-type,
+:where(html.theme-light) .api-auth-token, :where(html.theme-light) .api-auth-u, :where(html.theme-light) .api-auth-p,
+:where(html.theme-light) .api-curl-in { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .api-tab, :where(html.theme-light) .api-rtab { color: #5a5a5a; }
+:where(html.theme-light) .api-tab:hover, :where(html.theme-light) .api-rtab:hover { color: #000; }
+:where(html.theme-light) .api-tab.active, :where(html.theme-light) .api-rtab.active { color: #005fb8; border-bottom-color: #005fb8; }
+:where(html.theme-light) .api-badge { background: #e3e3e3; color: #333; }
+:where(html.theme-light) .api-pre { color: #1f2328; }
+:where(html.theme-light) .api-hk { color: #0b5c9a; }
+:where(html.theme-light) .api-hv { color: #333; }
+:where(html.theme-light) .api-act { color: #6a6a6a; }
+:where(html.theme-light) .api-add { border-color: #ccc; color: #6a6a6a; }
+:where(html.theme-light) .api-ghead { color: #1f2328; }
+:where(html.theme-light) .api-ghead:hover { background: #f0f0f0; }
+:where(html.theme-light) .api-gname { color: #1f2328; }
+:where(html.theme-light) .api-gico { color: #a8761c; }
+:where(html.theme-light) .api-gcount { background: #e8e8e8; color: #555; }
+:where(html.theme-light) .api-gempty { border-color: #ccc; color: #8a8a8a; }
+:where(html.theme-light) .api-list .api-ghead.drop-on, :where(html.theme-light) .api-list .api-ghead.drop-on:hover,
+:where(html.theme-light) .api-list .api-item.drop-on, :where(html.theme-light) .api-list .api-item.drop-on:hover {
+  background: #dceaf8; box-shadow: inset 2px 0 0 #0e6cc4;
+}
+:where(html.theme-light) .api-list.drop-on { background: #f2f7fc; }
+:where(html.theme-light) .api-mv-row select { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .api-mini:disabled:hover { background: #ffffff; color: #1f2328; }

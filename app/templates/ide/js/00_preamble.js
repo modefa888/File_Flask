@@ -139,7 +139,16 @@
           if (dbcConn && typeof openDbView === "function") openDbView(dbcConn);
           continue;
         }
+        // API 调试视图（虚拟路径 \u0000http:<请求 id>）：集合存 localStorage，按 id 还原成请求标签
+        if (typeof API_VIEW_PREFIX === "string" && t.path.indexOf(API_VIEW_PREFIX) === 0) {
+          const apiReq = (typeof apiFind === "function") ? apiFind(t.path.slice(API_VIEW_PREFIX.length)) : null;
+          if (apiReq && typeof apiOpen === "function") apiOpen(apiReq.id);
+          continue;
+        }
         if (t.path.indexOf("\u0001") >= 0) continue;
+        // 其它内部虚拟视图（\u0000 前缀，如未识别的工具视图）：不是真实文件，直接跳过。
+        // 否则 openFile 会去后端读一个不存在的路径，刷新后冒出「路径不存在」的错误标签
+        if (t.path.indexOf("\u0000") >= 0) continue;
         await openFile(t.path, t.name, t.group || 0).catch(() => {});
       }
       if (activePath && activePath.indexOf("\u0001") < 0) {
@@ -1076,6 +1085,7 @@
     // 否则 rebuildGroups 命中缓存提前返回时，旧标签节点会残留并不断累积
     groupBundles.forEach(b => { b.tabbar.textContent = ""; });
     tabs.forEach(t => { t.el = null; renderTab(t); mountHost(t); });
+    if (typeof apiSyncOpenMarks === "function") apiSyncOpenMarks();   // 标签栏重建后刷新 API 已打开标记
     if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏「已打开」高亮跟随标签
   }
   /* ---------- 动态编辑组：组按「行」排布，每行内可并排多个组 ----------
@@ -1308,6 +1318,7 @@
     scrollTabIntoView(tab);
     sessionSaveTabs();
     if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏高亮跟随当前标签
+    if (typeof apiSyncOpenMarks === "function") apiSyncOpenMarks();   // API 调试侧栏高亮跟随当前标签
   }
   async function closeTab(tab) {
     const i = tabs.indexOf(tab);

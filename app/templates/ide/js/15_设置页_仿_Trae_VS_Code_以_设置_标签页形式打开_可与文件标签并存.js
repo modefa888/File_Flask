@@ -42,9 +42,9 @@
    顺序存 ide.settings.actOrder（data-panel 组成的数组），启动时按它重排活动栏；
    插件运行期注册的图标不在数组里，保持在末尾（底部图标组之前），用户拖动后即被记入。 */
 const ACT_SHORT = { explorer: "资源管理器", search: "搜索", git: "源代码管理", run: "运行和调试",
-  runner: "后台任务", env: "运行环境", dbconn: "数据库", ext: "扩展" };
+  runner: "后台任务", env: "运行环境", dbconn: "数据库", api: "API 调试", ext: "扩展" };
 // 默认顺序（与 partials/body.html 的书写顺序一致）：「恢复默认顺序」即回到这里，而不是回到「当前看到的顺序」
-const ACT_DEFAULT_ORDER = ["explorer", "search", "git", "run", "runner", "env", "dbconn", "ext"];
+const ACT_DEFAULT_ORDER = ["explorer", "search", "git", "run", "runner", "env", "dbconn", "api", "ext"];
 function actOrderSaved() {
   const v = ideSettingGet("actOrder", []);
   return Array.isArray(v) ? v.filter(x => typeof x === "string" && x) : [];

@@ -26,6 +26,7 @@
       <div class="act" data-panel="runner" title="后台任务（保持运行 / 查看日志 / 停止）"><i class="bi bi-play-btn"></i><span class="runner-badge" id="actRunnerBadge" style="display:none">0</span></div>
       <div class="act" data-panel="env" title="运行环境（Node / Python / PHP 等）"><i class="bi bi-cpu"></i></div>
       <div class="act" data-panel="dbconn" title="数据库（连接 SQLite / MySQL / PostgreSQL 并浏览管理）"><i class="bi bi-database"></i></div>
+      <div class="act" data-panel="api" title="API 调试（HTTP 请求客户端，仿 Postman）"><i class="bi bi-send"></i></div>
       <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
       {# 底部两个图标：进程资源管理器在设置之上，设置永远在最底下。
          act-spacer 让「组内第一个」吸收上方全部空白，把整组顶到活动栏最底部（若两个都写 margin-top:auto，
@@ -140,6 +141,16 @@
         </div>
         <div class="s-hint" id="dbcHint">连接仅保存在本机，密码加密存储；打开连接后在右侧编辑器区域浏览表与数据（只读查询）。</div>
         <div class="dbc-list" id="dbcList"></div>
+      </div>
+      <div class="side-panel" id="apiPanel">
+        <div class="api-tools">
+          <button class="g-btn block" id="apiNew" title="新建一个 HTTP 请求"><i class="bi bi-plus-lg"></i> 新建请求</button>
+          <button class="g-ico" id="apiGroupNew" title="新建分组（把请求拖进分组归类）"><i class="bi bi-folder-plus"></i></button>
+          <button class="g-ico" id="apiImport" title="从 cURL 命令导入"><i class="bi bi-box-arrow-in-down"></i></button>
+          <button class="g-ico" id="apiExport" title="导出全部请求（JSON 文件）"><i class="bi bi-box-arrow-up"></i></button>
+        </div>
+        <div class="s-hint" id="apiHint">请求集合保存在本机浏览器；点条目在右侧编辑器里编辑并发送。拖拽条目到分组可归类，右键可移到指定分组。</div>
+        <div class="api-list" id="apiList"></div>
       </div>
     </div>
 

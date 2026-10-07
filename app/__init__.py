@@ -63,10 +63,11 @@ def _register_blueprints(app: Flask) -> None:
     from .routes.ide.npm import bp as npm_bp
     from .routes.ide.plugins import bp as plugins_bp
     from .routes.common.dbconn import bp as dbconn_bp
+    from .routes.ide.httpreq import bp as httpreq_bp
     for bp in (auth_bp, pages_bp, browser_bp, zip_bp, delete_bp, archive_history_bp,
                fileops_bp, index_bp, progress_stream_bp, grep_bp, git_bp, run_bp, port_bp,
                term_bp, env_bp, proc_bp, shares_bp, ai_bp, agent_bp, chat_history_bp, pip_bp, npm_bp,
-               plugins_bp, dbconn_bp):
+               plugins_bp, dbconn_bp, httpreq_bp):
         app.register_blueprint(bp)
 
 

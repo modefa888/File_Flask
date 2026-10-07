@@ -1181,6 +1181,7 @@
     const s = AI.sessions.find(x => x.id === AI.curId);
     $("aiConvTitle").textContent = (s && s.title) || "新对话";
     aiRenderStats();                                      // 统计条跟随当前会话
+    aiUpdateCtxRing();                                    // 上下文占用圆环也跟随当前会话（切换/删除对话后重算）
     aiRenderActiveSkills();                               // 标题栏激活技能跟随当前输入框
   }
   function aiRenderHist() {

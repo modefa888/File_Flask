@@ -724,7 +724,7 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
   background: #ffffff; border-color: #cecece; color: #5a6a7a;
 }
 :where(html.theme-light) .ai-agent-btn:hover, :where(html.theme-light) .ai-web-btn:hover, :where(html.theme-light) .ai-skill-btn:hover {
-  border-color: #a0a0a0; color: #33404d;
+  border-color: #a0a0a0; color: #33404d; background: #f0f0f0;
 }
 :where(html.theme-light) .ai-skill-opt { color: #333333; }
 :where(html.theme-light) .ai-skill-opt:hover { background: #f0f0f0; }

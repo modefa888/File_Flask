@@ -975,11 +975,19 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .dbc-row-tb td { color: #24292f; border-bottom-color: #ececec; border-right-color: #f0f0f0; }
 :where(html.theme-light) .dbc-row-tb td.dbc-row-k { color: #005fb8; }
 :where(html.theme-light) .dbc-row-tb td.dbc-null { color: #999999; }
+:where(html.theme-light) .dbc-row-img { background: #eef3f9; border-color: #c9d6e6; color: #1a5fb4; }
+:where(html.theme-light) .dbc-row-img:hover { background: #e2ebf6; color: #12457f; }
 :where(html.theme-light) .dbc-row-in { background: #ffffff; color: #24292f; border-color: #d4d4d4; }
 :where(html.theme-light) .dbc-grid .dbc-null { color: #999999; }
 :where(html.theme-light) .dbc-empty { color: #8a8a8a; }
 :where(html.theme-light) .dbc-pager { border-top-color: #e4e4e4; color: #6b6b6b; }
 :where(html.theme-light) .dbc-limit { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .dbc-pg-in { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .dbc-pg-t { color: #6b6b6b; }
+:where(html.theme-light) .dbc-grid th.dbc-th-sort:hover { background: #e4e9ef; }
+:where(html.theme-light) .dbc-sort-ico { color: #b3b3b3; }
+:where(html.theme-light) .dbc-grid th.dbc-th-sort:hover .dbc-sort-ico { color: #005fb8; }
+:where(html.theme-light) .dbc-sort-ico.on { color: #005fb8; }
 :where(html.theme-light) .sysai-call.err .sysai-call-r { color: #c0392b; }
 :where(html.theme-light) .sysai-call-err { color: #a8544a; }
 :where(html.theme-light) .sysai-mod-desc { color: #6b6b6b; }

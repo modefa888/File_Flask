@@ -336,7 +336,8 @@
     var saved = dbcLoadState(conn.id);        // 上次的浏览状态（刷新后还原）
     var state = { db: saved.db || conn.dbname || "", table: saved.table || "",
                   schema: saved.schema || "", limit: saved.limit || 100, offset: 0,
-                  total: null, seq: 0, kind: conn.kind, includeDeleted: false };
+                  total: null, seq: 0, kind: conn.kind, includeDeleted: false,
+                  order: "", dir: "" };                   // 表头点击排序：按哪列、升序 asc / 降序 desc
     tab.dbcState = state;
 
     var dbSel = tab.host.querySelector(".dbc-db-sel");
@@ -400,8 +401,18 @@
       lastGrid = { cols: (cols && cols.length) ? cols : [], rows: rows || [] };   // 供「行详情」取用
       if (!cols || !cols.length) return '<div class="dbc-empty">' + esc(emptyText || "没有数据") + "</div>";
       var actions = !!(opts && opts.actions);
+      // 表头排序：只有「浏览表数据」才给（SQL 查询结果是任意语句，排不了）
+      var sortable = !!(opts && opts.sortable);
       var head = (actions ? "<th class=\"dbc-ract-h\"></th>" : "") +
-                 cols.map(function (c) { return "<th>" + esc(c) + "</th>"; }).join("");
+                 cols.map(function (c) {
+                   if (!sortable) return "<th>" + esc(c) + "</th>";
+                   var act = (state.order === c) ? state.dir : "";      // "" / asc / desc
+                   var ico = act === "asc" ? "bi-sort-up"
+                           : (act === "desc" ? "bi-sort-down" : "bi-arrow-down-up");
+                   return '<th class="dbc-th-sort" data-col="' + escAttr(c) +
+                     '" title="点击排序：升序 → 降序 → 取消">' + esc(c) +
+                     '<i class="bi ' + ico + ' dbc-sort-ico' + (act ? " on" : "") + '"></i></th>';
+                 }).join("");
       var body = rows.length
         ? rows.map(function (r, ri) {
             var act = "";
@@ -420,6 +431,15 @@
         : '<tr><td class="dbc-empty" colspan="' + (cols.length + (actions ? 1 : 0)) + '">没有数据</td></tr>';
       var cls = (opts && opts.single) ? "dbc-grid single" : "dbc-grid";
       return '<table class="' + cls + '"><thead>' + head + "</thead><tbody>" + body + "</tbody></table>";
+    }
+
+    // 表头排序：点一下升序，再点降序，第三次取消（回到数据库默认顺序）；每次排序都跳回第一页
+    function toggleSort(col) {
+      if (!col) return;
+      if (state.order !== col) { state.order = col; state.dir = "asc"; }
+      else if (state.dir === "asc") { state.dir = "desc"; }
+      else { state.order = ""; state.dir = ""; }
+      loadRows(0);
     }
 
     var _schemaRetry = false;
@@ -452,6 +472,7 @@
           it.onclick = function () {
             state.table = it.dataset.name;
             state.schema = it.dataset.schema;
+            state.order = ""; state.dir = "";          // 换表 / 集合后，旧的排序列多半已经不存在
             dbcSaveState(conn.id, { db: state.db, table: state.table, schema: state.schema });
             tabsBox.querySelectorAll(".dbc-table").forEach(function (x) {
               x.classList.toggle("on", x === it);
@@ -503,20 +524,36 @@
                              "&schema=" + encodeURIComponent(state.schema) +
                              "&table=" + encodeURIComponent(state.table) +
                              "&limit=" + state.limit + "&offset=" + (offset || 0) +
+                             (state.order ? "&order=" + encodeURIComponent(state.order) + "&dir=" + state.dir : "") +
                              (state.includeDeleted ? "&include_deleted=1" : ""));
         if (seq !== state.seq) return;                    // 快速切换时丢弃过期结果
         state.offset = d.offset || 0;
         state.total = d.total;
         lastGrid.softCol = d.soft_col || null;
         lastGrid.softMode = d.soft_mode || null;
+        // Redis 的行没有「列」的概念，排序按钮只给 SQL 库 / MongoDB
+        var canSort = state.kind !== "redis";
         gridBox.innerHTML = drawGrid(d.columns, d.rows, "表里没有数据",
-                                      { actions: state.kind !== "redis" });
+                                      { actions: canSort, sortable: canSort });
+        gridBox.querySelectorAll("th.dbc-th-sort").forEach(function (th) {
+          th.onclick = function () { toggleSort(th.getAttribute("data-col")); };
+        });
         lastGrid.pk = d.pk || [];            // 主键（编辑行时用来定位）
         var from = d.rows.length ? state.offset + 1 : 0;
         var to = state.offset + d.rows.length;
+        // 总行数已知才算得出总页数，也就只有这时才给「跳转指定页」
+        var pages = (state.total === null || state.total === undefined)
+          ? 0 : Math.max(1, Math.ceil(state.total / state.limit));
+        var curPage = Math.floor(state.offset / state.limit) + 1;
         var softBtn = lastGrid.softCol
           ? '<button class="dbc-mini dbc-toggle-del' + (state.includeDeleted ? " on" : "") + '" title="切换是否显示已逻辑删除的行">'
             + (state.includeDeleted ? "隐藏已删除" : "显示已删除") + "</button>"
+          : "";
+        var jumpHtml = pages > 1
+          ? '<span class="dbc-pg-jump"><span class="dbc-pg-t">跳至</span>' +
+            '<input class="dbc-pg-in" type="number" min="1" max="' + pages + '" value="' + curPage +
+            '" title="输入页码后回车 / 点右侧按钮跳转"><span class="dbc-pg-t">/ ' + pages + ' 页</span>' +
+            '<button class="dbc-mini dbc-pg-go" title="跳转到该页"><i class="bi bi-arrow-return-left"></i></button></span>'
           : "";
         pagerEl.innerHTML =
           softBtn +
@@ -524,6 +561,7 @@
             ? "第 " + from + "-" + to + " 行"
             : "第 " + from + "-" + to + " 行 / 共 " + state.total + " 行") + "</span>" +
           '<span class="dbc-sp"></span>' +
+          jumpHtml +
           '<button class="dbc-mini dbc-prev"' + (state.offset <= 0 ? " disabled" : "") + '><i class="bi bi-chevron-left"></i></button>' +
           '<button class="dbc-mini dbc-next"' + (d.rows.length < state.limit ? " disabled" : "") + '><i class="bi bi-chevron-right"></i></button>' +
           '<select class="dbc-limit"><option value="50">50</option><option value="100">100</option>' +
@@ -533,6 +571,19 @@
         lim.onchange = function () { state.limit = parseInt(lim.value, 10) || 100; loadRows(0); };
         pagerEl.querySelector(".dbc-prev").onclick = function () { loadRows(Math.max(0, state.offset - state.limit)); };
         pagerEl.querySelector(".dbc-next").onclick = function () { loadRows(state.offset + state.limit); };
+        var jin = pagerEl.querySelector(".dbc-pg-in");
+        if (jin) {
+          // 页码越界时自动夹到 1..总页数；已经在这一页就不重复请求
+          var goPage = function () {
+            var p = parseInt(jin.value, 10);
+            if (!(p >= 1)) p = 1;
+            if (p > pages) p = pages;
+            jin.value = String(p);
+            if ((p - 1) * state.limit !== state.offset) loadRows((p - 1) * state.limit);
+          };
+          jin.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); goPage(); } };
+          pagerEl.querySelector(".dbc-pg-go").onclick = goPage;
+        }
         var sbtn = pagerEl.querySelector(".dbc-toggle-del");
         if (sbtn) sbtn.onclick = function () { state.includeDeleted = !state.includeDeleted; loadRows(0); };
       } catch (e) {
@@ -713,6 +764,57 @@
     function setRowPanel(show) {
       rowBox.hidden = !show;
       if (show) rowCard.clamp();
+      else closeImgPreview();                       // 收起行详情时顺手关掉图片预览
+    }
+    // 值看着是图片地址（http(s) 链接 / data:image，且以常见图片后缀结尾）：
+    // 值后面挂一个「查看图片」按钮，点开直接看，不用把链接拷到浏览器
+    var IMG_URL_RE = /\.(png|jpe?g|gif|webp|bmp|svgz?|avif|ico)$/i;
+    function imgUrlOf(v) {
+      if (typeof v !== "string") return "";
+      var s = v.trim();
+      if (/^data:image\//i.test(s)) return s;
+      if (!/^https?:\/\//i.test(s)) return "";
+      return IMG_URL_RE.test(s.split(/[?#]/)[0]) ? s : "";   // 后缀可能藏在 ? 参数前面
+    }
+    /* ---- 图片查看遮罩：点「查看图片」弹层看原图（点背景 / × / Esc 关闭） ---- */
+    var imgOv = null;
+    function closeImgPreview() {
+      if (!imgOv) return;
+      if (imgOv.parentNode) imgOv.parentNode.removeChild(imgOv);
+      imgOv = null;
+      document.removeEventListener("keydown", imgOvKey, true);
+    }
+    function imgOvKey(e) {
+      if (e.key === "Escape") { e.stopPropagation(); closeImgPreview(); }
+    }
+    function openImgPreview(src) {
+      if (!src) return;
+      closeImgPreview();
+      var ov = document.createElement("div");
+      ov.className = "dbc-img-ov";
+      ov.innerHTML =
+        '<img alt="图片预览" src="' + escAttr(src) + '">' +
+        '<div class="dbc-img-bar">' +
+          '<button class="dbc-mini dbc-img-open" title="在新标签页打开原图">' +
+            '<i class="bi bi-box-arrow-up-right"></i> 打开原图</button>' +
+          '<button class="dbc-mini dbc-img-close" title="关闭（Esc）"><i class="bi bi-x-lg"></i></button>' +
+        "</div>" +
+        '<div class="dbc-img-url" title="' + escAttr(src) + '">' + esc(src) + "</div>";
+      document.body.appendChild(ov);
+      imgOv = ov;
+      ov.querySelector("img").onerror = function () {      // 来源站防盗链 / 链接失效时给个明确提示
+        ov.querySelector(".dbc-img-url").textContent =
+          "图片加载失败（可能被来源站限制，可点「打开原图」在浏览器里试）：" + src;
+      };
+      ov.addEventListener("click", function (e) {
+        var t = e.target;
+        if (t === ov || (t.closest && t.closest(".dbc-img-close"))) { closeImgPreview(); return; }
+        if (t.closest && t.closest(".dbc-img-open")) {
+          e.preventDefault();
+          window.open(src, "_blank", "noopener");
+        }
+      });
+      document.addEventListener("keydown", imgOvKey, true);
     }
     // 每行都能定位到原始值（data-v），编辑时据此判断哪些字段真的改了
     function rowTableHtml(cols, rec) {
@@ -720,9 +822,12 @@
         cols.map(function (c, i) {
           var v = rec[i], isNull = (v === null || v === undefined);
           var txt = isNull ? "NULL" : String(v);
+          var img = isNull ? "" : imgUrlOf(txt);
+          var btn = img ? '<button type="button" class="dbc-row-img" data-src="' + escAttr(img) +
+                          '"><i class="bi bi-image"></i> 查看图片</button>' : "";
           return '<tr><td class="dbc-row-k">' + esc(c) + '</td><td class="dbc-row-v"' +
             (isNull ? ' data-null="1"' : "") + ' data-v="' + escAttr(txt) + '">' +
-            (isNull ? '<span class="dbc-null">NULL</span>' : esc(txt)) + "</td></tr>";
+            (isNull ? '<span class="dbc-null">NULL</span>' : esc(txt)) + btn + "</td></tr>";
         }).join("") + "</tbody></table>";
     }
     // 能不能编辑：必须有主键（MongoDB 是 _id），且主键值都在这一行里
@@ -762,6 +867,14 @@
         cols.length + " 个字段" + (can ? "" : "（缺主键，不可改 / 删）");
       setRowPanel(true);
     }
+    // 值单元格里的「查看图片」按钮（渲染时挂在值后面）：点开弹层预览，不影响整行的详情 / 编辑逻辑
+    rowBody.addEventListener("click", function (e) {
+      var b = e.target && e.target.closest ? e.target.closest(".dbc-row-img") : null;
+      if (!b) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openImgPreview(b.getAttribute("data-src") || "");
+    });
     gridBox.addEventListener("click", function (e) {
       var actBtn = e.target.closest ? e.target.closest(".dbc-rdel, .dbc-rrestore") : null;
       if (actBtn) {                                   // 操作列：假删除 / 恢复，不触发行详情

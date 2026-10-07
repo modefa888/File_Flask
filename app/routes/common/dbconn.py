@@ -855,8 +855,12 @@ def _nosql_schema(conn, kind, use):
     return [{"name": n, "current": n == dbname} for n in names], tables, dbname
 
 
-def _nosql_rows(conn, kind, use, table, limit, offset, include_deleted=False):
-    """非关系型库的数据行：Redis → 某个 key 的值；MongoDB → 某个集合的文档"""
+def _nosql_rows(conn, kind, use, table, limit, offset, include_deleted=False,
+                order_col="", order_dir="ASC"):
+    """非关系型库的数据行：Redis → 某个 key 的值；MongoDB → 某个集合的文档
+
+    Redis 的行没有可排序的「列」语义，order_col 忽略；MongoDB 交给服务端排序。
+    """
     if kind == "redis":
         return _redis_rows(conn, table, limit, offset)
     coll = conn[use.get("dbname") or ""][table]
@@ -868,7 +872,10 @@ def _nosql_rows(conn, kind, use, table, limit, offset, include_deleted=False):
     filt = {}                                         # 默认过滤掉 is_deleted=1 的文档（假删除）
     if not include_deleted:
         filt = {"$or": [{"is_deleted": {"$ne": 1}}, {"is_deleted": {"$exists": False}}]}
-    docs = list(coll.find(filt).skip(offset).limit(limit))
+    cur = coll.find(filt)
+    if order_col:                                     # 表头点击排序：按该字段升 / 降
+        cur = cur.sort(order_col, -1 if order_dir == "DESC" else 1)
+    docs = list(cur.skip(offset).limit(limit))
     cols = []
     for d in docs:
         for k in d.keys():
@@ -2084,6 +2091,8 @@ def api_db_rows():
     except (TypeError, ValueError):
         limit, offset = _PAGE_DEFAULT, 0
     include_deleted = request.args.get("include_deleted") == "1"
+    order_col = str(request.args.get("order") or "").strip()          # 表头点击排序：排序列 / 方向
+    order_dir = "DESC" if str(request.args.get("dir") or "").lower() == "desc" else "ASC"
     conf = _load_conf(cid, with_password=True)
     if not conf:
         return jsonify({"error": "连接不存在"}), 404
@@ -2098,7 +2107,8 @@ def api_db_rows():
                     dbn = use.get("dbname") or ""
                     if kind == "mongodb" and table not in conn[dbn].list_collection_names():
                         return jsonify({"error": "集合不存在：%s" % table}), 404
-                    cols, rows, total = _nosql_rows(conn, kind, use, table, limit, offset, include_deleted)
+                    cols, rows, total = _nosql_rows(conn, kind, use, table, limit, offset,
+                                                    include_deleted, order_col, order_dir)
                     if kind == "mongodb":
                         pk = ["_id"]
                         soft_col, soft_mode = "is_deleted", "flag"   # Mongo 约定用 is_deleted 字段
@@ -2121,7 +2131,14 @@ def api_db_rows():
                         total = list(row.values())[0] if isinstance(row, dict) else row[0]
                     except Exception:
                         pass
-                    cur.execute("SELECT * FROM %s%s LIMIT %d OFFSET %d" % (ref, where, limit, offset))
+                    # 排序：列名先用一条 LIMIT 0 确认真实存在再拼接（比查 information_schema 便宜，也不给注入留口子）
+                    order_by = ""
+                    if order_col:
+                        cur.execute("SELECT * FROM %s LIMIT 0" % ref)
+                        if order_col in [d0[0] for d0 in (cur.description or [])]:
+                            order_by = " ORDER BY %s %s" % (_quote(kind, order_col), order_dir)
+                    cur.execute("SELECT * FROM %s%s%s LIMIT %d OFFSET %d"
+                                % (ref, where, order_by, limit, offset))
                     cols, rows = _rows_of(cur, kind)
             finally:
                 _close(conn, kind)
@@ -2672,17 +2689,23 @@ def api_db_nl2sql():
         return jsonify({"error": "缺少目标数据库（conn 或 path）"}), 400
     kind = use.get("kind") or "sqlite"
 
-    from ..ide.ai import _load_cfg, _sys_pick, _log_ai_call, _sys_err_response   # 函数内导入，避免模块循环依赖
+    from ..ide.ai import (_load_cfg, _sys_pick, _log_ai_call, _sys_err_response,
+                          _estimate_msgs, _estimate_tokens)   # 函数内导入，避免模块循环依赖
     cfg = _load_cfg()
     provider, model, err = _sys_pick(cfg, "nl2sql")
     if err:
         return _sys_err_response(err, need_config=not cfg.get("providers"))
 
     t_start = time.time()
+    req_text = ""      # 明细用：这次实际发出去的请求摘要与收到的响应（失败时也一并带上）
+    resp_text = ""
+    tin = tout = 0
+    est = False
 
     def _fail(msg, code=502, **extra):
         """统一失败出口：记一次失败调用再返回"""
-        _log_ai_call("nl2sql", False, int((time.time() - t_start) * 1000), msg)
+        _log_ai_call("nl2sql", False, int((time.time() - t_start) * 1000), msg,
+                     model, tin, tout, est, req=req_text, resp=resp_text)
         return jsonify({"error": msg, **extra}), code
 
     try:
@@ -2711,6 +2734,7 @@ def api_db_nl2sql():
         dialect = {"sqlite": "SQLite", "mysql": "MySQL", "postgres": "PostgreSQL"}.get(kind, kind)
         sys_prompt = _NL_SYS.format(dialect=dialect)
         content = ("[数据库表结构]\n" + ctx + "\n\n[查询需求]\n" + question)[:_NL_CTX]
+    req_text = content
     base = provider["base_url"].rstrip("/")
     url = base if base.endswith("/chat/completions") else base + "/chat/completions"
     payload = json.dumps({"model": model, "stream": False, "messages": [
@@ -2726,6 +2750,13 @@ def api_db_nl2sql():
         resp = urllib.request.urlopen(req, timeout=_NL_TIMEOUT)
         obj = json.loads(resp.read().decode("utf-8"))
         text = (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
+        resp_text = text
+        u = obj.get("usage") or {}
+        tin, tout = u.get("prompt_tokens") or 0, u.get("completion_tokens") or 0
+        if not (tin or tout):                 # 上游没给 usage：按字数兜底估算，界面标「≈」
+            tin = _estimate_msgs([{"role": "system", "content": sys_prompt},
+                                  {"role": "user", "content": content}])
+            tout, est = _estimate_tokens(text), True
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "ignore")[:200]
         return _fail("AI 接口返回 %s：%s" % (e.code, detail))
@@ -2772,7 +2803,8 @@ def api_db_nl2sql():
             return _fail("模型生成的不是只读查询语句，已丢弃，请换个说法重试（%s）" % bad, 400, sql=out)
 
     elapsed = int((time.time() - t0) * 1000)
-    _log_ai_call("nl2sql", True, elapsed)
+    _log_ai_call("nl2sql", True, elapsed, "", model, tin, tout, est,
+                 req=req_text, resp=resp_text)
     _log.info("AI 生成查询：kind=%s model=%s %dms out=%s", kind, model, elapsed, out[:200])
     return jsonify({"sql": out, "model": model, "elapsed_ms": elapsed})
 
@@ -2879,16 +2911,22 @@ def api_db_table_ai_design():
     use = _pick(conf, dbname)
     dbname = use.get("dbname") or ""
 
-    from ..ide.ai import _load_cfg, _sys_pick, _log_ai_call, _sys_err_response   # 函数内导入，避免模块循环依赖
+    from ..ide.ai import (_load_cfg, _sys_pick, _log_ai_call, _sys_err_response,
+                          _estimate_msgs, _estimate_tokens)   # 函数内导入，避免模块循环依赖
     cfg = _load_cfg()
     provider, model, err = _sys_pick(cfg, "tabledesign")
     if err:
         return _sys_err_response(err, need_config=not cfg.get("providers"))
 
     t_start = time.time()
+    req_text = ""      # 明细用：这次实际发出去的请求摘要与收到的响应（失败时也一并带上）
+    resp_text = ""
+    tin = tout = 0
+    est = False
 
     def _fail(msg, code=502, **extra):
-        _log_ai_call("tabledesign", False, int((time.time() - t_start) * 1000), msg)
+        _log_ai_call("tabledesign", False, int((time.time() - t_start) * 1000), msg,
+                     model, tin, tout, est, req=req_text, resp=resp_text)
         return jsonify({"error": msg, **extra}), code
 
     # 上下文：改已有表 → 带上它的列结构；新建表 → 带上库里的表名，免得重名
@@ -2925,6 +2963,7 @@ def api_db_table_ai_design():
         now={"sqlite": "CURRENT_TIMESTAMP", "mysql": "CURRENT_TIMESTAMP", "postgres": "now()"}[kind],
     )
     content = (ctx + "[设计要求]\n" + question)[:_NL_CTX]
+    req_text = content
     base = provider["base_url"].rstrip("/")
     url = base if base.endswith("/chat/completions") else base + "/chat/completions"
     payload = json.dumps({"model": model, "stream": False, "messages": [
@@ -2940,6 +2979,13 @@ def api_db_table_ai_design():
         resp = urllib.request.urlopen(req, timeout=_NL_TIMEOUT)
         obj = json.loads(resp.read().decode("utf-8"))
         text = (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
+        resp_text = text
+        u = obj.get("usage") or {}
+        tin, tout = u.get("prompt_tokens") or 0, u.get("completion_tokens") or 0
+        if not (tin or tout):                 # 上游没给 usage：按字数兜底估算，界面标「≈」
+            tin = _estimate_msgs([{"role": "system", "content": sys_prompt},
+                                  {"role": "user", "content": content}])
+            tout, est = _estimate_tokens(text), True
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "ignore")[:200]
         return _fail("AI 接口返回 %s：%s" % (e.code, detail))
@@ -2982,7 +3028,8 @@ def api_db_table_ai_design():
 
     name = re.sub(r"[\s\"'`;,\-./]+", "_", str(spec.get("table") or "")).strip("_")[:_TD_TYPE]
     elapsed = int((time.time() - t0) * 1000)
-    _log_ai_call("tabledesign", True, elapsed)
+    _log_ai_call("tabledesign", True, elapsed, "", model, tin, tout, est,
+                 req=req_text, resp=resp_text)
     _log.info("AI 推荐表结构：kind=%s model=%s %dms table=%s %d 列", kind, model, elapsed, name, len(cols))
     return jsonify({"table": name, "columns": cols, "note": str(spec.get("note") or "")[:200],
                     "model": model, "elapsed_ms": elapsed})

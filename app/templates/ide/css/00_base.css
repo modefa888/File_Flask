@@ -76,5 +76,20 @@
 .kb-btn { background: #2f2f30; color: #bcbcbc; border: 1px solid #3c3c3d; border-radius: 5px;
   font-size: 11px; padding: 3px 10px; cursor: pointer; flex: none; }
 .kb-btn:hover { background: #3a3a3b; color: #fff; }
+/* 设置 → 外观：活动栏图标顺序（拖动 / 上下移动） */
+.set-row.actord { align-items: flex-start; }
+.actord-box { flex: none; width: 300px; }
+.actord-list { display: flex; flex-direction: column; gap: 4px; }
+.actord-item { display: flex; align-items: center; gap: 8px; background: #2a2a2b; border: 1px solid #3a3a3b;
+  border-radius: 6px; padding: 5px 8px; color: #d6d6d6; font-size: 12.5px; cursor: grab; }
+.actord-item:hover { border-color: #0a6aa8; }
+.actord-item.dragging { opacity: .45; border-style: dashed; }
+.actord-item.actord-ph { min-height: 28px; opacity: .6; border-style: dashed; background: transparent; }
+.actord-grip { color: #7a7a7a; font-size: 13px; }
+.actord-ic { width: 18px; text-align: center; color: #9cdcfe; font-size: 14px; }
+.actord-nm { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.actord-mv { background: #2f2f30; color: #bcbcbc; border: 1px solid #3c3c3d; border-radius: 4px;
+  width: 20px; height: 20px; padding: 0; font-size: 10px; line-height: 1; cursor: pointer; flex: none; }
+.actord-mv:hover { background: #3a3a3b; color: #fff; }
 
 

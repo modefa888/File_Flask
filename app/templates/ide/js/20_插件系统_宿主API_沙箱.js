@@ -145,6 +145,8 @@
     act.innerHTML = '<i class="bi ' + (spec.icon || "bi-puzzle") + '"></i>';
     const settingsAct = document.getElementById("actSettings");
     if (settingsAct && settingsAct.parentNode) settingsAct.parentNode.insertBefore(act, settingsAct);
+    // 活动栏图标顺序可由「设置 → 外观」自定义：新注册的图标按已保存顺序落位
+    if (typeof window.applyActOrder === "function") window.applyActOrder();
     // 侧边栏面板容器
     const panel = document.createElement("div");
     panel.className = "side-panel";
@@ -609,6 +611,7 @@
     try { IDE.editors.closeAll(id); } catch (e) { console.error(e); }
     // 移除该插件注册的面板 / 命令，使禁用、卸载能立即在界面上生效（无需刷新页面）
     try { _plRemovePluginUI(id); } catch (e) { console.error(e); }
+    if (typeof window.applyActOrder === "function") window.applyActOrder();   // 图标已移除，重排剩余图标
     IDE.events.emit("pluginDeactivated", id);
   }
 
@@ -635,6 +638,7 @@
         showPanel(saved);
       }
     } catch (e) { console.error("[IDE] 恢复插件面板失败:", e); }
+    if (typeof window.applyActOrder === "function") window.applyActOrder();   // 插件图标纳入「活动栏图标顺序」
     _plRenderPanel();
   };
 

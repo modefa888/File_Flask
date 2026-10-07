@@ -273,6 +273,12 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .kb-keys kbd { color: #333333; background: #ececec; border-color: #d4d4d4; }
 :where(html.theme-light) .kb-btn { background: #e8e8e8; color: #333333; border-color: #cecece; }
 :where(html.theme-light) .kb-btn:hover { background: #dcdcdc; color: #000000; }
+:where(html.theme-light) .actord-item { background: #ffffff; border-color: #dcdcdc; color: #333333; }
+:where(html.theme-light) .actord-item:hover { border-color: #0066b8; }
+:where(html.theme-light) .actord-grip { color: #8a8a8a; }
+:where(html.theme-light) .actord-ic { color: #005fb8; }
+:where(html.theme-light) .actord-mv { background: #e8e8e8; color: #333333; border-color: #cecece; }
+:where(html.theme-light) .actord-mv:hover { background: #dcdcdc; color: #000000; }
 
 /* ---------- 设置页：通知（24） ---------- */
 :where(html.theme-light) .set-sec h2 { color: #333333; border-bottom-color: #e0e0e0; }

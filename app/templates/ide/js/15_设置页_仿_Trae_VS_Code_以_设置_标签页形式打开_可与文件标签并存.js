@@ -4,7 +4,7 @@
   const IDE_SETTINGS = Object.assign(
     { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
       showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true,
-      httpProxy: "", theme: "dark", playerTheme: "auto" },
+      httpProxy: "", theme: "dark", playerTheme: "auto", actOrder: [] },
     (() => { try { return JSON.parse(localStorage.getItem("ide.settings") || "{}"); } catch (_) { return {}; } })()
   );
   function ideIsLight() { return IDE_SETTINGS.theme === "light"; }                 // 当前是否浅色（白底）主题
@@ -38,7 +38,45 @@
     if (typeof applyVideoPlayerTheme === "function") applyVideoPlayerTheme();
   }
 
-  const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真实文件冲突）
+  /* ---------- 活动栏图标顺序（设置 → 外观 可修改） ----------
+   顺序存 ide.settings.actOrder（data-panel 组成的数组），启动时按它重排活动栏；
+   插件运行期注册的图标不在数组里，保持在末尾（设置按钮之前），用户拖动后即被记入。 */
+const ACT_SHORT = { explorer: "资源管理器", search: "搜索", git: "源代码管理", run: "运行和调试",
+  runner: "后台任务", env: "运行环境", dbconn: "数据库", ext: "扩展" };
+// 默认顺序（与 partials/body.html 的书写顺序一致）：「恢复默认顺序」即回到这里，而不是回到「当前看到的顺序」
+const ACT_DEFAULT_ORDER = ["explorer", "search", "git", "run", "runner", "env", "dbconn", "ext"];
+function actOrderSaved() {
+  const v = ideSettingGet("actOrder", []);
+  return Array.isArray(v) ? v.filter(x => typeof x === "string" && x) : [];
+}
+function actOrderEffective() {
+  const saved = actOrderSaved();
+  return saved.length ? saved : ACT_DEFAULT_ORDER;   // 未自定义（含已恢复默认）→ 用内置默认顺序
+}
+function actOrderLabel(act) {   // 活动栏 title 里常带括号说明，列表只取短名
+  const id = act.dataset.panel;
+  return ACT_SHORT[id] || String(act.title || id).replace(/（.*$/, "");
+}
+function applyActOrder() {
+  const bar = document.getElementById("activitybar");
+  if (!bar) return;
+  const settingsAct = document.getElementById("actSettings");   // 排序只在设置按钮之前进行
+  const acts = [...bar.querySelectorAll(".act[data-panel]")];
+  if (!acts.length) return;
+  const rank = new Map();
+  actOrderEffective().forEach((id, i) => { if (!rank.has(id)) rank.set(id, i); });
+  const BIG = 1e9;
+  acts.map((a, i) => ({ a: a, i: i }))
+    .sort((x, y) => {
+      const rx = rank.has(x.a.dataset.panel) ? rank.get(x.a.dataset.panel) : BIG;
+      const ry = rank.has(y.a.dataset.panel) ? rank.get(y.a.dataset.panel) : BIG;
+      return (rx - ry) || (x.i - y.i);   // 未记录的图标（插件新增）保持原相对位置，排在最后
+    })
+    .forEach(o => bar.insertBefore(o.a, settingsAct || null));
+}
+window.applyActOrder = applyActOrder;   // 插件注册 / 移除面板后由 20_ 插件系统补调一次
+
+const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真实文件冲突）
   function openSettingsTab(section) {
     let tab = findTab(SETTINGS_PATH);
     if (!tab) {
@@ -76,6 +114,7 @@
         '<div class="set-sec" id="sec-appearance"><h2 data-kw="外观 主题 背景 颜色 深色 浅色 白 黑 白天 黑夜 theme dark light">外观</h2>' +
           '<div class="set-row" data-kw="外观 主题 界面 颜色 背景 深色 浅色 白 黑 白天 黑夜 theme dark light"><div class="set-info"><div class="set-label">界面主题</div><div class="set-desc">黑夜（深色，默认）与白天（白色背景）之间切换，立即生效并记住选择</div></div><select id="setTheme"><option value="dark">黑夜（深色）</option><option value="light">白天（白色背景）</option></select></div>' +
           '<div class="set-row" data-kw="外观 主题 播放器 视频 皮肤 白天 黑夜 跟随编辑器 player video theme skin light dark auto"><div class="set-info"><div class="set-label">播放器主题</div><div class="set-desc">标签页内嵌视频播放器的皮肤：白天（浅色控制条与播放列表）/ 黑夜（深色，默认）/ 跟随编辑器（跟随上面的「界面主题」）</div></div><select id="setPlayerTheme"><option value="auto">跟随编辑器</option><option value="light">白天（浅色）</option><option value="dark">黑夜（深色）</option></select></div>' +
+          '<div class="set-row actord" data-kw="外观 活动栏 图标 顺序 排序 排列 拖动 activity bar order sort"><div class="set-info"><div class="set-label">活动栏图标顺序</div><div class="set-desc">拖动条目（或点 ↑ ↓）调整左侧活动栏图标的上下顺序，立即生效并记住选择；插件添加的图标也可一起调整</div></div><div class="actord-box"><div class="actord-list" id="setActOrder"></div><button class="set-btn" id="setActOrderReset" style="margin-top:8px;">恢复默认顺序</button></div></div>' +
         '</div>' +
         '<div class="set-sec" id="sec-editor"><h2>编辑器</h2>' +
           '<div class="set-row" data-kw="字体 字号 font size"><div class="set-info"><div class="set-label">字体大小</div><div class="set-desc">编辑器代码字体大小（10–24）</div></div><input type="number" min="10" max="24" id="setFontSize"></div>' +
@@ -352,12 +391,82 @@
       if (typeof applyVideoPlayerTheme === "function") applyVideoPlayerTheme();
       toast(v === "auto" ? "播放器已跟随编辑器主题" : (v === "light" ? "播放器已切换到白天皮肤" : "播放器已切换到黑夜皮肤"), "ok");
     });
+    // ---- 活动栏图标顺序（外观）：拖动 / 上下移动，改动即时保存并应用到左侧活动栏 ----
+    const actList = q("#setActOrder");
+    function actOrderIds() { return [...actList.querySelectorAll(".actord-item:not(.actord-ph)")].map(el => el.dataset.panel); }
+    function actOrderCommit() {
+      const ids = actOrderIds();
+      IDE_SETTINGS.actOrder = ids;
+      saveIdeSettings(); ideSettingSet("actOrder", ids);
+      applyActOrder();
+    }
+    function actOrderRender() {
+      if (!actList) return;
+      const bar = $("activitybar");
+      if (!bar) return;
+      // 列表按活动栏当前实际顺序渲染（applyActOrder 已把 DOM 排好）
+      const acts = [...bar.querySelectorAll(".act[data-panel]")];
+      actList.innerHTML = acts.map(a => {
+        const ic = a.querySelector("i");
+        return '<div class="actord-item" draggable="true" data-panel="' + esc(a.dataset.panel) + '" title="' + esc(a.title || a.dataset.panel) + '">' +
+          '<span class="actord-grip"><i class="bi bi-grip-vertical"></i></span>' +
+          '<span class="actord-ic">' + (ic ? ic.outerHTML : '<i class="bi bi-square"></i>') + '</span>' +
+          '<span class="actord-nm">' + esc(actOrderLabel(a)) + '</span>' +
+          '<button class="actord-mv" data-mv="-1" title="上移"><i class="bi bi-chevron-up"></i></button>' +
+          '<button class="actord-mv" data-mv="1" title="下移"><i class="bi bi-chevron-down"></i></button>' +
+        '</div>';
+      }).join("");
+      // 上移 / 下移按钮
+      actList.querySelectorAll(".actord-mv").forEach(b => {
+        b.onclick = (e) => {
+          e.stopPropagation();
+          const it = b.closest(".actord-item");
+          const up = b.dataset.mv === "-1";
+          const sib = up ? it.previousElementSibling : it.nextElementSibling;
+          if (!sib) return;
+          if (up) actList.insertBefore(it, sib); else actList.insertBefore(sib, it);
+          actOrderCommit(); actOrderRender();
+        };
+      });
+      // 拖动排序：拖动期间用占位块标出落点（不移动被拖元素本身，避免 Firefox 中断拖拽），
+      // 松手后再把条目挪到占位块处；拖到条目下半区 = 插到该条目之后
+      let ph = null;
+      actList.querySelectorAll(".actord-item").forEach(it => {
+        it.addEventListener("dragstart", (e) => {
+          it.classList.add("dragging");
+          ph = document.createElement("div");
+          ph.className = "actord-item actord-ph";
+          actList.insertBefore(ph, it.nextElementSibling);
+          try { e.dataTransfer.setData("text/plain", it.dataset.panel); e.dataTransfer.effectAllowed = "move"; } catch (_) {}
+        });
+        it.addEventListener("dragover", (e) => {
+          if (!ph || it.classList.contains("actord-ph")) return;
+          e.preventDefault();
+          const r = it.getBoundingClientRect();
+          actList.insertBefore(ph, (e.clientY - r.top) > r.height / 2 ? it.nextElementSibling : it);
+        });
+        it.addEventListener("dragend", () => {
+          it.classList.remove("dragging");
+          if (ph && ph.parentNode) { actList.insertBefore(it, ph); ph.remove(); }
+          ph = null;
+          actOrderCommit(); actOrderRender();
+        });
+      });
+    }
+    actOrderRender();
+    q("#setActOrderReset").onclick = () => {
+      IDE_SETTINGS.actOrder = [];
+      saveIdeSettings(); ideSettingSet("actOrder", []);
+      applyActOrder(); actOrderRender();
+      toast("活动栏图标已恢复默认顺序", "ok");
+    };
     q("#setClearRecent").onclick = () => { localStorage.removeItem("ide.recentFiles"); toast("已清除最近打开记录", "ok"); };
     q("#setReset").onclick = () => {
       Object.assign(IDE_SETTINGS, { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
         showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true, httpProxy: "",
-        theme: "dark", playerTheme: "auto" });
+        theme: "dark", playerTheme: "auto", actOrder: [] });
       saveIdeSettings(); applyIdeSettings();
+      ideSettingSet("actOrder", []); applyActOrder(); actOrderRender();   // 活动栏图标顺序也恢复默认
       q("#setFontSize").value = 13; q("#setLineWrap").checked = false; q("#setActiveLine").checked = true;
       q("#setIndent").value = 4; q("#setHints").checked = true;
       q("#setShowAll").checked = false; q("#setGitView").value = "list"; q("#setGitCommitMode").value = "tree";
@@ -500,6 +609,7 @@
   applyKeybinds();
 
   applyIdeSettings();   // 启动时应用一次（新开编辑器读取 IDE_SETTINGS 默认值）
+  applyActOrder();      // 活动栏图标顺序（设置 → 外观 可修改；插件注册的图标稍后由 20_ 补调）
 
   /* ---------- 键盘快捷键 ---------- */
   let chordK = false;   // Ctrl+K 两段式快捷键（仿 VS Code）

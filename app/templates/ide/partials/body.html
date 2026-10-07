@@ -147,9 +147,10 @@
           <button class="g-btn block" id="apiNew" title="新建一个 HTTP 请求"><i class="bi bi-plus-lg"></i> 新建请求</button>
           <button class="g-ico" id="apiGroupNew" title="新建分组（把请求拖进分组归类）"><i class="bi bi-folder-plus"></i></button>
           <button class="g-ico" id="apiImport" title="从 cURL 命令导入"><i class="bi bi-box-arrow-in-down"></i></button>
-          <button class="g-ico" id="apiExport" title="导出全部请求（JSON 文件）"><i class="bi bi-box-arrow-up"></i></button>
+          <button class="g-ico" id="apiImportFile" title="导入导出的 JSON 文件（关键字段自动解密）"><i class="bi bi-file-earmark-arrow-down"></i></button>
+          <button class="g-ico" id="apiExport" title="导出全部请求（关键字段加密的 JSON 文件）"><i class="bi bi-box-arrow-up"></i></button>
         </div>
-        <div class="s-hint" id="apiHint">请求集合保存在本机浏览器；点条目在右侧编辑器里编辑并发送。拖拽条目到分组可归类，右键可移到指定分组。</div>
+        <div class="s-hint" id="apiHint">请求集合保存在本机浏览器；点条目在右侧编辑器里编辑并发送。拖拽条目到分组可归类，右键可移到指定分组。导出时请求头 / 参数 / 表单 / JSON 请求体里的关键字段（Authorization、token、password 等）会被加密：导出弹窗里留空 = 用服务端 .env 的默认口令（本机导入时免输口令），填了口令则要用同一口令才能导入。</div>
         <div class="api-list" id="apiList"></div>
       </div>
     </div>

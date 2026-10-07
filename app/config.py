@@ -52,6 +52,16 @@ PORT = _env_int("PORT", 5001)
 # 更换盐会使已保存的凭据无法解密（需要在界面上重新填写）。
 SECRET_SALT = _env_str("SECRET_SALT", "")
 
+# ===== 导出文件的默认口令（API 调试「导出请求」）=====
+# 导出时「关键字段」（Authorization / token / password / api-key 等）用口令加密。
+# 这里配置「导出弹窗里不填口令」时使用的默认口令：
+#   · 显式配 EXPORT_PASSWORD 就用它；
+#   · 留空则回退到上面的 SECRET_SALT（够强、无需用户记，开箱即用）。
+# 用默认口令导出的文件在本机导入时免输口令；导出时手填了口令的文件，导入必须输同一个。
+# 注意：默认口令的解密钥匙就在本机 .env 里 —— 它防的是「文件被转发出去」，不是「防本机」；
+#       要对本机也保密，导出时手填一个口令。两者都为空时，导出必须手填口令（后端会拒绝空口令）。
+EXPORT_PASSWORD = _env_str("EXPORT_PASSWORD", "") or SECRET_SALT
+
 # 默认起始路径
 _DEFAULT_START = os.path.sep if os.name != "nt" else os.environ.get("SystemDrive", "C:") + "\\"
 DEFAULT_START_PATH = _env_str("DEFAULT_START_PATH", _DEFAULT_START)

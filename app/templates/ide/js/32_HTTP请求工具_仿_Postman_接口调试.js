@@ -521,10 +521,11 @@
   }
   function apiSideWire() {
     const newBtn = $("apiNew"), impBtn = $("apiImport"), expBtn = $("apiExport"),
-      grpBtn = $("apiGroupNew"), list = $("apiList");
+      grpBtn = $("apiGroupNew"), list = $("apiList"), impFileBtn = $("apiImportFile");
     // 顶部「新建请求」建在未分组下；要在分组里新建，用分组头右侧的 +
     if (newBtn) newBtn.addEventListener("click", function () { const r = apiBlank(); apiAdd(r); apiRenderList(); apiOpen(r.id); });
     if (impBtn) impBtn.addEventListener("click", function () { apiImportCurl(); });
+    if (impFileBtn) impFileBtn.addEventListener("click", function () { apiPickImportFile(); });
     if (expBtn) expBtn.addEventListener("click", function () { apiExportAll(); });
     if (grpBtn) grpBtn.addEventListener("click", async function () {
       const n = await uiPrompt("新建分组", "", "例如：用户中心");
@@ -624,11 +625,180 @@
     if (!req.url) { toast("未能从命令中解析出 URL", "warn"); return; }
     apiAdd(req); apiRenderList(); apiOpen(req.id); toast("已导入请求", "ok");
   }
-  function apiExportAll() {
-    const data = JSON.stringify(apiList(), null, 2);
-    const blob = new Blob([data], { type: "application/json" });
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "api-requests.json"; a.click();
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  /* ---------------- 导出 / 导入（关键字段加密） ----------------
+     加密为什么放服务端：IDE 常常是以 http://<局域网IP>:端口 打开的，属于非安全上下文，
+     浏览器在这种页面下不提供 crypto.subtle（同 js/24 的说明），前端做不了正经加密。
+     服务端 services/common/export_crypto.py 用「口令 + 随机盐」派生密钥，
+     与落库凭据同一套流加密原语（SHA256-CTR + HMAC），不依赖第三方库。
+     前端这里只负责收口令、下载文件、把解出来的请求并回本机列表 ——
+     「哪些字段算关键字段」只由后端 services/ide/httpexport.py 一处决定，
+     免得两边各写一套规则后慢慢跑偏。 */
+  const API_PW_KEY = "ide.http.expPw";      // 口令只记在 sessionStorage：关掉标签页就没了
+  const API_IMPORT_MAX = 4 * 1024 * 1024;   // 本机存储只有几 MB，导太大的文件写不进去，先拦下来
+
+  function apiPwGet() { try { return sessionStorage.getItem(API_PW_KEY) || ""; } catch (_) { return ""; } }
+  function apiPwPut(v) { try { if (v) sessionStorage.setItem(API_PW_KEY, v); } catch (_) {} }
+
+  /* 口令输入弹窗。uiModal 自带那个 input 是明文框（放密码不合适），所以自己往 html 里
+     塞一个 type=password 的输入框，并用 input 事件兜住值 —— 弹窗关闭时会清空 innerHTML，
+     那时再想读就读不到了。返回 null 表示用户取消，返回空串表示「就是要留空」。 */
+  async function apiAskPassword(title, msg, okText, value, hint, placeholder) {
+    const p = uiModal({ title: title, icon: "bi-shield-lock", okText: okText,
+      html: '<div class="m-msg">' + esc(msg) + '</div>' +
+        '<div class="m-row"><label>密码</label>' +
+        '<input id="apiPwIn" type="password" autocomplete="new-password" spellcheck="false" placeholder="' +
+        String(placeholder || "密码").replace(/"/g, "") + '">' +
+        '<div class="hint">' + esc(hint || "仅用于加解密这个文件，不会写入磁盘或日志；关掉标签页即失效。") + '</div></div>' });
+    const inp = $("apiPwIn");
+    let buf = String(value || "");
+    if (inp) {
+      inp.value = buf;
+      inp.addEventListener("input", function () { buf = inp.value; });
+      inp.focus(); inp.select();
+    }
+    const ok = await p;
+    return ok ? String(buf || "") : null;
+  }
+
+  async function apiPostExport(list, pw) {
+    try {
+      const res = await fetch("/api/http/export", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requests: list, groups: apiLoadGroups(), password: pw }),
+      });
+      const d = await res.json();
+      return (d && typeof d === "object") ? d : { error: "服务端返回异常" };
+    } catch (e) { return { error: (e && e.message) || String(e) }; }
+  }
+
+  /* 导出全部请求。两次「确认」合并成一个弹窗：既要给出加密口令，也起到原来那个二次确认的
+     作用（导出按钮紧挨着「导入」，误点代价不小）。
+     口令留空 = 用服务端 .env 里配的默认口令（EXPORT_PASSWORD，没配就回退 SECRET_SALT）——
+     日常备份不用记口令，本机导入时也免输；填了口令则只有该口令能解开。 */
+  async function apiExportAll() {
+    const list = apiList();
+    if (!list.length) { toast("还没有请求可导出", "warn"); return; }
+    let pw = apiPwGet();                 // 上次这个标签页里输过的口令，预填上省事
+    let warn = "";
+    for (;;) {
+      const ans = await apiAskPassword("导出全部请求（关键字段加密）",
+        (warn ? warn + "\n\n" : "") +
+        "将把本机保存的 " + list.length + " 个请求导出为 JSON 文件「api-requests.json」。\n\n" +
+        "会用口令加密的关键字段：\n" +
+        "· 请求头 / 查询参数 / 表单 / JSON 请求体里名字含 token、secret、password、api-key、cookie 的字段\n" +
+        "· Authorization 请求头，以及「认证」页签里的 token、用户名、密码\n\n" +
+        "其余内容（请求名、URL、分组等）仍是明文。",
+        "导出", pw,
+        "留空 = 使用服务端 .env 里配置的默认口令，本机导入时免输密码；填写则导入必须输入同一密码。",
+        "留空 = 用服务端默认口令");
+      if (ans === null) return;                        // 取消 = 不导出
+      pw = ans.trim();
+      const out = await apiPostExport(list, pw);
+      if (out.error) {
+        // 服务端没配默认口令（.env 里 EXPORT_PASSWORD 与 SECRET_SALT 都是空的）→ 让用户补一个
+        if (out.error_code === "no_default_password") {
+          warn = "服务端没有配置默认口令（.env 的 EXPORT_PASSWORD / SECRET_SALT 都为空），请填写导出密码。";
+          continue;
+        }
+        toast("导出失败：" + out.error, "err");
+        return;
+      }
+      apiPwPut(pw);                                    // 只记非空口令；留空（走默认口令）不会覆盖已缓存的值
+      const blob = new Blob([out.file], { type: "application/json" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "api-requests.json"; a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+      const n = (out.sensitive || []).length;
+      toast("已导出 " + out.count + " 个请求" +
+        (out.keySource === "default" ? "，已用服务端默认口令加密" : "，已用你设置的密码加密") +
+        (n ? "（" + n + " 处关键字段）" : "（没有需要加密的关键字段）"), "ok");
+      return;
+    }
+  }
+
+  /* 导入：选文件 → （按需问口令）→ 后端解密并清洗 → 并回本机列表。
+     默认口令加密的文件（keySource=default）先不问口令，本机多半能直接解开；
+     解不开（换过 .env / 来自别的机器）再转成手输，最多手输 3 次，免得重新选文件。 */
+  function apiPickImportFile() {
+    const inp = document.createElement("input");
+    inp.type = "file"; inp.accept = ".json,application/json"; inp.style.display = "none";
+    document.body.appendChild(inp);
+    inp.addEventListener("change", function () {
+      const f = inp.files && inp.files[0];
+      inp.remove();
+      if (f) apiImportFile(f);
+    });
+    inp.click();
+  }
+
+  async function apiImportFile(file) {
+    if (file.size > API_IMPORT_MAX) {
+      toast("文件太大（超过 4 MB）：本机存储只有几 MB，装不下", "warn");
+      return;
+    }
+    let text = "";
+    try { text = await file.text(); } catch (e) { toast("读取文件失败", "err"); return; }
+    let payload = null;
+    try { payload = JSON.parse(text); } catch (_) { toast("不是合法的 JSON 文件", "warn"); return; }
+    const sealed = text.indexOf("encp:v1:") >= 0;      // 文件里有没有密文
+    // 默认口令加密的文件：本机后端自己就能解开，先不问密码，省一步操作；
+    // 解不开（改过 .env / 来自别的机器）时再转成手输口径。
+    const isDefault = !!(payload && !Array.isArray(payload) && payload.keySource === "default");
+    let pw = apiPwGet(), ask = sealed && !isDefault, tip = "", tries = 0;
+    while (tries < 3) {                                // tries 只数手输次数，静默那次不算
+      if (ask) {
+        tries++;
+        const ans = await apiAskPassword("导入加密文件",
+          (tip ? tip + "\n\n" : "") + "「" + file.name + "」里的关键字段是加密的，请输入导出时用的密码。",
+          "解密并导入", pw, "密码不会写入磁盘或日志；关掉标签页即失效。", "导出时设置的密码");
+        if (ans === null) return;
+        pw = ans.trim();
+        if (!pw) { toast("请输入密码", "warn"); continue; }
+      }
+      const d = await apiPostImport(payload, pw);
+      if (!d.error) { if (pw) apiPwPut(pw); apiMergeImported(d, file.name); return; }
+      if (d.error_code !== "bad_password" || !sealed) { toast("导入失败：" + d.error, "err"); return; }
+      if (!ask) {
+        tip = "用服务端默认口令解不开这个文件（可能改过 .env，或文件来自别的机器），请手动输入导出时用的密码。";
+        ask = true;
+      } else {
+        tip = "";
+        toast("密码不正确，请重新输入", "warn");
+      }
+    }
+  }
+
+  async function apiPostImport(payload, pw) {
+    try {
+      const res = await fetch("/api/http/import", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload: payload, password: pw }),
+      });
+      const d = await res.json();
+      return (d && typeof d === "object") ? d : { error: "服务端返回异常" };
+    } catch (e) { return { error: (e && e.message) || String(e) }; }
+  }
+
+  /* 并回本机列表：分组按「名字」复用（同一个文件重复导入不会攒出一堆同名分组），
+     请求一律换新 id（避免与已有 id 撞车）。只追加、不覆盖 —— 导错了删掉重来即可，
+     比「先清空再写入」安全得多。 */
+  function apiMergeImported(d, fileName) {
+    const groups = d.groups || [], reqs = d.requests || [];
+    const gmap = {};
+    groups.forEach(function (g) {
+      const name = String(g.name || "").trim() || "导入分组";
+      const local = apiLoadGroups().filter(function (x) { return x.name === name; })[0];
+      gmap[g.id] = (local || apiGroupAdd(name)).id;
+    });
+    reqs.forEach(function (raw) {
+      const q = Object.assign(apiBlank(), raw);      // 后端已按白名单清洗，缺的字段由默认值兜住
+      q.id = apiNewId();
+      q.gid = gmap[raw.gid] || "";                   // 认不出的分组 / 旧版格式：落到「未分组」
+      apiAdd(q);
+    });
+    apiRenderList();
+    toast("已从「" + fileName + "」导入 " + reqs.length + " 个请求" +
+      (d.decrypted ? "，解密 " + d.decrypted + " 处关键字段" : "") +
+      (groups.length ? "，分组 " + groups.length + " 个" : ""), "ok");
   }
   /* 导出给 00_preamble 的 sessionRestore 用：刷新后按虚拟路径 \u0000http:<请求 id> 还原已打开的请求标签。
      本模块是独立 IIFE，内部的 const / function 默认不对外可见（此前只导出了 apiSideWire/apiSyncOpenMarks，

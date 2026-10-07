@@ -217,6 +217,10 @@ Client ◀─响应─
 - **凭据加密盐**：`SECRET_SALT`（Git Token / AI API Key / SMTP 授权码 / Telegram Bot Token
   落库前用它派生加密密钥；留空则回退到 `data/.file_manager_secret_key` 本地随机密钥。
   换盐会导致已存凭据无法解密，需在界面上重新填写）
+- **导出文件的默认口令**：`EXPORT_PASSWORD`（API 调试「导出请求」用口令加密关键字段；
+  导出弹窗留空即用它加密、本机导入免输口令，手填口令的文件则必须用同一口令导入。
+  留空回退 `SECRET_SALT`，两者都空时导出必须手填。默认口令的钥匙在本机 `.env` 里，
+  防的是文件被转发出去，不是防本机）
 - **传输加密**：IDE 页面渲染时注入 RSA 公钥（密钥对见 `data/.file_manager_transport_key.pem`），
   前端用纯 JS RSA-OAEP 加密后提交（`tp1:` 前缀），后端解密再按存储密钥加密落库；
   未安装 `cryptography` 时自动降级为明文传输，功能不受影响

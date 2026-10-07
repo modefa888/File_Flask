@@ -664,10 +664,10 @@ async function procDiagRun(manual) {
 function procDiagStartTimer() {
   procDiagStopTimer();
   PROCDIAG.timer = setInterval(() => {
+    // 只更新秒数：文案与图标交给 procDiagPaintState 一次性渲染
+    // （这里若整段重写 paState.innerHTML，会每 800ms 重建 <i>，使 1s 的旋转动画不断从头开始、看起来一抖一抖）
     const t = $("paTime");
     if (t) t.textContent = Math.round((Date.now() - PROCDIAG.started) / 1000) + " 秒";
-    const st = $("paState");
-    if (st) st.innerHTML = '<i class="bi bi-arrow-repeat pa-spin"></i> 正在分析…';
   }, 800);
 }
 
@@ -718,9 +718,16 @@ function procDiagPaintState() {
   if (PROCDIAG.error) { f.textContent = PROCDIAG.error; return; }
   if (!d) { f.textContent = "点「重新分析」把当前资源快照交给内置 AI 分析"; return; }
   const tk = (d.estimated ? "≈" : "") + ((d.tokens_in || 0) + (d.tokens_out || 0));
-  f.textContent = "模型 " + (d.model || "-") + " · 用时 " + (d.elapsed_ms || 0) + " ms · tokens " + tk +
+  f.textContent = "模型 " + (d.model || "-") + " · 用时 " + procDiagDur(d.elapsed_ms) + " · tokens " + tk +
     "（输入 " + (d.tokens_in || 0) + " / 输出 " + (d.tokens_out || 0) + "）· 快照 " +
     procPmClock((d.snapshot || {}).time);
+}
+
+/* 毫秒 → 分秒：20395 → 20 秒，95000 → 1 分 35 秒 */
+function procDiagDur(ms) {
+  const s = Math.max(0, Math.round((ms || 0) / 1000));
+  const m = Math.floor(s / 60);
+  return m > 0 ? m + " 分 " + (s % 60) + " 秒" : s + " 秒";
 }
 
 /* 顶部四张快照卡片（复用进程管理器的卡片样式） */
@@ -756,8 +763,9 @@ function procDiagPaintResult() {
   const box = $("paResult");
   if (!box) return;
   if (PROCDIAG.busy) {
-    box.innerHTML = '<div class="pa-loading"><i class="bi bi-arrow-repeat pa-spin"></i> ' +
-      '正在分析本机资源占用…已等待 <b id="paTime">0 秒</b>' +
+    box.innerHTML = '<div class="pa-loading">' +
+      '<div class="pa-loading-row"><i class="bi bi-arrow-repeat pa-spin"></i>' +
+      '正在分析本机资源占用…已等待 <b id="paTime">0 秒</b></div>' +
       '<div class="pa-skel"><span></span><span></span><span></span></div>' +
       '<div class="pa-loading-tip">快照已采集，正在等模型给出结论；接口越慢这里等得越久</div></div>';
     return;

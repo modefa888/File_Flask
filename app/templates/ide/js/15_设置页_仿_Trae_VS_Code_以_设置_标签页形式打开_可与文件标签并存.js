@@ -40,7 +40,7 @@
 
   /* ---------- 活动栏图标顺序（设置 → 外观 可修改） ----------
    顺序存 ide.settings.actOrder（data-panel 组成的数组），启动时按它重排活动栏；
-   插件运行期注册的图标不在数组里，保持在末尾（设置按钮之前），用户拖动后即被记入。 */
+   插件运行期注册的图标不在数组里，保持在末尾（底部图标组之前），用户拖动后即被记入。 */
 const ACT_SHORT = { explorer: "资源管理器", search: "搜索", git: "源代码管理", run: "运行和调试",
   runner: "后台任务", env: "运行环境", dbconn: "数据库", ext: "扩展" };
 // 默认顺序（与 partials/body.html 的书写顺序一致）：「恢复默认顺序」即回到这里，而不是回到「当前看到的顺序」
@@ -60,9 +60,11 @@ function actOrderLabel(act) {   // 活动栏 title 里常带括号说明，列�
 function applyActOrder() {
   const bar = document.getElementById("activitybar");
   if (!bar) return;
-  const settingsAct = document.getElementById("actSettings");   // 排序只在设置按钮之前进行
   const acts = [...bar.querySelectorAll(".act[data-panel]")];
   if (!acts.length) return;
+  // 排序锚点 = 底部图标组里的第一个（进程资源管理器图标），锚点之后的「设置」永远在最底下。
+  // 不能用 #actSettings 当锚点：那样被插入的图标会落到锚点之后的底部图标下面去，整列图标会被挤到底部。
+  const anchor = bar.querySelector(".act.bottom") || document.getElementById("actSettings") || null;
   const rank = new Map();
   actOrderEffective().forEach((id, i) => { if (!rank.has(id)) rank.set(id, i); });
   const BIG = 1e9;
@@ -72,7 +74,7 @@ function applyActOrder() {
       const ry = rank.has(y.a.dataset.panel) ? rank.get(y.a.dataset.panel) : BIG;
       return (rx - ry) || (x.i - y.i);   // 未记录的图标（插件新增）保持原相对位置，排在最后
     })
-    .forEach(o => bar.insertBefore(o.a, settingsAct || null));
+    .forEach(o => bar.insertBefore(o.a, anchor));
 }
 window.applyActOrder = applyActOrder;   // 插件注册 / 移除面板后由 20_ 插件系统补调一次
 
@@ -196,6 +198,10 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
               '<div class="sysai-mod-name">拉取模型列表<span class="sysai-stat" data-stat="models"></span></div>' +
               '<div class="sysai-mod-desc">设置里「拉取模型」按钮探测接口有哪些模型可用</div></div><code>POST /api/ai/models</code>' +
               '<label class="set-switch sysai-sw" data-mod="models" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+            '<div class="sysai-mod"><i class="bi bi-activity"></i><div class="sysai-mod-main">' +
+              '<div class="sysai-mod-name">资源占用诊断<span class="sysai-stat" data-stat="proc"></span></div>' +
+              '<div class="sysai-mod-desc">进程资源管理器里的「AI 诊断」：把本机 CPU / 内存 / 磁盘 / 网络与高占用进程交给 AI 分析</div></div><code>POST /api/proc/diagnose</code>' +
+              '<label class="set-switch sysai-sw" data-mod="proc" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
           '</div>' +
         '</div>' +
 

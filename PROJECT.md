@@ -100,6 +100,7 @@ File_Flask/
 | 18 | `ide/agent.py` | `agent` | AI 智能体：模型自动读/写文件、搜索、执行命令，多轮直到任务完成 |
 | 19 | `ide/chat_history.py` | `chat_history` | AI 对话历史持久化：会话/消息的增删查改（SQLite） |
 | 20 | `ide/pip.py` | `pip` | IDE 内的 Python 包管理：安装 / 卸载 / 查询 |
+| 21 | `ide/proc.py` | `proc` | 进程资源管理器：系统 CPU/内存/磁盘/网络占用、进程列表、结束进程、AI 资源诊断（`POST /api/proc/diagnose`） |
 
 ### 4.1 AI 助手（`ide/ai.py`）
 
@@ -148,6 +149,8 @@ File_Flask/
 | `envprobe.py` | 探测系统 Python / Node 等运行时 |
 | `envinstall.py` | 白名单式一键安装运行时到 `~/.local`，无需管理员 |
 | `portinfo.py` | 端口占用查询 |
+| `services/ide/procinfo.py` | 进程资源管理器采集：后台采样线程（2 秒）出快照，系统/分组占用、进程列表、按 pid 结束进程 |
+| `services/ide/procdiag.py` | AI 资源诊断专用逻辑：采集诊断快照、筛可安全结束的候选进程、组织提问、清洗模型结论（服务端是唯一真源） |
 | `services/ide/chatdb.py` | AI 对话历史 SQLite 存储层（`conversations` + `messages` 双表，按 `user_id` 隔离） |
 | `services/ide/agent/` | Agent 智能体的工具实现与权限门控 |
 | `archive_history.py` | 压缩历史持久化 |

@@ -13,7 +13,11 @@
   }
   .activitybar .act:hover { color: #ffffff; }
   .activitybar .act.active { color: #ffffff; border-left-color: #ffffff; }
-  .activitybar .act.bottom { margin-top: auto; }
+  /* 底部图标组（进程资源管理器 + 设置）：整组吸附在活动栏最底部。
+     只有组内第一个 .act-spacer 用 margin-top:auto 顶开上方空白，其余紧跟其后；
+     两个都写 auto 的话 flex 会平分空白，两个图标之间就会出现一大段空隙。 */
+  .activitybar .act.bottom { margin-top: 0; }
+  .activitybar .act.bottom.act-spacer { margin-top: auto; }
 
   /* 侧边栏 */
   .sidebar {

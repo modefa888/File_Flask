@@ -11,3 +11,5 @@ pymysql>=1.0
 psycopg2-binary>=2.9
 redis>=5.0
 pymongo>=4.6
+# 进程资源管理器（CPU / 内存 / 磁盘 / 进程列表采集）
+psutil>=5.9

@@ -27,6 +27,11 @@
       <div class="act" data-panel="env" title="运行环境（Node / Python / PHP 等）"><i class="bi bi-cpu"></i></div>
       <div class="act" data-panel="dbconn" title="数据库（连接 SQLite / MySQL / PostgreSQL 并浏览管理）"><i class="bi bi-database"></i></div>
       <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
+      {# 底部两个图标：进程资源管理器在设置之上，设置永远在最底下。
+         act-spacer 让「组内第一个」吸收上方全部空白，把整组顶到活动栏最底部（若两个都写 margin-top:auto，
+         flex 会把空白平分，进程图标就会被卡在中间、设置上方留一大段空隙）。
+         applyActOrder() 的排序锚点同样是「第一个 .act.bottom」，二者顺序不会被重排打乱 #}
+      <div class="act bottom act-spacer" id="actProc" title="进程资源管理器（CPU / 内存 / 磁盘 / 网络 / 进程）"><i class="bi bi-activity"></i></div>
       <div class="act bottom" id="actSettings" title="设置 (Ctrl+,)"><i class="bi bi-gear"></i></div>
     </div>
 

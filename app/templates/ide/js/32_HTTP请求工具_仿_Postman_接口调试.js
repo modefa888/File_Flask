@@ -12,6 +12,10 @@
   const API_RES_LANGS = ["auto", "json", "xml", "html", "javascript", "text"];
   const API_REQ_MIN_H = 120;                   // 请求区最小高度：页签 + 至少一行内容
   const API_RES_MIN_H = 140;                   // 响应区最小高度：状态栏 + 页签 + 几行内容
+  const API_PANE_KEY = "ide.http.pane";        // 请求区当前页签：参数 / 请求头 / 请求体 / 认证
+  const API_RTAB_KEY = "ide.http.resTab";      // 响应区当前页签：响应体 / 响应头 / 原始数据
+  const API_PANES = ["params", "headers", "body", "auth"];
+  const API_RTABS = ["body", "headers", "raw"];
 
   let API_REQS = null;
   let API_GROUPS = null;
@@ -146,7 +150,8 @@
     });
     box.innerHTML = html;
   }
-  window.apiSyncOpenMarks = function () { apiRenderList(); };
+  // activate / renderTabsAll 都会调它：此时标签已显示，顺手把「等显示再接上的请求区高度」落实（见 apiFlushReqH）
+  window.apiSyncOpenMarks = function () { apiRenderList(); apiFlushReqH(); };
   function loadApiReqs() { apiRenderList(); }
 
   /* ---------------- 请求构建 ---------------- */
@@ -909,7 +914,9 @@
     if (tab.api && tab.api.req) req = tab.api.req;
     else req = apiFind(req.id) || req;
     // bulk 记录各面板（params / headers / body）是否正处在「批量编辑」纯文本模式
-    tab.api = { req: req, sending: false, err: "", res: null, el: null, curPane: "params", curRes: "body", bulk: {} };
+    if (tab.api && tab.api.hObs) { tab.api.hObs.disconnect(); }   // 重建视图前先停掉上一轮的高度观察
+    apiPendReqH.delete(tab);                                     // 旧视图的「待落高度」作废，避免落到新面板上
+    tab.api = { req: req, sending: false, err: "", res: null, el: null, curPane: "params", curRes: "body", bulk: {}, hObs: null, hPend: 0 };
     tab.name = req.name; if (tab.el) renderTab(tab);
     const h = tab.host;
     h.innerHTML =
@@ -982,7 +989,9 @@
     apiWireResView(tab);      // 响应体视图工具条：容器常驻，只绑一次（内容由 apiPaintRes 重绘）
 
     apiRenderPane(tab, "params"); apiRenderPane(tab, "headers"); apiRenderPane(tab, "body"); apiRenderPane(tab, "auth");
-    apiShowPane(tab, "params"); apiPaintRes(tab);
+    // 刷新 / 重开标签后接上上次看的页签（请求区 + 响应区），和高度一样属于工具级偏好
+    apiShowPane(tab, apiPrefGet(API_PANE_KEY, API_PANES, "params"));
+    apiShowRes(tab, apiPrefGet(API_RTAB_KEY, API_RTABS, "body"));
     apiWireResize(tab);        // 响应状态栏可上下拖动：调整请求区 / 响应区的高度
   }
 
@@ -993,18 +1002,52 @@
     const v = parseInt(localStorage.getItem(API_REQ_H_KEY) || "0", 10);
     return (v > 0) ? v : 0;
   }
-  /* 收敛并落到 DOM：上限 =「面板高 - 响应区最小高度」，所以永远挤不没响应区 */
+  /* 收敛并落到 DOM：上限 =「面板高 - 响应区最小高度」，所以永远挤不没响应区。
+     面板还没排版时（标签未激活 / 隐藏中，clientHeight 为 0）直接放弃，绝不能拿 0 去收敛 ——
+     那样会被压成最小高度，刷新后拖好的「位置」就丢了（见 apiRestoreReqH）。 */
   function apiApplyReqH(tab, h) {
     const el = tab.api && tab.api.el;
     if (!el || !el.req || !el.root || !el.req.isConnected) return 0;
-    const max = Math.max(API_REQ_MIN_H, (el.root.clientHeight || 0) - API_RES_MIN_H);
+    const avail = el.root.clientHeight || 0;
+    if (avail <= 0) return 0;                            // 量不到尺寸：先不应用，等有高度再来
+    const max = Math.max(API_REQ_MIN_H, avail - API_RES_MIN_H);
     const v = Math.max(API_REQ_MIN_H, Math.min(max, Math.round(h)));
     el.req.classList.add("fixed");
     el.req.style.height = v + "px";
     return v;
   }
+  /* 复原上次拖出来的高度。视图是在 activate 之前构建的（那时 .cm-host 还是 display:none），
+     当场量不到高度，所以先挂进「等待队列」，等标签被激活（apiSyncOpenMarks 会被调用）或
+     ResizeObserver 发现它终于有尺寸时再落；落成功就出队。 */
+  const apiPendReqH = new Set();
+  function apiFlushReqH() {
+    if (!apiPendReqH.size) return;
+    apiPendReqH.forEach(function (tab) {
+      const el = tab.api && tab.api.el;
+      if (!el || !el.req) { apiPendReqH.delete(tab); return; }          // 视图已重建：旧状态作废
+      const h = apiSavedReqH() || tab.api.hPend || 0;
+      if (apiApplyReqH(tab, h)) apiPendReqH.delete(tab);
+    });
+  }
+  function apiRestoreReqH(tab) {
+    if (tab.api.hObs) { tab.api.hObs.disconnect(); tab.api.hObs = null; }
+    const saved = apiSavedReqH();
+    if (!saved) { apiPendReqH.delete(tab); return; }     // 从没拖过：保持内容撑开的默认布局
+    if (apiApplyReqH(tab, saved)) { apiPendReqH.delete(tab); return; }
+    tab.api.hPend = saved;                               // 记下待落的高度，等标签显示出来
+    apiPendReqH.add(tab);
+    if (typeof ResizeObserver !== "function") return;    // 没有 RO 就只靠 activate 时的 flush
+    const ob = new ResizeObserver(function () {
+      apiFlushReqH();
+      if (!apiPendReqH.has(tab)) { ob.disconnect(); tab.api.hObs = null; }
+    });
+    tab.api.hObs = ob;
+    ob.observe(tab.api.el.root);
+  }
   function apiResetReqH(tab) {
     const el = tab.api && tab.api.el; if (!el || !el.req) return;
+    if (tab.api.hObs) { tab.api.hObs.disconnect(); tab.api.hObs = null; }
+    apiPendReqH.delete(tab); tab.api.hPend = 0;
     el.req.classList.remove("fixed");
     el.req.style.height = "";
     try { localStorage.removeItem(API_REQ_H_KEY); } catch (_) {}
@@ -1013,8 +1056,7 @@
     const el = tab.api.el, head = tab.host.querySelector(".api-res-head");
     if (!head || !el.req) return;
     head.title = "按住上下拖动，调整请求区 / 响应区高度（双击恢复默认）";
-    const saved = apiSavedReqH();
-    if (saved) apiApplyReqH(tab, saved);                // 重绘后接上上次拖出来的高度
+    apiRestoreReqH(tab);                                // 重绘后接上上次拖出来的高度
     let dragging = false, startY = 0, startH = 0;
     const onMove = function (e) {
       if (!dragging) return;
@@ -1060,8 +1102,16 @@
     });
   });
 /*__APPEND__*/
+  /* 工具级「视图偏好」读写：值必须在白名单里才认，脏数据一律回默认值 */
+  function apiPrefGet(key, allowed, dft) {
+    let v = null; try { v = localStorage.getItem(key); } catch (_) {}
+    return (v && allowed.indexOf(v) >= 0) ? v : dft;
+  }
+  function apiPrefSet(key, v) { try { localStorage.setItem(key, v); } catch (_) {} }
+
   function apiShowPane(tab, t) {
     tab.api.curPane = t;
+    apiPrefSet(API_PANE_KEY, t);            // 记住看的是哪一页：刷新 / 重开请求后回到同一页
     tab.host.querySelectorAll(".api-tab").forEach(function (b) { b.classList.toggle("active", b.dataset.t === t); });
     tab.host.querySelectorAll(".api-pane").forEach(function (p) {
       const on = p.dataset.p === t;
@@ -1071,6 +1121,7 @@
   }
   function apiShowRes(tab, t) {
     tab.api.curRes = t;
+    apiPrefSet(API_RTAB_KEY, t);
     tab.host.querySelectorAll(".api-rtab").forEach(function (b) { b.classList.toggle("active", b.dataset.rt === t); });
     apiPaintRes(tab);
   }

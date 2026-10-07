@@ -79,6 +79,12 @@
 .api-send { flex: none; }
 
 .api-req { display: flex; flex-direction: column; border-bottom: 1px solid #2a2a2a; }
+/* 拖过响应状态栏之后（JS 加 .fixed）：请求区锁定像素高度，不再被响应区挤压，
+   超出部分由面板自己滚动；同时取消请求头表格的 6 行上限 —— 拖多高就显示多少行。 */
+.api-req.fixed { flex: none; overflow: hidden; }
+.api-req.fixed > .api-tabs { flex: none; }
+.api-req.fixed > .api-panes { flex: 1; min-height: 0; overflow: auto; }
+.api-req.fixed .api-kv-wrap { max-height: none; }
 .api-tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid #2a2a2a; }
 .api-tab { border: none; background: transparent; color: #9a9a9a; padding: 9px 12px; cursor: pointer; font-size: 12.5px; border-bottom: 2px solid transparent; }
 .api-tab:hover { color: #e6e6e6; }
@@ -93,20 +99,35 @@
 .api-pane.active { display: block; }
 
 /* 请求头 / 参数 / 表单：行高固定 = td 上下内边距 3+3 + 输入框 30px = 36px，
-   外层 .api-kv-wrap 限高 6 行（6 × 36 = 216px），更多行用内部滚动条查看。
+   外层 .api-kv-wrap 限高 = 表头 20px + 6 行数据（6 × 36 = 216px），更多行用内部滚动条查看。
    原来不限高时，几十行请求头会把下方响应区域整个挤出屏幕（.scroll-thin 负责细滚动条外观） */
 .api-kv { width: 100%; border-collapse: collapse; }
 .api-kv td { padding: 3px; height: 36px; box-sizing: border-box; vertical-align: middle; }
 .api-kv-c { width: 26px; text-align: center; }
-.api-kv-k, .api-kv-v { width: 50%; height: 30px; }
+.api-kv-k, .api-kv-v, .api-kv-d { height: 30px; }
+/* 列宽写在表头 th 上：输入框统一 width:100% 撑满各自单元格，宽度只能靠单元格约束才稳定 */
+.api-kvh-k { width: 28%; }
+.api-kvh-v { width: 34%; }
+.api-kvh-d { width: auto; }
+/* 表头吸顶：表格内部滚动时「名称 / 值 / 注释」始终可见（底色需与面板一致，否则会透出下面的行） */
+.api-kv thead th { position: sticky; top: 0; z-index: 1; padding: 0 3px 4px; background: #1e1e1e;
+  font-size: 11.5px; font-weight: 600; color: #8a8a8a; text-align: left; }
 .api-kv input { width: 100%; box-sizing: border-box; background: #2d2d2d; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 4px; padding: 6px 8px; outline: none; font-family: var(--mono, ui-monospace, Consolas, monospace); }
-.api-kv-wrap { max-height: 216px; overflow-y: auto; overflow-x: hidden; }
+.api-kv-wrap { max-height: 236px; overflow-y: auto; overflow-x: hidden; }
 .api-kv input:focus { border-color: #0e6cc4; }
 .api-kv-x { width: 28px; text-align: center; }
 .api-kv-del { border: none; background: transparent; color: #888; cursor: pointer; padding: 4px; border-radius: 4px; }
 .api-kv-del:hover { background: rgba(255,255,255,.1); color: #ff6b6b; }
 .api-add { margin-top: 8px; border: 1px dashed #444; background: transparent; color: #9a9a9a; border-radius: 5px; padding: 6px 10px; cursor: pointer; }
 .api-add:hover { background: rgba(255,255,255,.04); color: #e6e6e6; }
+/* 表格上方的小工具条：右侧「批量编辑」与 Postman 的 Bulk Edit 同位 */
+.api-kv-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.api-kv-hint { font-size: 11.5px; color: #7d7d7d; }
+/* 批量编辑模式下的纯文本输入区（替代整张表） */
+.api-kv-bulk { width: 100%; box-sizing: border-box; min-height: 152px; resize: vertical;
+  background: #1b1b1b; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 6px; padding: 8px 10px; outline: none;
+  font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12.5px; line-height: 1.6; }
+.api-kv-bulk:focus { border-color: #0e6cc4; }
 
 .api-body-modes { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; flex-wrap: wrap; }
 .api-radio { color: #bdbdbd; cursor: pointer; }
@@ -121,7 +142,15 @@
 
 /* 响应 */
 .api-res { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.api-res-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #2a2a2a; }
+/* 这条状态栏（200 OK · 耗时 · 大小）兼作「请求区 / 响应区」的上下拖动分隔条：
+   整条按住即可上下拖（里面的按钮除外），双击恢复默认；悬停时顶边亮一条蓝线作提示。 */
+.api-res-head { position: relative; display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid #2a2a2a; cursor: row-resize; user-select: none; }
+.api-res-head .api-mini { cursor: pointer; }
+.api-res-head::before { content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 2px;
+  background: transparent; transition: background .12s; }
+.api-res-head:hover::before, .api-res-head.dragging::before { background: #007fd4; }
+.api-res-head.dragging { background: rgba(0,127,212,.07); }
 .api-res-meta { font-size: 12.5px; color: #9a9a9a; }
 .api-res-meta.ok { color: #4ec47a; }
 .api-res-meta.warn { color: #e0a64b; }
@@ -141,8 +170,83 @@
 .api-hk { color: #7fc3ff; font-weight: 600; white-space: nowrap; width: 1px; }
 .api-hv { color: #cfcfcf; font-family: var(--mono, ui-monospace, Consolas, monospace); }
 .api-img { max-width: 100%; border-radius: 6px; }
+/* 响应体视图工具条（美化 / 原始 / 预览 / 可视化 + 语言 + 换行），对标 Postman 的 Body 工具条。
+   默认隐藏、由 .on 显示：不能只靠内联 style.display=""（会回落到这里的 none，同 .api-pane 的坑） */
+.api-res-view { display: none; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #2a2a2a; }
+.api-res-view.on { display: flex; }
+.api-rviews { display: flex; gap: 2px; }
+.api-rview { border: none; background: transparent; color: #9a9a9a; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 12.5px; }
+.api-rview:hover:not(:disabled) { background: rgba(255,255,255,.06); color: #e6e6e6; }
+.api-rview.active { background: rgba(0,105,184,.22); color: #fff; }
+.api-rview:disabled { opacity: .38; cursor: not-allowed; }
+/* 灰掉的按钮不触发悬停，所以「为什么不可用」的提示挂在这层 span 上 */
+.api-rview-off { display: inline-flex; }
+.api-res-lang { background: #2d2d2d; color: #bdbdbd; border: 1px solid #3c3c3c; border-radius: 5px; padding: 4px 6px; font-size: 12px; outline: none; }
+.api-wrapbtn { padding: 5px 8px; }
+.api-wrapbtn.active { color: #fff; background: rgba(0,105,184,.22); border-color: #0e6cc4; }
+/* 预览：给外面的 HTML 一块自己的画布（沙箱由 JS 设，这里只管尺寸和底色） */
+.api-prev { width: 100%; min-height: 360px; border: 0; border-radius: 6px; background: #fff; }
+.api-pre-nowrap { white-space: pre; word-break: normal; }
+/* 可视化：把 JSON 摆成表格 */
+.api-vz { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.api-vz th { position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap; padding: 6px 8px;
+  color: #8a8a8a; font-weight: 600; background: #1e1e1e; border-bottom: 1px solid #2a2a2a; }
+.api-vz td { padding: 6px 8px; border-bottom: 1px solid #2a2a2a; color: #d6d6d6; vertical-align: top; word-break: break-all; }
+.api-vz tbody tr:hover { background: rgba(255,255,255,.03); }
+.api-vz-i { width: 1px; white-space: nowrap; color: #808080; }
+.api-vz-k { width: 1px; white-space: nowrap; color: #7fc3ff; font-family: var(--mono, ui-monospace, Consolas, monospace); }
+.api-vz-note { margin-top: 8px; font-size: 11.5px; color: #7d7d7d; }
+/* 语法高亮配色（深色下取 VS Code 那套） */
+.api-tk-k { color: #9cdcfe; }
+.api-tk-s { color: #ce9178; }
+.api-tk-n { color: #b5cea8; }
+.api-tk-l { color: #569cd6; }
+.api-tk-p { color: #d4d4d4; }
+.api-tk-c { color: #6a9955; }
+.api-tk-t { color: #569cd6; }
+.api-tk-a { color: #9cdcfe; }
 
 .api-curl-in { width: 100%; box-sizing: border-box; min-height: 160px; resize: vertical; background: #1b1b1b; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 6px; padding: 10px; outline: none; font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12.5px; }
+
+/* 生成代码悬浮框（Postman 风格）：固定定位在「代码」按钮下方，右对齐 */
+.api-code-pop { position: fixed; z-index: 2000; width: 580px; max-width: calc(100vw - 24px);
+  background: #252526; border: 1px solid #3c3c3c; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  display: flex; flex-direction: column; overflow: hidden; }
+.api-code-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #2a2a2a; }
+.api-code-title { font-size: 12.5px; color: #cfcfcf; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.api-code-title .bi { color: #9a9a9a; }
+/* 语言下拉：输入框兼搜索框 + 关键字过滤列表（列表用 fixed 贴输入框下方，不被 overflow:hidden 裁剪） */
+.api-code-langwrap { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+.api-code-lang-ico { position: absolute; left: 8px; font-size: 12px; color: #8a8a8a; pointer-events: none; }
+.api-code-lang-input { width: 100%; min-width: 0; background: #2d2d2d; color: #e6e6e6; border: 1px solid #3c3c3c;
+  border-radius: 5px; padding: 6px 8px 6px 26px; font-size: 12.5px; outline: none; }
+.api-code-lang-input:focus { border-color: #0e639c; }
+.api-code-lang-input::placeholder { color: #7a7a7a; }
+.api-code-lang-list { position: fixed; z-index: 2100; max-height: 260px; overflow: auto; padding: 4px;
+  background: #2d2d2d; border: 1px solid #3c3c3c; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+.api-code-lang-item { padding: 6px 8px; font-size: 12.5px; color: #dcdcdc; border-radius: 4px; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.api-code-lang-item.is-active { background: #0e639c; color: #ffffff; }
+.api-code-lang-item.is-cur::after { content: "\2713"; margin-left: 8px; opacity: .8; }
+.api-code-lang-item mark { background: transparent; color: #4daafc; font-weight: 600; }
+.api-code-lang-item.is-active mark { color: #ffffff; }
+.api-code-lang-empty { padding: 10px 8px; font-size: 12.5px; color: #8a8a8a; text-align: center; }
+.api-code-body { margin: 0; max-height: 360px; overflow: auto; padding: 12px 14px; white-space: pre;
+  font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12.5px; line-height: 1.6; color: #d6d6d6; }
+:where(html.theme-light) .api-code-pop { background: #ffffff; border-color: #d0d0d0; box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+:where(html.theme-light) .api-code-head { border-bottom-color: #e5e5e5; }
+:where(html.theme-light) .api-code-title { color: #1f2328; }
+:where(html.theme-light) .api-code-title .bi { color: #6a6a6a; }
+:where(html.theme-light) .api-code-lang-input { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .api-code-lang-ico { color: #8a8a8a; }
+:where(html.theme-light) .api-code-lang-input::placeholder { color: #9a9a9a; }
+:where(html.theme-light) .api-code-lang-list { background: #ffffff; border-color: #d0d0d0; box-shadow: 0 8px 24px rgba(0,0,0,.15); }
+:where(html.theme-light) .api-code-lang-item { color: #1f2328; }
+:where(html.theme-light) .api-code-lang-item.is-active { background: #0e639c; color: #ffffff; }
+:where(html.theme-light) .api-code-lang-item mark { color: #0b5fa5; }
+:where(html.theme-light) .api-code-lang-item.is-active mark { color: #ffffff; }
+:where(html.theme-light) .api-code-lang-empty { color: #6a6a6a; }
+:where(html.theme-light) .api-code-body { color: #1f2328; }
 
 /* ---------- 浅色主题覆盖 ---------- */
 :where(html.theme-light) .api { background: #ffffff; color: #1f2328; }
@@ -155,7 +259,8 @@
 :where(html.theme-light) .api-sub { color: #8a8a8a; }
 :where(html.theme-light) .api-name { color: #1f2328; }
 :where(html.theme-light) .api-bar, :where(html.theme-light) .api-tabs, :where(html.theme-light) .api-req,
-:where(html.theme-light) .api-res-head, :where(html.theme-light) .api-res-tabs, :where(html.theme-light) .api-hdrs td { border-bottom-color: #e5e5e5; }
+:where(html.theme-light) .api-res-head, :where(html.theme-light) .api-res-tabs, :where(html.theme-light) .api-hdrs td,
+:where(html.theme-light) .api-res-view, :where(html.theme-light) .api-vz th, :where(html.theme-light) .api-vz td { border-bottom-color: #e5e5e5; }
 :where(html.theme-light) .api-method, :where(html.theme-light) .api-url, :where(html.theme-light) .api-mini,
 :where(html.theme-light) .api-kv input, :where(html.theme-light) .api-raw, :where(html.theme-light) .api-auth-type,
 :where(html.theme-light) .api-auth-token, :where(html.theme-light) .api-auth-u, :where(html.theme-light) .api-auth-p,
@@ -182,3 +287,24 @@
 :where(html.theme-light) .api-list.drop-on { background: #f2f7fc; }
 :where(html.theme-light) .api-mv-row select { background: #ffffff; color: #1f2328; border-color: #cecece; }
 :where(html.theme-light) .api-mini:disabled:hover { background: #ffffff; color: #1f2328; }
+:where(html.theme-light) .api-res-head.dragging { background: rgba(0,95,184,.07); }
+:where(html.theme-light) .api-kv thead th { background: #ffffff; color: #6a6a6a; }
+:where(html.theme-light) .api-kv-hint { color: #8a8a8a; }
+:where(html.theme-light) .api-kv-bulk { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .api-rview { color: #5a5a5a; }
+:where(html.theme-light) .api-rview:hover:not(:disabled) { background: #f0f0f0; color: #000; }
+:where(html.theme-light) .api-rview.active { background: #dceaf8; color: #005fb8; }
+:where(html.theme-light) .api-res-lang { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .api-wrapbtn.active { background: #dceaf8; color: #005fb8; border-color: #005fb8; }
+:where(html.theme-light) .api-vz th { background: #ffffff; color: #6a6a6a; }
+:where(html.theme-light) .api-vz td { color: #1f2328; }
+:where(html.theme-light) .api-vz tbody tr:hover { background: #f6f6f6; }
+:where(html.theme-light) .api-vz-note { color: #8a8a8a; }
+:where(html.theme-light) .api-tk-k { color: #0b5c9a; }
+:where(html.theme-light) .api-tk-s { color: #a31515; }
+:where(html.theme-light) .api-tk-n { color: #098658; }
+:where(html.theme-light) .api-tk-l { color: #0000ff; }
+:where(html.theme-light) .api-tk-p { color: #1f2328; }
+:where(html.theme-light) .api-tk-c { color: #0a7a3d; }
+:where(html.theme-light) .api-tk-t { color: #0000ff; }
+:where(html.theme-light) .api-tk-a { color: #b5560a; }

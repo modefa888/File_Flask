@@ -290,12 +290,21 @@ def unseal_requests(requests, password):
 
 # ---------------------------------------------------------------- 导入：清洗
 def _norm_rows(raw):
-    """行数组规范化：丢掉非对象项，缺字段补空串，on 默认勾选。"""
+    """行数组规范化：丢掉非对象项，缺字段补空串，on 默认勾选。
+
+    desc 是前端的「注释」列（纯备注，不参与请求构建）。这里按白名单逐字段挑，
+    漏掉 desc 的话「导出 → 导入」一个来回注释就全没了。
+    """
     out = []
     for row in raw if isinstance(raw, list) else []:
         if not isinstance(row, dict):
             continue
-        out.append({"on": bool(row.get("on", True)), "k": _text(row.get("k")), "v": _text(row.get("v"))})
+        out.append({
+            "on": bool(row.get("on", True)),
+            "k": _text(row.get("k")),
+            "v": _text(row.get("v")),
+            "desc": _text(row.get("desc")),
+        })
     return out
 
 

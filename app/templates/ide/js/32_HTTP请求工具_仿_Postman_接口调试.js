@@ -6,9 +6,16 @@
   const API_GROUP_KEY = "ide.http.groups";     // 分组单独存一个键：旧数据没有 gid 字段，天然落在「未分组」，无需迁移
   const API_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
   const API_METHOD_CLS = { GET: "get", POST: "post", PUT: "put", PATCH: "patch", DELETE: "delete", HEAD: "head", OPTIONS: "options" };
+  const API_REQ_H_KEY = "ide.http.reqHeight";  // 拖过响应状态栏后的「请求区」高度（px）；没拖过就没有这个键
+  const API_RES_VIEW_KEY = "ide.http.resView";  // 响应体视图偏好：美化/原始/预览/可视化 + 语言 + 是否自动换行
+  const API_RES_VIEWS = ["pretty", "raw", "preview", "visualize"];
+  const API_RES_LANGS = ["auto", "json", "xml", "html", "javascript", "text"];
+  const API_REQ_MIN_H = 120;                   // 请求区最小高度：页签 + 至少一行内容
+  const API_RES_MIN_H = 140;                   // 响应区最小高度：状态栏 + 页签 + 几行内容
 
   let API_REQS = null;
   let API_GROUPS = null;
+  let API_RES_VIEW = null;     // 响应体视图偏好（见 apiResView）
 
   function apiAttr(s) { return escAttr ? escAttr(s) : esc(String(s == null ? "" : s)); }
 
@@ -64,7 +71,8 @@
     apiPersist();
     return r.gid;
   }
-  function apiRow(k, v) { return { on: true, k: k || "", v: v || "" }; }
+  /* 一行 key-value。desc 是「注释」列：纯备注，不参与 URL / 请求头 / 表单的构建 */
+  function apiRow(k, v, d) { return { on: true, k: k || "", v: v || "", desc: d || "" }; }
   /* 复制文本：优先异步剪贴板，失败再回退 execCommand（http / webview / 无剪贴板权限都能兜住） */
   function apiCopy(text) {
     const t = String(text == null ? "" : text);
@@ -219,6 +227,665 @@
     return req;
   }
 /*__APPEND__*/
+  /* ---------------- 生成代码（Postman 风格的多语言代码段） ----------------
+     把当前请求翻译成各语言的等价调用。复用了请求构建那套 apiBuildUrl / apiBuildHeaders /
+     apiBuildBody，所以生成的代码与「实际发出的请求」严格一致（含自动补的 Content-Type、Bearer/Basic 认证）。
+     字符串一律走 JSON.stringify 或语言自带的「原始字符串」语法兜底，保证生成的代码片段本身是合法代码，
+     不会被请求体里的引号 / 反斜杠带崩（也顺便避免 XSS：悬浮框里用 textContent 渲染，不碰 innerHTML）。 */
+  const API_CODE_TARGETS = [
+    { id: "cs_httpclient", label: "C# - HttpClient" },
+    { id: "cs_restsharp", label: "C# - RestSharp" },
+    { id: "curl", label: "cURL" },
+    { id: "dart_dio", label: "Dart - dio" },
+    { id: "dart_http", label: "Dart - http" },
+    { id: "go", label: "Go - Native" },
+    { id: "http", label: "HTTP" },
+    { id: "java_okhttp", label: "Java - OkHttp" },
+    { id: "java_unirest", label: "Java - Unirest" },
+    { id: "js_fetch", label: "JavaScript - Fetch" },
+    { id: "js_jquery", label: "JavaScript - jQuery" },
+    { id: "js_xhr", label: "JavaScript - XHR" },
+    { id: "kotlin_okhttp", label: "Kotlin - Okhttp" },
+    { id: "c_libcurl", label: "C - libcurl" },
+    { id: "node_axios", label: "NodeJs - Axios" },
+    { id: "node_native", label: "NodeJs - Native" },
+    { id: "node_request", label: "NodeJs - Request" },
+    { id: "node_unirest", label: "NodeJs - Unirest" },
+    { id: "objc_nsurlsession", label: "Objective-C - NSURLSession" },
+    { id: "ocaml", label: "OCaml - Cohttp" },
+    { id: "php_curl", label: "PHP - cURL" },
+    { id: "php_guzzle", label: "PHP - Guzzle" },
+    { id: "php_http_request2", label: "PHP - HTTP_Request2" },
+    { id: "php_pecl_http", label: "PHP - pecl_http" },
+    { id: "ps", label: "PowerShell - RestMethod" },
+    { id: "py_http", label: "Python - http.client" },
+    { id: "py_requests", label: "Python - Requests" },
+    { id: "r_httr", label: "R - httr" },
+    { id: "r_rcurl", label: "R - RCurl" },
+    { id: "ruby", label: "Ruby - Net::HTTP" },
+    { id: "rust_reqwest", label: "Rust - reqwest" },
+    { id: "httpie", label: "Shell - Httpie" },
+    { id: "wget", label: "Shell - wget" },
+    { id: "swift_urlsession", label: "Swift - URLSession" },
+  ];
+  const API_CODE_LANG_KEY = "ide.http.codeLang";   // 记住上次选的语言（和 cURL 偏好一样，工具级）
+
+  function apiUrlParts(url) {
+    try { const u = new URL(url); return { host: u.host, path: (u.pathname || "/") + u.search, scheme: u.protocol.replace(":", "") }; }
+    catch (_) { return { host: url, path: "/", scheme: "http" }; }
+  }
+  /* 各语言的字符串字面量写法。JSON.stringify 的输出是合法的 JS/Python/Go/Java/C#/R/ObjC(C99)/Ruby
+     字符串常量，所以大多数语言直接复用它；只有插值/原始字符串语义特殊的语言单独兜底：
+       - Dart / Kotlin：$ 是插值，需转义成 \$
+       - Rust / Swift：不支持 \uXXXX，改用原始字符串 r#"..."# / #"..."#
+       - Go / OCaml：用反引号 / {| |} 原始串，含定界符时回退
+       - Ruby：双引号串 #{} 会插值，转义成 \#{
+       - PowerShell：单引号 here-string + 转义 $ 和 "
+       - Shell：单引号串按 '\'' 转义 */
+  function pyDict(o) { const ks = Object.keys(o); if (!ks.length) return "{}"; return "{\n" + ks.map(function (k) { return "    " + JSON.stringify(k) + ": " + JSON.stringify(o[k]); }).join(",\n") + "\n}"; }
+  function jsDict(o) { const ks = Object.keys(o); if (!ks.length) return "{}"; return "{\n  " + ks.map(function (k) { return JSON.stringify(k) + ": " + JSON.stringify(o[k]); }).join(",\n  ") + "\n}"; }
+  function phpStr(s) { return "'" + String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'"; }
+  function phpAssoc(o) { const ks = Object.keys(o); if (!ks.length) return "[]"; return "[\n" + ks.map(function (k) { return "    " + JSON.stringify(k) + " => " + phpStr(o[k]); }).join(",\n") + "\n  ]"; }
+  function phpUrl(s) { return '"' + String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"'; }
+  function goStr(s) { return String(s).indexOf("`") >= 0 ? JSON.stringify(s) : "`" + s + "`"; }
+  function csStr(s) { return JSON.stringify(s); }
+  function javaStr(s) { return JSON.stringify(s); }
+  function cStr(s) { return JSON.stringify(s); }
+  function rStr(s) { return JSON.stringify(s); }
+  function objcStr(s) { return "@" + JSON.stringify(s); }
+  function rubyDq(s) { return '"' + String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"'; }
+  /* Ruby 双引号串里 #{} 会被当插值，请求体里若恰好有就转义掉（#\{ 在 Ruby 里是字面 #） */
+  function rubyStr(s) { return JSON.stringify(s).replace(/#([{@$])/g, "#\\$1"); }
+  function ocamlStr(s) { return String(s).indexOf("|}") >= 0 ? JSON.stringify(s) : "{|" + s + "|}"; }
+  function psStr(s) { return '"' + String(s).replace(/`/g, "``").replace(/\$/g, "`$").replace(/"/g, '""') + '"'; }
+  function dartStr(s) { return JSON.stringify(s).replace(/\$/g, function () { return "\\$"; }); }
+  function kotlinStr(s) { return JSON.stringify(s).replace(/\$/g, function () { return "\\$"; }); }
+  function rustStr(s) { const t = String(s); if (t.indexOf('"#') < 0) return 'r#"' + t + '"#'; if (t.indexOf('"##') < 0) return 'r##"' + t + '"##'; return 'r###"' + t + '"###'; }
+  function swiftStr(s) { const t = String(s); if (t.indexOf('"#') < 0) return '#"' + t + '"#'; if (t.indexOf('"##') < 0) return '##"' + t + '"##'; return '###"' + t + '"###'; }
+  function shq(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
+
+  function apiGenCode(target, req) {
+    if (target === "curl") return apiCurl(req);
+    const url = apiBuildUrl(req);
+    const headers = apiBuildHeaders(req);
+    const body = apiBuildBody(req);
+    const hasBody = !!(body && req.method !== "GET" && req.method !== "HEAD");
+    const ct = headers["Content-Type"] || (hasBody ? "text/plain" : "");
+    switch (target) {
+      case "cs_httpclient": return apiCodeCs(url, headers, body, hasBody, req.method, ct);
+      case "cs_restsharp": return apiCodeRestSharp(url, headers, body, hasBody, req.method);
+      case "dart_dio": return apiCodeDartDio(url, headers, body, hasBody, req.method);
+      case "dart_http": return apiCodeDartHttp(url, headers, body, hasBody, req.method);
+      case "go": return apiCodeGo(url, headers, body, hasBody, req.method, ct);
+      case "http": return apiCodeRawHttp(url, headers, body, hasBody, req.method);
+      case "java_okhttp": return apiCodeJava(url, headers, body, hasBody, req.method, ct);
+      case "java_unirest": return apiCodeUnirest(url, headers, body, hasBody, req.method);
+      case "js_fetch": return apiCodeJs(url, headers, body, hasBody, req.method);
+      case "js_jquery": return apiCodeJquery(url, headers, body, hasBody, req.method);
+      case "js_xhr": return apiCodeXhr(url, headers, body, hasBody, req.method);
+      case "kotlin_okhttp": return apiCodeKotlinOkhttp(url, headers, body, hasBody, req.method, ct);
+      case "c_libcurl": return apiCodeLibcurl(url, headers, body, hasBody, req.method);
+      case "node_axios": return apiCodeNodeAxios(url, headers, body, hasBody, req.method);
+      case "node_native": return apiCodeNodeNative(url, headers, body, hasBody, req.method);
+      case "node_request": return apiCodeNodeRequest(url, headers, body, hasBody, req.method);
+      case "node_unirest": return apiCodeNodeUnirest(url, headers, body, hasBody, req.method);
+      case "objc_nsurlsession": return apiCodeObjc(url, headers, body, hasBody, req.method);
+      case "ocaml": return apiCodeOcaml(url, headers, body, hasBody, req.method);
+      case "php_curl": return apiCodePhpCurl(url, headers, body, hasBody, req.method);
+      case "php_guzzle": return apiCodePhpGuzzle(url, headers, body, hasBody, req.method);
+      case "php_http_request2": return apiCodePhpRequest2(url, headers, body, hasBody, req.method);
+      case "php_pecl_http": return apiCodePhpPecl(url, headers, body, hasBody, req.method);
+      case "ps": return apiCodePs(url, headers, body, hasBody, req.method);
+      case "py_http": return apiCodePyHttp(url, headers, body, hasBody, req.method);
+      case "py_requests": return apiCodePyRequests(url, headers, body, hasBody, req.method);
+      case "r_httr": return apiCodeRHttr(url, headers, body, hasBody, req.method);
+      case "r_rcurl": return apiCodeRRcurl(url, headers, body, hasBody, req.method);
+      case "ruby": return apiCodeRuby(url, headers, body, hasBody, req.method);
+      case "rust_reqwest": return apiCodeRust(url, headers, body, hasBody, req.method);
+      case "httpie": return apiCodeHttpie(url, headers, body, hasBody, req.method);
+      case "wget": return apiCodeWget(url, headers, body, hasBody, req.method);
+      case "swift_urlsession": return apiCodeSwift(url, headers, body, hasBody, req.method);
+      default: return "// 未知语言";
+    }
+  }
+  function apiCodePyHttp(url, headers, body, hasBody, method) {
+    const u = apiUrlParts(url), path = u.path || "/";
+    const conn = u.scheme === "https" ? "HTTPSConnection" : "HTTPConnection";
+    let s = "import http.client\n";
+    if (hasBody) s += "import json\n\n"; else s += "\n";
+    s += "conn = http.client." + conn + '("' + u.host + '")\n';
+    s += (hasBody ? "payload = " + JSON.stringify(body) + "\n\n" : "\npayload = None\n");
+    s += "headers = " + pyDict(headers) + "\n\n";
+    s += 'conn.request("' + method + '", "' + path + '", payload, headers)\n';
+    s += "res = conn.getresponse()\n";
+    s += 'data = res.read().decode("utf-8")\n';
+    s += "print(data)\n";
+    return s;
+  }
+  function apiCodePyRequests(url, headers, body, hasBody, method) {
+    let s = "import requests\n\n";
+    s += 'url = "' + url + '"\n';
+    s += "headers = " + pyDict(headers) + "\n";
+    if (hasBody) s += "payload = " + JSON.stringify(body) + "\n";
+    s += "\nresponse = requests.request(\"" + method + "\", url" + (hasBody ? ", data=payload" : "") + ", headers=headers)\n";
+    s += "print(response.text)\n";
+    return s;
+  }
+  function apiCodeNode(url, headers, body, hasBody, method) {
+    let s = "const url = " + JSON.stringify(url) + ";\n";
+    s += "const options = {\n";
+    s += '  method: "' + method + '",\n';
+    s += "  headers: " + jsDict(headers) + "\n";
+    if (hasBody) s += "  body: " + JSON.stringify(body) + "\n";
+    s += "};\n\n";
+    s += "fetch(url, options)\n";
+    s += "  .then((res) => res.text())\n";
+    s += "  .then((body) => console.log(body))\n";
+    s += "  .catch((error) => console.error(error));\n";
+    return s;
+  }
+  function apiCodeJs(url, headers, body, hasBody, method) {
+    let s = "fetch(" + JSON.stringify(url) + ", {\n";
+    s += '  method: "' + method + '",\n';
+    s += "  headers: " + jsDict(headers) + (hasBody ? ",\n  body: " + JSON.stringify(body) + "\n" : "\n");
+    s += "})\n";
+    s += "  .then((r) => r.text())\n";
+    s += "  .then((data) => console.log(data));\n";
+    return s;
+  }
+  function apiCodePhpCurl(url, headers, body, hasBody, method) {
+    let s = "<?php\n\n";
+    s += "$curl = curl_init();\n\n";
+    s += "curl_setopt_array($curl, [\n";
+    s += '  CURLOPT_URL => ' + phpUrl(url) + ",\n";
+    s += "  CURLOPT_RETURNTRANSFER => true,\n";
+    s += '  CURLOPT_ENCODING => "",\n';
+    s += "  CURLOPT_MAXREDIRS => 10,\n";
+    s += "  CURLOPT_TIMEOUT => 30,\n";
+    s += '  CURLOPT_FOLLOWLOCATION => true,\n';
+    s += '  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,\n';
+    s += '  CURLOPT_CUSTOMREQUEST => "' + method + '",\n';
+    if (hasBody) s += "  CURLOPT_POSTFIELDS => " + phpStr(body) + ",\n";
+    s += "  CURLOPT_HTTPHEADER => [\n";
+    s += Object.keys(headers).map(function (k) { return "    " + phpStr(k + ": " + headers[k]); }).join(",\n");
+    s += "\n  ],\n]);\n\n";
+    s += "$response = curl_exec($curl);\n";
+    s += "$err = curl_error($curl);\n";
+    s += "curl_close($curl);\n\n";
+    s += "if ($err) {\n  echo \"cURL Error #:\" . $err;\n} else {\n  echo $response;\n}\n";
+    return s;
+  }
+  function apiCodePhpGuzzle(url, headers, body, hasBody, method) {
+    let s = "<?php\n\n";
+    s += "use GuzzleHttp\\Client;\n\n";
+    s += "$client = new Client();\n\n";
+    s += "$response = $client->request(\n";
+    s += '  "' + method + '",\n';
+    s += "  " + phpUrl(url) + ",\n";
+    s += "  [\n";
+    s += '    "headers" => ' + phpAssoc(headers) + (hasBody ? ",\n    \"body\" => " + phpStr(body) + "\n" : "\n");
+    s += "  ]\n);\n\n";
+    s += "echo $response->getBody();\n";
+    return s;
+  }
+  function apiCodeCs(url, headers, body, hasBody, method, ct) {
+    const others = {};
+    Object.keys(headers).forEach(function (k) { if (k.toLowerCase() !== "content-type") others[k] = headers[k]; });
+    let s = "using System.Net.Http;\nusing System.Text;\nusing System.Threading.Tasks;\n\n";
+    s += "public class Program\n{\n  public static async Task Main()\n  {\n";
+    s += "    var client = new HttpClient();\n\n";
+    s += '    var request = new HttpRequestMessage(new HttpMethod("' + method + '"), "' + csStr(url) + '");\n';
+    if (hasBody) { s += "    var content = new StringContent(" + csStr(body) + ', null, "' + (ct || "text/plain") + '");\n    request.Content = content;\n'; }
+    Object.keys(others).forEach(function (k) { s += '    request.Headers.TryAddWithoutValidation("' + csStr(k) + '", "' + csStr(others[k]) + '");\n'; });
+    s += "\n    var response = await client.SendAsync(request);\n";
+    s += "    response.EnsureSuccessStatusCode();\n";
+    s += "    var body = await response.Content.ReadAsStringAsync();\n";
+    s += '    System.Console.WriteLine(body);\n';
+    s += "  }\n}\n";
+    return s;
+  }
+  function apiCodeGo(url, headers, body, hasBody, method) {
+    let s = "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n";
+    if (hasBody) s += '\t"strings"\n';
+    s += ")\n\nfunc main() {\n";
+    s += "\turl := " + goStr(url) + "\n\tmethod := " + goStr(method) + "\n\n";
+    if (hasBody) s += "\tpayload := strings.NewReader(" + goStr(body) + ")\n\n";
+    s += "\tclient := &http.Client{}\n";
+    s += "\treq, err := http.NewRequest(method, url, " + (hasBody ? "payload" : "nil") + ")\n";
+    s += "\tif err != nil {\n\t\tfmt.Println(err)\n\t\treturn\n\t}\n\n";
+    Object.keys(headers).forEach(function (k) { s += "\treq.Header.Add(" + goStr(k) + ", " + goStr(headers[k]) + ")\n"; });
+    s += "\n\tres, err := client.Do(req)\n\tif err != nil {\n\t\tfmt.Println(err)\n\t\treturn\n\t}\n\tdefer res.Body.Close()\n\n";
+    s += "\tbody, err := io.ReadAll(res.Body)\n\tif err != nil {\n\t\tfmt.Println(err)\n\t\treturn\n\t}\n\tfmt.Println(string(body))\n}\n";
+    return s;
+  }
+  function apiCodeRuby(url, headers, body, hasBody, method) {
+    const K = { GET: "Get", POST: "Post", PUT: "Put", PATCH: "Patch", DELETE: "Delete", HEAD: "Head", OPTIONS: "Options" };
+    let s = 'require "uri"\nrequire "net/http"\n\n';
+    s += 'url = URI("' + rubyDq(url) + '")\n';
+    s += "http = Net::HTTP.new(url.host, url.port)\n";
+    s += 'http.use_ssl = (url.scheme == "https")\n\n';
+    s += "request = Net::HTTP::" + (K[method] || "Post") + ".new(url)\n";
+    Object.keys(headers).forEach(function (k) { s += "request[" + rubyDq(k) + "] = " + rubyDq(headers[k]) + "\n"; });
+    if (hasBody) s += "request.body = " + rubyStr(body) + "\n";
+    s += "\nresponse = http.request(request)\nputs response.read_body\n";
+    return s;
+  }
+  function apiCodePs(url, headers, body, hasBody, method) {
+    let s = '$method = "' + method + '"\n';
+    s += "$uri = " + psStr(url) + "\n";
+    s += "$headers = @{\n";
+    Object.keys(headers).forEach(function (k) { s += "  " + psStr(k) + " = " + psStr(headers[k]) + "\n"; });
+    s += "}\n";
+    if (hasBody) s += "$body = " + "@'\n" + body + "\n'@\n";
+    s += "$response = Invoke-RestMethod -Method $method -Uri $uri -Headers $headers" + (hasBody ? " -Body $body" : "") + "\n";
+    s += "$response\n";
+    return s;
+  }
+  function apiCodeOcaml(url, headers, body, hasBody, method) {
+    let s = "open Cohttp_lwt_unix\nopen Cohttp\nopen Lwt\n\n";
+    s += "let body =" + (hasBody ? " {|" + body + "|}" : ' ""') + "\n\n";
+    s += "let () =\n  let uri = Uri.of_string " + ocamlStr(url) + " in\n  let headers =\n    Header.init ()";
+    Object.keys(headers).forEach(function (k) { s += "\n      |> Header.add " + ocamlStr(k) + " " + ocamlStr(headers[k]); });
+    s += "\n  in\n";
+    if (hasBody) s += "  let%lwt resp = Client.post ~headers uri ~body:(Cohttp.Body.of_string body) in\n";
+    else s += "  let%lwt resp = Client.get ~headers uri in\n";
+    s += "  let%lwt body_str = Cohttp_lwt.Body.to_string resp.body in\n";
+    s += "  Lwt_io.printl body_str\n";
+    return s;
+  }
+  function apiCodeJava(url, headers, body, hasBody, method, ct) {
+    const others = {};
+    Object.keys(headers).forEach(function (k) { if (k.toLowerCase() !== "content-type") others[k] = headers[k]; });
+    let s = "import okhttp3.*;\nimport java.io.IOException;\n\npublic class Main {\n  public static void main(String[] args) throws IOException {\n";
+    s += "    OkHttpClient client = new OkHttpClient();\n\n";
+    if (hasBody) { s += '    MediaType mediaType = MediaType.parse("' + ct + '");\n    RequestBody body = RequestBody.create(mediaType, ' + javaStr(body) + ");\n"; }
+    s += "    Request request = new Request.Builder()\n      .url(" + javaStr(url) + ")\n      .method(" + method + ", " + (hasBody ? "body" : "null") + ")\n";
+    Object.keys(others).forEach(function (k) { s += '      .addHeader("' + javaStr(k) + '", "' + javaStr(others[k]) + '")\n'; });
+    s += "      .build();\n\n";
+    s += "    Response response = client.newCall(request).execute();\n    System.out.println(response.body().string());\n  }\n}\n";
+    return s;
+  }
+  function apiCodeHttpie(url, headers, body, hasBody, method) {
+    let s = "http " + (method === "GET" ? "" : "--method " + method + " ") + url;
+    Object.keys(headers).forEach(function (k) { s += " " + k + ":" + headers[k]; });
+    if (hasBody) s += " body:=" + JSON.stringify(body);
+    return s.trim() + "\n";
+  }
+  function apiCodeRestSharp(url, headers, body, hasBody, method) {
+    const M = { GET: "Get", POST: "Post", PUT: "Put", DELETE: "Delete", PATCH: "Patch", HEAD: "Head", OPTIONS: "Options" };
+    const others = {};
+    Object.keys(headers).forEach(function (k) { if (k.toLowerCase() !== "content-type") others[k] = headers[k]; });
+    let s = "using RestSharp;\n\n";
+    s += "var client = new RestClient(" + csStr(url) + ");\n";
+    s += 'var request = new RestRequest("", Method.' + (M[method] || "Post") + ");\n";
+    Object.keys(others).forEach(function (k) { s += "request.AddHeader(" + csStr(k) + ", " + csStr(others[k]) + ");\n"; });
+    if (hasBody) s += "request.AddStringBody(" + csStr(body) + ", " + csStr(headers["Content-Type"] || "text/plain") + ");\n";
+    s += "\nvar response = await client.ExecuteAsync(request);\n";
+    s += "Console.WriteLine(response.Content);\n";
+    return s;
+  }
+  function apiCodeDartDio(url, headers, body, hasBody, method) {
+    const ks = Object.keys(headers);
+    let s = "import 'package:dio/dio.dart';\n\nvoid main() async {\n  final dio = Dio();\n\n";
+    s += "  final response = await dio.request(\n    " + dartStr(url) + ",\n";
+    s += "    options: Options(\n      method: '" + method + "',\n      headers: {\n";
+    s += ks.map(function (k) { return "        " + dartStr(k) + ": " + dartStr(headers[k]); }).join(",\n");
+    s += (ks.length ? "\n" : "") + "      },\n    ),\n";
+    if (hasBody) s += "    data: " + dartStr(body) + ",\n";
+    s += "  );\n\n  print(response.data);\n}\n";
+    return s;
+  }
+  function apiCodeDartHttp(url, headers, body, hasBody, method) {
+    const ks = Object.keys(headers);
+    let s = "import 'package:http/http.dart' as http;\n\nvoid main() async {\n  var headers = {\n";
+    s += ks.map(function (k) { return "    " + dartStr(k) + ": " + dartStr(headers[k]); }).join(",\n");
+    s += (ks.length ? "\n" : "") + "  };\n";
+    s += "  var request = http.Request('" + method + "', Uri.parse(" + dartStr(url) + "));\n";
+    if (hasBody) s += "  request.body = " + dartStr(body) + ";\n";
+    s += "  request.headers.addAll(headers);\n\n";
+    s += "  http.StreamedResponse response = await request.send();\n\n";
+    s += "  if (response.statusCode == 200) {\n    print(await response.stream.bytesToString());\n  } else {\n    print(response.reasonPhrase);\n  }\n}\n";
+    return s;
+  }
+  function apiCodeRawHttp(url, headers, body, hasBody, method) {
+    const u = apiUrlParts(url), path = u.path || "/";
+    let s = method + " " + path + " HTTP/1.1\nHost: " + u.host + "\n";
+    Object.keys(headers).forEach(function (k) { s += k + ": " + headers[k] + "\n"; });
+    if (hasBody) s += "\n" + body + "\n";
+    return s;
+  }
+  function apiCodeUnirest(url, headers, body, hasBody, method) {
+    const others = {};
+    Object.keys(headers).forEach(function (k) { if (k.toLowerCase() !== "content-type") others[k] = headers[k]; });
+    let s = "import kong.unirest.HttpResponse;\nimport kong.unirest.Unirest;\n\n";
+    s += "public class Main {\n  public static void main(String[] args) {\n";
+    s += "    HttpResponse<String> response = Unirest." + method.toLowerCase() + "(" + javaStr(url) + ")\n";
+    Object.keys(others).forEach(function (k) { s += "      .header(" + javaStr(k) + ", " + javaStr(others[k]) + ")\n"; });
+    if (hasBody) s += "      .body(" + javaStr(body) + ")\n";
+    s += "      .asString();\n\n    System.out.println(response.getBody());\n  }\n}\n";
+    return s;
+  }
+  function apiCodeJquery(url, headers, body, hasBody, method) {
+    let s = "const settings = {\n";
+    s += '  "async": true,\n  "crossDomain": true,\n';
+    s += '  "url": ' + JSON.stringify(url) + ",\n";
+    s += '  "method": "' + method + '",\n';
+    s += '  "headers": ' + jsDict(headers);
+    if (hasBody) s += ',\n  "data": ' + JSON.stringify(body);
+    s += "\n};\n\n$.ajax(settings).done(function (response) {\n  console.log(response);\n});\n";
+    return s;
+  }
+  function apiCodeXhr(url, headers, body, hasBody, method) {
+    let s = hasBody ? "const data = " + JSON.stringify(body) + ";\n\n" : "";
+    s += "const xhr = new XMLHttpRequest();\nxhr.withCredentials = true;\n\n";
+    s += 'xhr.addEventListener("readystatechange", function () {\n';
+    s += "  if (this.readyState === this.DONE) {\n    console.log(this.responseText);\n  }\n});\n\n";
+    s += 'xhr.open("' + method + '", ' + JSON.stringify(url) + ");\n";
+    Object.keys(headers).forEach(function (k) { s += "xhr.setRequestHeader(" + JSON.stringify(k) + ", " + JSON.stringify(headers[k]) + ");\n"; });
+    s += "\nxhr.send(" + (hasBody ? "data" : "") + ");\n";
+    return s;
+  }
+  function apiCodeKotlinOkhttp(url, headers, body, hasBody, method, ct) {
+    const others = {};
+    Object.keys(headers).forEach(function (k) { if (k.toLowerCase() !== "content-type") others[k] = headers[k]; });
+    let s = "import okhttp3.MediaType.Companion.toMediaType\nimport okhttp3.OkHttpClient\nimport okhttp3.Request\nimport okhttp3.RequestBody.Companion.toRequestBody\n\n";
+    s += "fun main() {\n    val client = OkHttpClient()\n\n";
+    if (hasBody) s += "    val mediaType = " + kotlinStr(ct || "text/plain") + ".toMediaType()\n    val body = " + kotlinStr(body) + ".toRequestBody(mediaType)\n";
+    s += "    val request = Request.Builder()\n        .url(" + kotlinStr(url) + ")\n";
+    s += "        .method(" + kotlinStr(method) + ", " + (hasBody ? "body" : "null") + ")\n";
+    Object.keys(others).forEach(function (k) { s += "        .addHeader(" + kotlinStr(k) + ", " + kotlinStr(others[k]) + ")\n"; });
+    s += "        .build()\n\n";
+    s += "    client.newCall(request).execute().use { response ->\n        println(response.body!!.string())\n    }\n}\n";
+    return s;
+  }
+  function apiCodeLibcurl(url, headers, body, hasBody, method) {
+    let s = "#include <curl/curl.h>\n\nint main(void) {\n  CURL *curl;\n  CURLcode res;\n\n";
+    s += "  curl_global_init(CURL_GLOBAL_DEFAULT);\n  curl = curl_easy_init();\n  if (curl) {\n";
+    s += "    struct curl_slist *headers = NULL;\n";
+    Object.keys(headers).forEach(function (k) { s += "    headers = curl_slist_append(headers, " + cStr(k + ": " + headers[k]) + ");\n"; });
+    s += "\n    curl_easy_setopt(curl, CURLOPT_URL, " + cStr(url) + ");\n";
+    s += "    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);\n";
+    s += "    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, " + cStr(method) + ");\n";
+    if (hasBody) s += "    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, " + cStr(body) + ");\n";
+    s += "\n    res = curl_easy_perform(curl);\n    curl_slist_free_all(headers);\n    curl_easy_cleanup(curl);\n  }\n\n";
+    s += "  curl_global_cleanup();\n  return 0;\n}\n";
+    return s;
+  }
+  function apiCodeNodeAxios(url, headers, body, hasBody, method) {
+    let s = "const axios = require('axios');\n\n";
+    if (hasBody) s += "let data = " + JSON.stringify(body) + ";\n\n";
+    s += "const config = {\n  method: '" + method.toLowerCase() + "',\n  maxBodyLength: Infinity,\n";
+    s += "  url: " + JSON.stringify(url) + ",\n  headers: " + jsDict(headers) + (hasBody ? ",\n  data: data\n" : "\n");
+    s += "};\n\naxios.request(config)\n  .then((response) => {\n    console.log(JSON.stringify(response.data));\n  })\n  .catch((error) => {\n    console.log(error);\n  });\n";
+    return s;
+  }
+  function apiCodeNodeNative(url, headers, body, hasBody, method) {
+    const mod = apiUrlParts(url).scheme === "https" ? "https" : "http";
+    let s = "const " + mod + " = require('" + mod + "');\n\n";
+    if (hasBody) s += "let data = " + JSON.stringify(body) + ";\n\n";
+    s += "const options = {\n  method: '" + method + "',\n  headers: " + jsDict(headers) + "\n};\n\n";
+    s += "const req = " + mod + ".request(" + JSON.stringify(url) + ", options, (res) => {\n  let chunks = '';\n\n";
+    s += "  res.on('data', (chunk) => {\n    chunks += chunk;\n  });\n\n  res.on('end', () => {\n    console.log(chunks);\n  });\n});\n\n";
+    s += "req.on('error', (error) => {\n  console.error(error);\n});\n\n";
+    if (hasBody) s += "req.write(data);\n";
+    s += "req.end();\n";
+    return s;
+  }
+  function apiCodeNodeRequest(url, headers, body, hasBody, method) {
+    let s = "const request = require('request');\n\nconst options = {\n  method: '" + method + "',\n";
+    s += "  url: " + JSON.stringify(url) + ",\n  headers: " + jsDict(headers) + (hasBody ? ",\n  body: " + JSON.stringify(body) : "") + "\n};\n\n";
+    s += "request(options, function (error, response, body) {\n  if (error) throw new Error(error);\n\n  console.log(body);\n});\n";
+    return s;
+  }
+  function apiCodeNodeUnirest(url, headers, body, hasBody, method) {
+    let s = "const unirest = require('unirest');\n\n";
+    s += "const req = unirest('" + method + "', " + JSON.stringify(url) + ")\n  .headers(" + jsDict(headers) + ");\n\n";
+    if (hasBody) s += "req.send(" + JSON.stringify(body) + ");\n\n";
+    s += "req.end(function (res) {\n  if (res.error) throw new Error(res.error);\n\n  console.log(res.body);\n});\n";
+    return s;
+  }
+  function apiCodeObjc(url, headers, body, hasBody, method) {
+    const ks = Object.keys(headers);
+    let s = "#import <Foundation/Foundation.h>\n\n";
+    s += "NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:" + objcStr(url) + "]\n";
+    s += "  cachePolicy:NSURLRequestUseProtocolCachePolicy\n  timeoutInterval:10.0];\n";
+    s += "[request setHTTPMethod:" + objcStr(method) + "];\n";
+    s += "[request setAllHTTPHeaderFields:@{\n";
+    s += ks.map(function (k) { return "  " + objcStr(k) + ": " + objcStr(headers[k]); }).join(",\n");
+    s += "\n}];\n";
+    if (hasBody) s += "[request setHTTPBody:[" + objcStr(body) + " dataUsingEncoding:NSUTF8StringEncoding]];\n";
+    s += "\nNSURLSession *session = [NSURLSession sharedSession];\n";
+    s += "NSURLSessionDataTask *dataTask = [session dataTaskWithRequest:request\n";
+    s += '  completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {\n    if (error) {\n      NSLog(@"%@", error);\n    } else {\n      NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;\n      NSLog(@"%@", httpResponse);\n    }\n  }];\n';
+    s += "[dataTask resume];\n";
+    return s;
+  }
+  function apiCodePhpRequest2(url, headers, body, hasBody, method) {
+    const M = { GET: "GET", POST: "POST", PUT: "PUT", DELETE: "DELETE", PATCH: "PATCH", HEAD: "HEAD", OPTIONS: "OPTIONS" };
+    let s = "<?php\nrequire_once 'HTTP/Request2.php';\n\n";
+    s += "$request = new HTTP_Request2();\n";
+    s += "$request->setUrl(" + phpUrl(url) + ");\n";
+    s += "$request->setMethod(HTTP_Request2::METHOD_" + (M[method] || "POST") + ");\n";
+    s += "$request->setConfig(['follow_redirects' => true]);\n";
+    s += "$request->setHeader([\n" + Object.keys(headers).map(function (k) { return "  " + JSON.stringify(k) + " => " + phpStr(headers[k]); }).join(",\n") + "\n]);\n";
+    if (hasBody) s += "$request->setBody(" + phpStr(body) + ");\n";
+    s += "\ntry {\n  $response = $request->send();\n  if ($response->getStatus() == 200) {\n    echo $response->getBody();\n  } else {\n";
+    s += "    echo 'Unexpected HTTP status: ' . $response->getStatus() . ' ' . $response->getReasonPhrase();\n  }\n";
+    s += "} catch (HTTP_Request2_Exception $e) {\n  echo 'Error: ' . $e->getMessage();\n}\n";
+    return s;
+  }
+  function apiCodePhpPecl(url, headers, body, hasBody, method) {
+    let s = "<?php\n\n$client = new http\\Client();\n";
+    s += "$request = new http\\Client\\Request(" + phpUrl(method) + ", " + phpUrl(url) + ");\n\n";
+    s += "$request->setHeaders([\n" + Object.keys(headers).map(function (k) { return "  " + JSON.stringify(k) + " => " + phpStr(headers[k]); }).join(",\n") + "\n]);\n";
+    if (hasBody) s += "$request->appendBody(" + phpStr(body) + ");\n";
+    s += "\n$client->enqueue($request)->send();\n$response = $client->getResponse();\n\necho $response->getBody();\n";
+    return s;
+  }
+  function apiCodeRHttr(url, headers, body, hasBody, method) {
+    let s = "library(httr)\n\nurl <- " + rStr(url) + "\n\nheaders <- c(\n";
+    s += Object.keys(headers).map(function (k) { return "  " + rStr(k) + " = " + rStr(headers[k]); }).join(",\n");
+    s += "\n)\n";
+    if (hasBody) s += "\nbody <- " + rStr(body) + "\n";
+    s += "\nresponse <- VERB(" + rStr(method) + ", url" + (hasBody ? ", body = body" : "") + ", add_headers(headers))\n\n";
+    s += 'content(response, "text")\n';
+    return s;
+  }
+  function apiCodeRRcurl(url, headers, body, hasBody, method) {
+    let s = "library(RCurl)\n\nheaders <- c(\n";
+    s += Object.keys(headers).map(function (k) { return "  " + rStr(k) + " = " + rStr(headers[k]); }).join(",\n");
+    s += "\n)\n\n";
+    s += "content <- getURL(" + rStr(url) + ", httpheader = headers, customrequest = " + rStr(method);
+    if (hasBody) s += ", postfields = " + rStr(body);
+    s += ")\n\ncat(content)\n";
+    return s;
+  }
+  function apiCodeRust(url, headers, body, hasBody, method) {
+    const M = { GET: "GET", POST: "POST", PUT: "PUT", DELETE: "DELETE", PATCH: "PATCH", HEAD: "HEAD", OPTIONS: "OPTIONS" };
+    let s = "use std::error::Error;\n\n#[tokio::main]\nasync fn main() -> Result<(), Box<dyn Error>> {\n";
+    s += "    let client = reqwest::Client::new();\n\n    let res = client\n";
+    s += "        .request(reqwest::Method::" + (M[method] || "POST") + ", " + rustStr(url) + ")\n";
+    Object.keys(headers).forEach(function (k) { s += "        .header(" + rustStr(k) + ", " + rustStr(headers[k]) + ")\n"; });
+    if (hasBody) s += "        .body(" + rustStr(body) + ")\n";
+    s += "        .send()\n        .await?;\n\n";
+    s += '    println!("{}", res.text().await?);\n    Ok(())\n}\n';
+    return s;
+  }
+  function apiCodeWget(url, headers, body, hasBody, method) {
+    let s = "wget";
+    if (method !== "GET") s += " \\\n  --method " + shq(method);
+    s += " \\\n  --no-check-certificate";
+    s += " \\\n  --timeout=0";
+    Object.keys(headers).forEach(function (k) { s += " \\\n  --header " + shq(k + ": " + headers[k]); });
+    if (hasBody) s += " \\\n  --body-data " + shq(body);
+    s += " \\\n  --output-document \\\n  - \\\n  " + shq(url) + "\n";
+    return s;
+  }
+  function apiCodeSwift(url, headers, body, hasBody, method) {
+    let s = "import Foundation\n\nlet headers = [\n";
+    s += Object.keys(headers).map(function (k) { return "  " + swiftStr(k) + ": " + swiftStr(headers[k]); }).join(",\n");
+    s += "\n]\n";
+    if (hasBody) s += "\nlet parameters = " + swiftStr(body) + "\nlet postData = parameters.data(using: .utf8)\n";
+    s += "\nvar request = URLRequest(url: URL(string: " + swiftStr(url) + ")!, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 10.0)\n";
+    s += "request.httpMethod = " + swiftStr(method) + "\n";
+    s += "request.allHTTPHeaderFields = headers\n";
+    if (hasBody) s += "request.httpBody = postData\n";
+    s += "\nlet session = URLSession.shared\n";
+    s += "let dataTask = session.dataTask(with: request as URLRequest) { (data, response, error) in\n";
+    s += "  if let error = error {\n    print(error)\n  } else {\n    let httpResponse = response as? HTTPURLResponse\n    print(httpResponse)\n  }\n}\n\n";
+    s += "dataTask.resume()\n";
+    return s;
+  }
+  function apiCodeLangGet() {
+    let v = null; try { v = localStorage.getItem(API_CODE_LANG_KEY); } catch (_) {}
+    return (v && API_CODE_TARGETS.some(function (t) { return t.id === v; })) ? v : "curl";
+  }
+  function apiCodeLangSet(v) { try { localStorage.setItem(API_CODE_LANG_KEY, v); } catch (_) {} }
+
+  /* 悬浮框：点「代码」按钮弹出，固定定位在按钮下方（右对齐）。
+     只渲染一个；用 textContent 写代码（不碰 innerHTML），天然防 XSS。点外部 / Esc 关闭。 */
+  let apiCodePop = null;
+  function apiCodeOnDoc(e) {
+    if (!apiCodePop) return;
+    const t = e.target, pop = apiCodePop.pop;
+    const inList = !!(apiCodePop.list && apiCodePop.list.contains(t));   // 点候选项不能先收列表，否则点不中
+    if (!pop.contains(t) && !inList && !t.closest("#apiCodeBtn")) { apiCloseCode(); return; }
+    if (apiCodePop.closeList && !inList && t !== apiCodePop.input) apiCodePop.closeList();
+  }
+  function apiCodeOnKey(e) {
+    if (e.key !== "Escape") return;
+    if (apiCodePop && apiCodePop.closeList && apiCodePop.closeList()) return;  // 有下拉先只关下拉，再按一次才关整框
+    apiCloseCode();
+  }
+  function apiCloseCode() {
+    if (!apiCodePop) return;
+    apiCodePop.pop.remove();
+    document.removeEventListener("mousedown", apiCodeOnDoc, true);
+    document.removeEventListener("keydown", apiCodeOnKey, true);
+    apiCodePop = null;
+  }
+  function apiCodeLangLabel(id) {
+    for (let i = 0; i < API_CODE_TARGETS.length; i++) if (API_CODE_TARGETS[i].id === id) return API_CODE_TARGETS[i].label;
+    return API_CODE_TARGETS[0].label;
+  }
+  function apiPaintCode(pop, tab) {
+    const code = apiGenCode(pop._lang || "curl", tab.api.req);
+    pop.querySelector(".api-code-body").textContent = code;
+  }
+  /* 语言下拉：输入框既是「当前语言」显示位，也是搜索框 —— 输入关键字按 label/id 过滤。
+     列表用 position:fixed 定位在输入框正下方（fixed 不会被悬浮框的 overflow:hidden 裁掉）。
+     键盘：↑↓ 移动高亮、Enter 选中、Esc 只关下拉、Tab 收起。 */
+  function apiCodeLangInit(pop, tab) {
+    const input = pop.querySelector(".api-code-lang-input");
+    const list = pop.querySelector(".api-code-lang-list");
+    let items = [], active = 0, opened = false;
+
+    function idxOf(id) { for (let i = 0; i < API_CODE_TARGETS.length; i++) if (API_CODE_TARGETS[i].id === id) return i; return 0; }
+    function browsing() { const q = input.value.trim().toLowerCase(); return !!q && q !== apiCodeLangLabel(pop._lang).toLowerCase(); }
+    function paint() {
+      const q = browsing() ? input.value.trim().toLowerCase() : "";
+      items = q ? API_CODE_TARGETS.filter(function (t) { return t.label.toLowerCase().indexOf(q) >= 0 || t.id.indexOf(q) >= 0; })
+                : API_CODE_TARGETS.slice();
+      if (!q) active = idxOf(pop._lang);
+      if (active >= items.length) active = Math.max(0, items.length - 1);
+      list.textContent = "";
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "api-code-lang-empty"; empty.textContent = "未找到匹配语言";
+        list.appendChild(empty); return;
+      }
+      items.forEach(function (t) {
+        const row = document.createElement("div");
+        row.className = "api-code-lang-item" + (t.id === pop._lang ? " is-cur" : "");
+        row.title = t.label;
+        if (q) {
+          const k = t.label.toLowerCase().indexOf(q);
+          if (k >= 0) {
+            row.appendChild(document.createTextNode(t.label.slice(0, k)));
+            const mk = document.createElement("mark"); mk.textContent = t.label.slice(k, k + q.length);
+            row.appendChild(mk);
+            row.appendChild(document.createTextNode(t.label.slice(k + q.length)));
+          } else row.textContent = t.label;
+        } else row.textContent = t.label;
+        row.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        row.addEventListener("mouseenter", function () { active = items.indexOf(t); mark(); });
+        row.addEventListener("click", function () { pick(t.id); });
+        list.appendChild(row);
+      });
+      mark();
+    }
+    function mark() {
+      for (let i = 0; i < list.children.length; i++) list.children[i].classList.toggle("is-active", i === active);
+      const el = list.children[active]; if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+    }
+    function place() {
+      const r = input.getBoundingClientRect();
+      list.style.left = Math.round(r.left) + "px";
+      list.style.width = Math.round(r.width) + "px";
+      const below = window.innerHeight - r.bottom - 10, above = r.top - 10;
+      if (below < 140 && above > below) { list.style.top = "auto"; list.style.bottom = Math.round(window.innerHeight - r.top + 4) + "px"; }
+      else { list.style.bottom = "auto"; list.style.top = Math.round(r.bottom + 4) + "px"; }
+    }
+    function open() { if (!opened) { opened = true; list.hidden = false; } paint(); place(); }
+    function close() {
+      if (!opened) return false;
+      opened = false; list.hidden = true; input.value = apiCodeLangLabel(pop._lang);
+      return true;
+    }
+    function pick(id) { pop._lang = id; apiCodeLangSet(id); input.value = apiCodeLangLabel(id); apiPaintCode(pop, tab); close(); }
+
+    input.value = apiCodeLangLabel(pop._lang);
+    input.addEventListener("mousedown", function (e) {
+      if (document.activeElement !== input) { e.preventDefault(); input.focus(); input.select(); }
+      else if (!opened) input.select();
+      open();
+    });
+    input.addEventListener("input", function () { active = 0; open(); });
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") { e.preventDefault(); if (!opened) open(); active = Math.min(active + 1, items.length - 1); mark(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); if (!opened) open(); active = Math.max(active - 1, 0); mark(); }
+      else if (e.key === "Enter") { if (opened && items[active]) { e.preventDefault(); pick(items[active].id); } }
+      else if (e.key === "Tab") { close(); }
+    });
+    input.addEventListener("blur", function () { setTimeout(function () { close(); }, 120); });
+    apiCodePop.input = input;
+    apiCodePop.closeList = close;
+  }
+  function apiToggleCode(tab) {
+    if (apiCodePop && apiCodePop.tab === tab) { apiCloseCode(); return; }
+    apiCloseCode();
+    const btn = tab.host.querySelector("#apiCodeBtn"); if (!btn) return;
+    const pop = document.createElement("div");
+    pop.className = "api-code-pop";
+    pop._lang = apiCodeLangGet();
+    pop.innerHTML =
+      '<div class="api-code-head">' +
+        '<span class="api-code-title"><i class="bi bi-code"></i> 生成代码</span>' +
+        '<div class="api-code-langwrap">' +
+          '<i class="bi bi-search api-code-lang-ico"></i>' +
+          '<input class="api-code-lang-input" type="text" spellcheck="false" autocomplete="off" placeholder="搜索语言" title="输入关键字筛选语言">' +
+        "</div>" +
+        '<button class="api-mini api-code-copy" title="复制代码"><i class="bi bi-clipboard"></i></button>' +
+        '<button class="api-mini api-code-x" title="关闭"><i class="bi bi-x-lg"></i></button>' +
+      "</div>" +
+      '<div class="api-code-lang-list" hidden></div>' +
+      '<pre class="api-code-body scroll-thin"></pre>';
+    document.body.appendChild(pop);
+    apiCodePop = { tab: tab, pop: pop, list: pop.querySelector(".api-code-lang-list"), closeList: null };
+    apiCodeLangInit(pop, tab);
+    const r = btn.getBoundingClientRect(), pw = pop.offsetWidth, ph = pop.offsetHeight;
+    let left = Math.max(8, r.right - pw), top = r.bottom + 6;
+    if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 6);
+    pop.style.left = left + "px"; pop.style.top = top + "px";
+    apiPaintCode(pop, tab);
+    pop.querySelector(".api-code-copy").addEventListener("click", function () {
+      const code = pop.querySelector(".api-code-body").textContent;
+      apiCopy(code).then(function () { toast("代码已复制", "ok"); }).catch(function () { apiCopyFallback("复制代码", code); });
+    });
+    pop.querySelector(".api-code-x").addEventListener("click", apiCloseCode);
+    setTimeout(function () { document.addEventListener("mousedown", apiCodeOnDoc, true); document.addEventListener("keydown", apiCodeOnKey, true); }, 0);
+  }
+/*__APPEND__*/
   /* ---------------- 编辑器标签 ---------------- */
   function apiOpen(id) {
     let req = apiFind(id);
@@ -241,7 +908,8 @@
   function apiBuildView(tab, req) {
     if (tab.api && tab.api.req) req = tab.api.req;
     else req = apiFind(req.id) || req;
-    tab.api = { req: req, sending: false, err: "", res: null, el: null, curPane: "params", curRes: "body" };
+    // bulk 记录各面板（params / headers / body）是否正处在「批量编辑」纯文本模式
+    tab.api = { req: req, sending: false, err: "", res: null, el: null, curPane: "params", curRes: "body", bulk: {} };
     tab.name = req.name; if (tab.el) renderTab(tab);
     const h = tab.host;
     h.innerHTML =
@@ -253,6 +921,7 @@
           '<input class="api-url" spellcheck="false" autocomplete="off" placeholder="请求 URL，例如 https://api.example.com/users" value="' + apiAttr(req.url) + '">' +
           '<button class="g-btn api-send" title="发送 (Ctrl+Enter)"><i class="bi bi-send-fill"></i> 发送</button>' +
           '<span class="api-bar-sp"></span>' +
+          '<button class="api-mini" id="apiCodeBtn" title="生成多语言代码"><i class="bi bi-code"></i> 代码</button>' +
           '<button class="api-mini" id="apiCurlBtn" title="复制为 cURL"><i class="bi bi-terminal"></i> cURL</button>' +
           '<button class="api-mini" id="apiDupBtn" title="另存为副本"><i class="bi bi-files"></i></button>' +
         '</div>' +
@@ -263,7 +932,7 @@
             '<button class="api-tab" data-t="body">请求体</button>' +
             '<button class="api-tab" data-t="auth">认证</button>' +
           '</div>' +
-          '<div class="api-panes">' +
+          '<div class="api-panes scroll-thin">' +
             '<div class="api-pane" data-p="params"></div>' +
             '<div class="api-pane" data-p="headers"></div>' +
             '<div class="api-pane" data-p="body"></div>' +
@@ -279,18 +948,22 @@
           '<div class="api-res-tabs">' +
             '<button class="api-rtab active" data-rt="body">响应体</button>' +
             '<button class="api-rtab" data-rt="headers">响应头</button>' +
-            '<button class="api-rtab" data-rt="raw">原始</button>' +
+            // 原来也叫「原始」，和响应体里的「原始」视图撞名，改成「原始数据」（整个响应对象）
+            '<button class="api-rtab" data-rt="raw" title="整个响应对象：状态码 / 响应头 / 正文文本">原始数据</button>' +
           '</div>' +
+          // 响应体视图工具条（美化 / 原始 / 预览 / 可视化 + 语言 + 换行）：常驻元素，只换 innerHTML
+          '<div class="api-res-view"></div>' +
           '<div class="api-res-body scroll-thin"></div>' +
         '</div>' +
       '</div>';
 
     tab.api.el = {
+      root: h.querySelector(".api"), req: h.querySelector(".api-req"),
       method: h.querySelector(".api-method"), url: h.querySelector(".api-url"),
       panes: { params: h.querySelector('[data-p="params"]'), headers: h.querySelector('[data-p="headers"]'),
         body: h.querySelector('[data-p="body"]'), auth: h.querySelector('[data-p="auth"]') },
       res: h.querySelector(".api-res-body"), meta: h.querySelector(".api-res-meta"),
-      copy: h.querySelector("#apiCopyRes"),
+      copy: h.querySelector("#apiCopyRes"), view: h.querySelector(".api-res-view"),
     };
     tab.api.el.method.addEventListener("change", function () { req.method = tab.api.el.method.value; apiPersist(); apiRenderList(); });
     tab.api.el.url.addEventListener("input", function () { req.url = tab.api.el.url.value; apiPersist(); apiRenderList(); });
@@ -301,14 +974,91 @@
       apiCopy(txt).then(function () { toast("cURL 已复制到剪贴板", "ok"); })
         .catch(function () { apiCopyFallback("复制为 cURL", txt); });
     });
+    h.querySelector("#apiCodeBtn").addEventListener("click", function (e) { e.stopPropagation(); apiToggleCode(tab); });
     h.querySelector("#apiDupBtn").addEventListener("click", function () { const c = JSON.parse(JSON.stringify(req)); c.id = apiNewId(); c.name = req.name + " 副本"; apiAdd(c); apiRenderList(); apiOpen(c.id); toast("已另存为副本", "ok"); });
     h.querySelector("#apiCopyRes").addEventListener("click", function () { apiCopyResponse(tab); });
     h.querySelectorAll(".api-tab").forEach(function (b) { b.addEventListener("click", function () { apiShowPane(tab, b.dataset.t); }); });
     h.querySelectorAll(".api-rtab").forEach(function (b) { b.addEventListener("click", function () { apiShowRes(tab, b.dataset.rt); }); });
+    apiWireResView(tab);      // 响应体视图工具条：容器常驻，只绑一次（内容由 apiPaintRes 重绘）
 
     apiRenderPane(tab, "params"); apiRenderPane(tab, "headers"); apiRenderPane(tab, "body"); apiRenderPane(tab, "auth");
     apiShowPane(tab, "params"); apiPaintRes(tab);
+    apiWireResize(tab);        // 响应状态栏可上下拖动：调整请求区 / 响应区的高度
   }
+
+  /* ---------------- 请求区 / 响应区高度（拖动响应状态栏） ----------------
+     默认两块都由内容撑开（请求头表格限 6 行高）；一旦拖动过，就给请求区锁定像素高度，
+     响应区吃掉剩下的空间。高度存在 localStorage，换请求、重开标签页后都保持。 */
+  function apiSavedReqH() {
+    const v = parseInt(localStorage.getItem(API_REQ_H_KEY) || "0", 10);
+    return (v > 0) ? v : 0;
+  }
+  /* 收敛并落到 DOM：上限 =「面板高 - 响应区最小高度」，所以永远挤不没响应区 */
+  function apiApplyReqH(tab, h) {
+    const el = tab.api && tab.api.el;
+    if (!el || !el.req || !el.root || !el.req.isConnected) return 0;
+    const max = Math.max(API_REQ_MIN_H, (el.root.clientHeight || 0) - API_RES_MIN_H);
+    const v = Math.max(API_REQ_MIN_H, Math.min(max, Math.round(h)));
+    el.req.classList.add("fixed");
+    el.req.style.height = v + "px";
+    return v;
+  }
+  function apiResetReqH(tab) {
+    const el = tab.api && tab.api.el; if (!el || !el.req) return;
+    el.req.classList.remove("fixed");
+    el.req.style.height = "";
+    try { localStorage.removeItem(API_REQ_H_KEY); } catch (_) {}
+  }
+  function apiWireResize(tab) {
+    const el = tab.api.el, head = tab.host.querySelector(".api-res-head");
+    if (!head || !el.req) return;
+    head.title = "按住上下拖动，调整请求区 / 响应区高度（双击恢复默认）";
+    const saved = apiSavedReqH();
+    if (saved) apiApplyReqH(tab, saved);                // 重绘后接上上次拖出来的高度
+    let dragging = false, startY = 0, startH = 0;
+    const onMove = function (e) {
+      if (!dragging) return;
+      apiApplyReqH(tab, startH + (e.clientY - startY));   // 鼠标往哪移，这条分界线就跟到哪（跟手）
+    };
+    const onUp = function () {
+      if (!dragging) return;
+      dragging = false;
+      head.classList.remove("dragging");
+      document.body.classList.remove("resizing-v");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      // 存收敛后的真实高度；下次应用时还会再收敛一次，窗口更小也不会越界
+      try { localStorage.setItem(API_REQ_H_KEY, String(parseInt(el.req.style.height || "0", 10) || 0)); } catch (_) {}
+    };
+    head.addEventListener("mousedown", function (e) {
+      if (e.target.closest("button")) return;             // 「复制响应体」按钮照常可点
+      e.preventDefault();                                 // 免得拖动时把状态文字选蓝
+      dragging = true;
+      startY = e.clientY;
+      startH = el.req.getBoundingClientRect().height || 0;
+      head.classList.add("dragging");
+      document.body.classList.add("resizing-v");
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+    head.addEventListener("dblclick", function (e) {
+      if (!e.target.closest("button")) apiResetReqH(tab);  // 双击恢复默认高度
+    });
+  }
+  /* 窗口变小：已锁定的请求区跟着收敛，否则会把响应区挤到看不见 */
+  let apiRszRaf = 0;
+  window.addEventListener("resize", function () {
+    if (apiRszRaf) return;
+    apiRszRaf = requestAnimationFrame(function () {
+      apiRszRaf = 0;
+      document.querySelectorAll(".api .api-req.fixed").forEach(function (reqEl) {
+        const apiEl = reqEl.closest(".api"); if (!apiEl) return;
+        const max = Math.max(API_REQ_MIN_H, apiEl.clientHeight - API_RES_MIN_H);
+        const h = parseInt(reqEl.style.height || "0", 10) || API_REQ_MIN_H;
+        reqEl.style.height = Math.max(API_REQ_MIN_H, Math.min(max, h)) + "px";
+      });
+    });
+  });
 /*__APPEND__*/
   function apiShowPane(tab, t) {
     tab.api.curPane = t;
@@ -330,25 +1080,120 @@
         '<td class="api-kv-c"><input type="checkbox" data-f="on"' + (r.on ? " checked" : "") + '></td>' +
         '<td><input class="api-kv-k" data-f="k" placeholder="名称" value="' + apiAttr(r.k) + '"></td>' +
         '<td><input class="api-kv-v" data-f="v" placeholder="值" value="' + apiAttr(r.v) + '"></td>' +
+        // 注释列：纯备注，data-f="desc" 让 apiWireKv 的通用 input 处理直接落到 row.desc
+        '<td><input class="api-kv-d" data-f="desc" placeholder="说明（可选）" value="' + apiAttr(r.desc || "") + '"></td>' +
         '<td class="api-kv-x"><button class="api-kv-del" title="删除"><i class="bi bi-x-lg"></i></button></td>' +
         '</tr>';
     }).join("");
-    // 表格外面套一层限高容器：最多显示 6 行，更多行用内部滚动条查看（见 CSS .api-kv-wrap）
-    return '<div class="api-kv-wrap scroll-thin"><table class="api-kv"><tbody>' + (body || "") + '</tbody></table></div>' +
+    // 表格外面套一层限高容器：最多显示 6 行数据（表头吸顶），更多行用内部滚动条查看（见 CSS .api-kv-wrap）
+    return '<div class="api-kv-bar"><span class="api-kv-hint">勾选的行才会随请求发出</span>' +
+        '<button class="api-mini api-bulk" title="把整张表当纯文本编辑：每行一条「名称: 值」">批量编辑</button></div>' +
+      '<div class="api-kv-wrap scroll-thin"><table class="api-kv">' +
+        '<thead><tr><th class="api-kv-c"></th><th class="api-kvh-k">名称</th><th class="api-kvh-v">值</th>' +
+        '<th class="api-kvh-d">注释</th><th class="api-kv-x"></th></tr></thead>' +
+        '<tbody>' + (body || "") + '</tbody></table></div>' +
       '<button class="api-add"><i class="bi bi-plus-lg"></i> 添加一行</button>';
   }
+  /* ---------------- 批量编辑（对标 Postman 的 Bulk Edit） ----------------
+     把整张表当纯文本改：每行一条「名称: 值」，也接受「名称=值」，空行忽略。
+     每行只认第一个分隔符，所以值里带 : 或 = （URL、时间戳等）不会被切错。 */
+  function apiKvToText(rows) {
+    return (rows || []).filter(function (r) {
+      return (r.k || "").trim() || (r.v || "").trim();      // 完全空白的行不写进去
+    }).map(function (r) {
+      return (r.k || "") + ": " + (r.v || "");
+    }).join("\n");
+  }
+  function apiKvFromText(text) {
+    const out = [];
+    String(text == null ? "" : text).split(/\r?\n/).forEach(function (line) {
+      if (!line.trim()) return;
+      let at = -1;
+      for (let i = 0; i < line.length; i++) { if (line[i] === ":" || line[i] === "=") { at = i; break; } }
+      if (at < 0) out.push(apiRow(line.trim(), ""));
+      else out.push(apiRow(line.slice(0, at).trim(), line.slice(at + 1).trim()));
+    });
+    return out;
+  }
+  /* 写回表格：原地替换数组内容（保持引用不变，面板与事件委托都拿着这个数组）。
+     按名称从旧行继承「勾选状态」和「注释」—— 注释列没出现在纯文本里，
+     不继承的话用户一批量编辑就会把注释全丢掉。 */
+  function apiKvApplyText(rows, text) {
+    const pool = (rows || []).slice();
+    const next = apiKvFromText(text).map(function (p) {
+      let hit = -1;
+      for (let i = 0; i < pool.length; i++) { if (pool[i] && pool[i].k === p.k) { hit = i; break; } }
+      const old = hit >= 0 ? pool.splice(hit, 1)[0] : null;
+      return { on: old ? old.on : true, k: p.k, v: p.v, desc: old ? (old.desc || "") : "" };
+    });
+    rows.length = 0;
+    next.forEach(function (r) { rows.push(r); });
+  }
+  function apiKvBulkHtml() {
+    return '<div class="api-kv-bar"><span class="api-kv-hint">每行一条「名称: 值」（也支持 名称=值），空行忽略</span>' +
+        '<button class="api-mini api-bulk" title="把文本写回表格（Esc 也可以）">完成</button></div>' +
+      '<textarea class="api-kv-bulk scroll-thin" spellcheck="false" placeholder="Accept: application/json&#10;Content-Type: application/json"></textarea>';
+  }
+  /* 渲染一张 kv 表：正常模式 = 表格，批量编辑模式 = 纯文本。两种模式只换 innerHTML，委托照旧绑在 list 上 */
+  function apiRenderKv(tab, list, rows, pane) {
+    const bulk = !!(tab.api.bulk && tab.api.bulk[pane]);
+    list.innerHTML = bulk ? apiKvBulkHtml() : apiKvHtml(rows);
+    if (bulk) {
+      const ta = list.querySelector(".api-kv-bulk");
+      if (ta) {
+        ta.value = apiKvToText(rows);
+        ta.addEventListener("keydown", function (e) {
+          e.stopPropagation();                                // 免得被全局快捷键接走
+          if (e.key === "Escape") { e.preventDefault(); apiKvEndBulk(tab, rows, pane); }
+        });
+      }
+    }
+    apiWireKv(tab, list, rows, pane);
+  }
+  function apiKvBeginBulk(tab, pane) {
+    tab.api.bulk = tab.api.bulk || {};
+    tab.api.bulk[pane] = true;
+    apiRenderPane(tab, pane);
+    const ta = tab.api.el.panes[pane].querySelector(".api-kv-bulk");
+    if (ta) { ta.focus(); const n = ta.value.length; try { ta.setSelectionRange(n, n); } catch (_) {} }
+  }
+  function apiKvEndBulk(tab, rows, pane) {
+    const box = tab.api.el.panes[pane];
+    const ta = box ? box.querySelector(".api-kv-bulk") : null;
+    if (ta) apiKvApplyText(rows, ta.value);
+    if (tab.api.bulk) tab.api.bulk[pane] = false;
+    apiPersist();
+    apiRenderPane(tab, pane);                               // 重绘回表格（里面会刷新徽标）
+  }
+  /* 「参数 / 请求头 / 表单」表格的事件委托。
+     注意这些容器是「建一次、内容反复重绘」的常驻元素（.api-pane 本身不重建，只换 innerHTML），
+     所以事件只能绑一次：若每次重绘都 addEventListener，点一次「添加一行」会同时触发 N 个
+     处理函数（N = 之前重绘过几次），表现为一次加出好几行；「删除」更糟，一次会 splice 掉 N 行。
+     数组本身每次重绘都可能换新引用，因此把它挂在容器上、在事件里现取，而不是闭包死。 */
   function apiWireKv(tab, list, rows, pane) {
+    list._apiRows = rows;                       // 每次重绘刷新引用
+    if (list._apiWired === pane) return;        // 同一容器同一面板只绑一次
+    list._apiWired = pane;
     list.addEventListener("input", function (e) {
       const tr = e.target.closest("tr"); if (!tr) return;
-      const i = +tr.dataset.i, f = e.target.dataset.f; if (rows[i] == null) return;
-      if (f === "on") rows[i].on = e.target.checked; else rows[i][f] = e.target.value;
+      const arr = list._apiRows; if (!arr) return;
+      const i = +tr.dataset.i, f = e.target.dataset.f; if (arr[i] == null) return;
+      if (f === "on") arr[i].on = e.target.checked; else arr[i][f] = e.target.value;
       apiPersist(); apiUpdateBadges(tab);
     });
     list.addEventListener("click", function (e) {
+      const arr = list._apiRows; if (!arr) return;
+      // 「批量编辑」是来回切换：进表格前把文本写回数组，进文本前把数组序列化成文本
+      if (e.target.closest(".api-bulk")) {
+        if (tab.api.bulk && tab.api.bulk[pane]) apiKvEndBulk(tab, arr, pane);
+        else apiKvBeginBulk(tab, pane);
+        return;
+      }
+      const tr = e.target.closest("tr");
       // 重绘目标必须是「这张表所在的面板」：原先写死成 headers，导致在「参数」里增删行时
       // 重绘的是隐藏的 headers 面板，参数面板还留着已删除的旧行
-      if (e.target.closest(".api-kv-del")) { const tr = e.target.closest("tr"); rows.splice(+tr.dataset.i, 1); apiRenderPane(tab, pane); apiPersist(); return; }
-      if (e.target.closest(".api-add")) { rows.push(apiRow("", "")); apiRenderPane(tab, pane); apiPersist(); }
+      if (e.target.closest(".api-kv-del")) { if (tr) arr.splice(+tr.dataset.i, 1); apiRenderPane(tab, pane); apiPersist(); return; }
+      if (e.target.closest(".api-add")) { arr.push(apiRow("", "")); apiRenderPane(tab, pane); apiPersist(); }
     });
   }
   function apiUpdateBadges(tab) {
@@ -359,8 +1204,8 @@
   }
   function apiRenderPane(tab, t) {
     const req = tab.api.req, box = tab.api.el.panes[t];
-    if (t === "params") { box.innerHTML = apiKvHtml(req.params); apiWireKv(tab, box, req.params, "params"); }
-    else if (t === "headers") { box.innerHTML = apiKvHtml(req.headers); apiWireKv(tab, box, req.headers, "headers"); }
+    if (t === "params") apiRenderKv(tab, box, req.params, "params");
+    else if (t === "headers") apiRenderKv(tab, box, req.headers, "headers");
     else if (t === "body") {
       const b = req.body;
       const modes = [["none", "无"], ["json", "JSON"], ["text", "文本"], ["form", "表单"]];
@@ -373,7 +1218,8 @@
           '<textarea class="api-raw" spellcheck="false" placeholder="' + (b.mode === "json" ? "{ }" : "请求体内容") + '"></textarea>');
       const ta = box.querySelector(".api-raw");
       if (ta) { ta.value = b.raw || ""; ta.addEventListener("input", function () { req.body.raw = ta.value; apiPersist(); }); }
-      if (b.mode === "form") apiWireKv(tab, box.querySelector(".api-form"), b.form, "body");
+      // 表单面板也是同一张 kv 表（含「注释」列和「批量编辑」）；容器是每次新建的 .api-form
+      if (b.mode === "form") apiRenderKv(tab, box.querySelector(".api-form"), b.form, "body");
       box.querySelectorAll('input[name="apiBodyMode"]').forEach(function (r) {
         r.addEventListener("change", function () { req.body.mode = r.value; if (r.value === "form" && !req.body.form.length) req.body.form.push(apiRow("", "")); apiPersist(); apiRenderPane(tab, "body"); });
       });
@@ -442,13 +1288,256 @@
       apiPaintRes(tab);
     }
   }
+  /* ---------------- 响应体视图（美化 / 原始 / 预览 / 可视化） ----------------
+     这组偏好是整个「工具」级的，不跟着请求走：选了「原始」再切到别的接口也还是原始（与 Postman 一致），
+     所以放模块变量 + localStorage，而不是塞进单个请求对象里。 */
+  function apiResView() {
+    if (API_RES_VIEW) return API_RES_VIEW;
+    let raw = null;
+    try { raw = JSON.parse(localStorage.getItem(API_RES_VIEW_KEY) || "null"); } catch (_) { raw = null; }
+    if (!raw || typeof raw !== "object") raw = {};
+    API_RES_VIEW = {
+      view: API_RES_VIEWS.indexOf(raw.view) >= 0 ? raw.view : "pretty",
+      lang: API_RES_LANGS.indexOf(raw.lang) >= 0 ? raw.lang : "auto",
+      wrap: raw.wrap !== false,        // 默认打开自动换行：与改造前 .api-pre 的 pre-wrap 表现一致
+    };
+    return API_RES_VIEW;
+  }
+  function apiSaveResView() { try { localStorage.setItem(API_RES_VIEW_KEY, JSON.stringify(API_RES_VIEW || {})); } catch (_) {} }
+
+  /* 响应文本：二进制（base64）没有文本可读，一律当空串 */
+  function apiResText(r) { return (r && r.encoding !== "base64" && typeof r.text === "string") ? r.text : ""; }
+  /* 解析成 JSON（null = 不是 JSON）。缓存挂在 WeakMap 上而不是响应对象上，
+     否则「原始数据」视图 stringify 整个响应时会多出一个 __json 字段。 */
+  const API_JSON_CACHE = new WeakMap();
+  function apiResJson(r) {
+    if (!r || r.encoding === "base64") return null;
+    let hit = API_JSON_CACHE.get(r);
+    if (hit === undefined) {
+      hit = { v: null };
+      try { hit.v = JSON.parse(r.text || ""); } catch (_) { hit.v = null; }
+      API_JSON_CACHE.set(r, hit);
+    }
+    return hit.v;
+  }
+  /* 语言：先看 Content-Type，再嗅探正文开头 —— 很多接口不带 content-type，或者一律写成 text/plain */
+  function apiResLang(r) {
+    const ct = String((r && r.content_type) || "").toLowerCase();
+    if (/json/.test(ct)) return "json";
+    if (/html/.test(ct)) return "html";
+    if (/xml|svg/.test(ct)) return "xml";
+    if (/javascript|ecmascript/.test(ct)) return "javascript";
+    // text/* 不在这里直接下结论：text/plain 里塞 JSON 的接口太多了，继续往下嗅探正文，
+    // 什么都不像时最后自然会落到 "text"
+    const s = apiResText(r).replace(/^\uFEFF/, "").trim();
+    if (!s) return "text";
+    if (/^<\?xml/i.test(s)) return "xml";
+    if (/^(<!doctype\s+html|<html)/i.test(s)) return "html";
+    if (/^[\[{]/.test(s)) { try { JSON.parse(s); return "json"; } catch (_) { return "text"; } }
+    if (/^<[a-z!/?]/i.test(s)) return "xml";
+    return "text";
+  }
+  function apiLangName(l) { return ({ json: "JSON", xml: "XML", html: "HTML", javascript: "JavaScript", text: "纯文本" })[l] || "纯文本"; }
+  function apiResLangUsed(r) { const V = apiResView(); return V.lang === "auto" ? apiResLang(r) : V.lang; }
+
+  /* 语法高亮：一律「在原串上切词、再逐段转义」。
+     不能先 esc 再拿正则匹配字符串 —— 转义会把 " 变成 &quot;，字符串就再也匹配不上（表现为整片无颜色）。 */
+  const API_HL_JSON = /("(?:\\.|[^"\\])*")(\s*:)|("(?:\\.|[^"\\])*")|(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|\b(true|false|null)\b|([{}\[\],:])/g;
+  const API_HL_JS = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`)|(-?\b\d+(?:\.\d+)?\b)|\b(var|let|const|function|return|if|else|for|while|new|class|this|typeof|try|catch|finally|throw|async|await|yield|null|undefined|true|false)\b/g;
+  const API_HL_XML = /(<!--[\s\S]*?-->)|(<\/?[A-Za-z][\w:.-]*|<![A-Za-z][^>]*>|<\?)|([A-Za-z_:][\w:.-]*)(=)("(?:[^"]*)"|'(?:[^']*)')|(\/?>)/g;
+
+  /* 逐段拼接：匹配之外的部分也要 esc，否则正文里的 < 会被浏览器当成标签 */
+  function apiHlRun(src, re, pick) {
+    let out = "", last = 0, m;
+    re.lastIndex = 0;                                   // 正则带 g，是共享的，每次用前必须归零
+    while ((m = re.exec(src)) !== null) {
+      if (m.index > last) out += esc(src.slice(last, m.index));
+      out += pick(m);
+      last = m.index + m[0].length;
+      if (m[0] === "") re.lastIndex++;                  // 零宽匹配兜底，否则死循环
+    }
+    return out + esc(src.slice(last));
+  }
+  function apiHlJson(src) {
+    return apiHlRun(src, API_HL_JSON, function (m) {
+      if (m[1] != null) return '<span class="api-tk-k">' + esc(m[1]) + "</span>" + esc(m[2] || "");
+      if (m[3] != null) return '<span class="api-tk-s">' + esc(m[3]) + "</span>";
+      if (m[4] != null) return '<span class="api-tk-n">' + esc(m[4]) + "</span>";
+      if (m[5] != null) return '<span class="api-tk-l">' + esc(m[5]) + "</span>";
+      return '<span class="api-tk-p">' + esc(m[6] == null ? m[0] : m[6]) + "</span>";
+    });
+  }
+  function apiHlJs(src) {
+    return apiHlRun(src, API_HL_JS, function (m) {
+      if (m[1] != null) return '<span class="api-tk-c">' + esc(m[1]) + "</span>";
+      if (m[2] != null) return '<span class="api-tk-s">' + esc(m[2]) + "</span>";
+      if (m[3] != null) return '<span class="api-tk-n">' + esc(m[3]) + "</span>";
+      return '<span class="api-tk-l">' + esc(m[4] == null ? m[0] : m[4]) + "</span>";
+    });
+  }
+  function apiHlXml(src) {
+    return apiHlRun(src, API_HL_XML, function (m) {
+      if (m[1] != null) return '<span class="api-tk-c">' + esc(m[1]) + "</span>";
+      if (m[2] != null) return '<span class="api-tk-t">' + esc(m[2]) + "</span>";
+      if (m[3] != null) return '<span class="api-tk-a">' + esc(m[3]) + "</span>" + esc(m[4] || "") +
+        '<span class="api-tk-s">' + esc(m[5] || "") + "</span>";
+      return '<span class="api-tk-p">' + esc(m[6] == null ? m[0] : m[6]) + "</span>";
+    });
+  }
+  function apiHl(src, lang) {
+    if (lang === "json") return apiHlJson(src);
+    if (lang === "html" || lang === "xml") return apiHlXml(src);
+    if (lang === "javascript") return apiHlJs(src);
+    return esc(src);
+  }
+  /* 美化：JSON 重新缩进；其它语言只上色不重排 —— HTML/XML 自动缩进会把内联文本拆得面目全非，
+     与其给一份看着像坏了的排版，不如老实按原文显示 */
+  function apiResPrettyText(r, lang) {
+    if (lang === "json") {
+      const v = apiResJson(r);
+      if (v !== null) { try { return JSON.stringify(v, null, 2); } catch (_) {} }
+    }
+    return apiResText(r);
+  }
+
+  /* 预览：图片直接 img，其余（HTML / XML / SVG）丢进沙箱 iframe。
+     沙箱刻意不给 allow-scripts：响应内容是外部来的，而这个应用自带本地文件接口，
+     让预览页能发请求等于开了个后门；纯静态页面（绝大多数预览场景）照常显示。 */
+  function apiResPreviewOk(r) {
+    if (!r) return false;
+    const base = String(r.content_type || "").split(";")[0].trim().toLowerCase();
+    if (r.encoding === "base64") return base.indexOf("image/") === 0;
+    return /html|xml|svg/.test(base) && !/json/.test(base);
+  }
+  function apiResPreviewHtml(r) {
+    const ct = String(r.content_type || "");
+    if (r.encoding === "base64") return '<img class="api-img" src="data:' + apiAttr(ct) + ";base64," + apiAttr(r.body_b64 || "") + '">';
+    return '<iframe class="api-prev" sandbox referrerpolicy="no-referrer" srcdoc="' + apiAttr(r.text || "") + '"></iframe>';
+  }
+
+  /* 可视化：把 JSON 自动摆成表格 —— 对象数组 → 多列，对象 → 名称/值，数组 → 一列 */
+  const API_VZ_LIMIT = 500;      // 最多渲染 500 行：几万行全塞进 DOM 会直接把页面卡死
+  function apiVzCell(x) {
+    if (x === undefined) return "";
+    if (x === null) return '<span class="api-tk-l">null</span>';
+    if (typeof x === "object") return esc(JSON.stringify(x));
+    return esc(String(x));
+  }
+  function apiVzTable(headHtml, rowsHtml, total) {
+    const note = total > API_VZ_LIMIT
+      ? '<div class="api-vz-note">只渲染前 ' + API_VZ_LIMIT + " 行，共 " + total + " 行</div>" : "";
+    return '<table class="api-vz">' + headHtml + "<tbody>" + rowsHtml.join("") + "</tbody></table>" + note;
+  }
+  function apiResVisualHtml(r) {
+    const v = apiResJson(r);
+    if (v === null) return '<div class="api-res-hint">这个响应不是 JSON，没法做成表格。</div>';
+    const head = function (cells) {
+      return "<thead><tr>" + cells.map(function (c) { return "<th>" + c + "</th>"; }).join("") + "</tr></thead>";
+    };
+    const idx = '<span class="api-vz-i">#</span>';
+    if (Array.isArray(v)) {
+      const objs = v.length > 0 && v.every(function (x) { return x && typeof x === "object" && !Array.isArray(x); });
+      if (objs) {
+        const cols = [];
+        v.forEach(function (o) { Object.keys(o).forEach(function (k) { if (cols.indexOf(k) < 0) cols.push(k); }); });
+        return apiVzTable(head([idx].concat(cols.map(function (c) { return esc(c); }))),
+          v.slice(0, API_VZ_LIMIT).map(function (o, i) {
+            return '<tr><td class="api-vz-i">' + (i + 1) + "</td>" +
+              cols.map(function (c) { return "<td>" + apiVzCell(o[c]) + "</td>"; }).join("") + "</tr>";
+          }), v.length);
+      }
+      return apiVzTable(head([idx, "值"]),
+        v.slice(0, API_VZ_LIMIT).map(function (x, i) {
+          return '<tr><td class="api-vz-i">' + (i + 1) + "</td><td>" + apiVzCell(x) + "</td></tr>";
+        }), v.length);
+    }
+    if (v && typeof v === "object") {
+      const keys = Object.keys(v);
+      return apiVzTable(head(["名称", "值"]), keys.slice(0, API_VZ_LIMIT).map(function (k) {
+        return '<tr><td class="api-vz-k">' + esc(k) + "</td><td>" + apiVzCell(v[k]) + "</td></tr>";
+      }), keys.length);
+    }
+    return apiVzTable(head(["值"]), ["<tr><td>" + apiVzCell(v) + "</td></tr>"], 1);
+  }
+
+  /* 工具条：美化 / 原始 / 预览 / 可视化 + 语言下拉 + 自动换行。
+     用不上的视图置灰（和 Postman 一样），并把原因挂在 title 上 —— 灰按钮本身不触发悬停，
+     所以提示写在外层 span 上。 */
+  function apiPaintResView(tab, r, eff) {
+    const el = tab.api.el, V = apiResView();
+    if (!el.view) return;      // 老 DOM（理论上不会有）时别把整个响应区带崩
+    const LANGS = [["auto", "自动"], ["json", "JSON"], ["xml", "XML"], ["html", "HTML"], ["javascript", "JavaScript"], ["text", "纯文本"]];
+    const btn = function (id, label, why) {
+      const cls = "api-rview" + (eff === id ? " active" : "");
+      if (!why) return '<button class="' + cls + '" data-v="' + id + '">' + label + "</button>";
+      return '<span class="api-rview-off" title="' + apiAttr(why) + '">' +
+        '<button class="' + cls + '" data-v="' + id + '" disabled>' + label + "</button></span>";
+    };
+    el.view.innerHTML =
+      '<div class="api-rviews">' +
+        btn("pretty", "美化") + btn("raw", "原始") +
+        btn("preview", "预览", apiResPreviewOk(r) ? "" : "只能预览 HTML / XML / SVG 或图片响应") +
+        btn("visualize", "可视化", apiResJson(r) !== null ? "" : "只能把 JSON 响应渲染成表格") +
+      "</div>" +
+      '<select class="api-res-lang" title="语法语言（自动 = 按 Content-Type 识别）">' +
+        LANGS.map(function (p) {
+          return '<option value="' + p[0] + '"' + (V.lang === p[0] ? " selected" : "") + ">" + p[1] +
+            (p[0] === "auto" ? " · " + apiLangName(apiResLang(r)) : "") + "</option>";
+        }).join("") +
+      "</select>" +
+      '<button class="api-mini api-wrapbtn' + (V.wrap ? " active" : "") + '" title="自动换行：' +
+        (V.wrap ? "已开启（点击关闭）" : "已关闭（点击开启）") + '"><i class="bi bi-text-wrap"></i></button>';
+    el.view.classList.add("on");
+  }
+  function apiHideResView(el) { if (el && el.view) { el.view.classList.remove("on"); el.view.innerHTML = ""; } }
+
+  /* 响应体入口：四个视图走同一条路。
+     eff = 本次真正生效的视图：偏好里的视图在当前响应上用不了（比如「预览」碰上 JSON）就退回美化，
+     只影响这一次渲染，用户的选择本身不动 —— 换回能预览的响应还是预览。 */
+  function apiPaintBody(tab, r, sizeTxt) {
+    const el = tab.api.el, V = apiResView();
+    const usable = function (v) { return v === "preview" ? apiResPreviewOk(r) : (v === "visualize" ? apiResJson(r) !== null : true); };
+    const eff = usable(V.view) ? V.view : "pretty";
+    apiPaintResView(tab, r, eff);
+    if (eff === "preview") { el.res.innerHTML = apiResPreviewHtml(r); return; }
+    if (eff === "visualize") { el.res.innerHTML = apiResVisualHtml(r); return; }
+    if (r.encoding === "base64") {          // 二进制又没有可预览的形态：只能给下载
+      const base = String(r.content_type || "").split(";")[0].trim().toLowerCase();
+      el.res.innerHTML = '<div class="api-res-hint">二进制响应（' + esc(r.content_type || "?") + "，" + sizeTxt +
+        '）。<button class="api-mini" id="apiDl">下载</button></div>';
+      const dl = el.res.querySelector("#apiDl");
+      if (dl) dl.addEventListener("click", function () { apiDownload(tab, base); });
+      return;
+    }
+    const lang = apiResLangUsed(r);
+    const text = eff === "raw" ? apiResText(r) : apiResPrettyText(r, lang);
+    el.res.innerHTML = '<pre class="api-pre' + (V.wrap ? "" : " api-pre-nowrap") + '">' +
+      (eff === "raw" ? esc(text) : apiHl(text, lang)) + "</pre>";
+  }
+  /* 视图工具条事件：容器常驻、内容反复重绘，所以只绑一次 + 委托（同 apiWireKv 的道理） */
+  function apiWireResView(tab) {
+    const el = tab.api.el; if (!el || !el.view || el.view._apiWired) return;
+    el.view._apiWired = true;
+    el.view.addEventListener("click", function (e) {
+      const V = apiResView();
+      if (e.target.closest(".api-wrapbtn")) { V.wrap = !V.wrap; apiSaveResView(); apiPaintRes(tab); return; }
+      const b = e.target.closest(".api-rview");
+      if (!b || b.disabled || b.dataset.v === V.view) return;
+      V.view = b.dataset.v; apiSaveResView(); apiPaintRes(tab);
+    });
+    el.view.addEventListener("change", function (e) {
+      if (!e.target.classList.contains("api-res-lang")) return;
+      const V = apiResView(); V.lang = e.target.value; apiSaveResView(); apiPaintRes(tab);
+    });
+  }
+
   function apiPaintRes(tab) {
     const el = tab.api.el; if (!el) return;
     const r = tab.api.res, err = tab.api.err, sending = tab.api.sending;
     if (el.copy) el.copy.disabled = !!sending || !r;   // 没有响应时「复制响应体」不可点
-    if (sending) { el.meta.className = "api-res-meta info"; el.meta.textContent = "发送中…"; el.res.innerHTML = '<div class="api-res-hint"><i class="bi bi-arrow-repeat pa-spin"></i> 正在发送请求</div>'; return; }
-    if (err) { el.meta.className = "api-res-meta err"; el.meta.textContent = "请求失败"; el.res.innerHTML = '<div class="api-res-err"><i class="bi bi-exclamation-triangle"></i> ' + esc(err) + '</div>'; return; }
-    if (!r) { el.meta.className = "api-res-meta"; el.meta.textContent = "尚未发送"; el.res.innerHTML = '<div class="api-res-hint">填写请求后点「发送」查看响应。</div>'; return; }
+    if (sending) { el.meta.className = "api-res-meta info"; el.meta.textContent = "发送中…"; el.res.innerHTML = '<div class="api-res-hint"><i class="bi bi-arrow-repeat pa-spin"></i> 正在发送请求</div>'; apiHideResView(el); return; }
+    if (err) { el.meta.className = "api-res-meta err"; el.meta.textContent = "请求失败"; el.res.innerHTML = '<div class="api-res-err"><i class="bi bi-exclamation-triangle"></i> ' + esc(err) + '</div>'; apiHideResView(el); return; }
+    if (!r) { el.meta.className = "api-res-meta"; el.meta.textContent = "尚未发送"; el.res.innerHTML = '<div class="api-res-hint">填写请求后点「发送」查看响应。</div>'; apiHideResView(el); return; }
     const sizeTxt = (r.size || 0) >= 1024 ? ((r.size / 1024).toFixed(1) + " KB") : (r.size + " B");
     el.meta.className = "api-res-meta " + apiStatusCls(r.status);
     el.meta.innerHTML = '<span class="api-st ' + apiStatusCls(r.status) + '">' + r.status + " " + esc(r.status_text || "") + "</span> · " +
@@ -460,19 +1549,12 @@
       el.res.innerHTML = '<table class="api-hdrs">' + r.headers.map(function (p) {
         return "<tr><td class=\"api-hk\">" + esc(p[0]) + "</td><td class=\"api-hv\">" + esc(p[1]) + "</td></tr>";
       }).join("") + "</table>";
+      apiHideResView(el);
     } else if (rt === "raw") {
       el.res.innerHTML = '<pre class="api-pre">' + esc(JSON.stringify(r, null, 2)) + "</pre>";
+      apiHideResView(el);
     } else {
-      if (r.encoding === "base64") {
-        const ct = (r.content_type || "").split(";")[0].toLowerCase();
-        if (ct.indexOf("image/") === 0) el.res.innerHTML = '<img class="api-img" src="data:' + r.content_type + ';base64,' + r.body_b64 + '">';
-        else el.res.innerHTML = '<div class="api-res-hint">二进制响应（' + (r.content_type || "?") + '，' + sizeTxt + '）。<button class="api-mini" id="apiDl">下载</button></div>';
-        const dl = el.res.querySelector("#apiDl"); if (dl) dl.addEventListener("click", function () { apiDownload(tab, ct); });
-      } else {
-        let out = r.text || "";
-        try { if (/json/i.test(r.content_type || "")) out = JSON.stringify(JSON.parse(out), null, 2); } catch (_) {}
-        el.res.innerHTML = '<pre class="api-pre">' + esc(out) + "</pre>";
-      }
+      apiPaintBody(tab, r, sizeTxt);
     }
   }
   function apiDownload(tab, ct) {

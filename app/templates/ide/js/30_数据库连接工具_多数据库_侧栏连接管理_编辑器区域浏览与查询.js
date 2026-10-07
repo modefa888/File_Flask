@@ -23,6 +23,20 @@
     return (c.host || "") + (c.port ? ":" + c.port : "") + (c.dbname ? " / " + c.dbname : "");
   }
 
+  /* ---------- 每个连接在编辑器区域的浏览状态（选中的库 / 表 / SQL 文本等）----------
+     刷新后据此还原，避免每次都回到初始（第一张表、SQL 窗关闭）。按连接 id 存 localStorage。 */
+  function dbcStateKey(id) { return "ide.dbconn.state." + id; }
+  function dbcLoadState(id) {
+    try { return JSON.parse(localStorage.getItem(dbcStateKey(id)) || "{}") || {}; } catch (e) { return {}; }
+  }
+  function dbcSaveState(id, patch) {
+    try {
+      var s = dbcLoadState(id);
+      for (var k in patch) if (Object.prototype.hasOwnProperty.call(patch, k)) s[k] = patch[k];
+      localStorage.setItem(dbcStateKey(id), JSON.stringify(s));
+    } catch (e) { /* 忽略（隐私模式 / 空间不足等） */ }
+  }
+
   async function dbcApi(url, opts) {
     var r = await fetch(url, opts);
     var d = await r.json();
@@ -84,15 +98,30 @@
         try {
           await dbcApi("/api/db/conns/delete", { method: "POST",
             headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id }) });
+          try { localStorage.removeItem(dbcStateKey(c.id)); } catch (e2) { /* 忽略 */ }   // 顺带清掉浏览状态
           toast("已删除连接：" + c.name, "ok");
           await loadDbConns(true);
         } catch (err) { toast("删除失败：" + (err.message || err), "err"); }
       };
     });
+    dbcSyncOpenMarks();          // 侧栏高亮：已打开 / 当前正在查看的连接
   }
   function dbcFind(id) {
     for (var i = 0; i < DBC.conns.length; i++) if (DBC.conns[i].id === id) return DBC.conns[i];
     return null;
+  }
+
+  /* ---------- 侧栏高亮：已打开（open）/ 当前正在查看（active）的连接 ----------
+     标签的增删切换统一会走到 00_preamble 的 renderTabsAll / activate，
+     那里会回调本函数，所以这里只按当前标签状态刷一遍样式。 */
+  function dbcSyncOpenMarks() {
+    var box = $("dbcList");
+    if (!box || typeof DBC_VIEW_PREFIX !== "string") return;    // 尚未初始化时跳过
+    box.querySelectorAll(".dbc-item").forEach(function (it) {
+      var t = findTab(DBC_VIEW_PREFIX + it.dataset.id);
+      it.classList.toggle("open", !!t);
+      it.classList.toggle("active", !!(t && t.host.classList.contains("active")));
+    });
   }
 
   /* ---------- 新建 / 编辑弹窗 ---------- */
@@ -167,8 +196,8 @@
         var isSqlite = kind === "sqlite";
         box.querySelectorAll(".dbc-host-row").forEach(function (r) { r.hidden = isSqlite; });
         box.querySelector(".dbc-tip-t").textContent = k.hint || "";
-        box.querySelector(".dbc-db-lb").textContent = isSqlite ? "文件" : "库名";
-        dbIn.placeholder = isSqlite ? "/path/to/database.db" : "可留空，连上后再选库";
+        box.querySelector(".dbc-db-lb").textContent = isSqlite ? "文件" : (kind === "redis" ? "库序号" : "库名");
+        dbIn.placeholder = { sqlite: "/path/to/database.db", redis: "0（默认 0 号库）" }[kind] || "可留空，连上后再选库";
         if (!portIn.value) portIn.placeholder = String(k.default_port || "");
       }
       function payload() {
@@ -253,19 +282,52 @@
           '<div class="dbc-bar">' +
             '<span class="dbc-cur" title="当前表">—</span>' +
             '<span class="dbc-sp"></span>' +
-            '<button class="dbc-mini dbc-sql-toggle" title="显示 / 隐藏 SQL 执行区"><i class="bi bi-terminal"></i> SQL</button>' +
-          "</div>" +
-          '<div class="dbc-sql" hidden>' +
-            "<textarea class=\"dbc-sql-in\" spellcheck=\"false\" placeholder=\"输入只读 SQL，Ctrl+Enter 执行（仅允许 SELECT / SHOW / EXPLAIN 等）\"></textarea>" +
-            '<div class="dbc-sql-bar"><span class="dbc-sql-msg"></span>' +
-            '<button class="ai-set-btn dbc-sql-run">执行</button></div>' +
+            '<button class="dbc-mini dbc-sql-toggle" title="显示 / 隐藏 SQL 执行区"><i class="bi bi-terminal"></i> <span class="dbc-sql-btn-t">SQL</span></button>' +
           "</div>" +
           '<div class="dbc-grid-wrap scroll-thin"></div>' +
           '<div class="dbc-pager"></div>' +
+          /* SQL 悬浮查询窗：绝对定位在数据区之上，可拖动 / 可全屏，不占数据表空间 */
+          '<div class="dbc-sql" hidden>' +
+            '<div class="dbc-sql-head">' +
+              '<span class="dbc-sql-title"><i class="bi bi-terminal"></i>SQL 查询</span>' +
+              '<span class="dbc-sql-hint">只读 · Ctrl+Enter 运行 · 拖动标题可移动</span>' +
+              '<span class="dbc-sp"></span>' +
+              '<button class="dbc-mini dbc-sql-max" title="全屏"><i class="bi bi-fullscreen"></i></button>' +
+              '<button class="dbc-mini dbc-sql-close" title="收起"><i class="bi bi-x-lg"></i></button>' +
+            "</div>" +
+            '<div class="dbc-sql-ai">' +
+              '<input class="dbc-sql-ai-input" type="text" spellcheck="false" placeholder="✨ 用一句话描述要查什么，回车即生成 SQL">' +
+              '<button class="dbc-mini dbc-sql-ai-run" title="生成 SQL（回车）"><i class="bi bi-stars"></i></button>' +
+            "</div>" +
+            '<textarea class="dbc-sql-input" spellcheck="false" placeholder="SELECT * FROM 表名 LIMIT 100;"></textarea>' +
+            '<div class="dbc-sql-bar">' +
+              '<span class="dbc-sql-msg"></span>' +
+              '<button class="dbc-mini dbc-sql-clear">清空</button>' +
+              '<button class="dbc-mini dbc-sql-run"><i class="bi bi-play-fill"></i>运行</button>' +
+            "</div>" +
+          "</div>" +
+          /* 行详情悬浮窗：点表格任意一行弹出，字段 / 值全量展示（不截断、可换行、可复制） */
+          '<div class="dbc-sql dbc-row" hidden>' +
+            '<div class="dbc-sql-head">' +
+              '<span class="dbc-sql-title"><i class="bi bi-list-columns-reverse"></i>行详情</span>' +
+              '<span class="dbc-sql-hint">点表格任意一行查看全部字段 · 拖动标题可移动</span>' +
+              '<span class="dbc-sp"></span>' +
+              '<button class="dbc-mini dbc-row-max" title="全屏"><i class="bi bi-fullscreen"></i></button>' +
+              '<button class="dbc-mini dbc-row-close" title="关闭"><i class="bi bi-x-lg"></i></button>' +
+            "</div>" +
+            '<div class="dbc-row-body scroll-thin"></div>' +
+            '<div class="dbc-sql-bar"><span class="dbc-sql-msg dbc-row-info"></span>' +
+              '<button class="dbc-mini dbc-row-edit"><i class="bi bi-pencil"></i> 编辑</button>' +
+              '<button class="dbc-mini dbc-row-save" hidden><i class="bi bi-check-lg"></i> 保存</button>' +
+              '<button class="dbc-mini dbc-row-cancel" hidden>取消</button>' +
+              '<button class="dbc-mini dbc-row-copy"><i class="bi bi-clipboard"></i> 复制 JSON</button></div>' +
+          "</div>" +
         "</div>" +
       "</div>";
 
-    var state = { db: conn.dbname || "", table: "", schema: "", limit: 100, offset: 0,
+    var saved = dbcLoadState(conn.id);        // 上次的浏览状态（刷新后还原）
+    var state = { db: saved.db || conn.dbname || "", table: saved.table || "",
+                  schema: saved.schema || "", limit: saved.limit || 100, offset: 0,
                   total: null, seq: 0, kind: conn.kind };
     tab.dbcState = state;
 
@@ -275,12 +337,31 @@
     var pagerEl = tab.host.querySelector(".dbc-pager");
     var curEl = tab.host.querySelector(".dbc-cur");
     var sqlBox = tab.host.querySelector(".dbc-sql");
-    var sqlIn = tab.host.querySelector(".dbc-sql-in");
+    var sqlIn = tab.host.querySelector(".dbc-sql-input");
     var sqlMsg = tab.host.querySelector(".dbc-sql-msg");
+    var lastGrid = { cols: [], rows: [] };     // 当前网格的数据，供「行详情」取用
+
+    // 非 SQL 库（Redis / MongoDB）没有「表 / SQL 语句」概念：左侧改为键 / 集合，右侧查询区改为命令 / JSON
+    var isRedis = conn.kind === "redis", isMongo = conn.kind === "mongodb";
+    var isNosql = isRedis || isMongo;
+    tab.host.querySelector(".dbc-tabs-sel").textContent = isRedis ? "键（Key）" : (isMongo ? "集合" : "表 / 视图");
+    tab.host.querySelector(".dbc-sql-btn-t").textContent = isRedis ? "命令" : (isMongo ? "查询" : "SQL");
+    tab.host.querySelector(".dbc-sql-toggle").title =
+      isRedis ? "显示 / 隐藏 Redis 命令区" : (isMongo ? "显示 / 隐藏 MongoDB 查询区" : "显示 / 隐藏 SQL 执行区");
+    if (isNosql) {
+      tab.host.querySelector(".dbc-sql-title").innerHTML =
+        '<i class="bi bi-terminal"></i>' + (isRedis ? "Redis 命令" : "MongoDB 查询");
+      tab.host.querySelector(".dbc-sql-hint").textContent = isRedis
+        ? "只读 · Ctrl+Enter 执行 · 仅允许读取类命令"
+        : "只读 · Ctrl+Enter 执行 · JSON 过滤（默认作用于左侧选中的集合，可用 collection 指定）";
+      sqlIn.placeholder = isRedis ? "HGETALL user:1"
+                                  : '{"collection": "users", "filter": {}, "limit": 50}';
+    }
 
     function err(e) { return '<div class="dbc-empty">' + esc(e.message || e) + "</div>"; }
 
     function drawGrid(cols, rows, emptyText, opts) {
+      lastGrid = { cols: (cols && cols.length) ? cols : [], rows: rows || [] };   // 供「行详情」取用
       if (!cols || !cols.length) return '<div class="dbc-empty">' + esc(emptyText || "没有数据") + "</div>";
       var head = "<tr>" + cols.map(function (c) { return "<th>" + esc(c) + "</th>"; }).join("") + "</tr>";
       var body = rows.length
@@ -295,6 +376,7 @@
       return '<table class="' + cls + '"><thead>' + head + "</thead><tbody>" + body + "</tbody></table>";
     }
 
+    var _schemaRetry = false;
     async function loadSchema() {
       tabsBox.innerHTML = '<div class="dbc-empty">加载中…</div>';
       try {
@@ -320,16 +402,29 @@
           it.onclick = function () {
             state.table = it.dataset.name;
             state.schema = it.dataset.schema;
+            dbcSaveState(conn.id, { db: state.db, table: state.table, schema: state.schema });
             tabsBox.querySelectorAll(".dbc-table").forEach(function (x) {
               x.classList.toggle("on", x === it);
             });
             loadRows(0);
           };
         });
-        var first = tabsBox.querySelector(".dbc-table");
-        if (first) first.onclick();
+        // 优先还原上次选中的表；该表不存在（或没记录）时退回第一张
+        var pick = null;
+        tabsBox.querySelectorAll(".dbc-table").forEach(function (it) {
+          if (!pick && state.table && it.dataset.name === state.table) pick = it;
+        });
+        var target = pick || tabsBox.querySelector(".dbc-table");
+        if (target) target.onclick();
         else { curEl.textContent = "—"; gridBox.innerHTML = '<div class="dbc-empty">选择左侧的表查看数据</div>'; pagerEl.innerHTML = ""; }
       } catch (e) {
+        // 上次记住的库已不可用（被删 / 改名）：退回连接自身的库重试一次，避免卡死
+        if (!_schemaRetry && state.db && state.db !== (conn.dbname || "")) {
+          _schemaRetry = true;
+          state.db = conn.dbname || ""; state.table = ""; state.schema = "";
+          dbcSaveState(conn.id, { db: state.db, table: "", schema: "" });
+          return loadSchema();
+        }
         tabsBox.innerHTML = err(e);
       }
     }
@@ -349,6 +444,7 @@
         state.offset = d.offset || 0;
         state.total = d.total;
         gridBox.innerHTML = drawGrid(d.columns, d.rows, "表里没有数据");
+        lastGrid.pk = d.pk || [];            // 主键（编辑行时用来定位）
         var from = d.rows.length ? state.offset + 1 : 0;
         var to = state.offset + d.rows.length;
         pagerEl.innerHTML =
@@ -372,36 +468,334 @@
 
     async function runQuery() {
       var sql = sqlIn.value.trim();
-      if (!sql) { sqlMsg.textContent = "请先输入 SQL"; return; }
+      if (!sql) { sqlMsg.className = "dbc-sql-msg err"; sqlMsg.textContent = "请先输入 SQL"; return; }
+      dbcSaveState(conn.id, { sql: sqlIn.value });
+      sqlMsg.className = "dbc-sql-msg";
       sqlMsg.textContent = "执行中…";
       gridBox.innerHTML = '<div class="dbc-empty">执行中…</div>';
       curEl.textContent = "查询结果";
       try {
         var d = await dbcApi("/api/db/query", { method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ conn: conn.id, dbname: state.db, sql: sql }) });
-        sqlMsg.textContent = "返回 " + d.row_count + " 行" + (d.truncated ? "（已截断到 " + d.limit + "）" : "") +
-          " · " + (d.elapsed_ms || 0) + " ms";
+          body: JSON.stringify({ conn: conn.id, dbname: state.db, schema: state.schema,
+                                 table: state.table, sql: sql }) });
+        // 后端会回传「实际查询的表 / 集合」（MongoDB 可能由 JSON 里的 collection 指定）：
+        // 与左侧选中的不一致时同步过去，避免侧栏高亮与结果对不上
+        var usedEl = null;
+        tabsBox.querySelectorAll(".dbc-table").forEach(function (x) {
+          if (!usedEl && d.table && x.dataset.name === d.table) usedEl = x;
+        });
+        if (usedEl && d.table !== state.table) {
+          state.table = d.table;
+          tabsBox.querySelectorAll(".dbc-table").forEach(function (x) { x.classList.toggle("on", x === usedEl); });
+          dbcSaveState(conn.id, { table: d.table, schema: state.schema });
+        }
+        sqlMsg.className = "dbc-sql-msg ok";
+        sqlMsg.textContent = (d.table ? d.table + " · " : "") + "返回 " + d.row_count + " 行" +
+          (d.truncated ? "（已截断到 " + d.limit + "）" : "") + " · " + (d.elapsed_ms || 0) + " ms";
         gridBox.innerHTML = drawGrid(d.columns, d.rows, "查询成功，没有返回行");
+        lastGrid.pk = d.pk || [];
         pagerEl.innerHTML = "";
       } catch (e) {
+        sqlMsg.className = "dbc-sql-msg err";
         sqlMsg.textContent = e.message || String(e);
         gridBox.innerHTML = err(e);
       }
     }
 
-    dbSel.onchange = function () { state.db = dbSel.value; state.table = ""; loadSchema(); };
+    // ---- 一句话生成 SQL：交给系统 AI（设置 → AI 助手 的当前接口/模型），只生成不执行 ----
+    var aiRow = tab.host.querySelector(".dbc-sql-ai");
+    var aiInput = tab.host.querySelector(".dbc-sql-ai-input");
+    var aiRun = tab.host.querySelector(".dbc-sql-ai-run");
+    var aiBusy = false;
+    // 该功能在「设置 → 系统 AI」里被停用时，整行 AI 输入都收起来（后端也会拒绝调用）
+    function refreshAiRow() {
+      if (!aiRow) return;
+      aiRow.hidden = (typeof sysAiOff === "function") && sysAiOff("nl2sql");
+    }
+    if (typeof onSysAiOffChange === "function") onSysAiOffChange(refreshAiRow);
+    else refreshAiRow();
+    // 非 SQL 库同样支持「一句话生成」，只是产物不同：命令 / JSON
+    var aiTip = isRedis ? "生成命令（回车）" : (isMongo ? "生成查询（回车）" : "生成 SQL（回车）");
+    if (isRedis) aiInput.placeholder = "✨ 用一句话描述要查什么，回车即生成命令";
+    else if (isMongo) aiInput.placeholder = "✨ 用一句话描述要查什么，回车即生成 JSON";
+    aiRun.title = aiTip;
+    function setAiBusy(on) {
+      aiBusy = on;
+      aiRun.disabled = on; aiInput.disabled = on;
+      aiRun.classList.toggle("loading", on);
+      aiRun.title = on ? "生成中…" : aiTip;
+      aiRun.innerHTML = '<i class="bi ' + (on ? "bi-arrow-repeat" : "bi-stars") + '"></i>';
+    }
+    async function genSql() {
+      if (aiBusy) return;
+      var q = aiInput.value.trim();
+      if (!q) { sqlMsg.className = "dbc-sql-msg err"; sqlMsg.textContent = "请先用一句话描述要查什么"; aiInput.focus(); return; }
+      setAiBusy(true);
+      sqlMsg.className = "dbc-sql-msg";
+      sqlMsg.textContent = isRedis ? "正在让 AI 生成命令…" : (isMongo ? "正在让 AI 生成查询…" : "正在让 AI 生成 SQL…");
+      try {
+        var d = await dbcApi("/api/db/nl2sql", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conn: conn.id, dbname: state.db, question: q }) });
+        sqlIn.value = d.sql || "";
+        dbcSaveState(conn.id, { sql: sqlIn.value });
+        sqlMsg.className = "dbc-sql-msg ok";
+        sqlMsg.textContent = "已生成（" + (d.model || "AI") + " · " + (d.elapsed_ms || 0) + " ms）· 确认后按 Ctrl+Enter 运行";
+        sqlIn.focus();
+      } catch (e) {
+        sqlMsg.className = "dbc-sql-msg err";
+        sqlMsg.textContent = e.message || String(e);
+      } finally { setAiBusy(false); }
+    }
+
+    // ---- 悬浮窗通用：拖标题栏移动、按钮切全屏（限制在数据区内），并按连接记住位置 / 全屏状态 ----
+    function makeCard(box, head, maxBtn, name) {
+      var pos = saved[name + "Pos"] || null;
+      var drag = null;
+      function clamp() {                            // 把位置夹回数据区内（宿主不可见时不动）
+        if (box.classList.contains("max") || !box.style.left) return;
+        var area = box.parentElement.getBoundingClientRect();    // .dbc-main
+        if (!area.width || !area.height) return;   // 尺寸为 0 说明宿主还没显示，夹了会被压到左上角
+        var maxL = Math.max(0, area.width - box.offsetWidth);
+        var maxT = Math.max(0, area.height - box.offsetHeight);
+        box.style.left = Math.max(0, Math.min(parseFloat(box.style.left) || 0, maxL)) + "px";
+        box.style.top = Math.max(0, Math.min(parseFloat(box.style.top) || 0, maxT)) + "px";
+      }
+      function place() {                            // 清掉内联定位，按「记录的位置」或 CSS 默认值摆放
+        box.style.left = ""; box.style.top = ""; box.style.right = "";
+        if (!box.classList.contains("max") && pos && pos.left) {
+          box.style.right = "auto";
+          box.style.left = pos.left; box.style.top = pos.top;
+          clamp();
+        }
+      }
+      function onMove(e) {
+        if (!drag) return;
+        var area = box.parentElement.getBoundingClientRect();
+        var maxL = Math.max(0, area.width - box.offsetWidth);
+        var maxT = Math.max(0, area.height - box.offsetHeight);
+        box.style.right = "auto";
+        box.style.left = Math.max(0, Math.min(e.clientX - area.left - drag.x, maxL)) + "px";
+        box.style.top = Math.max(0, Math.min(e.clientY - area.top - drag.y, maxT)) + "px";
+      }
+      function endDrag() {
+        if (drag) {                                 // 记住拖动后的位置
+          pos = { left: box.style.left, top: box.style.top };
+          var p = {}; p[name + "Pos"] = pos; dbcSaveState(conn.id, p);
+        }
+        drag = null;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", endDrag);
+      }
+      head.addEventListener("mousedown", function (e) {
+        if (e.button !== 0 || (e.target.closest && e.target.closest("button"))) return;
+        if (box.classList.contains("max")) return;     // 全屏状态下无需拖动
+        var r = box.getBoundingClientRect();
+        drag = { x: e.clientX - r.left, y: e.clientY - r.top };
+        e.preventDefault();
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", endDrag);
+      });
+      function setMax(on) {
+        box.classList.toggle("max", !!on);
+        place();
+        maxBtn.title = on ? "还原" : "全屏";
+        maxBtn.innerHTML = '<i class="bi ' + (on ? "bi-arrows-angle-contract" : "bi-fullscreen") + '"></i>';
+        var p = {}; p[name + "Max"] = !!on; dbcSaveState(conn.id, p);
+      }
+      maxBtn.onclick = function () { setMax(!box.classList.contains("max")); };
+      if (saved[name + "Max"]) setMax(true); else place();   // 还原上次的全屏 / 位置
+      return { setMax: setMax, place: place, clamp: clamp };
+    }
+
+    var sqlToggle = tab.host.querySelector(".dbc-sql-toggle");
+    var sqlMaxBtn = tab.host.querySelector(".dbc-sql-max");
+    var sqlCard = makeCard(sqlBox, tab.host.querySelector(".dbc-sql-head"), sqlMaxBtn, "sql");
+    var sqlMaxClick = sqlMaxBtn.onclick;            // 全屏切换后把焦点还给编辑框
+    sqlMaxBtn.onclick = function () { sqlMaxClick(); sqlIn.focus(); };
+
+    function setSqlPanel(show) {
+      sqlBox.hidden = !show;
+      sqlToggle.classList.toggle("on", show);
+      if (show) { sqlCard.clamp(); sqlIn.focus(); }
+      dbcSaveState(conn.id, { sqlOpen: !!show });
+    }
+
+    // ---- 行详情：点数据表格任意一行，把这行的所有字段完整列出来（各数据库通用）；
+    //      有主键的行还能直接改字段并写回数据库 ----
+    var rowBox = tab.host.querySelector(".dbc-row");
+    var rowBody = tab.host.querySelector(".dbc-row-body");
+    var rowInfo = tab.host.querySelector(".dbc-row-info");
+    var rowEditBtn = tab.host.querySelector(".dbc-row-edit");
+    var rowSaveBtn = tab.host.querySelector(".dbc-row-save");
+    var rowCancelBtn = tab.host.querySelector(".dbc-row-cancel");
+    var rowCard = makeCard(rowBox, tab.host.querySelector(".dbc-row .dbc-sql-head"),
+                           tab.host.querySelector(".dbc-row-max"), "row");
+    var curRow = null;
+
+    function setRowPanel(show) {
+      rowBox.hidden = !show;
+      if (show) rowCard.clamp();
+    }
+    // 每行都能定位到原始值（data-v），编辑时据此判断哪些字段真的改了
+    function rowTableHtml(cols, rec) {
+      return '<table class="dbc-row-tb"><thead><tr><th>字段</th><th>值</th></tr></thead><tbody>' +
+        cols.map(function (c, i) {
+          var v = rec[i], isNull = (v === null || v === undefined);
+          var txt = isNull ? "NULL" : String(v);
+          return '<tr><td class="dbc-row-k">' + esc(c) + '</td><td class="dbc-row-v"' +
+            (isNull ? ' data-null="1"' : "") + ' data-v="' + escAttr(txt) + '">' +
+            (isNull ? '<span class="dbc-null">NULL</span>' : esc(txt)) + "</td></tr>";
+        }).join("") + "</tbody></table>";
+    }
+    // 能不能编辑：必须有主键（MongoDB 是 _id），且主键值都在这一行里
+    function canEditRow(cols, rec) {
+      var pk = lastGrid.pk || [];
+      if (!pk.length) return false;
+      for (var i = 0; i < pk.length; i++) {
+        var idx = cols.indexOf(pk[i]);
+        if (idx < 0 || rec[idx] === null || rec[idx] === undefined) return false;
+      }
+      return true;
+    }
+    function setEditMode(on) {
+      rowBox.classList.toggle("editing", !!on);
+      rowEditBtn.hidden = !!on;
+      rowSaveBtn.hidden = !on;
+      rowCancelBtn.hidden = !on;
+    }
+    function openRow(idx) {
+      var cols = lastGrid.cols, rec = lastGrid.rows[idx];
+      if (!cols.length || !rec) return;
+      curRow = { cols: cols, rec: rec, idx: idx };
+      setEditMode(false);
+      rowBody.innerHTML = rowTableHtml(cols, rec);
+      rowBody.scrollTop = 0;
+      var can = canEditRow(cols, rec);
+      rowEditBtn.hidden = !can;
+      rowInfo.textContent = (state.table ? state.table + " · " : "") + "第 " + (idx + 1) + " 行 · " +
+        cols.length + " 个字段" + (can ? "" : "（缺主键，不可编辑）");
+      setRowPanel(true);
+    }
+    gridBox.addEventListener("click", function (e) {
+      var tr = e.target && e.target.closest ? e.target.closest("tr") : null;
+      if (!tr || !tr.parentNode || tr.parentNode.tagName !== "TBODY") return;   // 表头 / 空数据行不算
+      var kids = tr.parentNode.children;
+      var idx = Array.prototype.indexOf.call(kids, tr);
+      if (idx < 0 || !lastGrid.rows[idx]) return;
+      Array.prototype.forEach.call(kids, function (r) { r.classList.toggle("on", r === tr); });
+      openRow(idx);
+    });
+    // 进入编辑：值单元格换成输入框（原值放 data-v 里比对）
+    rowEditBtn.onclick = function () {
+      if (!curRow) return;
+      Array.prototype.forEach.call(rowBody.querySelectorAll(".dbc-row-v"), function (td) {
+        var wasNull = td.getAttribute("data-null") === "1";
+        var ta = document.createElement("textarea");
+        ta.className = "dbc-row-in";
+        ta.rows = 1;
+        ta.spellcheck = false;
+        ta.value = wasNull ? "" : (td.getAttribute("data-v") || "");
+        if (wasNull) ta.placeholder = "NULL（留空不修改）";
+        td.textContent = "";
+        td.appendChild(ta);
+      });
+      setEditMode(true);
+      rowInfo.textContent = "编辑中 · 改完点「保存」会直接写入数据库（空串会写成空字符串，NULL 留空即不改动）";
+      var first = rowBody.querySelector(".dbc-row-in");
+      if (first) first.focus();
+    };
+    rowCancelBtn.onclick = function () {
+      if (!curRow) return;
+      setEditMode(false);
+      rowBody.innerHTML = rowTableHtml(curRow.cols, curRow.rec);
+      rowInfo.textContent = (state.table ? state.table + " · " : "") + "第 " + (curRow.idx + 1) + " 行";
+    };
+    rowSaveBtn.onclick = async function () {
+      if (!curRow || !canEditRow(curRow.cols, curRow.rec)) return;
+      var ins = Array.prototype.slice.call(rowBody.querySelectorAll(".dbc-row-in"));
+      var changes = {}, key = {}, n = 0;
+      curRow.cols.forEach(function (c, i) {
+        var before = curRow.rec[i];
+        var wasNull = (before === null || before === undefined);
+        var after = ins[i] ? ins[i].value : (wasNull ? "" : String(before));
+        if (wasNull && after === "") return;                     // 原本 NULL、没填 → 不动
+        if (!wasNull && after === String(before)) return;        // 没改 → 不动
+        changes[c] = after;
+        n++;
+      });
+      if (!n) { rowInfo.textContent = "没有检测到改动"; return; }
+      (lastGrid.pk || []).forEach(function (c) { key[c] = curRow.rec[curRow.cols.indexOf(c)]; });
+      var ok = await uiConfirm("保存修改",
+        "将把 " + n + " 处改动写入「" + (state.table || "") + "」，会直接作用于数据库，确定继续？",
+        "保存", true);
+      if (!ok) return;
+      rowSaveBtn.disabled = true;
+      try {
+        var d = await dbcApi("/api/db/row/update", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conn: conn.id, dbname: state.db, schema: state.schema,
+                                 table: state.table, key: key, changes: changes }) });
+        // 本地基线同步成新值，表格里对应单元格也一起更新（不重新拉数据，避免打乱面板）
+        var tr = gridBox.querySelectorAll("tbody tr")[curRow.idx];
+        Object.keys(changes).forEach(function (c) {
+          var i = curRow.cols.indexOf(c);
+          curRow.rec[i] = changes[c];
+          if (lastGrid.rows[curRow.idx]) lastGrid.rows[curRow.idx][i] = changes[c];
+          var td = tr && tr.children[i];
+          if (td) { td.classList.remove("dbc-null"); td.textContent = changes[c]; }
+        });
+        setEditMode(false);
+        rowBody.innerHTML = rowTableHtml(curRow.cols, curRow.rec);
+        rowInfo.textContent = "已保存 " + n + " 处改动（影响 " + (d.updated || 0) + " 行）";
+        toast("已保存 " + n + " 处改动", "ok");
+      } catch (e) {
+        rowInfo.textContent = e.message || String(e);
+      } finally { rowSaveBtn.disabled = false; }
+    };
+    tab.host.querySelector(".dbc-row-close").onclick = function () { setRowPanel(false); };
+    tab.host.querySelector(".dbc-row-copy").onclick = function () {
+      if (!curRow) return;
+      var obj = {};
+      curRow.cols.forEach(function (c, i) { obj[c] = (curRow.rec[i] === undefined ? null : curRow.rec[i]); });
+      copyText(JSON.stringify(obj, null, 2));
+    };
+
+    dbSel.onchange = function () {
+      state.db = dbSel.value; state.table = ""; state.schema = "";
+      dbcSaveState(conn.id, { db: state.db, table: "", schema: "" });
+      loadSchema();
+    };
     tab.host.querySelector(".dbc-refresh").onclick = function () {
       if (state.table) { loadRows(state.offset); } else { loadSchema(); }
     };
-    tab.host.querySelector(".dbc-sql-toggle").onclick = function () {
-      sqlBox.hidden = !sqlBox.hidden;
-      if (!sqlBox.hidden) sqlIn.focus();
+    sqlToggle.onclick = function () { setSqlPanel(sqlBox.hidden); };
+    tab.host.querySelector(".dbc-sql-close").onclick = function () { setSqlPanel(false); };
+    tab.host.querySelector(".dbc-sql-clear").onclick = function () {
+      sqlIn.value = "";
+      sqlMsg.textContent = ""; sqlMsg.className = "dbc-sql-msg";
+      dbcSaveState(conn.id, { sql: "" });
+      sqlIn.focus();
     };
     tab.host.querySelector(".dbc-sql-run").onclick = runQuery;
     sqlIn.addEventListener("keydown", function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runQuery(); }
     });
+    // 输入停顿即落盘 SQL 文本，刷新后不丢
+    var sqlSaveTimer = null;
+    sqlIn.addEventListener("input", function () {
+      clearTimeout(sqlSaveTimer);
+      sqlSaveTimer = setTimeout(function () { dbcSaveState(conn.id, { sql: sqlIn.value }); }, 400);
+    });
+    aiRun.onclick = genSql;
+    aiInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); genSql(); }
+    });
+    // 还原上次的 SQL 文本与悬浮窗开合状态（位置 / 全屏已由 makeCard 还原），再加载结构
+    //（结构会按记录还原选中的库 / 表）
+    if (saved.sql) sqlIn.value = saved.sql;
+    if (saved.sqlOpen) setSqlPanel(true);   // 显示时再夹一次边界，适配当前窗口尺寸
     loadSchema();
   }
 

@@ -1,5 +1,11 @@
   /* ===== 数据库连接工具：左栏连接列表 + 编辑器区域的库表浏览与查询 ===== */
 
+  /* ---------- 编辑器标签：数据库连接标签加颜色（与侧栏高亮呼应） ---------- */
+  .tab.tab-db { box-shadow: inset 3px 0 0 #0e639c; }        /* 未激活：左侧一条蓝边 */
+  .tab.tab-db.active { background: #094771; color: #ffffff; box-shadow: inset 3px 0 0 #4db8ff; }
+  .tab.tab-db.active .t-close { color: #cfe8ff; }
+  .tab.tab-db.active .t-close:hover { background: #0e639c; color: #ffffff; }
+
   /* ---------- 左栏面板 ---------- */
   .dbc-tools { display: flex; align-items: center; gap: 6px; padding: 8px 10px 0; }
   .dbc-tools .g-btn { flex: 1; }
@@ -10,6 +16,12 @@
     border: 1px solid transparent;
   }
   .dbc-item:hover { background: #2a2d2e; border-color: #37373d; }
+  /* 已打开的连接：淡底 + 左侧蓝条；当前正在查看的连接：整条蓝底 */
+  .dbc-item.open { background: #26292c; box-shadow: inset 2px 0 0 #3a6ea5; }
+  .dbc-item.open .dbc-name { color: #ffffff; }
+  .dbc-item.active { background: #094771; border-color: #0e639c; box-shadow: inset 2px 0 0 #4db8ff; }
+  .dbc-item.active .dbc-name, .dbc-item.active .dbc-sub { color: #ffffff; }
+  .dbc-item.active .dbc-ico { color: #9fd0ff; }
   .dbc-ico { flex: none; font-size: 15px; color: #4ec9b0; }
   .dbc-main { flex: 1; min-width: 0; }
   .dbc-name { font-size: 12.5px; color: #e2e2e2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -90,8 +102,11 @@
   .dbc-table.on .bi { color: #ffffff; }
   .dbc-tn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dbc-tc { flex: none; font-size: 10.5px; color: #7a7a7a; }
+  /* 选中的表：右侧行数用蓝色标出（与 SQLite 查看器一致） */
+  .dbc-table.on .dbc-tc { color: #9fd0ff; }
 
-  .dbc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  /* position: relative 是 SQL 悬浮查询窗的定位参照（只在数据区内浮动，不盖左侧表列表） */
+  .dbc-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .dbc-bar {
     flex: none; display: flex; align-items: center; gap: 8px;
     padding: 7px 12px; border-bottom: 1px solid #2e2e2f;
@@ -104,16 +119,108 @@
   }
   .dbc-mini:hover { background: #3a3d41; color: #ffffff; }
   .dbc-mini:disabled { opacity: .45; cursor: default; }
-  .dbc-sql { flex: none; border-bottom: 1px solid #2e2e2f; padding: 8px 12px; background: #1b1b1d; }
-  .dbc-sql-in {
-    width: 100%; box-sizing: border-box; min-height: 70px; max-height: 200px; resize: vertical;
-    background: #141415; color: #dcdcdc; border: 1px solid #333333; border-radius: 6px;
-    padding: 8px 10px; font-size: 12.5px; line-height: 1.6; outline: none;
+  /* SQL 查询窗：工具栏「SQL」按钮开的悬浮窗，可拖动 / 可全屏，不占数据表空间 */
+  .dbc-sql-toggle.on { background: #094771; border-color: #0e639c; color: #ffffff; }
+  /* 块级布局而非 column flex：flex 子项会被压缩，而 input/textarea 的自动最小高度
+     对表单元素等于 0，一挤就只剩 padding，变成一条细线。 */
+  .dbc-sql {
+    position: absolute; z-index: 40; top: 44px; right: 16px;
+    width: 680px; max-width: calc(100% - 32px); display: block;
+    background: #252526; border: 1px solid #454545; border-radius: 8px;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, .55);
+  }
+  .dbc-sql[hidden] { display: none; }
+  /* 全屏：铺满数据区，标题栏保留（用于还原与关闭） */
+  .dbc-sql.max { top: 0; right: 0; bottom: 0; left: 0; width: auto; max-width: none; border-radius: 0; }
+  .dbc-sql-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px 6px 12px; border-bottom: 1px solid #3a3a3a;
+    cursor: move; user-select: none;
+  }
+  .dbc-sql.max .dbc-sql-head { cursor: default; }
+  .dbc-sql-title { flex: none; font-size: 12px; font-weight: 600; color: #4fc3f7; white-space: nowrap; }
+  .dbc-sql-title .bi { color: #4fc3f7; margin-right: 4px; }
+  /* 窄窗口下让提示文字先被省略，避免把头部撑破 */
+  .dbc-sql-hint {
+    flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    font-size: 11px; color: #7a7a7a; white-space: nowrap;
+  }
+  /* 悬浮窗里的按钮改成描边样式，贴合面板观感 */
+  .dbc-sql .dbc-mini { background: transparent; border-color: #444444; color: #bbbbbb; }
+  .dbc-sql .dbc-mini:hover:not(:disabled) { background: #333333; color: #ffffff; }
+  /* 一句话生成 SQL：输入框 + 图标按钮（生成中转圈） */
+  .dbc-sql-ai { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; }
+  /* 该功能在「设置 → 系统 AI」里被停用 → 整行收起（flex 会盖掉 hidden 的默认样式） */
+  .dbc-sql-ai[hidden] { display: none; }
+  .dbc-sql-ai-input {
+    flex: 1; min-width: 0; box-sizing: border-box; height: 26px;
+    background: #1b1b1b; color: #e6e6e6; border: 1px solid #444444; border-radius: 4px;
+    padding: 0 8px; font-size: 12.5px; font-family: inherit; outline: none;
+  }
+  .dbc-sql-ai-input:focus { border-color: #0098ff; }
+  .dbc-sql-ai-input:disabled { opacity: .6; }
+  .dbc-sql-ai-run .bi { display: inline-block; }
+  /* AI 请求中：图标转圈 + 彩色流光（渐变作用在图标的 ::before 字形上） */
+  .dbc-sql-ai-run.loading .bi { animation: dbcSpin .9s linear infinite; }
+  .dbc-sql-ai-run.loading .bi::before {
+    background: linear-gradient(90deg, #22d3ee, #a855f7, #f472b6, #fbbf24, #22d3ee);
+    background-size: 400% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    /* 只靠 -webkit-text-fill-color 置透明：不支持渐变文字的浏览器该属性同样无效，
+       图标会保留原来的灰色而不是消失 */
+    -webkit-text-fill-color: transparent;
+    animation: dbcFlow 2.4s linear infinite;
+  }
+  @keyframes dbcSpin { to { transform: rotate(360deg); } }
+  @keyframes dbcFlow { from { background-position: 0 0; } to { background-position: 400% 0; } }
+  /* SQL 编辑框 */
+  .dbc-sql-input {
+    display: block; box-sizing: border-box; width: calc(100% - 24px);
+    margin: 8px 12px 0; height: 88px; min-height: 56px; resize: vertical;
+    background: #1b1b1b; color: #e6e6e6; border: 1px solid #444444; border-radius: 4px;
+    padding: 6px 8px; outline: none; font-size: 12.5px; line-height: 1.5;
     font-family: ui-monospace, Menlo, Consolas, monospace;
   }
-  .dbc-sql-in:focus { border-color: #0e639c; }
-  .dbc-sql-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-  .dbc-sql-msg { flex: 1; min-width: 0; font-size: 11.5px; color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; }
+  .dbc-sql-input:focus { border-color: #0098ff; }
+  /* 全屏时编辑框撑满剩余高度（标题 33 + AI 行 34 + 上下间距 45） */
+  .dbc-sql.max .dbc-sql-input { height: calc(100% - 112px); resize: none; }
+  /* 底部：状态 + 操作 */
+  .dbc-sql-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px 8px; }
+  .dbc-sql-msg { flex: 1; min-width: 0; font-size: 11.5px; line-height: 1.5; color: #8a8a8a; }
+  .dbc-sql-msg.ok { color: #7fc98a; }
+  .dbc-sql-msg.err { color: #e08a8a; }
+  .dbc-sql-run .bi { margin-right: 4px; }
+  /* 行详情：与 SQL 查询窗同一套悬浮卡片外观，内容换成「字段 / 值」全量列表 */
+  .dbc-row { top: 60px; left: 16px; right: auto; }   /* 默认开在数据区左侧，避开右侧的 SQL 窗 */
+  .dbc-row-body {
+    margin: 8px 12px; max-height: 320px; overflow: auto;
+    border: 1px solid #3a3a3a; border-radius: 5px; background: #1b1b1b;
+  }
+  .dbc-sql.max .dbc-row-body { max-height: none; height: calc(100% - 92px); }
+  .dbc-row-tb { border-collapse: collapse; width: 100%; font-size: 12px; }
+  .dbc-row-tb th {
+    position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap;
+    background: #262628; color: #9fd0ff; font-weight: 600;
+    padding: 5px 10px; border-bottom: 1px solid #3a3a3a; border-right: 1px solid #2e2e2f;
+  }
+  .dbc-row-tb td {
+    padding: 5px 10px; border-bottom: 1px solid #2a2a2b; border-right: 1px solid #262626;
+    color: #d6d6d6; vertical-align: top; white-space: pre-wrap; word-break: break-all;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .dbc-row-tb td.dbc-row-k { width: 1%; min-width: 110px; white-space: nowrap; color: #9fd0ff; }
+  .dbc-row-tb td.dbc-null { color: #6a6a6a; font-style: italic; }
+  .dbc-row-info { white-space: nowrap; }
+  /* 编辑态：值单元格换成输入框 */
+  .dbc-row-in {
+    width: 100%; box-sizing: border-box; min-height: 26px; resize: vertical;
+    background: #1b1b1b; color: #e6e6e6; border: 1px solid #444444; border-radius: 4px;
+    padding: 3px 6px; font-size: 12px; line-height: 1.45; outline: none;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .dbc-row-in:focus { border-color: #0098ff; }
+  .dbc-row-in::placeholder { color: #6a6a6a; font-style: italic; }
   .dbc-grid-wrap { flex: 1; min-height: 0; overflow: auto; }
   .dbc-pager {
     flex: none; display: flex; align-items: center; gap: 6px;
@@ -127,7 +234,7 @@
   .dbc-grid { border-collapse: collapse; width: 100%; font-size: 12px; }
   .dbc-grid th {
     position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap;
-    background: #262628; color: #b8b8b8; font-weight: 600;
+    background: #262628; color: #9fd0ff; font-weight: 600;
     padding: 6px 10px; border-bottom: 1px solid #3a3a3a; border-right: 1px solid #2e2e2f;
   }
   .dbc-grid td {
@@ -135,6 +242,8 @@
     color: #d6d6d6; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-family: ui-monospace, Menlo, Consolas, monospace;
   }
+  .dbc-grid tbody tr { cursor: pointer; }                       /* 点整行看详情 */
   .dbc-grid tbody tr:hover td { background: #26262a; }
+  .dbc-grid tbody tr.on td { background: #094771; color: #ffffff; }
   .dbc-grid .dbc-null { color: #6a6a6a; font-style: italic; }
   .dbc-empty { padding: 18px; color: #7a7a7a; font-size: 12.5px; text-align: center; }

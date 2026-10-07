@@ -133,8 +133,8 @@
               '<div class="sysai-mod-desc">源代码管理里按本次改动生成 Git 提交说明</div></div><code>POST /api/ai/commit-message</code>' +
               '<label class="set-switch sysai-sw" data-mod="commit" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
             '<div class="sysai-mod"><i class="bi bi-database"></i><div class="sysai-mod-main">' +
-              '<div class="sysai-mod-name">一句话生成 SQL<span class="sysai-stat" data-stat="nl2sql"></span></div>' +
-              '<div class="sysai-mod-desc">数据库查看器里把自然语言翻译成查询语句</div></div><code>POST /api/sqlite/nl2sql</code>' +
+              '<div class="sysai-mod-name">一句话生成查询<span class="sysai-stat" data-stat="nl2sql"></span></div>' +
+              '<div class="sysai-mod-desc">数据库查看器 / 连接工具里把自然语言翻译成 SQL、Redis 命令或 Mongo 查询</div></div><code>POST /api/db/nl2sql</code>' +
               '<label class="set-switch sysai-sw" data-mod="nl2sql" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
             '<div class="sysai-mod"><i class="bi bi-diagram-3"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">新建项目 AI<span class="sysai-stat" data-stat="scaffold"></span></div>' +

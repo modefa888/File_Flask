@@ -1,15 +1,19 @@
 """数据库连接工具：连接配置管理 + 多数据库浏览与查询。
 
-支持：SQLite（标准库，无需驱动）、MySQL / MariaDB（pymysql）、PostgreSQL（psycopg2）。
+支持：SQLite（标准库，无需驱动）、MySQL / MariaDB（pymysql）、PostgreSQL（psycopg2）、
+      Redis（redis）、MongoDB（pymongo）。
 没装对应驱动的类型会在「驱动」接口里标出来，前端据此禁用，而不是等到连接时才报错。
 
 安全约定（与既有 SQLite 查看器一致）：
   · 查询一律只读 —— SQLite 用 file:...?mode=ro；MySQL/PG 只放行 SELECT/SHOW/DESC/EXPLAIN 类语句；
+    Redis 只放行读取类命令；MongoDB 只做 find，并拒绝 $where 等可执行脚本的操作符；
   · 密码用 services/common/secret.py 加密后落库，返回前端时脱敏（只留前 4 位）；
   · 表名走方言引号转义，且必须来自已列出的表，避免拼接注入。
 """
 import json
 import os
+import re
+import shlex
 import sqlite3
 import threading
 import time
@@ -30,15 +34,31 @@ _SQL_MAX = 20000                 # SQL 文本长度上限
 _QUERY_TIMEOUT = 8               # 查询超时秒数
 _CONNECT_TIMEOUT = 8             # 建连接超时秒数
 _CELL_MAX = 2000                 # 单个单元格最长字符数（超出截断）
+_NL_MAX = 500                    # 「一句话生成 SQL」描述长度上限
+_NL_TIMEOUT = 60                 # 调 AI 生成 SQL 的超时秒数
+_NL_CTX = 40000                  # 提示词总长度上限（表结构 + 需求）
+_NL_TABLES = 60                  # 表结构最多提供给 AI 的表数
+_NOSQL_LIST_MAX = 300            # Redis key / 列表类浏览一次最多列出多少条
 
 KINDS = {
-    "sqlite": {"label": "SQLite", "icon": "bi-filetype-db", "need_host": False,
-               "default_port": 0, "driver": "sqlite3", "hint": "填写 .db / .sqlite 文件的绝对路径"},
+    "sqlite": {"label": "SQLite", "icon": "bi-filetype-sql", "need_host": False,
+               "default_port": 0, "driver": "sqlite3", "pip": "",
+               "hint": "填写 .db / .sqlite 文件的绝对路径"},
     "mysql": {"label": "MySQL / MariaDB", "icon": "bi-server", "need_host": True,
-              "default_port": 3306, "driver": "pymysql", "hint": "默认端口 3306"},
+              "default_port": 3306, "driver": "pymysql", "pip": "pymysql", "hint": "默认端口 3306"},
     "postgres": {"label": "PostgreSQL", "icon": "bi-database-fill", "need_host": True,
-                 "default_port": 5432, "driver": "psycopg2", "hint": "默认端口 5432"},
+                 "default_port": 5432, "driver": "psycopg2", "pip": "psycopg2-binary",
+                 "hint": "默认端口 5432"},
+    "redis": {"label": "Redis", "icon": "bi-lightning-charge", "need_host": True,
+              "default_port": 6379, "driver": "redis", "pip": "redis",
+              "hint": "默认端口 6379；「库名」填 0-15 的库序号，留空为 0"},
+    "mongodb": {"label": "MongoDB", "icon": "bi-collection-fill", "need_host": True,
+                "default_port": 27017, "driver": "pymongo", "pip": "pymongo",
+                "hint": "默认端口 27017；「库名」可留空，连上后再选库"},
 }
+# 非关系型：不走 SQL 那套（库表/行/SQL 语句），浏览与查询各自单独实现
+_NOSQL = ("redis", "mongodb")
+_SQLITE_EXTS = (".db", ".sqlite", ".sqlite3", ".db3")   # 「一句话生成」按路径直连时的后缀白名单
 
 # 只读语句白名单：首关键字命中即放行（写操作交给数据库自身再拒一次）
 _READ_START = ("select", "show", "desc", "describe", "explain", "with", "pragma", "table", "values")
@@ -67,8 +87,7 @@ def api_db_kinds():
         out.append({"kind": key, "label": meta["label"], "icon": meta["icon"],
                     "need_host": meta["need_host"], "default_port": meta["default_port"],
                     "hint": meta["hint"], "driver": meta["driver"], "ready": ok,
-                    "install": "" if ok else "pip install %s" % (
-                        "pymysql" if meta["driver"] == "pymysql" else "psycopg2-binary")})
+                    "install": "" if (ok or not meta.get("pip")) else "pip install %s" % meta["pip"]})
     return jsonify({"kinds": out})
 
 
@@ -210,18 +229,21 @@ def api_db_conns_delete():
 
 # --------------------------------------------------------------------------- 连接（各方言）
 
-def _open_sqlite(conf):
+def _open_sqlite(conf, writable=False):
     path = conf.get("dbname") or ""
     if not os.path.isfile(path):
         raise RuntimeError("文件不存在：%s" % path)
-    uri = "file:%s?mode=ro" % path.replace("?", "%3f").replace("#", "%23")
+    # 默认只读（mode=ro）；只有「编辑行」保存时才以可写方式打开
+    uri = "file:%s" % path.replace("?", "%3f").replace("#", "%23")
+    if not writable:
+        uri += "?mode=ro"
     conn = sqlite3.connect(uri, uri=True, timeout=_CONNECT_TIMEOUT)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=3000")
     return conn
 
 
-def _open_mysql(conf):
+def _open_mysql(conf, writable=False):
     import pymysql                                   # 函数内导入：没装也只是这类不可用
     from pymysql.cursors import DictCursor
     params = {"host": conf.get("host") or "127.0.0.1",
@@ -235,15 +257,16 @@ def _open_mysql(conf):
     if conf.get("dbname"):
         params["database"] = conf["dbname"]
     conn = pymysql.connect(**params)
-    try:                                             # 会话级只读，双保险
-        with conn.cursor() as cur:
-            cur.execute("SET SESSION TRANSACTION READ ONLY")
-    except Exception:
-        pass
+    if not writable:
+        try:                                         # 会话级只读，双保险
+            with conn.cursor() as cur:
+                cur.execute("SET SESSION TRANSACTION READ ONLY")
+        except Exception:
+            pass
     return conn
 
 
-def _open_postgres(conf):
+def _open_postgres(conf, writable=False):
     import psycopg2
     from psycopg2.extras import RealDictCursor
     conn = psycopg2.connect(host=conf.get("host") or "127.0.0.1",
@@ -253,20 +276,111 @@ def _open_postgres(conf):
                             dbname=conf.get("dbname") or "postgres",
                             connect_timeout=_CONNECT_TIMEOUT,
                             cursor_factory=RealDictCursor)
-    conn.set_session(readonly=True, autocommit=True)  # 只读事务
+    conn.set_session(readonly=not writable, autocommit=True)   # 只读事务（保存时放开）
     return conn
 
 
-def _open(conf):
-    """按类型建连接。返回 (conn, kind)；失败抛异常。"""
+def _open_redis(conf):
+    import redis                                     # 函数内导入：没装也只是这类不可用
+    try:
+        db = int(conf.get("dbname") or 0)
+    except (TypeError, ValueError):
+        db = 0
+    r = redis.Redis(host=conf.get("host") or "127.0.0.1",
+                    port=int(conf.get("port") or 6379),
+                    username=conf.get("username") or None,
+                    password=conf.get("password") or None,
+                    db=max(0, db),
+                    decode_responses=True,           # 直接给字符串，省去逐处 decode
+                    socket_connect_timeout=_CONNECT_TIMEOUT,
+                    socket_timeout=_QUERY_TIMEOUT)
+    r.ping()                                         # 连不上时立刻报错，而不是等到第一次命令
+    return r
+
+
+def _sasl_bad_char(s):
+    """按 SASLprep（RFC 4013）找出第一个不被允许的字符，没有则返回 None。
+
+    MongoDB 的 SCRAM 认证会对用户名 / 密码做 SASLprep 校验，一旦命中禁止字符，
+    pymongo 只会回一句笼统的『SASLprep: failed prohibited character check』。
+    这里把具体字符找出来（常见于复制密码时带进来的零宽字符等不可见字符），便于定位。
+    """
+    import stringprep
+    import unicodedata
+    if not s:
+        return None
+    mapped = []
+    for ch in s:
+        if stringprep.in_table_c12(ch):          # 非 ASCII 空格 → 普通空格
+            mapped.append(" ")
+        elif stringprep.in_table_b1(ch):         # 「映射为无」→ 直接删除
+            continue
+        else:
+            mapped.append(ch)
+    for ch in unicodedata.normalize("NFKC", "".join(mapped)):
+        if (stringprep.in_table_a1(ch) or stringprep.in_table_c12(ch)
+                or stringprep.in_table_c21_c22(ch) or stringprep.in_table_c3(ch)
+                or stringprep.in_table_c4(ch) or stringprep.in_table_c5(ch)
+                or stringprep.in_table_c6(ch) or stringprep.in_table_c7(ch)
+                or stringprep.in_table_c8(ch) or stringprep.in_table_c9(ch)):
+            return ch
+    return None
+
+
+def _open_mongo(conf):
+    import pymongo
+    from urllib.parse import quote_plus
+    host = conf.get("host") or "127.0.0.1"
+    port = int(conf.get("port") or 27017)
+    user = conf.get("username") or ""
+    pwd = conf.get("password") or ""
+    auth = ("%s:%s@" % (quote_plus(user), quote_plus(pwd))) if user else ""
+    uri = "mongodb://%s%s:%d/" % (auth, host, port)
+    client = pymongo.MongoClient(uri,
+                                 serverSelectionTimeoutMS=_CONNECT_TIMEOUT * 1000,
+                                 connectTimeoutMS=_CONNECT_TIMEOUT * 1000,
+                                 socketTimeoutMS=_QUERY_TIMEOUT * 1000)
+    try:
+        client.admin.command("ping")                 # 连不上时立刻报错
+    except Exception as e:
+        msg = str(e)
+        if "saslprep" in msg.lower():                # 把「哪个字符不合法」翻译出来
+            for label, val in (("密码", pwd), ("用户名", user)):
+                bad = _sasl_bad_char(val)
+                if bad is not None:
+                    raise RuntimeError(
+                        "%s；%s里含 SASLprep 不允许的字符 U+%04X（控制字符 / 显示类不可见字符，"
+                        "或 Unicode 3.2 之后新增的字符如 emoji；多为复制密码时带进来的），请重新输入"
+                        % (msg, label, ord(bad)))
+        raise
+    return client
+
+
+def _open(conf, writable=False):
+    """按类型建连接。返回 (conn, kind)；失败抛异常。
+
+    writable=True 只用于「编辑行 → 保存」；浏览 / 查询一律走默认的只读连接。
+    """
     kind = conf.get("kind") or "sqlite"
     if kind == "sqlite":
-        return _open_sqlite(conf), kind
+        return _open_sqlite(conf, writable), kind
     if kind == "mysql":
-        return _open_mysql(conf), kind
+        return _open_mysql(conf, writable), kind
     if kind == "postgres":
-        return _open_postgres(conf), kind
+        return _open_postgres(conf, writable), kind
+    if kind == "redis":
+        return _open_redis(conf), kind
+    if kind == "mongodb":
+        return _open_mongo(conf), kind
     raise RuntimeError("不支持的数据库类型：%s" % kind)
+
+
+def _close(conn, kind=""):
+    """所有类型统一收尾（Redis / Mongo 的 close 语义不同，但都叫 close）"""
+    try:
+        conn.close()
+    except Exception:
+        pass
 
 
 def _quote(kind, name: str) -> str:
@@ -402,6 +516,585 @@ def _readonly_guard(sql: str):
     return ""
 
 
+# --------------------------------------------------------------- 一句话生成 SQL
+
+_NL_SYS = (
+    "你是 {dialect} 查询生成器。根据用户的一句话需求和给定的数据库结构，"
+    "生成一条可直接执行的 {dialect} 只读查询语句。\n"
+    "硬性要求：\n"
+    "1. 只输出 SQL 本身：不要解释、不要 Markdown 代码块、不要用 ``` 包裹、不要输出多条语句；\n"
+    "2. 只允许查询（SELECT / WITH / SHOW / DESC / EXPLAIN 等），严禁 INSERT / UPDATE / DELETE / "
+    "DROP / ALTER / CREATE 等写操作；\n"
+    "3. 只能使用结构中确实存在的表名与字段名，不要臆造；\n"
+    "4. 不确定或需求无法满足时，只输出一行以「-- 」开头的简短原因说明；\n"
+    "5. 合理使用 LIMIT 限制返回行数。"
+)
+
+_NL_SYS_REDIS = (
+    "你是 Redis 查询生成器。根据用户的一句话需求和给定的 key 结构，生成一条可直接执行的 Redis 只读命令。\n"
+    "硬性要求：\n"
+    "1. 只输出一条命令本身：不要解释、不要 Markdown 代码块、不要用 ``` 包裹；\n"
+    "2. 只允许读取类命令（GET / MGET / HGET / HGETALL / HKEYS / HVALS / LRANGE / LLEN / SMEMBERS / "
+    "SCARD / ZRANGE / ZSCORE / TYPE / TTL / EXISTS / STRLEN / HLEN / DBSIZE / XRANGE 等），"
+    "严禁 SET / DEL / EXPIRE / HSET / LPUSH / SADD / FLUSHDB 等写操作；\n"
+    "3. key 只能来自给定的示例或用户明确提到的名字，不要臆造；\n"
+    "4. 不确定或需求无法满足时，只输出一行以「-- 」开头的简短原因说明；\n"
+    "5. 需要遍历 key 时用 SCAN，不要用 KEYS。\n"
+    "示例：用户问「user:1 里存了什么」→ 输出 HGETALL user:1"
+)
+
+_NL_SYS_MONGO = (
+    "你是 MongoDB 查询生成器。根据用户的一句话需求和给定的集合结构，生成一个用于 find 的 JSON。\n"
+    "硬性要求：\n"
+    "1. 只输出 JSON 本身：不要解释、不要 Markdown 代码块、不要用 ``` 包裹；\n"
+    "2. 支持的形式：{\"collection\": \"集合名\", \"filter\": {...}, \"sort\": {\"字段\": -1}, "
+    "\"projection\": {...}, \"limit\": 50, \"skip\": 0}；也可以只给一个过滤对象 {...}；\n"
+    "3. 用户点名了集合（如「用户表」「users 集合」）时，必须用 collection 指明，且取自结构里真实的集合名；"
+    "没点名时可以省略 collection，由调用方用「当前选中的集合」；\n"
+    "4. 只做查询，严禁 $where / $function / $accumulator / $out / $merge 等可执行或写入的操作符；\n"
+    "5. 字段名只能来自采样文档中出现过的，不要臆造；\n"
+    "6. 不确定或需求无法满足时，只输出一行以「-- 」开头的简短原因说明；\n"
+    "7. 合理设置 limit（不超过 200）。\n"
+    "示例：用户问「查询用户表」→ 输出 {\"collection\": \"users\", \"filter\": {}, \"limit\": 200}\n"
+    "注意：必须输出 JSON，不要输出 db.集合.find(...) 这类 shell 写法。"
+)
+
+
+def _row_vals(r):
+    """统一取值：DictCursor 给 dict、sqlite3 给 Row/元组，都转成列表"""
+    return list(r.values()) if isinstance(r, dict) else list(r)
+
+
+def _schema_text(cur, kind, dbname=""):
+    """把库结构整理成给 AI 看的文本（表名 + 字段，超长截断），兼容各数据库方言"""
+    parts = []
+    if kind == "sqlite":
+        cur.execute("SELECT name, type FROM sqlite_master WHERE type IN ('table','view') "
+                    "AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        rows = [_row_vals(r) for r in cur.fetchall()]
+        for name, typ in rows[:_NL_TABLES]:
+            try:
+                cols = [_row_vals(c) for c in cur.execute("PRAGMA table_info(%s)" % _quote(kind, name)).fetchall()]
+                cdefs = ", ".join("%s %s" % (c[1], c[2] or "") for c in cols)
+            except Exception:
+                cdefs = ""
+            parts.append("-- %s %s\n%s(%s)" % (typ or "table", name, name, cdefs))
+    elif kind == "mysql":
+        cur.execute("SELECT table_name, column_name, column_type, column_key "
+                    "FROM information_schema.columns WHERE table_schema = %s "
+                    "ORDER BY table_name, ordinal_position", (dbname or "",))
+        groups = {}
+        for r in cur.fetchall():
+            tn, cn, ct, ck = _row_vals(r)[:4]
+            groups.setdefault(tn, []).append("%s %s%s" % (cn, ct, " PK" if ck == "PRI" else ""))
+        for i, (tn, cols) in enumerate(groups.items()):
+            if i >= _NL_TABLES:
+                break
+            parts.append("%s(%s)" % (tn, ", ".join(cols)))
+    else:  # postgres
+        cur.execute("SELECT table_schema, table_name, column_name, data_type "
+                    "FROM information_schema.columns "
+                    "WHERE table_schema NOT IN ('pg_catalog','information_schema') "
+                    "ORDER BY table_schema, table_name, ordinal_position")
+        groups = {}
+        for r in cur.fetchall():
+            sc, tn, cn, dt = _row_vals(r)[:4]
+            key = tn if sc == "public" else "%s.%s" % (sc, tn)
+            groups.setdefault(key, []).append("%s %s" % (cn, dt))
+        for i, (tn, cols) in enumerate(groups.items()):
+            if i >= _NL_TABLES:
+                break
+            parts.append("%s(%s)" % (tn, ", ".join(cols)))
+    return "\n".join(parts)
+
+
+def _first_semi(line: str):
+    """行内「字符串字面量之外」的第一个分号位置；行内注释之后的分号不算，没有则 None"""
+    q = None
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if q:
+            if ch == q:
+                if q == "'" and line[i + 1:i + 2] == "'":     # '' 是转义的单引号
+                    i += 2
+                    continue
+                q = None
+        elif ch in ("'", '"', "`"):
+            q = ch
+        elif ch == "-" and line[i + 1:i + 2] == "-":
+            return None
+        elif ch == ";":
+            return i
+        i += 1
+    return None
+
+
+def _clean_sql(text: str) -> str:
+    """从模型输出里抠出 SQL：去代码围栏、去前缀说明、截到第一条语句结尾"""
+    s = (text or "").strip()
+    m = re.search(r"```(?:sql)?\s*(.+?)(?:```|\Z)", s, re.S | re.I)
+    if m:
+        s = m.group(1).strip()
+    lines = s.splitlines()
+    start = next((i for i, ln in enumerate(lines)
+                  if re.match(r"^\s*(select|with|show|desc|describe|explain|table|values|--)", ln, re.I)), None)
+    if start is None:
+        return ""       # 通篇不含 SQL：交给上层提示「没有返回可用的 SQL」
+    out = []
+    for ln in lines[start:]:
+        cut = _first_semi(ln)
+        if cut is not None:                   # 到第一条语句结尾即停，丢掉后面的解释
+            out.append(ln[:cut + 1])
+            break
+        out.append(ln)
+    return "\n".join(out).strip()[:_SQL_MAX]
+
+
+# ----------------------------------------------------------- 非关系型库（Redis / MongoDB）
+
+# Redis 只读命令白名单（只放行「读取」类，避免误改数据）
+_REDIS_READ = {
+    "type", "ttl", "pttl", "exists", "dbsize", "randomkey", "scan", "keys", "object", "memory",
+    "dump", "strlen", "getrange", "get", "mget", "bitcount", "getbit", "bitpos",
+    "hget", "hmget", "hgetall", "hkeys", "hvals", "hlen", "hexists", "hscan", "hstrlen",
+    "lrange", "llen", "lindex", "lpos",
+    "smembers", "scard", "sismember", "smismember", "srandmember", "sscan",
+    "sinter", "sunion", "sdiff", "sintercard",
+    "zrange", "zrevrange", "zrangebyscore", "zrevrangebyscore", "zrangebylex", "zlexcount",
+    "zscore", "zmscore", "zcard", "zcount", "zrank", "zrevrank", "zscan",
+    "info", "ping", "echo", "time", "xrange", "xrevrange", "xlen", "xinfo",
+}
+
+
+def _redis_db_index(conf):
+    try:
+        return max(0, int(conf.get("dbname") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _redis_databases(r, conf):
+    """可切换的库：Redis 按序号划分（默认 16 个）"""
+    try:
+        n = int((r.config_get("databases") or {}).get("databases") or 16)
+    except Exception:
+        n = 16
+    n = max(1, min(n, 64))
+    cur = _redis_db_index(conf)
+    return [{"name": str(i), "current": i == cur} for i in range(n)]
+
+
+def _redis_keys(r, limit=_NOSQL_LIST_MAX):
+    """列出 key（SCAN 渐进扫描，最多 limit 条）；顺带用一次 pipeline 取每个 key 的类型"""
+    keys, cursor = [], 0
+    try:
+        while True:
+            cursor, batch = r.scan(cursor=cursor, count=200)
+            keys.extend(batch)
+            if cursor == 0 or len(keys) >= limit:
+                break
+    except Exception:
+        pass
+    keys = sorted(keys[:limit])
+    types = [None] * len(keys)
+    if keys:
+        try:
+            pipe = r.pipeline(transaction=False)
+            for k in keys:
+                pipe.type(k)
+            types = pipe.execute()
+        except Exception:
+            pass
+    return [{"name": k, "schema": "", "kind": "key",
+             "rows": types[i] if i < len(types) else None} for i, k in enumerate(keys)]
+
+
+def _redis_key_total(r, key, t):
+    try:
+        if t == "string":
+            return 1
+        if t == "hash":
+            return int(r.hlen(key))
+        if t == "list":
+            return int(r.llen(key))
+        if t == "set":
+            return int(r.scard(key))
+        if t == "zset":
+            return int(r.zcard(key))
+    except Exception:
+        pass
+    return None
+
+
+def _redis_rows(r, key, limit, offset):
+    """把某个 key 的值摊平成「列 + 行」（按类型分别处理）"""
+    t = r.type(key)
+    if t == "none":
+        return ["结果"], [["<key 不存在>"]], 0
+    if t == "string":
+        return ["字段", "值"], [["value", r.get(key)]], 1
+    if t == "hash":
+        items = list(r.hgetall(key).items())
+        return ["字段", "值"], [[k, v] for k, v in items[offset:offset + limit]], len(items)
+    if t == "list":
+        vals = r.lrange(key, offset, offset + limit - 1)
+        return ["索引", "值"], [[offset + i, v] for i, v in enumerate(vals)], _redis_key_total(r, key, t)
+    if t == "set":                                   # 集合无序：用 SSCAN 逐段翻页
+        out, cursor, skip = [], 0, offset
+        while len(out) < limit:
+            cursor, batch = r.sscan(key, cursor=cursor, count=200)
+            for m in batch:
+                if skip > 0:
+                    skip -= 1
+                    continue
+                out.append(m)
+                if len(out) >= limit:
+                    break
+            if cursor == 0:
+                break
+        return ["成员"], [[m] for m in out], _redis_key_total(r, key, t)
+    if t == "zset":
+        vals = r.zrange(key, offset, offset + limit - 1, withscores=True)
+        return ["成员", "分数"], [[m, s] for m, s in vals], _redis_key_total(r, key, t)
+    if t == "stream":
+        return ["值"], [["<stream 请在命令区用 XRANGE 查询>"]], None
+    return ["值"], [["<暂不支持浏览的 key 类型：%s>" % t]], None
+
+
+def _redis_render(v):
+    """把 Redis 命令的返回值整理成表格"""
+    if v is None:
+        return ["结果"], [["(nil)"]]
+    if isinstance(v, bool):
+        return ["结果"], [[int(v)]]
+    if isinstance(v, (str, int, float)):
+        return ["结果"], [[v]]
+    if isinstance(v, dict):
+        return ["字段", "值"], [[k, _cell(x)] for k, x in v.items()]
+    if isinstance(v, (list, tuple)):
+        if v and all(isinstance(x, (list, tuple)) and len(x) == 2 for x in v):
+            return ["项", "值"], [[_cell(a), _cell(b)] for a, b in v]
+        return ["结果"], [[_cell(x)] for x in v]
+    return ["结果"], [[_cell(v)]]
+
+
+def _mongo_cell(v):
+    """MongoDB 取值：文档 / 数组 / ObjectId 等统一转成可读文本"""
+    if v is None or isinstance(v, (int, float, bool)):
+        return v
+    if isinstance(v, str):
+        return v[:_CELL_MAX] + ("…（已截断）" if len(v) > _CELL_MAX else "")
+    try:
+        s = json.dumps(v, default=str, ensure_ascii=False)
+    except Exception:
+        s = str(v)
+    return s[:_CELL_MAX] + ("…（已截断）" if len(s) > _CELL_MAX else "")
+
+
+def _mongo_pick_db(names, want):
+    """挑一个可用的库：优先请求的，其次第一个非系统库"""
+    if want and want in names:
+        return want
+    return next((n for n in names if n not in ("admin", "local", "config")),
+                names[0] if names else "")
+
+
+def _nosql_schema(conn, kind, use):
+    """非关系型库的结构：Redis → 编号库 + key；MongoDB → 库 + 集合。返回 (dbs, tables, dbname)"""
+    if kind == "redis":
+        return _redis_databases(conn, use), _redis_keys(conn), str(_redis_db_index(use))
+    try:
+        names = sorted(conn.list_database_names())
+    except Exception:
+        names = []
+    dbname = _mongo_pick_db(names, use.get("dbname") or "")
+    tables = []
+    if dbname:
+        try:
+            colls = sorted(conn[dbname].list_collection_names())
+        except Exception:
+            colls = []
+        if len(colls) <= _NL_TABLES:                 # 集合不多时顺带带上文档数
+            for name in colls:
+                n = None
+                try:
+                    n = int(conn[dbname][name].estimated_document_count())
+                except Exception:
+                    pass
+                tables.append({"name": name, "schema": dbname, "kind": "collection", "rows": n})
+        else:
+            tables = [{"name": name, "schema": dbname, "kind": "collection", "rows": None}
+                      for name in colls]
+    return [{"name": n, "current": n == dbname} for n in names], tables, dbname
+
+
+def _nosql_rows(conn, kind, use, table, limit, offset):
+    """非关系型库的数据行：Redis → 某个 key 的值；MongoDB → 某个集合的文档"""
+    if kind == "redis":
+        return _redis_rows(conn, table, limit, offset)
+    coll = conn[use.get("dbname") or ""][table]
+    total = None
+    try:
+        total = int(coll.estimated_document_count())
+    except Exception:
+        pass
+    docs = list(coll.find({}).skip(offset).limit(limit))
+    cols = []
+    for d in docs:
+        for k in d.keys():
+            if k not in cols:
+                cols.append(k)                       # 列取所有文档键的并集（保持出现顺序）
+    return cols, [[_mongo_cell(d.get(c)) for c in cols] for d in docs], total
+
+
+def _nosql_query(conn, kind, use, table, text, limit):
+    """非关系型库的「查询」：Redis → 只读命令；MongoDB → 集合上的 JSON 过滤。
+
+    返回 (列, 行, 实际使用的集合)：MongoDB 时第三项是真正查的集合名（供前端回显 / 同步选中），
+    Redis 没有集合概念，固定返回空串。
+    """
+    if kind == "redis":
+        parts = shlex.split(text)                    # 支持带引号的参数
+        if not parts:
+            raise RuntimeError("命令不能为空")
+        cmd = parts[0].lower()
+        if cmd not in _REDIS_READ:
+            raise RuntimeError("只允许读取类命令，「%s」不在白名单内" % cmd)
+        cols, rows = _redis_render(conn.execute_command(*parts))
+        return cols, rows, ""
+    text = (text or "").strip()
+    if not text:
+        spec = {}                                    # 空 = 无条件，取全部文档
+    else:
+        try:
+            spec = json.loads(text)
+        except Exception:
+            raise RuntimeError('查询必须是合法的 JSON，例如 {"filter": {"status": 1}, "limit": 50}')
+    if not isinstance(spec, dict):
+        raise RuntimeError("查询必须是一个 JSON 对象")
+    raw = json.dumps(spec, ensure_ascii=False)
+    for bad in ("$where", "$function", "$accumulator", "$out", "$merge"):
+        if bad in raw:
+            raise RuntimeError("查询里含有不允许的操作符：%s" % bad)
+    # 集合：JSON 里写了 collection 就用它，没写就用左侧选中的那个
+    coll = str(spec.get("collection") or table or "")
+    if not coll:
+        raise RuntimeError("请先在左侧选择一个集合，或在 JSON 里用 collection 指定")
+    dbname = use.get("dbname") or ""
+    if coll not in conn[dbname].list_collection_names():
+        raise RuntimeError("集合不存在：%s" % coll)
+    if set(spec) & {"filter", "sort", "projection", "limit", "skip"}:
+        flt = spec.get("filter") or {}
+        sort, proj = spec.get("sort"), spec.get("projection")
+        try:
+            lim = max(1, min(int(spec.get("limit") or limit), _MAX_ROWS))
+            skip = max(0, int(spec.get("skip") or 0))
+        except (TypeError, ValueError):
+            lim, skip = limit, 0
+    else:                                            # 没写这些键时，整个对象就当过滤条件
+        flt, sort, proj, lim, skip = spec, None, None, limit, 0
+    if isinstance(flt, dict):
+        flt.pop("collection", None)                  # 别把 collection 当成过滤字段
+    kwargs = {}
+    if flt:
+        kwargs["filter"] = flt
+    if proj:
+        kwargs["projection"] = proj
+    cur = conn[dbname][coll].find(**kwargs)
+    if sort:
+        cur = cur.sort([(k, 1 if v not in (-1, "-1") else -1) for k, v in sort.items()])
+    docs = list(cur.skip(skip).limit(lim))
+    cols = []
+    for d in docs:
+        for k in d.keys():
+            if k not in cols:
+                cols.append(k)
+    return cols, [[_mongo_cell(d.get(c)) for c in cols] for d in docs], coll
+
+
+# ------------------------------------------------------------ 编辑行（按主键 / _id 更新）
+
+def _pk_columns(cur, kind, dbname, schema, table):
+    """取主键列名（编辑行时用来定位），没有主键返回 []"""
+    try:
+        if kind == "sqlite":
+            rows = cur.execute("PRAGMA table_info(%s)" % _quote(kind, table)).fetchall()
+            return [r[1] for r in sorted((r for r in rows if r[5]), key=lambda r: r[5])]
+        if kind == "mysql":
+            cur.execute("SELECT column_name FROM information_schema.key_column_usage "
+                        "WHERE table_schema = %s AND table_name = %s AND constraint_name = 'PRIMARY' "
+                        "ORDER BY ordinal_position", (dbname, table))
+        else:
+            cur.execute("SELECT kcu.column_name FROM information_schema.table_constraints tc "
+                        "JOIN information_schema.key_column_usage kcu "
+                        "  ON kcu.constraint_name = tc.constraint_name "
+                        " AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name "
+                        "WHERE tc.constraint_type = 'PRIMARY KEY' "
+                        "  AND tc.table_schema = %s AND tc.table_name = %s "
+                        "ORDER BY kcu.ordinal_position", (schema or "public", table))
+        return [_row_vals(r)[0] for r in cur.fetchall()]
+    except Exception:
+        return []
+
+
+def _mongo_id(v):
+    """把前端回传的 _id 还原成合适类型（24 位十六进制 → ObjectId）"""
+    if isinstance(v, str):
+        s = v.strip().strip('"')
+        if len(s) == 24:
+            try:
+                from bson import ObjectId
+                return ObjectId(s)
+            except Exception:
+                pass
+        return s
+    return v
+
+
+def _update_sql(use, kind, schema, table, key, changes):
+    """UPDATE ... WHERE 主键（用可写连接：浏览 / 查询用的连接是只读的）"""
+    ref = _table_ref(kind, use.get("dbname") or "", schema, table)
+    ph = "?" if kind == "sqlite" else "%s"
+    sets = ", ".join("%s = %s" % (_quote(kind, c), ph) for c in changes)
+    whr = " AND ".join("%s = %s" % (_quote(kind, c), ph) for c in key)
+    args = list(changes.values()) + list(key.values())
+    conn, _k = _open(use, writable=True)
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE %s SET %s WHERE %s" % (ref, sets, whr), args)
+        n = cur.rowcount
+        conn.commit()
+        return n
+    finally:
+        _close(conn, kind)
+
+
+def _update_redis(r, key, row_key, changes):
+    """Redis 的「编辑行」：按 key 的类型写回（string / hash / list）"""
+    t = r.type(key)
+    new = changes.get("值")
+    if t == "string":
+        if new is None:
+            raise RuntimeError("没有需要保存的改动")
+        r.set(key, new)
+        return 1
+    if t == "hash":
+        f = row_key.get("字段")
+        if f is None or new is None:
+            raise RuntimeError("哈希行需要「字段」与新值")
+        r.hset(key, f, new)
+        return 1
+    if t == "list":
+        i = row_key.get("索引")
+        if i is None or new is None:
+            raise RuntimeError("列表行需要「索引」与新值")
+        r.lset(key, int(i), new)
+        return 1
+    raise RuntimeError("暂不支持直接编辑 %s 类型的 key" % t)
+
+
+# --------------------------------------------- 非关系型库的「一句话生成」上下文与清洗
+
+def _clean_command(text):
+    """从模型输出里抠出 Redis 命令：去代码围栏与说明，只取第一行命令"""
+    s = (text or "").strip()
+    m = re.search(r"```(?:bash|sh|redis|shell)?\s*(.+?)(?:```|\Z)", s, re.S | re.I)
+    if m:
+        s = m.group(1).strip()
+    for ln in s.splitlines():
+        ln = ln.strip()
+        if ln and not ln.startswith("#") and not ln.startswith("//"):
+            return ln[:_SQL_MAX]
+    return ""
+
+
+def _clean_json(text):
+    """从模型输出里抠出 JSON 对象：去代码围栏，再按括号配对截出第一个完整对象"""
+    s = (text or "").strip()
+    m = re.search(r"```(?:json)?\s*(.+?)(?:```|\Z)", s, re.S | re.I)
+    if m:
+        s = m.group(1).strip()
+    i = s.find("{")
+    if i < 0:
+        return ""
+    depth, quote, esc = 0, None, False
+    for j in range(i, len(s)):
+        ch = s[j]
+        if quote:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == quote:
+                quote = None
+            continue
+        if ch in "\"'":
+            quote = ch
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return s[i:j + 1][:_SQL_MAX]
+    return ""
+
+
+def _excerpt(text, n=160):
+    """模型回复的短摘要：压平空白 + 截断；用于把「模型到底回了啥」带进错误信息与日志"""
+    s = re.sub(r"\s+", " ", str(text or "")).strip()
+    return (s[:n] + "…") if len(s) > n else (s or "（空回复）")
+
+
+def _redis_ai_context(r, use):
+    """给 AI 看的 Redis 结构：当前库规模 + 一部分 key 及其类型"""
+    db = _redis_db_index(use)
+    keys = _redis_keys(r, limit=60)
+    try:
+        size = int(r.dbsize())
+    except Exception:
+        size = len(keys)
+    lines = ["-- 当前是第 %d 号库，约有 %d 个 key；下面是部分 key 及其类型：" % (db, size)]
+    if keys:
+        lines += ["%s (%s)" % (k["name"], k["rows"] or "?") for k in keys]
+    else:
+        lines.append("-- （这个库是空的）")
+    return "\n".join(lines)
+
+
+def _mongo_ai_context(client, use):
+    """给 AI 看的 MongoDB 结构：当前库 + 各集合的采样文档"""
+    try:
+        names = sorted(client.list_database_names())
+    except Exception:
+        names = []
+    dbname = _mongo_pick_db(names, use.get("dbname") or "")
+    lines = ["-- 当前库：%s" % (dbname or "(未指定)")]
+    if not dbname:
+        return "\n".join(lines)
+    try:
+        colls = sorted(client[dbname].list_collection_names())
+    except Exception:
+        colls = []
+    lines.append("-- 集合及其采样文档：")
+    if not colls:
+        lines.append("-- （这个库没有集合）")
+    for name in colls[:_NL_TABLES]:
+        try:
+            doc = client[dbname][name].find_one()
+        except Exception:
+            doc = None
+        if doc is None:
+            lines.append("%s: （空集合）" % name)
+            continue
+        try:
+            s = json.dumps(doc, default=str, ensure_ascii=False)
+        except Exception:
+            s = str(doc)
+        lines.append("%s: %s" % (name, s[:600]))
+    return "\n".join(lines)
+
+
 # --------------------------------------------------------------------------- 接口
 
 @bp.route("/api/db/test", methods=["POST"])
@@ -430,24 +1123,27 @@ def api_db_test():
         with _LOCK:
             conn, kind = _open(conf)
             try:
-                cur = conn.cursor()
                 if kind == "sqlite":
+                    cur = conn.cursor()
                     cur.execute("SELECT COUNT(*) FROM sqlite_master")
                     cur.fetchone()
                     ver = "SQLite " + sqlite3.sqlite_version
                 elif kind == "mysql":
+                    cur = conn.cursor()
                     cur.execute("SELECT VERSION()")
                     r = cur.fetchone()
                     ver = "MySQL " + str(list(r.values())[0] if isinstance(r, dict) else r[0])
-                else:
+                elif kind == "postgres":
+                    cur = conn.cursor()
                     cur.execute("SHOW server_version")
                     r = cur.fetchone()
                     ver = "PostgreSQL " + str(list(r.values())[0] if isinstance(r, dict) else r[0])
+                elif kind == "redis":
+                    ver = "Redis " + str((conn.info() or {}).get("redis_version") or "")
+                else:
+                    ver = "MongoDB " + str((conn.server_info() or {}).get("version") or "")
             finally:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+                _close(conn, kind)
     except Exception as e:
         return jsonify({"ok": False, "error": "连接失败：%s" % e}), 200
     return jsonify({"ok": True, "version": ver, "elapsed_ms": int((time.time() - t0) * 1000)})
@@ -466,14 +1162,15 @@ def api_db_schema():
         with _LOCK:
             conn, kind = _open(use)
             try:
-                cur = conn.cursor()
-                dbs = _list_databases(cur, kind, use)
-                tables = _list_tables(cur, kind, use.get("dbname") or "")
+                if kind in _NOSQL:
+                    dbs, tables, eff = _nosql_schema(conn, kind, use)
+                    use["dbname"] = eff           # 例如 MongoDB 没指定库时自动选一个，回给前端
+                else:
+                    cur = conn.cursor()
+                    dbs = _list_databases(cur, kind, use)
+                    tables = _list_tables(cur, kind, use.get("dbname") or "")
             finally:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+                _close(conn, kind)
     except Exception as e:
         return jsonify({"error": "读取结构失败：%s" % e}), 500
     return jsonify({"kind": kind, "dbname": use.get("dbname") or "",
@@ -502,69 +1199,270 @@ def api_db_rows():
         with _LOCK:
             conn, kind = _open(use)
             try:
-                cur = conn.cursor()
-                names = {t["name"] for t in _list_tables(cur, kind, use.get("dbname") or "")}
-                if table not in names:               # 表名必须真实存在，避免拼接注入
-                    return jsonify({"error": "表不存在：%s" % table}), 404
-                ref = _table_ref(kind, use.get("dbname") or "", schema, table)
-                total = None
-                try:
-                    cur.execute("SELECT COUNT(*) FROM %s" % ref)
-                    row = cur.fetchone()
-                    total = list(row.values())[0] if isinstance(row, dict) else row[0]
-                except Exception:
-                    pass
-                cur.execute("SELECT * FROM %s LIMIT %d OFFSET %d" % (ref, limit, offset))
-                cols, rows = _rows_of(cur, kind)
+                pk = []                          # 主键列（编辑行时用来定位）
+                if kind in _NOSQL:
+                    dbn = use.get("dbname") or ""
+                    if kind == "mongodb" and table not in conn[dbn].list_collection_names():
+                        return jsonify({"error": "集合不存在：%s" % table}), 404
+                    cols, rows, total = _nosql_rows(conn, kind, use, table, limit, offset)
+                    if kind == "mongodb" and "_id" in cols:
+                        pk = ["_id"]
+                else:
+                    cur = conn.cursor()
+                    names = {t["name"] for t in _list_tables(cur, kind, use.get("dbname") or "")}
+                    if table not in names:           # 表名必须真实存在，避免拼接注入
+                        return jsonify({"error": "表不存在：%s" % table}), 404
+                    pk = _pk_columns(cur, kind, use.get("dbname") or "", schema, table)
+                    ref = _table_ref(kind, use.get("dbname") or "", schema, table)
+                    total = None
+                    try:
+                        cur.execute("SELECT COUNT(*) FROM %s" % ref)
+                        row = cur.fetchone()
+                        total = list(row.values())[0] if isinstance(row, dict) else row[0]
+                    except Exception:
+                        pass
+                    cur.execute("SELECT * FROM %s LIMIT %d OFFSET %d" % (ref, limit, offset))
+                    cols, rows = _rows_of(cur, kind)
             finally:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+                _close(conn, kind)
     except Exception as e:
         return jsonify({"error": "读取数据失败：%s" % e}), 500
-    return jsonify({"table": table, "columns": cols, "rows": rows,
+    return jsonify({"table": table, "columns": cols, "rows": rows, "pk": pk,
                     "total": total, "limit": limit, "offset": offset})
 
 
 @bp.route("/api/db/query", methods=["POST"])
 def api_db_query():
-    """执行只读 SQL"""
+    """执行只读查询：SQL 库走 SELECT 类语句；Redis 走只读命令；MongoDB 走 JSON 过滤"""
     data = request.get_json(silent=True) or {}
     cid = str(data.get("conn") or "")
     sql = str(data.get("sql") or "")
     dbname = str(data.get("dbname") or "")
-    bad = _readonly_guard(sql)
-    if bad:
-        return jsonify({"error": bad}), 400
+    table = str(data.get("table") or "")
+    conf = _load_conf(cid, with_password=True)
+    if not conf:
+        return jsonify({"error": "连接不存在"}), 404
+    # 只读语句校验只针对 SQL；Redis 命令 / Mongo JSON 由 _nosql_query 各自校验
+    if (conf.get("kind") or "sqlite") not in _NOSQL:
+        bad = _readonly_guard(sql)
+        if bad:
+            return jsonify({"error": bad}), 400
     try:
         limit = min(max(int(data.get("limit") or _PAGE_DEFAULT), 1), _MAX_ROWS)
     except (TypeError, ValueError):
         limit = _PAGE_DEFAULT
-    conf = _load_conf(cid, with_password=True)
-    if not conf:
-        return jsonify({"error": "连接不存在"}), 404
     use = _pick(conf, dbname)
     t0 = time.time()
+    used = table                                  # 实际查询的表 / 集合，回显给前端
     try:
         with _LOCK:
             conn, kind = _open(use)
             try:
-                _timeout_guard(conn, kind)
-                cur = conn.cursor()
-                cur.execute(sql.rstrip(";"))
-                cols, rows = _rows_of(cur, kind)
+                if kind in _NOSQL:
+                    cols, rows, used = _nosql_query(conn, kind, use, table, sql, limit)
+                else:
+                    _timeout_guard(conn, kind)
+                    cur = conn.cursor()
+                    cur.execute(sql.rstrip(";"))
+                    cols, rows = _rows_of(cur, kind)
             finally:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+                _close(conn, kind)
     except Exception as e:
         msg = str(e)
         if "readonly" in msg.lower() or "read-only" in msg.lower():
             msg = "该连接是只读的，不能执行写操作（%s）" % msg
         return jsonify({"error": "执行失败：%s" % msg}), 400
     truncated = len(rows) > limit
+    pk = ["_id"] if (kind == "mongodb" and "_id" in (cols or [])) else []
     return jsonify({"columns": cols, "rows": rows[:limit], "row_count": len(rows),
-                    "truncated": truncated, "limit": limit,
+                    "truncated": truncated, "limit": limit, "table": used, "pk": pk,
                     "elapsed_ms": int((time.time() - t0) * 1000)})
+
+
+@bp.route("/api/db/row/update", methods=["POST"])
+def api_db_row_update():
+    """按主键（MongoDB 按 _id）更新一行里的若干字段。
+
+    ⚠ 这是本工具里唯一会写库的接口：前端必须二次确认后才调用，
+    并且用单独的「可写连接」执行，不改变浏览 / 查询的只读约定。
+    """
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("conn") or "")
+    dbname = str(data.get("dbname") or "")
+    schema = str(data.get("schema") or "")
+    table = str(data.get("table") or "")
+    key = data.get("key") if isinstance(data.get("key"), dict) else {}
+    changes = data.get("changes") if isinstance(data.get("changes"), dict) else {}
+    if not key:
+        return jsonify({"error": "缺少定位这一行的主键"}), 400
+    if not changes:
+        return jsonify({"error": "没有需要保存的改动"}), 400
+    if len(key) > 10 or len(changes) > 60:
+        return jsonify({"error": "字段过多，已拒绝"}), 400
+    conf = _load_conf(cid, with_password=True)
+    if not conf:
+        return jsonify({"error": "连接不存在"}), 404
+    use = _pick(conf, dbname)
+    kind = conf.get("kind") or "sqlite"
+    try:
+        with _LOCK:
+            if kind == "redis":
+                conn, _k = _open(use, writable=True)
+                try:
+                    n = _update_redis(conn, table, key, changes)
+                finally:
+                    _close(conn, kind)
+            elif kind == "mongodb":
+                conn, _k = _open(use, writable=True)
+                try:
+                    res = conn[use.get("dbname") or ""][table].update_one(
+                        {"_id": _mongo_id(key.get("_id"))}, {"$set": changes})
+                    n = int(getattr(res, "modified_count", 0))
+                finally:
+                    _close(conn, kind)
+            else:
+                n = _update_sql(use, kind, schema, table, key, changes)
+    except Exception as e:
+        return jsonify({"error": "保存失败：%s" % e}), 400
+    _log.info("更新数据行：kind=%s table=%s 字段=%s 行数=%s", kind, table, list(changes), n)
+    return jsonify({"ok": True, "updated": n})
+
+
+@bp.route("/api/db/nl2sql", methods=["POST"])
+def api_db_nl2sql():
+    """一句话生成查询：SQL → 只读 SQL；Redis → 只读命令；MongoDB → find 的 JSON。
+
+    统一入口，用参数决定目标数据库（两种二选一）：
+      · conn + dbname —— 已保存的连接（SQLite / MySQL / PostgreSQL / Redis / MongoDB）
+      · path          —— 直接指向 SQLite 数据库文件（文件查看器用，无需先建连接）
+
+    只负责生成、不负责执行；结果回到前端让用户确认后再执行（那里同样只读），构成双重保险。
+    """
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("conn") or "")
+    path = str(data.get("path") or "")
+    dbname = str(data.get("dbname") or "")
+    question = str(data.get("question") or "").strip()
+    if not question:
+        return jsonify({"error": "请先用一句话描述你想查什么"}), 400
+    if len(question) > _NL_MAX:
+        return jsonify({"error": "描述过长（上限 %d 字）" % _NL_MAX}), 400
+    if cid:
+        conf = _load_conf(cid, with_password=True)
+        if not conf:
+            return jsonify({"error": "连接不存在"}), 404
+        use = _pick(conf, dbname)
+    elif path:
+        target = os.path.abspath(os.path.normpath(path))
+        if not os.path.isfile(target):
+            return jsonify({"error": "数据库文件不存在：%s" % target}), 404
+        if os.path.splitext(target)[1].lower() not in _SQLITE_EXTS:
+            return jsonify({"error": "不是 SQLite 数据库文件：%s" % target}), 400
+        use = {"kind": "sqlite", "dbname": target}          # 直接按文件当 SQLite 库打开
+    else:
+        return jsonify({"error": "缺少目标数据库（conn 或 path）"}), 400
+    kind = use.get("kind") or "sqlite"
+
+    from ..ide.ai import _load_cfg, _sys_pick, _log_ai_call, _sys_err_response   # 函数内导入，避免模块循环依赖
+    cfg = _load_cfg()
+    provider, model, err = _sys_pick(cfg, "nl2sql")
+    if err:
+        return _sys_err_response(err, need_config=not cfg.get("providers"))
+
+    t_start = time.time()
+
+    def _fail(msg, code=502, **extra):
+        """统一失败出口：记一次失败调用再返回"""
+        _log_ai_call("nl2sql", False, int((time.time() - t_start) * 1000), msg)
+        return jsonify({"error": msg, **extra}), code
+
+    try:
+        with _LOCK:
+            conn, _k = _open(use)
+            try:
+                if kind == "redis":
+                    ctx = _redis_ai_context(conn, use)
+                elif kind == "mongodb":
+                    ctx = _mongo_ai_context(conn, use)
+                else:
+                    _timeout_guard(conn, kind)
+                    ctx = _schema_text(conn.cursor(), kind, use.get("dbname") or "")
+            finally:
+                _close(conn, kind)
+    except Exception as e:
+        return jsonify({"error": "无法读取数据库结构：%s" % e}), 500
+
+    if kind == "redis":
+        sys_prompt = _NL_SYS_REDIS
+        content = ("[Redis 结构]\n" + ctx + "\n\n[查询需求]\n" + question)[:_NL_CTX]
+    elif kind == "mongodb":
+        sys_prompt = _NL_SYS_MONGO
+        content = ("[MongoDB 结构]\n" + ctx + "\n\n[查询需求]\n" + question)[:_NL_CTX]
+    else:
+        dialect = {"sqlite": "SQLite", "mysql": "MySQL", "postgres": "PostgreSQL"}.get(kind, kind)
+        sys_prompt = _NL_SYS.format(dialect=dialect)
+        content = ("[数据库表结构]\n" + ctx + "\n\n[查询需求]\n" + question)[:_NL_CTX]
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    payload = json.dumps({"model": model, "stream": False, "messages": [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": content}]}).encode("utf-8")
+
+    import urllib.error
+    import urllib.request
+    t0 = time.time()
+    req = urllib.request.Request(url, data=payload, method="POST", headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+    try:
+        resp = urllib.request.urlopen(req, timeout=_NL_TIMEOUT)
+        obj = json.loads(resp.read().decode("utf-8"))
+        text = (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")[:200]
+        return _fail("AI 接口返回 %s：%s" % (e.code, detail))
+    except Exception as e:
+        return _fail("调用 AI 接口失败：%s" % e)
+
+    # 把模型原话记进日志，解析不出来时便于回溯（只在服务端日志里）
+    _log.info("AI 生成回复：kind=%s model=%s text=%s", kind, model, _excerpt(text, 300))
+
+    out = ""
+    if kind == "redis":
+        out = _clean_command(text)
+        if not out:
+            return _fail("模型没有返回可用的命令，请换个说法或换个模型（模型原话：%s）" % _excerpt(text))
+        if out.startswith("--"):        # 模型按要求回了「-- 无法生成：<原因>」
+            return _fail(out.lstrip("- ")[:200] or "无法根据当前结构生成命令", 400, sql=out)
+        if out.split(None, 1)[0].lower() not in _REDIS_READ:
+            return _fail("模型生成的不是只读命令，已丢弃，请换个说法重试", 400, sql=out)
+    elif kind == "mongodb":
+        out = _clean_json(text)
+        if not out:
+            return _fail("模型没有返回可用的 JSON，请换个说法或换个模型（模型原话：%s）" % _excerpt(text))
+        try:
+            spec = json.loads(out)
+            if not isinstance(spec, dict):
+                raise ValueError
+        except Exception:
+            return _fail("模型生成的不是 JSON 对象，已丢弃，请换个说法重试", 400, sql=out)
+        for bad_op in ("$where", "$function", "$accumulator", "$out", "$merge"):
+            if bad_op in out:
+                return _fail("模型生成的查询里含有不允许的操作符：%s" % bad_op, 400, sql=out)
+        out = json.dumps(spec, ensure_ascii=False, indent=2)
+    else:
+        out = _clean_sql(text)
+        if not out:
+            low = " " + (text or "").lower() + " "
+            if any((" " + w + " ") in low for w in _WRITE_WORDS):
+                return _fail("模型生成的是写操作语句，已丢弃（此处只用于查询），请换个说法重试", 400)
+            return _fail("模型没有返回可用的 SQL，请换个说法或换个模型（模型原话：%s）" % _excerpt(text))
+        if out.startswith("--"):        # 模型按要求回了「-- 无法生成：<原因>」
+            return _fail(out.lstrip("- ").splitlines()[0][:200] or "无法根据当前结构生成 SQL", 400, sql=out)
+        bad = _readonly_guard(out)
+        if bad:
+            return _fail("模型生成的不是只读查询语句，已丢弃，请换个说法重试（%s）" % bad, 400, sql=out)
+
+    elapsed = int((time.time() - t0) * 1000)
+    _log_ai_call("nl2sql", True, elapsed)
+    _log.info("AI 生成查询：kind=%s model=%s %dms out=%s", kind, model, elapsed, out[:200])
+    return jsonify({"sql": out, "model": model, "elapsed_ms": elapsed})

@@ -1048,7 +1048,8 @@
     // 同一标签的旧节点先摘掉，避免重复挂载（标签栏出现重影/点击错位）
     if (tab.el && tab.el.parentNode) tab.el.parentNode.removeChild(tab.el);
     const el = document.createElement("div");
-    el.className = "tab" + (tab.dirty ? " dirty" : "");
+    // tab-db：数据库连接标签，加一条类型色边（激活时整条着色），与侧栏高亮呼应
+    el.className = "tab" + (tab.dirty ? " dirty" : "") + (tab.isDbConn ? " tab-db" : "");
     // 差异标签的 name 带 "@提交哈希" 后缀（如 ide.html@895cd54），直接匹配取不到类型图标，
     // 用 relPath 的真实文件名来取图标；大小 1.4em 由 .t-ic 规则统一控制
     const iconName = (tab.diff && tab.relPath) ? baseName(tab.relPath) : tab.name;
@@ -1075,6 +1076,7 @@
     // 否则 rebuildGroups 命中缓存提前返回时，旧标签节点会残留并不断累积
     groupBundles.forEach(b => { b.tabbar.textContent = ""; });
     tabs.forEach(t => { t.el = null; renderTab(t); mountHost(t); });
+    if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏「已打开」高亮跟随标签
   }
   /* ---------- 动态编辑组：组按「行」排布，每行内可并排多个组 ----------
      向右拆分：与源组同行、插在其右侧；向下拆分：在源组所在行的下方新起一行 */
@@ -1305,6 +1307,7 @@
     revealInTree(tab.path);          // 树列表跟随当前打开的文件高亮
     scrollTabIntoView(tab);
     sessionSaveTabs();
+    if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏高亮跟随当前标签
   }
   async function closeTab(tab) {
     const i = tabs.indexOf(tab);

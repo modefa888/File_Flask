@@ -1,6 +1,5 @@
 """浏览/预览/缩略图/视频流转发路由。"""
 import os
-import re
 import sys
 import json
 import time
@@ -573,11 +572,6 @@ _SQLITE_CELL_MAX = 1000          # 单元格显示截断长度（避免超大 BL
 _SQLITE_SQL_MAX = 20000          # SQL 文本长度上限
 _SQLITE_QUERY_MAX = 2000         # 查询结果最多返回行数
 _SQLITE_QUERY_TIMEOUT = 5        # 单条查询最长执行秒数（超出即中断，避免拖死服务）
-_SQLITE_NL_MAX = 500             # 「一句话生成 SQL」描述长度上限
-_SQLITE_NL_TIMEOUT = 60          # 调 AI 生成 SQL 的超时秒数
-_SQLITE_NL_CTX = 40000           # 提示词总长度上限（表结构 + 需求）
-_SQLITE_SCHEMA_TABLES = 60       # 表结构最多提供给 AI 的表数
-_SQLITE_SCHEMA_CHARS = 400       # 单张表建表语句截断长度
 
 
 def _is_sqlite_file(ext):
@@ -775,166 +769,8 @@ def api_sqlite_query():
                 pass
 
 
-# 「一句话生成 SQL」：只读的语句白名单开头关键字
-_SQL_READONLY_START = re.compile(r"^\s*(?:--[^\n]*\n|\s)*(select|with|explain|pragma)\b", re.I)
-_SQL_WRITE_WORDS = re.compile(r"\b(insert|update|delete|drop|alter|create|attach|detach|vacuum|reindex)\b", re.I)
-
-_SQLITE_NL_SYS = (
-    "你是 SQLite 查询生成器。根据用户的一句话需求和给定的数据库结构，生成一条可直接执行的 SQLite 查询语句。\n"
-    "硬性要求：\n"
-    "1. 只输出 SQL 本身：不要解释、不要 Markdown 代码块、不要用 ``` 包裹、不要输出多条语句；\n"
-    "2. 只能生成只读查询（SELECT / WITH / EXPLAIN / PRAGMA），绝不生成任何写操作；\n"
-    "3. 表名与列名必须严格取自给定结构，不要臆造；结构里的中文表名/列名可直接使用；\n"
-    "4. 除用户明确要求全部数据外，都加 LIMIT 限制返回行数（默认 100）；\n"
-    "5. 若该需求用现有结构无法完成，只输出一行：-- 无法生成：<原因>"
-)
-
-
-def _sqlite_schema_dump(cur):
-    """把库结构整理成给 AI 看的文本（建表语句 + 行数，超长部分截断）"""
-    rows = cur.execute(
-        "SELECT name, type, sql FROM sqlite_master "
-        "WHERE type IN ('table','view') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' "
-        "ORDER BY type, name").fetchall()
-    parts = []
-    for name, ttype, ddl in rows[:_SQLITE_SCHEMA_TABLES]:
-        try:
-            n = cur.execute(f"SELECT COUNT(*) FROM {_sqlite_quote_ident(name)}").fetchone()[0]
-        except Exception:
-            n = None
-        body = (ddl or "").strip()
-        if len(body) > _SQLITE_SCHEMA_CHARS:
-            body = body[:_SQLITE_SCHEMA_CHARS] + " …"
-        parts.append(f"-- {ttype} {name}（{n if n is not None else '?'} 行）\n{body}")
-    if len(rows) > _SQLITE_SCHEMA_TABLES:
-        parts.append(f"-- 另有 {len(rows) - _SQLITE_SCHEMA_TABLES} 张表未列出")
-    return "\n\n".join(parts)
-
-
-def _first_semi(line):
-    """行内「字符串字面量之外」的第一个分号位置；行内注释之后的分号不算，没有则 None"""
-    q = None
-    i = 0
-    while i < len(line):
-        ch = line[i]
-        if q:
-            if ch == q:
-                if q == "'" and line[i + 1:i + 2] == "'":     # '' 是转义的单引号
-                    i += 2
-                    continue
-                q = None
-        elif ch in ("'", '"', "`"):
-            q = ch
-        elif ch == "-" and line[i + 1:i + 2] == "-":
-            return None
-        elif ch == ";":
-            return i
-        i += 1
-    return None
-
-
-def _clean_sql(text):
-    """从模型输出里抠出 SQL：去代码围栏、去前缀说明、截到第一条语句结尾"""
-    s = (text or "").strip()
-    m = re.search(r"```(?:sql)?\s*(.+?)(?:```|\Z)", s, re.S | re.I)
-    if m:
-        s = m.group(1).strip()
-    lines = s.splitlines()
-    start = next((i for i, ln in enumerate(lines)
-                  if re.match(r"^\s*(select|with|explain|pragma|--)", ln, re.I)), None)
-    if start is None:
-        return ""       # 通篇不含 SQL：交给上层提示「没有返回可用的 SQL」
-    out = []
-    for ln in lines[start:]:
-        cut = _first_semi(ln)
-        if cut is not None:                   # 到第一条语句结尾即停，丢掉后面的解释
-            out.append(ln[:cut + 1])
-            break
-        out.append(ln)
-    return "\n".join(out).strip()[: _SQLITE_SQL_MAX]
-
-
-@bp.route("/api/sqlite/nl2sql", methods=["POST"])
-def api_sqlite_nl2sql():
-    """一句话生成 SQL：用系统 AI（设置 → AI 助手 当前的接口/模型）产出只读查询语句。
-
-    只负责生成、不负责执行；生成的语句回到前端让用户确认后再走 /api/sqlite/query，
-    那里同样只读，构成双重保险。
-    """
-    data = request.get_json(silent=True) or {}
-    question = str(data.get("question") or "").strip()
-    target_path = os.path.abspath(os.path.normpath(data.get("path") or ""))
-    if not question:
-        return jsonify({"error": "请先用一句话描述你想查什么"}), 400
-    if len(question) > _SQLITE_NL_MAX:
-        return jsonify({"error": f"描述过长（上限 {_SQLITE_NL_MAX} 字）"}), 400
-    if not os.path.isfile(target_path):
-        return jsonify({"error": "文件不存在"}), 404
-    if not _is_sqlite_file(os.path.splitext(target_path)[1].lower().lstrip(".")):
-        return jsonify({"error": "不是 SQLite 数据库文件"}), 400
-
-    from ..ide.ai import _load_cfg, _sys_pick, _log_ai_call, _sys_err_response   # 函数内导入，避免模块循环依赖
-    cfg = _load_cfg()
-    provider, model, err = _sys_pick(cfg, "nl2sql")
-    if err:
-        return _sys_err_response(err, need_config=not cfg.get("providers"))
-
-    t_start = time.time()
-
-    def _fail(msg, code=502, **extra):
-        """统一失败出口：记一次失败调用再返回"""
-        _log_ai_call("nl2sql", False, int((time.time() - t_start) * 1000), msg)
-        return jsonify({"error": msg, **extra}), code
-
-    try:
-        con = _sqlite_connect_ro(target_path)
-        try:
-            schema = _sqlite_schema_dump(con.cursor())
-        finally:
-            con.close()
-    except Exception as e:
-        return jsonify({"error": f"无法读取数据库结构: {str(e)}"}), 500
-
-    base = provider["base_url"].rstrip("/")
-    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
-    content = ("[数据库表结构]\n" + schema + "\n\n[查询需求]\n" + question)[:_SQLITE_NL_CTX]
-    payload = json.dumps({"model": model, "stream": False, "messages": [
-        {"role": "system", "content": _SQLITE_NL_SYS},
-        {"role": "user", "content": content}]}).encode("utf-8")
-
-    import urllib.error
-    import urllib.request
-    t0 = time.time()
-    req = urllib.request.Request(url, data=payload, method="POST", headers={
-        "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
-    try:
-        resp = urllib.request.urlopen(req, timeout=_SQLITE_NL_TIMEOUT)
-        obj = json.loads(resp.read().decode("utf-8"))
-        text = (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "ignore")[:200]
-        return _fail(f"AI 接口返回 {e.code}：{detail}")
-    except Exception as e:
-        return _fail(f"调用 AI 接口失败：{str(e)}")
-
-    sql = _clean_sql(text)
-    if not sql:
-        if _SQL_WRITE_WORDS.search(text or ""):
-            return _fail("模型生成的是写操作语句，已丢弃（此处只用于查询），请换个说法重试", 400)
-        return _fail("模型没有返回可用的 SQL，请换个说法或换个模型")
-    if sql.startswith("--"):            # 模型按要求回了「-- 无法生成：<原因>」
-        return _fail(sql.lstrip("- ").splitlines()[0][:200] or "无法根据当前结构生成 SQL", 400, sql=sql)
-    if not _SQL_READONLY_START.match(sql) or _SQL_WRITE_WORDS.search(sql):
-        return _fail("模型生成的不是只读查询语句，已丢弃，请换个说法重试", 400, sql=sql)
-
-    elapsed = int((time.time() - t0) * 1000)
-    _log_ai_call("nl2sql", True, elapsed)
-    _log.info("AI 生成 SQL：model=%s %dms sql=%s", model, elapsed, sql[:200])
-    return jsonify({
-        "sql": sql,
-        "model": model,
-        "elapsed_ms": elapsed,
-    })
+# 「一句话生成」统一走 app/routes/common/dbconn.py 的 /api/db/nl2sql
+# （SQLite 文件传 path，其它库传 conn + dbname），这里不再单独保留一份实现。
 
 
 @bp.route("/api/raw/<path:fspath>")

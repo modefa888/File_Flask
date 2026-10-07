@@ -274,7 +274,7 @@
       setAiBusy(true);
       sqlMsg.className = "dbv-sql-msg";
       sqlMsg.textContent = "正在让 AI 生成 SQL…";
-      fetch("/api/sqlite/nl2sql", {
+      fetch("/api/db/nl2sql", {          // 与数据库连接工具同一个入口，用 path 指明目标库
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: path, question: question }),

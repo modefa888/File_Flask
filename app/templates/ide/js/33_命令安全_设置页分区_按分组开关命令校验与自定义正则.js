@@ -62,6 +62,31 @@
     '</div>';
   }
 
+  /* 全局放行名单：命令级白名单，跨项目生效（AI 卡片上的「全局允许」会写到这里） */
+  function cgAllowHtml(g) {
+    const allow = g.allow || [];
+    const max = g.allow_max || 200;
+    return '<div class="cg-allow">' +
+      '<div class="cg-allow-hd"><i class="bi bi-unlock"></i>全局放行名单' +
+        '<span class="cg-allow-n" title="已放行 ' + allow.length + ' 条，上限 ' + max + ' 条">' +
+          allow.length + ' / ' + max + '</span></div>' +
+      '<div class="cg-allow-desc">在 AI 助手的确认卡片上选「全局允许」会把这条命令记到这里：' +
+        '之后终端与智能体在<b>任何项目</b>里遇到同一条命令都直接执行、不再弹确认。' +
+        '仅精确匹配命令原文（不做正则 / 前缀匹配），移除后该命令会重新需要确认。</div>' +
+      (allow.length
+        ? allow.map((c, i) =>
+            '<div class="cg-arow" data-kw="全局放行 ' + cgTitle(c) + '">' +
+              '<code title="' + cgTitle("放行命令：" + c) + '">' + esc(c) + '</code>' +
+              '<button class="set-btn cg-allow-del" title="从名单移除，之后该命令会重新需要确认">移除</button>' +
+            '</div>').join("")
+        : '<div class="cg-allow-empty">名单为空：目前没有任何命令被全局放行</div>') +
+      '<div class="cg-allow-add">' +
+        '<input type="text" id="cgAllowPat" placeholder="手动添加要放行的命令（精确匹配，如 docker ps）" autocomplete="off" spellcheck="false">' +
+        '<button class="set-btn" id="cgAllowAdd">添加</button>' +
+      '</div>' +
+    '</div>';
+  }
+
   function cmdGuardPaint() {
     const box = $("cgBody");
     const g = CMD_GUARD.data;
@@ -107,6 +132,7 @@
              (groups.some(x => CMD_GUARD.open[x.id]) ? "全部收起" : "展开全部") + '</button>' +
          '</div>' +
          '<div class="cg-list">' + groups.map(x => cgGroupHtml(x, levels)).join("") + '</div>';
+    h += cgAllowHtml(g);
     box.innerHTML = h;
     cgBind(box);
   }
@@ -167,6 +193,32 @@
       });
     }
 
+    box.querySelectorAll(".cg-arow").forEach((row, i) => {
+      const del = row.querySelector(".cg-allow-del");
+      if (del) del.onclick = () => {
+        g.allow.splice(i, 1);
+        cmdGuardSave("已从全局放行名单移除");
+      };
+    });
+
+    const allowAdd = box.querySelector("#cgAllowAdd");
+    if (allowAdd) {
+      const el = box.querySelector("#cgAllowPat");
+      const add = () => {
+        const v = (el.value || "").trim();
+        if (!v) { toast("请输入要放行的命令", "warn"); el.focus(); return; }
+        g.allow = g.allow || [];
+        if (g.allow.includes(v)) { toast("这条命令已在放行名单里", "warn"); return; }
+        if (g.allow.length >= (g.allow_max || 200)) {
+          toast("全局放行名单最多 " + (g.allow_max || 200) + " 条", "warn"); return;
+        }
+        g.allow.push(v);
+        cmdGuardSave("已加入全局放行名单");
+      };
+      allowAdd.onclick = add;
+      el.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") add(); };
+    }
+
     const allBtn = box.querySelector("#cgToggleAll");
     if (allBtn) allBtn.onclick = () => {
       const anyOpen = (g.groups || []).some(x => CMD_GUARD.open[x.id]);
@@ -182,6 +234,7 @@
       enabled: g.enabled !== false,
       off: (g.groups || []).filter(x => !x.on).map(x => x.id),
       custom: (g.custom || []).map(c => ({ pattern: c.pattern, reason: c.reason, on: c.on !== false })),
+      allow: (g.allow || []).slice(),          // 全局放行名单（整份覆盖保存）
     };
   }
 

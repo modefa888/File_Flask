@@ -415,6 +415,19 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .cg-crow code { color: #a0522d; background: rgba(160, 82, 45, .1); }
 :where(html.theme-light) .cg-why { color: #6b6b6b; }
 :where(html.theme-light) .cg-del:hover { background: #fbe0e0; border-color: #e8b0b0; color: #c0392b; }
+/* 全局放行名单 */
+:where(html.theme-light) .cg-allow { background: #f8f8f8; border-color: #e5e5e5; }
+:where(html.theme-light) .cg-allow-hd { color: #1f2328; }
+:where(html.theme-light) .cg-allow-hd .bi { color: #1a7f37; }
+:where(html.theme-light) .cg-allow-n { color: #5a5a5a; background: #ececec; border-color: #dcdcdc; }
+:where(html.theme-light) .cg-allow-desc { color: #6b6b6b; }
+:where(html.theme-light) .cg-allow-desc b { color: #333333; }
+:where(html.theme-light) .cg-allow-empty { color: #8a8a8a; border-color: #dcdcdc; }
+:where(html.theme-light) .cg-arow { background: #f0f0f0; border-color: #e0e0e0; }
+:where(html.theme-light) .cg-arow code { color: #1a7f37; background: rgba(26, 127, 55, .1); }
+:where(html.theme-light) .cg-allow-del:hover { background: #fbe0e0; border-color: #e8b0b0; color: #c0392b; }
+:where(html.theme-light) .cg-allow-add input { background: #ffffff; border-color: #dcdcdc; color: #1f2328; }
+:where(html.theme-light) .cg-allow-add input:focus { border-color: #005fb8; }
 
 /* ---------- 侧边搜索面板（03） ---------- */
 :where(html.theme-light) .s-modes { background: #e4e4e4; }
@@ -921,6 +934,10 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ai-ask.denied { border-color: #e8b0b0; color: #c0392b; }
 :where(html.theme-light) .ai-ask .btns button.ok { background: #dff3e4; border-color: #8fd0a0; color: #1a7f37; }
 :where(html.theme-light) .ai-ask .btns button.no:hover { background: #fbe0e0; border-color: #e8b0b0; color: #a02b2b; }
+:where(html.theme-light) .ai-ask .btns button.glo { background: #e2eefb; border-color: #a8c8e8; color: #0b5c9a; }
+:where(html.theme-light) .ai-ask .btns button.glo:hover { background: #d2e4f8; border-color: #86b3dd; }
+:where(html.theme-light) .ai-ask .btns button.set { color: #8a7a4a; }
+:where(html.theme-light) .ai-ask .btns button.set:hover { background: #ececec; color: #8a5a00; }
 :where(html.theme-light) .ai-set-tip { color: #a0522d; }
 :where(html.theme-light) .sysai-mods { background: #f8f8f8; border-color: #e5e5e5; box-shadow: 0 2px 8px rgba(0, 0, 0, .06); }
 :where(html.theme-light) .sysai-mods-hd { color: #1f2328; }

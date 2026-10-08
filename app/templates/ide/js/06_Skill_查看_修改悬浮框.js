@@ -1518,22 +1518,40 @@
       '<div class="r"></div><div class="btns">' +
       '<button class="ok">允许执行</button>' +
       '<button class="all">本次会话都允许</button>' +
-      '<button class="no">拒绝</button></div>';
+      '<button class="glo" title="加入全局放行名单：以后任何项目遇到同一条命令都直接执行，不再弹确认">全局允许</button>' +
+      '<button class="no">拒绝</button>' +
+      '<button class="set" title="打开设置 → 命令安全"><i class="bi bi-gear"></i></button>' +
+      '</div>';
     const args = ev.args || {};
     row.querySelector("code").textContent = args.command || args.path || JSON.stringify(args);
     row.querySelector(".r").textContent = ev.reason || "需要你确认后才会执行";
-    const decide = (allow, always) => {
+    const isCmd = ev.tool === "run_command" && !!args.command;
+    // 「全局允许」只对执行命令有意义：写文件等其余确认项隐藏该按钮
+    if (!isCmd) row.querySelector(".glo").style.display = "none";
+    const decide = (allow, always, glo) => {
       fetch("/api/ai/agent/approve", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ run_id: runId, call_id: ev.call_id, allow: allow, always: always }),
+        body: JSON.stringify({ run_id: runId, call_id: ev.call_id, allow: allow,
+                               always: always, global: !!glo }),
+      }).then(r => r.json()).then(d => {
+        if (d && d.warn) toast("已允许执行，但加入全局放行名单失败：" + d.warn, "warn");
+        else if (d && d.global_added) toast("已全局允许：以后任何项目都将直接执行", "ok");
       }).catch(() => {});
       row.classList.add(allow ? "allowed" : "denied");
       row.querySelector(".btns").remove();
-      row.querySelector(".r").textContent = allow ? "已允许执行" : "已拒绝执行";
+      row.querySelector(".r").textContent = allow
+        ? (glo ? "已全局允许：以后任何项目都将直接执行" : "已允许执行")
+        : "已拒绝执行";
     };
-    row.querySelector(".ok").onclick = () => decide(true, false);
-    row.querySelector(".all").onclick = () => decide(true, true);
-    row.querySelector(".no").onclick = () => decide(false, false);
+    row.querySelector(".ok").onclick = () => decide(true, false, false);
+    row.querySelector(".all").onclick = () => decide(true, true, false);
+    row.querySelector(".glo").onclick = () => decide(true, false, true);
+    row.querySelector(".no").onclick = () => decide(false, false, false);
+    // 齿轮：跳到「设置 → 命令安全」，先看策略再决定是否放行（不代答本次确认）
+    row.querySelector(".set").onclick = () => {
+      if (typeof openSettingsTab === "function") openSettingsTab("sec-cmdguard");
+      else toast("无法打开设置页", "warn");
+    };
     return row;
   }
 
@@ -1547,11 +1565,13 @@
     const steps = [];
     const changes = [];                  // 本次 AI 回复产生的文件改动 id（供回撤）
     AI._agentTurnChanges = changes;      // 中断时也能拿到已产生的改动，供回撤按钮使用
+    AI._agentTurnSteps = steps;          // 中断（手动停止）时也能拿到已完成的步骤，刷新后仍能展开查看
     let stepsBox = null;
     const ensureStepsBox = () => {
       if (!stepsBox) {
         stepsBox = aiBuildStepsBox([]);
         bodyRow.appendChild(stepsBox);               // 追加在 AI 气泡/元信息之后（即消息下面）
+        AI._agentStepsBox = stepsBox;                // 中断时收尾用：停掉转圈并折叠成一行
       }
       return stepsBox;
     };
@@ -2022,8 +2042,11 @@
     bodyB.innerHTML = '<span class="ai-waiting">思考中<span class="d"></span><span class="d"></span><span class="d"></span></span>';
     let acc = "", thinking = "", ttft = 0;                // ttft：首 token 到达耗时
     let turnChanges = [];                                 // 本轮 AI 产生的文件改动 id（供回撤）
+    let turnSteps = [];                                   // 本轮工具步骤（普通对话路径用；智能体路径见 AI._agentTurnSteps）
     let turnDone = false;                                 // 回复已入列：之后收尾出错不再覆盖/重复插入
     AI._agentTurnChanges = [];
+    AI._agentTurnSteps = [];                              // 由 aiRunAgent 填充：手动停止时保存步骤用
+    AI._agentStepsBox = null;
     AI._agentRunId = "";                                  // 本场运行的 id（停止后补拉变更用）
     AI.ctrl = new AbortController();
     try {
@@ -2084,7 +2107,7 @@
       const dec = new TextDecoder();
       let buf = "";
       // 普通对话也会调用读取类工具：把过程记录渲染在消息下方
-      const chatSteps = [], chatStepRows = new Map(), chatStepMeta = new Map();
+      const chatSteps = turnSteps, chatStepRows = new Map(), chatStepMeta = new Map();
       let chatStepsBox = null;
       const ensureChatSteps = () => {
         if (!chatStepsBox) { chatStepsBox = aiBuildStepsBox([]); bodyB.parentElement.appendChild(chatStepsBox); }
@@ -2173,10 +2196,16 @@
         bodyB.innerHTML = aiMd(acc.replace(/^\s+/, "")) + "\n（已停止）";
         const out = acc.trim();
         const ab0 = turnChanges.length ? turnChanges : (AI._agentTurnChanges || []);
+        // 手动停止时 aiRunAgent 还没返回，步骤只能从它暴露的数组里取（否则刷新后步骤全丢）
+        const abSteps = (turnSteps.length ? turnSteps : (AI._agentTurnSteps || [])).slice();
+        const abBox = AI._agentStepsBox;                 // 步骤框收尾：停掉转圈 + 折叠成一行
+        if (abBox) { abBox._pending = 0; abBox._paint(); abBox._setCollapsed(true); }
         const finalizeAbort = (abChanges) => {
-          if (out || abChanges.length) {                  // 即使没有文字，只要改过文件也保留模块与回撤
+          // 有文字 / 有文件改动 / 有步骤都保留模块（步骤与回撤按钮刷新后仍可见）
+          if (out || abChanges.length || abSteps.length) {
             const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
             AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, ms: meta.ms, ts: meta.ts,
+                           steps: abSteps.length ? abSteps : undefined,
                            changes: abChanges.length ? abChanges : undefined });
             bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
             turnDone = true;
@@ -2204,7 +2233,9 @@
         bodyB.classList.add("err");
         const meta = { ms: Math.round(performance.now() - t0), ts: Date.now(), err: true };
         const errChanges = (turnChanges.length ? turnChanges : (AI._agentTurnChanges || []));
+        const errSteps = (turnSteps.length ? turnSteps : (AI._agentTurnSteps || [])).slice();   // 出错同样保留已完成的步骤
         AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: errText, err: true, ms: meta.ms, ts: meta.ts,
+                       steps: errSteps.length ? errSteps : undefined,
                        changes: errChanges.length ? errChanges : undefined });
         bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
         aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);

@@ -159,3 +159,87 @@
 .cg-crow .set-switch { margin-left: auto; }
 .cg-del { flex: none; }
 .cg-del:hover { background: rgba(244,135,113,.15); border-color: rgba(244,135,113,.5); color: #f48771; }
+
+/* 全局放行名单（命令级白名单，跨项目生效） */
+.cg-allow {
+  margin-top: 16px;
+  border: 1px solid #303031;
+  border-radius: 8px;
+  background: #242425;
+  padding: 12px 14px 14px;
+}
+.cg-allow-hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e2e2e2;
+  font-size: 13px;
+  font-weight: 600;
+}
+.cg-allow-hd .bi { color: #5cc98a; }
+.cg-allow-n {
+  margin-left: auto;
+  flex: none;
+  color: #b8b8b8;
+  background: #2f2f30;
+  border: 1px solid #3c3c3d;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 400;
+  padding: 1px 8px;
+}
+.cg-allow-desc {
+  color: #8a8a8a;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 7px 0 10px;
+}
+.cg-allow-desc b { color: #cfcfcf; }
+.cg-allow-empty {
+  color: #7a7a7a;
+  font-size: 12px;
+  border: 1px dashed #3c3c3d;
+  border-radius: 6px;
+  padding: 10px;
+  text-align: center;
+}
+.cg-arow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #2a2a2b;
+  border: 1px solid #3c3c3d;
+  border-radius: 6px;
+  padding: 7px 10px;
+  margin-bottom: 6px;
+}
+.cg-arow code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: #9cdc9c;
+  background: rgba(92,201,138,.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
+.cg-allow-del { flex: none; }
+.cg-allow-del:hover { background: rgba(244,135,113,.15); border-color: rgba(244,135,113,.5); color: #f48771; }
+.cg-allow-add { display: flex; gap: 8px; margin-top: 10px; }
+.cg-allow-add input {
+  flex: 1;
+  min-width: 0;
+  background: #1c1c1d;
+  border: 1px solid #3c3c3d;
+  border-radius: 6px;
+  color: #e2e2e2;
+  font-size: 12px;
+  padding: 5px 9px;
+  font-family: inherit;
+}
+.cg-allow-add input:focus { outline: none; border-color: #0a6aa8; }
+.cg-allow-add .set-btn { flex: none; }

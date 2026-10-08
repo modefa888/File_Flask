@@ -1,7 +1,8 @@
 """AI 智能体（Agent）：让模型自动读文件、改文件、搜索、执行命令，多轮直到任务完成。
 
 POST /api/ai/agent           {repo, messages, perm, provider_id?, model?}   SSE 流式
-POST /api/ai/agent/approve   {run_id, call_id, allow, always}               批准/拒绝待确认的调用
+POST /api/ai/agent/approve   {run_id, call_id, allow, always, global}       批准/拒绝待确认的调用
+                             global=true 时把该命令写入「设置 → 命令安全」的全局放行名单
 
 SSE 事件（data: {json}\\n\\n）：
     {"type":"run","run_id":"..."}                       本次运行 id（确认时回传）
@@ -35,9 +36,9 @@ from flask import Blueprint, jsonify, request, Response
 
 from ... import config
 from ...log import get_logger
-from ...services.common.safety import check_command, is_delete_command
+from ...services.common.safety import check_command, is_delete_command, is_allowed_command
 from ...services.ide.web_search import search_web, format_results
-from ...services.common import undo
+from ...services.common import undo, cmdguard
 from .ai import (_clean_content, _load_cfg, _sys_pick, _override_pick, _log_ai_call,
                  _estimate_msgs, _estimate_tokens,
                  _open_stream, _sse, _inject_system_time, _sys_err_response,
@@ -887,6 +888,8 @@ def _gate(perm, name, args, root, auto_run="safe", web_auto=True, sub_agent=Fals
         if not getattr(config, "ENABLE_EXEC", True):
             return False, "已禁用命令执行（config.ENABLE_EXEC = False）", False, ""
         cmd = str(args.get("command") or "")
+        if is_allowed_command(cmd):
+            return True, "", False, ""                 # 已在「全局放行名单」：任何项目都直接执行
         verdict = check_command(cmd)
         if verdict["level"] == "blocked":
             return False, "已拦截危险命令：%s" % verdict["reason"], False, ""
@@ -1255,7 +1258,12 @@ def _run_tool_job(name, args, root, perm, ctx=None):
     if fn is None:
         return False, "未知工具：%s" % name, "", "未知工具：%s" % name
     try:
-        return fn(args, root, perm, ctx)
+        # 仅把 ctx 传给声明了该参数的处理器（如 generate_image / code_intel）
+        nargs = getattr(fn, "__code__", None)
+        nargs = nargs.co_argcount if nargs is not None else 3
+        if nargs >= 4:
+            return fn(args, root, perm, ctx)
+        return fn(args, root, perm)
     except Exception as e:  # noqa: BLE001
         return False, "工具执行异常：%s" % e, "", "工具执行异常：%s" % e
 
@@ -1377,7 +1385,9 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
                 ev = threading.Event()
                 box = {"allow": False, "always": False}
                 with _PENDING_LOCK:
-                    _PENDING[key] = {"ev": ev, "box": box}
+                    # cmd 供「全局允许」把这条命令写进命令安全的白名单（approve 接口读取）
+                    _PENDING[key] = {"ev": ev, "box": box, "tool": name,
+                                     "cmd": str(args.get("command") or "")}
                 yield _sse({"type": "ask", "call_id": c["id"], "tool": name, "args": args,
                             "reason": job["ask"]})
                 answered = ev.wait(timeout=_ASK_TIMEOUT)
@@ -1567,14 +1577,29 @@ def api_ai_agent():
 
 @bp.route("/api/ai/agent/approve", methods=["POST"])
 def api_ai_agent_approve():
-    """批准 / 拒绝智能体待确认的工具调用。"""
+    """批准 / 拒绝智能体待确认的工具调用。
+
+    global=True（前端「全局允许」）：同意本次执行，并把这条命令写进「设置 → 命令安全」的
+    全局放行名单，之后在任何项目里遇到同一条命令都直接执行、不再弹确认。
+    """
     data = request.get_json(silent=True) or {}
     key = (str(data.get("run_id") or ""), str(data.get("call_id") or ""))
     with _PENDING_LOCK:
         st = _PENDING.get(key)
     if not st:
         return jsonify({"error": "该确认已失效（可能已超时或已处理）"}), 404
-    st["box"]["allow"] = bool(data.get("allow"))
+    allow = bool(data.get("allow"))
+    st["box"]["allow"] = allow
     st["box"]["always"] = bool(data.get("always"))
+    added, warn = False, ""
+    if allow and data.get("global"):
+        cmd = str(st.get("cmd") or "").strip()
+        if cmd:
+            _sel, err = cmdguard.add_allow(cmd)
+            if err:
+                warn = err
+            else:
+                added = True
+                _log.info("命令已加入全局放行名单：%s", cmd[:200])
     st["ev"].set()
-    return jsonify({"ok": True, "allow": st["box"]["allow"]})
+    return jsonify({"ok": True, "allow": allow, "global_added": added, "warn": warn})

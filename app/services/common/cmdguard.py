@@ -4,7 +4,7 @@
 规则本体在 config.EXEC_RULE_GROUPS（按用途分组，每条标明 blocked / confirm / delete 级别），
 本模块负责三件事：
   1. 把规则整理成前端可直接渲染的目录（catalog）；
-  2. 保存用户的选择 —— 总开关、分组开关、自定义正则（store.db 的 cmd_guard 表，单行 JSON）；
+  2. 保存用户的选择 —— 总开关、分组开关、自定义正则、全局放行名单（store.db 的 cmd_guard 表，单行 JSON）；
   3. 给 safety.py 提供「当前生效的规则」，被关掉的分组不再参与校验。
 
 两条约定：
@@ -12,6 +12,9 @@
     直接写块设备」这种不可逆操作，给它配一个开关就等于把刹车做成装饰；要彻底关掉校验，
     只能用部署级开关 config.EXEC_ENFORCE_SAFETY（环境变量 EXEC_ENFORCE_SAFETY=False）。
   · 关掉分组只影响「要不要打断用户」：命令不再弹确认，直接执行。
+
+「全局放行名单」是命令级的白名单：用户确认某条命令时选「全局允许」，就把这条命令原文记下来，
+之后终端与 AI 智能体在任何项目里遇到同一条命令都直接执行、不再弹确认（设置 → 命令安全 里可移除）。
 """
 import json
 import re
@@ -26,6 +29,7 @@ _log = get_logger()
 _TABLE = "cmd_guard"
 _KEY = "state"
 _MAX_CUSTOM = 50                     # 自定义正则条数上限，避免设置被塞爆
+_MAX_ALLOW = 200                     # 全局放行名单条数上限
 
 # 级别的中文名（前端直接用，保证只有一处定义）
 LEVELS = {"blocked": "硬拦截", "confirm": "需确认", "delete": "删除类"}
@@ -36,7 +40,7 @@ _active = None                       # 缓存编译好的生效规则，save() �
 
 
 def _default():
-    return {"enabled": True, "off": [], "custom": []}
+    return {"enabled": True, "off": [], "custom": [], "allow": []}
 
 
 def _clean(raw) -> dict:
@@ -70,6 +74,18 @@ def _clean(raw) -> dict:
             "on": bool(item.get("on", True)),
         })
     st["custom"] = items[:_MAX_CUSTOM]
+
+    allow = raw.get("allow")
+    if isinstance(allow, dict):                  # 万一被存成 {0: "pwd", ...}
+        allow = list(allow.values())
+    elif isinstance(allow, str):
+        allow = [allow]
+    commands = []
+    for item in (allow or []):                   # 命令原文精确匹配，去重且丢掉空白项
+        s = str(item or "").strip()
+        if s and s not in commands:
+            commands.append(s)
+    st["allow"] = commands[:_MAX_ALLOW]
     return st
 
 
@@ -125,6 +141,27 @@ def save(payload) -> tuple:
 def master_on() -> bool:
     """总开关：关掉后命令不再逐条确认（硬拦截仍然生效）。"""
     return bool(state().get("enabled", True))
+
+
+def allow_set() -> set:
+    """全局放行名单（命令级，跨项目）：整条命令与之精确匹配即视为安全。"""
+    return set(state().get("allow") or [])
+
+
+def add_allow(command) -> tuple:
+    """把一条命令加入全局放行名单（幂等）。返回 (新设置, 错误信息)。"""
+    cmd = str(command or "").strip()
+    if not cmd:
+        return None, "命令为空，无法加入全局放行名单"
+    with _lock:
+        allow = list(state().get("allow") or [])
+        if cmd in allow:
+            return state(), None
+        if len(allow) >= _MAX_ALLOW:
+            return None, "全局放行名单已达上限 %d 条，请先移除一些" % _MAX_ALLOW
+        cur = dict(state())
+        cur["allow"] = allow + [cmd]
+        return save(cur)
 
 
 def active_rules() -> dict:
@@ -184,4 +221,6 @@ def catalog() -> dict:
         "groups": groups,
         "custom": [dict(x) for x in (st.get("custom") or [])],
         "custom_max": _MAX_CUSTOM,
+        "allow": [str(x) for x in (st.get("allow") or [])],
+        "allow_max": _MAX_ALLOW,
     }

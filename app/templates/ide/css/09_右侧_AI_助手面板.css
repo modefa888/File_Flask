@@ -527,12 +527,18 @@
   .ai-ask .q code { background: #1c1a12; border: 1px solid #4a3f28; border-radius: 4px; padding: 1px 6px;
     color: #ffd479; font-family: ui-monospace, Menlo, Consolas, monospace; }
   .ai-ask .r { color: #b9a97f; font-size: 11px; margin-top: 4px; }
-  .ai-ask .btns { display: flex; gap: 6px; margin-top: 8px; }
+  .ai-ask .btns { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
   .ai-ask .btns button { background: #3a3d41; border: 1px solid #4a4a4a; color: #dcdcdc; border-radius: 4px;
     font-size: 11.5px; padding: 3px 10px; cursor: pointer; font-family: inherit; }
   .ai-ask .btns button:hover { background: #45494e; }
   .ai-ask .btns button.ok { background: #2b5c39; border-color: #3d7a4d; color: #d8f5df; }
   .ai-ask .btns button.no:hover { background: #5a2b2b; border-color: #7a3d3d; color: #ffd7d7; }
+  /* 全局允许：写入命令安全的全局放行名单，之后任何项目都直接执行 */
+  .ai-ask .btns button.glo { background: #1f3d52; border-color: #2f6a8a; color: #bfe4ff; }
+  .ai-ask .btns button.glo:hover { background: #26506b; border-color: #3a86ad; }
+  /* 齿轮：打开「设置 → 命令安全」查看 / 调整策略 */
+  .ai-ask .btns button.set { padding: 3px 7px; line-height: 1; color: #b9a97f; }
+  .ai-ask .btns button.set:hover { background: #45494e; color: #ffd479; }
   .ai-ask.allowed { border-color: #3d7a4d; color: #9fe0b0; }
   .ai-ask.denied { border-color: #7a3d3d; color: #e08a8a; }
   /* 需要用户确认：卡片单独挂在消息下方（不放进默认折叠的步骤列表），

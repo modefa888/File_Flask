@@ -295,7 +295,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         return;
       }
       // 搜索时跨全部分区匹配（不受当前标签限制）
-      host.querySelectorAll(".set-row, .cg-group, .cg-crow").forEach(r => {
+      host.querySelectorAll(".set-row, .cg-group, .cg-crow, .cg-arow").forEach(r => {
         r.style.display = ((r.dataset.kw || "").includes(k) || r.textContent.toLowerCase().includes(k)) ? "" : "none";
       });
       host.querySelectorAll(".set-key, .kb-row").forEach(r => {

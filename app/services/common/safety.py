@@ -17,6 +17,16 @@ def split_commands(command: str):
     return [p.strip() for p in parts if p and p.strip()]
 
 
+def is_allowed_command(command: str) -> bool:
+    """命令级全局放行（设置 → 命令安全 → 全局放行名单）：
+
+    用户在确认卡片上选过「全局允许」的同名命令，之后在任何项目里都直接执行、不再弹确认。
+    只做整条命令的精确匹配，不做正则/前缀匹配，避免把一整类命令都放出去。
+    """
+    text = (command or "").strip()
+    return bool(text) and text in cmdguard.allow_set()
+
+
 def is_delete_command(command: str):
     """判断是否是删除 / 破坏性命令，返回 (bool, reason)。
 
@@ -25,6 +35,8 @@ def is_delete_command(command: str):
     """
     text = (command or "").strip()
     if not text:
+        return False, ""
+    if text in cmdguard.allow_set():           # 已加入全局放行名单：不再按删除命令打断
         return False, ""
     delete_rules = cmdguard.active_rules().get("delete") or []
     for part in [text] + split_commands(text):
@@ -40,6 +52,8 @@ def check_command(command: str) -> dict:
         return {"level": "ok", "reason": "", "part": ""}
     text = (command or "").strip()
     if not text:
+        return {"level": "ok", "reason": "", "part": ""}
+    if text in cmdguard.allow_set():          # 全局放行名单：任何项目都直接执行
         return {"level": "ok", "reason": "", "part": ""}
 
     rules = cmdguard.active_rules()
@@ -75,5 +89,6 @@ def rules_summary() -> dict:
         "master": guard["enabled"],                                    # 设置里的总开关
         "off_groups": [g["name"] for g in guard["groups"] if not g["on"]],   # 已关闭的分组
         "custom": [c["pattern"] for c in guard["custom"] if c.get("on")],    # 生效的自定义正则
+        "allow": list(guard.get("allow") or []),          # 全局放行名单（任何项目都直接执行）
         "guard": guard,
     }

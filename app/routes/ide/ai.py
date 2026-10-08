@@ -1134,7 +1134,8 @@ def api_ai_chat():
 
     def _text_tool_note(perm_now, web=False, image_tool=False, lsp_tool=False):
         """接口不支持原生 tools 时，用系统提示告诉模型可用工具与文本调用格式。"""
-        names = ["list_dir(path)", "read_file(path, start, end)", "search_files(pattern, path, max)"]
+        names = ["list_dir(path)", "read_file(path, start, end)", "search_files(pattern, path, max)",
+                 'todo_write(todos=[{"content":"…","status":"pending|in_progress|completed"}])']
         if web:
             names.append("web_search(query, max_results)")
         if image_tool:
@@ -1350,6 +1351,9 @@ def api_ai_chat():
                 yield _sse({"type": "result", "call_id": c["id"], "tool": c["name"], "ok": bool(ok),
                             "summary": summary, "detail": detail, "ms": 0,
                             "changes": (tool_changes or None)})
+                if c["name"] == "todo_write" and ok:          # 任务清单：实时推给前端渲染进度
+                    from .agent import _norm_todos
+                    yield _sse({"type": "todos", "todos": _norm_todos(c["args"].get("todos"))})
                 convo.append({"role": "tool", "tool_call_id": c["id"],
                               "content": (model_text or summary or detail or "")[:_CHAT_TOOL_CHARS]})
         yield b"data: [DONE]\n\n"

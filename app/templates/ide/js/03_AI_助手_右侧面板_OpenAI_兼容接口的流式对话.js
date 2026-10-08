@@ -135,7 +135,7 @@
         mid: m.pid || aiNewPid(), role: m.role, text: m.text || m.content || "",
         images: m.images || [], reasoning: m.reasoning || "",
         meta: { ms: m.ms, ts: m.ts, steps: m.steps, files: m.files,
-                changes: m.changes, undone: m.undone, err: m.err },
+                changes: m.changes, undone: m.undone, err: m.err, todos: m.todos },
       }));
       if (!msgs.length) continue;
       try {
@@ -214,7 +214,7 @@
       mid: m.pid, role: m.role, text: m.text || "",
       images: m.images || [], reasoning: m.reasoning || "",
       meta: { ms: m.ms, ts: m.ts, steps: m.steps, files: m.files,
-              changes: m.changes, undone: m.undone, err: m.err },
+              changes: m.changes, undone: m.undone, err: m.err, todos: m.todos },
     }));
     const savedPids = s._savedPids || new Set();
     const currentPids = new Set(all.filter(m => m && m.pid).map(m => m.pid));

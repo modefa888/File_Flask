@@ -43,7 +43,7 @@ def _clean_meta(meta):
         return {}
     # 只保留需要的字段
     clean = {}
-    for k in ("ms", "ts", "steps", "files", "changes", "undone", "err"):
+    for k in ("ms", "ts", "steps", "files", "changes", "undone", "err", "todos"):
         if k in meta and meta[k] is not None:
             clean[k] = meta[k]
     return clean
@@ -155,6 +155,8 @@ def get_conversation(user_id, conv_id):
                         m["files"] = md["files"]
                     if md.get("steps"):
                         m["steps"] = md["steps"]
+                    if md.get("todos"):
+                        m["todos"] = md["todos"]
                     if md.get("ms") is not None:
                         m["ms"] = md["ms"]
                     if md.get("ts") is not None:

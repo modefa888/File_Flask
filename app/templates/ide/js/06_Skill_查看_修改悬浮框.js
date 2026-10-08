@@ -1339,10 +1339,14 @@
   const AI_TOOL_LABEL = {
     read_file: "读取文件", write_file: "写入文件", edit_file: "修改文件",
     list_dir: "列出目录", search_files: "搜索代码", run_command: "执行命令",
+    todo_write: "更新任务清单", web_search: "联网搜索", generate_image: "生成图片",
+    code_intel: "代码分析", delegate_task: "子 Agent",
   };
   const AI_TOOL_ICON = {
     read_file: "bi-file-earmark-text", write_file: "bi-file-earmark-plus", edit_file: "bi-pencil-square",
     list_dir: "bi-folder2-open", search_files: "bi-search", run_command: "bi-terminal",
+    todo_write: "bi-list-check", web_search: "bi-globe2", generate_image: "bi-image",
+    code_intel: "bi-braces", delegate_task: "bi-diagram-3",
   };
   function aiRenderAgentToggle() {
     const btn = $("aiAgentBtn");
@@ -1510,6 +1514,65 @@
     return box;
   }
 
+  /* ---------- 任务清单（todo_write）：AI 把多步任务拆成清单并实时更新进度 ---------- */
+  const AI_TODO_ICON = {
+    completed: "bi-check-circle-fill",
+    in_progress: "bi-arrow-repeat spin",
+    pending: "bi-circle",
+  };
+  function aiTodoStats(todos) {
+    const list = (todos || []).filter(t => t && t.content);
+    const done = list.filter(t => t.status === "completed").length;
+    return { done: done, total: list.length, all: list.length > 0 && done === list.length };
+  }
+  /* 构造可折叠的「任务列表」面板：头部显示 已完成/总数，正文逐项列出（含状态图标）。
+     返回的元素带 .update(todos) 方法，流式过程中反复调用即可原地刷新。 */
+  function aiTodoBox(todos) {
+    const list = (todos || []).filter(t => t && t.content);
+    if (!list.length) return null;
+    const box = document.createElement("div");
+    box.className = "ai-todo";
+    box.innerHTML =
+      '<div class="ai-todo-head"><i class="bi bi-chevron-down tw"></i>' +
+      '<span class="ttl">任务列表</span><span class="cnt"></span></div>' +
+      '<div class="ai-todo-body"><div class="ai-todo-state"></div><div class="ai-todo-list"></div></div>';
+    box._head = box.querySelector(".ai-todo-head");
+    box._listEl = box.querySelector(".ai-todo-list");
+    box._stateEl = box.querySelector(".ai-todo-state");
+    box._setCollapsed = function (collapsed) {
+      box.classList.toggle("collapsed", collapsed);
+      box._head.querySelector(".tw").className =
+        "bi " + (collapsed ? "bi-chevron-right" : "bi-chevron-down") + " tw";
+    };
+    box._head.onclick = () => box._setCollapsed(!box.classList.contains("collapsed"));
+    box.update = function (next) {
+      const items = (next || []).filter(t => t && t.content);
+      box._listEl.innerHTML = "";
+      items.forEach(t => {
+        const st = t.status || "pending";
+        const row = document.createElement("div");
+        row.className = "ai-todo-row " + st;
+        row.innerHTML = '<i class="bi ' + (AI_TODO_ICON[st] || AI_TODO_ICON.pending) + ' ic"></i>' +
+          '<span class="tx"></span>';
+        row.querySelector(".tx").textContent = t.content;
+        row.title = t.content;
+        box._listEl.appendChild(row);
+      });
+      const s = aiTodoStats(items);
+      box._head.querySelector(".cnt").textContent = s.done + "/" + s.total;
+      if (s.all) {
+        box._stateEl.textContent = "所有任务已完成";
+        box._stateEl.className = "ai-todo-state done";
+      } else {
+        const cur = (items.find(t => t.status === "in_progress") || {}).content || "";
+        box._stateEl.textContent = "进行中 " + s.done + "/" + s.total + (cur ? "：" + cur : "");
+        box._stateEl.className = "ai-todo-state";
+      }
+    };
+    box.update(list);
+    return box;
+  }
+
   /* 需要用户确认的调用（例如执行命令） */
   function aiAskCard(ev, runId) {
     const row = document.createElement("div");
@@ -1564,8 +1627,10 @@
     const rows = new Map();              // call_id -> 步骤行
     const steps = [];
     const changes = [];                  // 本次 AI 回复产生的文件改动 id（供回撤）
+    const todos = [];                    // 本次运行的任务清单（todo_write 实时更新）
     AI._agentTurnChanges = changes;      // 中断时也能拿到已产生的改动，供回撤按钮使用
     AI._agentTurnSteps = steps;          // 中断（手动停止）时也能拿到已完成的步骤，刷新后仍能展开查看
+    AI._agentTurnTodos = todos;          // 中断时也能拿到当前任务清单
     let stepsBox = null;
     const ensureStepsBox = () => {
       if (!stepsBox) {
@@ -1574,6 +1639,17 @@
         AI._agentStepsBox = stepsBox;                // 中断时收尾用：停掉转圈并折叠成一行
       }
       return stepsBox;
+    };
+    let todoBox = null;
+    const ensureTodoBox = () => {
+      if (todoBox) return todoBox;
+      if (!todos.length) return null;                // 没有清单内容时不占位
+      todoBox = aiTodoBox(todos);
+      if (todoBox) {
+        bodyRow.appendChild(todoBox);                // 任务清单面板挂在消息下方（与步骤框同级）
+        AI._agentTodoBox = todoBox;
+      }
+      return todoBox;
     };
     let runId = "", text = "";
     const r = await fetch("/api/ai/agent", {
@@ -1645,6 +1721,15 @@
               stepsBox._pending = Math.max(0, stepsBox._pending - 1);
               stepsBox._paint();
             }
+          } else if (e.type === "todos") {
+            // 任务清单更新（todo_write）：原地刷新清单面板
+            const list = (e.todos || []).filter(t => t && t.content);
+            if (list.length) {
+              todos.length = 0;
+              todos.push(...list);
+              const box = ensureTodoBox();
+              if (box) box.update(todos);
+            }
           } else if (e.type === "subagent") {
             // 子 Agent 实时进度：渲染到对应的 delegate_task 步骤行内
             aiSubStepEvent(rows.get(e.call_id), e.event);
@@ -1656,7 +1741,8 @@
       aiScrollToBottom(true);
     }
     if (stepsBox) { stepsBox._pending = 0; stepsBox._paint(); stepsBox._setCollapsed(true); }  // 本轮结束：自动折叠为一行
-    return { text: text, steps: steps, changes: changes };
+    if (todoBox) todoBox.update(todos);
+    return { text: text, steps: steps, changes: changes, todos: todos };
   }
 
   /* ---------- 附加文件 / 文件夹到对话：资源管理器右键「添加到 AI 对话」→ 输入框上方出现小卡片 ---------- */
@@ -2043,10 +2129,13 @@
     let acc = "", thinking = "", ttft = 0;                // ttft：首 token 到达耗时
     let turnChanges = [];                                 // 本轮 AI 产生的文件改动 id（供回撤）
     let turnSteps = [];                                   // 本轮工具步骤（普通对话路径用；智能体路径见 AI._agentTurnSteps）
+    let turnTodos = [];                                   // 本轮任务清单（todo_write）
     let turnDone = false;                                 // 回复已入列：之后收尾出错不再覆盖/重复插入
     AI._agentTurnChanges = [];
     AI._agentTurnSteps = [];                              // 由 aiRunAgent 填充：手动停止时保存步骤用
+    AI._agentTurnTodos = [];                              // 由 aiRunAgent 填充：手动停止时保存任务清单用
     AI._agentStepsBox = null;
+    AI._agentTodoBox = null;
     AI._agentRunId = "";                                  // 本场运行的 id（停止后补拉变更用）
     AI.ctrl = new AbortController();
     try {
@@ -2082,11 +2171,13 @@
         });
         acc = res.text || "";
         turnChanges = (res.changes && res.changes.length) ? res.changes : (AI._agentTurnChanges || []);
+        turnTodos = (res.todos && res.todos.length) ? res.todos : (AI._agentTurnTodos || []);
         bodyB.innerHTML = aiMd(acc) || "（已完成，未产生文字说明）";
         const aMeta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
         AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: acc, ms: aMeta.ms, ts: aMeta.ts,
                        steps: res.steps.length ? res.steps : undefined,
-                       changes: turnChanges.length ? turnChanges : undefined });
+                       changes: turnChanges.length ? turnChanges : undefined,
+                       todos: turnTodos.length ? turnTodos : undefined });
         bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
         turnDone = true;                                // 回复已落定：后续收尾出错只提示，不覆盖
         aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
@@ -2112,6 +2203,14 @@
       const ensureChatSteps = () => {
         if (!chatStepsBox) { chatStepsBox = aiBuildStepsBox([]); bodyB.parentElement.appendChild(chatStepsBox); }
         return chatStepsBox;
+      };
+      let chatTodoBox = null;
+      const ensureChatTodos = () => {
+        if (!chatTodoBox && turnTodos.length) {
+          chatTodoBox = aiTodoBox(turnTodos);
+          if (chatTodoBox) bodyB.parentElement.appendChild(chatTodoBox);
+        }
+        return chatTodoBox;
       };
       while (true) {
         const { done, value } = await reader.read();
@@ -2159,6 +2258,16 @@
               }
               continue;
             }
+            if (obj.type === "todos") {
+              const list = (obj.todos || []).filter(t => t && t.content);
+              if (list.length) {
+                turnTodos.length = 0;
+                turnTodos.push(...list);
+                const box = ensureChatTodos();
+                if (box) box.update(turnTodos);
+              }
+              continue;
+            }
             if (obj.type === "subagent") {
               aiSubStepEvent(chatStepRows.get(obj.call_id), obj.event);
               continue;
@@ -2176,13 +2285,15 @@
         aiScrollToBottom();
       }
       if (chatStepsBox) { chatStepsBox._pending = 0; chatStepsBox._paint(); chatStepsBox._setCollapsed(true); }  // 本轮结束：自动折叠为一行
+      if (chatTodoBox) chatTodoBox.update(turnTodos);
       const out = acc.replace(/^\s+/, "");
       bodyB.innerHTML = aiMd(out) || (chatSteps.length ? "（已完成工具调用）" : "（空回复）");
       thinkB.parentElement.style.display = thinking.trim() ? "" : "none";
       const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
       AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, reasoning: thinking.trim() || undefined,
                      ms: meta.ms, ts: meta.ts, steps: chatSteps.length ? chatSteps : undefined,
-                     changes: turnChanges.length ? turnChanges : undefined });
+                     changes: turnChanges.length ? turnChanges : undefined,
+                     todos: turnTodos.length ? turnTodos : undefined });
       bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
       turnDone = true;                                  // 回复已落定：后续收尾出错只提示，不覆盖
       aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
@@ -2198,15 +2309,17 @@
         const ab0 = turnChanges.length ? turnChanges : (AI._agentTurnChanges || []);
         // 手动停止时 aiRunAgent 还没返回，步骤只能从它暴露的数组里取（否则刷新后步骤全丢）
         const abSteps = (turnSteps.length ? turnSteps : (AI._agentTurnSteps || [])).slice();
+        const abTodos = (turnTodos.length ? turnTodos : (AI._agentTurnTodos || [])).slice();
         const abBox = AI._agentStepsBox;                 // 步骤框收尾：停掉转圈 + 折叠成一行
         if (abBox) { abBox._pending = 0; abBox._paint(); abBox._setCollapsed(true); }
         const finalizeAbort = (abChanges) => {
-          // 有文字 / 有文件改动 / 有步骤都保留模块（步骤与回撤按钮刷新后仍可见）
-          if (out || abChanges.length || abSteps.length) {
+          // 有文字 / 有文件改动 / 有步骤 / 有任务清单都保留模块（刷新后仍可见）
+          if (out || abChanges.length || abSteps.length || abTodos.length) {
             const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
             AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, ms: meta.ms, ts: meta.ts,
                            steps: abSteps.length ? abSteps : undefined,
-                           changes: abChanges.length ? abChanges : undefined });
+                           changes: abChanges.length ? abChanges : undefined,
+                           todos: abTodos.length ? abTodos : undefined });
             bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
             turnDone = true;
             aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);

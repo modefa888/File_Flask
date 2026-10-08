@@ -117,7 +117,11 @@ File_Flask/
 - 端点：
   - `POST /api/ai/agent` `{repo, messages, perm, provider_id?, model?}` —— SSE 流式。
   - `POST /api/ai/agent/approve` `{run_id, call_id, allow, always}` —— 批准/拒绝待确认调用。
-- 内置 6 个工具：`list_dir / read_file / write_file / edit_file / search_files / run_command`。
+- 内置工具：`list_dir / read_file / write_file / edit_file / search_files / run_command`，
+  以及可开关的 `web_search / generate_image / code_intel / delegate_task / todo_write`。
+- 任务清单：`todo_write` 工具让模型把多步任务拆成待办清单（`pending / in_progress / completed`），
+  每次调用 SSE 推送 `{"type":"todos","todos":[...]}`，前端在消息下方渲染可折叠的「任务列表」进度面板；
+  清单随回复存入会话历史（`meta.todos`），刷新后仍可回放。可在 设置 → 对话 → 任务清单 关闭。
 - 权限三档（与前端一致）：
   - `readonly` —— 只读；写入与执行一律拒绝。
   - `workspace` —— 读任意；写只能落在项目根内；执行命令逐条确认。

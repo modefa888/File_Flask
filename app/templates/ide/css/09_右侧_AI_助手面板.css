@@ -521,6 +521,35 @@
   .ai-sub-step .s-res.bad { color: #e08a8a; }
   .ai-sub-final { font-size: 11px; color: #9aa4b2; padding: 3px 0; white-space: pre-wrap; word-break: break-word; }
   .ai-sub-final.bad { color: #e08a8a; }
+  /* 任务清单（todo_write）：消息下方的可折叠面板，头部显示 已完成/总数 */
+  .ai-todo { align-self: stretch; margin-top: 5px; border: 1px solid #33333a; border-radius: 6px;
+    background: #202024; overflow: hidden; min-width: 0; max-width: 100%; }
+  .ai-todo-head { display: flex; align-items: center; gap: 6px; padding: 5px 8px; cursor: pointer;
+    font-size: 11.5px; color: #c8c8c8; user-select: none; }
+  .ai-todo-head:hover { background: #26262b; }
+  .ai-todo-head .tw { font-size: 10px; color: #7d7d7d; flex: none; }
+  .ai-todo-head .ttl { flex: none; color: #b9c6d4; }
+  .ai-todo-head .cnt { margin-left: auto; flex: none; color: #7fb3e0; font-size: 11px;
+    font-variant-numeric: tabular-nums; }
+  .ai-todo-body { display: flex; flex-direction: column; gap: 4px; padding: 1px 9px 8px; }
+  .ai-todo.collapsed .ai-todo-body { display: none; }
+  .ai-todo-state { font-size: 11px; color: #767676; }
+  .ai-todo-state.done { color: #7fd88f; }
+  .ai-todo-list { display: flex; flex-direction: column; gap: 3px; max-height: 300px;
+    overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #424242 transparent; }
+  .ai-todo-list::-webkit-scrollbar { width: 8px; }
+  .ai-todo-list::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 4px;
+    border: 2px solid transparent; background-clip: content-box; }
+  .ai-todo-row { display: flex; align-items: flex-start; gap: 6px; font-size: 11.5px; line-height: 1.5;
+    color: #b9c6d4; }
+  .ai-todo-row .ic { flex: none; font-size: 12px; margin-top: 1px; color: #6e6e76; }
+  .ai-todo-row .tx { min-width: 0; word-break: break-word; overflow-wrap: anywhere; }
+  .ai-todo-row.in_progress { color: #cfe3f7; }
+  .ai-todo-row.in_progress .ic { color: #7fb3e0; animation: aiTodoSpin 1s linear infinite; }
+  .ai-todo-row.completed { color: #7d8a80; }
+  .ai-todo-row.completed .ic { color: #7fd88f; }
+  .ai-todo-row.completed .tx { text-decoration: line-through; text-decoration-color: #46564b; }
+  @keyframes aiTodoSpin { to { transform: rotate(360deg); } }
   /* 命令确认卡片 */
   .ai-ask { align-self: flex-start; max-width: 100%; background: #2c2718; border: 1px solid #5a4a26;
     border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #e2c08a; }

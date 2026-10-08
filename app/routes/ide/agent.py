@@ -10,6 +10,7 @@ SSE 事件（data: {json}\\n\\n）：
     {"type":"step","call_id","tool","args"}             开始调用工具
     {"type":"ask","call_id","tool","args","reason"}     需要用户确认（如执行命令）
     {"type":"result","call_id","tool","ok","summary","detail","ms"}   工具结果
+    {"type":"todos","todos":[{"content","status"}...]}                任务清单更新（todo_write）
     {"type":"error","error":"..."}
     {"type":"done"}
 
@@ -148,6 +149,20 @@ _TOOLS = [
             "task": {"type": "string", "description": "给子 Agent 的任务说明（目标、范围、约束、验收标准）"},
             "scope_path": {"type": "string", "description": "子 Agent 的工作范围目录（可选，默认同项目根）"}},
             "required": ["task"]}}},
+    {"type": "function", "function": {
+        "name": "todo_write",
+        "description": "创建或更新当前任务的「任务清单」（待办列表），用于把多步骤任务拆解并实时跟踪进度。"
+                      "每次调用都传入【完整】清单（而不是增量），已完成 / 进行中 / 待办都包含在内。"
+                      "当任务需要 3 步以上、涉及多个文件，或用户明确要求先列计划时使用；"
+                      "简单的一两步任务无需清单。",
+        "parameters": {"type": "object", "properties": {
+            "todos": {"type": "array", "description": "完整的任务清单（按执行顺序排列）", "items": {
+                "type": "object", "properties": {
+                    "content": {"type": "string", "description": "任务内容（一句话，动词开头，如「改造 agent.py 支持解析」）"},
+                    "status": {"type": "string", "enum": ["pending", "in_progress", "completed"],
+                               "description": "状态：pending 待办 / in_progress 进行中（同一时刻最多一项）/ completed 已完成"}},
+                "required": ["content", "status"]}}},
+            "required": ["todos"]}}},
 ]
 
 _READ_TOOLS = {"list_dir", "read_file", "search_files", "web_search", "code_intel"}
@@ -170,6 +185,9 @@ _TOOL_ALIASES = {
     "grep": "search_files", "search": "search_files", "search_files": "search_files",
     "search_files_content": "search_files", "find": "search_files", "glob": "search_files",
     "web_search": "web_search", "websearch": "web_search", "search_web": "web_search",
+    "todo_write": "todo_write", "todos": "todo_write", "todo": "todo_write",
+    "task_list": "todo_write", "tasklist": "todo_write", "write_todos": "todo_write",
+    "update_todos": "todo_write", "todowrite": "todo_write",
 }
 # 参数名差异：统一成本项目工具使用的键名
 _ARG_ALIASES = {
@@ -184,6 +202,9 @@ _ARG_ALIASES = {
     "new_string": "new_text", "new_str": "new_text", "new_content": "new_text", "new": "new_text",
     "cmd": "command", "script": "command", "shell_command": "command",
     "start_line": "start", "end_line": "end",
+    # 任务清单：模型可能用 tasks / items / list 等键名
+    "todos": "todos", "tasks": "todos", "items": "todos", "todo_list": "todos",
+    "task_list": "todos", "plan": "todos",
 }
 # 这些键只是说明性字段，不作为工具参数
 _CALL_META_KEYS = {"name", "tool", "tool_name", "type", "function", "input", "arguments",
@@ -330,6 +351,46 @@ def _record_run_changes(run_id, changes):
         for c in changes:
             if c.get("id") and c.get("id") not in seen:
                 lst.append(c)
+
+
+# 任务清单状态（与前端、模型约定的取值）
+_TODO_MAX = 30
+_TODO_DONE = {"done", "complete", "completed", "finished", "ok", "success", "true", "已完成", "完成"}
+_TODO_DOING = {"in_progress", "in-progress", "inprogress", "doing", "active", "running",
+               "working", "current", "进行中"}
+
+
+def _norm_todos(raw):
+    """把模型给出的任务清单归一化成 [{"content": str, "status": "pending|in_progress|completed"}]。
+
+    兼容多种写法：纯字符串数组、[{content/task/text, status/state}]、或包在 {"todos": [...]} 里。
+    """
+    if isinstance(raw, dict):
+        raw = raw.get("todos") or raw.get("tasks") or raw.get("items")
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for it in raw[:_TODO_MAX]:
+        if isinstance(it, str):
+            content, status = it, ""
+        elif isinstance(it, dict):
+            content = (it.get("content") or it.get("task") or it.get("text")
+                       or it.get("title") or it.get("desc") or "")
+            status = str(it.get("status") or it.get("state") or it.get("done") or "")
+        else:
+            continue
+        content = str(content).strip()
+        if not content:
+            continue
+        st = status.strip().lower()
+        if st in _TODO_DONE:
+            st = "completed"
+        elif st in _TODO_DOING:
+            st = "in_progress"
+        else:
+            st = "pending"
+        out.append({"content": content[:200], "status": st})
+    return out
 
 
 # ---------------------------------------------------------------- 基础工具
@@ -584,6 +645,21 @@ def _tool_web_search(args, root, perm):
         return False, "搜索失败", "", "联网搜索失败：%s" % e
 
 
+def _tool_todo_write(args, root, perm):
+    """Agent 工具：创建 / 更新任务清单。纯状态记录，不落盘、不碰文件，任何权限都允许。"""
+    todos = _norm_todos(args.get("todos"))
+    if not todos:
+        return False, "清单为空", "", "todo_write 需要提供非空的 todos 数组（每项含 content 与 status）"
+    done = sum(1 for t in todos if t["status"] == "completed")
+    total = len(todos)
+    cur = next((t["content"] for t in todos if t["status"] == "in_progress"), "")
+    mark = {"completed": "[x]", "in_progress": "[>]", "pending": "[ ]"}
+    body = "\n".join("%d. %s %s" % (i, mark[t["status"]], t["content"])
+                     for i, t in enumerate(todos, 1))
+    summary = "任务清单 %d/%d 已完成" % (done, total) + ("，当前：" + cur if cur else "")
+    return True, summary, body, "任务清单已更新（%d/%d 完成）：\n%s" % (done, total, body)
+
+
 _TOOL_FUNCS = {
     "list_dir": _tool_list_dir,
     "read_file": _tool_read_file,
@@ -592,6 +668,7 @@ _TOOL_FUNCS = {
     "search_files": _tool_search_files,
     "run_command": _tool_run_command,
     "web_search": _tool_web_search,
+    "todo_write": _tool_todo_write,
 }
 # generate_image / code_intel 在文件下方定义，于模块加载末期注册到 _TOOL_FUNCS
 
@@ -759,6 +836,7 @@ def _run_subagent(provider, model, root, perm, task, ctx):
                  if (ctx.get("web_tool", True) or t["function"]["name"] != "web_search")
                  and (ctx.get("image_tool", True) or t["function"]["name"] != "generate_image")
                  and (ctx.get("lsp_tool", True) or t["function"]["name"] != "code_intel")
+                 and (ctx.get("task_list", True) or t["function"]["name"] != "todo_write")
                  and t["function"]["name"] != "delegate_task"]   # 子 Agent 不再派生子 Agent
     log = []
     _round = 0
@@ -852,7 +930,7 @@ def tools_for_perm(perm, image_tool=True, lsp_tool=True):
 
     generate_image / code_intel 按开关开放；delegate_task 仅 Agent 内部使用，不在这里暴露。
     """
-    names = {"list_dir", "read_file", "search_files", "web_search"}
+    names = {"list_dir", "read_file", "search_files", "web_search", "todo_write"}
     if perm in ("workspace", "full"):
         names |= {"write_file", "edit_file"}
     if image_tool:
@@ -987,6 +1065,8 @@ def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None, 
         tool_lines.append("- code_intel(action, query, path)")
     if allow_sub:
         tool_lines.append("- delegate_task(task, scope_path)")
+    if task_list:
+        tool_lines.append('- todo_write(todos)   # todos=[{"content":"…","status":"pending|in_progress|completed"}]')
     base += (
         "\n\n工具调用格式：优先使用标准的函数调用（tool_calls）。"
         "如果你的接口不支持 function calling，可把调用写在正文里，系统会自动解析。严格使用下列工具名与参数名：\n"
@@ -996,9 +1076,12 @@ def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None, 
     )
     if task_list:
         base += (
-            "\n\n任务清单：当任务包含多个步骤（需要改动多个文件、先排查再修改等）时，"
-            "请先在回复里用简短的清单列出计划（1. 2. 3. …），每完成一步就更新清单、标注进度，"
-            "让用户随时看清任务进展；简单的一两步任务无需清单。"
+            "\n\n任务清单（todo_write）：当任务包含多个步骤（需要改动多个文件、先排查再修改等）时，"
+            "先用 todo_write 建立清单（每项一句话、动词开头，按执行顺序排列），"
+            "之后每完成一项就再次调用 todo_write 更新状态：传入【完整】清单，"
+            "把正在做的标为 in_progress（同一时刻最多一项）、做完的标为 completed、其余为 pending；"
+            "任务全部完成后把每一项都标为 completed。这样用户能在界面上实时看到任务进度。"
+            "简单的一两步任务无需清单，也不要为了完成任务而虚构清单。"
         )
     if skill:
         sids = skill if isinstance(skill, list) else [skill]
@@ -1299,6 +1382,7 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
                  if (web_tool or t["function"]["name"] != "web_search")
                  and (image_tool or t["function"]["name"] != "generate_image")
                  and (lsp_tool or t["function"]["name"] != "code_intel")
+                 and (task_list or t["function"]["name"] != "todo_write")
                  and (allow_sub or t["function"]["name"] != "delegate_task")]
     # 本次运行的上下文（供 delegate_task 子 Agent 复用同一接口 / 模型 / 权限）
     _ctx = {"provider": provider, "model": model, "auto_run": auto_run, "web_auto": web_auto,
@@ -1407,6 +1491,8 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
             ok, summary, detail, model_text = _run_tool_job(name, args, root, perm, _ctx)
             changes = undo.finish(root)              # 推断动作类型 + 生成差异，供「文件变更」模块
             _record_run_changes(run_id, changes)     # 按 run_id 累计，供停止后补拉
+            if name == "todo_write" and ok:           # 任务清单：实时推给前端渲染进度
+                yield _sse({"type": "todos", "todos": _norm_todos(args.get("todos"))})
             ms = int((time.time() - t_start) * 1000)
             done[c["id"]] = (ok, summary, detail, model_text, ms, False)
             _log.info("Agent 工具：%s %s → %s（%dms）", name, json.dumps(args, ensure_ascii=False)[:200],

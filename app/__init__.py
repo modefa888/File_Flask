@@ -34,6 +34,7 @@ def create_app(test_config=None) -> Flask:
     _install_error_handlers(app)
     _init_chat_engine()
     _init_index_engine()
+    _init_cron_engine(app)
 
     return app
 
@@ -64,10 +65,11 @@ def _register_blueprints(app: Flask) -> None:
     from .routes.ide.plugins import bp as plugins_bp
     from .routes.common.dbconn import bp as dbconn_bp
     from .routes.ide.httpreq import bp as httpreq_bp
+    from .routes.ide.cron import bp as cron_bp
     for bp in (auth_bp, pages_bp, browser_bp, zip_bp, delete_bp, archive_history_bp,
                fileops_bp, index_bp, progress_stream_bp, grep_bp, git_bp, run_bp, port_bp,
                term_bp, env_bp, proc_bp, shares_bp, ai_bp, agent_bp, chat_history_bp, pip_bp, npm_bp,
-               plugins_bp, dbconn_bp, httpreq_bp):
+               plugins_bp, dbconn_bp, httpreq_bp, cron_bp):
         app.register_blueprint(bp)
 
 
@@ -141,6 +143,22 @@ def _init_chat_engine() -> None:
         init_chat_db()
     except Exception as e:                      # 初始化失败不应阻断服务启动
         _log.warning("对话历史库初始化失败，继续启动: %s", e)
+
+
+def _init_cron_engine(app=None) -> None:
+    """启动定时任务调度器（幂等）。
+
+    debug + reloader 模式下父进程也会 create_app，父进程不启动，避免同一任务被触发两次。
+    """
+    import os as _os
+    if app is not None and getattr(app, "debug", False) and _os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        _log.info("调试重载父进程：跳过定时任务调度器")
+        return
+    try:
+        from .services.ide import cronsvc
+        cronsvc.ensure_scheduler()
+    except Exception as e:                      # 调度器失败不应阻断服务启动
+        _log.warning("定时任务调度器启动失败，继续启动: %s", e)
 
 
 def _init_index_engine() -> None:

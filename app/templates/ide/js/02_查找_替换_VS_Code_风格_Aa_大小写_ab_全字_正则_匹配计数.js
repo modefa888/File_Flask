@@ -371,6 +371,8 @@
         : aiAddFileFromTree(path, name, isDir),
     });
     if (!isDir) {
+      // 以此文件建一个定时任务：自动推断解释器命令与工作目录，弹出新建悬浮框
+      items.push({ label: "添加定时任务…", act: () => cronFromFile(path, name) });
       const isBase = !!(compareBase && compareBase.path === path);
       items.push({ divider: true });
       items.push({ label: isBase ? "已选为比较基准（点击取消）" : "选择以进行比较",
@@ -1082,8 +1084,8 @@
   document.addEventListener("contextmenu", () => closeDrop(), true);   // 在别处右键时收起菜单
 
   /* ---------- 侧边栏面板切换 ---------- */
-  const panels = { explorer: "explorerPanel", search: "searchPanel", git: "gitPanel", run: "runPanel", runner: "runnerPanel", env: "envPanel", ext: "extPanel", dbconn: "dbconnPanel", api: "apiPanel" };
-  const titles = { explorer: "资源管理器", search: "搜索", git: "源代码管理", run: "运行和调试", runner: "后台任务", env: "运行环境", ext: "扩展", dbconn: "数据库", api: "API 调试" };
+  const panels = { explorer: "explorerPanel", search: "searchPanel", git: "gitPanel", run: "runPanel", runner: "runnerPanel", env: "envPanel", ext: "extPanel", dbconn: "dbconnPanel", api: "apiPanel", cron: "cronPanel" };
+  const titles = { explorer: "资源管理器", search: "搜索", git: "源代码管理", run: "运行和调试", runner: "后台任务", env: "运行环境", ext: "扩展", dbconn: "数据库", api: "API 调试", cron: "定时任务" };
   function showPanel(name) {
     // 未知面板（例如会话恢复时插件面板尚未注册、或插件已被卸载）回退到资源管理器，
     // 否则下面的循环会把所有面板隐藏却没有目标可显示，导致侧栏空白。
@@ -1102,6 +1104,7 @@
     [$("sideNewFile"), $("sideNewFolder"), $("sideTreeToggle"), $("sideShowAll"), $("sideRefresh"), $("sideRoot")].forEach(b => { if (b) b.style.display = (name === "explorer") ? "" : "none"; });
     if ($("sidePortSearch")) $("sidePortSearch").style.display = (name === "runner") ? "block" : "none";   // CSS 默认隐藏，runner 面板显式放开
     if (name !== "runner") clearTimeout(RUNNER.timer);      // 面板不可见时停止自动刷新
+    if (name !== "cron" && typeof CRON !== "undefined") clearTimeout(CRON.timer);
   }
   document.getElementById("activitybar").addEventListener("click", (e) => {
     const a = e.target.closest(".act[data-panel]"); if (!a) return;
@@ -1116,6 +1119,7 @@
     if (p === "env") loadEnv(false);
     if (p === "dbconn" && typeof loadDbConns === "function") loadDbConns();
     if (p === "api" && typeof loadApiReqs === "function") loadApiReqs();
+    if (p === "cron" && typeof loadCron === "function") loadCron().then(cronTick);
   });
   function toggleSidebar() {
     $("sidebar").classList.toggle("collapsed");

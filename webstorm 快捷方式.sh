@@ -1,1 +1,0 @@
-/home/zhangjie/Downloads/WebStorm-2025.2.2/WebStorm-252.26199.162/bin/webstorm.sh

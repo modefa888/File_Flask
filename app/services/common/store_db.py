@@ -316,6 +316,42 @@ CREATE TABLE IF NOT EXISTS db_write_log (
     created_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_dbwrite_created ON db_write_log(created_at);
+
+-- 定时任务（参考青龙面板）：一行一个任务
+CREATE TABLE IF NOT EXISTS cron_tasks (
+    id          TEXT PRIMARY KEY,
+    name        TEXT DEFAULT '',
+    cron        TEXT DEFAULT '',
+    command     TEXT DEFAULT '',
+    cwd         TEXT DEFAULT '',
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    remark      TEXT DEFAULT '',
+    timeout     INTEGER NOT NULL DEFAULT 0,      -- 0 = 不限时
+    created_at  REAL NOT NULL DEFAULT 0,
+    updated_at  REAL NOT NULL DEFAULT 0,
+    last_at     REAL NOT NULL DEFAULT 0,
+    last_status TEXT DEFAULT '',
+    last_ms     INTEGER DEFAULT 0,
+    last_exit   INTEGER,
+    run_count   INTEGER NOT NULL DEFAULT 0,
+    ok_count    INTEGER NOT NULL DEFAULT 0,
+    fail_count  INTEGER NOT NULL DEFAULT 0
+);
+-- 定时任务的执行历史（每个任务保留最近若干条，历史日志文件随之清理）
+CREATE TABLE IF NOT EXISTS cron_runs (
+    id         TEXT PRIMARY KEY,
+    task_id    TEXT NOT NULL,
+    task_name  TEXT DEFAULT '',
+    trigger    TEXT DEFAULT 'cron',              -- cron / manual
+    status     TEXT DEFAULT 'running',           -- running / success / fail / killed / timeout
+    exit_code  INTEGER,
+    started_at REAL NOT NULL DEFAULT 0,
+    ended_at   REAL NOT NULL DEFAULT 0,
+    duration   INTEGER DEFAULT 0,
+    log_path   TEXT DEFAULT '',
+    log_size   INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_cron_runs_task ON cron_runs(task_id, started_at DESC);
 """
 
 

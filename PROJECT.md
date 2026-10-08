@@ -1,6 +1,6 @@
 # PROJECT.md — 项目结构与架构说明
 
-> 本文档基于当前代码库（`app/__init__.py` 注册蓝图、`app/routes/`、`app/services/` 实际文件）梳理生成，用于快速了解工程结构、模块职责与关键数据流。当前实际注册 **20 个蓝图**（含 `ai`、`agent`、`chat_history`、`pip`），与 `README.md` 已同步。
+> 本文档基于当前代码库（`app/__init__.py` 注册蓝图、`app/routes/`、`app/services/` 实际文件）梳理生成，用于快速了解工程结构、模块职责与关键数据流。当前实际注册 **22 个蓝图**（含 `ai`、`agent`、`chat_history`、`pip`），与 `README.md` 已同步。
 
 ---
 
@@ -45,7 +45,7 @@ File_Flask/
     ├── __init__.py       # 应用工厂 create_app()
     ├── config.py         # 集中配置（端口/账号/安全规则/缓存路径/ffmpeg…）
     ├── log.py            # JSON 日志 + 每日轮转
-    ├── routes/           # 20 个蓝图（HTTP 层）
+    ├── routes/           # 22 个蓝图（HTTP 层）
     ├── services/         # 11 个业务服务（无 HTTP 依赖）
     ├── templates/        # 5 个 Jinja 模板
     └── static/           # 前端资源 + vendor 本地化依赖
@@ -58,7 +58,7 @@ File_Flask/
 `create_app()` 按顺序执行：
 
 1. **构造 Flask 实例**：模板/静态目录从 `config` 取；写入 `SECRET_KEY / DEBUG / JSON_AS_ASCII / MAX_CONTENT_LENGTH=32MB`。
-2. **`_register_blueprints(app)`**：一次性 `import` 并注册 20 个蓝图（顺序见下文第 4 节）。
+2. **`_register_blueprints(app)`**：一次性 `import` 并注册 22 个蓝图（顺序见下文第 4 节）。
 3. **`_install_request_logging(app)`**：
    - `before_request` 记录 `g._start = monotonic()` 与 `method/path`。
    - `after_request` 输出 JSON 日志，字段包含 `method / path / status / latency_ms`。
@@ -72,9 +72,9 @@ File_Flask/
 
 ---
 
-## 4. 路由层：20 个蓝图
+## 4. 路由层：22 个蓝图
 
-> 共 **20 个 Blueprint**（见 `app/__init__.py`）；与 `README.md` 已同步。
+> 共 **22 个 Blueprint**（见 `app/__init__.py`）；与 `README.md` 已同步。
 
 `app/routes/` 下每个模块暴露一个 `bp` 蓝图，均在 `create_app()` 中注册：
 
@@ -101,6 +101,7 @@ File_Flask/
 | 19 | `ide/chat_history.py` | `chat_history` | AI 对话历史持久化：会话/消息的增删查改（SQLite） |
 | 20 | `ide/pip.py` | `pip` | IDE 内的 Python 包管理：安装 / 卸载 / 查询 |
 | 21 | `ide/proc.py` | `proc` | 进程资源管理器：系统 CPU/内存/磁盘/网络占用、进程列表、结束进程、AI 资源诊断（`POST /api/proc/diagnose`） |
+| 22 | `ide/cron.py` | `cron` | 定时任务（参考青龙面板）：cron 计划任务的增删改查、启停、立即运行、停止、执行记录与日志 |
 
 ### 4.1 AI 助手（`ide/ai.py`）
 
@@ -139,7 +140,27 @@ File_Flask/
 - 存储：`data/.file_manager_ai_chat.db`（SQLite，`conversations` + `messages` 双表）。
 - 消息中的图片以 `dataURL` 形式完整保存（`images` 字段为 JSON 数组），保证多端回放一致。
 
-### 4.4 pip 包管理（`ide/pip.py`）
+### 4.4 定时任务（`ide/cron.py` + `services/ide/cron*.py`）
+
+- 端点：`/api/cron/tasks`（列表，带下次运行时间与运行中状态）、`/api/cron/save`（新建/更新）、
+  `/api/cron/delete`、`/api/cron/toggle`（启停）、`/api/cron/run`（立即运行）、`/api/cron/stop`、
+  `/api/cron/runs`（执行记录）、`/api/cron/log`（日志增量）、`/api/cron/clear-runs`、`/api/cron/validate`、
+  `/api/cron/suggest`（按文件推断命令/名称/工作目录，供「从文件新建」预填）。
+- 入口：活动栏「定时任务」图标；文件树右键「添加定时任务…」会按文件类型（复用 `run._RUNNERS` /
+  `_project_runtime`，例如 .py 自动用项目 `.venv/bin/python`）预填命令与工作目录后弹出新建悬浮框；
+  任务名称默认取当前项目文件夹名（`ROOT` 目录名）。
+- 存储：`store.db` 的 `cron_tasks` + `cron_runs` 两张表（`services/ide/crondb.py`）。
+- 表达式：标准 5 段式（分 时 日 月 周），支持 `*`、区间、列表、步长与 `@daily` 等宏；
+  日 / 周同时限定时按标准 cron 取「或」（`services/ide/cronutil.py`）。
+- 调度执行：`services/ide/cronsvc.py` 起一个守护线程，每 5s 扫一次，命中且该分钟未触发过就执行；
+  同一任务不并发；执行前统一走 `safety.check_command` 拦截危险命令；
+  日志落盘 `data/cron_logs/<task_id>/<run_id>.log`，前端按 offset 轮询增量读取；
+  每个任务保留最近 50 条记录，超出的连同日志一起清理；支持超时自动终止与手动停止。
+- 前端：活动栏「定时任务」图标 + 侧栏面板（`js/36_定时任务…js`、`css/36_定时任务.css`），
+  含任务卡片（启停开关 / 立即运行 / 执行记录 / 编辑 / 删除）、浮层任务编辑器（含 cron 预设与实时校验）、
+  执行记录 + 日志查看浮层。
+
+### 4.5 pip 包管理（`ide/pip.py`）
 
 - 供 IDE 侧边栏调用，支持安装 / 卸载 / 查询 Python 包，可指定虚拟环境。
 
@@ -162,6 +183,9 @@ File_Flask/
 | `services/ide/procdiag.py` | AI 资源诊断专用逻辑：采集诊断快照、筛可安全结束的候选进程、组织提问、清洗模型结论（服务端是唯一真源） |
 | `services/ide/chatdb.py` | AI 对话历史 SQLite 存储层（`conversations` + `messages` 双表，按 `user_id` 隔离） |
 | `services/ide/agent/` | Agent 智能体的工具实现与权限门控 |
+| `services/ide/cronutil.py` | cron 表达式解析 / 匹配 / 推算下次运行时间 |
+| `services/ide/crondb.py` | 定时任务与执行历史的 SQLite 存储层 |
+| `services/ide/cronsvc.py` | 定时任务调度线程 + 执行器（日志落盘 / 超时 / 停止 / 清理） |
 | `archive_history.py` | 压缩历史持久化 |
 
 ---
@@ -277,5 +301,6 @@ Client ◀─响应─
 | 前端界面 | `app/templates/index.html`（桌面）/ `mobile.html`（手机）/ `ide.html`（IDE） |
 | AI 对话历史结构 | `app/services/ide/chatdb.py` + `app/routes/ide/chat_history.py` |
 | pip 安装 / 环境探测 | `app/routes/ide/pip.py` + `services/ide/envprobe.py`、`envinstall.py` |
+| 定时任务（cron） | `app/routes/ide/cron.py` + `services/ide/cronutil.py`、`crondb.py`、`cronsvc.py`；前端 `js/36_定时任务…js` + `css/36_定时任务.css` |
 | 打包脚本 | `FileManager.spec` |
 | 启动参数 | `run.py` 的 `argparse` |

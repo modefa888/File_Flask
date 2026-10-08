@@ -132,6 +132,8 @@
       if (panel === "search" && typeof window.sessionRestoreSearch === "function") window.sessionRestoreSearch();
       // 数据库连接面板：连接列表是懒加载的（点侧栏图标才拉取），会话恢复时要主动补一次，否则刷新后左栏空白
       if (panel === "dbconn" && typeof loadDbConns === "function") loadDbConns();
+      // 定时任务面板：同样懒加载，恢复会话时补一次并启动自动刷新
+      if (panel === "cron" && typeof loadCron === "function") loadCron().then(cronTick);
       const raw = localStorage.getItem("ide.session.tabs");
       const list = raw ? JSON.parse(raw) : [];
       const activePath = localStorage.getItem("ide.session.activeTab") || "";

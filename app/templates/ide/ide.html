@@ -114,6 +114,7 @@
 <style>
 {% include 'ide/css/34_命令安全.css' %}
 {% include 'ide/css/35_对话设置与内联对话.css' %}
+{% include 'ide/css/36_定时任务.css' %}
 </style>
 {# 29_浅色主题 必须最后一个 <style> 加载：它的浅色覆盖与原始规则同权重，靠「后加载者胜」生效 #}
 <style>
@@ -161,6 +162,8 @@ try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'li
 {# 命令安全：须放在 16_（关闭大 IIFE）之前，才能复用闭包内的 esc / escAttr / toast / $ #}
 {% include 'ide/js/33_命令安全_设置页分区_按分组开关命令校验与自定义正则.js' %}
 {% include 'ide/js/34_对话设置_发送快捷键_自动运行_智能标题_内联对话与终端.js' %}
+{# 定时任务（参考青龙面板）：须放在 16_（关闭大 IIFE）之前，才能复用闭包内的 $ / esc / toast / uiConfirm #}
+{% include 'ide/js/36_定时任务_参考青龙面板_cron_执行记录_日志.js' %}
 {# 插件系统：必须放在 16_ 之前（同属 00_preamble 的大 IIFE 闭包），才能复用闭包内的 openFile/toast/showPanel/panels 等 #}
 {% include 'ide/js/20_插件系统_宿主API_沙箱.js' %}
 {# 自动刷新必须在 16_ 之前加载：依赖 IIFE 闭包内的 refreshTree / loadGitStatus / explorerPanel 等 #}

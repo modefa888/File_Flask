@@ -1304,3 +1304,38 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .dbc-dz-ai .dbc-dz-aix:hover { background: #e7e0f7; color: #241a3f; }
 :where(html.theme-light) .dbc-dz-ai .dbc-dz-aimsg { color: #5d5380; }
 :where(html.theme-light) .dbc-dz-ai .dbc-dz-aimsg.err { color: #c0392b; }
+
+/* ---------- 定时任务（36） ---------- */
+:where(html.theme-light) .cron-item { background: #ffffff; border-color: #dcdcdc; }
+:where(html.theme-light) .cron-item.off { border-left-color: #c0c0c0; }
+:where(html.theme-light) .cron-item .ci-name { color: #1f2328; }
+:where(html.theme-light) .cron-item .ci-cmd { color: #33404d; }
+:where(html.theme-light) .cron-item .ci-meta, :where(html.theme-light) .cron-item .ci-cron { color: #6b6b6b; }
+:where(html.theme-light) .cron-item .ci-cron code { background: #f4f4f4; border-color: #e0e0e0; color: #8a5a00; }
+:where(html.theme-light) .cron-item .ci-next { color: #1a7f37; }
+:where(html.theme-light) .cron-item .ci-st { color: #6b6b6b; border-color: #dcdcdc; }
+:where(html.theme-light) .cron-item .ci-st.ok { color: #1a7f37; border-color: #9dd3a8; }
+:where(html.theme-light) .cron-item .ci-st.bad { color: #c0392b; border-color: #e8b0b0; }
+:where(html.theme-light) .cron-item .ci-st.warn { color: #8a5a00; border-color: #e0cfa0; }
+:where(html.theme-light) .cron-item .ci-st.run { color: #0b5c9a; border-color: #a8c8e8; }
+:where(html.theme-light) .cron-item .ci-btn { background: #e8e8e8; }
+:where(html.theme-light) .cron-item .ci-btn:hover { background: #dcdcdc; }
+:where(html.theme-light) .cron-dialog { background: #ffffff; border-color: #d9d9d9; color: #333333; }
+:where(html.theme-light) .cron-dialog .cd-head { background: #f5f5f5; border-bottom-color: #e5e5e5; color: #1f2328; }
+:where(html.theme-light) .cron-dialog .cd-row > label { color: #6b6b6b; }
+:where(html.theme-light) .cron-dialog input, :where(html.theme-light) .cron-dialog textarea {
+  background: #ffffff; border-color: #d0d0d0; color: #1f2328;
+}
+:where(html.theme-light) .cron-dialog .cd-presets button { background: #f2f2f2; border-color: #dcdcdc; color: #4a5560; }
+:where(html.theme-light) .cron-dialog .cd-presets button:hover { border-color: #a0a0a0; color: #1f2328; }
+:where(html.theme-light) .cron-dialog .cd-foot { background: #f5f5f5; border-top-color: #e5e5e5; }
+:where(html.theme-light) .cron-dialog .cd-btn { background: #efefef; border-color: #d5d5d5; color: #333333; }
+:where(html.theme-light) .cron-dialog .cd-btn:hover { border-color: #a8a8a8; color: #000000; }
+:where(html.theme-light) .cron-dialog .cr-list { border-right-color: #e5e5e5; }
+:where(html.theme-light) .cron-dialog .cr-row:hover { background: #f0f0f0; }
+:where(html.theme-light) .cron-dialog .cr-row.on { background: #e3f0fb; }
+:where(html.theme-light) .cron-dialog .cr-row-t { color: #333333; }
+:where(html.theme-light) .cron-dialog .cr-log-head { color: #33404d; border-bottom-color: #e5e5e5; }
+:where(html.theme-light) .cron-dialog .cr-mini { background: #f2f2f2; border-color: #d5d5d5; color: #4a5560; }
+:where(html.theme-light) .cron-dialog .cr-log { background: #f7f7f7; color: #26323c; }
+:where(html.theme-light) .cron-dialog .ph { color: #8a8a8a; }

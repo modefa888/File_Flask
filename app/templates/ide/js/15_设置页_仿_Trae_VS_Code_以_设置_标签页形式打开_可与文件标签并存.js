@@ -166,44 +166,54 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
             '<div class="sysai-mods-desc">下面这些功能共用同一套 AI 接口配置；未单独指定时跟随 AI 助手当前选中的接口与模型。右侧开关可单独停用某个功能（停用后它不会再调用 AI）。</div>' +
             '<div class="sysai-mod"><i class="bi bi-chat-left-quote"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">AI 助手对话<span class="sysai-stat" data-stat="chat"></span></div>' +
-              '<div class="sysai-mod-desc">右侧 AI 面板的提问、代码解释与整段改写</div></div><code>POST /api/ai/chat</code>' +
-              '<label class="set-switch sysai-sw" data-mod="chat" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+              '<div class="sysai-mod-desc">右侧 AI 面板的提问、代码解释与整段改写</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/ai/chat</code>' +
+              '<label class="set-switch sysai-sw" data-mod="chat" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
             '<div class="sysai-mod"><i class="bi bi-cpu"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">Agent 任务<span class="sysai-stat" data-stat="agent"></span></div>' +
-              '<div class="sysai-mod-desc">让 AI 自动读写多个文件、连续执行任务</div></div><code>POST /api/ai/agent</code>' +
-              '<label class="set-switch sysai-sw" data-mod="agent" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+              '<div class="sysai-mod-desc">让 AI 自动读写多个文件、连续执行任务</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/ai/agent</code>' +
+              '<label class="set-switch sysai-sw" data-mod="agent" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
             '<div class="sysai-mod"><i class="bi bi-git"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">生成提交信息<span class="sysai-stat" data-stat="commit"></span></div>' +
-              '<div class="sysai-mod-desc">源代码管理里按本次改动生成 Git 提交说明</div></div><code>POST /api/ai/commit-message</code>' +
-              '<label class="set-switch sysai-sw" data-mod="commit" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+              '<div class="sysai-mod-desc">源代码管理里按本次改动生成 Git 提交说明</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/ai/commit-message</code>' +
+              '<label class="set-switch sysai-sw" data-mod="commit" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
             '<div class="sysai-mod"><i class="bi bi-database"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">一句话生成查询<span class="sysai-stat" data-stat="nl2sql"></span></div>' +
-              '<div class="sysai-mod-desc">数据库查看器 / 连接工具里把自然语言翻译成 SQL、Redis 命令或 Mongo 查询</div></div><code>POST /api/db/nl2sql</code>' +
-              '<label class="set-switch sysai-sw" data-mod="nl2sql" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+              '<div class="sysai-mod-desc">数据库查看器 / 连接工具里把自然语言翻译成 SQL、Redis 命令或 Mongo 查询</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/db/nl2sql</code>' +
+              '<label class="set-switch sysai-sw" data-mod="nl2sql" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
             '<div class="sysai-mod"><i class="bi bi-diagram-3"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">AI 推荐表设计<span class="sysai-stat" data-stat="tabledesign"></span></div>' +
-              '<div class="sysai-mod-desc">表结构设计弹窗里按一句话描述推荐表名与列定义</div></div><code>POST /api/db/table/ai-design</code>' +
-              '<label class="set-switch sysai-sw" data-mod="tabledesign" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+              '<div class="sysai-mod-desc">表结构设计弹窗里按一句话描述推荐表名与列定义</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/db/table/ai-design</code>' +
+              '<label class="set-switch sysai-sw" data-mod="tabledesign" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
             '<div class="sysai-mod"><i class="bi bi-diagram-3"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">新建项目 AI<span class="sysai-stat" data-stat="scaffold"></span></div>' +
-              '<div class="sysai-mod-desc">新建项目时按一句话描述生成项目初始框架</div></div><code>POST /api/projects/create</code>' +
-              '<label class="set-switch sysai-sw" data-mod="scaffold" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+              '<div class="sysai-mod-desc">新建项目时按一句话描述生成项目初始框架</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/projects/create</code>' +
+              '<label class="set-switch sysai-sw" data-mod="scaffold" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
             '<div class="sysai-mod"><i class="bi bi-collection"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">对话记忆压缩<span class="sysai-stat" data-stat="summary"></span></div>' +
-              '<div class="sysai-mod-desc">长对话自动压缩成记忆摘要，节省上下文</div></div><code>POST /api/ai/summarize</code>' +
-              '<label class="set-switch sysai-sw" data-mod="summary" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+              '<div class="sysai-mod-desc">长对话自动压缩成记忆摘要，节省上下文</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/ai/summarize</code>' +
+              '<label class="set-switch sysai-sw" data-mod="summary" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
             '<div class="sysai-mod"><i class="bi bi-puzzle"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">插件宿主 AI<span class="sysai-stat" data-stat="plugin"></span></div>' +
-              '<div class="sysai-mod-desc">插件通过 host.ai 调用当前接口与模型</div></div><code>POST /api/ai/plugin</code>' +
-              '<label class="set-switch sysai-sw" data-mod="plugin" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+              '<div class="sysai-mod-desc">插件通过 host.ai 调用当前接口与模型</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/ai/plugin</code>' +
+              '<label class="set-switch sysai-sw" data-mod="plugin" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
             '<div class="sysai-mod"><i class="bi bi-cloud-download"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">拉取模型列表<span class="sysai-stat" data-stat="models"></span></div>' +
-              '<div class="sysai-mod-desc">设置里「拉取模型」按钮探测接口有哪些模型可用</div></div><code>POST /api/ai/models</code>' +
-              '<label class="set-switch sysai-sw" data-mod="models" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+              '<div class="sysai-mod-desc">设置里「拉取模型」按钮探测接口有哪些模型可用</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/ai/models</code>' +
+              '<label class="set-switch sysai-sw" data-mod="models" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
             '<div class="sysai-mod"><i class="bi bi-activity"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">资源占用诊断<span class="sysai-stat" data-stat="proc"></span></div>' +
-              '<div class="sysai-mod-desc">进程资源管理器里的「AI 诊断」：把本机 CPU / 内存 / 磁盘 / 网络与高占用进程交给 AI 分析</div></div><code>POST /api/proc/diagnose</code>' +
-              '<label class="set-switch sysai-sw" data-mod="proc" title="启用 / 停用"><input type="checkbox"><span></span></label></div>' +
+              '<div class="sysai-mod-desc">进程资源管理器里的「AI 诊断」：把本机 CPU / 内存 / 磁盘 / 网络与高占用进程交给 AI 分析</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/proc/diagnose</code>' +
+              '<label class="set-switch sysai-sw" data-mod="proc" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
           '</div>' +
         '</div>' +
 

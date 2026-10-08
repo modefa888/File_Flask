@@ -1043,7 +1043,7 @@
         sel = document.createElement("select");
         sel.className = "sysai-model";
         sel.title = "该功能单独使用的接口 / 模型（默认 = 用上面的设置）";
-        row.insertBefore(sel, lb);            // 放在开关左边
+        lb.parentNode.insertBefore(sel, lb);  // 放在开关左边（开关已包在 .sysai-mod-ctl 内，须插到它的父容器里）
       }
       sel.innerHTML = "";
       const dflt = document.createElement("option");

@@ -1000,7 +1000,7 @@
     };
   }
 
-  async function notifySave() {
+  async function notifySave(silent) {
     const body = notifyReadForm();
     // SMTP 授权码 / Telegram Bot Token 传输加密（见 js/24_敏感字段传输加密.js）
     if (window.TP) {
@@ -1015,8 +1015,9 @@
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
       _notifyCache = d.cfg;
-      notifyToast("通知设置已保存", "ok");
       cronNotifySave(true);                 // 定时任务通知的配置一并保存
+      if (silent) return d;                 // 自动保存：不打扰，也不清空正在编辑的框
+      notifyToast("通知设置已保存", "ok");
       // 密码框回到默认 placeholder
       const pwd = document.getElementById("notifyPassword");
       if (pwd) { pwd.value = ""; pwd.placeholder = "授权码"; }
@@ -1031,6 +1032,16 @@
     } catch (e) {
       notifyToast("保存失败：" + e.message, "err");
     }
+  }
+
+  // 「通知」分区（AI 全局设置）：离开字段 / 切换开关后自动保存（防抖）
+  let _notifyAutoSaveTimer = null;
+  function notifyAutoSave() {
+    clearTimeout(_notifyAutoSaveTimer);
+    _notifyAutoSaveTimer = setTimeout(async () => {
+      const d = await notifySave(true);
+      if (d) notifyToast("通知：设置已自动保存", "ok");
+    }, 500);
   }
 
   const _notifyTestBtnId = { desktop: "notifyTestLocal", email: "notifyTestEmail", telegram: "notifyTestTelegram", all: "notifyTestAll" };
@@ -1325,7 +1336,8 @@
         notifyToggleOptVisibility();
         if (t.id === "notifyTitle" || t.id === "notifyBody") notifyPreviewRefresh();
         if (t.id === "notifyCronTitle" || t.id === "notifyCronBody") cronNotifyPreviewRefresh();
-        if (t.id.startsWith("notifyCron")) cronNotifyAutoSave();   // 定时任务通知：改动即自动保存
+        // 文本输入不逐键保存：等离开输入框（focusout）或切换开关（change）时再自动保存，
+        // 避免把打到一半的内容存进去
       }, true);
       document.addEventListener("change", e => {
         const t = e.target;
@@ -1333,7 +1345,16 @@
         notifyToggleOptVisibility();
         // 开启「浏览器通知」时，向浏览器申请通知权限
         if (t.id === "notifyDesktop" && t.checked) notifyRequestBrowserPermission();
-        if (t.id && t.id.startsWith("notifyCron")) cronNotifyAutoSave();
+        // 开关 / 勾选 / 下拉：切换即自动保存（两个分区都适用）
+        if (t.id.startsWith("notifyCron")) cronNotifyAutoSave();
+        else notifyAutoSave();
+      }, true);
+      // 离开输入框（失焦）即自动保存：通知与定时任务通知两个分区都适用
+      document.addEventListener("focusout", e => {
+        const t = e.target;
+        if (!t || !t.id || !t.id.startsWith("notify") || !t.isConnected) return;
+        if (t.id.startsWith("notifyCron")) cronNotifyAutoSave();
+        else notifyAutoSave();
       }, true);
       // 记住最后编辑的模板字段，点变量胶囊时插入到那里
       document.addEventListener("focusin", e => {

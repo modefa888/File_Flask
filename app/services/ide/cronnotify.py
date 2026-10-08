@@ -32,7 +32,8 @@ _log = get_logger()
 _HTTP_TIMEOUT = 10                                  # 钉钉 / PushPlus 请求超时（秒）
 
 # 需要脱敏的配置路径（读取时替换为掩码，保存时收到掩码则跳过更新）
-_SECRET_PATHS = (("dingtalk", "secret"), ("dingtalk", "webhook"), ("pushplus", "token"))
+_SECRET_PATHS = (("dingtalk", "secret"), ("dingtalk", "webhook"), ("pushplus", "token"),
+                 ("email", "password"), ("telegram", "bot_token"))
 _MASK = "******"
 
 DEFAULT_CFG = {
@@ -48,6 +49,27 @@ DEFAULT_CFG = {
         "dingtalk": False,
         "telegram": False,
         "pushplus": False,
+    },
+    # desktop / email / telegram 的「判断字段」use_global：
+    # True = 复用「设置 → 通知」的全局通道配置；False = 用本模块独立填写的配置
+    "desktop": {
+        "use_global": True,
+        "app_name": "",                             # 独立配置：通知中心显示的应用名（留空 = File_Flask）
+        "sound": True,                              # 独立配置：是否播放提示音
+    },
+    "email": {
+        "use_global": True,
+        "host": "", "port": 465, "security": "ssl",  # 独立配置：SMTP 服务器 / 端口 / 加密方式
+        "username": "", "password": "",              # 独立配置：账号与授权码
+        "from_addr": "",                             # 独立配置：发件人地址（留空 = 用户名）
+        "to": "",                                    # 独立配置：收件人（多个逗号分隔）
+    },
+    "telegram": {
+        "use_global": True,
+        "bot_token": "",                             # 独立配置：Bot Token
+        "chat_id": "",                               # 独立配置：会话 ID
+        "api_base": "https://api.telegram.org",      # 独立配置：API 地址（可填自建 / 反代）
+        "proxy": "",                                 # 独立配置：代理（留空 = 直连）
     },
     "dingtalk": {
         "webhook": "",                              # 机器人 Webhook 地址（含 access_token）
@@ -76,6 +98,9 @@ def get_cfg():
     if isinstance(saved, dict):
         _merge_dict(cfg, saved, "events")
         _merge_dict(cfg, saved, "channels")
+        _merge_dict(cfg, saved, "desktop")
+        _merge_dict(cfg, saved, "email")
+        _merge_dict(cfg, saved, "telegram")
         _merge_dict(cfg, saved, "dingtalk")
         _merge_dict(cfg, saved, "pushplus")
         if "enabled" in saved:
@@ -95,10 +120,19 @@ def save_cfg(patch):
             for k, v in patch[key].items():
                 if k in (cfg.get(key) or {}):
                     cfg[key][k] = bool(v)
-    for key in ("dingtalk", "pushplus"):
+    for key in ("desktop", "email", "telegram", "dingtalk", "pushplus"):
         if isinstance(patch.get(key), dict):
             for k, v in patch[key].items():
-                if k in (cfg.get(key) or {}) and v != _MASK:
+                if k not in (cfg.get(key) or {}):
+                    continue
+                if k == "use_global":
+                    cfg[key][k] = bool(v)           # 判断字段：复用全局 / 独立配置
+                elif k == "port":
+                    try:
+                        cfg[key][k] = max(1, int(v or 465))
+                    except (TypeError, ValueError):
+                        cfg[key][k] = 465
+                elif v != _MASK:                    # 掩码 = 未修改，跳过不覆盖
                     cfg[key][k] = str(v or "").strip()
     crondb.set_setting("notify", cfg)
     return sanitize_cfg(get_cfg())
@@ -175,16 +209,26 @@ def _send_pushplus(cfg, title, body):
 
 # ---------------------------------------------------------------- 统一入口
 def _send_one(cfg, channel, title, body):
-    """向单个渠道发一条；返回 {ok, detail}。"""
+    """向单个渠道发一条；返回 {ok, detail}。
+
+    desktop / email / telegram 按各自的 use_global 判断字段决定：
+    True 复用「设置 → 通知」的全局配置，False 用本模块独立配置。
+    """
     try:
         if channel == "desktop":
-            r = notifications.notify_desktop(title, body)
+            d = cfg.get("desktop") or {}
+            r = (notifications.notify_desktop(title, body) if d.get("use_global", True)
+                 else notifications.notify_desktop(title, body, desk_cfg=d))
             return bool(getattr(r, "ok", False)), str(getattr(r, "detail", "") or "已发送")
         if channel == "email":
-            r = notifications.notify_smtp(title, body)
+            e_ = cfg.get("email") or {}
+            r = (notifications.notify_smtp(title, body) if e_.get("use_global", True)
+                 else notifications.notify_smtp(title, body, smtp_cfg=e_))
             return bool(getattr(r, "ok", False)), str(getattr(r, "detail", "") or "已发送")
         if channel == "telegram":
-            r = notifications.notify_telegram(title, body)
+            t = cfg.get("telegram") or {}
+            r = (notifications.notify_telegram(title, body) if t.get("use_global", True)
+                 else notifications.notify_telegram(title, body, tg_cfg=t))
             return bool(getattr(r, "ok", False)), str(getattr(r, "detail", "") or "已发送")
         if channel == "dingtalk":
             return _send_dingtalk(cfg, title, body)

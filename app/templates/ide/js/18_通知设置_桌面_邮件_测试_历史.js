@@ -182,7 +182,7 @@
     return '<div class="set-sec" id="sec-cron-notify" data-kw="定时任务 通知 cron 钉钉 pushplus telegram 邮件">' +
       '<h2 data-kw="定时任务 通知 cron 钉钉 pushplus telegram 邮件 桌面"><i class="bi bi-alarm"></i> 定时任务通知</h2>' +
       '<div class="set-desc" data-kw="定时任务 通知 cron 钉钉 pushplus telegram 邮件 桌面">定时任务<b>失败 / 超时 / 安排重试</b>时向本机与外部渠道推送。' +
-      '桌面 / 邮件 / Telegram 复用「通知」分区填好的全局通道配置，无需重复填写；钉钉 / PushPlus 在本分区独立配置。</div>' +
+      '桌面 / 邮件 / Telegram 可选择「复用全局配置」（「通知」分区里填的）或「独立配置」（在本分区单独填写，与 AI 通知互不影响）。</div>' +
 
       '<div class="notify-card">' +
         '<div class="notify-card-title"><i class="bi bi-power"></i> 总开关与触发事件</div>' +
@@ -206,15 +206,135 @@
         '<div class="notify-card-title"><i class="bi bi-broadcast"></i> 推送渠道</div>' +
         '<div class="notify-grid-2">' +
           cronChCard("bi-bell", "", "定时任务 桌面 系统 通知 desktop", "桌面通知",
-            "复用「通知」分区的本机系统通知。", "notifyCronChDesktop") +
+            "本机系统通知（来源可选复用全局或独立配置）。", "notifyCronChDesktop") +
           cronChCard("bi-envelope", "email", "定时任务 邮件 smtp email", "邮件",
-            "复用「通知」分区的「SMTP 设置」。", "notifyCronChEmail") +
+            "SMTP 发送（来源可选复用全局或独立配置）。", "notifyCronChEmail") +
           cronChCard("bi-chat-dots", "", "定时任务 钉钉 dingtalk 机器人 webhook", "钉钉机器人",
             "群机器人 Webhook 推送，支持加签。", "notifyCronChDingtalk") +
           cronChCard("bi-telegram", "tg", "定时任务 telegram tg 电报", "Telegram",
-            "复用「通知」分区的「Telegram Bot 设置」。", "notifyCronChTelegram") +
+            "Bot 推送（来源可选复用全局或独立配置）。", "notifyCronChTelegram") +
           cronChCard("bi-wechat", "", "定时任务 pushplus 微信 推送", "PushPlus",
             "推送到微信（www.pushplus.plus）。", "notifyCronChPushplus") +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card notifyCronDeskOpts">' +
+        '<div class="notify-card-title"><i class="bi bi-bell"></i> 桌面通知设置</div>' +
+        '<div class="notify-row inline set-row" data-kw="配置来源 复用 全局 独立 desktop">' +
+          '<div class="notify-label-wrap"><div class="notify-label">配置来源</div>' +
+          '<div class="notify-desc">复用全局 = 用「通知」分区的桌面通知设置；独立 = 下面单独填。</div></div>' +
+          '<div class="notify-cron-evs">' +
+            '<label class="notify-check"><input type="radio" name="cronDeskSrc" id="notifyCronDeskSrcG" value="global"> 复用全局</label>' +
+            '<label class="notify-check"><input type="radio" name="cronDeskSrc" id="notifyCronDeskSrcO" value="own"> 独立配置</label>' +
+          '</div>' +
+        '</div>' +
+        '<div class="notifyCronOwnOpts" id="notifyCronDeskOwnOpts">' +
+          '<div class="notify-grid-2">' +
+            '<div class="notify-row stack set-row" data-kw="应用名称 app name">' +
+              '<div class="notify-label-wrap"><div class="notify-label">应用名称（可选）</div>' +
+              '<div class="notify-desc">通知中心里显示的应用名，留空 = File_Flask。</div></div>' +
+              '<input class="notify-input" id="notifyCronDeskApp" placeholder="File_Flask" autocomplete="off" spellcheck="false">' +
+            '</div>' +
+            '<div class="notify-row inline set-row" data-kw="提示音 声音 sound">' +
+              '<div class="notify-label-wrap"><div class="notify-label">播放提示音</div></div>' +
+              '<label class="set-switch"><input type="checkbox" id="notifyCronDeskSound"><span></span></label>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card notifyCronEmailOpts">' +
+        '<div class="notify-card-title"><i class="bi bi-envelope-at"></i> 邮件（SMTP）设置</div>' +
+        '<div class="notify-row inline set-row" data-kw="配置来源 复用 全局 独立 email smtp">' +
+          '<div class="notify-label-wrap"><div class="notify-label">配置来源</div>' +
+          '<div class="notify-desc">复用全局 = 用「通知」分区的 SMTP 设置；独立 = 下面单独填。</div></div>' +
+          '<div class="notify-cron-evs">' +
+            '<label class="notify-check"><input type="radio" name="cronEmailSrc" id="notifyCronEmailSrcG" value="global"> 复用全局</label>' +
+            '<label class="notify-check"><input type="radio" name="cronEmailSrc" id="notifyCronEmailSrcO" value="own"> 独立配置</label>' +
+          '</div>' +
+        '</div>' +
+        '<div class="notifyCronOwnOpts" id="notifyCronEmailOwnOpts">' +
+          '<div class="notify-row stack set-row" data-kw="收件人 to">' +
+            '<div class="notify-label-wrap"><div class="notify-label">收件人地址</div>' +
+            '<div class="notify-desc">接收通知的邮箱，多个用英文逗号分隔。</div></div>' +
+            '<input class="notify-input" id="notifyCronEmailTo" placeholder="me@example.com" autocomplete="off" spellcheck="false">' +
+          '</div>' +
+          '<div class="notify-grid-2">' +
+            '<div class="notify-row stack set-row" data-kw="smtp 服务器 host">' +
+              '<div class="notify-label-wrap"><div class="notify-label">SMTP 服务器</div></div>' +
+              '<input class="notify-input" id="notifyCronEmailHost" placeholder="smtp.qq.com" autocomplete="off" spellcheck="false">' +
+            '</div>' +
+            '<div class="notify-row stack set-row" data-kw="端口 port">' +
+              '<div class="notify-label-wrap"><div class="notify-label">端口</div></div>' +
+              '<input class="notify-input" id="notifyCronEmailPort" type="number" min="1" placeholder="465">' +
+            '</div>' +
+          '</div>' +
+          '<div class="notify-grid-2">' +
+            '<div class="notify-row stack set-row" data-kw="加密 ssl tls">' +
+              '<div class="notify-label-wrap"><div class="notify-label">加密方式</div></div>' +
+              '<select class="notify-input" id="notifyCronEmailSec">' +
+                '<option value="ssl">SSL（465）</option>' +
+                '<option value="tls">STARTTLS（587）</option>' +
+                '<option value="none">不加密</option>' +
+              '</select>' +
+            '</div>' +
+            '<div class="notify-row stack set-row" data-kw="用户名 账号 username">' +
+              '<div class="notify-label-wrap"><div class="notify-label">用户名</div></div>' +
+              '<input class="notify-input" id="notifyCronEmailUser" placeholder="邮箱账号" autocomplete="off" spellcheck="false">' +
+            '</div>' +
+          '</div>' +
+          '<div class="notify-grid-2">' +
+            '<div class="notify-row stack set-row" data-kw="授权码 密码 password">' +
+              '<div class="notify-label-wrap"><div class="notify-label">授权码 / 密码</div>' +
+              '<div class="notify-desc">保存后仅显示 ****。</div></div>' +
+              '<form class="notify-pwd-form" autocomplete="off" onsubmit="return false">' +
+                '<input class="notify-input" id="notifyCronEmailPwd" type="password" placeholder="授权码" autocomplete="off">' +
+              '</form>' +
+            '</div>' +
+            '<div class="notify-row stack set-row" data-kw="发件人 from 地址">' +
+              '<div class="notify-label-wrap"><div class="notify-label">发件人地址（可选）</div>' +
+              '<div class="notify-desc">留空 = 用用户名。</div></div>' +
+              '<input class="notify-input" id="notifyCronEmailFrom" placeholder="留空 = 用户名" autocomplete="off" spellcheck="false">' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card notifyCronTgOpts">' +
+        '<div class="notify-card-title"><i class="bi bi-telegram"></i> Telegram 设置</div>' +
+        '<div class="notify-row inline set-row" data-kw="配置来源 复用 全局 独立 telegram">' +
+          '<div class="notify-label-wrap"><div class="notify-label">配置来源</div>' +
+          '<div class="notify-desc">复用全局 = 用「通知」分区的 Bot 设置；独立 = 下面单独填。</div></div>' +
+          '<div class="notify-cron-evs">' +
+            '<label class="notify-check"><input type="radio" name="cronTgSrc" id="notifyCronTgSrcG" value="global"> 复用全局</label>' +
+            '<label class="notify-check"><input type="radio" name="cronTgSrc" id="notifyCronTgSrcO" value="own"> 独立配置</label>' +
+          '</div>' +
+        '</div>' +
+        '<div class="notifyCronOwnOpts" id="notifyCronTgOwnOpts">' +
+          '<div class="notify-row stack set-row" data-kw="bot token 令牌">' +
+            '<div class="notify-label-wrap"><div class="notify-label">Bot Token</div>' +
+            '<div class="notify-desc">@BotFather 创建 Bot 后获得；保存后仅显示 ****。</div></div>' +
+            '<form class="notify-pwd-form" autocomplete="off" onsubmit="return false">' +
+              '<input class="notify-input" id="notifyCronTgToken" type="password" placeholder="123456:ABC-DEF…" autocomplete="off">' +
+            '</form>' +
+          '</div>' +
+          '<div class="notify-grid-2">' +
+            '<div class="notify-row stack set-row" data-kw="chat id 会话 群组">' +
+              '<div class="notify-label-wrap"><div class="notify-label">Chat ID</div>' +
+              '<div class="notify-desc">可向 <code>@userinfobot</code> 获取。</div></div>' +
+              '<input class="notify-input" id="notifyCronTgChat" placeholder="-1001234567890" autocomplete="off" spellcheck="false">' +
+            '</div>' +
+            '<div class="notify-row stack set-row" data-kw="api base 反代 地址">' +
+              '<div class="notify-label-wrap"><div class="notify-label">API 地址（可选）</div>' +
+              '<div class="notify-desc">默认官方地址，可填自建 / 反代。</div></div>' +
+              '<input class="notify-input" id="notifyCronTgApiBase" placeholder="https://api.telegram.org" autocomplete="off" spellcheck="false">' +
+            '</div>' +
+          '</div>' +
+          '<div class="notify-row stack set-row" data-kw="代理 proxy socks5">' +
+            '<div class="notify-label-wrap"><div class="notify-label">代理（只给这个 Bot 用）</div>' +
+            '<div class="notify-desc">如 <code>http://127.0.0.1:7890</code>；留空 = 直连。</div></div>' +
+            '<input class="notify-input" id="notifyCronTgProxy" placeholder="留空 = 直连" autocomplete="off" spellcheck="false">' +
+          '</div>' +
         '</div>' +
       '</div>' +
 
@@ -251,10 +371,12 @@
       '<div class="notify-card">' +
         '<div class="notify-card-title"><i class="bi bi-gear-wide-connected"></i> 操作</div>' +
         '<div class="notify-desc" style="margin:0 0 12px;">保存后立即生效；测试会按对应渠道发一条真实通知（会先用当前表单里的配置发送）。</div>' +
-        '<div class="notify-actions" data-kw="测试 保存 test save 钉钉 pushplus">' +
+        '<div class="notify-actions" data-kw="测试 保存 test save 钉钉 pushplus 邮件 桌面 telegram">' +
+          '<button class="notify-btn" id="notifyCronTestDesktop"><i class="bi bi-bell"></i> 测试桌面</button>' +
+          '<button class="notify-btn" id="notifyCronTestEmail"><i class="bi bi-envelope"></i> 测试邮件</button>' +
+          '<button class="notify-btn" id="notifyCronTestTelegram"><i class="bi bi-telegram"></i> 测试 Telegram</button>' +
           '<button class="notify-btn" id="notifyCronTestDingtalk"><i class="bi bi-chat-dots"></i> 测试钉钉</button>' +
           '<button class="notify-btn" id="notifyCronTestPushplus"><i class="bi bi-wechat"></i> 测试 PushPlus</button>' +
-          '<span class="notify-desc" style="align-self:center;">桌面 / 邮件 / Telegram 用「通知」分区的测试按钮即可。</span>' +
           '<button class="notify-btn primary" id="notifyCronSaveBtn" style="margin-left:auto;"><i class="bi bi-save"></i> 保存</button>' +
         '</div>' +
       '</div>' +
@@ -558,7 +680,9 @@
   function cronNotifyFill(n) {
     const q = id => document.getElementById(id);
     if (!q("notifyCronEnabled")) return;
-    const ev = n.events || {}, ch = n.channels || {}, ding = n.dingtalk || {}, pp = n.pushplus || {};
+    const ev = n.events || {}, ch = n.channels || {};
+    const dk = n.desktop || {}, em = n.email || {}, tg = n.telegram || {};
+    const ding = n.dingtalk || {}, pp = n.pushplus || {};
     q("notifyCronEnabled").checked = !!n.enabled;
     if (q("notifyCronEvFail"))    q("notifyCronEvFail").checked = ev.fail !== false;
     if (q("notifyCronEvTimeout")) q("notifyCronEvTimeout").checked = ev.timeout !== false;
@@ -568,6 +692,31 @@
     if (q("notifyCronChDingtalk")) q("notifyCronChDingtalk").checked = !!ch.dingtalk;
     if (q("notifyCronChTelegram")) q("notifyCronChTelegram").checked = !!ch.telegram;
     if (q("notifyCronChPushplus")) q("notifyCronChPushplus").checked = !!ch.pushplus;
+    // 配置来源判断字段：use_global = true → 复用全局；false → 独立配置
+    const pickSrc = (gid, oid, useGlobal) => {
+      if (q(gid)) q(gid).checked = useGlobal !== false;
+      if (q(oid)) q(oid).checked = useGlobal === false;
+    };
+    pickSrc("notifyCronDeskSrcG", "notifyCronDeskSrcO", dk.use_global);
+    pickSrc("notifyCronEmailSrcG", "notifyCronEmailSrcO", em.use_global);
+    pickSrc("notifyCronTgSrcG", "notifyCronTgSrcO", tg.use_global);
+    // 桌面独立配置
+    if (q("notifyCronDeskApp"))   q("notifyCronDeskApp").value = dk.app_name || "";
+    if (q("notifyCronDeskSound")) q("notifyCronDeskSound").checked = dk.sound !== false;
+    // 邮件独立配置（密码后端返回掩码，原样回填；未设置时为空）
+    if (q("notifyCronEmailTo"))    q("notifyCronEmailTo").value = em.to || "";
+    if (q("notifyCronEmailHost"))  q("notifyCronEmailHost").value = em.host || "";
+    if (q("notifyCronEmailPort"))  q("notifyCronEmailPort").value = em.port || 465;
+    if (q("notifyCronEmailSec"))   q("notifyCronEmailSec").value = em.security || "ssl";
+    if (q("notifyCronEmailUser"))  q("notifyCronEmailUser").value = em.username || "";
+    if (q("notifyCronEmailPwd"))   q("notifyCronEmailPwd").value = em.password || "";
+    if (q("notifyCronEmailFrom"))  q("notifyCronEmailFrom").value = em.from_addr || "";
+    // Telegram 独立配置
+    if (q("notifyCronTgToken"))   q("notifyCronTgToken").value = tg.bot_token || "";
+    if (q("notifyCronTgChat"))    q("notifyCronTgChat").value = tg.chat_id || "";
+    if (q("notifyCronTgApiBase")) q("notifyCronTgApiBase").value = tg.api_base || "https://api.telegram.org";
+    if (q("notifyCronTgProxy"))   q("notifyCronTgProxy").value = tg.proxy || "";
+    // 钉钉 / PushPlus
     if (q("notifyCronDingWebhook")) q("notifyCronDingWebhook").value = ding.webhook || "";
     if (q("notifyCronDingSecret"))  q("notifyCronDingSecret").value = ding.secret || "";
     if (q("notifyCronPpToken"))     q("notifyCronPpToken").value = pp.token || "";
@@ -579,6 +728,11 @@
     const q = id => document.getElementById(id);
     const c = id => { const el = q(id); return el ? el.checked : false; };
     const v = id => { const el = q(id); return el ? el.value.trim() : ""; };
+    // 判断字段读取：radio 选中 "own" → use_global = false（独立配置）
+    const useGlobal = name => {
+      const own = document.querySelector('input[name="' + name + '"][value="own"]');
+      return !(own && own.checked);
+    };
     return {
       notify: {
         enabled: c("notifyCronEnabled"),
@@ -587,6 +741,25 @@
           desktop: c("notifyCronChDesktop"), email: c("notifyCronChEmail"),
           dingtalk: c("notifyCronChDingtalk"), telegram: c("notifyCronChTelegram"),
           pushplus: c("notifyCronChPushplus"),
+        },
+        desktop: {
+          use_global: useGlobal("cronDeskSrc"),
+          app_name: v("notifyCronDeskApp"),
+          sound: c("notifyCronDeskSound"),
+        },
+        email: {
+          use_global: useGlobal("cronEmailSrc"),
+          to: v("notifyCronEmailTo"), host: v("notifyCronEmailHost"),
+          port: parseInt(v("notifyCronEmailPort"), 10) || 465,
+          security: v("notifyCronEmailSec") || "ssl",
+          username: v("notifyCronEmailUser"), password: v("notifyCronEmailPwd"),
+          from_addr: v("notifyCronEmailFrom"),
+        },
+        telegram: {
+          use_global: useGlobal("cronTgSrc"),
+          bot_token: v("notifyCronTgToken"), chat_id: v("notifyCronTgChat"),
+          api_base: v("notifyCronTgApiBase") || "https://api.telegram.org",
+          proxy: v("notifyCronTgProxy"),
         },
         dingtalk: { webhook: v("notifyCronDingWebhook"), secret: v("notifyCronDingSecret") },
         pushplus: { token: v("notifyCronPpToken"), topic: v("notifyCronPpTopic") },
@@ -621,7 +794,8 @@
       });
       const d = await r.json();
       const res = d && d.results && d.results[channel];
-      const name = { dingtalk: "钉钉", pushplus: "PushPlus" }[channel] || channel;
+      const name = { desktop: "桌面", email: "邮件", dingtalk: "钉钉",
+                     telegram: "Telegram", pushplus: "PushPlus" }[channel] || channel;
       if (res && res.ok) notifyToast(`测试通知已发送（${name}）`, "ok");
       else notifyToast(`测试失败（${name}）：${(res && res.detail) || d.error || "未知错误"}`, "err");
       await notifyLoad();
@@ -698,11 +872,20 @@
     document.querySelectorAll(".notifyEmailOpts").forEach(el => el.style.display = emailOn ? "" : "none");
     const tgOn = document.getElementById("notifyTelegram")?.checked;
     document.querySelectorAll(".notifyTelegramOpts").forEach(el => el.style.display = tgOn ? "" : "none");
-    // 定时任务通知：钉钉 / PushPlus 的配置项跟随对应渠道开关
-    const dingOn = document.getElementById("notifyCronChDingtalk")?.checked;
-    document.querySelectorAll(".notifyCronDingOpts").forEach(el => el.style.display = dingOn ? "" : "none");
-    const ppOn = document.getElementById("notifyCronChPushplus")?.checked;
-    document.querySelectorAll(".notifyCronPpOpts").forEach(el => el.style.display = ppOn ? "" : "none");
+    // 定时任务通知：配置卡跟随对应渠道开关；独立配置块跟随「配置来源」判断字段
+    const cronChOn = (id) => { const el = document.getElementById(id); return el ? el.checked : false; };
+    document.querySelectorAll(".notifyCronDeskOpts").forEach(el => el.style.display = cronChOn("notifyCronChDesktop") ? "" : "none");
+    document.querySelectorAll(".notifyCronEmailOpts").forEach(el => el.style.display = cronChOn("notifyCronChEmail") ? "" : "none");
+    document.querySelectorAll(".notifyCronTgOpts").forEach(el => el.style.display = cronChOn("notifyCronChTelegram") ? "" : "none");
+    document.querySelectorAll(".notifyCronDingOpts").forEach(el => el.style.display = cronChOn("notifyCronChDingtalk") ? "" : "none");
+    document.querySelectorAll(".notifyCronPpOpts").forEach(el => el.style.display = cronChOn("notifyCronChPushplus") ? "" : "none");
+    const ownOn = (name) => {
+      const own = document.querySelector('input[name="' + name + '"][value="own"]');
+      return !!(own && own.checked);
+    };
+    document.querySelectorAll("#notifyCronDeskOwnOpts").forEach(el => el.style.display = ownOn("cronDeskSrc") ? "" : "none");
+    document.querySelectorAll("#notifyCronEmailOwnOpts").forEach(el => el.style.display = ownOn("cronEmailSrc") ? "" : "none");
+    document.querySelectorAll("#notifyCronTgOwnOpts").forEach(el => el.style.display = ownOn("cronTgSrc") ? "" : "none");
   }
 
   function notifyReadForm() {
@@ -966,6 +1149,9 @@
         else if (id === "notifyTestEmail") notifyTest("email", btn);
         else if (id === "notifyTestTelegram") notifyTest("telegram", btn);
         else if (id === "notifyTestAll") notifyTest("all", btn);
+        else if (id === "notifyCronTestDesktop") cronNotifyTest("desktop", btn);
+        else if (id === "notifyCronTestEmail") cronNotifyTest("email", btn);
+        else if (id === "notifyCronTestTelegram") cronNotifyTest("telegram", btn);
         else if (id === "notifyCronTestDingtalk") cronNotifyTest("dingtalk", btn);
         else if (id === "notifyCronTestPushplus") cronNotifyTest("pushplus", btn);
         else if (id === "notifyCronSaveBtn") cronNotifySave();

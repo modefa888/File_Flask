@@ -568,10 +568,14 @@ class DesktopResult:
     detail: str = ""
 
 
-def notify_desktop(title: str, body: str) -> DesktopResult:
-    """在本机弹系统通知。失败不会抛，返回 detail。"""
+def notify_desktop(title: str, body: str, desk_cfg: Optional[dict] = None) -> DesktopResult:
+    """在本机弹系统通知。失败不会抛，返回 detail。
+
+    desk_cfg：独立的桌面通知配置（app_name / sound / timeout_ms / sound_name）；
+    传入时优先使用，不传则读全局配置（供定时任务等模块复用或独立配置）。
+    """
     cfg = _read_cfg()
-    desk = cfg.get("desktop") or {}
+    desk = desk_cfg if isinstance(desk_cfg, dict) else (cfg.get("desktop") or {})
     app_name = str(desk.get("app_name") or "File_Flask")
     play_sound = bool(desk.get("sound"))
     timeout_ms = int(desk.get("timeout_ms") or 5000)
@@ -853,9 +857,11 @@ class SmtpResult:
     detail: str = ""
 
 
-def notify_smtp(title: str, body: str, force_recipient: str = "") -> SmtpResult:
+def notify_smtp(title: str, body: str, force_recipient: str = "",
+                smtp_cfg: Optional[dict] = None) -> SmtpResult:
+    """发送邮件。smtp_cfg 传入独立的 SMTP 配置时优先使用（否则读全局配置）。"""
     cfg = _read_cfg()
-    smtp = cfg.get("smtp") or {}
+    smtp = smtp_cfg if isinstance(smtp_cfg, dict) else (cfg.get("smtp") or {})
     host = str(smtp.get("host") or "").strip()
     user = str(smtp.get("username") or "").strip()
     pw = str(smtp.get("password") or "")
@@ -1100,10 +1106,14 @@ def _tg_urlopen(req, proxy: str = "", timeout: int = _TG_TIMEOUT):
 
 
 
-def notify_telegram(title: str, body: str) -> TelegramResult:
-    """通过 Bot API 发送一条消息。失败不抛，返回 detail。"""
+def notify_telegram(title: str, body: str, tg_cfg: Optional[dict] = None) -> TelegramResult:
+    """通过 Bot API 发送一条消息。失败不抛，返回 detail。
+
+    tg_cfg：独立的 Telegram 配置（bot_token / chat_id / api_base / proxy …）；
+    传入时优先使用，不传则读全局配置。
+    """
     cfg = _read_cfg()
-    tg = cfg.get("telegram") or {}
+    tg = tg_cfg if isinstance(tg_cfg, dict) else (cfg.get("telegram") or {})
     token = str(tg.get("bot_token") or "").strip()
     chat_id = str(tg.get("chat_id") or "").strip()
     if not token:

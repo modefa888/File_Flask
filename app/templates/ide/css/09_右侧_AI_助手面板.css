@@ -550,9 +550,29 @@
   .ai-todo-row.completed .ic { color: #7fd88f; }
   .ai-todo-row.completed .tx { text-decoration: line-through; text-decoration-color: #46564b; }
   @keyframes aiTodoSpin { to { transform: rotate(360deg); } }
+  /* 任务清单：悬浮固定在消息区底部（不随消息滚动，浮在内容之上） */
+  .ai-msgs-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .ai-todo-float {
+    position: absolute; left: 10px; right: 10px; bottom: 6px; z-index: 20;
+    max-width: calc(100% - 20px); max-height: 60%; pointer-events: auto;
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .ai-todo-float .ai-todo {
+    margin-top: 0; min-height: 0; overflow: hidden; flex: 0 1 auto;
+    display: flex; flex-direction: column;
+    background: rgba(28, 28, 32, .9);
+    -webkit-backdrop-filter: blur(10px) saturate(1.2);
+    backdrop-filter: blur(10px) saturate(1.2);
+    border-color: #3d3d46;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, .5);
+  }
+  .ai-todo-float .ai-todo-head { padding: 6px 10px; }
+  .ai-todo-float .ai-todo-body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  /* 高度由面板总的 60% 上限约束，超出时列表内部滚动（而不是撑破面板） */
+  .ai-todo-float .ai-todo-list { flex: 1 1 auto; min-height: 0; max-height: none; }
   /* 命令确认卡片 */
-  .ai-ask { align-self: flex-start; max-width: 100%; background: #2c2718; border: 1px solid #5a4a26;
-    border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #e2c08a; }
+  .ai-ask { position: relative; z-index: 25; align-self: flex-start; max-width: 100%; background: #2c2718;
+    border: 1px solid #5a4a26; border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #e2c08a; }
   .ai-ask .q code { background: #1c1a12; border: 1px solid #4a3f28; border-radius: 4px; padding: 1px 6px;
     color: #ffd479; font-family: ui-monospace, Menlo, Consolas, monospace; }
   .ai-ask .r { color: #b9a97f; font-size: 11px; margin-top: 4px; }

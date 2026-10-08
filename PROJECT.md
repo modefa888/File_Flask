@@ -120,8 +120,12 @@ File_Flask/
 - 内置工具：`list_dir / read_file / write_file / edit_file / search_files / run_command`，
   以及可开关的 `web_search / generate_image / code_intel / delegate_task / todo_write`。
 - 任务清单：`todo_write` 工具让模型把多步任务拆成待办清单（`pending / in_progress / completed`），
-  每次调用 SSE 推送 `{"type":"todos","todos":[...]}`，前端在消息下方渲染可折叠的「任务列表」进度面板；
-  清单随回复存入会话历史（`meta.todos`），刷新后仍可回放。可在 设置 → 对话 → 任务清单 关闭。
+  每次调用 SSE 推送 `{"type":"todos","todos":[...]}`；前端把清单渲染成「悬浮固定在消息区底部」的
+  可折叠面板（`#aiTodoFloat`，绝对定位在 `#aiMsgs` 外层容器上，不随消息滚动，并自动给消息区补底部留白），
+  不再内嵌在消息里。清单随回复存入会话历史（`meta.todos`），刷新/切换会话后取最后一份回放。
+  可在 设置 → 对话 → 任务清单 关闭。
+  兜底：多步任务若模型迟迟不建清单，主循环会在最近的工具结果末尾注入一次「系统提醒」（每 3 轮最多一次），
+  促使它调用 `todo_write`，避免小模型漏建导致面板不显示。
 - 权限三档（与前端一致）：
   - `readonly` —— 只读；写入与执行一律拒绝。
   - `workspace` —— 读任意；写只能落在项目根内；执行命令逐条确认。

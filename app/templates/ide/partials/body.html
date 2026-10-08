@@ -217,6 +217,7 @@
         <button class="ai-hbtn" id="aiCloseBtn" title="关闭 AI 助手"><i class="bi bi-x-lg"></i></button>
       </div>
       <div class="ai-hist" id="aiHist" style="display:none"></div>
+      <div class="ai-msgs-wrap">
       <div class="ai-msgs scroll-thin" id="aiMsgs">
         <!-- 空会话时的中间提示：首屏静态占位，加载后由 aiRenderAll() 按当前项目重绘 -->
         <div class="ai-empty" id="aiEmpty">
@@ -234,6 +235,8 @@
             <div class="ai-hero-tip"><i class="bi bi-folder2-open"></i> 打开一个文件夹后，对话记录会自动绑定该项目</div>
           </div>
         </div>
+      </div>
+        <div class="ai-todo-float" id="aiTodoFloat" style="display:none"></div>
       </div>
       <div class="ai-imgs" id="aiImgs" style="display:none"></div>
       <div class="ai-input">

@@ -1543,6 +1543,7 @@
       box.classList.toggle("collapsed", collapsed);
       box._head.querySelector(".tw").className =
         "bi " + (collapsed ? "bi-chevron-right" : "bi-chevron-down") + " tw";
+      if (typeof aiTodoFloatPad === "function") aiTodoFloatPad();   // 展开/收起后同步消息区底部留白
     };
     box._head.onclick = () => box._setCollapsed(!box.classList.contains("collapsed"));
     box.update = function (next) {
@@ -1573,7 +1574,67 @@
     return box;
   }
 
+  /* ---------- 任务清单：悬浮固定在消息区底部（参考 Trae / CodeBuddy） ----------
+     常驻在消息区底部的悬浮卡片，显示当前（或最近一次）任务清单，随运行实时更新。
+     它是消息区外层容器的绝对定位子元素，不随消息滚动、也不会被消息清空（aiRenderAll 只重建 #aiMsgs）。 */
+  function aiTodoFloatHost() { return $("aiTodoFloat"); }
+  /* 悬浮面板压在消息区底部：给消息区补一段底部内边距，避免最新内容被面板挡住 */
+  function aiTodoFloatPad() {
+    const box = $("aiMsgs"), host = aiTodoFloatHost();
+    if (!box || !host) return;
+    if (host.style.display === "none" || !host.offsetHeight) { box.style.paddingBottom = ""; return; }
+    box.style.paddingBottom = (host.offsetHeight + 12) + "px";
+  }
+  function aiTodoFloatShow(todos) {
+    const host = aiTodoFloatHost();
+    if (!host) return;
+    const list = (todos || []).filter(t => t && t.content);
+    if (!list.length) { aiTodoFloatHide(); return; }
+    if (!host._panel || !host._panel.isConnected) {
+      host.innerHTML = "";
+      host._panel = aiTodoBox(list);
+      host.appendChild(host._panel);
+    } else {
+      host._panel.update(list);
+    }
+    host.style.display = "";
+    aiTodoFloatPad();
+    if (typeof aiScrollToBottom === "function") aiScrollToBottom();
+  }
+  function aiTodoFloatHide() {
+    const host = aiTodoFloatHost();
+    if (host) host.style.display = "none";
+    aiTodoFloatPad();
+  }
+  /* 加载 / 切换会话：取最后一条带任务清单的回复，回放到悬浮面板 */
+  function aiTodoFloatSyncFromMsgs() {
+    let todos = null;
+    for (let i = (AI.msgs || []).length - 1; i >= 0; i--) {
+      const m = AI.msgs[i];
+      if (m && m.role === "assistant" && m.todos && m.todos.length) { todos = m.todos; break; }
+    }
+    if (todos) aiTodoFloatShow(todos);
+    else aiTodoFloatHide();
+  }
+  window.addEventListener("resize", () => { try { aiTodoFloatPad(); } catch (_) {} });
+  (function initTodoFloatObserver() {                  // 面板高度变化（展开/收起、换行）时同步底部留白
+    const host = $("aiTodoFloat");
+    if (!host || typeof ResizeObserver === "undefined") return;
+    try { new ResizeObserver(() => { try { aiTodoFloatPad(); } catch (_) {} }).observe(host); } catch (_) {}
+  })();
+
   /* 需要用户确认的调用（例如执行命令） */
+  /* 命令确认卡片：用户已操作后延迟自动淡出并移除，避免确认面板在消息里堆积 */
+  function aiAskCardAutoRemove(row) {
+    setTimeout(() => {
+      try {
+        row.style.transition = "opacity .35s ease, transform .35s ease";
+        row.style.opacity = "0";
+        row.style.transform = "translateY(-6px)";
+      } catch (_) {}
+      setTimeout(() => { try { row.remove(); } catch (_) {} }, 380);
+    }, 1000);
+  }
   function aiAskCard(ev, runId) {
     const row = document.createElement("div");
     row.className = "ai-ask";
@@ -1592,6 +1653,8 @@
     // 「全局允许」只对执行命令有意义：写文件等其余确认项隐藏该按钮
     if (!isCmd) row.querySelector(".glo").style.display = "none";
     const decide = (allow, always, glo) => {
+      if (row._decided) return;                         // 防重复点击
+      row._decided = true;
       fetch("/api/ai/agent/approve", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ run_id: runId, call_id: ev.call_id, allow: allow,
@@ -1601,10 +1664,12 @@
         else if (d && d.global_added) toast("已全局允许：以后任何项目都将直接执行", "ok");
       }).catch(() => {});
       row.classList.add(allow ? "allowed" : "denied");
-      row.querySelector(".btns").remove();
+      const btns = row.querySelector(".btns");
+      if (btns) btns.remove();
       row.querySelector(".r").textContent = allow
         ? (glo ? "已全局允许：以后任何项目都将直接执行" : "已允许执行")
         : "已拒绝执行";
+      aiAskCardAutoRemove(row);                         // 用户已操作：1 秒后自动移除该面板
     };
     row.querySelector(".ok").onclick = () => decide(true, false, false);
     row.querySelector(".all").onclick = () => decide(true, true, false);
@@ -1639,17 +1704,6 @@
         AI._agentStepsBox = stepsBox;                // 中断时收尾用：停掉转圈并折叠成一行
       }
       return stepsBox;
-    };
-    let todoBox = null;
-    const ensureTodoBox = () => {
-      if (todoBox) return todoBox;
-      if (!todos.length) return null;                // 没有清单内容时不占位
-      todoBox = aiTodoBox(todos);
-      if (todoBox) {
-        bodyRow.appendChild(todoBox);                // 任务清单面板挂在消息下方（与步骤框同级）
-        AI._agentTodoBox = todoBox;
-      }
-      return todoBox;
     };
     let runId = "", text = "";
     const r = await fetch("/api/ai/agent", {
@@ -1722,13 +1776,12 @@
               stepsBox._paint();
             }
           } else if (e.type === "todos") {
-            // 任务清单更新（todo_write）：原地刷新清单面板
+            // 任务清单更新（todo_write）：刷新底部悬浮面板（不随消息滚动）
             const list = (e.todos || []).filter(t => t && t.content);
             if (list.length) {
               todos.length = 0;
               todos.push(...list);
-              const box = ensureTodoBox();
-              if (box) box.update(todos);
+              aiTodoFloatShow(todos);
             }
           } else if (e.type === "subagent") {
             // 子 Agent 实时进度：渲染到对应的 delegate_task 步骤行内
@@ -1741,7 +1794,6 @@
       aiScrollToBottom(true);
     }
     if (stepsBox) { stepsBox._pending = 0; stepsBox._paint(); stepsBox._setCollapsed(true); }  // 本轮结束：自动折叠为一行
-    if (todoBox) todoBox.update(todos);
     return { text: text, steps: steps, changes: changes, todos: todos };
   }
 
@@ -1992,6 +2044,7 @@
       return;
     }
     $("aiEmpty") && ($("aiEmpty").style.display = "none");
+    aiTodoFloatHide();            // 新一轮开始：先收起上一轮的任务清单，等本轮产生清单再显示
     let userMsgForPending = null;
     if (!reuse) {
       const userText = text || (imgs.length ? "（见图）" : "");
@@ -2135,7 +2188,6 @@
     AI._agentTurnSteps = [];                              // 由 aiRunAgent 填充：手动停止时保存步骤用
     AI._agentTurnTodos = [];                              // 由 aiRunAgent 填充：手动停止时保存任务清单用
     AI._agentStepsBox = null;
-    AI._agentTodoBox = null;
     AI._agentRunId = "";                                  // 本场运行的 id（停止后补拉变更用）
     AI.ctrl = new AbortController();
     try {
@@ -2204,14 +2256,6 @@
         if (!chatStepsBox) { chatStepsBox = aiBuildStepsBox([]); bodyB.parentElement.appendChild(chatStepsBox); }
         return chatStepsBox;
       };
-      let chatTodoBox = null;
-      const ensureChatTodos = () => {
-        if (!chatTodoBox && turnTodos.length) {
-          chatTodoBox = aiTodoBox(turnTodos);
-          if (chatTodoBox) bodyB.parentElement.appendChild(chatTodoBox);
-        }
-        return chatTodoBox;
-      };
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -2263,8 +2307,7 @@
               if (list.length) {
                 turnTodos.length = 0;
                 turnTodos.push(...list);
-                const box = ensureChatTodos();
-                if (box) box.update(turnTodos);
+                aiTodoFloatShow(turnTodos);
               }
               continue;
             }
@@ -2285,7 +2328,6 @@
         aiScrollToBottom();
       }
       if (chatStepsBox) { chatStepsBox._pending = 0; chatStepsBox._paint(); chatStepsBox._setCollapsed(true); }  // 本轮结束：自动折叠为一行
-      if (chatTodoBox) chatTodoBox.update(turnTodos);
       const out = acc.replace(/^\s+/, "");
       bodyB.innerHTML = aiMd(out) || (chatSteps.length ? "（已完成工具调用）" : "（空回复）");
       thinkB.parentElement.style.display = thinking.trim() ? "" : "none";

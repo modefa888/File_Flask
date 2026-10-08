@@ -1024,6 +1024,14 @@ def _repo_tree(root, max_lines=_TREE_LINES, depth=_TREE_DEPTH):
     return "\n".join(out)
 
 
+_TODO_REMIND = (
+    "\n\n[系统提醒] 这是一个包含多个步骤的任务，但你还没有建立任务清单。"
+    "请立即调用 todo_write 记录你的执行计划（每项含 content 与 status，正在做的标 in_progress、"
+    "其余标 pending），并在后续每完成一步时调用 todo_write 更新整份清单（把完成的标 completed）。"
+    "如果确实只是一两步的简单任务，可忽略本提醒直接继续。"
+)
+
+
 def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None, task_list=True, web_tool=True,
                  image_tool=True, lsp_tool=True, allow_sub=True):
     perm_desc = {
@@ -1077,11 +1085,13 @@ def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None, 
     if task_list:
         base += (
             "\n\n任务清单（todo_write）：当任务包含多个步骤（需要改动多个文件、先排查再修改等）时，"
-            "先用 todo_write 建立清单（每项一句话、动词开头，按执行顺序排列），"
+            "必须在【开始动手的第一步】就调用 todo_write 建立清单（每项一句话、动词开头，按执行顺序排列，"
+            "第一项标 in_progress），可以和第一批工具调用放在同一条回复里。"
             "之后每完成一项就再次调用 todo_write 更新状态：传入【完整】清单，"
             "把正在做的标为 in_progress（同一时刻最多一项）、做完的标为 completed、其余为 pending；"
             "任务全部完成后把每一项都标为 completed。这样用户能在界面上实时看到任务进度。"
-            "简单的一两步任务无需清单，也不要为了完成任务而虚构清单。"
+            "判断标准：只要预计需要 3 个以上动作，就一定先建清单；只有简单的一两步任务才无需清单，"
+            "也不要为了完成任务而虚构清单。"
         )
     if skill:
         sids = skill if isinstance(skill, list) else [skill]
@@ -1391,6 +1401,8 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
             "perm": perm, "root": root}
     always_allow = set()
     rounds_tool_idx = []                 # 每轮追加的 tool 消息下标，用于上下文裁剪
+    todo_seen = False                    # 本场运行模型是否已用过 todo_write
+    todo_remind_round = 0                # 上次提醒模型建任务清单的轮次（0 = 还没提醒过）
     _round = 0
     # max_steps：主 Agent 最大工具轮数（0 = 不限制）；max_steps_sub：子 Agent 的最大步数（0 = 不限制）。
     while True:                          # 模型不再发起调用即自然结束
@@ -1413,6 +1425,8 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
         # ① 逐个发 step 事件 + 权限判定（需要确认的稍后仍按顺序处理）
         for c in tool_calls:
             name, args = c["name"], c["args"]
+            if name == "todo_write":
+                todo_seen = True
             yield _sse({"type": "step", "call_id": c["id"], "tool": name, "args": args})
             allowed, refuse, need_ask, ask_reason = _gate(perm, name, args, root, auto_run, web_auto)
             if not allowed:
@@ -1510,6 +1524,14 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
             convo.append({"role": "tool", "tool_call_id": c["id"],
                           "content": (rec[3] or rec[1] or "")[:_TOOL_CHARS]})
         rounds_tool_idx.append(idxs)
+        # 任务清单提醒：多步任务若模型迟迟不调用 todo_write，就在最近一条工具结果末尾追加系统提醒，
+        # 促使它在界面上建立/更新任务清单（每 3 轮最多提醒一次，避免刷屏）。
+        if task_list and not todo_seen:
+            total_calls = sum(len(x) for x in rounds_tool_idx)
+            if idxs and (total_calls >= 3 or _round >= 2) and \
+                    (todo_remind_round == 0 or _round - todo_remind_round >= 3):
+                convo[idxs[-1]]["content"] = (convo[idxs[-1]]["content"] or "") + _TODO_REMIND
+                todo_remind_round = _round
         n_trim = _trim_convo(convo, rounds_tool_idx)
         if n_trim:
             _log.info("Agent 上下文裁剪：压缩了 %d 条较早轮次的工具结果（保留最近 %d 轮全文）",

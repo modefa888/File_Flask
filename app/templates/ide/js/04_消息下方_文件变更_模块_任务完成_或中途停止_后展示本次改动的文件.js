@@ -294,12 +294,9 @@
     const nearBottom = force || (box.scrollHeight - box.scrollTop - box.clientHeight < 120);
     if (!nearBottom) return;
     requestAnimationFrame(() => {
-      const last = box.lastElementChild;
-      if (last && last.scrollIntoView) {
-        last.scrollIntoView({ block: "end", behavior: "auto" });
-      } else {
-        box.scrollTop = box.scrollHeight;
-      }
+      // 直接滚到最底部：底部内边距（悬浮任务清单预留）也会被算进去，
+      // 这样最新内容落在悬浮面板上方，不会被挡住。
+      box.scrollTop = box.scrollHeight;
     });
   }
 
@@ -316,10 +313,6 @@
       if (m.steps && m.steps.length) {                 // 智能体：过程记录收进消息下方的折叠区域
         b.parentElement.appendChild(aiBuildStepsBox(m.steps));
       }
-      if (m.role === "assistant" && m.todos && m.todos.length) {       // 任务清单模块
-        const tb = aiTodoBox(m.todos);
-        if (tb) b.parentElement.appendChild(tb);
-      }
       if (m.role === "assistant" && m.changes && m.changes.length) {   // 文件变更模块
         b.parentElement.appendChild(aiChangesBox(m, mi));
       }
@@ -330,6 +323,8 @@
         b.parentElement.insertAdjacentHTML("beforeend", aiUserMetaHtml(m, mi));   // 用户消息：时间 + 复制
       }
     });
+    // 任务清单不再内嵌在消息里：改为消息区底部常驻的悬浮面板（取最后一条带清单的回复回放）
+    aiTodoFloatSyncFromMsgs();
   }
   async function aiLoadCfg() {
     try {

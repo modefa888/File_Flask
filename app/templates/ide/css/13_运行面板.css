@@ -31,13 +31,46 @@
     flex: 1; background: #37373d; border: none; color: #cccccc; cursor: pointer;
     font-size: 11px; padding: 3px 0; border-radius: 3px; font-family: inherit;
   }
-  .runner-item .ri-acts button:hover { background: #45494e; color: #fff; }
+  .runner-item .ri-acts button:hover { background: #45494e; }
   .runner-item .ri-acts button.danger:hover { background: #5a2b2b; color: #ffb0b0; }
-  /* 「查看日志」占满剩余宽度，其余操作压缩成图标按钮 —— 一行放得下 4 个操作 */
+  /* 全部为图标按钮：等宽平分一行，图标居中 */
   .runner-item .ri-acts button.wide { flex: 1; }
-  .runner-item .ri-acts button.ico { flex: none; padding: 3px 9px; display: inline-flex;
-                                     align-items: center; justify-content: center; }
-  .runner-item .ri-acts button.ico .bi { font-size: 12px; }
+  .runner-item .ri-acts button.ico { flex: 1 1 0; padding: 4px 0; display: inline-flex;
+                                    align-items: center; justify-content: center; }
+  .runner-item .ri-acts button.ico .bi { font-size: 13px; }
+  /* 彩色图标：一眼区分「查看日志 / 继续 / 暂停 / 重启 / 停止 / 移除 / 详情」 */
+  .runner-item .ri-acts button.v-view  { color: #9ecbff; }
+  .runner-item .ri-acts button.v-go    { color: #6fcf8a; }
+  .runner-item .ri-acts button.v-pause { color: #e2c08a; }
+  .runner-item .ri-acts button.v-re    { color: #4fc1ff; }
+  .runner-item .ri-acts button.v-stop  { color: #f14c4c; }
+  .runner-item .ri-acts button.v-del   { color: #e08a8a; }
+  .runner-item .ri-acts button.v-info  { color: #b9c6d4; }
+  .runner-item .ri-acts button.ico:hover { filter: brightness(1.3); }
+  /* 查看详细信息：悬浮卡片 */
+  .runner-info-pop {
+    position: fixed; z-index: 300; width: 330px; max-width: calc(100vw - 16px);
+    max-height: 62vh; overflow-y: auto;
+    background: #26262b; border: 1px solid #3c3c42; border-radius: 10px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, .55); padding: 10px 12px 12px; color: #d4d4d4;
+  }
+  .runner-info-pop .ti-head { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600;
+    margin-bottom: 8px; color: #e6e6e6; }
+  .runner-info-pop .ti-head .bi { color: #6cb6ff; font-size: 13px; flex: none; }
+  .runner-info-pop .ti-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .runner-info-pop .ti-close { background: none; border: none; color: #8a8a8a; cursor: pointer; font-size: 12px; padding: 0 2px; }
+  .runner-info-pop .ti-close:hover { color: #fff; }
+  .runner-info-pop .ti-row { display: flex; gap: 8px; font-size: 11.5px; line-height: 1.6; padding: 3px 0;
+    border-top: 1px solid #2c2c33; }
+  .runner-info-pop .ti-row:first-child { border-top: none; }
+  .runner-info-pop .ti-k { flex: none; width: 60px; color: #8a8a8a; }
+  .runner-info-pop .ti-v { flex: 1; min-width: 0; color: #d4d4d4; word-break: break-all; overflow-wrap: anywhere; }
+  .runner-info-pop .ti-v.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: #cfe3d8; }
+  .runner-info-pop .ti-port { display: inline-flex; align-items: center; gap: 3px; color: #4ec9b0;
+    text-decoration: none; background: #1e2f2b; border: 1px solid #2f5a4e; border-radius: 4px;
+    padding: 0 6px; margin: 1px 3px 1px 0; }
+  .runner-info-pop .ti-port:hover { background: #263a35; border-color: #3f7a68; color: #7fe0c8; }
+  .runner-info-pop .ti-port .bi { font-size: 10px; }
   /* 暂停中：左侧竖条与状态点用琥珀色，和「运行中」的绿色区分开 */
   .runner-item.paused { border-left-color: #e2c08a; }
   .runner-item .ri-top .dot.paused { background: #e2c08a; }
@@ -45,9 +78,19 @@
   .runner-item .ri-meta.ri-res { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .runner-item .ri-res .res { display: inline-flex; align-items: center; gap: 3px; color: #9d9d9d; }
   .runner-item .ri-res .res .bi { font-size: 11px; }
+  /* CPU 蓝 / 内存 紫：一眼区分两类占用（高占用再叠加 warm/hot 覆盖） */
+  .runner-item .ri-res .res.cpu { color: #4fc1ff; }
+  .runner-item .ri-res .res.mem { color: #c586c0; }
   .runner-item .ri-res .res.warm { color: #e2c08a; }
   .runner-item .ri-res .res.hot { color: #f14c4c; }
   .runner-item .ri-res .res.dim { color: #7d7d7d; }
+  /* 端口：可点击，在新标签打开对应服务 */
+  .runner-item .ri-res .res.port {
+    color: #4ec9b0; text-decoration: none; cursor: pointer;
+    background: #1e2f2b; border: 1px solid #2f5a4e; border-radius: 4px; padding: 0 6px; height: 18px;
+  }
+  .runner-item .ri-res .res.port:hover { background: #263a35; border-color: #3f7a68; color: #7fe0c8; }
+  .runner-item .ri-res .res.port .bi { font-size: 10px; }
   .port-box { margin-bottom: 10px; border: 1px solid #37373d; border-radius: 6px; background: #252526; overflow: hidden; }
   .port-box .pb-head { display: flex; align-items: center; padding: 6px 8px; font-size: 11px; color: #9d9d9d;
                        border-bottom: 1px solid #333; background: #2a2d2e; }

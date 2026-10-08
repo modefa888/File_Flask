@@ -100,6 +100,40 @@ def tree_usage(pid) -> dict:
     return {"cpu": round(cpu, 1), "rss": rss, "n": len(seen)}
 
 
+def tree_pids(pid) -> list:
+    """某进程及其全部后代的 pid 列表。
+
+    用途：把监听端口等「实际发生在子进程上」的信息归属到整个任务进程树
+    （例如 python reloader / npm run dev 真正监听端口的是它拉起的子进程，只看父 pid 会漏掉）。
+    未装 psutil 或 pid 无效时返回 []。
+    """
+    if psutil is None:
+        return []
+    try:
+        snap = _ensure()
+    except Exception:
+        return []
+    procs = (snap or {}).get("procs") or []
+    kids = {}
+    for r in procs:
+        kids.setdefault(r["ppid"], []).append(r["pid"])
+    try:
+        pid = int(pid or 0)
+    except (TypeError, ValueError):
+        return []
+    if pid <= 0:
+        return []
+    out, seen, stack = [], set(), [pid]
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        out.append(cur)
+        stack.extend(kids.get(cur, []))
+    return out
+
+
 def _app_root() -> str:
     """本服务所在项目根目录（用来判断工作区落在哪个分区）。"""
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))

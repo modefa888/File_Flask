@@ -185,6 +185,80 @@ def _from_proc() -> list:
     return rows
 
 
+def _listen_inodes() -> dict:
+    """从 /proc/net/{tcp,tcp6,udp,udp6} 读出「监听中」的 socket inode -> 端口 映射。
+
+    不依赖 ss 的进程信息，权限无关（只能看到端口，不能看到归属进程，正好够用）。
+    """
+    out = {}
+    for fname in ("tcp", "tcp6", "udp", "udp6"):
+        try:
+            with open("/proc/net/" + fname, "r", encoding="utf-8") as f:
+                lines = f.readlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 10:
+                continue
+            state = parts[3]
+            if fname.startswith("tcp") and state != "0A":       # 0A = LISTEN
+                continue
+            if fname.startswith("udp") and state != "07":       # 07 = 无对端（相当于监听）
+                continue
+            try:
+                _addr, hex_port = parts[1].split(":")
+                port = int(hex_port, 16)
+                inode = int(parts[9])
+            except (ValueError, IndexError):
+                continue
+            if 1 <= port <= 65535:
+                out[inode] = port
+    return out
+
+
+def ports_for_pids(pids) -> list:
+    """给定一组 pid，返回它们正在监听的端口（升序）。
+
+    做法：读 /proc/<pid>/fd 里的 socket inode，再与 /proc/net/* 的监听 inode 对照。
+    好处是**不依赖 ss -p**（某些环境 / 容器 / 跨命名空间下 ss 拿不到进程归属），
+    也能覆盖「真正监听端口的是子进程」的情况（配合进程树 pids 一起传进来）。
+    """
+    inodes = _listen_inodes()
+    if not inodes:
+        return []
+    ports = set()
+    for pid in (pids or []):
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            continue
+        fddir = "/proc/%d/fd" % pid
+        try:
+            fds = os.listdir(fddir)
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                target = os.readlink(os.path.join(fddir, fd))
+            except OSError:
+                continue
+            if not target.startswith("socket:["):
+                continue
+            try:
+                ino = int(target[8:-1])
+            except ValueError:
+                continue
+            if ino in inodes:
+                ports.add(inodes[ino])
+    return sorted(ports)
+
+
+def listening_ports() -> set:
+    """当前处于监听状态的全部端口集合（不区分进程归属）。"""
+    return set(_listen_inodes().values())
+
+
 def list_ports() -> list:
     """监听中的端口 + 占用进程信息，按「自己的进程优先、端口升序」排序。"""
     rows = _from_ss() or _from_proc()

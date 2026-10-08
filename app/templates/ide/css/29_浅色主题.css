@@ -557,10 +557,35 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .runner-item .ri-res .res { color: #6b6b6b; }
 :where(html.theme-light) .runner-item .ri-res .res.warm { color: #9a6700; }
 :where(html.theme-light) .runner-item .ri-res .res.hot { color: #c62828; }
+:where(html.theme-light) .runner-item .ri-res .res.cpu { color: #0969da; }
+:where(html.theme-light) .runner-item .ri-res .res.mem { color: #8250df; }
+:where(html.theme-light) .runner-item .ri-res .res.port { color: #0f766e; background: #e6f4f1; border-color: #b7ddd6; }
+:where(html.theme-light) .runner-item .ri-res .res.port:hover { background: #d5ece7; border-color: #8cc7bb; color: #0b5f58; }
 :where(html.theme-light) .runner-item.paused { border-left-color: #bf8700; }
 :where(html.theme-light) .runner-item .ri-top .dot.paused { background: #bf8700; }
 :where(html.theme-light) .runner-item .ri-acts button { background: #e0e0e0; color: #333333; }
 :where(html.theme-light) .runner-item .ri-acts button:hover { background: #d0d0d0; color: #000000; }
+/* 彩色图标（浅色配色，保证对比度） */
+:where(html.theme-light) .runner-item .ri-acts button.v-view  { color: #0969da; }
+:where(html.theme-light) .runner-item .ri-acts button.v-go    { color: #1a7f37; }
+:where(html.theme-light) .runner-item .ri-acts button.v-pause { color: #9a6700; }
+:where(html.theme-light) .runner-item .ri-acts button.v-re    { color: #0b6bcb; }
+:where(html.theme-light) .runner-item .ri-acts button.v-stop  { color: #c62828; }
+:where(html.theme-light) .runner-item .ri-acts button.v-del   { color: #c0392b; }
+:where(html.theme-light) .runner-item .ri-acts button.v-info  { color: #6b6b6b; }
+/* 查看详细信息悬浮卡片 */
+:where(html.theme-light) .runner-info-pop {
+  background: #ffffff; border-color: #dcdcdc; box-shadow: 0 12px 32px rgba(0, 0, 0, .18); color: #333333;
+}
+:where(html.theme-light) .runner-info-pop .ti-head, :where(html.theme-light) .runner-info-pop .ti-title { color: #1f2328; }
+:where(html.theme-light) .runner-info-pop .ti-close { color: #8a8a8a; }
+:where(html.theme-light) .runner-info-pop .ti-close:hover { color: #000000; }
+:where(html.theme-light) .runner-info-pop .ti-row { border-top-color: #eeeeee; }
+:where(html.theme-light) .runner-info-pop .ti-k { color: #8a8a8a; }
+:where(html.theme-light) .runner-info-pop .ti-v { color: #333333; }
+:where(html.theme-light) .runner-info-pop .ti-v.mono { color: #0a5c3a; }
+:where(html.theme-light) .runner-info-pop .ti-port { color: #0f766e; background: #e6f4f1; border-color: #b7ddd6; }
+:where(html.theme-light) .runner-info-pop .ti-port:hover { background: #d5ece7; border-color: #8cc7bb; color: #0b5f58; }
 :where(html.theme-light) .port-box { border-color: #e0e0e0; background: #ffffff; }
 :where(html.theme-light) .port-box .pb-head { color: #6b6b6b; border-bottom-color: #e0e0e0; background: #f3f3f3; }
 :where(html.theme-light) .port-box .pb-head b { color: #333333; }

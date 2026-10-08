@@ -91,7 +91,7 @@ File_Flask/
 | 9 | `progress_stream.py` | `progress_stream` | 通用 SSE 进度推送 |
 | 10 | `grep.py` | `grep` | 正则内容搜索 |
 | 11 | `git.py` | `git` | status / diff / log / stage / commit / push / pull / remote / init / .gitignore |
-| 12 | `run.py` | `run` | 在线 IDE 的 F5 运行、日志流、超时后转后台 |
+| 12 | `run.py` | `run` | 在线 IDE 的 F5 运行、日志流、超时后转后台；后台任务面板（`/api/run/tasks` 带 CPU/内存/端口，端口可点击新标签打开；操作按钮为彩色图标，另有「查看详细信息」悬浮卡片） |
 | 13 | `port.py` | `port` | 端口占用查询 / 杀进程 |
 | 14 | `term.py` | `term` | 服务器终端命令执行（含安全拦截与二次确认） |
 | 15 | `env.py` | `env` | 运行环境探测 / 一键安装到 `~/.local` |

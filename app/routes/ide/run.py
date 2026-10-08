@@ -25,6 +25,7 @@ POST /api/run/prune                          清理全部已结束的任务记�
 """
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -150,6 +151,12 @@ _REG_NAME = ".file_runner_tasks.json"         # 任务注册表
 _TASK_TTL = 6 * 3600                          # 已结束记录保留时长（自动清理）
 _MAX_LINES = 4000                             # 每个任务内存中保留的最大行数
 _LINE_MAX = 4000                              # 单行最大长度
+
+# 从任务日志里反推「监听端口」用的模式（仅在读不到 /proc 归属时兜底）
+_LOG_URL_PORT_RE = re.compile(r"https?://[^\s/'\"]{1,64}?:(\d{2,5})", re.I)
+_LOG_WORD_PORT_RE = re.compile(
+    r"(?:listening(?:\s+on)?|running(?:\s+on)?|serving|serve_forever|listen(?:ing)?|port|端口|监听)"
+    r"[^\d\n]{0,16}(\d{2,5})", re.I)
 
 _TASKS = {}                                   # id -> _BgTask
 _LOCK = threading.Lock()                      # 保护 _TASKS 与注册表文件
@@ -398,6 +405,32 @@ class _BgTask:
             "pid": self.pid, "log_path": self.log_path,
             "target": self.target, "command": " ".join(self.cmd), "cwd": self.cwd,
         }
+
+    def log_ports(self, listen_set) -> list:
+        """从任务日志里提取「疑似监听端口」，只用当前确实在监听的端口过滤。
+
+        为什么需要它：任务进程若由其他用户（如 root）启动，本服务读不到 /proc/<pid>/fd，
+        ss -p 也拿不到归属进程，此时只能从日志（开发服务器一般会打印 listening on :3000）反推。
+        只保留 listen_set 里的端口，可基本排除日志里出现的第三方端口。
+        """
+        if not listen_set:
+            return []
+        rx_url = _LOG_URL_PORT_RE
+        rx_word = _LOG_WORD_PORT_RE
+        found = []
+        with self.cond:
+            lines = list(self.lines[-300:])
+        for ln in lines:
+            msg = ln.get("m") or ""
+            for rx in (rx_url, rx_word):
+                for mt in rx.finditer(msg):
+                    try:
+                        p = int(mt.group(1))
+                    except (TypeError, ValueError):
+                        continue
+                    if p in listen_set and p not in found:
+                        found.append(p)
+        return sorted(found)
 
     def brief(self) -> dict:
         alive = self.is_alive()
@@ -833,19 +866,39 @@ def api_run_tasks():
     _ensure_loaded()
     # 顺带把每个任务进程监听的端口带上（卡片显示「端口 3000」）
     ports_by_pid = {}
+    listen_set = set()
     try:
         from ...services.ide import portinfo
         for p in portinfo.list_ports():
             pids = p.get("pids") or ([p["pid"]] if p.get("pid") else [])
             for pid in pids:
                 ports_by_pid.setdefault(pid, set()).add(p["port"])
+        listen_set = portinfo.listening_ports()
     except Exception as e:
         _log.warning("任务端口信息获取失败：%s", e)
     with _LOCK:
         items = []
         for t in _TASKS.values():
             b = t.brief()
-            b["ports"] = sorted(ports_by_pid.get(t.pid, ()))
+            # 端口按「整个进程树」匹配：真正监听端口的常常是子进程（reloader / npm 拉起的 node）
+            pids = [t.pid] if t.pid else []
+            if t.pid:
+                try:
+                    from ...services.ide import procinfo
+                    pids = procinfo.tree_pids(t.pid) or pids
+                except Exception:
+                    pass
+            ports = set()
+            try:
+                from ...services.ide import portinfo
+                ports |= set(portinfo.ports_for_pids(pids))   # 直读 /proc，最稳
+            except Exception:
+                pass
+            for pid in pids:                                   # 再叠加 ss 的结果（可能覆盖更多场景）
+                ports |= ports_by_pid.get(pid, set())
+            if not ports and t.is_alive() and listen_set:       # 兜底：从任务日志里反推（跨用户 / 容器场景）
+                ports |= set(t.log_ports(listen_set))
+            b["ports"] = sorted(ports)
             items.append(b)
     items.sort(key=lambda x: (not x["running"], -x["duration"]))
     return jsonify({

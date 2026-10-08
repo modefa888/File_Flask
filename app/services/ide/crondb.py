@@ -1,7 +1,9 @@
-"""定时任务存储层（SQLite / store.db 的 cron_tasks + cron_runs 两张表）。
+"""定时任务存储层（SQLite / store.db 的 cron_tasks + cron_runs + cron_cfg 三张表）。
 
-只做纯粹的增删改查，不涉及进程与文件；调度与执行见 cronsvc.py。
+只做纯粹的增删改查，不涉及进程与文件；调度与执行见 cronsvc.py，
+通知渠道配置见 cronnotify.py（同样落在 cron_cfg 表）。
 """
+import json
 import time
 import uuid
 
@@ -11,15 +13,17 @@ from ..common.store_db import store_conn, store_tx
 _log = get_logger()
 
 _TASK_COLS = ("id", "name", "cron", "command", "cwd", "enabled", "remark", "timeout",
-              "created_at", "updated_at", "last_at", "last_status", "last_ms", "last_exit",
-              "run_count", "ok_count", "fail_count")
+              "max_retries", "retry_interval", "depends_on", "pre_hook", "post_hook",
+              "notify", "created_at", "updated_at", "last_at", "last_status", "last_ms",
+              "last_exit", "run_count", "ok_count", "fail_count")
 
 
 def _task_dict(row):
     if not row:
         return None
-    d = {k: row[k] for k in _TASK_COLS}
+    d = {k: row[k] for k in _TASK_COLS if k in row.keys()}
     d["enabled"] = bool(d.get("enabled"))
+    d["notify"] = bool(d.get("notify"))
     return d
 
 
@@ -48,26 +52,40 @@ def get_task(tid):
     return _task_dict(rows[0]) if rows else None
 
 
-def create_task(name, cron, command, cwd="", enabled=True, remark="", timeout=0):
+def create_task(name, cron, command, cwd="", enabled=True, remark="", timeout=0,
+                max_retries=0, retry_interval=60, depends_on="", pre_hook="", post_hook="",
+                notify=True, tid=None):
     now = time.time()
-    tid = uuid.uuid4().hex[:12]
+    tid = str(tid) if tid else uuid.uuid4().hex[:12]
     with store_tx() as conn:
         conn.execute(
             "INSERT INTO cron_tasks (id, name, cron, command, cwd, enabled, remark, timeout,"
-            " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (tid, name, cron, command, cwd, 1 if enabled else 0, remark, int(timeout or 0), now, now))
+            " max_retries, retry_interval, depends_on, pre_hook, post_hook, notify,"
+            " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (tid, name, cron, command, cwd, 1 if enabled else 0, remark, int(timeout or 0),
+             max(0, int(max_retries or 0)), max(1, int(retry_interval or 60)),
+             str(depends_on or ""), str(pre_hook or ""), str(post_hook or ""),
+             1 if notify else 0, now, now))
     return get_task(tid)
 
 
 def update_task(tid, **fields):
-    allowed = ("name", "cron", "command", "cwd", "enabled", "remark", "timeout")
+    allowed = ("name", "cron", "command", "cwd", "enabled", "remark", "timeout",
+               "max_retries", "retry_interval", "depends_on", "pre_hook", "post_hook", "notify")
     sets, args = [], []
     for k in allowed:
         if k not in fields:
             continue
         v = fields[k]
         sets.append(k + "=?")
-        args.append(1 if (k == "enabled" and bool(v)) else (0 if k == "enabled" else v))
+        if k in ("enabled", "notify"):
+            args.append(1 if bool(v) else 0)
+        elif k == "max_retries":
+            args.append(max(0, int(v or 0)))
+        elif k == "retry_interval":
+            args.append(max(1, int(v or 60)))
+        else:
+            args.append(v)
     if sets:
         sets.append("updated_at=?")
         args.append(time.time())
@@ -107,12 +125,12 @@ def bump_task_stats(tid, status, ms=0, exit_code=None, at=None):
 
 
 # ---------------------------------------------------------------- 执行历史
-def insert_run(run_id, task_id, task_name, trigger, log_path, started_at=None):
+def insert_run(run_id, task_id, task_name, trigger, log_path, started_at=None, attempt=0):
     with store_tx() as conn:
         conn.execute(
-            "INSERT INTO cron_runs (id, task_id, task_name, trigger, status, started_at, log_path)"
-            " VALUES (?,?,?,?,?,?,?)",
-            (run_id, str(task_id), task_name, trigger, "running",
+            "INSERT INTO cron_runs (id, task_id, task_name, trigger, attempt, status,"
+            " started_at, log_path) VALUES (?,?,?,?,?,?,?,?)",
+            (run_id, str(task_id), task_name, trigger, max(0, int(attempt or 0)), "running",
              float(started_at or time.time()), log_path))
 
 
@@ -166,3 +184,46 @@ def clear_runs(task_id):
         with store_tx() as conn:
             conn.execute("DELETE FROM cron_runs WHERE task_id=? AND status!='running'", (str(task_id),))
     return dropped
+
+
+def clear_runs_before(ts):
+    """删除某时刻之前的所有执行记录（日志自动清理用），返回被删记录。"""
+    rows = _query("SELECT id, log_path FROM cron_runs WHERE status!='running' AND ended_at>0"
+                  " AND ended_at<?", (float(ts),))
+    dropped = [{"id": r["id"], "log_path": r["log_path"]} for r in rows]
+    if dropped:
+        with store_tx() as conn:
+            conn.execute("DELETE FROM cron_runs WHERE id IN (%s)"
+                         % ",".join("?" * len(dropped)), tuple(r["id"] for r in dropped))
+    return dropped
+
+
+# ---------------------------------------------------------------- 模块设置（cron_cfg 键值表）
+def get_setting(key, default=None):
+    """读取一个模块设置（值是 JSON 文本；不存在返回 default）。"""
+    rows = _query("SELECT value FROM cron_cfg WHERE key=?", (str(key),))
+    if not rows:
+        return default
+    try:
+        return json.loads(rows[0]["value"])
+    except (TypeError, ValueError):
+        return rows[0]["value"]
+
+
+def set_setting(key, value):
+    """写入一个模块设置（任意可 JSON 序列化的值）。"""
+    with store_tx() as conn:
+        conn.execute("INSERT OR REPLACE INTO cron_cfg (key, value) VALUES (?, ?)",
+                     (str(key), json.dumps(value, ensure_ascii=False)))
+
+
+def all_settings():
+    """读取全部模块设置（还原成对象）。"""
+    rows = _query("SELECT key, value FROM cron_cfg")
+    out = {}
+    for r in rows:
+        try:
+            out[r["key"]] = json.loads(r["value"])
+        except (TypeError, ValueError):
+            out[r["key"]] = r["value"]
+    return out

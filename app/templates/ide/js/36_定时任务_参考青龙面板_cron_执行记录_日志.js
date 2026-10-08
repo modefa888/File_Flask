@@ -843,6 +843,162 @@
     }
   }
 
+  /* ==================================================================
+     设置弹窗（日志自动清理 + 通知渠道）与备份 / 恢复
+     ================================================================== */
+  const CRON_CH_NAMES = {
+    desktop: "桌面通知", email: "邮件（全局 SMTP）", dingtalk: "钉钉机器人",
+    telegram: "Telegram（全局）", pushplus: "PushPlus",
+  };
+  const CRON_EV_NAMES = { fail: "执行失败", timeout: "执行超时", retry: "安排重试" };
+
+  function cronOpenSettings() {
+    const ov = cronEnsureModal();
+    CRON.logRun = null;                            // 设置弹窗不涉及日志
+    ov.innerHTML =
+      '<div class="cron-dialog cd-settings">' +
+        '<div class="cd-head"><i class="bi bi-gear"></i><span>定时任务设置</span>' +
+          '<button class="cd-x" title="关闭"><i class="bi bi-x-lg"></i></button></div>' +
+        '<div class="cd-body" id="cronSetBody"><div class="ph">加载中…</div></div>' +
+        '<div class="cd-foot">' +
+          '<span class="cd-spacer"></span>' +
+          '<button class="cd-btn" id="cronSetCancel">取消</button>' +
+          '<button class="cd-btn primary" id="cronSetSave">保存</button>' +
+        '</div>' +
+      '</div>';
+    ov.style.display = "flex";
+    ov.querySelector(".cd-x").onclick = cronCloseModal;
+    $("cronSetCancel").onclick = cronCloseModal;
+    $("cronSetSave").onclick = cronSaveSettings;
+    fetch("/api/cron/settings").then(r => r.json()).then(d => {
+      if (d.error) { $("cronSetBody").innerHTML = '<div class="ph">' + esc(d.error) + '</div>'; return; }
+      cronRenderSettings(d);
+    }).catch(() => {
+      $("cronSetBody").innerHTML = '<div class="ph">读取设置失败</div>';
+    });
+  }
+
+  function cronRenderSettings(d) {
+    const n = d.notify || {};
+    const events = n.events || {}, chs = n.channels || {};
+    const ding = n.dingtalk || {}, pp = n.pushplus || {};
+    const chRow = (key) =>
+      '<div class="cs-ch">' +
+        '<label class="cd-check"><input type="checkbox" data-ch="' + key + '"' + (chs[key] ? " checked" : "") +
+          '> ' + esc(CRON_CH_NAMES[key]) + '</label>' +
+        '<button class="cd-btn cs-test" data-test="' + key + '" title="向该渠道发一条测试通知">测试</button>' +
+      '</div>';
+    $("cronSetBody").innerHTML =
+      '<div class="cs-sec">日志自动清理</div>' +
+      '<div class="cd-row2">' +
+        '<div class="cd-row cd-row-sm"><label>保留天数（0 = 永久保留）</label>' +
+          '<input id="csLogDays" type="number" min="0" step="1" value="' + escAttr(d.log_days || 0) + '"></div>' +
+        '<div class="cd-row cd-row-sm"><label>每任务保留执行记录（条）</label>' +
+          '<input id="csKeepRuns" type="number" min="1" step="1" value="' + escAttr(d.keep_runs || 50) + '"></div>' +
+      '</div>' +
+      '<div class="cs-sec">通知推送</div>' +
+      '<label class="cd-check"><input type="checkbox" id="csNotifyOn"' + (n.enabled ? " checked" : "") +
+        '> 启用通知（任务失败 / 超时时按下面的事件与渠道推送）</label>' +
+      '<div class="cs-row-lbl">触发事件</div>' +
+      '<div class="cs-ev">' + Object.keys(CRON_EV_NAMES).map(k =>
+        '<label class="cd-check"><input type="checkbox" data-ev="' + k + '"' + (events[k] ? " checked" : "") +
+          '> ' + esc(CRON_EV_NAMES[k]) + '</label>').join("") + '</div>' +
+      '<div class="cs-row-lbl">推送渠道（邮件 / Telegram 用「设置 → 通知」里的全局配置）</div>' +
+      '<div class="cs-chs">' + Object.keys(CRON_CH_NAMES).map(chRow).join("") + '</div>' +
+      '<div class="cd-row"><label>钉钉机器人 Webhook（含 access_token）</label>' +
+        '<input id="csDingWebhook" spellcheck="false" placeholder="https://oapi.dingtalk.com/robot/send?access_token=…" value="' +
+          escAttr(ding.webhook || "") + '"></div>' +
+      '<div class="cd-row"><label>钉钉加签密钥（SEC 开头，留空 = 不加签）</label>' +
+        '<input id="csDingSecret" spellcheck="false" placeholder="SEC…" value="' + escAttr(ding.secret || "") + '"></div>' +
+      '<div class="cd-row"><label>PushPlus Token（www.pushplus.plus 获取）</label>' +
+        '<input id="csPpToken" spellcheck="false" placeholder="推送 token" value="' + escAttr(pp.token || "") + '"></div>' +
+      '<div class="cd-row"><label>PushPlus 群组编码（可选，留空发给自己）</label>' +
+        '<input id="csPpTopic" spellcheck="false" value="' + escAttr(pp.topic || "") + '"></div>' +
+      '<div class="cd-err" id="cronSetErr"></div>';
+    ov.querySelectorAll("[data-test]").forEach(b => {
+      b.onclick = async () => {
+        b.disabled = true; b.textContent = "发送中…";
+        await cronSaveSettings(true);                 // 先保存，测试用的才是刚填的配置
+        const d2 = await cronAct("/api/cron/notify-test", { channel: b.dataset.test });
+        b.disabled = false; b.textContent = "测试";
+        const r = d2.results || {};
+        const key = b.dataset.test;
+        if (r[key] && r[key].ok) toast(CRON_CH_NAMES[key] + "：发送成功", "ok");
+        else toast(CRON_CH_NAMES[key] + "：发送失败 " + ((r[key] && r[key].detail) || ""), "err");
+      };
+    });
+  }
+
+  async function cronSaveSettings(silent) {
+    const err = $("cronSetErr");
+    const ev = {}, ch = {};
+    document.querySelectorAll("#cronModal [data-ev]").forEach(x => { ev[x.dataset.ev] = x.checked; });
+    document.querySelectorAll("#cronModal [data-ch]").forEach(x => { ch[x.dataset.ch] = x.checked; });
+    const body = {
+      log_days: parseInt($("csLogDays").value, 10) || 0,
+      keep_runs: parseInt($("csKeepRuns").value, 10) || 50,
+      notify: {
+        enabled: $("csNotifyOn").checked, events: ev, channels: ch,
+        dingtalk: {
+          webhook: $("csDingWebhook").value.trim(),
+          secret: $("csDingSecret").value.trim(),
+        },
+        pushplus: {
+          token: $("csPpToken").value.trim(),
+          topic: $("csPpTopic").value.trim(),
+        },
+      },
+    };
+    const d = await cronAct("/api/cron/settings", body);
+    if (d.error) { if (!silent && err) err.textContent = d.error; toast(d.error, "err"); return false; }
+    if (!silent) { cronCloseModal(); toast("设置已保存", "ok"); }
+    return true;
+  }
+
+  /* ---------- 备份 / 恢复 ---------- */
+  async function cronViewBackup() {
+    try {
+      const r = await fetch("/api/cron/backup");
+      const d = await r.json();
+      if (d.error) { toast(d.error, "err"); return; }
+      const blob = new Blob([JSON.stringify(d, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      const dt = new Date(), p2 = n => String(n).padStart(2, "0");
+      a.href = URL.createObjectURL(blob);
+      a.download = "cron-backup-" + dt.getFullYear() + p2(dt.getMonth() + 1) + p2(dt.getDate()) +
+        "-" + p2(dt.getHours()) + p2(dt.getMinutes()) + p2(dt.getSeconds()) + ".json";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+      toast("已导出 " + ((d.tasks || []).length) + " 个任务（通知密钥已脱敏）", "ok");
+    } catch (e) {
+      toast("备份失败：" + (e.message || e), "err");
+    }
+  }
+
+  function cronViewRestore() {
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = ".json,application/json";
+    inp.onchange = async () => {
+      const file = inp.files && inp.files[0];
+      if (!file) return;
+      let data = null;
+      try { data = JSON.parse(await file.text()); } catch (e) { toast("备份文件解析失败", "err"); return; }
+      const tasks = (data && Array.isArray(data.tasks)) ? data.tasks : (Array.isArray(data) ? data : []);
+      if (!tasks.length) { toast("备份文件里没有任务数据", "err"); return; }
+      const ok = await uiConfirm("恢复备份",
+        "将从备份导入 " + tasks.length + " 个任务（保留现有任务；尽量沿用原任务 id，依赖关系一并恢复）。继续吗？",
+        "恢复", false);
+      if (!ok) return;
+      const d = await cronAct("/api/cron/restore",
+        { tasks: tasks, settings: (data && data.settings) || {}, mode: "merge" });
+      if (d.error) { toast(d.error, "err"); return; }
+      toast("已导入 " + d.imported + " 个任务" + (d.skipped ? "，跳过 " + d.skipped + " 条无效数据" : ""), "ok");
+      cronViewRefresh(true);
+    };
+    inp.click();
+  }
+
   /* 面板工具栏按钮 + 首屏同步一次（刷新后角标数量正确） */
   (function initCronPanel() {
     const add = $("cronNew");

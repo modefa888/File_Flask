@@ -14,6 +14,7 @@
     ai_conversations / ai_messages / ai_prefs    AI 对话历史（原独立库 .file_manager_ai_chat.db）
     ai_undo_snapshots                           AI 文件改动快照（原独立库 .file_manager_ai_undo.db）
     ai_usage / ai_calls                        系统 AI 调用计数与明细
+    cron_tasks / cron_runs / cron_cfg           定时任务（任务 / 执行历史 / 模块设置）
     store_meta       通用键值（含「旧 JSON / 旧库是否已导入」标记）
 
 设计约定与 share_store.py 一致：
@@ -122,7 +123,7 @@ CREATE TABLE IF NOT EXISTS fav_groups (
 -- 最近打开的目录（一行一个目录；seq 越小越新）
 CREATE TABLE IF NOT EXISTS recent_folders (
     seq       INTEGER PRIMARY KEY,
-    path      TEXT NOT NULL,
+    path       TEXT NOT NULL,
     opened_at REAL DEFAULT 0
 );
 -- 运行任务注册表（一行一个任务）
@@ -321,12 +322,18 @@ CREATE INDEX IF NOT EXISTS idx_dbwrite_created ON db_write_log(created_at);
 CREATE TABLE IF NOT EXISTS cron_tasks (
     id          TEXT PRIMARY KEY,
     name        TEXT DEFAULT '',
-    cron        TEXT DEFAULT '',
+    cron        TEXT DEFAULT '',                 -- 5 段（分 时 日 月 周）或 6 段（秒 分 时 日 月 周）
     command     TEXT DEFAULT '',
     cwd         TEXT DEFAULT '',
     enabled     INTEGER NOT NULL DEFAULT 1,
     remark      TEXT DEFAULT '',
     timeout     INTEGER NOT NULL DEFAULT 0,      -- 0 = 不限时
+    max_retries INTEGER NOT NULL DEFAULT 0,      -- 失败 / 超时后重试次数（0 = 不重试）
+    retry_interval INTEGER NOT NULL DEFAULT 60,  -- 重试间隔（秒）
+    depends_on  TEXT DEFAULT '',                 -- 依赖任务 id（逗号分隔）：全部「最近一次成功」才触发
+    pre_hook    TEXT DEFAULT '',                 -- 前置钩子（主命令前执行，失败则跳过主命令）
+    post_hook   TEXT DEFAULT '',                 -- 后置钩子（主命令后执行，不影响退出码判定）
+    notify      INTEGER NOT NULL DEFAULT 1,      -- 失败 / 超时时是否推送通知
     created_at  REAL NOT NULL DEFAULT 0,
     updated_at  REAL NOT NULL DEFAULT 0,
     last_at     REAL NOT NULL DEFAULT 0,
@@ -342,7 +349,8 @@ CREATE TABLE IF NOT EXISTS cron_runs (
     id         TEXT PRIMARY KEY,
     task_id    TEXT NOT NULL,
     task_name  TEXT DEFAULT '',
-    trigger    TEXT DEFAULT 'cron',              -- cron / manual
+    trigger    TEXT DEFAULT 'cron',              -- cron / manual / retry
+    attempt    INTEGER NOT NULL DEFAULT 0,       -- 第几次重试（0 = 首次执行）
     status     TEXT DEFAULT 'running',           -- running / success / fail / killed / timeout
     exit_code  INTEGER,
     started_at REAL NOT NULL DEFAULT 0,
@@ -352,6 +360,11 @@ CREATE TABLE IF NOT EXISTS cron_runs (
     log_size   INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_cron_runs_task ON cron_runs(task_id, started_at DESC);
+-- 定时任务模块设置（日志清理天数 / 每任务保留条数 / 通知渠道配置等，一行一个键）
+CREATE TABLE IF NOT EXISTS cron_cfg (
+    key   TEXT PRIMARY KEY,
+    value TEXT DEFAULT ''
+);
 """
 
 
@@ -393,7 +406,8 @@ def init_store_db():
 
 def _migrate_ai_columns(conn):
     """老库补列：ai_calls.model / tokens_in / tokens_out、ai_usage.tokens_in / tokens_out，
-    以及「对话按项目隔离」用的 ai_conversations.root / ai_prefs.cur_roots。
+    以及「对话按项目隔离」用的 ai_conversations.root / ai_prefs.cur_roots、
+    定时任务扩展列（重试 / 依赖 / 钩子 / 通知 / 重试次序）。
 
     CREATE TABLE IF NOT EXISTS 对已存在的表不会补列，所以这里手工加；
     SQLite 的 ADD COLUMN 没有 IF NOT EXISTS，先查 PRAGMA，缺了才加（故可反复执行）。
@@ -409,6 +423,14 @@ def _migrate_ai_columns(conn):
         ("ai_usage", "tokens_out", "INTEGER DEFAULT 0"),
         ("ai_conversations", "root", "TEXT DEFAULT ''"),
         ("ai_prefs", "cur_roots", "TEXT DEFAULT '{}'"),
+        # 定时任务扩展：失败重试 / 任务依赖 / 前后置钩子 / 失败通知 / 重试次序
+        ("cron_tasks", "max_retries", "INTEGER NOT NULL DEFAULT 0"),
+        ("cron_tasks", "retry_interval", "INTEGER NOT NULL DEFAULT 60"),
+        ("cron_tasks", "depends_on", "TEXT DEFAULT ''"),
+        ("cron_tasks", "pre_hook", "TEXT DEFAULT ''"),
+        ("cron_tasks", "post_hook", "TEXT DEFAULT ''"),
+        ("cron_tasks", "notify", "INTEGER NOT NULL DEFAULT 1"),
+        ("cron_runs", "attempt", "INTEGER NOT NULL DEFAULT 0"),
     ):
         try:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}

@@ -168,6 +168,99 @@
 
   /* 通知分区 HTML：由设置页 buildSettingsContent() 调用。
      结构（markup）与逻辑统一放在本文件，避免通知模块代码散落在设置页 JS 里。 */
+  /* ---------- 独立分区：定时任务通知（设置页左侧导航单独一项） ----------
+     配置与「定时任务管理 → 设置」弹窗共用同一份（store.db 的 cron_cfg.notify），
+     桌面 / 邮件 / Telegram 复用「通知」分区的全局通道配置，这里只做开关与事件选择。 */
+  function cronNotifyBuildSectionHTML() {
+    const cronChCard = (icon, cls, kw, label, desc, id) =>
+      '<div class="notify-channel-card ' + cls + ' set-row" data-kw="定时任务 ' + kw + '">' +
+        '<div class="notify-icon"><i class="bi ' + icon + '"></i></div>' +
+        '<div class="notify-channel-info"><div class="notify-label">' + label + '</div>' +
+        '<div class="notify-desc">' + desc + '</div></div>' +
+        '<label class="set-switch"><input type="checkbox" id="' + id + '"><span></span></label>' +
+      '</div>';
+    return '<div class="set-sec" id="sec-cron-notify" data-kw="定时任务 通知 cron 钉钉 pushplus telegram 邮件">' +
+      '<h2 data-kw="定时任务 通知 cron 钉钉 pushplus telegram 邮件 桌面"><i class="bi bi-alarm"></i> 定时任务通知</h2>' +
+      '<div class="set-desc" data-kw="定时任务 通知 cron 钉钉 pushplus telegram 邮件 桌面">定时任务<b>失败 / 超时 / 安排重试</b>时向本机与外部渠道推送。' +
+      '桌面 / 邮件 / Telegram 复用「通知」分区填好的全局通道配置，无需重复填写；钉钉 / PushPlus 在本分区独立配置。</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title"><i class="bi bi-power"></i> 总开关与触发事件</div>' +
+        '<div class="notify-row inline set-row" data-kw="启用定时任务通知 enabled 开关 启用">' +
+          '<div class="notify-label-wrap"><div class="notify-label">启用定时任务通知</div>' +
+          '<div class="notify-desc">总开关；关闭后所有渠道均不推送。</div></div>' +
+          '<label class="set-switch"><input type="checkbox" id="notifyCronEnabled"><span></span></label>' +
+        '</div>' +
+        '<div class="notify-row inline set-row" data-kw="触发事件 失败 超时 重试 fail timeout retry">' +
+          '<div class="notify-label-wrap"><div class="notify-label">触发事件</div>' +
+          '<div class="notify-desc">勾选哪些事件时推送；「安排重试」指任务配置了失败重试并已排入重试。</div></div>' +
+          '<div class="notify-cron-evs">' +
+            '<label class="notify-check"><input type="checkbox" id="notifyCronEvFail"> 执行失败</label>' +
+            '<label class="notify-check"><input type="checkbox" id="notifyCronEvTimeout"> 执行超时</label>' +
+            '<label class="notify-check"><input type="checkbox" id="notifyCronEvRetry"> 安排重试</label>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title"><i class="bi bi-broadcast"></i> 推送渠道</div>' +
+        '<div class="notify-grid-2">' +
+          cronChCard("bi-bell", "", "定时任务 桌面 系统 通知 desktop", "桌面通知",
+            "复用「通知」分区的本机系统通知。", "notifyCronChDesktop") +
+          cronChCard("bi-envelope", "email", "定时任务 邮件 smtp email", "邮件",
+            "复用「通知」分区的「SMTP 设置」。", "notifyCronChEmail") +
+          cronChCard("bi-chat-dots", "", "定时任务 钉钉 dingtalk 机器人 webhook", "钉钉机器人",
+            "群机器人 Webhook 推送，支持加签。", "notifyCronChDingtalk") +
+          cronChCard("bi-telegram", "tg", "定时任务 telegram tg 电报", "Telegram",
+            "复用「通知」分区的「Telegram Bot 设置」。", "notifyCronChTelegram") +
+          cronChCard("bi-wechat", "", "定时任务 pushplus 微信 推送", "PushPlus",
+            "推送到微信（www.pushplus.plus）。", "notifyCronChPushplus") +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card notifyCronDingOpts">' +
+        '<div class="notify-card-title"><i class="bi bi-chat-dots"></i> 钉钉机器人设置</div>' +
+        '<div class="notify-row stack set-row" data-kw="钉钉 webhook 加签 secret 地址">' +
+          '<div class="notify-label-wrap"><div class="notify-label">钉钉 Webhook</div>' +
+          '<div class="notify-desc">群设置里添加「自定义机器人」后获得的 Webhook 地址（含 access_token）；保存后仅显示 ****。</div></div>' +
+          '<input class="notify-input" id="notifyCronDingWebhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=…" autocomplete="off" spellcheck="false">' +
+        '</div>' +
+        '<div class="notify-row stack set-row" data-kw="钉钉 加签 密钥 secret sec 安全">' +
+          '<div class="notify-label-wrap"><div class="notify-label">钉钉加签密钥</div>' +
+          '<div class="notify-desc">机器人安全设置选「加签」时的 SEC 密钥；留空 = 不加签。</div></div>' +
+          '<input class="notify-input" id="notifyCronDingSecret" placeholder="SEC…" autocomplete="off" spellcheck="false">' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card notifyCronPpOpts">' +
+        '<div class="notify-card-title"><i class="bi bi-wechat"></i> PushPlus 设置</div>' +
+        '<div class="notify-grid-2">' +
+          '<div class="notify-row stack set-row" data-kw="pushplus token 令牌 微信">' +
+            '<div class="notify-label-wrap"><div class="notify-label">PushPlus Token</div>' +
+            '<div class="notify-desc">在 www.pushplus.plus 微信登录后获取；保存后仅显示 ****。</div></div>' +
+            '<input class="notify-input" id="notifyCronPpToken" placeholder="推送 token" autocomplete="off" spellcheck="false">' +
+          '</div>' +
+          '<div class="notify-row stack set-row" data-kw="pushplus 群组 topic 编码">' +
+            '<div class="notify-label-wrap"><div class="notify-label">群组编码（可选）</div>' +
+            '<div class="notify-desc">留空发给自己；填了发到指定群组。</div></div>' +
+            '<input class="notify-input" id="notifyCronPpTopic" placeholder="留空 = 发给自己" autocomplete="off" spellcheck="false">' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title"><i class="bi bi-gear-wide-connected"></i> 操作</div>' +
+        '<div class="notify-desc" style="margin:0 0 12px;">保存后立即生效；测试会按对应渠道发一条真实通知（会先用当前表单里的配置发送）。</div>' +
+        '<div class="notify-actions" data-kw="测试 保存 test save 钉钉 pushplus">' +
+          '<button class="notify-btn" id="notifyCronTestDingtalk"><i class="bi bi-chat-dots"></i> 测试钉钉</button>' +
+          '<button class="notify-btn" id="notifyCronTestPushplus"><i class="bi bi-wechat"></i> 测试 PushPlus</button>' +
+          '<span class="notify-desc" style="align-self:center;">桌面 / 邮件 / Telegram 用「通知」分区的测试按钮即可。</span>' +
+          '<button class="notify-btn primary" id="notifyCronSaveBtn" style="margin-left:auto;"><i class="bi bi-save"></i> 保存</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
   function notifyBuildSectionHTML() {
     return '<div class="set-sec" id="sec-notify" data-kw="通知 notify email 邮件 浏览器 桌面 toast 提示">' +
       '<h2><i class="bi bi-bell"></i> 通知</h2>' +
@@ -449,6 +542,94 @@
     } catch (e) {
       console.error("[notify] load failed:", e);
     }
+    cronNotifyLoad();                       // 定时任务通知（配置存在 cron_cfg，独立接口）
+  }
+
+  /* ---------- 定时任务通知（cron_cfg.notify，与「定时任务 → 设置」共用同一份配置） ---------- */
+  async function cronNotifyLoad() {
+    if (!document.getElementById("notifyCronEnabled")) return;   // 设置面板没打开就不用管
+    try {
+      const r = await fetch("/api/cron/settings");
+      const d = await r.json();
+      if (d && d.notify) cronNotifyFill(d.notify);
+    } catch (_) {}
+  }
+
+  function cronNotifyFill(n) {
+    const q = id => document.getElementById(id);
+    if (!q("notifyCronEnabled")) return;
+    const ev = n.events || {}, ch = n.channels || {}, ding = n.dingtalk || {}, pp = n.pushplus || {};
+    q("notifyCronEnabled").checked = !!n.enabled;
+    if (q("notifyCronEvFail"))    q("notifyCronEvFail").checked = ev.fail !== false;
+    if (q("notifyCronEvTimeout")) q("notifyCronEvTimeout").checked = ev.timeout !== false;
+    if (q("notifyCronEvRetry"))   q("notifyCronEvRetry").checked = !!ev.retry;
+    if (q("notifyCronChDesktop"))  q("notifyCronChDesktop").checked = ch.desktop !== false;
+    if (q("notifyCronChEmail"))    q("notifyCronChEmail").checked = !!ch.email;
+    if (q("notifyCronChDingtalk")) q("notifyCronChDingtalk").checked = !!ch.dingtalk;
+    if (q("notifyCronChTelegram")) q("notifyCronChTelegram").checked = !!ch.telegram;
+    if (q("notifyCronChPushplus")) q("notifyCronChPushplus").checked = !!ch.pushplus;
+    if (q("notifyCronDingWebhook")) q("notifyCronDingWebhook").value = ding.webhook || "";
+    if (q("notifyCronDingSecret"))  q("notifyCronDingSecret").value = ding.secret || "";
+    if (q("notifyCronPpToken"))     q("notifyCronPpToken").value = pp.token || "";
+    if (q("notifyCronPpTopic"))     q("notifyCronPpTopic").value = pp.topic || "";
+    notifyToggleOptVisibility();
+  }
+
+  function cronNotifyReadForm() {
+    const q = id => document.getElementById(id);
+    const c = id => { const el = q(id); return el ? el.checked : false; };
+    const v = id => { const el = q(id); return el ? el.value.trim() : ""; };
+    return {
+      notify: {
+        enabled: c("notifyCronEnabled"),
+        events: { fail: c("notifyCronEvFail"), timeout: c("notifyCronEvTimeout"), retry: c("notifyCronEvRetry") },
+        channels: {
+          desktop: c("notifyCronChDesktop"), email: c("notifyCronChEmail"),
+          dingtalk: c("notifyCronChDingtalk"), telegram: c("notifyCronChTelegram"),
+          pushplus: c("notifyCronChPushplus"),
+        },
+        dingtalk: { webhook: v("notifyCronDingWebhook"), secret: v("notifyCronDingSecret") },
+        pushplus: { token: v("notifyCronPpToken"), topic: v("notifyCronPpTopic") },
+      },
+    };
+  }
+
+  async function cronNotifySave(silent) {
+    try {
+      const r = await fetch("/api/cron/settings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cronNotifyReadForm()),
+      });
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || ("HTTP " + r.status));
+      if (d.notify) cronNotifyFill(d.notify);       // 掩码回填，明示哪些已保存
+      if (!silent) notifyToast("定时任务通知设置已保存", "ok");
+      return true;
+    } catch (e) {
+      notifyToast("定时任务通知保存失败：" + e.message, "err");
+      return false;
+    }
+  }
+
+  async function cronNotifyTest(channel, btn) {
+    if (btn) { btn.disabled = true; btn.dataset._old = btn.innerHTML; btn.innerHTML = '<i class="bi bi-hourglass-split"></i> 发送中…'; }
+    try {
+      await cronNotifySave(true);                   // 先保存，测试用的才是刚填的配置
+      const r = await fetch("/api/cron/notify-test", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel }),
+      });
+      const d = await r.json();
+      const res = d && d.results && d.results[channel];
+      const name = { dingtalk: "钉钉", pushplus: "PushPlus" }[channel] || channel;
+      if (res && res.ok) notifyToast(`测试通知已发送（${name}）`, "ok");
+      else notifyToast(`测试失败（${name}）：${(res && res.detail) || d.error || "未知错误"}`, "err");
+      await notifyLoad();
+    } catch (e) {
+      notifyToast("测试请求失败：" + e.message, "err");
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset._old || "测试"; }
+    }
   }
 
   // 只刷新历史列表（新通知到达时调用）。
@@ -517,6 +698,11 @@
     document.querySelectorAll(".notifyEmailOpts").forEach(el => el.style.display = emailOn ? "" : "none");
     const tgOn = document.getElementById("notifyTelegram")?.checked;
     document.querySelectorAll(".notifyTelegramOpts").forEach(el => el.style.display = tgOn ? "" : "none");
+    // 定时任务通知：钉钉 / PushPlus 的配置项跟随对应渠道开关
+    const dingOn = document.getElementById("notifyCronChDingtalk")?.checked;
+    document.querySelectorAll(".notifyCronDingOpts").forEach(el => el.style.display = dingOn ? "" : "none");
+    const ppOn = document.getElementById("notifyCronChPushplus")?.checked;
+    document.querySelectorAll(".notifyCronPpOpts").forEach(el => el.style.display = ppOn ? "" : "none");
   }
 
   function notifyReadForm() {
@@ -577,6 +763,7 @@
       if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
       _notifyCache = d.cfg;
       notifyToast("通知设置已保存", "ok");
+      cronNotifySave(true);                 // 定时任务通知的配置一并保存
       // 密码框回到默认 placeholder
       const pwd = document.getElementById("notifyPassword");
       if (pwd) { pwd.value = ""; pwd.placeholder = "授权码"; }
@@ -779,14 +966,19 @@
         else if (id === "notifyTestEmail") notifyTest("email", btn);
         else if (id === "notifyTestTelegram") notifyTest("telegram", btn);
         else if (id === "notifyTestAll") notifyTest("all", btn);
+        else if (id === "notifyCronTestDingtalk") cronNotifyTest("dingtalk", btn);
+        else if (id === "notifyCronTestPushplus") cronNotifyTest("pushplus", btn);
+        else if (id === "notifyCronSaveBtn") cronNotifySave();
         else if (id === "notifyClearHistory") notifyClearHistory();
       });
 
-      // 进入通知分区时刷新
+      // 进入通知 / 定时任务通知分区时刷新
       document.addEventListener("click", e => {
         const nav = e.target.closest && e.target.closest(".set-navitem");
         if (nav && nav.dataset.sec === "sec-notify") {
           setTimeout(() => notifyLoad(), 100);
+        } else if (nav && nav.dataset.sec === "sec-cron-notify") {
+          setTimeout(() => cronNotifyLoad(), 100);
         }
       });
 

@@ -219,6 +219,25 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+/* 定时任务通知：触发事件勾选行 */
+.notify-cron-evs {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.notify-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg, #d4d4d4);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.notify-check input {
+  width: auto;
+  accent-color: #3b82f6;
+}
 .notify-btn {
   display: inline-flex;
   align-items: center;

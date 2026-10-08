@@ -109,6 +109,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         '<div class="set-navitem" data-sec="sec-ai"><i class="bi bi-stars"></i>AI 助手</div>' +
         '<div class="set-navitem" data-sec="sec-sysai"><i class="bi bi-cpu"></i>系统 AI</div>' +
         '<div class="set-navitem" data-sec="sec-notify"><i class="bi bi-bell"></i>通知</div>' +
+        '<div class="set-navitem" data-sec="sec-cron-notify"><i class="bi bi-alarm"></i>定时任务通知</div>' +
         '<div class="set-navitem" data-sec="sec-git-creds"><i class="bi bi-git"></i>Git 认证</div>' +
         '<div class="set-navitem" data-sec="sec-network"><i class="bi bi-globe2"></i>网络/代理</div>' +
         '<div class="set-navitem" data-sec="sec-cmdguard"><i class="bi bi-shield-shaded"></i>命令安全</div>' +
@@ -261,6 +262,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         '</div>' +
 
         notifyBuildSectionHTML() +
+        cronNotifyBuildSectionHTML() +
         cmdGuardBuildSectionHTML() +
         chatBuildSectionHTML() +
       '</div>' +

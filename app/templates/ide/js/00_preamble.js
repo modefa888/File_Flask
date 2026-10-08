@@ -266,12 +266,54 @@
     json: "json", md: "markdown", markdown: "markdown",
     yml: "yaml", yaml: "yaml", sh: "shellscript", bash: "shellscript", zsh: "shellscript",
     xml: "xml", xsl: "xml",
-    gitignore: "ignore", gitattributes: "ignore", gitmodules: "ignore", dockerignore: "ignore"
+    gitignore: "ignore", gitattributes: "ignore", gitmodules: "ignore", dockerignore: "ignore",
+    // ↓ 补齐语言图标：seti 的 languageIds 收录了这些语言，但本表此前只列了上面 14 种，
+    // 于是 .go/.rs/.java 等只能在 iconFor 里落到「通用灰色文件」兜底（表现为「没有图标」）。
+    // 映射值必须是 seti-icons.json 的 languageIds 里真实存在的键，否则查不到图标。
+    go: "go",
+    mod: "go", sum: "go",
+    rs: "rust",
+    java: "java", jar: "java",
+    php: "php", phtml: "php",
+    rb: "ruby", rake: "ruby", gemspec: "ruby", erb: "erb",
+    c: "c", h: "c",
+    cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp", hh: "cpp", inl: "cpp",
+    cs: "csharp", csx: "csharp",
+    kt: "kotlin", kts: "kotlin",
+    swift: "swift",
+    lua: "lua",
+    r: "r",
+    dart: "dart",
+    vue: "vue",
+    ex: "elixir", exs: "elixir",
+    hs: "haskell", lhs: "haskell",
+    jl: "julia",
+    pl: "perl", pm: "perl",
+    tf: "terraform", tfvars: "terraform",
+    gradle: "gradle",
+    groovy: "groovy", gvy: "groovy",
+    clj: "clojure", cljs: "clojure", cljc: "clojure", edn: "clojure",
+    elm: "elm",
+    fs: "fsharp", fsx: "fsharp", fsi: "fsharp",
+    m: "objective-c", mm: "objective-cpp",
+    ml: "ocaml", mli: "ocaml",
+    bat: "bat", cmd: "bat",
+    ps1: "powershell", psm1: "powershell", psd1: "powershell",
+    tex: "latex", ltx: "latex", sty: "latex", cls: "latex", bib: "latex",
+    properties: "properties", dotenv: "dotenv",
+    styl: "stylus", pcss: "postcss",
+    handlebars: "handlebars", hbs: "handlebars",
+    njk: "nunjucks", mustache: "mustache",
   };
   // 表格类扩展名 → 官方图标别名：.et/.ett（WPS）等 SETI 未收录，复用 xls/csv 的官方表格图标
   const SHEET_ICON_ALIAS = {
     et: "xls", ett: "xls", xlsx: "xls", xlsm: "xls", xltx: "xls", xltm: "xls", xlsb: "xls", ods: "xls",
     tsv: "csv",
+  };
+  // 文件名 → 图标键：Go 项目里 go.mod / go.sum 等没有独立语言 ID（seti 的 fileNames 也未收录），
+  // 统一借用 languageIds.go 的 _go2 图标，与 .go 文件保持同一视觉
+  const SETI_NAME_ALIAS = {
+    "go.mod": "_go2", "go.sum": "_go2", "go.work": "_go2", "go.work.sum": "_go2",
   };
   function iconFor(name, isDir) {
     if (isDir) return _si("bi-folder2", "#c09553");
@@ -279,7 +321,7 @@
     const ext = getExt(lower);
     const setiExt = SHEET_ICON_ALIAS[ext] || ext;   // 表格格式统一取官方表格图标
     if (SETI) {
-      let def = SETI.defs[SETI.names[lower]] || SETI.defs[SETI.exts[setiExt]];
+      let def = SETI.defs[SETI.names[lower]] || SETI.defs[SETI_NAME_ALIAS[lower]] || SETI.defs[SETI.exts[setiExt]];
       if (!def && SETI_LANG[ext]) def = SETI.defs[SETI.langs[SETI_LANG[ext]]];
       if (def && def.fontCharacter) {
         const code = String(def.fontCharacter).replace(/\\+/g, "");
@@ -291,6 +333,14 @@
     if (ext === "spec") return _si("bi-gear", "#a074c4");
     const map = {
       py:    ["bi-filetype-py", "#519aba"],
+      // Go：bootstrap-icons v1.10.5 没有 filetype-go，用代码文档图标 + Go 官方色兜底
+      // （正常渲染由上面的 SETI 分支负责，这里只覆盖图标数据尚未加载完的首屏瞬间）
+      go:    ["bi-file-earmark-code", "#00add8"],
+      mod:   ["bi-file-earmark-code", "#00add8"], sum: ["bi-file-earmark-code", "#00add8"],
+      // Go：bootstrap-icons v1.10.5 没有 filetype-go，用代码文档图标 + Go 官方色兜底
+      // （正常渲染由上面的 SETI 分支负责，这里只覆盖图标数据尚未加载完的首屏瞬间）
+      go:    ["bi-file-earmark-code", "#00add8"],
+      mod:   ["bi-file-earmark-code", "#00add8"], sum: ["bi-file-earmark-code", "#00add8"],
       html:  ["bi-filetype-html", "#e37933"], htm: ["bi-filetype-html", "#e37933"],
       css:   ["bi-filetype-css", "#519aba"], scss: ["bi-filetype-css", "#e37933"], less: ["bi-filetype-css", "#519aba"],
       js:    ["bi-filetype-js", "#cbcb41"], mjs: ["bi-filetype-js", "#cbcb41"], cjs: ["bi-filetype-js", "#cbcb41"],

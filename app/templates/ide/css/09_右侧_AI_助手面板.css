@@ -508,6 +508,19 @@
   .ai-steps-body::-webkit-scrollbar-thumb:hover { background: #555; }
   .ai-steps.collapsed .ai-steps-body { display: none; }
   .ai-steps-body .ai-step { align-self: stretch; }
+  /* 子 Agent 进度：嵌在 delegate_task 步骤行内，实时展开 */
+  .ai-substeps { flex: 1 0 100%; margin: 5px 0 2px; padding: 6px 8px 6px 18px; border-left: 2px solid #3a3a44;
+    border-radius: 0 4px 4px 0; background: rgba(255,255,255,0.03); display: flex; flex-direction: column; gap: 4px; }
+  .ai-sub-hd { font-size: 11px; color: #b9c6d4; }
+  .ai-sub-hd::before { content: "◈ "; color: #7fb3e0; }
+  .ai-sub-step { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #9aa4b2; }
+  .ai-sub-step .s-name { color: #cfe3f7; }
+  .ai-sub-step .s-arg { color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; }
+  .ai-sub-step .s-res { margin-left: auto; }
+  .ai-sub-step .s-res.ok { color: #7fd88f; }
+  .ai-sub-step .s-res.bad { color: #e08a8a; }
+  .ai-sub-final { font-size: 11px; color: #9aa4b2; padding: 3px 0; white-space: pre-wrap; word-break: break-word; }
+  .ai-sub-final.bad { color: #e08a8a; }
   /* 命令确认卡片 */
   .ai-ask { align-self: flex-start; max-width: 100%; background: #2c2718; border: 1px solid #5a4a26;
     border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #e2c08a; }

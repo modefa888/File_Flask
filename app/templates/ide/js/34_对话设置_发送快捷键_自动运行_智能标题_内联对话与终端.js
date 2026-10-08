@@ -20,6 +20,7 @@ const CHAT_DEFAULTS = {
   chatMaxStepsMain: 100,       // 最大步数（主 Agent），0 = 不限制
   chatMaxStepsSub: 500,        // 最大步数（子 Agent），0 = 不限制
   chatImageGen: true,          // 图片生成（允许 Agent 依据文字描述生成图片）
+  chatImageModel: "",          // 默认图片模型（留空则 gpt-image-1）
   chatLspTool: true,           // LSP 工具（跳转定义 / 查找引用等语言智能）
   chatCommitLang: "zh",        // 提交消息语言：zh | en
 };
@@ -54,6 +55,12 @@ function chatNumRow(id, label, desc, kw) {
   return '<div class="set-row" data-kw="' + kw + '">' +
     '<div class="set-info"><div class="set-label">' + label + '</div><div class="set-desc">' + desc + '</div></div>' +
     '<input type="number" id="' + id + '" min="0" step="10">' +
+  '</div>';
+}
+function chatTextRow(id, label, desc, kw) {
+  return '<div class="set-row" data-kw="' + kw + '">' +
+    '<div class="set-info"><div class="set-label">' + label + '</div><div class="set-desc">' + desc + '</div></div>' +
+    '<input type="text" id="' + id + '" class="set-text" placeholder="留空使用默认" autocomplete="off" spellcheck="false">' +
   '</div>';
 }
 function chatGroup(title, kw, rows) {
@@ -105,8 +112,9 @@ function chatBuildSectionHTML() {
       chatNumRow('chatMaxStepsMain', '最大步数（主 Agent）', '每轮对话中主 Agent 自动暂停前的最大步数。0 表示不限制。默认为 100。', 'Agent 最大步数 主 限制') +
       chatNumRow('chatMaxStepsSub', '最大步数（子 Agent）', '每次调用子 Agent（自定义 Agent）时的最大步数。0 表示不限制。默认为 500。', 'Agent 最大步数 子 自定义 限制')) +
 
-    chatGroup('图片生成', '图片生成 绘图 image 文字描述',
-      chatChkRow('chatImageGen', '图片生成', '允许 Agent 根据文字描述生成图片', '图片生成 绘图 image 文生图')) +
+    chatGroup('图片生成', '图片生成 绘图 image 文字描述 模型',
+      chatChkRow('chatImageGen', '图片生成', '允许 Agent 根据文字描述生成图片', '图片生成 绘图 image 文生图') +
+      chatTextRow('chatImageModel', '默认图片模型', '生成图片时使用的模型名（如 gpt-image-1 / dall-e-3）。留空则使用接口的默认（gpt-image-1）。', '图片生成 模型 文生图 model')) +
 
     chatGroup('LSP', 'LSP 语言服务 跳转定义 查找引用',
       chatChkRow('chatLspTool', 'LSP 工具', '启用 LSP（语言服务）工具。启用后，Agent 可以使用跳转定义、查找引用等语言智能功能。', 'LSP 语言服务 跳转定义 查找引用')) +
@@ -134,6 +142,7 @@ function chatMountSettings(host) {
   bindChatChk(q("#chatWebTool"), "chatWebTool");
   bindChatChk(q("#chatWebAuto"), "chatWebAuto");
   bindChatChk(q("#chatImageGen"), "chatImageGen");
+  bindChatText(q("#chatImageModel"), "chatImageModel");
   bindChatChk(q("#chatLspTool"), "chatLspTool");
   bindChatNum(q("#chatMaxStepsMain"), "chatMaxStepsMain");
   bindChatNum(q("#chatMaxStepsSub"), "chatMaxStepsSub");
@@ -157,6 +166,13 @@ function bindChatNum(el, k) {
     if (!isFinite(v) || v < 0) v = Number(CHAT_DEFAULTS[k]) || 0;
     el.value = v; chatSetKv(k, v);
   });
+}
+function bindChatText(el, k) {
+  if (!el) return;
+  el.value = chatGet(k) || "";
+  const save = () => chatSetKv(k, (el.value || "").trim());
+  el.addEventListener("change", save);
+  el.addEventListener("input", save);
 }
 
 /* ---------- 智能标题：首轮完成后由轻量模型生成标题 ---------- */

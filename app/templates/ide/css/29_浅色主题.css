@@ -797,6 +797,11 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ai-steps-body { scrollbar-color: #c4c4c4 transparent; }
 :where(html.theme-light) .ai-steps-body::-webkit-scrollbar-thumb { background: #c4c4c4; }
 :where(html.theme-light) .ai-steps-body::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+:where(html.theme-light) .ai-substeps { background: #f0f3f7; border-left-color: #cdd8e6; color: #5a6a7a; }
+:where(html.theme-light) .ai-sub-hd { color: #33404d; }
+:where(html.theme-light) .ai-sub-step .s-name { color: #33404d; }
+:where(html.theme-light) .ai-sub-step .s-arg { color: #8a8a8a; }
+:where(html.theme-light) .ai-sub-final { color: #5a6a7a; }
 :where(html.theme-light) .ai-ask { background: #fbf3d9; border-color: #e5d9b0; color: #8a6a00; }
 :where(html.theme-light) .ai-ask .q code { background: #f5edd8; border-color: #ddd0a8; color: #8a5a00; }
 :where(html.theme-light) .ai-ask .r { color: #8a7a4a; }

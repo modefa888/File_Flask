@@ -17,6 +17,7 @@ SSE 事件（data: {json}\\n\\n）：
     workspace 读任意；写只能落在项目内；执行命令需逐条确认
     full      读任意；写任意路径；执行命令不再确认（危险命令仍会被安全规则拦截）
 """
+import base64
 import json
 import os
 import re
@@ -117,9 +118,38 @@ _TOOLS = [
             "query": {"type": "string", "description": "搜索关键词（用简短、准确的中文或英文）"},
             "max_results": {"type": "integer", "description": "最多返回几条结果（默认 5，最大 10）"}},
             "required": ["query"]}}},
+    {"type": "function", "function": {
+        "name": "generate_image",
+        "description": "根据文字描述生成图片（文生图）。当你需要为界面、文档、README 或演示生成配图，"
+                      "或用户明确要求画图时调用。返回生成图片的查看地址（markdown 图片链接）。"
+                      "依赖当前接口支持 OpenAI 格式的 /images/generations（如 OpenAI；不支持的接口会返回明确错误）。",
+        "parameters": {"type": "object", "properties": {
+            "prompt": {"type": "string", "description": "画面描述（尽量具体：主体、风格、构图、色调）"},
+            "model": {"type": "string", "description": "图片模型名（可选）。默认 gpt-image-1；若当前接口不支持该模型，请换成接口提供的图片模型"},
+            "size": {"type": "string", "description": "尺寸（可选，默认 1024x1024，如 512x512 / 1792x1024）"},
+            "n": {"type": "integer", "description": "生成张数（可选，1-4，默认 1）"}},
+            "required": ["prompt"]}}},
+    {"type": "function", "function": {
+        "name": "code_intel",
+        "description": "本地代码智能（LSP 风格的轻量实现，无需外部语言服务进程）：在项目里"
+                      "查找符号定义、查找引用、列出文件大纲、按名搜索符号。只读、不修改任何文件。",
+        "parameters": {"type": "object", "properties": {
+            "action": {"type": "string", "description": "操作：find_definition 找定义 / find_references 找引用 / outline 列大纲 / search_symbol 按名搜符号"},
+            "query": {"type": "string", "description": "符号名（如 MyClass、do_task）或正则（search_symbol 时）"},
+            "path": {"type": "string", "description": "范围：目录或文件（可选，默认项目根；outline 必须给一个文件）"}},
+            "required": ["action", "query"]}}},
+    {"type": "function", "function": {
+        "name": "delegate_task",
+        "description": "把一个边界清晰、相对独立的子任务交给子 Agent 独立完成（它会自己读文件、改文件、跑命令，"
+                      "直到做完并把结果返回给你）。适合把大任务拆给子 Agent 分步推进。子 Agent 最多跑"
+                      "「最大步数（子 Agent）」步，且不会再次派生子 Agent；危险命令会被它自动拒绝。",
+        "parameters": {"type": "object", "properties": {
+            "task": {"type": "string", "description": "给子 Agent 的任务说明（目标、范围、约束、验收标准）"},
+            "scope_path": {"type": "string", "description": "子 Agent 的工作范围目录（可选，默认同项目根）"}},
+            "required": ["task"]}}},
 ]
 
-_READ_TOOLS = {"list_dir", "read_file", "search_files", "web_search"}
+_READ_TOOLS = {"list_dir", "read_file", "search_files", "web_search", "code_intel"}
 _WRITE_TOOLS = {"write_file", "edit_file"}
 _TOOL_NAMES = {t["function"]["name"] for t in _TOOLS}
 
@@ -562,17 +592,276 @@ _TOOL_FUNCS = {
     "run_command": _tool_run_command,
     "web_search": _tool_web_search,
 }
+# generate_image / code_intel 在文件下方定义，于模块加载末期注册到 _TOOL_FUNCS
 
 
-def tools_for_perm(perm):
-    """普通对话可用的工具：读取类始终可用；写入类仅在非只读权限下开放；不暴露 run_command。"""
+# ---------------------------------------------------------------- 新增工具：图片生成 / 本地代码智能 / 子 Agent
+def _tool_generate_image(args, root, perm, ctx=None):
+    """调用当前接口的 OpenAI 格式 /images/generations，生成图片并落盘，回传查看地址。
+
+    图片模型优先级：调用时显式 model > 设置里的默认模型(ctx.image_model) > gpt-image-1。
+    """
+    prompt = str(args.get("prompt") or "").strip()
+    if not prompt:
+        return False, "缺少 prompt", "", "缺少 prompt"
+    cfg = _load_cfg()
+    provider, model, err = _sys_pick(cfg, "agent")
+    if err:
+        return False, err, "", err
+    base = provider["base_url"].rstrip("/")
+    if base.endswith("/chat/completions"):
+        base = base[: -len("/chat/completions")]
+    img_model = str(args.get("model") or (ctx or {}).get("image_model") or "gpt-image-1").strip() or "gpt-image-1"
+    size = str(args.get("size") or "1024x1024").strip() or "1024x1024"
+    try:
+        n = max(1, min(4, int(args.get("n") or 1)))
+    except (TypeError, ValueError):
+        n = 1
+    body = {"model": img_model, "prompt": prompt, "n": n, "size": size, "response_format": "b64_json"}
+    req = urllib.request.Request(base + "/images/generations", data=json.dumps(body).encode("utf-8"),
+                                 method="POST", headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + provider["api_key"]})
+    try:
+        with urllib.request.urlopen(req, timeout=_READ_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", "ignore")[:800]
+        except Exception:  # noqa: BLE001
+            pass
+        return False, "图片生成失败（HTTP %d）" % e.code, "", "图片生成接口返回错误：%s" % detail
+    except Exception as e:  # noqa: BLE001
+        return False, "图片生成请求失败：%s" % e, "", "图片生成请求失败：%s" % e
+    items = (data.get("data") or [])[:n]
+    if not items:
+        return False, "接口未返回图片", "", "接口未返回图片：%s" % json.dumps(data, ensure_ascii=False)[:500]
+    d = os.path.join(config.STORAGE_DIR, "ai_images")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    urls = []
+    for i, it in enumerate(items):
+        b64 = it.get("b64_json")
+        url = it.get("url")
+        if b64:
+            try:
+                fn = "%s_%d.png" % (uuid.uuid4().hex[:12], i)
+                with open(os.path.join(d, fn), "wb") as f:
+                    f.write(base64.b64decode(b64))
+                urls.append("/api/ai/image/" + fn)
+            except Exception:  # noqa: BLE001
+                urls.append("")
+        elif url:
+            urls.append(url)
+    urls = [u for u in urls if u]
+    if not urls:
+        return False, "图片已生成但无法保存/解析", "", "图片已生成但返回内容无法解析：%s" % json.dumps(data, ensure_ascii=False)[:300]
+    summary = "已生成 %d 张图片" % len(urls)
+    body_text = "图片生成成功（%d 张）。查看地址：\n%s\n\n提示：用 markdown ![](地址) 即可在回复里嵌入。" % (
+        len(urls), "\n".join(urls))
+    return True, summary, body_text, body_text[:_TOOL_CHARS]
+
+
+def _tool_code_intel(args, root, perm, ctx=None):
+    """本地代码智能（LSP 风格轻量实现）：定义 / 引用 / 大纲 / 按名搜符号。只读、不改文件。"""
+    action = str(args.get("action") or "find_references").strip().lower()
+    query = str(args.get("query") or "").strip()
+    if not query:
+        return False, "缺少 query", "", "缺少 query（要查的符号名）"
+    base = _resolve(args.get("path") or ".", root)
+    if not os.path.exists(base):
+        return False, "路径不存在：%s" % base, "", "路径不存在：%s" % base
+    sym = re.escape(query)
+    def_rx = re.compile(
+        r"^\s*(?:async\s+)?(?:def|class|function|func|fn|public\s+func|private\s+func|"
+        r"protected\s+func|pub\s+fn|public\s+function|private\s+function)\s+%s\b" % sym)
+    ref_rx = re.compile(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % sym)
+    if action == "outline":
+        if not os.path.isfile(base):
+            return False, "outline 需要指定一个文件（path）", "", "outline 需要指定一个文件（path）"
+        # 大纲：列出文件里所有 def/class/函数/常量声明（不依赖 query）
+        outline_rx = re.compile(
+            r"^\s*(?:async\s+)?(?:def|class|function|func|fn|public|private|protected|const|let|var|pub)\b")
+        hits = []
+        try:
+            with open(base, "r", encoding="utf-8", errors="ignore") as f:
+                for i, line in enumerate(f, 1):
+                    if outline_rx.match(line):
+                        hits.append("%d: %s" % (i, line.strip()[:160]))
+        except (OSError, UnicodeError) as e:
+            return False, "读取失败：%s" % e, "", "读取失败：%s" % e
+        if not hits:
+            return True, "大纲无匹配", "", "文件 %s 内未找到 %s 的定义/声明" % (_rel(base, root), query)
+        body = "\n".join(hits)
+        return True, "大纲 %d 项" % len(hits), body, ("文件 %s 大纲（%d）：\n%s" % (_rel(base, root), len(hits), body))[:_TOOL_CHARS]
+    if action == "find_definition":
+        rx, label = def_rx, "定义"
+    elif action in ("find_references", "search_symbol"):
+        rx, label = ref_rx, "符号" if action == "search_symbol" else "引用"
+    else:
+        return False, "未知 action：%s" % action, "", \
+            "未知 action：%s（支持 find_definition / find_references / outline / search_symbol）" % action
+    hits, scanned = [], 0
+
+    def _iter_files():
+        if os.path.isfile(base):
+            yield base
+            return
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [x for x in dirnames if x not in _SKIP_DIRS and not x.startswith(".git")]
+            for fn in filenames:
+                full = os.path.join(dirpath, fn)
+                if os.path.getsize(full) > 2 * 1024 * 1024:
+                    continue
+                yield full
+
+    for full in _iter_files():
+        scanned += 1
+        if scanned > _SEARCH_FILES * 4:
+            break
+        try:
+            with open(full, "r", encoding="utf-8", errors="ignore") as f:
+                for i, line in enumerate(f, 1):
+                    if rx.search(line):
+                        hits.append("%s:%d: %s" % (_rel(full, root), i, line.rstrip()[:200]))
+                        if len(hits) >= _SEARCH_HITS:
+                            break
+        except (OSError, UnicodeError):
+            continue
+        if len(hits) >= _SEARCH_HITS:
+            break
+    if not hits:
+        return True, "无匹配", "", "在 %s 下 %s %s：无匹配" % (_rel(base, root), action, query)
+    body = "\n".join(hits)
+    return True, "%s 命中 %d 处" % (label, len(hits)), body[:4000], \
+        ("在 %s 下 %s %s（命中 %d）：\n%s" % (_rel(base, root), action, query, len(hits), body))[:_TOOL_CHARS]
+
+
+def _run_subagent(provider, model, root, perm, task, ctx):
+    """子 Agent 内部循环（生成器）：复用 _stream_model 跑工具，最多 sub_max 步，不再派生子 Agent。
+
+    每执行一步都会 yield 一个结构化事件 dict（kind∈start/step/result/final），
+    供父级实时转发到前端；最终 return (final_text, log)。
+    """
+    sub_max = ctx.get("max_steps_sub") or 0
+    convo = [{"role": "system", "content": _agent_system(root, perm, task_list=ctx.get("task_list", True),
+                                                         web_tool=ctx.get("web_tool", True),
+                                                         image_tool=ctx.get("image_tool", True),
+                                                         lsp_tool=ctx.get("lsp_tool", True),
+                                                         allow_sub=False)},
+             {"role": "user", "content": "这是一个独立的子任务，请独立完成（最多 %s 步）。任务：%s"
+              % ("不限" if not sub_max else sub_max, task)}]
+    tool_list = [t for t in _TOOLS
+                 if (ctx.get("web_tool", True) or t["function"]["name"] != "web_search")
+                 and (ctx.get("image_tool", True) or t["function"]["name"] != "generate_image")
+                 and (ctx.get("lsp_tool", True) or t["function"]["name"] != "code_intel")
+                 and t["function"]["name"] != "delegate_task"]   # 子 Agent 不再派生子 Agent
+    log = []
+    _round = 0
+    sid = 0
+    yield {"kind": "start", "task": task}
+    while True:
+        _round += 1
+        if sub_max and _round > sub_max:
+            log.append("[子 Agent 已达到「最大步数（子 Agent）」上限 %d，自动停止]" % sub_max)
+            break
+        # 驱动模型：子 Agent 的推理 token 不逐个转发，只在产出工具调用时上报进度
+        gen = _stream_model(provider, model, convo, tool_list)
+        try:
+            while True:
+                next(gen)            # 丢弃子 Agent 的流式输出
+        except StopIteration as e:
+            text, tool_calls = e.value
+        convo.append({"role": "assistant", "content": text or None,
+                      "tool_calls": [{"id": c["id"], "type": "function",
+                                      "function": {"name": c["name"], "arguments": c["args_raw"]}}
+                                     for c in tool_calls]})
+        if not tool_calls:
+            break
+        for c in tool_calls:
+            name, cargs = c["name"], c["args"]
+            sid += 1
+            yield {"kind": "step", "sid": sid, "tool": name, "args": cargs}
+            # 子 Agent 不能把确认弹给用户：sub_agent=True 让 _gate 自动裁决
+            allowed, refuse, need_ask, ask_reason = _gate(perm, name, cargs, root,
+                                                          ctx.get("auto_run", "safe"),
+                                                          ctx.get("web_auto", True), sub_agent=True)
+            if not allowed:
+                res_text = "调用被拒绝：%s" % refuse
+                s_summary = refuse
+                s_ok = False
+            else:
+                s_ok, s_summary, detail, model_text = _run_tool_job(name, cargs, root, perm, ctx)
+                res_text = model_text or s_summary
+                if not s_ok and s_summary:
+                    res_text = "工具执行失败：%s" % s_summary
+            convo.append({"role": "tool", "tool_call_id": c["id"],
+                          "content": (res_text or "")[:_TOOL_CHARS]})
+            yield {"kind": "result", "sid": sid, "tool": name, "ok": bool(s_ok), "summary": s_summary or ""}
+            log.append("[%s] %s" % (name, s_summary or (refuse if not allowed else "")))
+    final = ""
+    for m in reversed(convo):
+        if m.get("role") == "assistant":
+            final = m.get("content") or ""
+            break
+    yield {"kind": "final", "text": final}
+    return final, "\n".join(log)
+
+
+def _tool_delegate_task(args, root, perm, ctx):
+    """主 Agent 调用：把一个子任务交给子 Agent 独立完成。
+
+    作为生成器运行：逐个 yield 子 Agent 的内部事件 dict（父级包成 subagent SSE 实时转发到前端），
+    最后 return (ok, summary, detail, model_text)。
+    """
+    task = str(args.get("task") or "").strip()
+    if not task:
+        yield {"kind": "error", "msg": "缺少 task"}
+        return False, "缺少 task", "", "缺少 task（给子 Agent 的任务说明）"
+    if not ctx or not ctx.get("provider"):
+        yield {"kind": "error", "msg": "子 Agent 只能在 Agent 运行中调用"}
+        return False, "子 Agent 只能在 Agent 运行中调用", "", "delegate_task 缺少运行上下文"
+    root = _resolve(args.get("scope_path") or ".", ctx.get("root") or root)
+    if not os.path.isdir(root):
+        yield {"kind": "error", "msg": "scope_path 不是有效目录"}
+        return False, "scope_path 不是有效目录", "", "子 Agent 范围目录不存在：%s" % root
+    gen = _run_subagent(ctx["provider"], ctx["model"], root, perm, task, ctx)
+    final_text, log = "", ""
+    try:
+        while True:
+            yield next(gen)         # 转发子 Agent 内部事件
+    except StopIteration as e:
+        final_text, log = e.value
+    if not final_text and not log:
+        return False, "子 Agent 未产出结果", "", "子 Agent 未产出结果"
+    summary = "子 Agent 完成（约 %d 步）" % (log.count("\n") + 1)
+    return True, summary, log, (final_text or "(子 Agent 未给出文字结论)")[:_TOOL_CHARS]
+
+
+# generate_image / code_intel 定义在上方，这里在模块加载末期注册（避免前向引用）
+_TOOL_FUNCS["generate_image"] = _tool_generate_image
+_TOOL_FUNCS["code_intel"] = _tool_code_intel
+
+
+def tools_for_perm(perm, image_tool=True, lsp_tool=True):
+    """普通对话可用的工具：读取类始终可用；写入类仅在非只读权限下开放；不暴露 run_command。
+
+    generate_image / code_intel 按开关开放；delegate_task 仅 Agent 内部使用，不在这里暴露。
+    """
     names = {"list_dir", "read_file", "search_files", "web_search"}
     if perm in ("workspace", "full"):
         names |= {"write_file", "edit_file"}
+    if image_tool:
+        names.add("generate_image")
+    if lsp_tool:
+        names.add("code_intel")
     return [t for t in _TOOLS if t["function"]["name"] in names]
 
 
-def _gate(perm, name, args, root, auto_run="safe", web_auto=True):
+def _gate(perm, name, args, root, auto_run="safe", web_auto=True, sub_agent=False):
     """权限校验 → (allowed, refuse_reason, need_ask, ask_reason)。
 
     auto_run 来自「设置 → 对话 → 自动运行模式」：
@@ -587,6 +876,8 @@ def _gate(perm, name, args, root, auto_run="safe", web_auto=True):
         return True, "", False, ""
     if name in _WRITE_TOOLS:
         if auto_run == "ask":
+            if sub_agent:
+                return True, "", False, ""               # 子 Agent 被委派来写文件，自动放行
             return True, "", True, "当前为「每次询问」模式：写入文件需要你确认"
         path = _resolve(args.get("path"), root)
         if perm != "full" and root and path and not _inside(path, root):
@@ -599,6 +890,12 @@ def _gate(perm, name, args, root, auto_run="safe", web_auto=True):
         verdict = check_command(cmd)
         if verdict["level"] == "blocked":
             return False, "已拦截危险命令：%s" % verdict["reason"], False, ""
+        if sub_agent:
+            # 子 Agent 不能把确认弹给用户（会死锁）：放行安全命令，自动拒绝一切需确认 / 删除命令
+            is_del, del_reason = is_delete_command(cmd)
+            if verdict["level"] == "confirm" or is_del:
+                return False, "子 Agent 模式下不能执行需要用户确认的危险命令：%s" % (del_reason or verdict["reason"]), False, ""
+            return True, "", False, ""
         if auto_run == "all" or perm == "full":
             return True, "", False, ""                 # 自动运行所有内容 / 完全权限：命令不再逐条确认
         if auto_run == "ask":
@@ -646,7 +943,8 @@ def _repo_tree(root, max_lines=_TREE_LINES, depth=_TREE_DEPTH):
     return "\n".join(out)
 
 
-def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None, task_list=True, web_tool=True):
+def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None, task_list=True, web_tool=True,
+                 image_tool=True, lsp_tool=True, allow_sub=True):
     perm_desc = {
         "readonly": "仅可查看 —— 只能读文件与搜索，写入和执行会被拒绝（可提示用户切换权限）",
         "workspace": "工作区内修改 —— 可以读写项目内的文件；普通命令直接执行，删除 / 高风险命令执行前会先征求用户确认",
@@ -680,6 +978,12 @@ def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None, 
     ]
     if web_tool:
         tool_lines.append("- web_search(query, max_results)")
+    if image_tool:
+        tool_lines.append("- generate_image(prompt, size, n)")
+    if lsp_tool:
+        tool_lines.append("- code_intel(action, query, path)")
+    if allow_sub:
+        tool_lines.append("- delegate_task(task, scope_path)")
     base += (
         "\n\n工具调用格式：优先使用标准的函数调用（tool_calls）。"
         "如果你的接口不支持 function calling，可把调用写在正文里，系统会自动解析。严格使用下列工具名与参数名：\n"
@@ -934,13 +1238,24 @@ def _stream_model(provider, model, convo, tools=None):
     return text, out
 
 
-def _run_tool_job(name, args, root, perm):
-    """执行单个工具（会被线程池并发调用，只做纯函数式处理）。"""
+def _run_tool_job(name, args, root, perm, ctx=None):
+    """执行单个工具（会被线程池并发调用，只做纯函数式处理）。
+
+    ctx 携带本次运行的接口 / 模型 / 权限等上下文（图片默认模型、子 Agent 复用等）。
+    """
+    if name == "delegate_task":                 # 子 Agent：在无流式上下文时丢弃中间事件，仅返回最终结果
+        gen = _tool_delegate_task(args, root, perm, ctx)
+        try:
+            while True:
+                next(gen)
+        except StopIteration as e:
+            return e.value
+        return False, "子 Agent 异常", "", "子 Agent 未返回结果"
     fn = _TOOL_FUNCS.get(name)
     if fn is None:
         return False, "未知工具：%s" % name, "", "未知工具：%s" % name
     try:
-        return fn(args, root, perm)
+        return fn(args, root, perm, ctx)
     except Exception as e:  # noqa: BLE001
         return False, "工具执行异常：%s" % e, "", "工具执行异常：%s" % e
 
@@ -968,14 +1283,24 @@ def _trim_convo(convo, rounds_tool_idx):
 
 
 def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_prompts=None, extra_names=None,
-               auto_run="safe", task_list=True, web_tool=True, web_auto=True, max_steps=0, max_steps_sub=0):
+               auto_run="safe", task_list=True, web_tool=True, web_auto=True, max_steps=0, max_steps_sub=0,
+               image_tool=True, lsp_tool=True, allow_sub=True, image_model=""):
     convo = [{"role": "system", "content": _agent_system(root, perm, skills, extra_prompts, extra_names,
-                                                         task_list, web_tool)}] + msgs
-    tool_list = [t for t in _TOOLS if (web_tool or t["function"]["name"] != "web_search")]
+                                                         task_list, web_tool, image_tool, lsp_tool, allow_sub)}] + msgs
+    tool_list = [t for t in _TOOLS
+                 if (web_tool or t["function"]["name"] != "web_search")
+                 and (image_tool or t["function"]["name"] != "generate_image")
+                 and (lsp_tool or t["function"]["name"] != "code_intel")
+                 and (allow_sub or t["function"]["name"] != "delegate_task")]
+    # 本次运行的上下文（供 delegate_task 子 Agent 复用同一接口 / 模型 / 权限）
+    _ctx = {"provider": provider, "model": model, "auto_run": auto_run, "web_auto": web_auto,
+            "web_tool": web_tool, "image_tool": image_tool, "lsp_tool": lsp_tool,
+            "task_list": task_list, "max_steps_sub": max_steps_sub, "image_model": image_model,
+            "perm": perm, "root": root}
     always_allow = set()
     rounds_tool_idx = []                 # 每轮追加的 tool 消息下标，用于上下文裁剪
     _round = 0
-    # max_steps：主 Agent 最大工具轮数（0 = 不限制）；max_steps_sub 预留给子 Agent（当前暂无子 Agent）。
+    # max_steps：主 Agent 最大工具轮数（0 = 不限制）；max_steps_sub：子 Agent 的最大步数（0 = 不限制）。
     while True:                          # 模型不再发起调用即自然结束
         _round += 1
         if max_steps and _round > max_steps:
@@ -1014,7 +1339,7 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
             with ThreadPoolExecutor(max_workers=min(_MAX_PARALLEL, len(parallel))) as pool:
                 futs = {}
                 for job in parallel:
-                    futs[pool.submit(_run_tool_job, job["c"]["name"], job["c"]["args"], root, perm)] = (
+                    futs[pool.submit(_run_tool_job, job["c"]["name"], job["c"]["args"], root, perm, _ctx)] = (
                         job, time.time())
                 for fut in as_completed(futs):
                     job, t_start = futs[fut]
@@ -1030,6 +1355,22 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
         for job in serial:
             c = job["c"]
             name, args = c["name"], c["args"]
+            if name == "delegate_task":                 # 子 Agent：实时转发内部事件，再回最终结果
+                t_start = time.time()
+                gen = _tool_delegate_task(args, root, perm, _ctx)
+                try:
+                    while True:
+                        ev = next(gen)
+                        yield _sse({"type": "subagent", "call_id": c["id"], "event": ev})
+                except StopIteration as e:
+                    ok, summary, detail, model_text = e.value
+                    ms = int((time.time() - t_start) * 1000)
+                    done[c["id"]] = (ok, summary, detail, model_text, ms, False)
+                    _log.info("Agent 工具（子 Agent）：%s → %s（%dms）", c["name"],
+                              "ok" if ok else "fail", ms)
+                    yield _sse({"type": "result", "call_id": c["id"], "tool": "delegate_task", "ok": ok,
+                                "summary": summary, "detail": detail, "ms": ms})
+                continue
             t_start = time.time()
             if job["ask"] and name not in always_allow:
                 key = (run_id, c["id"])
@@ -1053,7 +1394,7 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
                 if box["always"]:
                     always_allow.add(name)
             undo.begin()
-            ok, summary, detail, model_text = _run_tool_job(name, args, root, perm)
+            ok, summary, detail, model_text = _run_tool_job(name, args, root, perm, _ctx)
             changes = undo.finish(root)              # 推断动作类型 + 生成差异，供「文件变更」模块
             _record_run_changes(run_id, changes)     # 按 run_id 累计，供停止后补拉
             ms = int((time.time() - t_start) * 1000)
@@ -1120,6 +1461,9 @@ def api_ai_agent():
         max_steps_sub = int(data.get("max_steps_sub") or 0)
     except (TypeError, ValueError):
         max_steps_sub = 0
+    image_tool = data.get("image_tool", True) is not False
+    lsp_tool = data.get("lsp_tool", True) is not False
+    image_model = str(data.get("image_model") or "").strip()
     clean = [{"role": str(m.get("role") or "user")[:16], "content": _clean_content(m.get("content"))}
              for m in msgs[:40]]
     _inject_system_time(clean)
@@ -1150,7 +1494,8 @@ def api_ai_agent():
         # 通知：外层包装，捕捉 delta 文本；异常也会触发
         text_parts = usage_meta["texts"]       # 同一份列表：通知与用量估算共用
         inner = _run_agent(run_id, provider, model, root, perm, clean, skills, extra_prompts, extra_names,
-                           auto_run, task_list, web_tool, web_auto, max_steps, max_steps_sub)
+                           auto_run, task_list, web_tool, web_auto, max_steps, max_steps_sub,
+                           image_tool, lsp_tool, allow_sub=True, image_model=image_model)
         try:
             for chunk in inner:
                 # 抽取 delta 文本（SSE 字节："data: {...}"）

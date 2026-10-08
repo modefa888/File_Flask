@@ -1410,6 +1410,54 @@
     if (!pre) { pre = document.createElement("pre"); pre.className = "st-detail"; row.appendChild(pre); }
     pre.textContent = [ev.summary ? "结果：" + ev.summary : "", ev.detail || ""].filter(Boolean).join("\n\n");
   }
+  /* 子 Agent 进度：把 subagent 事件实时渲染到父级 delegate_task 步骤行内 */
+  function aiSubStepEvent(row, ev) {
+    if (!row) return;
+    let box = row.querySelector(".ai-substeps");
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "ai-substeps";
+      box._sidMap = {};
+      row.appendChild(box);
+    }
+    const e2 = ev || {};
+    if (e2.kind === "start") {
+      const h = document.createElement("div");
+      h.className = "ai-sub-hd";
+      h.textContent = (e2.task || "").slice(0, 160);
+      box.appendChild(h);
+    } else if (e2.kind === "step") {
+      const r = document.createElement("div");
+      r.className = "ai-sub-step";
+      const a = e2.args || {};
+      const arg = a.path || a.command || a.pattern || a.query || a.prompt || "";
+      r.innerHTML = '<i class="bi ' + (AI_TOOL_ICON[e2.tool] || "bi-gear") + '"></i>' +
+        '<span class="s-name"></span><span class="s-arg"></span><span class="s-res">执行中…</span>';
+      r.querySelector(".s-name").textContent = AI_TOOL_LABEL[e2.tool] || e2.tool;
+      r.querySelector(".s-arg").textContent = (arg || "").toString().slice(0, 120);
+      r.querySelector(".s-arg").title = JSON.stringify(a, null, 1);
+      box.appendChild(r);
+      box._sidMap[e2.sid] = r;
+    } else if (e2.kind === "result") {
+      const r = box._sidMap[e2.sid];
+      if (r) {
+        const d = r.querySelector(".s-res");
+        d.className = "s-res " + (e2.ok ? "ok" : "bad");
+        d.textContent = e2.ok ? "完成" : "失败";
+        r.title = e2.summary || "";
+      }
+    } else if (e2.kind === "final") {
+      const f = document.createElement("div");
+      f.className = "ai-sub-final";
+      f.textContent = "结论：" + (e2.text || "").slice(0, 600);
+      box.appendChild(f);
+    } else if (e2.kind === "error") {
+      const f = document.createElement("div");
+      f.className = "ai-sub-final bad";
+      f.textContent = "错误：" + (e2.msg || "");
+      box.appendChild(f);
+    }
+  }
 
   /* 工具步骤汇总文案：列出目录 ×2 · 读取文件 ×3 · 1 项被拦截 */
   function aiStepsSummary(steps) {
@@ -1577,6 +1625,9 @@
               stepsBox._pending = Math.max(0, stepsBox._pending - 1);
               stepsBox._paint();
             }
+          } else if (e.type === "subagent") {
+            // 子 Agent 实时进度：渲染到对应的 delegate_task 步骤行内
+            aiSubStepEvent(rows.get(e.call_id), e.event);
           } else if (e.type === "error") {
             throw new Error(e.error);
           }
@@ -1953,6 +2004,9 @@
       provider_id: prov.id,
       model: pick.model,
       web_search: AI.webSearch,
+      image_tool: (typeof chatBool === "function") ? chatBool("chatImageGen") : true,
+      lsp_tool: (typeof chatBool === "function") ? chatBool("chatLspTool") : true,
+      image_model: (typeof chatGet === "function") ? (chatGet("chatImageModel") || "") : "",
       skills: backendSkills,
       perm: AI.perm,
       repo: (typeof ROOT !== "undefined" ? ROOT : ""),
@@ -1986,6 +2040,9 @@
           web_auto: (typeof chatBool === "function") ? chatBool("chatWebAuto") : true,
           max_steps: (typeof chatMaxStepsMain === "function") ? chatMaxStepsMain() : 0,
           max_steps_sub: (typeof chatMaxStepsSub === "function") ? chatMaxStepsSub() : 0,
+          image_tool: (typeof chatBool === "function") ? chatBool("chatImageGen") : true,
+          lsp_tool: (typeof chatBool === "function") ? chatBool("chatLspTool") : true,
+          image_model: (typeof chatGet === "function") ? (chatGet("chatImageModel") || "") : "",
           skills: backendSkills,
           skill_prompts: customSkillPrompts,
           skill_names: activeSkillNames,
@@ -2077,6 +2134,10 @@
                 chatStepsBox._pending = Math.max(0, chatStepsBox._pending - 1);
                 chatStepsBox._paint();
               }
+              continue;
+            }
+            if (obj.type === "subagent") {
+              aiSubStepEvent(chatStepRows.get(obj.call_id), obj.event);
               continue;
             }
             if ((obj.reasoning || obj.delta) && !ttft) ttft = performance.now() - t0;

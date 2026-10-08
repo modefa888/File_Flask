@@ -57,6 +57,7 @@
   background: #2f2f30; color: #e2e2e2; border: 1px solid #3c3c3d; border-radius: 5px;
   font-size: 12px; padding: 5px 8px; outline: none; flex: none; }
 .set-row input[type="text"]:focus, .set-row input[type="password"]:focus { border-color: #0a6aa8; }
+.set-row input.set-text { width: 220px; }
 .set-btn { background: #2f2f30; color: #dcdcdc; border: 1px solid #3c3c3d; border-radius: 5px;
   font-size: 12px; padding: 5px 12px; cursor: pointer; flex: none; }
 .set-btn:hover { background: #3a3a3b; }

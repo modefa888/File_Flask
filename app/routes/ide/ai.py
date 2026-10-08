@@ -27,7 +27,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from flask import Blueprint, request, jsonify, Response, make_response
+from flask import Blueprint, request, jsonify, Response, make_response, send_file
 
 from ... import config
 from ...services.common import secret, transport
@@ -615,6 +615,18 @@ def _mask_key(key: str) -> str:
     return secret.mask(key)
 
 
+@bp.route("/api/ai/image/<name>", methods=["GET"])
+def api_ai_image(name):
+    """查看 Agent 生成的图片（落盘在 data/storage/ai_images/）。name 仅取文件名，防目录穿越。"""
+    import mimetypes
+    name = os.path.basename(str(name))
+    base = os.path.join(config.STORAGE_DIR, "ai_images")
+    full = os.path.join(base, name)
+    if not os.path.isfile(full) or os.path.dirname(os.path.abspath(full)) != os.path.abspath(base):
+        return make_response("not found", 404)
+    return send_file(full, mimetype=mimetypes.guess_type(full)[0] or "image/png")
+
+
 @bp.route("/api/ai/config", methods=["GET"])
 def api_ai_config_get():
     cfg = _load_cfg()
@@ -1101,6 +1113,9 @@ def api_ai_chat():
     repo = str(data.get("repo") or "")
     root = os.path.abspath(repo) if repo and os.path.isdir(repo) else ""
     use_tools = bool(root) and data.get("use_tools", True) is not False
+    image_tool = data.get("image_tool", True) is not False
+    lsp_tool = data.get("lsp_tool", True) is not False
+    image_model = str(data.get("image_model") or "").strip()
     n_imgs = sum(1 for m in clean for part in (m["content"] if isinstance(m["content"], list) else [])
                  if isinstance(part, dict) and part.get("type") == "image_url")
     _log.info("AI 对话：provider=%s model=%s msgs=%d images=%d web_search=%s skills=%s perm=%s tools=%s",
@@ -1117,11 +1132,15 @@ def api_ai_chat():
             "Accept": "text/event-stream",
         }
 
-    def _text_tool_note(perm_now, web=False):
+    def _text_tool_note(perm_now, web=False, image_tool=False, lsp_tool=False):
         """接口不支持原生 tools 时，用系统提示告诉模型可用工具与文本调用格式。"""
         names = ["list_dir(path)", "read_file(path, start, end)", "search_files(pattern, path, max)"]
         if web:
             names.append("web_search(query, max_results)")
+        if image_tool:
+            names.append("generate_image(prompt, size, n)")
+        if lsp_tool:
+            names.append("code_intel(action, query, path)")
         if perm_now in ("workspace", "full"):
             names += ["write_file(path, content)", "edit_file(path, old_text, new_text)"]
         return ("\n\n[可用工具] 你可以按需读取项目文件来回答问题，不要凭空猜测，也不要让用户手动粘贴代码。"
@@ -1137,7 +1156,7 @@ def api_ai_chat():
     def gen():
         from .agent import tools_for_perm, _run_tool_job, _parse_text_calls, _gate
         convo = list(clean)
-        all_tools = tools_for_perm(perm) if use_tools else []
+        all_tools = tools_for_perm(perm, image_tool=image_tool, lsp_tool=lsp_tool) if use_tools else []
         if not data.get("web_search"):                       # 未开「联网」时不给 web_search 工具
             all_tools = [t for t in all_tools if t["function"]["name"] != "web_search"]
         tools = list(all_tools)
@@ -1175,7 +1194,7 @@ def api_ai_chat():
                         tools = []
                         rounds -= 1
                         if not any("可用工具" in str(m.get("content") or "") for m in convo):
-                            note = _text_tool_note(perm, bool(data.get("web_search")))
+                            note = _text_tool_note(perm, bool(data.get("web_search")), image_tool, lsp_tool)
                             if convo and convo[0].get("role") == "system":
                                 convo[0]["content"] = str(convo[0].get("content") or "") + note
                             else:
@@ -1325,7 +1344,8 @@ def api_ai_chat():
                         model_text = "该操作需要用户确认，请提示用户切换到智能体模式执行"
                     else:
                         undo.begin()
-                        ok, summary, detail, model_text = _run_tool_job(c["name"], c["args"], root, perm)
+                        ok, summary, detail, model_text = _run_tool_job(c["name"], c["args"], root, perm,
+                                                                         {"image_model": image_model})
                         tool_changes = undo.finish(root)   # 推断动作 + 生成差异，供「文件变更」模块
                 yield _sse({"type": "result", "call_id": c["id"], "tool": c["name"], "ok": bool(ok),
                             "summary": summary, "detail": detail, "ms": 0,

@@ -1,11 +1,13 @@
   /* ==================================================================
-     后台任务管理：列出所有「运行中 / 已结束」的任务，可查看日志、停止、移除。
+     后台任务管理：列出所有「运行中 / 已暂停 / 已结束」的任务。
+     卡片上可直接：查看日志 / 启动 / 暂停（挂起进程）/ 继续 / 重启 / 停止 / 移除，
+     并实时显示该任务（含它拉起的子进程）的 CPU 与内存占用。
      数据来自服务端持久化的任务注册表 + 日志文件，所以：
        · 关掉浏览器页面 -> 后台程序照常在跑；
        · 重启本服务 -> 自动重新接管仍在运行的进程，继续跟踪日志。
      var 声明，避免 showPanel 提前调用时命中 TDZ。
      ================================================================== */
-  var RUNNER = { timer: null, tasks: [] };
+  var RUNNER = { timer: null, tasks: [], holdUntil: 0 };
 
   function fmtDur(sec) {
     sec = Math.max(0, Math.round(sec || 0));
@@ -25,6 +27,53 @@
     if (!el) return;
     if (n > 0) { el.textContent = n > 99 ? "99+" : n; el.style.display = ""; }
     else el.style.display = "none";
+  }
+
+  /* ---------- 资源占用：CPU / 内存 / 进程数 ----------
+     数值由后端按「进程树」聚合（含 npm 拉起的 node 这类子进程），前端只负责显示。
+     CPU 以单核为 100%，多核 / 多线程程序可能超过 100%（与 top 一致）。 */
+  function fmtCpu(v) {
+    if (v === null || v === undefined || isNaN(v)) return "-";
+    return (v >= 10 ? Math.round(v) : Number(v).toFixed(1)) + "%";
+  }
+  function cpuCls(v) {                      // 高占用变色，一眼看出是谁在吃 CPU
+    if (v === null || v === undefined || isNaN(v)) return "";
+    return v >= 80 ? " hot" : (v >= 50 ? " warm" : "");
+  }
+  function resLine(t) {
+    if (!t.running) return "";              // 已结束的进程读不到占用，整行不显示
+    const n = t.procs || 1;
+    return '<div class="ri-meta ri-res">' +
+      '<span class="res' + cpuCls(t.cpu) + '" title="CPU 占用：该任务及其子进程合计（单核为 100%）">' +
+        '<i class="bi bi-cpu"></i> ' + fmtCpu(t.cpu) + '</span>' +
+      '<span class="res" title="内存占用：常驻内存（RSS）合计，含子进程">' +
+        '<i class="bi bi-memory"></i> ' + fmtSize(t.mem || 0) + '</span>' +
+      (n > 1 ? '<span class="res dim" title="该任务共拉起 ' + n + ' 个进程">' + n + ' 进程</span>' : "") +
+      '</div>';
+  }
+  /* 操作按钮：查看日志占满剩余宽度，其余用图标（一行放得下，不挤成两行） */
+  function actsHtml(t) {
+    let h = '<button data-act="view" class="wide">查看日志</button>';
+    if (t.running && t.paused) {
+      h += '<button data-act="resume" class="ico" title="继续运行（从挂起点恢复，不丢进程状态）"><i class="bi bi-play-fill"></i></button>' +
+           '<button data-act="restart" class="ico" title="重启（先停止再重新启动）"><i class="bi bi-arrow-clockwise"></i></button>' +
+           '<button data-act="stop" class="ico danger" title="停止（终止进程，可再启动）"><i class="bi bi-stop-fill"></i></button>';
+    } else if (t.running) {
+      h += '<button data-act="pause" class="ico" title="暂停（挂起进程：CPU 归零，端口仍占用）"><i class="bi bi-pause-fill"></i></button>' +
+           '<button data-act="restart" class="ico" title="重启（先停止再重新启动）"><i class="bi bi-arrow-clockwise"></i></button>' +
+           '<button data-act="stop" class="ico danger" title="停止（终止进程，可再启动）"><i class="bi bi-stop-fill"></i></button>';
+    } else {
+      h += '<button data-act="restart" class="ico" title="启动（用原来的文件与参数重新运行）"><i class="bi bi-play-fill"></i></button>' +
+           '<button data-act="remove" class="ico danger" title="移除这条记录（连同日志文件）"><i class="bi bi-trash"></i></button>';
+    }
+    return h;
+  }
+  async function runAct(url, id) {          // 任务操作统一走 POST {id}
+    const r = await fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: id }),
+    });
+    return await r.json();
   }
 
   async function loadRunnerList(opts) {
@@ -48,6 +97,7 @@
   function renderRunnerList() {
     const box = $("runnerList");
     if (!box) return;
+    if (Date.now() < RUNNER.holdUntil) return;   // 用户正按着卡片：跳过本次重绘，别把他要点的按钮换掉
     const list = RUNNER.tasks || [];
     if (!list.length) {
       box.innerHTML = '<div class="ph">暂时没有运行任务。<br>在「运行和调试」面板点「运行当前文件」或「后台运行（服务模式）」。</div>';
@@ -56,12 +106,14 @@
     box.innerHTML = "";
     list.forEach(t => {
       const item = document.createElement("div");
-      item.className = "runner-item" + (t.running ? " running" : "");
+      item.className = "runner-item" + (t.running ? " running" : "") + (t.paused ? " paused" : "");
       const tag = t.mode === "bg" ? (t.promoted ? "后台·已转" : "后台") : "前台";
-      const status = t.running
-        ? '<span class="dot"></span>运行中'
-        : '<span class="dot off"></span>已结束' +
-          (t.exit_code === null || t.exit_code === undefined ? "" : "（代码 " + t.exit_code + "）");
+      const status = t.paused
+        ? '<span class="dot paused"></span>已暂停'
+        : t.running
+          ? '<span class="dot"></span>运行中'
+          : '<span class="dot off"></span>已结束' +
+            (t.exit_code === null || t.exit_code === undefined ? "" : "（代码 " + t.exit_code + "）");
       item.innerHTML =
         '<div class="ri-top">' + status +
           '<span class="ri-name" title="' + escAttr(t.target) + '">' + esc(t.name) + '</span>' +
@@ -70,19 +122,20 @@
         '<div class="ri-meta">pid ' + (t.pid || "-") +
           (t.ports && t.ports.length ? ' · <span style="color:#4fc1ff">端口 ' + t.ports.join(", ") + '</span>' : "") +
           ' · ' + esc(t.cwd) + '</div>' +
+        resLine(t) +                               // CPU / 内存 / 进程数（仅运行中显示）
         '<div class="ri-meta">' + fmtDur(t.duration) + ' · ' + t.lines + ' 行日志 / ' + fmtSize(t.log_size) +
           ' · 启动于 ' + esc(t.started_at) + '</div>' +
-        '<div class="ri-acts">' +
-          '<button data-act="view">查看日志</button>' +
-          (t.running
-            ? '<button data-act="stop" class="danger">停止</button>'
-            : '<button data-act="remove" class="danger">移除</button>') +
-        '</div>';
-      item.querySelector('[data-act="view"]').onclick = () => attachTask(t);
-      const stop = item.querySelector('[data-act="stop"]');
-      if (stop) stop.onclick = () => stopTaskById(t);
-      const rem = item.querySelector('[data-act="remove"]');
-      if (rem) rem.onclick = () => removeTaskById(t);
+        '<div class="ri-acts">' + actsHtml(t) + '</div>';
+      const bind = (act, fn) => {
+        const b = item.querySelector('[data-act="' + act + '"]');
+        if (b) b.onclick = fn;
+      };
+      bind("view", () => attachTask(t));
+      bind("pause", () => pauseTaskById(t));
+      bind("resume", () => resumeTaskById(t));
+      bind("restart", () => restartTaskById(t));
+      bind("stop", () => stopTaskById(t));
+      bind("remove", () => removeTaskById(t));
       box.appendChild(item);
     });
   }
@@ -109,6 +162,49 @@
     const parts = String((t && t.target) || "").replace(/\/+$/, "").split("/");
     return parts.length >= 2 ? parts[parts.length - 2] : (parts.pop() || "");
   }
+  /* ---------- 暂停 / 继续：挂起进程（SIGSTOP），进程还在、CPU 归零 ---------- */
+  async function pauseTaskById(t) {
+    try {
+      const d = await runAct("/api/run/pause", t.id);
+      if (d.error) throw new Error(d.error);
+      toast("已暂停：" + t.name + "（端口仍被占用）", "warn");
+      loadRunnerList({ silent: true });
+    } catch (e) {
+      toast("暂停失败：" + (e.message || e), "err");
+    }
+  }
+  async function resumeTaskById(t) {
+    try {
+      const d = await runAct("/api/run/resume", t.id);
+      if (d.error) throw new Error(d.error);
+      toast("已继续运行：" + t.name, "ok");
+      loadRunnerList({ silent: true });
+    } catch (e) {
+      toast("继续失败：" + (e.message || e), "err");
+    }
+  }
+  /* ---------- 启动 / 重启：沿用原文件、工作目录与参数重新拉起 ----------
+     运行中的任务会先被停止（后端会等旧进程真正退出再启动，避免端口没释放导致启动失败）；
+     返回的新任务复用启动路径接回日志面板，旧记录保留在列表里，历史日志仍可回看。 */
+  async function restartTaskById(t) {
+    if (t.running) {
+      const proj = taskProject(t);
+      const ok = await uiConfirm("重启任务",
+        "确定重启「" + t.name + "」吗？会先停止当前进程，再用原参数启动。" + (proj ? "\n项目：" + proj : ""),
+        "重启", false);
+      if (!ok) return;
+    }
+    try {
+      const d = await runAct("/api/run/restart", t.id);
+      if (d.error) throw new Error(d.error);
+      startRunStream(d, d.target || t.target, d.mode || "bg", "");   // 新任务自动接上日志并持续推送
+      toast((t.running ? "已重启：" : "已启动：") + t.name, "ok");
+      loadRunnerList({ silent: true });
+    } catch (e) {
+      toast("启动失败：" + (e.message || e), "err");
+    }
+  }
+
   async function stopTaskById(t) {
     if (t.running) {
       const proj = taskProject(t);
@@ -185,4 +281,11 @@
   }
 
   // 「清理已结束记录」入口已移除：每张卡片有「移除」，后端也会自动清理过期记录
+
+  /* 鼠标按在任务卡片上时，短暂跳过自动刷新：面板可见时每 3s 会重建整块列表，
+     若恰好落在「按下 → 抬起」之间，按钮会被换成新 DOM，这一下点击就丢了。 */
+  document.addEventListener("pointerdown", e => {
+    const el = e.target && e.target.closest ? e.target.closest("#runnerList") : null;
+    if (el) RUNNER.holdUntil = Date.now() + 1200;
+  }, true);
 

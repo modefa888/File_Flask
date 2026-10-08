@@ -57,6 +57,49 @@ def available() -> bool:
     return psutil is not None
 
 
+def tree_usage(pid) -> dict:
+    """某进程及其全部后代当前占用的 CPU / 内存（按最近一次快照聚合）。
+
+    返回 {"cpu": 12.3, "rss": 12345678, "n": 4}：
+    - cpu  该进程树的 CPU%（单核为 100%，多核 / 多线程程序可能超过 100，与 top 一致）；
+    - rss  常驻内存之和（字节）；
+    - n    进程数（含自身）。
+
+    为什么要连后代一起算：后台任务往往是「启动器 + 干活的子进程」结构
+    （npm run dev 真正吃内存的是它拉起的 node，python 的 reloader 也一样），
+    只看父进程会严重低估算占用。
+
+    未装 psutil、或 pid 已不在快照里（进程刚退出 / 无权查看）时 cpu 返回 None，
+    由调用方决定显示成「-」还是隐藏。
+    """
+    if psutil is None:
+        return {"cpu": None, "rss": 0, "n": 0}
+    try:
+        snap = _ensure()                              # 顺带启动 2 秒采样线程，保证数据新鲜
+    except Exception:
+        return {"cpu": None, "rss": 0, "n": 0}
+    procs = (snap or {}).get("procs") or []
+    by_pid, kids = {}, {}
+    for r in procs:
+        by_pid[r["pid"]] = r
+        kids.setdefault(r["ppid"], []).append(r["pid"])
+    pid = int(pid or 0)
+    if pid <= 0 or pid not in by_pid:
+        return {"cpu": None, "rss": 0, "n": 0}
+    seen, stack, cpu, rss = set(), [pid], 0.0, 0
+    while stack:                                      # 沿 ppid 建子表后向下遍历整棵树
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        r = by_pid.get(cur)
+        if r:
+            cpu += float(r.get("cpu") or 0.0)
+            rss += int(r.get("rss") or 0)
+        stack.extend(kids.get(cur, []))
+    return {"cpu": round(cpu, 1), "rss": rss, "n": len(seen)}
+
+
 def _app_root() -> str:
     """本服务所在项目根目录（用来判断工作区落在哪个分区）。"""
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))

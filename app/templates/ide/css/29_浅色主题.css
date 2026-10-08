@@ -519,6 +519,11 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .runner-item .ri-tag { color: #6b6b6b; border-color: #cecece; }
 :where(html.theme-light) .runner-item .ri-cmd { color: #6b6b6b; }
 :where(html.theme-light) .runner-item .ri-meta { color: #8a8a8a; }
+:where(html.theme-light) .runner-item .ri-res .res { color: #6b6b6b; }
+:where(html.theme-light) .runner-item .ri-res .res.warm { color: #9a6700; }
+:where(html.theme-light) .runner-item .ri-res .res.hot { color: #c62828; }
+:where(html.theme-light) .runner-item.paused { border-left-color: #bf8700; }
+:where(html.theme-light) .runner-item .ri-top .dot.paused { background: #bf8700; }
 :where(html.theme-light) .runner-item .ri-acts button { background: #e0e0e0; color: #333333; }
 :where(html.theme-light) .runner-item .ri-acts button:hover { background: #d0d0d0; color: #000000; }
 :where(html.theme-light) .port-box { border-color: #e0e0e0; background: #ffffff; }

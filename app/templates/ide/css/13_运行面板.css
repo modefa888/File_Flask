@@ -33,6 +33,21 @@
   }
   .runner-item .ri-acts button:hover { background: #45494e; color: #fff; }
   .runner-item .ri-acts button.danger:hover { background: #5a2b2b; color: #ffb0b0; }
+  /* 「查看日志」占满剩余宽度，其余操作压缩成图标按钮 —— 一行放得下 4 个操作 */
+  .runner-item .ri-acts button.wide { flex: 1; }
+  .runner-item .ri-acts button.ico { flex: none; padding: 3px 9px; display: inline-flex;
+                                     align-items: center; justify-content: center; }
+  .runner-item .ri-acts button.ico .bi { font-size: 12px; }
+  /* 暂停中：左侧竖条与状态点用琥珀色，和「运行中」的绿色区分开 */
+  .runner-item.paused { border-left-color: #e2c08a; }
+  .runner-item .ri-top .dot.paused { background: #e2c08a; }
+  /* 资源占用：CPU / 内存 / 进程数（仅运行中的任务显示） */
+  .runner-item .ri-meta.ri-res { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .runner-item .ri-res .res { display: inline-flex; align-items: center; gap: 3px; color: #9d9d9d; }
+  .runner-item .ri-res .res .bi { font-size: 11px; }
+  .runner-item .ri-res .res.warm { color: #e2c08a; }
+  .runner-item .ri-res .res.hot { color: #f14c4c; }
+  .runner-item .ri-res .res.dim { color: #7d7d7d; }
   .port-box { margin-bottom: 10px; border: 1px solid #37373d; border-radius: 6px; background: #252526; overflow: hidden; }
   .port-box .pb-head { display: flex; align-items: center; padding: 6px 8px; font-size: 11px; color: #9d9d9d;
                        border-bottom: 1px solid #333; background: #2a2d2e; }

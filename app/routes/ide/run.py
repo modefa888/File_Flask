@@ -7,6 +7,10 @@ GET  /api/run/stream?id=&offset=             SSE 实时日志流（首选，单�
 GET  /api/run/log?id=&offset=                增量日志 + 状态（轮询兜底，SSE 不可用时使用）
 GET  /api/run/tasks                          所有运行任务（含已结束，供后台任务管理面板使用）
 POST /api/run/stop   {id}                    终止任务（整个进程组）
+POST /api/run/pause  {id}                    暂停任务（SIGSTOP 挂起进程组，CPU 归零、端口仍占用）
+POST /api/run/resume {id}                    继续运行被暂停的任务（SIGCONT）
+POST /api/run/restart {id}                   启动 / 重启任务（运行中则先停止；沿用原文件与工作目录）
+POST /api/run/promote {id}                   把前台任务转为后台（不再计时）
 POST /api/run/remove {id}                    移除一条已结束的任务记录（连同日志文件）
 POST /api/run/prune                          清理全部已结束的任务记录
 
@@ -264,6 +268,7 @@ class _BgTask:
         self.stopped_by_user = False
         self.timed_out = False          # 是否因超时被自动终止
         self.promoted = False           # 是否因超时被自动转为后台运行
+        self.paused = False             # 是否被「暂停」（SIGSTOP 挂起中，进程还在、CPU 归零）
         self.started = float(started_at or time.time())
         self.ended_at = None            # 结束时刻：用于冻结「已结束」任务的运行时长
         # 日志推送用的条件变量：add() 时唤醒正在等新数据的 SSE 连接
@@ -278,6 +283,7 @@ class _BgTask:
             "pid": self.pid, "started_at": self.started, "ended_at": self.ended_at,
             "promoted": self.promoted, "stopped_by_user": self.stopped_by_user,
             "timed_out": self.timed_out, "exit_code": self.exit_code, "done": self.done,
+            "paused": self.paused,
         }
 
     @classmethod
@@ -290,6 +296,7 @@ class _BgTask:
         t.promoted = bool(rec.get("promoted"))
         t.stopped_by_user = bool(rec.get("stopped_by_user"))
         t.timed_out = bool(rec.get("timed_out"))
+        t.paused = bool(rec.get("paused"))
         t.ended_at = rec.get("ended_at")
         return t
 
@@ -386,7 +393,7 @@ class _BgTask:
             "exit_code": self.exit_code,
             "mode": self.mode, "timeout": self.timeout, "timeout_used": self.timeout_used,
             "timed_out": self.timed_out, "stopped_by_user": self.stopped_by_user,
-            "promoted": self.promoted, "orphan": self.orphan,
+            "promoted": self.promoted, "orphan": self.orphan, "paused": bool(self.paused),
             "duration": self.duration(),
             "pid": self.pid, "log_path": self.log_path,
             "target": self.target, "command": " ".join(self.cmd), "cwd": self.cwd,
@@ -398,6 +405,18 @@ class _BgTask:
             size = os.path.getsize(self.log_path)
         except OSError:
             size = 0
+        # 资源占用：只在运行中采集（已结束的进程读不到，显示「-」反而像出错）
+        res = {"cpu": None, "rss": 0, "n": 0}
+        if alive and self.pid:
+            try:
+                from ...services.ide import procinfo
+                res = procinfo.tree_usage(self.pid)
+            except Exception:
+                pass
+        paused = bool(self.paused) and alive             # 进程已退出就不再算「暂停」
+        if paused:
+            res["cpu"] = 0.0                             # 挂起中的进程不消耗 CPU：直接归零，
+                                                         # 否则会显示采样窗口里残留的历史平均值
         return {
             "id": self.id, "target": self.target, "name": os.path.basename(self.target or self.id),
             "command": " ".join(self.cmd), "cwd": self.cwd,
@@ -405,6 +424,8 @@ class _BgTask:
             "running": alive, "exit_code": self.exit_code,
             "promoted": self.promoted, "timed_out": self.timed_out,
             "stopped_by_user": self.stopped_by_user,
+            "paused": paused,
+            "cpu": res.get("cpu"), "mem": int(res.get("rss") or 0), "procs": int(res.get("n") or 0),
             "started_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.started)),
             "duration": self.duration(), "lines": self.base + len(self.lines),
             "log_size": size, "log_path": self.log_path,
@@ -443,9 +464,46 @@ def _kill_pid(pid) -> None:
     kill_pid(pid)
 
 
+def _group_signal(task, sig) -> bool:
+    """给任务的整个进程组发信号（暂停 / 继续用）。
+
+    用进程组而不是单个 pid：_spawn_task 里做了 setsid，组长 pid == 任务 pid，
+    挂起 / 恢复会覆盖它拉起的全部子进程。只发给父进程的话，子进程会照常跑，
+    表现为「暂停了但 CPU 还在动、端口还在响应」。
+    服务重启后接管的任务没有 proc 对象，按 pid 反查进程组。
+    """
+    pgid = None
+    for pid in (task.proc.pid if task.proc is not None else None, task.pid):
+        if not pid:
+            continue
+        try:
+            pgid = os.getpgid(int(pid))
+            break
+        except OSError:                               # 进程刚退出 / 权限不足
+            continue
+    if not pgid:
+        return False
+    try:
+        os.killpg(pgid, sig)
+        return True
+    except OSError:
+        return False
+
+
+def _pause_task(task, paused: bool) -> bool:
+    """挂起（SIGSTOP）/ 恢复（SIGCONT）任务进程组，并同步任务状态。"""
+    if not _group_signal(task, signal.SIGSTOP if paused else signal.SIGCONT):
+        return False
+    task.paused = bool(paused)
+    _persist()
+    return True
+
+
 def _kill_task(task) -> None:
     if task is None or task.done:
         return
+    if task.paused:                     # 挂起的进程收不到 SIGTERM（会 pending 到恢复后），先唤醒再终止
+        _pause_task(task, False)
     if task.proc is not None:
         _kill_group(task.proc)
     else:
@@ -656,6 +714,62 @@ def _get_task(tid: str):
         return _TASKS.get(tid)
 
 
+def _restart_task(task):
+    """启动 / 重启内核：按任务记录里的文件、工作目录与参数重新拉起一条新任务。
+
+    返回 (新任务, None)，失败返回 (None, 错误响应)。
+    与 view 分离是为了能脱离 HTTP 直接调用（也便于测试）。
+    """
+    from ...services.ide import envprobe
+    target = task.target or ""
+    if not target or not os.path.isfile(target):
+        return None, _fail("原文件已不存在，无法启动：%s" % (target or "?"))
+    ext = os.path.splitext(target)[1].lower().lstrip(".")
+    runner = _RUNNERS.get(ext)
+    if not runner:
+        return None, _fail(f"暂不支持直接运行 .{ext} 文件" if ext else "暂不支持运行无扩展名的文件")
+    exe, label = runner
+    if not envprobe.resolve_exe(exe):
+        return None, _fail(f"未安装 {label}（找不到命令 {exe}）")
+
+    # 旧进程还在：先停掉并等它真正退出。不等待就启动的话，新进程会因端口没释放（EADDRINUSE）
+    # 立刻失败退出，看起来像「点了重启反而挂了」。暂停中的进程 _kill_task 会先唤醒再终止。
+    was_running = task.is_alive()
+    if was_running:
+        task.stopped_by_user = True
+        _persist()
+        _kill_task(task)
+        deadline = time.time() + 5
+        while time.time() < deadline and task.is_alive():
+            time.sleep(0.1)
+        if task.is_alive():
+            return None, _fail("旧进程未能在 5 秒内退出，请稍后再试")
+
+    # 解释器按当前环境重新解析（venv / 自定义解释器路径可能变了），附加参数沿用原命令
+    proj_exe, path_prepend, env_note = _project_runtime(target, exe)
+    exe_path = proj_exe or envprobe.resolve_exe(exe)
+    raw_args = [str(a) for a in (task.cmd[2:] if len(task.cmd) > 2 else [])]
+    cmd = [exe_path, target] + raw_args
+
+    mode = task.mode if task.mode in ("fg", "bg") else "bg"
+    timeout = None
+    if mode == "fg":
+        default_timeout, max_timeout = _timeout_limits()
+        try:
+            timeout = int(task.timeout_used or default_timeout) or default_timeout
+        except (TypeError, ValueError):
+            timeout = default_timeout
+        timeout = max(1, min(max_timeout, timeout))
+
+    new_task, err = _spawn_task(cmd, task.cwd or os.path.dirname(target) or ".", target, exe, raw_args,
+                                mode=mode, timeout=timeout,
+                                path_prepend=path_prepend, env_note=env_note)
+    if err:
+        return None, err
+    new_task.add("↻ %s（原任务 %s）" % ("已重启" if was_running else "重新启动", task.id), "dim")
+    return new_task, None
+
+
 # ======================================================================
 # 接口：日志
 # ======================================================================
@@ -776,6 +890,79 @@ def api_run_promote():
     task.promote_to_background(auto=False)
     _log.info("POST /api/run/promote id=%s target=%s", tid, task.target)
     return jsonify({"ok": True, "id": tid, "mode": "bg"})
+
+
+@bp.route("/api/run/pause", methods=["POST"])
+def api_run_pause():
+    """暂停任务：向整个进程组发 SIGSTOP，把进程挂起。
+
+    与「停止」的区别：停止是终止进程（再要跑得重新启动），暂停只是挂起 ——
+    进程状态还在，CPU 占用归零，但端口仍被监听（所以别在暂停时又启动一个同端口服务）。
+    """
+    data = request.get_json(silent=True) or {}
+    tid = (data.get("id") or "").strip()
+    task = _get_task(tid)
+    if not task:
+        return _fail("任务不存在或已过期", 404)
+    if not task.is_alive():
+        return _fail("任务已结束，无法暂停")
+    if task.paused:
+        return jsonify({"ok": True, "already_paused": True})
+    if not _pause_task(task, True):
+        return _fail("暂停失败（进程可能已退出）", 500)
+    task.add("⏸ 已暂停（进程挂起，CPU 归零；端口仍占用，点「继续」恢复运行）", "head")
+    _log.info("POST /api/run/pause id=%s target=%s", tid, task.target)
+    return jsonify({"ok": True, "paused": True, "id": tid})
+
+
+@bp.route("/api/run/resume", methods=["POST"])
+def api_run_resume():
+    """继续运行被暂停的任务（SIGCONT）：从挂起点恢复，不丢进程状态。"""
+    data = request.get_json(silent=True) or {}
+    tid = (data.get("id") or "").strip()
+    task = _get_task(tid)
+    if not task:
+        return _fail("任务不存在或已过期", 404)
+    if not task.is_alive():
+        return _fail("任务已结束，无法继续")
+    if not task.paused:
+        return jsonify({"ok": True, "already_running": True})
+    if not _pause_task(task, False):
+        return _fail("继续失败（进程可能已退出）", 500)
+    task.add("▶ 已继续运行（从挂起点恢复）", "head")
+    _log.info("POST /api/run/resume id=%s target=%s", tid, task.target)
+    return jsonify({"ok": True, "paused": False, "id": tid})
+
+
+@bp.route("/api/run/restart", methods=["POST"])
+def api_run_restart():
+    """启动 / 重启任务：按原记录里的文件、工作目录与参数重新拉起一条新任务。
+
+    - 仍在运行 -> 先终止再启动（「重启」）；
+    - 已结束   -> 直接启动（「启动」）。
+    新任务用新的 id 与日志文件，旧记录保留在列表里，历史日志仍可回看。
+    """
+    from ... import config
+    if not getattr(config, "ENABLE_EXEC", True):
+        return _fail("已禁用代码执行（config.ENABLE_EXEC = False）", 403)
+    data = request.get_json(silent=True) or {}
+    tid = (data.get("id") or "").strip()
+    task = _get_task(tid)
+    if not task:
+        return _fail("任务不存在或已过期", 404)
+
+    new_task, err = _restart_task(task)
+    if err:
+        return err
+    _log.info("POST /api/run/restart from=%s new=%s target=%s", tid, new_task.id, new_task.target)
+    return jsonify({
+        "ok": True, "id": new_task.id, "pid": new_task.pid, "target": new_task.target,
+        "mode": new_task.mode, "background": new_task.mode == "bg", "stream": True,
+        "timeout": new_task.timeout or 0, "log_path": new_task.log_path, "cwd": new_task.cwd,
+        "command": " ".join([os.path.basename((new_task.cmd or [""])[0]),
+                             os.path.basename(new_task.target)] + list((new_task.cmd or [])[2:])),
+        "restarted_from": tid,
+    })
 
 
 @bp.route("/api/run/remove", methods=["POST"])

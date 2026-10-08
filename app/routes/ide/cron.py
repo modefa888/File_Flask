@@ -310,6 +310,12 @@ def api_cron_notify_test():
     return jsonify({"ok": True, "results": res})
 
 
+@bp.route("/api/cron/notify-history")
+def api_cron_notify_history():
+    """定时任务触发的通知记录（按来源过滤，最新在前，最多 50 条）。"""
+    return jsonify({"ok": True, "records": cronnotify.history(50)})
+
+
 # ---------------------------------------------------------------- 备份 / 恢复
 @bp.route("/api/cron/backup")
 def api_cron_backup():

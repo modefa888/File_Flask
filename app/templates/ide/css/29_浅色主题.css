@@ -353,9 +353,12 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .notify-hch { background: #e0e0e0; color: #5a5a5a; }
 :where(html.theme-light) .notify-hch.skip { background: #ececec; color: #8a8a8a; }
 :where(html.theme-light) .notify-hbodytext { color: #6b6b6b; }
-:where(html.theme-light) .notify-preset { background: #e8e8e8; color: #333333; border-color: #cecece; }
-:where(html.theme-light) .notify-preset:hover { background: #dcdcdc; border-color: #c4c4c4; }
-:where(html.theme-light) .notify-preset.active { background: rgba(10, 106, 168, .15); border-color: #0a6aa8; color: #005fb8; }
+:where(html.theme-light) .notify-preset,
+:where(html.theme-light) .notify-preset-cron { background: #e8e8e8; color: #333333; border-color: #cecece; }
+:where(html.theme-light) .notify-preset:hover,
+:where(html.theme-light) .notify-preset-cron:hover { background: #dcdcdc; border-color: #c4c4c4; }
+:where(html.theme-light) .notify-preset.active,
+:where(html.theme-light) .notify-preset-cron.active { background: rgba(10, 106, 168, .15); border-color: #0a6aa8; color: #005fb8; }
 :where(html.theme-light) .notify-preview { background: #f6f6f6; border-color: #e0e0e0; }
 :where(html.theme-light) .notify-preview-head { color: #8a8a8a; }
 :where(html.theme-light) .notify-preview-card { background: #ffffff; border-color: #e0e0e0; box-shadow: 0 2px 10px rgba(0, 0, 0, .1); }
@@ -1196,7 +1199,9 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .notify-preview-note code { color: #a0522d; }
 :where(html.theme-light) .notify-channel-card .notify-icon { color: #005fb8; }
 :where(html.theme-light) .notify-channel-card.email .notify-icon { color: #a07800; }
-:where(html.theme-light) .notify-preset .bi { color: #005fb8; }
+:where(html.theme-light) .notify-preset .bi,
+:where(html.theme-light) .notify-preset-cron .bi { color: #005fb8; }
+:where(html.theme-light) .notify-check { color: #333333; }
 :where(html.theme-light) .notify-hch.ok { background: #dff3e4; color: #1a7f37; }
 :where(html.theme-light) .notify-hch.fail { background: #fbe0e0; color: #c0392b; }
 

@@ -191,13 +191,14 @@
           '<div class="notify-desc">总开关；关闭后所有渠道均不推送。</div></div>' +
           '<label class="set-switch"><input type="checkbox" id="notifyCronEnabled"><span></span></label>' +
         '</div>' +
-        '<div class="notify-row inline set-row" data-kw="触发事件 失败 超时 重试 fail timeout retry">' +
+        '<div class="notify-row inline set-row" data-kw="触发事件 失败 超时 重试 成功 fail timeout retry success">' +
           '<div class="notify-label-wrap"><div class="notify-label">触发事件</div>' +
-          '<div class="notify-desc">勾选哪些事件时推送；「安排重试」指任务配置了失败重试并已排入重试。</div></div>' +
+          '<div class="notify-desc">勾选哪些事件时推送；「执行成功」默认关闭，开启后每次执行成功也会推送并留记录。</div></div>' +
           '<div class="notify-cron-evs">' +
             '<label class="notify-check"><input type="checkbox" id="notifyCronEvFail"> 执行失败</label>' +
             '<label class="notify-check"><input type="checkbox" id="notifyCronEvTimeout"> 执行超时</label>' +
             '<label class="notify-check"><input type="checkbox" id="notifyCronEvRetry"> 安排重试</label>' +
+            '<label class="notify-check"><input type="checkbox" id="notifyCronEvSuccess"> 执行成功</label>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -366,6 +367,54 @@
             '<input class="notify-input" id="notifyCronPpTopic" placeholder="留空 = 发给自己" autocomplete="off" spellcheck="false">' +
           '</div>' +
         '</div>' +
+      '</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title"><i class="bi bi-pencil-square"></i> 通知模板</div>' +
+        '<div class="notify-row stack set-row" data-kw="定时任务 快速模板 预设 preset 模板 template">' +
+          '<div class="notify-label-wrap"><div class="notify-label">快速模板</div>' +
+          '<div class="notify-desc">点一下同时套用标题 + 正文，下面的预览即时生效；套用后仍可自由修改。清空两个字段则使用系统默认文案。</div></div>' +
+          '<div class="notify-presets">' +
+            Object.keys(CRON_TPL_PRESETS).map(id => {
+              const p = CRON_TPL_PRESETS[id];
+              return '<button type="button" class="notify-preset-cron" data-cpreset="' + id + '" title="' + p.desc + '">' +
+                '<i class="bi ' + p.icon + '"></i> ' + p.name + '</button>';
+            }).join("") +
+          '</div>' +
+        '</div>' +
+        '<div class="notify-preview set-row" data-kw="定时任务 效果预览 预览 preview">' +
+          '<div class="notify-preview-head"><span><i class="bi bi-eye"></i> 效果预览</span>' +
+          '<span class="notify-preview-tag">示例数据</span></div>' +
+          '<div class="notify-preview-card">' +
+            '<div class="notify-preview-app"><i class="bi bi-alarm-fill"></i> File_Flask<span>刚刚</span></div>' +
+            '<div class="notify-preview-title" id="notifyCronPreviewTitle">—</div>' +
+            '<div class="notify-preview-body" id="notifyCronPreviewBody">—</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="notify-row stack set-row" data-kw="定时任务 标题模板 title">' +
+          '<div class="notify-label-wrap"><div class="notify-label">标题模板</div>' +
+          '<div class="notify-desc">留空 = 使用系统默认文案。</div></div>' +
+          '<input class="notify-input" id="notifyCronTitle" placeholder="定时任务{event} · {task}">' +
+        '</div>' +
+        '<div class="notify-vars set-row" data-kw="定时任务 变量 variable 可用变量">' +
+          '<span class="notify-vars-tip">可用变量（点击插入）</span>' +
+          CRON_NOTIFY_VARS.map(x =>
+            '<button type="button" class="notify-var" data-var="{' + x.key + '}" title="' + x.desc + '">{' + x.key + '}</button>').join("") +
+        '</div>' +
+        '<div class="notify-row stack set-row" data-kw="定时任务 正文模板 body">' +
+          '<div class="notify-label-wrap"><div class="notify-label">正文模板</div>' +
+          '<div class="notify-desc">支持换行；钉钉 / PushPlus 等渠道按纯文本发送。</div></div>' +
+          '<textarea class="notify-input notify-textarea" id="notifyCronBody" rows="4" placeholder="任务「{task}」{event}。&#10;退出码：{exit}"></textarea>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title" style="justify-content:space-between;">' +
+          '<span><i class="bi bi-clock-history"></i> 通知记录</span>' +
+          '<button class="notify-btn" id="notifyCronHistoryRefresh"><i class="bi bi-arrow-clockwise"></i> 刷新</button>' +
+        '</div>' +
+        '<div class="notify-desc" style="margin:0 0 10px;">定时任务触发的推送记录（最新 50 条；全部记录见「通知」分区）。</div>' +
+        '<div id="notifyCronHistory" class="notify-history">加载中…</div>' +
       '</div>' +
 
       '<div class="notify-card">' +
@@ -675,6 +724,7 @@
       const d = await r.json();
       if (d && d.notify) cronNotifyFill(d.notify);
     } catch (_) {}
+    cronNotifyLoadHistory();
   }
 
   function cronNotifyFill(n) {
@@ -687,6 +737,7 @@
     if (q("notifyCronEvFail"))    q("notifyCronEvFail").checked = ev.fail !== false;
     if (q("notifyCronEvTimeout")) q("notifyCronEvTimeout").checked = ev.timeout !== false;
     if (q("notifyCronEvRetry"))   q("notifyCronEvRetry").checked = !!ev.retry;
+    if (q("notifyCronEvSuccess")) q("notifyCronEvSuccess").checked = !!ev.success;
     if (q("notifyCronChDesktop"))  q("notifyCronChDesktop").checked = ch.desktop !== false;
     if (q("notifyCronChEmail"))    q("notifyCronChEmail").checked = !!ch.email;
     if (q("notifyCronChDingtalk")) q("notifyCronChDingtalk").checked = !!ch.dingtalk;
@@ -721,7 +772,12 @@
     if (q("notifyCronDingSecret"))  q("notifyCronDingSecret").value = ding.secret || "";
     if (q("notifyCronPpToken"))     q("notifyCronPpToken").value = pp.token || "";
     if (q("notifyCronPpTopic"))     q("notifyCronPpTopic").value = pp.topic || "";
+    // 通知模板（清空 = 用系统默认文案）
+    const tpl = n.template || {};
+    if (q("notifyCronTitle")) q("notifyCronTitle").value = tpl.title || "";
+    if (q("notifyCronBody"))  q("notifyCronBody").value = tpl.body || "";
     notifyToggleOptVisibility();
+    cronNotifyPreviewRefresh();
   }
 
   function cronNotifyReadForm() {
@@ -736,7 +792,8 @@
     return {
       notify: {
         enabled: c("notifyCronEnabled"),
-        events: { fail: c("notifyCronEvFail"), timeout: c("notifyCronEvTimeout"), retry: c("notifyCronEvRetry") },
+        events: { fail: c("notifyCronEvFail"), timeout: c("notifyCronEvTimeout"),
+                  retry: c("notifyCronEvRetry"), success: c("notifyCronEvSuccess") },
         channels: {
           desktop: c("notifyCronChDesktop"), email: c("notifyCronChEmail"),
           dingtalk: c("notifyCronChDingtalk"), telegram: c("notifyCronChTelegram"),
@@ -763,11 +820,12 @@
         },
         dingtalk: { webhook: v("notifyCronDingWebhook"), secret: v("notifyCronDingSecret") },
         pushplus: { token: v("notifyCronPpToken"), topic: v("notifyCronPpTopic") },
+        template: { title: v("notifyCronTitle"), body: v("notifyCronBody") },
       },
     };
   }
 
-  async function cronNotifySave(silent) {
+  async function cronNotifySave(silent, skipFill) {
     try {
       const r = await fetch("/api/cron/settings", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -775,13 +833,25 @@
       });
       const d = await r.json();
       if (!r.ok || d.error) throw new Error(d.error || ("HTTP " + r.status));
-      if (d.notify) cronNotifyFill(d.notify);       // 掩码回填，明示哪些已保存
+      if (d.notify && !skipFill) cronNotifyFill(d.notify);   // 掩码回填，明示哪些已保存
       if (!silent) notifyToast("定时任务通知设置已保存", "ok");
       return true;
     } catch (e) {
       notifyToast("定时任务通知保存失败：" + e.message, "err");
       return false;
     }
+  }
+
+  // 改动即自动保存（防抖）：开关 / 勾选 / 输入后稍等片刻就落库，刷新不丢；
+  // skipFill 回填，避免打断正在进行的输入
+  let _cronAutoSaveTimer = null;
+  function cronNotifyAutoSave() {
+    clearTimeout(_cronAutoSaveTimer);
+    _cronAutoSaveTimer = setTimeout(async () => {
+      if (await cronNotifySave(true, true)) {
+        notifyToast("定时任务通知：设置已自动保存", "ok");
+      }
+    }, 600);
   }
 
   async function cronNotifyTest(channel, btn) {
@@ -1001,6 +1071,138 @@
     }
   }
 
+  /* ---------- 定时任务通知：模板变量 / 预设 / 预览 / 记录 ---------- */
+  const CRON_NOTIFY_VARS = [
+    { key: "task", desc: "任务名称" },
+    { key: "event", desc: "事件：执行失败 / 执行超时 / 安排重试" },
+    { key: "exit", desc: "退出码" },
+    { key: "duration", desc: "耗时（如 3.2s）" },
+    { key: "attempt", desc: "重试进度（如 第 1/3 次；非重试为空）" },
+    { key: "run", desc: "执行记录 ID" },
+    { key: "date", desc: "触发日期 YYYY-MM-DD" },
+    { key: "time", desc: "触发时间 HH:MM" },
+  ];
+  const CRON_TPL_PRESETS = {
+    std: {
+      name: "标准", icon: "bi-check2-circle", desc: "标题带事件 + 任务名，正文分行列详情，各渠道都合适",
+      title: "定时任务{event} · {task}",
+      body: "任务「{task}」{event}。\n退出码：{exit}\n耗时：{duration}\n时间：{date} {time}\n执行记录：{run}",
+    },
+    simple: {
+      name: "极简", icon: "bi-circle", desc: "一行摘要，适合 Telegram / 桌面通知这种一扫而过的场景",
+      title: "⏰ {task} {event}",
+      body: "{task} {event}（退出码 {exit}，耗时 {duration}）· {date} {time}",
+    },
+    alert: {
+      name: "运维告警", icon: "bi-exclamation-triangle", desc: "带 🚨 前缀与结构化字段，适合钉钉群 / 告警群醒目提醒",
+      title: "🚨 定时任务{event}：{task}",
+      body: "任务：{task}\n事件：{event}\n退出码：{exit}\n耗时：{duration}\n重试：{attempt}\n时间：{date} {time}\n执行记录：{run}",
+    },
+    plain: {
+      name: "纯文本", icon: "bi-fonts", desc: "无表情符号，兼容老系统通知中心 / 老邮箱",
+      title: "[定时任务] {task} {event}",
+      body: "{task} 于 {date} {time} {event}，退出码 {exit}，耗时 {duration}。执行记录 {run}。",
+    },
+  };
+  // 标题 / 正文都清空时，后端会用调用方默认文案；预览也按这份默认来
+  const CRON_TPL_DEFAULTS = CRON_TPL_PRESETS.std;
+
+  function cronNotifySubVars(tpl, vars) {
+    return String(tpl == null ? "" : tpl).replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, key) =>
+      Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : m);
+  }
+
+  function cronNotifyPreviewVars() {
+    const d = new Date(), p2 = n => String(n).padStart(2, "0");
+    return {
+      task: "每日备份",
+      event: "执行失败",
+      exit: "1",
+      duration: "3.2s",
+      attempt: "",
+      run: "ab12cd34ef",
+      date: d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()),
+      time: p2(d.getHours()) + ":" + p2(d.getMinutes()),
+    };
+  }
+
+  function cronNotifyPreviewRefresh() {
+    const tOut = document.getElementById("notifyCronPreviewTitle");
+    const bOut = document.getElementById("notifyCronPreviewBody");
+    if (!tOut || !bOut) return;
+    const vars = cronNotifyPreviewVars();
+    const tEl = document.getElementById("notifyCronTitle");
+    const bEl = document.getElementById("notifyCronBody");
+    const title = (tEl && tEl.value.trim()) ? tEl.value : CRON_TPL_DEFAULTS.title;
+    const body = (bEl && bEl.value.trim()) ? bEl.value : CRON_TPL_DEFAULTS.body;
+    tOut.textContent = cronNotifySubVars(title, vars);
+    bOut.textContent = cronNotifySubVars(body, vars);
+    // 当前标题 + 正文与哪个快速模板一致，就高亮哪个（与「通知」分区的预设交互一致）
+    document.querySelectorAll(".notify-preset-cron").forEach(el => {
+      const p = CRON_TPL_PRESETS[el.dataset.cpreset];
+      el.classList.toggle("active", !!p && p.title === title.trim() && p.body === body.trim());
+    });
+  }
+
+  function cronApplyPreset(id) {
+    const p = CRON_TPL_PRESETS[id];
+    if (!p) return;
+    const tEl = document.getElementById("notifyCronTitle");
+    const bEl = document.getElementById("notifyCronBody");
+    if (tEl) tEl.value = p.title;
+    if (bEl) bEl.value = p.body;
+    cronNotifyPreviewRefresh();
+  }
+
+  async function cronNotifyLoadHistory() {
+    const box = document.getElementById("notifyCronHistory");
+    if (!box) return;
+    try {
+      const r = await fetch("/api/cron/notify-history");
+      const d = await r.json();
+      cronNotifyRenderHistory((d && d.records) || []);
+    } catch (_) {
+      box.innerHTML = '<div class="notify-history-empty">记录加载失败</div>';
+    }
+  }
+
+  function cronNotifyRenderHistory(records) {
+    const box = document.getElementById("notifyCronHistory");
+    if (!box) return;
+    if (!records || !records.length) {
+      box.innerHTML = '<div class="notify-history-empty"><i class="bi bi-inbox"></i>暂无通知记录' +
+        '<div>任务失败 / 超时触发推送（或点下方「测试」按钮）后会出现在这里；' +
+        '开启「执行成功」事件后，每次执行成功也会留记录。</div></div>';
+      return;
+    }
+    box.innerHTML = records.map(r => {
+      const chats = notifyChannelsOf(r);
+      const chips = chats.length
+        ? chats.map(c => {
+            const tip = c.detail ? ` title="${notifyEsc(c.detail)}"` : "";
+            return `<span class="notify-hch ${c.ok ? "ok" : "fail"}"${tip}>` +
+                   `<i class="bi ${c.ok ? "bi-check-circle" : "bi-x-circle"}"></i>` +
+                   `${NOTIFY_CH_NAME[c.key] || c.key}</span>`;
+          }).join("")
+        : `<span class="notify-hch skip"><i class="bi bi-slash-circle"></i>未发送</span>`;
+      const rawTitle = String(r.title || "").trim();
+      const rawBody = String(r.body || "").trim();
+      const title = notifyEsc(rawTitle.length > 120 ? rawTitle.slice(0, 120) + "…" : rawTitle) || "（无标题）";
+      const body = notifyEsc(rawBody.length > 400 ? rawBody.slice(0, 400) + "…" : rawBody);
+      const abs = notifyAbsTime(r.ts);
+      const rel = notifyRelTime(r.ts);
+      return `<div class="notify-hitem">` +
+        `<div class="notify-hicon" title="定时任务">⏰</div>` +
+        `<div class="notify-hbody">` +
+          `<div class="notify-htitle"><span>${title}</span>` +
+          `<span class="notify-hmeta" title="${abs}">${rel || abs}</span></div>` +
+          `<div class="notify-hchannels">${chips}</div>` +
+          (body ? `<div class="notify-hbodytext">${body}</div>` : "") +
+        `</div>` +
+      `</div>`;
+    }).join("");
+  }
+
   async function notifyClearHistory() {
     if (!(await uiConfirm("清空通知记录", "确定清空全部通知记录？此操作不可恢复。", "清空", true))) return;
     try {
@@ -1024,7 +1226,8 @@
     agent: { icon: "🤖", name: "AI 智能体" },
     test:  { icon: "🧪", name: "测试通知" },
   };
-  const NOTIFY_CH_NAME = { desktop: "桌面", smtp: "邮件", telegram: "Telegram" };
+  const NOTIFY_CH_NAME = { desktop: "桌面", smtp: "邮件", telegram: "Telegram",
+                           email: "邮件", dingtalk: "钉钉", pushplus: "PushPlus" };
 
   function notifyEsc(v) {
     return String(v == null ? "" : v)
@@ -1044,7 +1247,7 @@
       ? r.channels
       : { desktop: r && r.desktop, smtp: r && r.smtp, telegram: r && r.telegram };
     const out = [];
-    for (const key of ["desktop", "smtp", "telegram"]) {
+    for (const key of ["desktop", "smtp", "email", "telegram", "dingtalk", "pushplus"]) {
       const v = src[key];
       if (v === null || v === undefined) continue;
       if (typeof v === "boolean") { out.push({ key, ok: v, detail: "" }); continue; }
@@ -1121,6 +1324,8 @@
         if (!t || !t.id || !t.id.startsWith("notify")) return;
         notifyToggleOptVisibility();
         if (t.id === "notifyTitle" || t.id === "notifyBody") notifyPreviewRefresh();
+        if (t.id === "notifyCronTitle" || t.id === "notifyCronBody") cronNotifyPreviewRefresh();
+        if (t.id.startsWith("notifyCron")) cronNotifyAutoSave();   // 定时任务通知：改动即自动保存
       }, true);
       document.addEventListener("change", e => {
         const t = e.target;
@@ -1128,17 +1333,21 @@
         notifyToggleOptVisibility();
         // 开启「浏览器通知」时，向浏览器申请通知权限
         if (t.id === "notifyDesktop" && t.checked) notifyRequestBrowserPermission();
+        if (t.id && t.id.startsWith("notifyCron")) cronNotifyAutoSave();
       }, true);
       // 记住最后编辑的模板字段，点变量胶囊时插入到那里
       document.addEventListener("focusin", e => {
         const t = e.target;
-        if (t && (t.id === "notifyTitle" || t.id === "notifyBody")) _notifyLastField = t.id;
+        if (t && (t.id === "notifyTitle" || t.id === "notifyBody" ||
+                  t.id === "notifyCronTitle" || t.id === "notifyCronBody")) _notifyLastField = t.id;
       }, true);
 
       document.addEventListener("click", e => {
         // 快速模板 / 变量胶囊（也是 button，需要先于下面的按钮分派处理）
         const presetBtn = e.target && e.target.closest ? e.target.closest(".notify-preset") : null;
         if (presetBtn) { notifyApplyPreset(presetBtn.dataset.preset); return; }
+        const cronPresetBtn = e.target && e.target.closest ? e.target.closest(".notify-preset-cron") : null;
+        if (cronPresetBtn) { cronApplyPreset(cronPresetBtn.dataset.cpreset); return; }
         const varBtn = e.target && e.target.closest ? e.target.closest(".notify-var") : null;
         if (varBtn) { notifyInsertVar(varBtn.dataset.var); return; }
         // 按钮内含 <i> 图标，e.target 可能是图标而不是按钮，统一向上找最近的 button
@@ -1155,6 +1364,7 @@
         else if (id === "notifyCronTestDingtalk") cronNotifyTest("dingtalk", btn);
         else if (id === "notifyCronTestPushplus") cronNotifyTest("pushplus", btn);
         else if (id === "notifyCronSaveBtn") cronNotifySave();
+        else if (id === "notifyCronHistoryRefresh") cronNotifyLoadHistory();
         else if (id === "notifyClearHistory") notifyClearHistory();
       });
 

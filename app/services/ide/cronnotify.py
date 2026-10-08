@@ -19,6 +19,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -42,6 +43,7 @@ DEFAULT_CFG = {
         "fail": True,                               # 执行失败
         "timeout": True,                            # 执行超时
         "retry": False,                             # 安排了失败重试
+        "success": False,                           # 执行成功（默认关，开启后每次成功都会推送并留记录）
     },
     "channels": {                                   # 启用哪些渠道
         "desktop": True,
@@ -79,10 +81,19 @@ DEFAULT_CFG = {
         "token": "",                                # PushPlus 的 token（www.pushplus.plus）
         "topic": "",                                # 群组编码（留空 = 发给自己）
     },
+    # 通知模板：变量 {task} {event} {exit} {duration} {attempt} {run} {date} {time}
+    # 标题与正文都清空时回退到 cronsvc 传入的默认文案
+    "template": {
+        "title": "定时任务{event} · {task}",
+        "body": "任务「{task}」{event}。\n退出码：{exit}\n耗时：{duration}\n时间：{date} {time}\n执行记录：{run}",
+    },
 }
 
+# 事件名（模板 {event} 变量用）
+_EVENT_NAMES = {"fail": "执行失败", "timeout": "执行超时", "retry": "安排重试", "success": "执行成功"}
+
 _CHANNELS = ("desktop", "email", "dingtalk", "telegram", "pushplus")
-_EVENTS = ("fail", "timeout", "retry")
+_EVENTS = ("fail", "timeout", "retry", "success")
 
 
 # ---------------------------------------------------------------- 配置读写
@@ -103,6 +114,7 @@ def get_cfg():
         _merge_dict(cfg, saved, "telegram")
         _merge_dict(cfg, saved, "dingtalk")
         _merge_dict(cfg, saved, "pushplus")
+        _merge_dict(cfg, saved, "template")
         if "enabled" in saved:
             cfg["enabled"] = bool(saved.get("enabled"))
     return cfg
@@ -134,6 +146,11 @@ def save_cfg(patch):
                         cfg[key][k] = 465
                 elif v != _MASK:                    # 掩码 = 未修改，跳过不覆盖
                     cfg[key][k] = str(v or "").strip()
+    if isinstance(patch.get("template"), dict):
+        tpl = cfg.setdefault("template", {})
+        for k in ("title", "body"):
+            if k in patch["template"]:
+                tpl[k] = str(patch["template"][k] or "").strip()
     crondb.set_setting("notify", cfg)
     return sanitize_cfg(get_cfg())
 
@@ -240,10 +257,20 @@ def _send_one(cfg, channel, title, body):
         return False, str(e)
 
 
-def send(title, body, event="fail", source="cron"):
+def _render_tpl(tpl, vars_):
+    """渲染模板：{var} 用 vars_ 里的值替换，未知变量原样保留。"""
+    def _sub(m):
+        key = m.group(1)
+        return str(vars_[key]) if key in vars_ else m.group(0)
+    return re.sub(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", _sub, str(tpl or ""))
+
+
+def send(title, body, event="fail", source="cron", vars_=None):
     """按配置推送一次通知；返回 {"results": {渠道: {ok, detail}}}。
 
     event: fail / timeout / retry —— 决定受哪个事件开关控制；
+    vars_: 模板变量（task / event / exit / duration / attempt / run / date / time），
+    配置了通知模板时用模板渲染标题与正文，否则用调用方传入的默认文案；
     总开关未开、该事件未勾选、或该渠道未启用时对应渠道会被跳过。
     """
     cfg = get_cfg()
@@ -256,22 +283,50 @@ def send(title, body, event="fail", source="cron"):
     if not events.get(event, True):
         results["skipped"] = "event-off"
         return results
+    # 模板渲染（模板里两个都清空时用调用方的默认文案）
+    tpl = cfg.get("template") or {}
+    vars_ = dict(vars_ or {})
+    vars_.setdefault("event", _EVENT_NAMES.get(event, event))
+    vars_.setdefault("date", time.strftime("%Y-%m-%d"))
+    vars_.setdefault("time", time.strftime("%H:%M"))
+    if str(tpl.get("title") or "").strip():
+        title = _render_tpl(tpl["title"], vars_)
+    if str(tpl.get("body") or "").strip():
+        body = _render_tpl(tpl["body"], vars_)
     channels = cfg.get("channels") or {}
     for ch in _CHANNELS:
         if not channels.get(ch):
             continue
         ok, detail = _send_one(cfg, ch, title, body)
         results["results"][ch] = {"ok": bool(ok), "detail": detail}
-    try:                                                # 写进全局通知历史，供标题栏查看
+    try:                                                # 写进通知历史（本分区按 source 过滤展示）
         notifications.append_history({"source": source, "title": title, "body": body,
-                                      "ts": int(time.time()), "channels": list(results["results"])})
+                                      "ts": int(time.time()), "channels": results["results"]})
     except Exception:                                   # noqa: BLE001
         pass
     return results
 
 
+def history(limit=50):
+    """读取定时任务触发的通知记录（按 source == "cron" 过滤，新的在前）。"""
+    try:
+        d = notifications.read_latest(0)
+    except Exception:                                   # noqa: BLE001
+        return []
+    out = []
+    for r in (d.get("history") or []):
+        if str(r.get("source") or "") == "cron":
+            out.append(r)
+            if len(out) >= max(1, int(limit or 50)):
+                break
+    return out
+
+
 def test(channel):
-    """对单个渠道发一条测试消息（忽略总开关）；channel: 渠道名或 "all"。"""
+    """对单个渠道发一条测试消息（忽略总开关）；channel: 渠道名或 "all"。
+
+    测试结果同样写入通知历史（source="cron"），在「定时任务通知 → 通知记录」可见。
+    """
     ch = (channel or "all").strip().lower()
     cfg = get_cfg()
     title = "定时任务通知测试"
@@ -283,4 +338,9 @@ def test(channel):
             continue
         ok, detail = _send_one(cfg, t, title, body)
         out[t] = {"ok": bool(ok), "detail": detail}
+    try:                                                # 测试也留记录，便于确认渠道是否真的通了
+        notifications.append_history({"source": "cron", "title": title, "body": body,
+                                      "ts": int(time.time()), "channels": out})
+    except Exception:                                   # noqa: BLE001
+        pass
     return out

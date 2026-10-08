@@ -276,6 +276,16 @@ def _watch(run_id, task_id, proc, log_path, started):
         if status == "success":
             with _LOCK:
                 _RETRIES.pop(task_id, None)
+            # 执行成功：events.success 开启时也会推送并留记录（send 内部自行判断开关）
+            if task.get("notify"):
+                cronnotify.send(
+                    "定时任务执行成功 · %s" % (task.get("name") or task_id),
+                    "任务「%s」执行成功。\n耗时：%.1fs\n时间：%s\n执行记录：%s" % (
+                        task.get("name") or task_id, dur / 1000.0,
+                        time.strftime("%Y-%m-%d %H:%M:%S"), run_id),
+                    event="success",
+                    vars_={"task": task.get("name") or task_id, "exit": "0",
+                           "duration": "%.1fs" % (dur / 1000.0), "run": run_id, "attempt": ""})
         elif status in ("fail", "timeout"):
             _handle_failure(task, run_id, status, code, dur, log_path)
 
@@ -297,6 +307,9 @@ def _handle_failure(task, run_id, status, code, dur, log_path):
     body = ("任务「%s」执行%s。\n退出码：%s\n耗时：%.1fs\n时间：%s\n执行记录：%s" % (
         name, "超时被终止" if status == "timeout" else "失败", code, dur / 1000.0,
         time.strftime("%Y-%m-%d %H:%M:%S"), run_id))
+    # 模板变量（通知模板见 cronnotify；{event} {date} {time} 由 send 兜底）
+    vars_ = {"task": name, "exit": "无" if code is None else code,
+             "duration": "%.1fs" % (dur / 1000.0), "run": run_id, "attempt": ""}
     # 1) 还有重试名额：安排下一次重试
     if max_retries > 0 and attempt < max_retries:
         nxt = attempt + 1
@@ -314,11 +327,12 @@ def _handle_failure(task, run_id, status, code, dur, log_path):
         except OSError:
             pass
         _log.info("定时任务将重试：%s run=%s（%s）", name, run_id, tip)
-        cronnotify.send(title, body + "\n" + tip, event="retry")
+        vars_["attempt"] = "第 %d/%d 次" % (nxt, max_retries)
+        cronnotify.send(title, body + "\n" + tip, event="retry", vars_=vars_)
         return
     # 2) 没有重试名额了（或没配重试）：推送失败 / 超时通知
     if task.get("notify"):
-        cronnotify.send(title, body, event=status)
+        cronnotify.send(title, body, event=status, vars_=vars_)
 
 
 def _retry_fire(task_id, attempt):

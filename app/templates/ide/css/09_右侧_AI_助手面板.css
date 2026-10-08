@@ -550,6 +550,9 @@
   .ai-todo-row.completed .ic { color: #7fd88f; }
   .ai-todo-row.completed .tx { text-decoration: line-through; text-decoration-color: #46564b; }
   @keyframes aiTodoSpin { to { transform: rotate(360deg); } }
+  /* 会话停止 / 结束（或回放历史）：进行中项切到暂停态，不再转圈，状态行用琥珀色提示 */
+  .ai-todo.paused .ai-todo-row.in_progress .ic { animation: none; color: #e2c08a; }
+  .ai-todo-state.paused { color: #e2c08a; }
   /* 任务清单：悬浮固定在消息区底部（不随消息滚动，浮在内容之上） */
   .ai-msgs-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .ai-todo-float {

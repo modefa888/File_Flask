@@ -943,6 +943,8 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ai-todo-row.completed { color: #7a8a80; }
 :where(html.theme-light) .ai-todo-row.completed .ic { color: #1a7f37; }
 :where(html.theme-light) .ai-todo-row.completed .tx { text-decoration-color: #a8c8b0; }
+:where(html.theme-light) .ai-todo.paused .ai-todo-row.in_progress .ic { color: #8a5a00; }
+:where(html.theme-light) .ai-todo-state.paused { color: #8a5a00; }
 :where(html.theme-light) .ai-todo-float .ai-todo {
   background: rgba(255, 255, 255, .93); border-color: #dcdcdc;
   box-shadow: 0 8px 24px rgba(0, 0, 0, .16);

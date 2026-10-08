@@ -1274,7 +1274,10 @@
     $("aiCtxBtn").classList.toggle("on", AI.ctx);
     $("aiCtxFlag").style.display = AI.ctx ? "" : "none";
   });
-  $("aiStop").addEventListener("click", () => { if (AI.ctrl) AI.ctrl.abort(); });
+  $("aiStop").addEventListener("click", () => {
+    if (AI.ctrl) AI.ctrl.abort();
+    aiTodoFloatSetPaused(true);        // 立即暂停任务清单（停止转圈），不等流收尾
+  });
 
   /* ---------- AI 操作权限：仅可查看 / 工作区内修改 / 完全权限 ---------- */
   const AI_PERMS = [
@@ -1517,7 +1520,7 @@
   /* ---------- 任务清单（todo_write）：AI 把多步任务拆成清单并实时更新进度 ---------- */
   const AI_TODO_ICON = {
     completed: "bi-check-circle-fill",
-    in_progress: "bi-arrow-repeat spin",
+    in_progress: "bi-arrow-repeat",
     pending: "bi-circle",
   };
   function aiTodoStats(todos) {
@@ -1546,29 +1549,45 @@
       if (typeof aiTodoFloatPad === "function") aiTodoFloatPad();   // 展开/收起后同步消息区底部留白
     };
     box._head.onclick = () => box._setCollapsed(!box.classList.contains("collapsed"));
+    box._paused = false;
+    box._items = list;
     box.update = function (next) {
       const items = (next || []).filter(t => t && t.content);
+      box._items = items;
       box._listEl.innerHTML = "";
       items.forEach(t => {
         const st = t.status || "pending";
         const row = document.createElement("div");
         row.className = "ai-todo-row " + st;
-        row.innerHTML = '<i class="bi ' + (AI_TODO_ICON[st] || AI_TODO_ICON.pending) + ' ic"></i>' +
-          '<span class="tx"></span>';
+        // 进行中：运行中转圈；会话停止/结束后换成暂停图标（静止）
+        const ic = (st === "in_progress" && box._paused)
+          ? "bi-pause-circle" : (AI_TODO_ICON[st] || AI_TODO_ICON.pending);
+        row.innerHTML = '<i class="bi ' + ic + ' ic"></i><span class="tx"></span>';
         row.querySelector(".tx").textContent = t.content;
         row.title = t.content;
         box._listEl.appendChild(row);
       });
       const s = aiTodoStats(items);
       box._head.querySelector(".cnt").textContent = s.done + "/" + s.total;
+      const cur = (items.find(t => t.status === "in_progress") || {}).content || "";
       if (s.all) {
         box._stateEl.textContent = "所有任务已完成";
         box._stateEl.className = "ai-todo-state done";
+      } else if (box._paused) {
+        box._stateEl.textContent = "已暂停 " + s.done + "/" + s.total + (cur ? "：" + cur : "");
+        box._stateEl.className = "ai-todo-state paused";
       } else {
-        const cur = (items.find(t => t.status === "in_progress") || {}).content || "";
         box._stateEl.textContent = "进行中 " + s.done + "/" + s.total + (cur ? "：" + cur : "");
         box._stateEl.className = "ai-todo-state";
       }
+    };
+    /* 运行中 / 已暂停（会话停止、异常结束、回放历史都算暂停）：暂停时不再转圈 */
+    box.setPaused = function (p) {
+      p = !!p;
+      if (box._paused === p) return;
+      box._paused = p;
+      box.classList.toggle("paused", p);
+      box.update(box._items || []);
     };
     box.update(list);
     return box;
@@ -1597,6 +1616,7 @@
     } else {
       host._panel.update(list);
     }
+    host._panel.setPaused(!AI.busy);       // 没有正在运行的会话 → 暂停态（不转圈）
     host.style.display = "";
     aiTodoFloatPad();
     if (typeof aiScrollToBottom === "function") aiScrollToBottom();
@@ -1605,6 +1625,11 @@
     const host = aiTodoFloatHost();
     if (host) host.style.display = "none";
     aiTodoFloatPad();
+  }
+  /* 会话停止 / 结束时调用：把「进行中」的项切到暂停态（停止转圈） */
+  function aiTodoFloatSetPaused(p) {
+    const host = aiTodoFloatHost();
+    if (host && host._panel && host._panel.setPaused) host._panel.setPaused(p);
   }
   /* 加载 / 切换会话：取最后一条带任务清单的回复，回放到悬浮面板 */
   function aiTodoFloatSyncFromMsgs() {
@@ -2400,6 +2425,7 @@
     } finally {
       AI.busy = false; AI.ctrl = null;
       $("aiSend").style.display = ""; $("aiStop").style.display = "none";
+      aiTodoFloatSetPaused(true);   // 本轮结束（完成/停止/异常）：任务清单暂停，停止转圈
       aiScrollToBottom(true);
       aiClearPendingTurn();   // 无论成功/失败/停止，本轮已结束
       if (typeof aiMaybeAutoTitle === "function") aiMaybeAutoTitle();   // 首轮完成后尝试智能标题

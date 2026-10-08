@@ -1339,3 +1339,43 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .cron-dialog .cr-mini { background: #f2f2f2; border-color: #d5d5d5; color: #4a5560; }
 :where(html.theme-light) .cron-dialog .cr-log { background: #f7f7f7; color: #26323c; }
 :where(html.theme-light) .cron-dialog .ph { color: #8a8a8a; }
+
+/* ---------- 定时任务大页（36） ---------- */
+:where(html.theme-light) .cron-view { background: #ffffff; }
+:where(html.theme-light) .cron-view .cv-head { background: #f5f5f5; border-bottom-color: #e3e3e3; }
+:where(html.theme-light) .cron-view .cv-title { color: #1f2328; }
+:where(html.theme-light) .cron-view .cv-stats { color: #6b6b6b; }
+:where(html.theme-light) .cron-view .cv-stat b { color: #1f2328; }
+:where(html.theme-light) .cron-view .cv-stat.ok b { color: #1a7f37; }
+:where(html.theme-light) .cron-view .cv-stat.run b { color: #0969da; }
+:where(html.theme-light) .cron-view .cv-stat.bad b { color: #c0392b; }
+:where(html.theme-light) .cron-view .cv-search,
+:where(html.theme-light) .cron-view .cv-filter { background: #ffffff; border-color: #d0d0d0; color: #1f2328; }
+:where(html.theme-light) .cron-view .cv-btn { background: #efefef; border-color: #d5d5d5; color: #333333; }
+:where(html.theme-light) .cron-view .cv-btn:hover { border-color: #a8a8a8; color: #000000; }
+:where(html.theme-light) .cron-view .cv-batch { background: #e3f0fb; border-color: #a8c8e8; color: #0b5c9a; }
+:where(html.theme-light) .cron-view .cv-table thead th { background: #f7f7f7; color: #6b6b6b; border-bottom-color: #e3e3e3; }
+:where(html.theme-light) .cron-view .cv-table td { color: #333333; border-bottom-color: #eeeeee; }
+:where(html.theme-light) .cron-view .cv-row:hover td { background: #f6f8fa; }
+:where(html.theme-light) .cron-view .cv-row.on td { background: #e3f0fb; }
+:where(html.theme-light) .cron-view .cv-name-t { color: #1f2328; }
+:where(html.theme-light) .cron-view .cv-row.off .cv-name-t,
+:where(html.theme-light) .cron-view .cv-row.off .cv-cmd { color: #9a9a9a; }
+:where(html.theme-light) .cron-view .cv-sub { color: #8a8a8a; }
+:where(html.theme-light) .cron-view .cv-plan code { background: #f4f4f4; border-color: #e0e0e0; color: #8a5a00; }
+:where(html.theme-light) .cron-view .cv-next { color: #1a7f37; }
+:where(html.theme-light) .cron-view .cv-cmd { color: #33404d; }
+:where(html.theme-light) .cron-view .cv-last { color: #333333; }
+:where(html.theme-light) .cron-view .cv-ico { background: #e8e8e8; }
+:where(html.theme-light) .cron-view .cv-ico:hover { background: #dcdcdc; }
+:where(html.theme-light) .cron-view .cv-detail { background: #fafafa; border-left-color: #e3e3e3; }
+:where(html.theme-light) .cron-view .cv-d-head { border-bottom-color: #e3e3e3; }
+:where(html.theme-light) .cron-view .cv-d-title { color: #1f2328; }
+:where(html.theme-light) .cron-view .cv-k { color: #8a8a8a; }
+:where(html.theme-light) .cron-view .cv-v { color: #333333; }
+:where(html.theme-light) .cron-view .cv-v.mono { color: #0a5c3a; }
+:where(html.theme-light) .cron-view .cv-d-sub { background: #f3f3f3; border-top-color: #e3e3e3; color: #33404d; }
+:where(html.theme-light) .cron-view .cv-run-row:hover { background: #f0f0f0; }
+:where(html.theme-light) .cron-view .cv-run-row.on { background: #e3f0fb; }
+:where(html.theme-light) .cron-view .cv-run-t { color: #333333; }
+:where(html.theme-light) .cron-view .cv-log { background: #f7f7f7; color: #26323c; }

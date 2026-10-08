@@ -159,6 +159,8 @@
           if (apiReq && typeof apiOpen === "function") apiOpen(apiReq.id);
           continue;
         }
+        // 定时任务管理大页（虚拟路径 \u0000cron）：不是真实文件，直接重开这个大页
+        if (t.path === "\u0000cron" && typeof cronOpenView === "function") { cronOpenView(); continue; }
         if (t.path.indexOf("\u0001") >= 0) continue;
         // 其它内部虚拟视图（\u0000 前缀，如未识别的工具视图）：不是真实文件，直接跳过。
         // 否则 openFile 会去后端读一个不存在的路径，刷新后冒出「路径不存在」的错误标签

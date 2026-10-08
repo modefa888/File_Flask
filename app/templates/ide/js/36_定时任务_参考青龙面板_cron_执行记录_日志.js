@@ -46,6 +46,10 @@
       CRON.tasks = d.tasks || [];
       cronSetBadge(d.running || 0);
       renderCronList();
+      // 编辑区大页也开着时：只刷新统计与表格，保留详情里的日志与滚动位置
+      if (typeof cronViewPaintHead === "function" && $("cvTbody")) {
+        cronViewPaintHead(); cronViewPaintRows();
+      }
     } catch (e) {
       const hint = $("cronHint");
       if (hint && !(opts && opts.silent)) hint.textContent = "读取定时任务失败：" + (e.message || e);
@@ -404,12 +408,449 @@
     if (e.key === "Escape" && $("cronModal") && $("cronModal").style.display !== "none") cronCloseModal();
   });
 
+  /* ==================================================================
+     编辑区「定时任务管理」大页（标签页形式）
+       · 顶部：统计概览 + 搜索 / 状态筛选 + 刷新 / 新建
+       · 勾选若干行 → 批量启用 / 停用 / 运行 / 删除
+       · 中部表格：名称 / 计划(含下次运行) / 状态 / 命令 / 上次运行 / 操作
+       · 右侧详情：任务信息 + 执行记录 + 实时日志（点记录即看）
+     数据全部走 /api/cron/*，与侧栏、悬浮框共用同一套状态。
+     ================================================================== */
+  const CRON_VIEW_PATH = "\u0000cron";
+  CRON.view = { sel: {}, kw: "", filter: "all", cur: "", runs: [], logRun: null,
+                logOffset: 0, log: "", logTimer: null, timer: null };
+
+  function cronOpenView(tid) {
+    let tab = findTab(CRON_VIEW_PATH);
+    if (!tab) {
+      const host = document.createElement("div");
+      host.className = "cm-host cron-view-host";
+      host.innerHTML = '<div class="cron-view" id="cronView"></div>';
+      const dw = currentWrap();
+      (dw || edGroups).appendChild(host);
+      tab = {
+        path: CRON_VIEW_PATH, host: host, cm: null, original: "", dirty: false,
+        group: curGroup, name: "定时任务", displayPath: "定时任务", relPath: "",
+        iconHtml: '<i class="bi bi-alarm" style="color:#e2c08a"></i>',
+      };
+      tab.onBeforeClose = () => {
+        clearTimeout(CRON.view.timer); clearTimeout(CRON.view.logTimer);
+        CRON.view.timer = CRON.view.logTimer = null;
+        return true;
+      };
+      tabs.push(tab);
+      renderTabsAll();
+    }
+    activate(tab);
+    cronViewRefresh(true).then(() => {
+      if (tid) cronViewSelect(tid);
+      cronViewTick();
+    });
+    return tab;
+  }
+  function cronViewActive() { return !!findTab(CRON_VIEW_PATH) && active && active.path === CRON_VIEW_PATH; }
+  function cronViewTick() {
+    clearTimeout(CRON.view.timer);
+    if (!cronViewActive()) return;
+    CRON.view.timer = setTimeout(() => { cronViewRefresh().then(cronViewTick); }, 5000);
+  }
+
+  /* ---------- 数据 ---------- */
+  async function cronViewRefresh(force) {
+    if (!findTab(CRON_VIEW_PATH)) return;
+    try {
+      const r = await fetch("/api/cron/tasks");
+      const d = await r.json();
+      CRON.tasks = d.tasks || [];
+      cronSetBadge(d.running || 0);
+    } catch (_) { /* 保留旧数据，不打断界面 */ }
+    if (force || !$("cvTbody")) cronViewRender();
+    else { cronViewPaintHead(); cronViewPaintRows(); }
+    // 侧栏面板也停在同一页时才重建（避免无谓重绘）
+    if ($("cronPanel") && $("cronPanel").classList.contains("active")) renderCronList();
+  }
+  function cronViewStats() {
+    const list = CRON.tasks || [];
+    return {
+      total: list.length,
+      enabled: list.filter(t => t.enabled).length,
+      running: list.filter(t => t.running).length,
+      ok: list.reduce((a, t) => a + (t.ok_count || 0), 0),
+      fail: list.reduce((a, t) => a + (t.fail_count || 0), 0),
+    };
+  }
+  function cronViewFiltered() {
+    const kw = (CRON.view.kw || "").trim().toLowerCase();
+    const f = CRON.view.filter;
+    return (CRON.tasks || []).filter(t => {
+      if (f === "enabled" && !t.enabled) return false;
+      if (f === "disabled" && t.enabled) return false;
+      if (f === "running" && !t.running) return false;
+      if (!kw) return true;
+      return [t.name, t.command, t.cron, t.remark].some(v => String(v || "").toLowerCase().indexOf(kw) >= 0);
+    });
+  }
+
+  /* ---------- 渲染 ---------- */
+  function cronViewStatsHtml() {
+    const s = cronViewStats();
+    return '<span class="cv-stat"><b>' + s.total + '</b> 总任务</span>' +
+      '<span class="cv-stat ok"><b>' + s.enabled + '</b> 已启用</span>' +
+      '<span class="cv-stat run"><b>' + s.running + '</b> 运行中</span>' +
+      '<span class="cv-stat ok"><b>' + s.ok + '</b> 成功</span>' +
+      '<span class="cv-stat bad"><b>' + s.fail + '</b> 失败</span>';
+  }
+  function cronViewBatchHtml() {
+    const n = Object.keys(CRON.view.sel).length;
+    if (!n) return "";
+    return '<div class="cv-batch" id="cvBatch">已选 <b>' + n + '</b> 项：' +
+      '<button class="cv-btn" data-batch="enable"><i class="bi bi-toggle-on"></i> 启用</button>' +
+      '<button class="cv-btn" data-batch="disable"><i class="bi bi-toggle-off"></i> 停用</button>' +
+      '<button class="cv-btn" data-batch="run"><i class="bi bi-play-fill"></i> 立即运行</button>' +
+      '<button class="cv-btn danger" data-batch="delete"><i class="bi bi-trash"></i> 删除</button>' +
+      '<button class="cv-btn" data-batch="none">取消选择</button></div>';
+  }
+  function cronViewPaintHead() {
+    const st = $("cvStats");
+    if (st) st.innerHTML = cronViewStatsHtml();
+    const old = $("cvBatch");
+    if (old) old.remove();
+    const head = $("cvHead");
+    if (head) head.insertAdjacentHTML("beforeend", cronViewBatchHtml());
+    cronViewBindBatch();
+  }
+  function cronViewPaintRows() {
+    const tb = $("cvTbody");
+    if (!tb) return;
+    const list = cronViewFiltered();
+    tb.innerHTML = list.length ? list.map(cronViewRowHtml).join("")
+      : '<tr><td colspan="7" class="cv-empty">没有匹配的任务。可点右上角「新建任务」，' +
+        '或在资源管理器里右键文件 →「添加定时任务…」。</td></tr>';
+    const all = $("cvAll");
+    if (all) all.checked = list.length > 0 && list.every(t => CRON.view.sel[t.id]);
+    cronViewBindRows();
+  }
+  function cronViewRender() {
+    const box = $("cronView");
+    if (!box) return;
+    box.innerHTML =
+      '<div class="cv-head" id="cvHead">' +
+        '<div class="cv-title"><i class="bi bi-alarm"></i><span>定时任务</span>' +
+          '<span class="cv-stats" id="cvStats">' + cronViewStatsHtml() + '</span></div>' +
+        '<div class="cv-tools">' +
+          '<input class="cv-search" id="cvSearch" placeholder="搜索名称 / 命令 / cron / 备注…" spellcheck="false" autocomplete="off" value="' + escAttr(CRON.view.kw) + '">' +
+          '<select class="cv-filter" id="cvFilter">' +
+            [["all", "全部"], ["enabled", "已启用"], ["disabled", "已停用"], ["running", "运行中"]]
+              .map(x => '<option value="' + x[0] + '"' + (CRON.view.filter === x[0] ? " selected" : "") + '>' + x[1] + '</option>').join("") +
+          '</select>' +
+          '<button class="cv-btn" id="cvRefresh" title="刷新"><i class="bi bi-arrow-clockwise"></i></button>' +
+          '<button class="cv-btn primary" id="cvNew" title="新建定时任务"><i class="bi bi-plus-lg"></i> 新建任务</button>' +
+        '</div>' +
+        cronViewBatchHtml() +
+      '</div>' +
+      '<div class="cv-body">' +
+        '<div class="cv-table-wrap scroll-thin"><table class="cv-table"><thead><tr>' +
+          '<th class="cv-c"><input type="checkbox" id="cvAll" title="全选"></th>' +
+          '<th>名称</th><th>计划</th><th>状态</th><th>命令</th><th>上次运行</th><th class="cv-a">操作</th>' +
+        '</tr></thead><tbody id="cvTbody"></tbody></table></div>' +
+        '<div class="cv-detail" id="cvDetail"></div>' +
+      '</div>';
+    cronViewBindHead();
+    cronViewPaintRows();
+    cronViewRenderDetail();
+  }
+  function cronViewRowHtml(t) {
+    const stKey = t.running ? "running" : (t.last_status || "");
+    const si = stKey ? cronStatusInfo(stKey) : ["未运行", ""];
+    const on = CRON.view.cur === t.id ? " on" : "";
+    const off = t.enabled ? "" : " off";
+    const sel = CRON.view.sel[t.id] ? " checked" : "";
+    return '<tr class="cv-row' + on + off + '" data-tid="' + t.id + '">' +
+      '<td class="cv-c"><input type="checkbox" data-sel="' + t.id + '"' + sel + '></td>' +
+      '<td class="cv-name"><div class="cv-name-t" title="' + escAttr(t.name) + '">' + esc(t.name) + '</div>' +
+        (t.remark ? '<div class="cv-sub" title="' + escAttr(t.remark) + '">' + esc(t.remark) + '</div>' : "") + '</td>' +
+      '<td class="cv-plan"><code>' + esc(t.cron) + '</code>' +
+        (t.next && t.next.length ? '<div class="cv-next" title="接下来的运行时间">' + esc(t.next.slice(0, 2).join("  ·  ")) + '</div>' : "") + '</td>' +
+      '<td><span class="ci-st ' + si[1] + '">' + esc(si[0]) + '</span>' +
+        '<div class="cv-sub">' + (t.enabled ? "已启用" : "已停用") + '</div></td>' +
+      '<td class="cv-cmd" title="' + escAttr(t.command) + '">' + esc(t.command) + '</td>' +
+      '<td class="cv-last">' + (t.last_at
+        ? esc(cronFmtTime(t.last_at)) + '<div class="cv-sub">' + cronFmtDur(t.last_ms) + ' · 共 ' + (t.run_count || 0) + ' 次</div>'
+        : '<span class="cv-sub">从未运行</span>') + '</td>' +
+      '<td class="cv-a">' +
+        (t.running
+          ? '<button class="cv-ico v-stop" data-act="stop" title="停止本次执行"><i class="bi bi-stop-fill"></i></button>'
+          : '<button class="cv-ico v-run" data-act="run" title="立即运行一次"><i class="bi bi-play-fill"></i></button>') +
+        '<button class="cv-ico v-edit" data-act="edit" title="编辑"><i class="bi bi-pencil-square"></i></button>' +
+        '<button class="cv-ico v-copy" data-act="copy" title="复制一份（默认停用）"><i class="bi bi-copy"></i></button>' +
+        '<button class="cv-ico v-del" data-act="del" title="删除"><i class="bi bi-trash"></i></button>' +
+      '</td></tr>';
+  }
+  function cronViewKV(k, v, mono) {
+    return '<div class="cv-kv"><span class="cv-k">' + esc(k) + '</span>' +
+      '<span class="cv-v' + (mono ? " mono" : "") + '">' +
+      esc(String(v == null || v === "" ? "—" : v)) + '</span></div>';
+  }
+  function cronViewRenderDetail() {
+    const box = $("cvDetail");
+    if (!box) return;
+    const t = (CRON.tasks || []).find(x => x.id === CRON.view.cur);
+    if (!t) {
+      box.innerHTML = '<div class="cv-d-empty"><i class="bi bi-list-ul"></i>' +
+        '<div>点击左侧任意一行，查看任务详情、执行记录与日志</div></div>';
+      return;
+    }
+    const si = cronStatusInfo(t.running ? "running" : (t.last_status || ""));
+    const runs = CRON.view.runs || [];
+    box.innerHTML =
+      '<div class="cv-d-head">' +
+        '<div class="cv-d-title" title="' + escAttr(t.name) + '">' + esc(t.name) + '</div>' +
+        '<span class="ci-st ' + si[1] + '">' + esc(si[0]) + '</span>' +
+        '<span class="cv-sp"></span>' +
+        (t.running
+          ? '<button class="cv-btn danger" data-dact="stop"><i class="bi bi-stop-fill"></i> 停止</button>'
+          : '<button class="cv-btn primary" data-dact="run"><i class="bi bi-play-fill"></i> 运行</button>') +
+        '<button class="cv-btn" data-dact="edit"><i class="bi bi-pencil-square"></i> 编辑</button>' +
+        '<button class="cv-btn" data-dact="runs" title="刷新执行记录"><i class="bi bi-arrow-clockwise"></i></button>' +
+      '</div>' +
+      '<div class="cv-d-info">' +
+        cronViewKV("cron 表达式", t.cron) +
+        cronViewKV("下次运行", (t.next && t.next.length) ? t.next.join("   ·   ") : "") +
+        cronViewKV("执行命令", t.command, true) +
+        cronViewKV("工作目录", t.cwd || "（默认：任务所在项目目录）", true) +
+        cronViewKV("超时", t.timeout ? (t.timeout + " 秒") : "不限时") +
+        cronViewKV("运行统计", "共 " + (t.run_count || 0) + " 次 · 成功 " + (t.ok_count || 0) + " · 失败 " + (t.fail_count || 0)) +
+        (t.remark ? cronViewKV("备注", t.remark) : "") +
+      '</div>' +
+      '<div class="cv-d-sub">执行记录 <span class="cv-sub">（' + runs.length + ' 条，点一行看日志）</span>' +
+        '<span class="cv-sp"></span>' +
+        '<button class="cv-btn" data-dact="clearruns" title="清空非运行中的历史记录">清空记录</button></div>' +
+      '<div class="cv-run-list scroll-thin" id="cvRunList">' + (runs.length ? runs.map(x => {
+        const xi = cronStatusInfo(x.status);
+        const on = (CRON.view.logRun && CRON.view.logRun.id === x.id) ? " on" : "";
+        return '<div class="cv-run-row' + on + '" data-rid="' + x.id + '">' +
+          '<span class="cr-dot ' + xi[1] + '"></span>' +
+          '<span class="cv-run-t">' + esc(cronFmtTime(x.started_at)) + '</span>' +
+          '<span class="cv-sub">' + (x.trigger === "manual" ? "手动" : "定时") + '</span>' +
+          '<span class="cv-sp"></span>' +
+          '<span class="cv-run-s">' + esc(xi[0]) +
+            (x.status !== "running" ? " · " + cronFmtDur(x.duration) : "") + '</span></div>';
+      }).join("") : '<div class="cv-d-empty-line">还没有执行记录</div>') + '</div>' +
+      '<div class="cv-d-sub">日志' +
+        (CRON.view.logRun ? ' <span class="cv-sub">' + esc(cronFmtTime(CRON.view.logRun.started_at)) + '</span>' : "") +
+        '<span class="cv-sp"></span>' +
+        '<button class="cv-btn" data-dact="logrefresh" title="重新加载日志"><i class="bi bi-arrow-clockwise"></i></button></div>' +
+      '<pre class="cv-log scroll-thin" id="cvLog">' + esc(CRON.view.log || "") + '</pre>';
+    const pre = $("cvLog");
+    if (pre) pre.scrollTop = pre.scrollHeight;
+    cronViewBindDetail();
+  }
+
+  /* ---------- 事件绑定 ---------- */
+  function cronViewBindHead() {
+    const se = $("cvSearch");
+    if (se) se.oninput = () => { CRON.view.kw = se.value; cronViewPaintRows(); };
+    const fl = $("cvFilter");
+    if (fl) fl.onchange = () => { CRON.view.filter = fl.value; cronViewPaintRows(); };
+    const rf = $("cvRefresh");
+    if (rf) rf.onclick = () => cronViewRefresh(true);
+    const nw = $("cvNew");
+    if (nw) nw.onclick = () => cronOpenEditor(null);
+    const all = $("cvAll");
+    if (all) {
+      all.onchange = () => {
+        const list = cronViewFiltered();
+        CRON.view.sel = {};
+        if (all.checked) list.forEach(t => { CRON.view.sel[t.id] = 1; });
+        cronViewPaintRows(); cronViewPaintHead();
+      };
+    }
+    cronViewBindBatch();
+  }
+  function cronViewBindBatch() {
+    const b = $("cvBatch");
+    if (!b) return;
+    b.querySelectorAll("[data-batch]").forEach(btn => { btn.onclick = () => cronViewBatch(btn.dataset.batch); });
+  }
+  function cronViewBindRows() {
+    document.querySelectorAll("#cvTbody .cv-row").forEach(row => {
+      const tid = row.dataset.tid;
+      row.onclick = (e) => {
+        if (e.target.closest("button") || e.target.closest("input")) return;
+        cronViewSelect(tid);
+      };
+      const act = (name, fn) => {
+        const el = row.querySelector('[data-act="' + name + '"]');
+        if (el) el.onclick = (ev) => { ev.stopPropagation(); fn(); };
+      };
+      const task = () => (CRON.tasks || []).find(x => x.id === tid);
+      act("run", () => cronViewRun(tid));
+      act("stop", () => cronViewStop(tid));
+      act("edit", () => cronOpenEditor(task()));
+      act("copy", () => cronViewCopy(task()));
+      act("del", () => cronViewDelete(task()));
+      const cb = row.querySelector("[data-sel]");
+      if (cb) cb.onchange = () => {
+        if (cb.checked) CRON.view.sel[tid] = 1; else delete CRON.view.sel[tid];
+        cronViewPaintHead();
+      };
+    });
+  }
+  function cronViewBindDetail() {
+    document.querySelectorAll("#cvDetail [data-dact]").forEach(btn => {
+      btn.onclick = () => cronViewDetailAct(btn.dataset.dact);
+    });
+    const box = $("cvRunList");
+    if (!box) return;
+    box.querySelectorAll(".cv-run-row").forEach(row => {
+      row.onclick = () => {
+        const run = (CRON.view.runs || []).find(x => x.id === row.dataset.rid);
+        if (!run) return;
+        box.querySelectorAll(".cv-run-row").forEach(e => e.classList.toggle("on", e === row));
+        cronViewLoadLog(run, true);
+      };
+    });
+  }
+
+  /* ---------- 操作 ---------- */
+  function cronViewSelect(tid) {
+    CRON.view.cur = tid;
+    CRON.view.runs = []; CRON.view.logRun = null; CRON.view.log = ""; CRON.view.logOffset = 0;
+    clearTimeout(CRON.view.logTimer);
+    cronViewPaintRows();
+    cronViewRenderDetail();
+    cronViewLoadRuns(tid);
+  }
+  async function cronViewLoadRuns(tid) {
+    if (!findTab(CRON_VIEW_PATH)) return;
+    try {
+      const r = await fetch("/api/cron/runs?task_id=" + encodeURIComponent(tid) + "&limit=80");
+      const d = await r.json();
+      if (CRON.view.cur !== tid) return;
+      CRON.view.runs = d.runs || [];
+    } catch (_) { CRON.view.runs = []; }
+    cronViewRenderDetail();
+    const first = (CRON.view.runs || [])[0];
+    if (first) cronViewLoadLog(first, true);
+  }
+  function cronViewLoadLog(run, force) {
+    if (!run) return;
+    CRON.view.logRun = run;
+    if (force) { CRON.view.log = ""; CRON.view.logOffset = 0; }
+    clearTimeout(CRON.view.logTimer);
+    const pre = $("cvLog");
+    if (pre) pre.textContent = CRON.view.log;
+    const pull = () => {
+      if (!findTab(CRON_VIEW_PATH)) return;
+      fetch("/api/cron/log?run_id=" + encodeURIComponent(run.id) + "&offset=" + CRON.view.logOffset)
+        .then(r => r.json()).then(d => {
+          if (d.error) { CRON.view.log += "\n[读取失败] " + d.error; }
+          else if (d.text) { CRON.view.logOffset = d.offset; CRON.view.log += d.text; }
+          const el = $("cvLog");
+          if (el && (d.text || d.error)) {
+            const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+            const keep = el.scrollTop;
+            el.textContent = CRON.view.log;
+            el.scrollTop = nearBottom ? el.scrollHeight : keep;
+          }
+          if (d.running) CRON.view.logTimer = setTimeout(pull, 1000);
+        }).catch(() => { CRON.view.logTimer = setTimeout(pull, 1500); });
+    };
+    pull();
+  }
+  async function cronViewRun(tid) {
+    const t = (CRON.tasks || []).find(x => x.id === tid);
+    const d = await cronAct("/api/cron/run", { id: tid });
+    if (d.error) { toast(d.error, "err"); return; }
+    toast("已开始执行：" + ((t && t.name) || tid), "ok");
+    await cronViewRefresh(true);
+    cronViewSelect(tid);
+  }
+  async function cronViewStop(tid) {
+    const d = await cronAct("/api/cron/stop", { id: tid });
+    if (d.error) { toast(d.error, "err"); return; }
+    toast("已停止", "warn");
+    await cronViewRefresh(true);
+    if (CRON.view.cur === tid) cronViewSelect(tid);
+  }
+  async function cronViewCopy(t) {
+    if (!t) return;
+    const d = await cronAct("/api/cron/save", {
+      name: t.name + " 副本", cron: t.cron, command: t.command, cwd: t.cwd || "",
+      remark: t.remark || "", timeout: t.timeout || 0, enabled: false,
+    });
+    if (d.error) { toast(d.error, "err"); return; }
+    toast("已复制为「" + d.task.name + "」（默认停用，改好再启用）", "ok");
+    cronViewRefresh(true);
+  }
+  async function cronViewDelete(t) {
+    if (!t) return;
+    const ok = await uiConfirm("删除定时任务",
+      "确定删除「" + t.name + "」吗？它的执行记录与日志文件会一起清掉，此操作不可撤销。", "删除", true);
+    if (!ok) return;
+    const d = await cronAct("/api/cron/delete", { id: t.id });
+    if (d.error) { toast(d.error, "err"); return; }
+    delete CRON.view.sel[t.id];
+    if (CRON.view.cur === t.id) { CRON.view.cur = ""; CRON.view.runs = []; CRON.view.logRun = null; CRON.view.log = ""; }
+    toast("已删除：" + t.name, "ok");
+    cronViewRefresh(true);
+  }
+  async function cronViewBatch(action) {
+    const ids = Object.keys(CRON.view.sel);
+    if (action === "none") { CRON.view.sel = {}; cronViewPaintRows(); cronViewPaintHead(); return; }
+    if (!ids.length) return;
+    const tasks = ids.map(id => (CRON.tasks || []).find(x => x.id === id)).filter(Boolean);
+    if (action === "delete") {
+      const ok = await uiConfirm("批量删除", "确定删除选中的 " + tasks.length + " 个定时任务吗？执行记录与日志会一起清掉。", "删除", true);
+      if (!ok) return;
+    }
+    if (action === "run") {
+      const ok = await uiConfirm("批量运行", "立即运行选中的 " + tasks.length + " 个任务？", "运行", false);
+      if (!ok) return;
+    }
+    let okN = 0, failN = 0;
+    for (const t of tasks) {
+      let d = null;
+      if (action === "enable") d = await cronAct("/api/cron/toggle", { id: t.id, enabled: true });
+      else if (action === "disable") d = await cronAct("/api/cron/toggle", { id: t.id, enabled: false });
+      else if (action === "run") d = await cronAct("/api/cron/run", { id: t.id });
+      else if (action === "delete") d = await cronAct("/api/cron/delete", { id: t.id });
+      else break;
+      if (d && d.error) failN++; else okN++;
+    }
+    if (action === "delete") CRON.view.sel = {};
+    const label = { enable: "启用", disable: "停用", run: "运行", delete: "删除" }[action] || action;
+    toast("批量" + label + "完成：" + okN + " 个成功" + (failN ? "，" + failN + " 个失败" : ""), failN ? "warn" : "ok");
+    await cronViewRefresh(true);
+    if (action === "run" && CRON.view.cur) cronViewSelect(CRON.view.cur);
+  }
+  async function cronViewDetailAct(act) {
+    const t = (CRON.tasks || []).find(x => x.id === CRON.view.cur);
+    if (!t) return;
+    if (act === "run") return cronViewRun(t.id);
+    if (act === "stop") return cronViewStop(t.id);
+    if (act === "edit") return cronOpenEditor(t);
+    if (act === "runs") return cronViewLoadRuns(t.id);
+    if (act === "logrefresh") return cronViewLoadLog(CRON.view.logRun, true);
+    if (act === "clearruns") {
+      const ok = await uiConfirm("清空执行记录", "确定清空「" + t.name + "」的历史执行记录与日志吗？（正在运行的会保留）", "清空", true);
+      if (!ok) return;
+      const d = await cronAct("/api/cron/clear-runs", { id: t.id });
+      if (d.error) { toast(d.error, "err"); return; }
+      toast("已清空 " + (d.removed || 0) + " 条记录", "ok");
+      CRON.view.logRun = null; CRON.view.log = ""; CRON.view.logOffset = 0;
+      cronViewLoadRuns(t.id);
+    }
+  }
+
   /* 面板工具栏按钮 + 首屏同步一次（刷新后角标数量正确） */
   (function initCronPanel() {
     const add = $("cronNew");
     if (add) add.onclick = () => cronOpenEditor(null);
     const rf = $("cronRefresh");
     if (rf) rf.onclick = () => loadCron();
+    const ov = $("cronOpenView");
+    if (ov) ov.onclick = () => cronOpenView();
   })();
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => loadCron({ silent: true }));

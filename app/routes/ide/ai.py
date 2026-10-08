@@ -958,6 +958,17 @@ def _clean_content(c):
     return ""
 
 
+def _strip_fence(s):
+    """去掉模型偶尔包裹的 ```lang ... ``` 代码围栏，便于直接落盘/替换。"""
+    s = (s or "").strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```[^\n]*\n?", "", s, count=1)
+        if s.endswith("```"):
+            s = s[:-3]
+        s = s.strip()
+    return s
+
+
 def _sse(payload: dict) -> bytes:
     return ("data: " + json.dumps(payload, ensure_ascii=False) + "\n\n").encode("utf-8")
 
@@ -1423,6 +1434,107 @@ def api_ai_summarize():
         return jsonify({"error": f"压缩失败：{e}"}), 502
 
 
+# ---------------------------------------------------------------- AI 自动标题
+_TITLE_TIMEOUT = 30
+_TITLE_SYS = ("你是对话标题生成器。根据用户的第一条问题，输出一个不超过 8 个汉字的简短标题，"
+              "概括对话主题。只输出标题本身：不要引号、不要标点符号结尾、不要解释、不要换行、不要 Markdown。")
+
+@bp.route("/api/ai/title", methods=["POST"])
+@_count_calls("chat")
+def api_ai_title():
+    """由轻量模型根据首轮问答自动生成对话标题（非流式）。"""
+    cfg = _load_cfg()
+    data = request.get_json(silent=True) or {}
+    msgs = data.get("messages") or []
+    if not isinstance(msgs, list) or not msgs:
+        return jsonify({"error": "messages 不能为空"}), 400
+    provider, model, err = _sys_pick(cfg, "chat")
+    if err:
+        return _sys_err_response(err, need_config=not cfg.get("providers"))
+    provider, model = _override_pick(cfg, provider, model, data)
+
+    convo = []
+    for m in msgs[:6]:
+        role = "用户" if str(m.get("role")) == "user" else "AI"
+        convo.append(role + "：" + str(m.get("text") or m.get("content") or "")[:1500])
+    content = "\n".join(convo)[:6000]
+
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    payload = json.dumps({"model": model, "stream": False, "messages": [
+        {"role": "system", "content": _TITLE_SYS},
+        {"role": "user", "content": content}]}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, method="POST", headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+    try:
+        resp = urllib.request.urlopen(req, timeout=_TITLE_TIMEOUT)
+        obj = json.loads(resp.read().decode("utf-8"))
+        choices = obj.get("choices") or [{}]
+        text = ((choices[0] or {}).get("message") or {}).get("content") or ""
+        title = re.sub(r"\s+", " ", text.strip().strip('"').strip()).strip()
+        return jsonify({"title": title[:24]})
+    except urllib.error.HTTPError as e:
+        return jsonify({"error": f"接口返回 {e.code}"}), 502
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return jsonify({"error": f"生成标题失败：{e}"}), 502
+
+
+# ---------------------------------------------------------------- 内联对话（编辑器 / 终端）
+_INLINE_TIMEOUT = 60
+_INLINE_SYS_EDIT = (
+    "你是代码编辑助手。用户会给你一段选中代码（可能为空，表示在光标处生成）和一句自然语言指令。"
+    "请直接输出「修改后的完整代码」，用于替换原选中内容；不要任何解释、不要 Markdown 代码围栏、"
+    "不要重复指令。只输出替换后的代码本身。")
+_INLINE_SYS_TERM = (
+    "你是终端命令助手。用户用自然语言描述想在终端执行的操作。请只输出一条可执行的 Shell 命令"
+    "（不要解释、不要 Markdown 围栏、不要分号串联多条命令）。如有歧义，选择最常见、最安全的实现。")
+
+@bp.route("/api/ai/inline", methods=["POST"])
+@_count_calls("chat")
+def api_ai_inline():
+    """内联对话：根据指令生成「代码（编辑模式）」或「一条 Shell 命令（终端模式）」（非流式）。"""
+    cfg = _load_cfg()
+    data = request.get_json(silent=True) or {}
+    instruction = str(data.get("instruction") or "").strip()
+    if not instruction:
+        return jsonify({"error": "instruction 不能为空"}), 400
+    mode = str(data.get("mode") or "edit")
+    provider, model, err = _sys_pick(cfg, "chat")
+    if err:
+        return _sys_err_response(err, need_config=not cfg.get("providers"))
+    provider, model = _override_pick(cfg, provider, model, data)
+
+    if mode == "terminal":
+        sys_prompt = _INLINE_SYS_TERM
+        user_content = "操作目录：" + str(data.get("cwd") or "") + "\n需求：" + instruction
+    else:
+        sys_prompt = _INLINE_SYS_EDIT
+        code = str(data.get("code") or "")
+        lang = str(data.get("language") or "")
+        user_content = (("语言：" + lang + "\n") if lang else "") + \
+                       "指令：" + instruction + "\n\n" + \
+                       ("原代码：\n" + code if code else "（无选中代码，请在合适位置生成）")
+    user_content = user_content[:20000]
+
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    payload = json.dumps({"model": model, "stream": False, "messages": [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_content}]}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, method="POST", headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+    try:
+        resp = urllib.request.urlopen(req, timeout=_INLINE_TIMEOUT)
+        obj = json.loads(resp.read().decode("utf-8"))
+        choices = obj.get("choices") or [{}]
+        text = ((choices[0] or {}).get("message") or {}).get("content") or ""
+        return jsonify({"mode": mode, "text": _strip_fence(text)})
+    except urllib.error.HTTPError as e:
+        return jsonify({"error": f"接口返回 {e.code}"}), 502
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return jsonify({"error": f"生成失败：{e}"}), 502
+
+
 # ---------------------------------------------------------------- Git 提交信息生成
 _COMMIT_TIMEOUT = 60                  # 生成提交信息的接口超时（秒）
 _COMMIT_MAX_NOTES = 3000              # 发给模型的「改动摘要」字符上限（不含任何代码）
@@ -1438,6 +1550,16 @@ _COMMIT_SYS = (
     "3. 说明用「动词 + 对象」，例如「✨ 新增提交信息生成接口」「⚡ 智能体并行提速」；\n"
     "4. 不要标点结尾、不要引号、不要换行、不要代码块、不要额外解释；\n"
     "5. 信息不足时按文件名和注释合理推断，不要编造无关内容。")
+_COMMIT_MAX_LINE_EN = 60              # 英文说明较长，放宽到 60 个字符
+_COMMIT_SYS_EN = (
+    "You are a Git commit message generator. The user only gives you the changed-file list and the "
+    "Chinese comments near the changes (no code). Summarize the change as:\n"
+    "1. Output exactly one line in the form \"<icon> <summary>\", where the summary is at most 60 characters;\n"
+    "2. Use exactly one icon by nature: feature ✨, bugfix 🐛, performance ⚡, refactor ♻️, "
+    "docs 📝, tests 🧪, config or dependencies 🔧, UI style 💄;\n"
+    "3. Write the summary as \"verb + object\", e.g. \"✨ add commit-message endpoint\";\n"
+    "4. No trailing punctuation, no quotes, no line breaks, no code fences, no extra explanation;\n"
+    "5. If information is insufficient, infer reasonably from file names and comments; do not invent unrelated content.")
 
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _COMMENT_PATTERNS = (
@@ -1676,19 +1798,25 @@ def api_ai_commit_message():
 
     provider, model = _override_pick(cfg, provider, model, data)
 
+    # 提交消息语言（来自「设置 → 对话 → 提交消息语言」）：en → 英文，其余按中文
+    lang = str(data.get("lang") or "zh").strip().lower()
+    en = lang.startswith("en")
+    commit_sys = _COMMIT_SYS_EN if en else _COMMIT_SYS
+    commit_limit = _COMMIT_MAX_LINE_EN if en else _COMMIT_MAX_LINE
+
     head = "[当前分支] " + (info["branch"] or "-") + "\n[变更文件数] %d\n\n" % info["files"]
     base = provider["base_url"].rstrip("/")
     url = base if base.endswith("/chat/completions") else base + "/chat/completions"
-    messages = [{"role": "system", "content": _COMMIT_SYS},
+    messages = [{"role": "system", "content": commit_sys},
                 {"role": "user", "content": (head + info["body"])[:_COMMIT_MAX_NOTES]}]
     text, choice, err = _commit_call(url, provider["api_key"], model, messages, False)
     if err:
         return jsonify({"error": err}), 502
-    msg = _clean_message(text)
+    msg = _clean_message(text, commit_limit)
     if not msg:                                    # 部分接口/模型非流式下返回空：改用流式再试一次
         _log.info("AI 提交信息：非流式返回为空，改用流式重试")
         text, _choice2, err2 = _commit_call(url, provider["api_key"], model, messages, True)
-        msg = _clean_message(text)
+        msg = _clean_message(text, commit_limit)
         if not msg and err2:
             return jsonify({"error": err2}), 502
     if not msg:

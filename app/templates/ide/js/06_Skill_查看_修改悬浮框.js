@@ -1980,6 +1980,12 @@
           provider_id: prov.id,
           model: pick.model,
           web_search: AI.webSearch,
+          auto_run: (typeof chatAutoRunMode === "function") ? chatAutoRunMode() : "safe",
+          task_list: (typeof chatBool === "function") ? chatBool("chatTaskList") : true,
+          web_tool: (typeof chatBool === "function") ? chatBool("chatWebTool") : true,
+          web_auto: (typeof chatBool === "function") ? chatBool("chatWebAuto") : true,
+          max_steps: (typeof chatMaxStepsMain === "function") ? chatMaxStepsMain() : 0,
+          max_steps_sub: (typeof chatMaxStepsSub === "function") ? chatMaxStepsSub() : 0,
           skills: backendSkills,
           skill_prompts: customSkillPrompts,
           skill_names: activeSkillNames,
@@ -2149,6 +2155,7 @@
       $("aiSend").style.display = ""; $("aiStop").style.display = "none";
       aiScrollToBottom(true);
       aiClearPendingTurn();   // 无论成功/失败/停止，本轮已结束
+      if (typeof aiMaybeAutoTitle === "function") aiMaybeAutoTitle();   // 首轮完成后尝试智能标题
     }
   }
 
@@ -2199,7 +2206,11 @@
   // 结果点击发送按钮会走 reuse 分支（不插入用户消息、不清空输入框）
   $("aiSend").addEventListener("click", () => aiSend());
   $("aiText").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); aiSend(); }
+    // 发送快捷键由「设置 → 对话 → 发送消息」控制：默认 Enter 发送；切到 Ctrl/⌘+Enter 后 Enter 换行
+    const needsCtrl = (typeof chatSendNeedsCtrl === "function") ? chatSendNeedsCtrl() : false;
+    if (e.key === "Enter" && !e.shiftKey && (needsCtrl ? (e.ctrlKey || e.metaKey) : true)) {
+      e.preventDefault(); aiSend();
+    }
   });
   $("aiText").addEventListener("click", (e) => {          // 输入框里的 @技能 标签：点击查看/修改
     const tag = e.target.closest(".ai-tag");

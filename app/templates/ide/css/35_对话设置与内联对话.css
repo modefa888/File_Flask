@@ -1,0 +1,86 @@
+/* ============================================================================
+   35_对话设置与内联对话：设置页「对话」分区分组 + 内联对话悬浮卡片
+   ============================================================================ */
+
+/* ---------- 设置页「对话」分区：分组盒子（参考 Trae 的卡片式分组） ---------- */
+.set-group { margin-bottom: 22px; }
+.set-group-hd { font-size: 12px; color: #8a8a8a; margin: 0 0 8px 2px; font-weight: 600; letter-spacing: .3px; }
+.set-group-bd { background: #242425; border: 1px solid #303031; border-radius: 8px; overflow: hidden; }
+.set-group-bd .set-row { background: transparent; border: 0; border-radius: 0; margin: 0;
+  border-bottom: 1px solid #303031; }
+.set-group-bd .set-row:last-child { border-bottom: 0; }
+.set-group-bd .set-row .set-desc { line-height: 1.5; }
+/* 开关使用 .set-switch：覆盖 base 里 .set-row input[type=checkbox] 的 15px 尺寸，避免隐藏 input 撑开 */
+.set-group-bd .set-row .set-switch { margin-left: auto; }
+.set-group-bd .set-row .set-switch input[type="checkbox"] { width: 0; height: 0; margin: 0; }
+
+/* ---------- 内联对话悬浮卡片 ---------- */
+.ice {
+  position: fixed; z-index: 9999; width: 360px; max-width: calc(100vw - 16px);
+  background: #1f1f20; border: 1px solid #3c3c3d; border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.45); color: #d6d6d6; font-size: 13px;
+  overflow: hidden;
+}
+.ice-hd { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  background: #2a2a2b; border-bottom: 1px solid #333; font-weight: 600; color: #ececec; }
+.ice-hd .bi { color: #0a6aa8; }
+.ice-close { margin-left: auto; cursor: pointer; color: #9a9a9a; font-size: 18px; line-height: 1;
+  padding: 0 2px; }
+.ice-close:hover { color: #fff; }
+.ice-sub { padding: 8px 12px 0; color: #8a8a8a; font-size: 12px; }
+.ice-input {
+  width: calc(100% - 24px); margin: 8px 12px; box-sizing: border-box; min-height: 64px; resize: vertical;
+  background: #161617; color: #e2e2e2; border: 1px solid #3c3c3d; border-radius: 6px;
+  padding: 8px 10px; font-size: 13px; font-family: inherit; outline: none; line-height: 1.5;
+}
+.ice-input:focus { border-color: #0a6aa8; }
+.ice-err { margin: 0 12px 8px; color: #e06c6c; font-size: 12px; }
+.ice-preview {
+  margin: 0 12px 8px; max-height: 220px; overflow: auto; background: #161617; color: #cfcfcf;
+  border: 1px solid #333; border-radius: 6px; padding: 8px 10px; font-size: 12px;
+  white-space: pre-wrap; word-break: break-all; font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+.ice-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 12px 12px; }
+.ice-btn {
+  background: #2f2f30; color: #dcdcdc; border: 1px solid #3c3c3d; border-radius: 6px;
+  font-size: 12px; padding: 6px 14px; cursor: pointer;
+}
+.ice-btn:hover { background: #3a3a3b; }
+.ice-btn.primary { background: #0a6aa8; border-color: #0a6aa8; color: #fff; }
+.ice-btn.primary:hover { background: #0c7bc4; }
+.ice-btn:disabled { opacity: .5; cursor: default; }
+
+/* ---------- 快捷键提示 ---------- */
+.term-input-row { position: relative; }   /* 让终端提示 chip 相对输入框定位 */
+.ice-hint {
+  position: fixed; z-index: 9998; pointer-events: none;
+  background: #2f2f30; color: #c8c8c8; border: 1px solid #3c3c3d; border-radius: 5px;
+  font-size: 11px; padding: 2px 7px; box-shadow: 0 2px 8px rgba(0,0,0,.35);
+}
+.ice-term-hint {
+  position: absolute; right: 10px; top: -22px; pointer-events: none;
+  background: #2f2f30; color: #c8c8c8; border: 1px solid #3c3c3d; border-radius: 5px;
+  font-size: 11px; padding: 1px 7px;
+}
+
+/* ---------- 浅色主题覆盖 ---------- */
+:where(html.theme-light) .set-group-hd { color: #6a6a6a; }
+:where(html.theme-light) .set-group-bd { background: #ffffff; border-color: #e0e0e0; }
+:where(html.theme-light) .set-group-bd .set-row { border-bottom-color: #eaeaea; }
+:where(html.theme-light) .set-group-bd .set-row:last-child { border-bottom: 0; }
+:where(html.theme-light) .ice { background: #ffffff; border-color: #d0d0d0; color: #1f2328;
+  box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+:where(html.theme-light) .ice-hd { background: #f3f3f3; border-bottom-color: #e6e6e6; color: #1f2328; }
+:where(html.theme-light) .ice-hd .bi { color: #005fb8; }
+:where(html.theme-light) .ice-sub, :where(html.theme-light) .ice-close { color: #6a6a6a; }
+:where(html.theme-light) .ice-close:hover { color: #000; }
+:where(html.theme-light) .ice-input { background: #f6f7f9; color: #1f2328; border-color: #d0d0d0; }
+:where(html.theme-light) .ice-input:focus { border-color: #005fb8; }
+:where(html.theme-light) .ice-err { color: #c0392b; }
+:where(html.theme-light) .ice-preview { background: #f6f7f9; color: #1f2328; border-color: #e0e0e0; }
+:where(html.theme-light) .ice-btn { background: #f0f0f0; color: #1f2328; border-color: #d0d0d0; }
+:where(html.theme-light) .ice-btn:hover { background: #e6e6e6; }
+:where(html.theme-light) .ice-btn.primary { background: #005fb8; border-color: #005fb8; color: #fff; }
+:where(html.theme-light) .ice-btn.primary:hover { background: #0a6fc8; }
+:where(html.theme-light) .ice-hint, :where(html.theme-light) .ice-term-hint {
+  background: #f0f0f0; color: #3b3b3b; border-color: #d0d0d0; }

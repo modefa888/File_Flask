@@ -1849,7 +1849,8 @@
     try {
       const r = await fetch("/api/ai/commit-message", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo: gitState.repo }),
+        body: JSON.stringify({ repo: gitState.repo,
+          lang: (typeof chatCommitLang === "function") ? chatCommitLang() : "zh" }),
       });
       const isJson = (r.headers.get("Content-Type") || "").indexOf("json") >= 0;
       const d = isJson ? await r.json().catch(() => ({})) : {};

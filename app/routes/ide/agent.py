@@ -572,13 +572,22 @@ def tools_for_perm(perm):
     return [t for t in _TOOLS if t["function"]["name"] in names]
 
 
-def _gate(perm, name, args, root):
-    """权限校验 → (allowed, refuse_reason, need_ask, ask_reason)。"""
+def _gate(perm, name, args, root, auto_run="safe", web_auto=True):
+    """权限校验 → (allowed, refuse_reason, need_ask, ask_reason)。
+
+    auto_run 来自「设置 → 对话 → 自动运行模式」：
+      - "all"：命令与写文件都不再逐条确认（仍拦截 blocked 级危险命令）；
+      - "safe"（默认）：写文件直接执行；命令仅对高风险/破坏性逐条确认，安全命令直接跑；
+      - "ask"：每次工具调用（写文件 + 任何命令）都先问用户。
+    web_auto 来自「设置 → 对话 → 自动接受网络搜索结果」：关闭时联网搜索前先征求确认。
+    """
     if perm == "readonly":
         if name in _WRITE_TOOLS or name == "run_command":
             return False, "当前权限为「仅可查看」：不能写入文件或执行命令（可在输入框左下角切换权限）", False, ""
         return True, "", False, ""
     if name in _WRITE_TOOLS:
+        if auto_run == "ask":
+            return True, "", True, "当前为「每次询问」模式：写入文件需要你确认"
         path = _resolve(args.get("path"), root)
         if perm != "full" and root and path and not _inside(path, root):
             return False, "超出工作区范围，已被权限拦截：%s" % path, False, ""
@@ -590,14 +599,20 @@ def _gate(perm, name, args, root):
         verdict = check_command(cmd)
         if verdict["level"] == "blocked":
             return False, "已拦截危险命令：%s" % verdict["reason"], False, ""
-        if perm == "full":
-            return True, "", False, ""                 # 完全权限：命令不再逐条确认
+        if auto_run == "all" or perm == "full":
+            return True, "", False, ""                 # 自动运行所有内容 / 完全权限：命令不再逐条确认
+        if auto_run == "ask":
+            return True, "", True, "当前为「每次询问」模式：执行命令需要你确认"
         is_del, del_reason = is_delete_command(cmd)
         if verdict["level"] == "confirm":
             return True, "", True, "该命令有一定风险：%s" % verdict["reason"]
         if is_del:
             return True, "", True, "%s：需要你确认后才会执行" % del_reason
         return True, "", False, ""                     # 安全命令直接执行
+    if name == "web_search":
+        if not web_auto:
+            return True, "", True, "「自动接受网络搜索结果」已关闭：联网搜索前需你确认"
+        return True, "", False, ""
     return True, "", False, ""
 
 
@@ -631,7 +646,7 @@ def _repo_tree(root, max_lines=_TREE_LINES, depth=_TREE_DEPTH):
     return "\n".join(out)
 
 
-def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None):
+def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None, task_list=True, web_tool=True):
     perm_desc = {
         "readonly": "仅可查看 —— 只能读文件与搜索，写入和执行会被拒绝（可提示用户切换权限）",
         "workspace": "工作区内修改 —— 可以读写项目内的文件；普通命令直接执行，删除 / 高风险命令执行前会先征求用户确认",
@@ -655,20 +670,29 @@ def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None):
         "8. 需要用户提供信息（如密钥、路径偏好）时直接提问，不要臆造。"
         % (root or "/", perm_desc, _TREE_DEPTH, tree or "（无法读取项目结构，请用 list_dir 自行查看）")
     )
+    tool_lines = [
+        "- list_dir(path)",
+        "- read_file(path, start, end)",
+        "- write_file(path, content)",
+        "- edit_file(path, old_text, new_text)",
+        "- search_files(pattern, path, max)",
+        "- run_command(command, timeout)",
+    ]
+    if web_tool:
+        tool_lines.append("- web_search(query, max_results)")
     base += (
         "\n\n工具调用格式：优先使用标准的函数调用（tool_calls）。"
         "如果你的接口不支持 function calling，可把调用写在正文里，系统会自动解析。严格使用下列工具名与参数名：\n"
         '<tool_use>{"name":"read_file","input":{"path":"app/xxx.py"}}</tool_use>\n'
-        "可用工具：\n"
-        "- list_dir(path)\n"
-        "- read_file(path, start, end)\n"
-        "- write_file(path, content)\n"
-        "- edit_file(path, old_text, new_text)\n"
-        "- search_files(pattern, path, max)\n"
-        "- run_command(command, timeout)\n"
-        "- web_search(query, max_results)\n"
+        "可用工具：\n" + "\n".join(tool_lines) + "\n"
         "不要使用 bash/read/write/edit 等别名，也不要输出无法解析的自由格式。"
     )
+    if task_list:
+        base += (
+            "\n\n任务清单：当任务包含多个步骤（需要改动多个文件、先排查再修改等）时，"
+            "请先在回复里用简短的清单列出计划（1. 2. 3. …），每完成一步就更新清单、标注进度，"
+            "让用户随时看清任务进展；简单的一两步任务无需清单。"
+        )
     if skill:
         sids = skill if isinstance(skill, list) else [skill]
         prompts = [_SKILL_PROMPTS.get(str(sid)) for sid in sids if _SKILL_PROMPTS.get(str(sid))]
@@ -761,12 +785,12 @@ def _reindex_text_calls(calls):
     return calls
 
 
-def _stream_model(provider, model, convo):
+def _stream_model(provider, model, convo, tools=None):
     """调用模型（流式，带工具定义）：yield SSE 事件，返回 (文本, 工具调用列表)。"""
     base = provider["base_url"].rstrip("/")
     url = base if base.endswith("/chat/completions") else base + "/chat/completions"
     body = {"model": model, "stream": True, "messages": convo,
-            "tools": _TOOLS, "tool_choice": "auto"}
+            "tools": tools or _TOOLS, "tool_choice": "auto"}
     payload = json.dumps(body).encode("utf-8")
     u_in, u_out = 0, 0                    # 本轮请求的 token 用量，结束后交回外层统计
     req = urllib.request.Request(url, data=payload, method="POST", headers={
@@ -943,14 +967,23 @@ def _trim_convo(convo, rounds_tool_idx):
     return trimmed
 
 
-def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_prompts=None, extra_names=None):
-    convo = [{"role": "system", "content": _agent_system(root, perm, skills, extra_prompts, extra_names)}] + msgs
+def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_prompts=None, extra_names=None,
+               auto_run="safe", task_list=True, web_tool=True, web_auto=True, max_steps=0, max_steps_sub=0):
+    convo = [{"role": "system", "content": _agent_system(root, perm, skills, extra_prompts, extra_names,
+                                                         task_list, web_tool)}] + msgs
+    tool_list = [t for t in _TOOLS if (web_tool or t["function"]["name"] != "web_search")]
     always_allow = set()
     rounds_tool_idx = []                 # 每轮追加的 tool 消息下标，用于上下文裁剪
     _round = 0
-    while True:                          # 不限制工具轮数；模型不再发起调用即自然结束
+    # max_steps：主 Agent 最大工具轮数（0 = 不限制）；max_steps_sub 预留给子 Agent（当前暂无子 Agent）。
+    while True:                          # 模型不再发起调用即自然结束
         _round += 1
-        result = yield from _stream_model(provider, model, convo)
+        if max_steps and _round > max_steps:
+            yield _sse({"type": "error",
+                        "error": "已达到「最大步数（主 Agent）」上限（%d 步），已自动停止；"
+                                 "可在 设置 → 对话 → Agent 中调整。" % max_steps})
+            return
+        result = yield from _stream_model(provider, model, convo, tool_list)
         text, tool_calls = result
         if not tool_calls:
             return
@@ -964,7 +997,7 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
         for c in tool_calls:
             name, args = c["name"], c["args"]
             yield _sse({"type": "step", "call_id": c["id"], "tool": name, "args": args})
-            allowed, refuse, need_ask, ask_reason = _gate(perm, name, args, root)
+            allowed, refuse, need_ask, ask_reason = _gate(perm, name, args, root, auto_run, web_auto)
             if not allowed:
                 done[c["id"]] = (False, refuse, "", "调用被拒绝：%s" % refuse, 0, True)
                 yield _sse({"type": "result", "call_id": c["id"], "tool": name, "ok": False,
@@ -1068,10 +1101,29 @@ def api_ai_agent():
     msgs = data.get("messages") or []
     if not isinstance(msgs, list) or not msgs:
         return jsonify({"error": "messages 不能为空"}), 400
+
+    # 自动运行模式（来自「设置 → 对话 → 自动运行模式」），默认 "safe"
+    auto_run = data.get("auto_run") or "safe"
+    if auto_run not in ("all", "safe", "ask"):
+        auto_run = "safe"
+    # 「设置 → 对话」中的 Agent 相关开关 / 步数
+    task_list = data.get("task_list", True) is not False
+    web_tool = data.get("web_tool", True) is not False
+    web_auto = data.get("web_auto", True) is not False
+    try:
+        max_steps = int(data.get("max_steps") or 0)
+    except (TypeError, ValueError):
+        max_steps = 0
+    if max_steps < 0:
+        max_steps = 0
+    try:
+        max_steps_sub = int(data.get("max_steps_sub") or 0)
+    except (TypeError, ValueError):
+        max_steps_sub = 0
     clean = [{"role": str(m.get("role") or "user")[:16], "content": _clean_content(m.get("content"))}
              for m in msgs[:40]]
     _inject_system_time(clean)
-    if data.get("web_search"):
+    if data.get("web_search") and web_tool:
         _inject_web_search(clean)
     repo = str(data.get("repo") or "")
     root = os.path.abspath(repo) if repo and os.path.isdir(repo) else ""
@@ -1097,7 +1149,8 @@ def api_ai_agent():
         yield _sse({"type": "run", "run_id": run_id, "perm": perm, "model": model, "root": root})
         # 通知：外层包装，捕捉 delta 文本；异常也会触发
         text_parts = usage_meta["texts"]       # 同一份列表：通知与用量估算共用
-        inner = _run_agent(run_id, provider, model, root, perm, clean, skills, extra_prompts, extra_names)
+        inner = _run_agent(run_id, provider, model, root, perm, clean, skills, extra_prompts, extra_names,
+                           auto_run, task_list, web_tool, web_auto, max_steps, max_steps_sub)
         try:
             for chunk in inner:
                 # 抽取 delta 文本（SSE 字节："data: {...}"）

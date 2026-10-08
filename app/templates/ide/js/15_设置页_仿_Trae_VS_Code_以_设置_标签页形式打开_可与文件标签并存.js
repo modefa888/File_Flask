@@ -112,6 +112,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         '<div class="set-navitem" data-sec="sec-git-creds"><i class="bi bi-git"></i>Git 认证</div>' +
         '<div class="set-navitem" data-sec="sec-network"><i class="bi bi-globe2"></i>网络/代理</div>' +
         '<div class="set-navitem" data-sec="sec-cmdguard"><i class="bi bi-shield-shaded"></i>命令安全</div>' +
+        '<div class="set-navitem" data-sec="sec-chat"><i class="bi bi-chat-square-text"></i>对话</div>' +
       '</div>' +
       '<div class="set-content">' +
         '<div class="set-sec" id="sec-appearance"><h2 data-kw="外观 主题 背景 颜色 深色 浅色 白 黑 白天 黑夜 theme dark light">外观</h2>' +
@@ -251,6 +252,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
 
         notifyBuildSectionHTML() +
         cmdGuardBuildSectionHTML() +
+        chatBuildSectionHTML() +
       '</div>' +
     '</div>';
     const q = (s) => host.querySelector(s);
@@ -561,6 +563,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     sysAiEnsure();       // 挂载「系统 AI」分区（设置 → 系统 AI）
     notifyMountSettings(); // 挂载「通知」分区（设置 → 通知）
     cmdGuardMountSettings(host); // 挂载「命令安全」分区（设置 → 命令安全）
+    chatMountSettings(host);   // 挂载「对话」分区（设置 → 对话）
     if (typeof gitCredsMountSettings === "function") gitCredsMountSettings(host); // 挂载「Git 认证」分区
   }
   /* ---------- 命令注册表 + 自定义快捷键（设置 → 快捷键 可视化修改，localStorage 持久化） ---------- */
@@ -596,6 +599,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     { id: "kb-term-new",    label: "新建终端",           def: "Mod+Shift+`",  run: () => { if (curTerm) selectTerm(curTerm); else termNew(); } },
     { id: "kb-output",      label: "切换输出面板",       def: "Mod+`",        run: () => toggleOutput() },
     { id: "kb-settings",    label: "打开设置",           def: "Mod+,",        run: () => openSettingsTab() },
+    { id: "kb-inline-chat", label: "内联对话（编辑器 / 终端）", def: "Mod+I",   run: () => inlineChatDispatch() },
   ];
   let kbCustom = (() => {
     try {

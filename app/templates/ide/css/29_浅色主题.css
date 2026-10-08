@@ -394,6 +394,28 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) #sec-git-creds .gc-sum-na { color: #6b6b6b; }
 :where(html.theme-light) #sec-git-creds .gc-sum-div { color: #b0b0b0; }
 
+/* ---------- 设置页：命令安全（34） ---------- */
+:where(html.theme-light) .cg-loading { color: #6b6b6b; }
+:where(html.theme-light) .cg-sum { color: #6b6b6b; }
+:where(html.theme-light) .cg-warn { background: #fff6e0; border-color: #e8d49a; color: #8a6a00; }
+:where(html.theme-light) .cg-group { background: #f8f8f8; border-color: #e5e5e5; }
+:where(html.theme-light) .cg-group.off .cg-name { color: #9a9a9a; }
+:where(html.theme-light) .cg-head:hover { background: #eef0f2; }
+:where(html.theme-light) .cg-caret { color: #6b6b6b; }
+:where(html.theme-light) .cg-name { color: #1f2328; }
+:where(html.theme-light) .cg-count { color: #5a5a5a; background: #ececec; border-color: #dcdcdc; }
+:where(html.theme-light) .cg-lock { color: #c0392b; background: rgba(192, 57, 43, .1); border-color: rgba(192, 57, 43, .3); }
+:where(html.theme-light) .cg-desc { color: #6b6b6b; }
+:where(html.theme-light) .cg-chip { color: #333333; background: #ececec; border-color: #dcdcdc; }
+:where(html.theme-light) .cg-chip.lv-blocked { color: #c0392b; background: rgba(192, 57, 43, .1); border-color: rgba(192, 57, 43, .3); }
+:where(html.theme-light) .cg-chip.lv-confirm { color: #0b5c9a; background: rgba(11, 92, 154, .1); border-color: rgba(11, 92, 154, .3); }
+:where(html.theme-light) .cg-chip.lv-delete { color: #8a5a00; background: rgba(138, 90, 0, .1); border-color: rgba(138, 90, 0, .28); }
+:where(html.theme-light) .cg-custom { border-top-color: #e0e0e0; }
+:where(html.theme-light) .cg-crow { background: #f0f0f0; border-color: #e0e0e0; }
+:where(html.theme-light) .cg-crow code { color: #a0522d; background: rgba(160, 82, 45, .1); }
+:where(html.theme-light) .cg-why { color: #6b6b6b; }
+:where(html.theme-light) .cg-del:hover { background: #fbe0e0; border-color: #e8b0b0; color: #c0392b; }
+
 /* ---------- 侧边搜索面板（03） ---------- */
 :where(html.theme-light) .s-modes { background: #e4e4e4; }
 :where(html.theme-light) .s-mode { color: #5a5a5a; }

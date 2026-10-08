@@ -141,8 +141,9 @@
   }
 
   // 把某个任务的日志挂到底部面板（生成/选中标签，回放历史并持续推送）
-  function attachTask(t) {
-    ensureLogTab(t);                    // 内部会 selectLogTab + 打开底部面板
+  // auto=true（刷新后自动恢复）：不强行打开被用户关闭的底部面板
+  function attachTask(t, auto) {
+    ensureLogTab(t, auto);              // 内部会 selectLogTab（auto 时按需打开底部面板）
     if (!LOGS[t.id].es && !LOGS[t.id].done) streamLog(t.id);
     RUNBG.id = t.id; RUNBG.name = t.name; RUNBG.target = t.target;
     RUNBG.mode = t.mode || "bg";
@@ -253,7 +254,7 @@
       try { localStorage.removeItem("ide.run.lastLog"); } catch (e) { /* 忽略 */ }
       return;
     }
-    attachTask(t);
+    attachTask(t, true);                         // 刷新自动恢复：不覆盖用户「已关闭底部面板」的意图
   }
 
   /* 页面加载后主动同步一次后端状态：刷新前在跑的任务要恢复成

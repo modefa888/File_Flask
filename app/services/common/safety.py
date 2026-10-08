@@ -1,29 +1,14 @@
 """命令安全校验：拦截危险命令，敏感命令要求二次确认。
 
-规则定义在 config.EXEC_BLOCK_PATTERNS / EXEC_CONFIRM_PATTERNS，可自行增删。
+规则定义在 config.EXEC_RULE_GROUPS（按用途分组，每条标明级别），分组开关与自定义正则
+由 services/common/cmdguard.py 管理 —— 设置 → 命令安全 里能整组开关、加自己的正则。
 命令会先按 shell 分隔符（; && || | 换行）拆成子命令逐个校验，
 避免 `echo hi && rm -rf /` 这类拼接绕过。
 """
 import re
 
 from ... import config
-
-
-def _rules(name, default):
-    rules = getattr(config, name, None)
-    if not rules:
-        return []
-    out = []
-    for item in rules:
-        try:
-            pattern, reason = item[0], item[1]
-        except (TypeError, IndexError):
-            continue
-        try:
-            out.append((re.compile(pattern, re.IGNORECASE), reason))
-        except re.error:
-            continue          # 用户自定义的正则写错时忽略该条，不影响其它规则
-    return out
+from . import cmdguard
 
 
 def split_commands(command: str):
@@ -32,33 +17,18 @@ def split_commands(command: str):
     return [p.strip() for p in parts if p and p.strip()]
 
 
-# 删除 / 破坏性命令：即使没命中 EXEC_CONFIRM_PATTERNS，也一律要求用户确认
-_DELETE_PATTERNS = [
-    (re.compile(p, re.IGNORECASE), r) for p, r in [
-        (r"\brm\b", "删除文件"),
-        (r"\brmdir\b", "删除目录"),
-        (r"\bunlink\b", "删除文件"),
-        (r"\bshred\b", "粉碎删除文件"),
-        (r"\btruncate\b", "清空文件内容"),
-        (r"\bfind\b[^\n]*\s-delete\b", "批量删除文件"),
-        (r"\bfind\b[^\n]*\s-exec\s+rm\b", "批量删除文件"),
-        (r"\bgit\s+clean\b", "删除未跟踪文件"),
-        (r"\bgit\s+reset\s+--hard\b", "丢弃未提交的改动"),
-        (r"\bdocker\s+(rm|rmi|system\s+prune|volume\s+rm|network\s+rm)\b", "删除容器 / 镜像"),
-        (r"\bkubectl\s+delete\b", "删除集群资源"),
-        (r"\bswapoff\b", "关闭交换分区"),
-        (r"\bmv\b", "移动文件（原位置将被移除）"),
-    ]
-]
-
-
 def is_delete_command(command: str):
-    """判断是否是删除 / 破坏性命令，返回 (bool, reason)。"""
+    """判断是否是删除 / 破坏性命令，返回 (bool, reason)。
+
+    规则来自「文件删除」等分组里 delete 级别的条目：被用户在设置里关掉的分组不再参与判断
+    （关掉就意味着这些命令直接执行，不再打断）。
+    """
     text = (command or "").strip()
     if not text:
         return False, ""
+    delete_rules = cmdguard.active_rules().get("delete") or []
     for part in [text] + split_commands(text):
-        for regex, reason in _DELETE_PATTERNS:
+        for regex, reason in delete_rules:
             if regex.search(part):
                 return True, reason
     return False, ""
@@ -72,8 +42,8 @@ def check_command(command: str) -> dict:
     if not text:
         return {"level": "ok", "reason": "", "part": ""}
 
-    blocked = _rules("EXEC_BLOCK_PATTERNS", [])
-    confirm = _rules("EXEC_CONFIRM_PATTERNS", [])
+    rules = cmdguard.active_rules()
+    blocked, confirm = rules.get("blocked") or [], rules.get("confirm") or []
 
     # 先整体匹配一次（有些规则需要看到整条命令，例如 dd ... of=/dev/xxx）
     candidates = [text] + split_commands(text)
@@ -89,10 +59,21 @@ def check_command(command: str) -> dict:
 
 
 def rules_summary() -> dict:
-    """给前端展示用的规则摘要。"""
+    """给前端展示用的规则摘要：终端「规则说明」弹窗与设置页「命令安全」共用。
+
+    blocked / confirm / delete 是**当前生效**的说明（已按设置里的开关过滤），
+    guard 里带着完整目录与开关状态，供设置页渲染。
+    """
+    live = cmdguard.active_rules()
+    guard = cmdguard.catalog()
     return {
         "enabled": bool(getattr(config, "EXEC_ENFORCE_SAFETY", True)),
         # 去重（多条正则可能对应同一条说明）
-        "blocked": list(dict.fromkeys(r for _p, r in _rules("EXEC_BLOCK_PATTERNS", []))),
-        "confirm": list(dict.fromkeys(r for _p, r in _rules("EXEC_CONFIRM_PATTERNS", []))),
+        "blocked": list(dict.fromkeys(r for _p, r in live.get("blocked") or [])),
+        "confirm": list(dict.fromkeys(r for _p, r in live.get("confirm") or [])),
+        "delete": list(dict.fromkeys(r for _p, r in live.get("delete") or [])),
+        "master": guard["enabled"],                                    # 设置里的总开关
+        "off_groups": [g["name"] for g in guard["groups"] if not g["on"]],   # 已关闭的分组
+        "custom": [c["pattern"] for c in guard["custom"] if c.get("on")],    # 生效的自定义正则
+        "guard": guard,
     }

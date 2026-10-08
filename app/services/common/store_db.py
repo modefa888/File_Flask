@@ -175,6 +175,11 @@ CREATE TABLE IF NOT EXISTS notify_cfg (
     key   TEXT PRIMARY KEY,
     value TEXT DEFAULT ''
 );
+-- 命令安全设置（设置 → 命令安全）：单行 JSON，存总开关 / 分组开关 / 自定义正则
+CREATE TABLE IF NOT EXISTS cmd_guard (
+    key   TEXT PRIMARY KEY,
+    value TEXT DEFAULT ''
+);
 -- 分享记录（原独立库 data/storage/shares.db）
 CREATE TABLE IF NOT EXISTS shares (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,

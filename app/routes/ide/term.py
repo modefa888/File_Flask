@@ -5,6 +5,9 @@ POST /api/term/open   {cwd, scope?}     新建终端会话，返回会话 id 与
 POST /api/term/exec   {id, command}     执行命令，返回输出与退出码（支持 cd 持久化）
 POST /api/term/kill   {id}              终止当前正在执行的命令
 POST /api/term/close  {id}              关闭会话
+POST /api/term/check  {command}         只做命令安全校验，不执行（输入时提前提示）
+GET  /api/term/rules                    当前命令安全策略（生效规则 + 分组目录）
+POST /api/term/rules  {enabled, off, custom}  保存设置 → 命令安全 的选择
 
 说明：这里不是真正的 PTY 交互式终端（不支持 vim/top 这类依赖 TTY 的全屏程序），
 而是「命令 + 输出」模式，足以覆盖 git / npm / ls 等日常操作。
@@ -29,6 +32,7 @@ from flask import Blueprint, request, jsonify
 
 from ... import config
 from ...log import get_logger
+from ...services.common import cmdguard
 from ...services.common.safety import check_command, rules_summary
 
 
@@ -221,6 +225,23 @@ def api_term_check():
 def api_term_rules():
     """返回当前命令安全策略，供界面展示。"""
     return jsonify(rules_summary())
+
+
+@bp.route("/api/term/rules", methods=["POST"])
+def api_term_rules_save():
+    """保存命令安全设置（设置 → 命令安全）：总开关、分组开关、自定义正则。
+
+    前端每次改动都提交完整状态（整份覆盖），省掉增量合并的坑；返回保存后的完整策略。
+    注意 blocked 级别的硬拦截不随开关放行，仍会照常拦截。
+    """
+    data = request.get_json(silent=True) or {}
+    st, err = cmdguard.save(data)
+    if err:
+        _log.warning("保存命令安全设置失败：%s", err)
+        return _fail(err)
+    _log.info("POST /api/term/rules enabled=%s off=%s custom=%d",
+              st["enabled"], ",".join(st["off"]) or "(无)", len(st["custom"]))
+    return jsonify({"ok": True, "rules": rules_summary()})
 
 
 @bp.route("/api/term/exec", methods=["POST"])

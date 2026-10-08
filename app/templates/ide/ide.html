@@ -111,6 +111,9 @@
 <style>
 {% include 'ide/css/33_HTTP请求工具_仿_Postman_接口调试.css' %}
 </style>
+<style>
+{% include 'ide/css/34_命令安全.css' %}
+</style>
 {# 29_浅色主题 必须最后一个 <style> 加载：它的浅色覆盖与原始规则同权重，靠「后加载者胜」生效 #}
 <style>
 {% include 'ide/css/29_浅色主题.css' %}
@@ -154,6 +157,8 @@ try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'li
    之后加载的文件访问不到闭包内的 toast()，而通知模块的保存/测试提示依赖它 #}
 {% include 'ide/js/18_通知设置_桌面_邮件_测试_历史.js' %}
 {% include 'ide/js/15_设置页_仿_Trae_VS_Code_以_设置_标签页形式打开_可与文件标签并存.js' %}
+{# 命令安全：须放在 16_（关闭大 IIFE）之前，才能复用闭包内的 esc / escAttr / toast / $ #}
+{% include 'ide/js/33_命令安全_设置页分区_按分组开关命令校验与自定义正则.js' %}
 {# 插件系统：必须放在 16_ 之前（同属 00_preamble 的大 IIFE 闭包），才能复用闭包内的 openFile/toast/showPanel/panels 等 #}
 {% include 'ide/js/20_插件系统_宿主API_沙箱.js' %}
 {# 自动刷新必须在 16_ 之前加载：依赖 IIFE 闭包内的 refreshTree / loadGitStatus / explorerPanel 等 #}

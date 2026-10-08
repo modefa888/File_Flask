@@ -83,10 +83,22 @@
   }
   // 是否使用浅色（白色背景）主题：由「设置 → 外观 → 界面主题」写入 localStorage
   function ideThemeLight() { return ideSettingGet("theme", "dark") === "light"; }
-  /* ---------- 会话持久化：侧边栏面板 + 打开的文件标签 ---------- */
+  /* ---------- 会话持久化：侧边栏面板 + 底部面板 + 打开的文件标签 ---------- */
   function sessionSavePanel(name) {
     if (!ideSettingGet("restoreSession", true)) return;
     try { localStorage.setItem("ide.session.panel", name); } catch (_) {}
+  }
+  // 底部面板（输出 / 终端 / 运行日志）：记录显隐状态与当前标签，刷新后原样恢复
+  function sessionSaveBottom() {
+    if (!ideSettingGet("restoreSession", true)) return;
+    try {
+      const p = $("bottomPanel");
+      const tab = document.querySelector(".bp-tab[data-pane].active");
+      localStorage.setItem("ide.session.bottom", JSON.stringify({
+        show: !!(p && p.classList.contains("show")),
+        pane: (typeof bottomPane === "string" ? bottomPane : (tab ? tab.dataset.pane : "output")) || "output",
+      }));
+    } catch (_) {}
   }
   // 只有「真实的源码文件标签」和「设置页」才值得恢复：
   // 跳过 diff 视图 / 打开更改汇总 / 文件比较等内部标签（它们的 path 是带 \u0001 的内部 key，用 openFile 去读必然报错）。
@@ -155,6 +167,11 @@
         const tab = findTab(activePath);
         if (tab) activate(tab);
       }
+      // 底部面板：恢复上次的显隐状态与当前标签（输出 / 终端 / 运行日志）
+      try {
+        const bp = JSON.parse(localStorage.getItem("ide.session.bottom") || "");
+        if (bp && bp.show && typeof toggleBottom === "function") toggleBottom(true, bp.pane || "output");
+      } catch (_) {}
     } catch (_) {}
   }
   // IDE 树中隐藏的目录：各类语言/工具的依赖与缓存目录（对任何项目生效）

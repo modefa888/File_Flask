@@ -36,12 +36,13 @@
     if (nearBottom) body.scrollTop = body.scrollHeight;
   }
 
-  // 确保某任务的日志标签存在并选中（不存在则创建）
-  function ensureLogTab(t) {
+  // 确保某任务的日志标签存在并选中（不存在则创建）。auto=true 表示刷新后自动恢复，
+  // 此时不强行打开已被用户关闭的底部面板。
+  function ensureLogTab(t, auto) {
     let L = LOGS[t.id];
     if (!L) {
       L = LOGS[t.id] = { name: t.name || "运行", buf: [], offset: 0, es: null, timer: null,
-                         done: false, promoted: false, target: t.target || "" };
+                        done: false, promoted: false, target: t.target || "" };
       const el = document.createElement("button");
       el.className = "bp-tab bp-log-tab";
       el.dataset.task = t.id;
@@ -57,11 +58,11 @@
       L.el = el;
     }
     if (t.target) L.target = t.target;                  // 供启动按钮判断「这个文件是否在跑」
-    selectLogTab(t.id);
+    selectLogTab(t.id, auto);
     return L;
   }
 
-  function selectLogTab(id) {
+  function selectLogTab(id, auto) {
     currentLogId = id;
     // 记住"正在看哪个任务的日志"，刷新后据此把输出面板接回来
     try { localStorage.setItem("ide.run.lastLog", id); } catch (e) { /* 隐私模式等，忽略 */ }
@@ -80,7 +81,7 @@
       body.appendChild(frag);
     }
     body.scrollTop = body.scrollHeight;
-    toggleBottom(true, "log");
+    if (auto) autoShowBottom("log"); else toggleBottom(true, "log");   // 刷新自动恢复时不打扰已关闭的面板
     bpKillMode();                                      // 切换日志标签时刷新右侧按钮状态
   }
 
@@ -268,7 +269,7 @@
     RUNBG.id = fg.id; RUNBG.offset = 0;
     RUNBG.name = fg.name || ""; RUNBG.target = fg.target || "";
     RUNBG.mode = "fg"; RUNBG.timeout = 0; RUNBG.args = ""; RUNBG.promoted = false;
-    toggleBottom(true, "output");
+    autoShowBottom("output");                          // 用户上次已关闭底部面板则不自动弹出（内容照常回放，重开后可见）
     opLine("$ " + fg.command + "    （工作目录：" + fg.cwd + "）", "op-cmd");
     opLine("  pid " + (fg.pid || "-") + " · 刷新前就在运行，已接回输出并继续跟踪", "op-dim");
     bpKillMode();

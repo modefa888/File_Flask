@@ -111,6 +111,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         '<div class="set-navitem" data-sec="sec-notify"><i class="bi bi-bell"></i>通知</div>' +
         '<div class="set-navitem" data-sec="sec-git-creds"><i class="bi bi-git"></i>Git 认证</div>' +
         '<div class="set-navitem" data-sec="sec-network"><i class="bi bi-globe2"></i>网络/代理</div>' +
+        '<div class="set-navitem" data-sec="sec-cmdguard"><i class="bi bi-shield-shaded"></i>命令安全</div>' +
       '</div>' +
       '<div class="set-content">' +
         '<div class="set-sec" id="sec-appearance"><h2 data-kw="外观 主题 背景 颜色 深色 浅色 白 黑 白天 黑夜 theme dark light">外观</h2>' +
@@ -249,6 +250,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         '</div>' +
 
         notifyBuildSectionHTML() +
+        cmdGuardBuildSectionHTML() +
       '</div>' +
     '</div>';
     const q = (s) => host.querySelector(s);
@@ -281,7 +283,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         return;
       }
       // 搜索时跨全部分区匹配（不受当前标签限制）
-      host.querySelectorAll(".set-row").forEach(r => {
+      host.querySelectorAll(".set-row, .cg-group, .cg-crow").forEach(r => {
         r.style.display = ((r.dataset.kw || "").includes(k) || r.textContent.toLowerCase().includes(k)) ? "" : "none";
       });
       host.querySelectorAll(".set-key, .kb-row").forEach(r => {
@@ -291,7 +293,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         r.style.display = r.textContent.toLowerCase().includes(k) ? "" : "none";
       });
       host.querySelectorAll(".set-sec").forEach(sec => {
-        const any = [...sec.querySelectorAll(".set-row, .set-key, .kb-row")].some(el => el.style.display !== "none");
+        const any = [...sec.querySelectorAll(".set-row, .set-key, .kb-row, .cg-group, .cg-crow")].some(el => el.style.display !== "none");
         sec.style.display = any ? "" : "none";
       });
     }
@@ -375,6 +377,9 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
           localStorage.removeItem("ide.session.panel");
           localStorage.removeItem("ide.session.tabs");
           localStorage.removeItem("ide.session.activeTab");
+          localStorage.removeItem("ide.session.bottom");
+          localStorage.removeItem("ide.session.settingsSec");
+          localStorage.removeItem("ide.session.search");
         } catch (_) {}
       }
     });
@@ -555,6 +560,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     aiMountSettings();   // 挂载 AI 助手接口配置（设置 → AI 助手）
     sysAiEnsure();       // 挂载「系统 AI」分区（设置 → 系统 AI）
     notifyMountSettings(); // 挂载「通知」分区（设置 → 通知）
+    cmdGuardMountSettings(host); // 挂载「命令安全」分区（设置 → 命令安全）
     if (typeof gitCredsMountSettings === "function") gitCredsMountSettings(host); // 挂载「Git 认证」分区
   }
   /* ---------- 命令注册表 + 自定义快捷键（设置 → 快捷键 可视化修改，localStorage 持久化） ---------- */

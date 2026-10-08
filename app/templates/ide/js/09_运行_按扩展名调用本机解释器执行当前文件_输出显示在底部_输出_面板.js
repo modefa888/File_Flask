@@ -8,6 +8,14 @@
 
   /* ---------- 底部面板：输出 / 终端 两个页签 ---------- */
   let bottomPane = "output";
+  // 上次是否为「用户主动关闭」底部面板：为 true 时，刷新后重连运行任务（前台输出 / 后台日志）不再自动弹出
+  let bottomUserClosed = false;
+  try {
+    if (ideSettingGet("restoreSession", true)) {
+      const b = JSON.parse(localStorage.getItem("ide.session.bottom") || "");
+      if (b && b.show === false) bottomUserClosed = true;
+    }
+  } catch (_) { /* 忽略 */ }
 
   function setBottomPane(name) {
     bottomPane = (name === "term") ? "term" : (name === "log") ? "log" : "output";
@@ -21,6 +29,7 @@
     if (bottomPane === "term") termEnsure().then(ok => { if (ok) $("termInput").focus(); });
     if (bottomPane === "log") { const lb = $("logBody"); if (lb) lb.scrollTop = lb.scrollHeight; }
     bpKillMode();                                      // 右侧按钮随当前标签刷新状态
+    if (typeof sessionSaveBottom === "function") sessionSaveBottom();   // 记住当前标签，刷新后恢复
   }
   function toggleBottom(force, pane) {
     const p = $("bottomPanel");
@@ -34,6 +43,14 @@
     if (show) applyBottomHeight(p.offsetHeight || BP_DEFAULT_H, false);
     refreshAllEditors();                 // 编辑区高度变化，重绘编辑器避免行号错位
     if (show && bottomPane === "term") termEnsure().then(ok => { if (ok) $("termInput").focus(); });
+    bottomUserClosed = !show;                                          // 记录用户意图：关了下次刷新就别自动弹
+    if (typeof sessionSaveBottom === "function") sessionSaveBottom();   // 记住显隐状态（开 / 关），刷新后恢复
+  }
+  // 刷新后自动接回运行任务时用：用户上次主动关了底部面板就不打扰
+  //（后台仍照常收日志，点「输出 / 任务名」标签可随时查看）
+  function autoShowBottom(pane) {
+    if (bottomUserClosed) { if (pane) setBottomPane(pane); return; }
+    toggleBottom(true, pane);
   }
   function toggleOutput(force) { toggleBottom(force, "output"); }
   function clearOutput() {

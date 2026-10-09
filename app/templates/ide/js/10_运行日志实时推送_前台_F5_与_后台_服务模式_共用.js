@@ -124,6 +124,15 @@
     }
   }
 
+  /* 同一入口文件只保留一个日志标签：启动 / 重启前，先把该文件旧的日志标签关掉（避免标签堆积）。 */
+  function closeLogTabsForTarget(target, exceptId) {
+    if (!target) return;
+    Object.keys(LOGS).forEach(id => {
+      const L = LOGS[id];
+      if (L && L.target === target && id !== exceptId) closeLogTab(id);
+    });
+  }
+
   // 单个任务的实时日志流（SSE，断线退回轮询）
   function streamLog(id) {
     const L = LOGS[id];
@@ -284,6 +293,7 @@
     RUNBG.name = baseName(target); RUNBG.target = target;
     RUNBG.mode = mode; RUNBG.timeout = d.timeout || 0; RUNBG.args = argsStr || "";
     RUNBG.promoted = false;
+    closeLogTabsForTarget(target, d.id);               // 同一文件的旧日志标签先关掉，避免堆积
     syncRunButtons();                                  // 启动按钮变成 ⏸
     if (mode === "fg") {
       toggleBottom(true, "output");

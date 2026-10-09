@@ -24,6 +24,26 @@
     if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
     return (n / 1024 / 1024).toFixed(1) + " MB";
   }
+  function fmtTs(sec) {                      // epoch 秒 -> 本地 YYYY-MM-DD HH:MM:SS
+    if (!sec) return "-";
+    const d = new Date(sec * 1000), p = n => (n < 10 ? "0" : "") + n;
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " +
+           p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+  /* 运行记录摘要：共运行几次 + 上一次的起止时间与时长
+     （运行中显示「上次运行」，已结束显示「本次运行」——正是用户要的“上次跑了多久、何时起停”）。 */
+  function histLine(t) {
+    const n = t.run_count || 0;
+    if (!n) return "";
+    const lr = t.last_run;
+    const label = t.running ? "上次运行" : "本次运行";
+    let s = "共运行 " + n + " 次";
+    if (lr && lr.start) {
+      s += " · " + label + " " + fmtDur(lr.duration || 0) + "：" + fmtTs(lr.start) +
+           (lr.end ? " → " + fmtTs(lr.end) : "（进行中）");
+    }
+    return '<div class="ri-meta ri-hist"><i class="bi bi-clock-history"></i> ' + esc(s) + '</div>';
+  }
   function setRunnerBadge(n) {
     const el = $("actRunnerBadge");
     if (!el) return;
@@ -109,6 +129,7 @@
       ["内存", fmtSize(t.mem || 0)],
       ["启动时间", t.started_at || "-"],
       ["运行时长", fmtDur(t.duration)],
+      ["运行次数", String(t.run_count || 0)],
       ["日志", (t.lines || 0) + " 行 / " + fmtSize(t.log_size || 0)],
       ["日志文件", t.log_path || "-", "mono"],
     ];
@@ -122,6 +143,26 @@
         ports.map(p => '<a class="ti-port" href="' + escAttr(portUrl(p)) + '" target="_blank" rel="noopener" ' +
           'title="在新标签打开 ' + escAttr(portUrl(p)) + '"><i class="bi bi-box-arrow-up-right"></i> ' + p + '</a>')
           .join(" ") + '</span></div>';
+    }
+    // 运行记录：每次「启动 → 停止」的起止时间 / 时长 / 结果
+    const runs = (t.runs || []).filter(r => r && r.start);
+    if (runs.length) {
+      html += '<div class="ti-hist-h"><i class="bi bi-clock-history"></i> 运行记录（最近 ' + runs.length + ' 次）</div>';
+      html += '<div class="ti-hist">';
+      runs.slice().reverse().forEach(r => {
+        const endTex = r.end ? fmtTs(r.end) : "运行中";
+        const resTex = r.end == null ? ""
+          : (r.stopped_by_user ? "手动停止" : r.timed_out ? "超时终止"
+             : (r.exit_code === 0 ? "正常退出" : "退出码 " + r.exit_code));
+        html += '<div class="ti-hist-i' + (r.end ? "" : " live") + '">' +
+          '<span class="hh-r">' + fmtTs(r.start) + '</span>' +
+          '<span class="hh-a">→</span>' +
+          '<span class="hh-r">' + endTex + '</span>' +
+          '<span class="hh-d">' + fmtDur(r.duration || 0) + '</span>' +
+          (resTex ? '<span class="hh-x">' + resTex + '</span>' : '') +
+          '</div>';
+      });
+      html += '</div>';
     }
     return html;
   }
@@ -226,6 +267,7 @@
         resLine(t) +                               // CPU / 内存 / 进程数（仅运行中显示）
         '<div class="ri-meta">' + fmtDur(t.duration) + ' · ' + t.lines + ' 行日志 / ' + fmtSize(t.log_size) +
           ' · 启动于 ' + esc(t.started_at) + '</div>' +
+        histLine(t) +                              // 共运行 N 次 · 上次运行的起止与时长
         '<div class="ri-acts">' + actsHtml(t) + '</div>';
       const bind = (act, fn) => {
         const b = item.querySelector('[data-act="' + act + '"]');
@@ -287,8 +329,8 @@
     }
   }
   /* ---------- 启动 / 重启：沿用原文件、工作目录与参数重新拉起 ----------
-     运行中的任务会先被停止（后端会等旧进程真正退出再启动，避免端口没释放导致启动失败）；
-     返回的新任务复用启动路径接回日志面板，旧记录保留在列表里，历史日志仍可回看。 */
+     以入口文件绝对路径为唯一键：运行中的会先被停止（后端等旧进程真正退出再启动，避免端口没释放），
+     新任务继承运行历史并替换旧卡片 —— 同一文件在列表里始终只有一张卡片，不再越点越多。 */
   async function restartTaskById(t) {
     if (t.running) {
       const proj = taskProject(t);

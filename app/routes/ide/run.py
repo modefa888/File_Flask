@@ -151,6 +151,7 @@ _REG_NAME = ".file_runner_tasks.json"         # 任务注册表
 _TASK_TTL = 6 * 3600                          # 已结束记录保留时长（自动清理）
 _MAX_LINES = 4000                             # 每个任务内存中保留的最大行数
 _LINE_MAX = 4000                              # 单行最大长度
+_MAX_RUNS = 30                                # 每个任务保留的运行历史条数（启动 → 停止）
 
 # 从任务日志里反推「监听端口」用的模式（仅在读不到 /proc 归属时兜底）
 _LOG_URL_PORT_RE = re.compile(r"https?://[^\s/'\"]{1,64}?:(\d{2,5})", re.I)
@@ -281,6 +282,8 @@ class _BgTask:
         # 日志推送用的条件变量：add() 时唤醒正在等新数据的 SSE 连接
         self.cond = threading.Condition()
         self.rev = 0
+        self.runs = []                  # 运行历史：每次「启动 → 停止」记一条（起止时间 / 时长 / 退出码）
+        self.tail_thread = None         # 跟随日志的线程句柄（替换记录前可等待其收尾）
 
     # ---- 序列化 ------------------------------------------------------
     def to_record(self) -> dict:
@@ -291,6 +294,7 @@ class _BgTask:
             "promoted": self.promoted, "stopped_by_user": self.stopped_by_user,
             "timed_out": self.timed_out, "exit_code": self.exit_code, "done": self.done,
             "paused": self.paused,
+            "runs": (self.runs or [])[-_MAX_RUNS:],
         }
 
     @classmethod
@@ -305,6 +309,23 @@ class _BgTask:
         t.timed_out = bool(rec.get("timed_out"))
         t.paused = bool(rec.get("paused"))
         t.ended_at = rec.get("ended_at")
+        t.runs = [r for r in (rec.get("runs") or []) if isinstance(r, dict)][-_MAX_RUNS:]
+        # 兼容旧记录（本次改动前没有 runs）：用记录里的起止时间补一条，历史不至于空白
+        if not t.runs and rec.get("started_at"):
+            try:
+                st = float(rec.get("started_at") or 0)
+                en = rec.get("ended_at")
+                t.runs = [{
+                    "start": st, "end": en,
+                    "duration": (round(max(0.0, float(en) - st), 1) if en else None),
+                    "exit_code": rec.get("exit_code"),
+                    "stopped_by_user": bool(rec.get("stopped_by_user")),
+                    "timed_out": bool(rec.get("timed_out")),
+                    "pid": rec.get("pid"),
+                }]
+            except (TypeError, ValueError):
+                t.runs = []
+        t.tail_thread = None
         return t
 
     # ---- 输出缓冲 ----------------------------------------------------
@@ -351,6 +372,41 @@ class _BgTask:
                 self.ended_at = time.time()
             self.cond.notify_all()
 
+    def begin_run(self):
+        """开始一次新的运行：重置本次运行状态，并在历史里追加一条（结束时间待收尾时补）。"""
+        self.started = time.time()
+        self.ended_at = None
+        self.done = False
+        self.exit_code = None
+        self.error = ""
+        self.stopped_by_user = False
+        self.timed_out = False
+        self.paused = False
+        self.lines = []
+        self.base = 0
+        with self.cond:
+            self.rev += 1
+            self.cond.notify_all()
+        self.runs.append({
+            "start": self.started, "end": None, "duration": None, "exit_code": None,
+            "stopped_by_user": False, "timed_out": False, "pid": self.pid,
+        })
+        if len(self.runs) > _MAX_RUNS:
+            del self.runs[:len(self.runs) - _MAX_RUNS]
+
+    def end_run(self):
+        """给「当前这次运行」在历史里收尾（结束时间 / 时长 / 退出码），可重复调用。"""
+        if not self.runs:
+            return
+        r = self.runs[-1]
+        if r.get("end") is not None:
+            return
+        r["end"] = self.ended_at or time.time()
+        r["duration"] = round(max(0.0, r["end"] - (r.get("start") or self.started)), 1)
+        r["exit_code"] = self.exit_code
+        r["stopped_by_user"] = bool(self.stopped_by_user)
+        r["timed_out"] = bool(self.timed_out)
+
     # ---- 状态 --------------------------------------------------------
     def is_alive(self) -> bool:
         """进程是否还在运行（本进程的子进程用 wait 判定，接管来的用 pid 探活）。"""
@@ -392,6 +448,22 @@ class _BgTask:
         # 已结束的任务用「结束时刻 - 启动时刻」冻结时长，不再随时间增长
         end = self.ended_at if self.done and self.ended_at else time.time()
         return round(max(0.0, end - self.started), 1)
+
+    def last_run(self):
+        """「上一次运行」：已结束时就是当前这次；运行中则取上一次已结束的那次。
+
+        供面板显示「上次运行了多久、什么时候启动、什么时候停止」。
+        """
+        runs = self.runs or []
+        if not runs:
+            return None
+        last = runs[-1]
+        if self.done or last.get("end") is not None:
+            return last
+        for r in reversed(runs[:-1]):
+            if r.get("end") is not None:
+                return r
+        return None
 
     def payload(self, lines, offset) -> dict:
         return {
@@ -462,6 +534,8 @@ class _BgTask:
             "started_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.started)),
             "duration": self.duration(), "lines": self.base + len(self.lines),
             "log_size": size, "log_path": self.log_path,
+            "runs": (self.runs or [])[-_MAX_RUNS:], "run_count": len(self.runs or []),
+            "last_run": self.last_run(),
         }
 
 
@@ -586,6 +660,7 @@ def _on_task_exit(task) -> None:
     else:
         task.add(f"— 进程已退出，代码 {code} —", "ok" if code == 0 else "err")
     task.finish(code)
+    task.end_run()          # 给本次运行收尾（结束时间 / 时长 / 退出码），写入历史
     _persist()
 
 
@@ -690,10 +765,13 @@ def _ensure_loaded() -> None:
         restored += 1
         if task.is_alive():
             task.add("↻ 服务已重启，已重新接管该进程并继续跟踪日志（页面关闭不影响运行）", "dim")
-        threading.Thread(target=_tail_log, args=(task,), daemon=True).start()
+        task.tail_thread = threading.Thread(target=_tail_log, args=(task,), daemon=True)
+        task.tail_thread.start()
     if restored:
         _log.info("已恢复 %d 个运行任务", restored)
         _persist()
+    # 历史遗留：同一入口文件可能残留多条记录，合并成一条（进程存活的优先）
+    _collapse_duplicate_targets()
 
 
 def _spawn_task(cmd, cwd, target, exe, raw_args, mode="bg", timeout=None,
@@ -726,6 +804,7 @@ def _spawn_task(cmd, cwd, target, exe, raw_args, mode="bg", timeout=None,
 
     task = _BgTask(tid, target, cmd, cwd, mode=mode, timeout=timeout, pid=proc.pid)
     task.proc = proc
+    task.begin_run()                              # 记录本次运行的起点（写入运行历史）
     short = " ".join([os.path.basename(exe), os.path.basename(target)] + raw_args)
     task.add(("▶ 后台运行：" if mode == "bg" else "$ ") + short, "head")
     if env_note:
@@ -735,7 +814,8 @@ def _spawn_task(cmd, cwd, target, exe, raw_args, mode="bg", timeout=None,
         _TASKS[tid] = task
         _prune_locked()
         _write_registry_locked()
-    threading.Thread(target=_tail_log, args=(task,), daemon=True).start()
+    task.tail_thread = threading.Thread(target=_tail_log, args=(task,), daemon=True)
+    task.tail_thread.start()
     if timeout:
         threading.Thread(target=_watchdog, args=(task,), daemon=True).start()
     return task, None
@@ -747,9 +827,120 @@ def _get_task(tid: str):
         return _TASKS.get(tid)
 
 
-def _restart_task(task):
-    """启动 / 重启内核：按任务记录里的文件、工作目录与参数重新拉起一条新任务。
+def _norm_target(p) -> str:
+    """把入口文件路径规范成绝对路径，作为「同一文件」的比较键。"""
+    try:
+        return os.path.abspath(p) if p else ""
+    except Exception:
+        return p or ""
 
+
+def _find_by_target(target):
+    """按「入口文件绝对路径」找已有记录（有多个时优先进程仍存活、其次最近启动的）。"""
+    key = _norm_target(target)
+    if not key:
+        return None
+    with _LOCK:
+        cands = [t for t in _TASKS.values() if _norm_target(t.target) == key]
+    if not cands:
+        return None
+    cands.sort(key=lambda t: (t.is_alive(), t.started), reverse=True)
+    return cands[0]
+
+
+def _settle_for_replace(task):
+    """替换记录前处理旧任务：停掉仍在跑的进程，并给它的本次运行收尾（记入历史）。
+
+    正常返回 None，停止超时返回错误响应。
+    """
+    if task is None:
+        return None
+    if task.is_alive():
+        task.stopped_by_user = True
+        _persist()
+        _kill_task(task)                          # 暂停中的进程会先唤醒再终止
+        deadline = time.time() + 5
+        while time.time() < deadline and task.is_alive():
+            time.sleep(0.1)
+        if task.is_alive():
+            return _fail("旧进程未能在 5 秒内退出，请稍后再试")
+    if not task.done:
+        code = None
+        try:
+            code = task.proc.poll() if task.proc is not None else None
+        except Exception:
+            code = None
+        task.finish(code)
+    task.end_run()
+    _persist()
+    return None
+
+
+def _replace_task(cmd, cwd, target, exe, raw_args, mode="bg", timeout=None,
+                  path_prepend="", env_note="", old=None):
+    """以「入口文件绝对路径」为唯一键启动：同一文件只保留一条任务记录。
+
+    先停掉同文件的旧进程并给它的本次运行收尾，再新建记录（**继承运行历史**），
+    最后移除旧记录 —— 于是「启动 / 重启」不再在列表里堆出多张同类卡片。
+    成功返回 (新任务, None)，失败返回 (None, 错误响应)。
+    """
+    if old is None:
+        old = _find_by_target(target)
+    if old is not None:
+        err = _settle_for_replace(old)
+        if err:
+            return None, err
+    new_task, err = _spawn_task(cmd, cwd, target, exe, raw_args, mode=mode, timeout=timeout,
+                                path_prepend=path_prepend, env_note=env_note)
+    if err:
+        return None, err
+    if old is not None:
+        hist = list(getattr(old, "runs", []) or [])
+        if hist:
+            new_task.runs = (hist + list(new_task.runs))[-_MAX_RUNS:]
+            _persist()
+        with _LOCK:
+            _TASKS.pop(old.id, None)
+            _write_registry_locked()
+        _remove_log_file(old)
+    return new_task, None
+
+
+def _collapse_duplicate_targets():
+    """把历史遗留的「同一入口文件多条记录」合并成一条（进程存活的优先保留）。
+
+    只保留一条，其余记录移除、日志删除；运行历史按时间合并，避免升级后列表里仍有一堆同类卡片。
+    """
+    with _LOCK:
+        groups = {}
+        for t in list(_TASKS.values()):
+            groups.setdefault(_norm_target(t.target), []).append(t)
+    removed, changed = [], False
+    for _key, lst in groups.items():
+        if len(lst) <= 1:
+            continue
+        lst.sort(key=lambda t: (t.is_alive(), t.started), reverse=True)
+        keep = lst[0]
+        allruns = []
+        for t in lst:
+            allruns.extend(getattr(t, "runs", []) or [])
+        allruns.sort(key=lambda r: (r.get("start") or 0))
+        keep.runs = allruns[-_MAX_RUNS:]
+        with _LOCK:
+            for t in lst[1:]:
+                _TASKS.pop(t.id, None)
+        removed.extend(lst[1:])
+        changed = True
+    for t in removed:
+        _remove_log_file(t)
+    if changed:
+        _persist()
+
+
+def _restart_task(task):
+    """启动 / 重启内核：按任务记录里的文件、工作目录与参数重新拉起。
+
+    以入口文件为唯一键：新任务继承历史并替换旧记录，列表里始终只有一张该文件的卡片。
     返回 (新任务, None)，失败返回 (None, 错误响应)。
     与 view 分离是为了能脱离 HTTP 直接调用（也便于测试）。
     """
@@ -765,18 +956,7 @@ def _restart_task(task):
     if not envprobe.resolve_exe(exe):
         return None, _fail(f"未安装 {label}（找不到命令 {exe}）")
 
-    # 旧进程还在：先停掉并等它真正退出。不等待就启动的话，新进程会因端口没释放（EADDRINUSE）
-    # 立刻失败退出，看起来像「点了重启反而挂了」。暂停中的进程 _kill_task 会先唤醒再终止。
     was_running = task.is_alive()
-    if was_running:
-        task.stopped_by_user = True
-        _persist()
-        _kill_task(task)
-        deadline = time.time() + 5
-        while time.time() < deadline and task.is_alive():
-            time.sleep(0.1)
-        if task.is_alive():
-            return None, _fail("旧进程未能在 5 秒内退出，请稍后再试")
 
     # 解释器按当前环境重新解析（venv / 自定义解释器路径可能变了），附加参数沿用原命令
     proj_exe, path_prepend, env_note = _project_runtime(target, exe)
@@ -794,9 +974,10 @@ def _restart_task(task):
             timeout = default_timeout
         timeout = max(1, min(max_timeout, timeout))
 
-    new_task, err = _spawn_task(cmd, task.cwd or os.path.dirname(target) or ".", target, exe, raw_args,
-                                mode=mode, timeout=timeout,
-                                path_prepend=path_prepend, env_note=env_note)
+    # _replace_task 内部会先停掉旧进程（等端口释放，避免 EADDRINUSE）再继承历史重启
+    new_task, err = _replace_task(cmd, task.cwd or os.path.dirname(target) or ".", target, exe, raw_args,
+                                  mode=mode, timeout=timeout,
+                                  path_prepend=path_prepend, env_note=env_note, old=task)
     if err:
         return None, err
     new_task.add("↻ %s（原任务 %s）" % ("已重启" if was_running else "重新启动", task.id), "dim")
@@ -989,11 +1170,11 @@ def api_run_resume():
 
 @bp.route("/api/run/restart", methods=["POST"])
 def api_run_restart():
-    """启动 / 重启任务：按原记录里的文件、工作目录与参数重新拉起一条新任务。
+    """启动 / 重启任务：按原记录里的文件、工作目录与参数重新拉起。
 
     - 仍在运行 -> 先终止再启动（「重启」）；
     - 已结束   -> 直接启动（「启动」）。
-    新任务用新的 id 与日志文件，旧记录保留在列表里，历史日志仍可回看。
+    以「入口文件绝对路径」为唯一键：继承运行历史并替换旧记录，列表里始终只有一张该文件的卡片。
     """
     from ... import config
     if not getattr(config, "ENABLE_EXEC", True):
@@ -1129,8 +1310,8 @@ def api_run():
 
     # 后台运行：常驻进程，不超时、可随时终止，关页面 / 重启服务都继续跑
     if background:
-        task, err = _spawn_task(cmd, cwd, target, exe, raw_args, mode="bg",
-                                path_prepend=path_prepend, env_note=env_note)
+        task, err = _replace_task(cmd, cwd, target, exe, raw_args, mode="bg",
+                                  path_prepend=path_prepend, env_note=env_note)
         if err:
             return err
         return jsonify({
@@ -1139,8 +1320,8 @@ def api_run():
         })
 
     # 前台运行：立即返回任务 id，日志实时推送；超时按 config.RUN_TIMEOUT_ACTION 处理
-    task, err = _spawn_task(cmd, cwd, target, exe, raw_args, mode="fg", timeout=timeout,
-                            path_prepend=path_prepend, env_note=env_note)
+    task, err = _replace_task(cmd, cwd, target, exe, raw_args, mode="fg", timeout=timeout,
+                              path_prepend=path_prepend, env_note=env_note)
     if err:
         return err
     return jsonify({

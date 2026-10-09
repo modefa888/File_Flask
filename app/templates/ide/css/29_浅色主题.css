@@ -606,6 +606,15 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .port-row .pr-other, :where(html.theme-light) .port-row .pr-cmd { color: #8a8a8a; }
 :where(html.theme-light) .port-row .pr-kill { background: #e8e8e8; color: #c0392b; border-color: #cecece; }
 :where(html.theme-light) .port-row .pr-kill:hover { background: #f5dcdc; color: #a02b2b; }
+/* 运行记录（卡片摘要 + 详情弹窗） */
+:where(html.theme-light) .runner-item .ri-meta.ri-hist { color: #8a8a8a; }
+:where(html.theme-light) .runner-info-pop .ti-hist-h { color: #8a8a8a; }
+:where(html.theme-light) .runner-info-pop .ti-hist-i { color: #333333; border-top-color: #eeeeee; }
+:where(html.theme-light) .runner-info-pop .ti-hist-i .hh-r { color: #333333; }
+:where(html.theme-light) .runner-info-pop .ti-hist-i .hh-a { color: #8a8a8a; }
+:where(html.theme-light) .runner-info-pop .ti-hist-i .hh-d { color: #1a7f37; }
+:where(html.theme-light) .runner-info-pop .ti-hist-i .hh-x { color: #6b6b6b; }
+:where(html.theme-light) .runner-info-pop .ti-hist-i.live .hh-d { color: #9a6700; }
 
 /* ---------- 运行环境面板（14） ---------- */
 :where(html.theme-light) .env-tools input { background: #ffffff; border-color: #cecece; color: #1f2328; }

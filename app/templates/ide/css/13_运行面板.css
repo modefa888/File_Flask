@@ -71,6 +71,20 @@
     padding: 0 6px; margin: 1px 3px 1px 0; }
   .runner-info-pop .ti-port:hover { background: #263a35; border-color: #3f7a68; color: #7fe0c8; }
   .runner-info-pop .ti-port .bi { font-size: 10px; }
+  /* 运行记录：卡片上一行的摘要（共运行 N 次 · 上次运行的起止与时长） */
+  .runner-item .ri-meta.ri-hist .bi { font-size: 11px; margin-right: 2px; }
+  /* 详情弹窗里的完整运行记录列表 */
+  .runner-info-pop .ti-hist-h { margin-top: 8px; display: flex; align-items: center; gap: 4px;
+    font-size: 11px; color: #9d9d9d; }
+  .runner-info-pop .ti-hist { margin-top: 4px; display: flex; flex-direction: column; }
+  .runner-info-pop .ti-hist-i { display: flex; align-items: center; gap: 6px; font-size: 11px;
+    padding: 3px 0; border-top: 1px solid #2c2c33; color: #cfcfcf; }
+  .runner-info-pop .ti-hist-i:first-child { border-top: none; }
+  .runner-info-pop .ti-hist-i .hh-r { font-family: ui-monospace, Menlo, Consolas, monospace; color: #c8c8c8; white-space: nowrap; }
+  .runner-info-pop .ti-hist-i .hh-a { color: #7d7d7d; }
+  .runner-info-pop .ti-hist-i .hh-d { color: #6fcf8a; white-space: nowrap; }
+  .runner-info-pop .ti-hist-i .hh-x { margin-left: auto; color: #8a8a8a; white-space: nowrap; }
+  .runner-info-pop .ti-hist-i.live .hh-d { color: #e2c08a; }
   /* 暂停中：左侧竖条与状态点用琥珀色，和「运行中」的绿色区分开 */
   .runner-item.paused { border-left-color: #e2c08a; }
   .runner-item .ri-top .dot.paused { background: #e2c08a; }

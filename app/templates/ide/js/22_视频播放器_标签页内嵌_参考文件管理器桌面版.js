@@ -164,6 +164,7 @@
 
     /* ---------- 海报封面层：首帧渲染后隐藏，缓冲卡顿（未播过）时重新浮现 ---------- */
     video.addEventListener("canplay", () => poster.classList.add("hide"));
+    video.addEventListener("loadeddata", () => poster.classList.add("hide"));   // 默认暂停时也隐去海报，露出静止首帧
     video.addEventListener("playing", () => { poster.dataset.played = "1"; poster.classList.add("hide"); });
     video.addEventListener("waiting", () => { if (!poster.dataset.played) poster.classList.remove("hide"); });
     /* ---------- 编码兜底：HEVC/10bit 等浏览器解不了的视频轨（症状：黑屏有声有时长）
@@ -180,7 +181,7 @@
       transStart = +ss || 0;
       video.dataset.trans = "1";
       video.src = transUrl(abs, ss);
-      if (autoplay !== false) video.play().catch(() => {});
+      if (autoplay) video.play().catch(() => {});   // 仅当原本处于播放态时才续播；默认暂停打开则保持暂停
       if (!transDur) {       // 拉取真实总时长，供进度显示与拖拽换算
         fetch("/api/video_duration?path=" + encodeURIComponent(abs))
           .then(r => r.json()).then(d => { if (d && d.duration) { transDur = d.duration; updateProgress(); } })
@@ -191,21 +192,17 @@
     // 检测：开始出数据后画面宽度仍为 0（只有音轨被解码）→ 走转码兜底
     const tryTransFallback = () => {
       if (transMode || video.videoWidth !== 0 || video.readyState < 2) return;
-      startTranscode(curPath, 0, true);
+      startTranscode(curPath, 0, !video.paused);
     };
     video.addEventListener("loadeddata", tryTransFallback);
     video.addEventListener("playing", tryTransFallback);
     video.addEventListener("error", () => {
       poster.classList.add("hide");
       // 直连源解码失败（不支持编码 / 容器异常）也先试一次转码；转码源再错才报错
-      if (!transMode) startTranscode(curPath, video.currentTime || 0, true);
+      if (!transMode) startTranscode(curPath, video.currentTime || 0, !video.paused);
       else showTip("视频加载失败，请确认文件可读", "bi-exclamation-circle");
     });
-    // 打开即自动播放（与文件管理器桌面版一致；被浏览器策略拦截时静默回退为手动播放）
-    video.addEventListener("loadedmetadata", function firstPlay() {
-      video.removeEventListener("loadedmetadata", firstPlay);
-      video.play().catch(() => {});
-    });
+    // 打开即默认暂停（不自动播放）：由用户点击播放键 / 空格 / 点画面后再开始
 
     /* ---------- 播放/暂停：按钮 + 点画面；双击全屏 ---------- */
     const playBtn = $(".vpv-play");

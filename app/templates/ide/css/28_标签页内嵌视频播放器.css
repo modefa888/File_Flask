@@ -46,6 +46,49 @@
   pointer-events: none;
 }
 
+/* 顶部居中视频标题（文件名）：与左侧大小徽标 / 右侧列表开关同一行，过长自动换行完整显示 */
+.vpv-title {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  max-width: min(72%, 760px);
+  color: #e5e7eb;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.5;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.vpv-wrap.title-hidden .vpv-title { display: none; }
+
+/* 标题显隐按钮：眼睛图标，样式与右上角列表开关一致，位于其左侧 */
+.vpv-title-toggle {
+  position: absolute;
+  top: 10px;
+  right: 48px;
+  z-index: 6;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #e5e7eb;
+  background: rgba(255, 255, 255, 0.13);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: background 0.15s ease;
+}
+.vpv-title-toggle:hover { background: rgba(255, 255, 255, 0.24); }
+
 /* ---------- 封面海报层：视频首帧渲染前显示缩略图 ---------- */
 .vpv-poster {
   position: absolute;
@@ -134,6 +177,14 @@
 .vpv-stage.idle .vpv-info { opacity: 0; transition: opacity 0.25s ease; }
 .vpv-side-toggle,
 .vpv-info { transition: opacity 0.25s ease; }
+
+/* 时间行：当前时间 + 进度条 + 总时长 */
+.vpv-timerow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.vpv-timerow .vpv-progress { flex: 1; min-width: 0; }
 
 /* 进度条：轨道 + 缓冲 + 已播放 + 拖拽圆点 */
 .vpv-progress {
@@ -396,6 +447,16 @@
   color: #1f2328;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
+.vpv-wrap.vpv-light .vpv-title {
+  color: #1f2328;
+  text-shadow: none;
+}
+.vpv-wrap.vpv-light .vpv-title-toggle {
+  border-color: rgba(0, 0, 0, 0.14);
+  color: #1f2328;
+  background: rgba(255, 255, 255, 0.86);
+}
+.vpv-wrap.vpv-light .vpv-title-toggle:hover { background: rgba(255, 255, 255, 0.98); }
 .vpv-wrap.vpv-light .vpv-seek-tip {
   background: rgba(255, 255, 255, 0.94);
   color: #1f2328;

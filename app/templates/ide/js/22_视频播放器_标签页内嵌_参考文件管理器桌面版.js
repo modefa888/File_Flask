@@ -15,7 +15,7 @@
   // 播放器状态持久化：单独 JSON（localStorage["ide.videoPlayer"]），永久记住
   // 音量 / 静音 / 倍速 / 播放模式——下次打开视频标签页沿用上一次的状态（如静音仍静音）
   var _vpvStore = (() => {
-    const def = { volume: 1, muted: false, rate: 1, mode: "order" };
+    const def = { volume: 1, muted: false, rate: 1, mode: "order", plFold: false };
     try { return Object.assign(def, JSON.parse(localStorage.getItem("ide.videoPlayer") || "{}")); }
     catch (_) { return def; }
   })();
@@ -73,6 +73,8 @@
       '<div class="vpv-wrap">' +
         '<div class="vpv-stage">' +
           '<div class="vpv-info" style="display:none;"></div>' +
+          '<div class="vpv-title"></div>' +
+          '<button class="vpv-title-toggle" title="隐藏标题"><i class="bi bi-eye"></i></button>' +
           '<video playsinline preload="metadata" src="' + streamUrl + '"></video>' +
           '<div class="vpv-poster" style="background-image:url(\'/api/thumbnail?path=' + encodeURIComponent(path) + '\')">' +
             '<div class="vpv-name">' + _vpvEsc(name) + '</div>' +
@@ -80,16 +82,19 @@
           '<div class="vpv-seek-tip"></div>' +
           '<button class="vpv-side-toggle" title="收起播放列表"><i class="bi bi-chevron-right"></i></button>' +
           '<div class="vpv-controls">' +
-            '<div class="vpv-progress"><div class="vpv-track">' +
-              '<div class="vpv-buffered"></div><div class="vpv-played"></div><div class="vpv-knob"></div>' +
-            '</div></div>' +
+            '<div class="vpv-timerow">' +
+              '<span class="vpv-time vpv-time-cur">00:00</span>' +
+              '<div class="vpv-progress"><div class="vpv-track">' +
+                '<div class="vpv-buffered"></div><div class="vpv-played"></div><div class="vpv-knob"></div>' +
+              '</div></div>' +
+              '<span class="vpv-time vpv-time-dur">00:00</span>' +
+            '</div>' +
             '<div class="vpv-row">' +
               '<button class="vpv-btn vpv-play" title="播放/暂停 (空格)"><i class="bi bi-play-fill"></i></button>' +
               '<div class="vpv-vol">' +
                 '<button class="vpv-btn vpv-mute" title="静音 (M)"><i class="bi bi-volume-up-fill"></i></button>' +
                 '<input type="range" class="vpv-vol-range" min="0" max="1" step="0.01" value="1" title="音量">' +
               '</div>' +
-              '<span class="vpv-time">00:00 / 00:00</span>' +
               '<div class="vpv-spacer"></div>' +
               '<div class="vpv-speed">' +
                 '<button class="vpv-btn vpv-speed-btn" title="倍速播放"><span class="vpv-speed-cur">1.0x</span></button>' +
@@ -121,8 +126,31 @@
     const video = host.querySelector("video");
     const poster = host.querySelector(".vpv-poster");
     const infoEl = host.querySelector(".vpv-info");
+    const titleEl = host.querySelector(".vpv-title");
+    titleEl.textContent = name;   // 顶部居中显示视频标题
     const seekTip = host.querySelector(".vpv-seek-tip");
     const sideToggle = host.querySelector(".vpv-side-toggle");
+    // 播放列表收起状态持久化：上次收起过，本次打开直接保持收起
+    if (_vpvStore.plFold) {
+      wrap.classList.add("no-side");
+      sideToggle.querySelector("i").className = "bi bi-chevron-left";
+      sideToggle.title = "展开播放列表";
+    }
+
+    /* ---------- 标题显示 / 隐藏（眼睛按钮，状态持久化） ---------- */
+    const titleBtn = host.querySelector(".vpv-title-toggle");
+    const applyTitleVis = hidden => {
+      wrap.classList.toggle("title-hidden", hidden);
+      titleBtn.querySelector("i").className = hidden ? "bi bi-eye-slash" : "bi bi-eye";
+      titleBtn.title = hidden ? "显示标题" : "隐藏标题";
+    };
+    titleBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      const hidden = !wrap.classList.contains("title-hidden");
+      applyTitleVis(hidden);
+      _vpvStore.titleHidden = hidden; _vpvSave();   // 记住偏好，下次打开沿用
+    });
+    if (_vpvStore.titleHidden) applyTitleVis(true);
     const $ = sel => host.querySelector(sel);
 
     /* ---------- 提示气泡（倍速/模式/旋转等操作反馈，1.6s 后淡出） ---------- */
@@ -191,7 +219,7 @@
     setPlayIcon();
 
     /* ---------- 进度条 + 时间 + 缓冲 ---------- */
-    const timeEl = $(".vpv-time"), progress = $(".vpv-progress");
+    const timeCur = $(".vpv-time-cur"), timeDur = $(".vpv-time-dur"), progress = $(".vpv-progress");
     const played = $(".vpv-played"), buffered = $(".vpv-buffered"), knob = $(".vpv-knob");
     const updateProgress = () => {
       // 转码模式：fMP4 流 duration 为 Infinity，用真实总时长 + ss 偏移换算显示
@@ -200,7 +228,8 @@
       const pct = dur ? cur / dur * 100 : 0;
       played.style.width = pct + "%";
       knob.style.left = pct + "%";
-      timeEl.textContent = _vpvFmt(cur) + " / " + _vpvFmt(dur);
+      timeCur.textContent = _vpvFmt(cur);
+      timeDur.textContent = "-" + _vpvFmt(Math.max(0, dur - cur));   // 右侧显示倒计时：还剩多少没播
       if (video.buffered.length && dur) {
         const end = video.buffered.end(video.buffered.length - 1) + (transMode ? transStart : 0);
         buffered.style.width = Math.min(100, end / dur * 100) + "%";
@@ -451,6 +480,7 @@
       poster.style.backgroundImage = "url('/api/thumbnail?path=" + encodeURIComponent(abs) + "')";
       const nameEl = poster.querySelector(".vpv-name");
       if (nameEl) nameEl.textContent = abs.split("/").pop() || "";
+      if (titleEl) titleEl.textContent = abs.split("/").pop() || "";   // 标题同步切换
       poster.classList.remove("hide");
       delete poster.dataset.played;
       rotDeg = 0; applyRotate();
@@ -509,6 +539,7 @@
       const folded = wrap.classList.toggle("no-side");
       sideToggle.querySelector("i").className = folded ? "bi bi-chevron-left" : "bi bi-chevron-right";
       sideToggle.title = folded ? "展开播放列表" : "收起播放列表";
+      _vpvStore.plFold = folded; _vpvSave();   // 记住收起状态，下次打开沿用
     });
 
     /* ---------- 标签被关闭（host 脱离文档）时解除全局监听并停播 ---------- */

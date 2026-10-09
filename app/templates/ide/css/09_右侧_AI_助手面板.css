@@ -144,6 +144,14 @@
   .bubble.ai-md h3, .bubble.ai-md h4, .bubble.ai-md h5 { margin: 10px 0 6px; font-size: 13px; color: #eee; }
   .bubble.ai-md ul, .bubble.ai-md ol { margin: 4px 0 8px; list-style: none; }
   .bubble.ai-md li { margin: 2px 0; }
+  /* 列表项：无序列表用小圆点、有序列表恢复序号（浅色主题下圆点为深色，见 29_ 文件末尾覆盖） */
+  .bubble.ai-md ul, .bubble.ai-md ol { padding-left: 18px; }
+  .bubble.ai-md ul > li { position: relative; padding-left: 13px; }
+  .bubble.ai-md ul > li::before {
+    content: ""; position: absolute; left: 1px; top: 8px; width: 5px; height: 5px;
+    border-radius: 50%; background: #c2c2c8;
+  }
+  .bubble.ai-md ol { list-style: decimal outside; }
   .bubble.ai-md code { background: #1b1b1e; border: 1px solid #333; border-radius: 4px; padding: 1px 5px;
     font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; color: #e8c07a; }
   .bubble.ai-md a { color: #6cb6ff; }

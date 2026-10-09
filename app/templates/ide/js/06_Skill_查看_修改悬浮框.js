@@ -1548,7 +1548,15 @@
         "bi " + (collapsed ? "bi-chevron-right" : "bi-chevron-down") + " tw";
       if (typeof aiTodoFloatPad === "function") aiTodoFloatPad();   // 展开/收起后同步消息区底部留白
     };
-    box._head.onclick = () => box._setCollapsed(!box.classList.contains("collapsed"));
+    box._head.onclick = () => {
+      const collapsed = !box.classList.contains("collapsed");
+      box._setCollapsed(collapsed);
+      try { localStorage.setItem("ide.aiTodoCollapsed", collapsed ? "1" : "0"); } catch (_) {}   // 记住展开/收起偏好
+    };
+    // 恢复上次收起状态：新建面板（含悬浮任务卡）时沿用偏好
+    let _savedFold = false;
+    try { _savedFold = localStorage.getItem("ide.aiTodoCollapsed") === "1"; } catch (_) {}
+    if (_savedFold) box._setCollapsed(true);
     box._paused = false;
     box._items = list;
     box.update = function (next) {

@@ -771,6 +771,7 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .bubble.ai-md h3, :where(html.theme-light) .bubble.ai-md h4, :where(html.theme-light) .bubble.ai-md h5 { color: #1f2328; }
 :where(html.theme-light) .bubble.ai-md code { background: #f0f0f0; border-color: #dcdcdc; color: #a05a00; }
 :where(html.theme-light) .bubble.ai-md a { color: #005fb8; }
+:where(html.theme-light) .bubble.ai-md ul > li::before { background: #1f2328; }
 :where(html.theme-light) .bubble.ai-md a.ai-path {
   color: #8a6a00; background: #f5f0e0; border-color: #e5dcc0;
 }

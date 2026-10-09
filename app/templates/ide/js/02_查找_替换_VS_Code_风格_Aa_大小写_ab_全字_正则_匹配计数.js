@@ -1113,8 +1113,61 @@
     items.push({ label: "键盘快捷方式…", act: showShortcuts });
     renderDrop(items, null, "editor-ctx", { x, y });
   }
+  /* ---------- 标签右键菜单（仿 VS Code 标签页菜单：关闭系列 / 保存 / 复制路径 / 拆分等） ---------- */
+  async function closeOtherTabs(tab) {
+    for (const t of tabs.filter(t => t.group === tab.group && t !== tab)) {
+      if (tabs.includes(t)) await closeTab(t);
+    }
+  }
+  async function closeTabsToRight(tab) {
+    const same = tabs.filter(t => t.group === tab.group);
+    for (const t of same.slice(same.indexOf(tab) + 1)) {
+      if (tabs.includes(t)) await closeTab(t);
+    }
+  }
+  function openTabCtxMenu(tab, x, y) {
+    const g = tab.group;
+    const same = tabs.filter(t => t.group === g);
+    const idx = same.indexOf(tab);
+    // 真实文件才显示路径/定位/重命名类操作（差异视图、汇总、设置页、插件视图等虚拟标签没有对应文件）
+    const real = !tab.diff && !tab.allDiff && !tab.displayPath && !tab.pluginView &&
+      !(typeof tab.path === "string" && tab.path.charCodeAt(0) < 32);
+    const items = [
+      { label: "关闭", sc: "Ctrl+W", act: () => closeTab(tab) },
+      { label: "关闭其他", disabled: same.length < 2, act: () => closeOtherTabs(tab) },
+      { label: "关闭右侧", disabled: idx >= same.length - 1, act: () => closeTabsToRight(tab) },
+      { label: "关闭全部", sc: "Ctrl+K W", act: () => closeGroupTabs(g) },
+      { label: "关闭已保存", sc: "Ctrl+K U", act: () => closeGroupTabs(g, true) },
+      { divider: true },
+      { label: "保存", sc: "Ctrl+S", disabled: !tab.dirty, act: () => saveTab(tab) },
+      { label: "保存全部", sc: "Ctrl+K S", disabled: !tabs.some(t => t.dirty), act: saveAllTabs },
+    ];
+    if (real) {
+      items.push({ divider: true });
+      items.push({ label: "在侧边打开", sc: "Ctrl+Enter", act: () => openFileToSide(tab.path, tab.name) });
+      items.push({ label: "复制路径", sc: "Ctrl+Alt+C", act: () => copyText(tab.path) });
+      items.push({ label: "复制相对路径", sc: "Ctrl+Shift+Alt+C", act: () => copyText(relPathOf(tab.path)) });
+      items.push({ label: "在资源管理器中显示", act: () => revealInTree(tab.path) });
+      items.push({ label: "打开时间线", act: () => openFileTimeline(tab.path, tab.name) });
+      items.push({ divider: true });
+      items.push({ label: "重命名…", sc: "F2", act: () => renameCurrentFile(tab.path, tab.name) });
+    }
+    items.push({ divider: true });
+    items.push({ label: "向右拆分编辑器", sc: "Ctrl+\\", act: () => splitEditor(g, "right") });
+    renderDrop(items, null, "tab-ctx", { x, y });
+  }
   // 在编辑器（含差异视图）上右键：先激活该标签，再弹出菜单
   edGroups.addEventListener("contextmenu", (e) => {
+    const tb = e.target && e.target.closest ? e.target.closest(".tab") : null;
+    if (tb) {
+      const tab = tabs.find(t => t.el === tb);
+      if (tab) {
+        e.preventDefault(); e.stopPropagation();
+        activate(tab);
+        openTabCtxMenu(tab, e.clientX, e.clientY);
+        return;
+      }
+    }
     const host = e.target && e.target.closest ? e.target.closest(".cm-host") : null;
     if (!host) return;
     const tab = tabs.find(t => t.host === host);

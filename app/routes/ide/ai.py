@@ -1263,9 +1263,11 @@ def api_ai_chat():
                             except (TypeError, ValueError):
                                 pass
                             # 把真实用量透传给前端（累计值）：前端据此显示精确 token，而不是按字数估算
+                            # context_tokens＝本轮输入规模（即当前上下文占用），prompt_tokens 是整轮累计
                             yield _sse({"type": "usage",
                                         "usage": {"prompt_tokens": usage_meta["in"],
-                                                  "completion_tokens": usage_meta["out"]}})
+                                                  "completion_tokens": usage_meta["out"],
+                                                  "context_tokens": int(u.get("prompt_tokens") or 0)}})
                         if obj.get("model"):
                             usage_meta["model"] = str(obj["model"])
                         choices = obj.get("choices") or []

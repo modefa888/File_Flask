@@ -1320,7 +1320,8 @@ def _stream_model(provider, model, convo, tools=None):
         break
     if u_in or u_out:                        # 本轮 token 用量交给外层累加统计
         yield _sse({"type": "usage", "model": model,
-                    "usage": {"prompt_tokens": u_in, "completion_tokens": u_out}})
+                    "usage": {"prompt_tokens": u_in, "completion_tokens": u_out,
+                              "context_tokens": u_in}})   # 本轮输入规模 = 当前上下文占用
     out = []
     for idx in sorted(calls):
         c = calls[idx]

@@ -167,6 +167,30 @@
     }
     return sec;
   }
+  /* 旧会话里的「选中代码」可能没存真实路径：按文件名在已打开的标签里找一次（找到就补上） */
+  function aiResolvePathByName(name) {
+    const base = String(name || "").replace(/:\d+(?:-\d+)?$/, "").trim();
+    if (!base || typeof tabs === "undefined") return "";
+    const t = tabs.find(x => x && x.name === base && x.path);
+    return t ? t.path : "";
+  }
+  /* 点击消息里的附件芯片：在编辑器打开该文件并跳到对应行段（没有行号就只打开文件） */
+  async function aiOpenAtLines(path, name, start, end) {
+    try {
+      const tab = await openFile(path, name);
+      if (!tab || !tab.cm) return;
+      const cm = tab.cm;
+      const s = parseInt(start, 10) || 0;
+      if (s > 0) {                                   // 带行段：选中并滚动到该区间
+        const a = Math.max(0, Math.min(s - 1, cm.lineCount() - 1));
+        const e = parseInt(end, 10) || s;
+        const b = Math.max(a, Math.min(e - 1, cm.lineCount() - 1));
+        cm.setSelection({ line: a, ch: 0 }, { line: b, ch: cm.getLine(b).length });
+        if (typeof scrollLineToComfort === "function") scrollLineToComfort(cm, a);
+      }
+      cm.focus();
+    } catch (err) { toast("打开失败：" + (err.message || err), "err"); }
+  }
   function aiBubble(role, text, cls, imgs, md, files, imgNames) {
     const row = document.createElement("div");
     row.className = "ai-row " + role;
@@ -192,15 +216,30 @@
       who.innerHTML = '<span class="who-av"><i class="bi bi-stars"></i></span><span class="who-nm">AI 助手</span>';
       row.appendChild(who);
     }
-    if (files && files.length) {                 // 本条消息附带的文件 / 文件夹 / 选中代码：显示在消息上方
+    const b = document.createElement("div");
+    b.className = "bubble" + (cls ? " " + cls : "");
+    if (md) { b.classList.add("ai-md"); b.innerHTML = aiMd(text || ""); }
+    else if (role === "user") { b.innerHTML = aiRenderUserText(text || ""); }
+    else { b.textContent = text || ""; }
+    row.appendChild(b);
+    if (files && files.length) {                 // 本条消息附带的文件 / 文件夹 / 选中代码：与正文同一行排在气泡内
       const g = document.createElement("div");
       g.className = "ai-bfiles";
       files.forEach(it => {
         const f = (typeof it === "string") ? { name: it } : it;   // 兼容历史会话里存的纯字符串
         const label = f.isDir ? (f.name + "/") : f.name;          // 目录带尾斜杠
+        // 真实文件路径：选中代码存在 src；旧会话没存时按文件名在已打开标签里找回
+        let realPath = f.src || f.path || "";
+        if (!/^(\/|[A-Za-z]:[\\/])/.test(String(realPath))) {
+          realPath = aiResolvePathByName(f.name) || (String(realPath).indexOf("sel#") === 0 ? "" : realPath);
+        }
+        const isReal = /^(\/|[A-Za-z]:[\\/])/.test(String(realPath));
+        // 行段：新数据直接带；旧数据从「文件名:18-35」里解析
+        let st = parseInt(f.start, 10) || 0, en = parseInt(f.end, 10) || 0;
+        if (!st) { const mm = /:(\d+)(?:-(\d+))?$/.exec(label); if (mm) { st = +mm[1]; en = mm[2] ? +mm[2] : st; } }
         const s = document.createElement("span");
         s.className = "ai-bfile" + (f.isDir ? " is-dir" : "") + (f.kind === "sel" ? " is-sel" : "");
-        s.title = label;
+        s.title = aiPathTip(realPath) || label;    // 悬浮显示「相对项目根的路径」
         if (f.kind === "sel" && f.lang) {          // 选中代码：与输入框芯片一致，显示语言徽标
           const lang = document.createElement("span");
           lang.className = "ai-bfile-lang";
@@ -211,16 +250,17 @@
           s.innerHTML = '<i class="bi ' + (f.isDir ? "bi-folder2" : "bi-file-earmark-text") + '"></i>';
           s.appendChild(document.createTextNode(label));
         }
+        if (isReal) {                              // 点击：打开并跳到对应行段（目录 → 资源管理器定位）
+          s.classList.add("ai-bfile-open");
+          s.addEventListener("click", () => {
+            if (f.isDir) { if (typeof revealInTree === "function") revealInTree(realPath); return; }
+            aiOpenAtLines(realPath, realPath.split("/").pop() || f.name, st, en);
+          });
+        }
         g.appendChild(s);
       });
-      row.appendChild(g);
+      b.insertBefore(g, b.firstChild);           // 插到正文最前面：芯片 + 文字同排（参考 CodeBuddy）
     }
-    const b = document.createElement("div");
-    b.className = "bubble" + (cls ? " " + cls : "");
-    if (md) { b.classList.add("ai-md"); b.innerHTML = aiMd(text || ""); }
-    else if (role === "user") { b.innerHTML = aiRenderUserText(text || ""); }
-    else { b.textContent = text || ""; }
-    row.appendChild(b);
     if (imgs && imgs.length) {                   // 图片以「文件名小卡片」加进消息正文（参考 CodeBuddy），点击放大查看
       const g = document.createElement("div");
       g.className = "ai-bimgs";
@@ -458,11 +498,12 @@
   function aiUpdateCtxRing(used) {
     const arc = $("aiCtxArc"), ring = $("aiCtxRing");
     if (!arc || !ring) return;
-    // 无参调用时读当前会话累计消耗（inSum + outSum），跟底部"输入 X tok"一致
-    // 之前默认取 AI.ctxUsed（初始化时为 0），导致圆环永远显示 0
+    // 无参调用时优先取「最近一次请求的上下文大小」（= 当前上下文占用，这才是圆环该表示的）；
+    // 旧会话没有 ctxLast 字段时退回累计消耗，保证圆环不为 0
     if (typeof used !== "number") {
       const cur = AI.sessions.find(x => x.id === AI.curId);
-      used = (cur && cur.stats && (cur.stats.inSum || 0)) + (cur && cur.stats && (cur.stats.outSum || 0));
+      const st = (cur && cur.stats) || {};
+      used = st.ctxLast || ((st.inSum || 0) + (st.outSum || 0));
     }
     AI.ctxUsed = used || 0;
     const pick = aiCurrentPick();
@@ -475,7 +516,7 @@
     ring.classList.toggle("warn", pct >= 60 && pct < 85);
     ring.classList.toggle("bad", pct >= 85);
     ring.title = "上下文占用：约 " + aiFmtTok(AI.ctxUsed || 0) + " / " + aiFmtTok(total) + " tokens（" + pct + "%）\n" +
-      "模型：" + (pick.model || "未选择") + "\n（窗口大小按模型名估算，显示当前会话累计消耗）";
+      "模型：" + (pick.model || "未选择") + "\n（最近一次请求发给模型的上下文大小；窗口大小按模型名估算）";
   }
 
   function aiFillModelSelect() {

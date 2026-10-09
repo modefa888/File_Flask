@@ -223,8 +223,8 @@
   }
   .ai-row .bubble .ai-tag-chip.custom { background: #3a2d50; color: #d0aaff; border-color: #5a3a7c; }
   .ai-row .bubble .ai-tag-chip:hover { border-color: #7fb3e0; filter: brightness(1.15); }
-  .ai-bimgs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; justify-content: flex-end; }
-  .ai-row.assistant .ai-bimgs { justify-content: flex-start; }
+  .ai-bimgs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px;
+    vertical-align: middle; margin-left: 6px; }
   .ai-bimgs img { max-width: 140px; max-height: 100px; border-radius: 6px; border: 1px solid #3c3c3c; object-fit: cover; cursor: zoom-in; }
   .ai-bimgs img:hover { border-color: #5a8ac0; }
   /* 消息里的图片：文件名小卡片（参考 CodeBuddy；点击放大查看） */
@@ -327,8 +327,13 @@
   .ai-file-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ai-file-chip .rm { background: none; border: none; color: #b9a97f; cursor: pointer; padding: 0 0 0 2px; font-size: 11px; line-height: 1; }
   .ai-file-chip .rm:hover { color: #ff8a8a; }
-  /* 已发送消息上方的「本条附带的文件」标记 */
-  .ai-bfiles { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 4px; }
+  /* 已发送消息里「本条附带的文件 / 选中代码」标记：与正文同一行排在气泡内（参考 CodeBuddy） */
+  .ai-bfiles { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px;
+    vertical-align: middle; margin-right: 6px; }
+  .ai-bfiles .ai-bfile { margin: 0; }
+  /* 可点击的附件芯片：点击在编辑器打开并跳到对应行段 */
+  .ai-bfile-open { cursor: pointer; }
+  .ai-bfile-open:hover { filter: brightness(1.18); border-color: #6b7a8a; }
   .ai-bfile { display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
     background: #2f2a1e; border: 1px solid #4a3f28; border-radius: 4px; padding: 1px 6px;
     font-size: 10.5px; color: #e2c08a; }

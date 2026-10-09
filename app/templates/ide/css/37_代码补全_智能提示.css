@@ -1,0 +1,91 @@
+/* ================================================================
+   代码补全候选列表（仿 VS Code IntelliSense）
+   —— 覆盖 vendor/codemirror/show-hint.min.css 的默认样式
+   ================================================================ */
+.CodeMirror-hints {
+  position: absolute;
+  z-index: 10400;
+  margin: 0;
+  padding: 3px 0;
+  list-style: none;
+  box-sizing: border-box;
+  min-width: 220px;
+  max-height: 262px;
+  overflow-y: auto;
+  border: 1px solid #454545;
+  border-radius: 4px;
+  background: #252526;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+  font-family: "SF Mono", "Menlo", Consolas, monospace;
+  font-size: var(--cm-font-size, 13px);
+  color: #d4d4d4;
+}
+.CodeMirror-hint {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 3px 8px 3px 6px;
+  border-radius: 0;
+  white-space: nowrap;
+  color: #d4d4d4;
+  cursor: pointer;
+}
+li.CodeMirror-hint-active { background: #04395e; color: #fff; }
+
+/* 左侧类型色块：abc / ƒ / C / M / K … 与 VS Code 的图标语义对齐 */
+.ide-cmp-ic {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 16px;
+  line-height: 16px;
+  margin-right: 6px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: "SF Mono", "Menlo", Consolas, monospace;
+  border-radius: 3px;
+  color: #1e1e1e;
+}
+.ide-cmp-ic.wide { font-size: 9px; letter-spacing: -.5px; }
+.ic-f, .ic-m { color: #b180d7; }   /* 函数 / 方法 */
+.ic-c { color: #4ec9b0; }          /* 类 */
+.ic-v { color: #75beff; }          /* 变量 */
+.ic-p { color: #75beff; }          /* 属性 */
+.ic-o { color: #c586c0; }          /* 模块 */
+.ic-k { color: #569cd6; }          /* 关键字 */
+.ic-d { color: #569cd6; }          /* 常量 */
+
+.ide-cmp-nm { flex: 0 0 auto; }
+.ide-cmp-nm b { color: #4aa8ff; font-weight: 700; }      /* 命中前缀高亮 */
+li.CodeMirror-hint-active .ide-cmp-nm b { color: #9cdcfe; }
+
+.ide-cmp-dt {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 16px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #8a8a8a;
+  font-size: 11px;
+}
+li.CodeMirror-hint-active .ide-cmp-dt { color: #b9c7d5; }
+
+/* ---------- 浅色主题 ---------- */
+.theme-light .CodeMirror-hints {
+  border-color: #c8c8c8;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .16);
+  color: #333;
+}
+.theme-light .CodeMirror-hint { color: #333; }
+.theme-light li.CodeMirror-hint-active { background: #d6ebff; color: #000; }
+.theme-light .ide-cmp-nm b { color: #0066bf; }
+.theme-light li.CodeMirror-hint-active .ide-cmp-nm b { color: #004b8f; }
+.theme-light .ide-cmp-dt { color: #8a8a8a; }
+.theme-light li.CodeMirror-hint-active .ide-cmp-dt { color: #555; }
+.theme-light .ic-f, .theme-light .ic-m { color: #af00db; }
+.theme-light .ic-c { color: #007f6e; }
+.theme-light .ic-v, .theme-light .ic-p { color: #0070c1; }
+.theme-light .ic-o { color: #a31515; }
+.theme-light .ic-k, .theme-light .ic-d { color: #0000ff; }

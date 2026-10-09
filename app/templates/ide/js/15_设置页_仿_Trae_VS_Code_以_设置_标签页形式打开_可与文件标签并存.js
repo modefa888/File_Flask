@@ -3,6 +3,7 @@
      ================================================================ */
   const IDE_SETTINGS = Object.assign(
     { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
+      codeComplete: true, autoComplete: true,
       showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true,
       httpProxyMode: "", httpProxy: "", httpNoProxy: "", httpTimeout: 20,
       httpInsecure: false, httpFilterMode: "", httpFilterList: "",
@@ -154,6 +155,8 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
           '<div class="set-row" data-kw="换行 wrap line"><div class="set-info"><div class="set-label">自动换行</div><div class="set-desc">过长的行折行显示，不出现横向滚动条</div></div><input type="checkbox" id="setLineWrap"></div>' +
           '<div class="set-row" data-kw="高亮 当前行 active line"><div class="set-info"><div class="set-label">高亮当前行</div><div class="set-desc">光标所在行加背景色</div></div><input type="checkbox" id="setActiveLine"></div>' +
           '<div class="set-row" data-kw="缩进 tab indent"><div class="set-info"><div class="set-label">缩进空格数</div><div class="set-desc">Tab 与自动缩进的空格宽度</div></div><select id="setIndent"><option value="2">2</option><option value="4">4</option><option value="8">8</option></select></div>' +
+          '<div class="set-row" data-kw="代码 补全 智能 提示 自动 联想 IntelliSense autocomplete suggest"><div class="set-info"><div class="set-label">代码补全</div><div class="set-desc">输入时联想文件名内符号、语言关键字、模块/类成员与文档中出现过的词；手动触发键 <kbd>Ctrl+Space</kbd>（也可用 <kbd>Alt+/</kbd>）</div></div><input type="checkbox" id="setCodeComplete"></div>' +
+          '<div class="set-row" data-kw="自动 弹出 补全 输入 触发 suggest"><div class="set-info"><div class="set-label">输入时自动弹出补全</div><div class="set-desc">关闭后只在按 Ctrl+Space 时弹出候选列表</div></div><input type="checkbox" id="setAutoComplete"></div>' +
         '</div>' +
         '<div class="set-sec" id="sec-files"><h2>文件</h2>' +
           '<div class="set-row" data-kw="显示 全部 依赖 隐藏 node_modules eye"><div class="set-info"><div class="set-label">显示全部文件</div><div class="set-desc">资源管理器中显示依赖目录（node_modules 等）与点开头隐藏文件（.gitignore、.env 等），与「眼睛」图标按钮联动</div></div><input type="checkbox" id="setShowAll"></div>' +
@@ -396,6 +399,8 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     q("#setLineWrap").checked = IDE_SETTINGS.lineWrap;
     q("#setActiveLine").checked = IDE_SETTINGS.activeLine;
     q("#setIndent").value = IDE_SETTINGS.indent;
+    q("#setCodeComplete").checked = IDE_SETTINGS.codeComplete !== false;
+    q("#setAutoComplete").checked = IDE_SETTINGS.autoComplete !== false;
     q("#setHints").checked = IDE_SETTINGS.hints;
     q("#setShowAll").checked = !!IDE_SETTINGS.showAllFiles;
     q("#setGitView").value = IDE_SETTINGS.gitViewMode === "tree" ? "tree" : "list";
@@ -420,6 +425,18 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     q("#setLineWrap").addEventListener("change", e => { IDE_SETTINGS.lineWrap = e.target.checked; saveIdeSettings(); applyIdeSettings(); });
     q("#setActiveLine").addEventListener("change", e => { IDE_SETTINGS.activeLine = e.target.checked; saveIdeSettings(); applyIdeSettings(); });
     q("#setIndent").addEventListener("change", e => { IDE_SETTINGS.indent = parseInt(e.target.value, 10) || 4; saveIdeSettings(); applyIdeSettings(); });
+    // 代码补全：关闭时顺手收起已弹出的候选列表（触发逻辑实时判断开关，无需重建编辑器）
+    q("#setCodeComplete").addEventListener("change", e => {
+      IDE_SETTINGS.codeComplete = e.target.checked;
+      saveIdeSettings();
+      if (!e.target.checked) ideCompleteCloseAll();
+      toast(e.target.checked ? "已开启代码补全" : "已关闭代码补全", "ok");
+    });
+    q("#setAutoComplete").addEventListener("change", e => {
+      IDE_SETTINGS.autoComplete = e.target.checked;
+      saveIdeSettings();
+      toast(e.target.checked ? "输入时将自动弹出补全列表" : "已改为仅 Ctrl+Space 手动触发", "ok");
+    });
     q("#setHints").addEventListener("change", e => { IDE_SETTINGS.hints = e.target.checked; saveIdeSettings(); applyIdeSettings(); });
     // 显示全部文件：与资源管理器「眼睛」图标同源（showAllFiles/showHidden），改动即时刷新文件树
     q("#setShowAll").addEventListener("change", e => {
@@ -646,6 +663,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     q("#setClearRecent").onclick = () => { localStorage.removeItem("ide.recentFiles"); toast("已清除最近打开记录", "ok"); };
     q("#setReset").onclick = () => {
       Object.assign(IDE_SETTINGS, { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
+        codeComplete: true, autoComplete: true,
         showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true,
         httpProxyMode: "", httpProxy: "", httpNoProxy: "", httpTimeout: 20, httpInsecure: false,
         httpFilterMode: "", httpFilterList: "",
@@ -655,6 +673,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
       ideSettingSet("actOrder", []); applyActOrder(); actOrderRender();   // 活动栏图标顺序也恢复默认
       q("#setFontSize").value = 13; q("#setLineWrap").checked = false; q("#setActiveLine").checked = true;
       q("#setIndent").value = 4; q("#setHints").checked = true;
+      q("#setCodeComplete").checked = true; q("#setAutoComplete").checked = true;
       q("#setShowAll").checked = false; q("#setGitView").value = "list"; q("#setGitCommitMode").value = "tree";
       q("#setRestoreSession").checked = true;
       q("#setHttpProxyMode").value = "none";

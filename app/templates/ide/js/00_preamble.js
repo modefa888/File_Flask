@@ -1075,6 +1075,8 @@
           styleActiveLine: IDE_SETTINGS.activeLine && !big, matchBrackets: !big, autoCloseBrackets: true,
           phrases: CM_PHRASES,
         });
+        // 代码补全（仿 VS Code IntelliSense）：候选来源与触发逻辑见 37_ 模块
+        if (typeof cmAttachCompletion === "function") cmAttachCompletion(tab.cm, ext);
         if (big) toast("文件较大（" + fmtSize(res.size || text.length) + "），已关闭语法高亮以保证编辑流畅", "warn");
         tab.cm.on("change", () => {
           if (tab.big) {

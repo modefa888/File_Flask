@@ -44,7 +44,7 @@
       const d = await r.json();
       if (d.error) throw new Error(d.error);
       CRON.tasks = d.tasks || [];
-      cronSetBadge(d.running || 0);
+      cronUpdateBadge();
       renderCronList();
       // 编辑区大页也开着时：只刷新统计与表格，保留详情里的日志与滚动位置
       if (typeof cronViewPaintHead === "function" && $("cvTbody")) {
@@ -60,6 +60,10 @@
     if (!el) return;
     if (n > 0) { el.textContent = n > 99 ? "99+" : n; el.style.display = ""; }
     else el.style.display = "none";
+  }
+  /* 活动栏角标：显示「已启动（启用）」的任务数量，随任务增删 / 启停即时刷新 */
+  function cronUpdateBadge() {
+    cronSetBadge((CRON.tasks || []).filter(t => t.enabled).length);
   }
   function renderCronList() {
     const box = $("cronList");
@@ -116,6 +120,7 @@
     if (d.error) { toast(d.error, "err"); loadCron({ silent: true }); return; }
     t.enabled = d.task.enabled; t.next = d.task.next;
     renderCronList();
+    cronUpdateBadge();
     toast(t.enabled ? "已启用：" + t.name : "已停用：" + t.name, "ok");
   }
   async function cronRun(t) {
@@ -141,7 +146,7 @@
     if (CRON.runTask && CRON.runTask.id === t.id) cronCloseModal();
     CRON.tasks = CRON.tasks.filter(x => x.id !== t.id);
     renderCronList();
-    cronSetBadge((CRON.tasks || []).filter(x => x.running).length);
+    cronUpdateBadge();
     if (!CRON.tasks.length) renderCronList();
     toast("已删除：" + t.name, "ok");
   }
@@ -462,7 +467,7 @@
       const r = await fetch("/api/cron/tasks");
       const d = await r.json();
       CRON.tasks = d.tasks || [];
-      cronSetBadge(d.running || 0);
+      cronUpdateBadge();
     } catch (_) { /* 保留旧数据，不打断界面 */ }
     if (force || !$("cvTbody")) cronViewRender();
     else { cronViewPaintHead(); cronViewPaintRows(); }

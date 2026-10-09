@@ -397,6 +397,28 @@
     items.push({ label: selCount > 1 ? ("删除 " + selCount + " 项") : "删除", sc: "Delete", danger: true, act: () => ctxAction("delete") });
     renderDrop(items, null, "tree-ctx", { x, y });
   }
+  /* 删除二次确认框里的「文件基础信息」区块：单文件拉 /api/properties 展示名称/类型/大小/修改时间，
+     目录给出「将删除全部内容」提示，多选则列出清单（最多 8 条）。 */
+  async function fileInfoHtml(targets) {
+    if (targets.length > 1) {
+      const lis = targets.slice(0, 8).map(t =>
+        '<li class="di-li"><i class="bi ' + (t.isDir ? "bi-folder2" : "bi-file-earmark") + '"></i>' + esc(t.name) + "</li>").join("");
+      return '<div class="del-info"><div class="di-sum">共 ' + targets.length + " 个项目将被删除：</div>" +
+        '<ul class="di-list">' + lis + (targets.length > 8 ? '<li class="di-more">…还有 ' + (targets.length - 8) + " 项</li>" : "") + "</ul></div>";
+    }
+    const t = targets[0];
+    let rows = '<tr><td class="di-k">名称</td><td class="di-v">' + esc(t.name) + "</td></tr>";
+    try {
+      const d = await (await fetch("/api/properties?path=" + encodeURIComponent(t.path) + (t.isDir ? "&light=1" : ""))).json();
+      if (d && !d.error) {
+        rows += '<tr><td class="di-k">类型</td><td class="di-v">' + (t.isDir ? "目录" : "文件" + (d.ext ? "（" + d.ext + "）" : "")) + "</td></tr>";
+        if (t.isDir) rows += '<tr><td class="di-k">说明</td><td class="di-v">删除将包含其下全部内容</td></tr>';
+        else rows += '<tr><td class="di-k">大小</td><td class="di-v">' + (d.size_str || "—") + "</td></tr>";
+        rows += '<tr><td class="di-k">修改时间</td><td class="di-v">' + (d.modified || "—") + "</td></tr>";
+      }
+    } catch (_) {}
+    return '<div class="del-info"><table class="di-tbl">' + rows + "</table></div>";
+  }
   async function ctxAction(act) {
     if (!ctxTarget) return;
     const { path, name, isDir } = ctxTarget;
@@ -447,7 +469,9 @@
       const msg = isBatch
         ? "确定删除选中的 " + targets.length + " 个项目吗？此操作不可撤销。"
         : "确定删除 " + name + " ？此操作不可撤销。";
-      if (!(await uiConfirm(isBatch ? "批量删除确认" : "删除确认", msg, "删除", true))) return;
+      const infoHtml = await fileInfoHtml(targets);
+      if (!(await uiModal({ title: isBatch ? "批量删除确认" : "删除确认", icon: "bi-exclamation-triangle",
+        html: '<div class="m-msg">' + esc(msg) + "</div>" + infoHtml, okText: "删除", danger: true }))) return;
       // 请求期间先关掉后台自动刷新的整树重建，保证下面捕获的行引用不会被中途换掉
       holdTreeRefresh(6000);
       // 删除进行中：在树行图标处显示旋转图标，文件真实删除后随行一起消失

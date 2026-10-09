@@ -57,6 +57,8 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .tree-row { color: #1f2328; }
 :where(html.theme-light) .tree-row:hover { background: #e8e8e8; }
 :where(html.theme-light) .tree-row.selected { background: #cde3f8; }
+:where(html.theme-light) .tree-row.tree-drop { background: rgba(0, 95, 184, 0.12); box-shadow: inset 0 0 0 1px #005fb8; }
+:where(html.theme-light) #explorerPanel.tree-dropping { outline-color: #005fb8; background: rgba(0, 95, 184, 0.04); }
 :where(html.theme-light) .tree-row.selected:focus { box-shadow: inset 0 0 0 1px #005fb8; }
 :where(html.theme-light) .tree-ws-head { color: #1f2328; }
 :where(html.theme-light) .tree-ws-head .ws-rm { color: #6b6b6b; }
@@ -210,6 +212,18 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ide-modal textarea { background: #ffffff; border-color: #cecece; color: #1f2328; }
 :where(html.theme-light) .ide-modal .m-row label { color: #5a5a5a; }
 :where(html.theme-light) .ide-modal .m-row .hint { color: #8a8a8a; }
+:where(html.theme-light) .ide-modal .del-info .di-tbl,
+:where(html.theme-light) .ide-modal .del-info .di-list { background: #f3f3f3; border-color: #dcdcdc; }
+:where(html.theme-light) .ide-modal .del-info .di-tbl td { border-bottom-color: #e2e2e2; }
+:where(html.theme-light) .ide-modal .del-info .di-k { color: #6b6b6b; }
+:where(html.theme-light) .ide-modal .del-info .di-v { color: #1f2328; }
+:where(html.theme-light) .ide-modal .del-info .di-sum { color: #444; }
+:where(html.theme-light) .ide-modal .del-info .di-list .di-li { color: #1f2328; border-bottom-color: #e2e2e2; }
+:where(html.theme-light) .ide-modal .del-info .di-list .di-li .bi { color: #4a7ab0; }
+:where(html.theme-light) .ide-modal .del-info .di-more { color: #8a8a8a !important; }
+:where(html.theme-light) .ide-modal .del-info .di-tbl .di-k { color: #4a7ab0; }
+:where(html.theme-light) .ide-modal .del-info .di-sz { color: #444; }
+:where(html.theme-light) .ide-modal .del-info .di-note { color: #b8862b; }
 :where(html.theme-light) .ide-modal .m-foot .m-cancel { background: #e0e0e0; color: #333333; }
 :where(html.theme-light) .ide-modal .m-foot .m-cancel:hover { background: #d0d0d0; }
 :where(html.theme-light) .ui-pop-confirm {

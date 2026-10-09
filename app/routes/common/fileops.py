@@ -291,6 +291,61 @@ def api_files_save():
         return jsonify({"error": str(e)}), 500
 
 
+# ---------- 拖拽上传：把本地文件放进项目目录（带基础检查） ----------
+# 单文件上限 25MB（全局 MAX_CONTENT_LENGTH=32MB 请求体上限之内，留出表单开销）
+UPLOAD_MAX_SIZE = 25 * 1024 * 1024
+_UPLOAD_NAME_FORBIDDEN = ("<", ">", ":", '"', "|", "?", "*", "\\", "/")
+
+
+@bp.route("/api/files/upload", methods=["POST"])
+def api_files_upload():
+    _log.info("POST /api/files/upload")
+    target_dir = safe_path(request.form.get("dir", ""))
+    if not os.path.isdir(target_dir):
+        return jsonify({"error": "目标目录不存在"}), 400
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "没有收到文件"}), 400
+    uploaded, skipped = [], []
+    for fs in files:
+        # 只取文件名本身：浏览器可能带上完整伪路径（webkitdirectory 等），统一落到一层
+        name = os.path.basename((fs.filename or "").replace("\\", "/")).strip()
+        if not name or name in (".", ".."):
+            skipped.append({"name": fs.filename or "?", "reason": "无效文件名"})
+            continue
+        if any(ch in name for ch in _UPLOAD_NAME_FORBIDDEN):
+            skipped.append({"name": name, "reason": "文件名包含非法字符"})
+            continue
+        try:
+            data = fs.read()
+        except Exception as e:
+            skipped.append({"name": name, "reason": "读取失败: %s" % e})
+            continue
+        if len(data) > UPLOAD_MAX_SIZE:
+            skipped.append({"name": name, "reason": "超过 25MB 大小限制"})
+            continue
+        if not data:
+            skipped.append({"name": name, "reason": "空文件"})
+            continue
+        # 同名不覆盖：自动追加 -1 / -2 序号
+        base, ext = os.path.splitext(name)
+        final, i = name, 1
+        while os.path.exists(os.path.join(target_dir, final)):
+            final = "%s-%d%s" % (base, i, ext)
+            i += 1
+        try:
+            with open(os.path.join(target_dir, final), "wb") as f:
+                f.write(data)
+        except Exception as e:
+            skipped.append({"name": name, "reason": str(e)})
+            continue
+        uploaded.append(final)
+    _invalidate_list_cache(target_dir)
+    _invalidate_dir_size(target_dir)
+    return jsonify({"success": True, "dir": target_dir,
+                    "uploaded": uploaded, "skipped": skipped})
+
+
 @bp.route("/api/rename", methods=["POST"])
 def api_rename():
     data = request.get_json()

@@ -510,6 +510,8 @@
       avi:   ["bi-film", "#dd7e2e"], mov: ["bi-film", "#dd7e2e"],
       mp3:   ["bi-music-note", "#519aba"], wav: ["bi-music-note", "#519aba"], flac: ["bi-music-note", "#519aba"],
       aac:   ["bi-music-note", "#519aba"], m4a: ["bi-music-note", "#519aba"], ogg: ["bi-music-note", "#519aba"],
+      // 播放列表（HLS m3u8 / m3u）：文本格式，用「播放」图标 + 视频橙区分于普通文本
+      m3u:   ["bi-file-earmark-play", "#dd7e2e"], m3u8: ["bi-file-earmark-play", "#dd7e2e"],
       zip:   ["bi-file-earmark-zip", "#b5895f"], tar: ["bi-file-earmark-zip", "#b5895f"],
       gz:    ["bi-file-earmark-zip", "#b5895f"], rar: ["bi-file-earmark-zip", "#b5895f"], "7z": ["bi-file-earmark-zip", "#b5895f"],
     };
@@ -840,6 +842,92 @@
       e.preventDefault();
       showTreeBgMenu(e.clientX, e.clientY, ROOT, null);
     });
+  }
+
+  /* ---------- 拖拽文件到资源管理器：直接上传到松开位置的目录 ----------
+     落在目录行 → 上传到该目录；落在文件行 → 其父目录；空白区域 → 项目根。
+     简单检查：非法文件名 / 超过 25MB / 空文件会被跳过并提示；同名不覆盖（后端自动加 -1 序号）。
+     只处理普通文件（dataTransfer.files），拖入整个文件夹时不展开递归上传。 */
+  {
+    const FILE_NAME_FORBIDDEN = /[<>:"|?*\\/]/;
+    let dropDir = null;
+    const dirOfRow = (row) => {
+      if (!row || !row.dataset || !row.dataset.path) return ROOT;
+      if (row.dataset.isdir === "1") return row.dataset.path;   // 目录行 → 该目录
+      const p = row.dataset.path, i = p.lastIndexOf("/");
+       // 文件行 → 其父目录
+      return i > 0 ? p.slice(0, i) : ROOT;
+    };
+    const clearHl = () => {
+      explorerPanel.querySelectorAll(".tree-drop").forEach(r => r.classList.remove("tree-drop"));
+      explorerPanel.classList.remove("tree-dropping");
+    };
+    explorerPanel.addEventListener("dragover", (e) => {
+      if (!ROOT || ![...(e.dataTransfer && e.dataTransfer.types || [])].includes("Files")) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      clearHl();
+      const row = e.target.closest && e.target.closest(".tree-row");
+      if (row) { dropDir = dirOfRow(row); row.classList.add("tree-drop"); }
+      else { dropDir = ROOT; explorerPanel.classList.add("tree-dropping"); }
+    });
+    explorerPanel.addEventListener("dragleave", (e) => {
+      if (!explorerPanel.contains(e.relatedTarget)) clearHl();
+    });
+    explorerPanel.addEventListener("drop", (e) => {
+      const files = [...(e.dataTransfer && e.dataTransfer.files || [])];
+      if (!ROOT || !files.length) return;
+      e.preventDefault();
+      clearHl();
+      const dir = dropDir || ROOT;
+      dropDir = null;
+      uploadDroppedFiles(files, dir);
+    });
+    async function uploadDroppedFiles(fileList, dir) {
+      const ok = [], reasons = [];
+      for (const f of fileList) {
+        if (f.size > 25 * 1024 * 1024) { reasons.push(f.name + "：超过 25MB"); continue; }
+        if (!f.size) { reasons.push(f.name + "：空文件"); continue; }
+        if (FILE_NAME_FORBIDDEN.test(f.name)) { reasons.push(f.name + "：文件名含非法字符"); continue; }
+        ok.push(f);
+      }
+      if (!ok.length) { toast("没有可上传的文件：" + reasons.join("；"), "err"); return; }
+      // 上传前的二次确认：展示目标目录与待上传文件的基础信息（名称 / 大小 / 类型）
+      const upRows = ok.map(f => {
+        const ext = getExt(f.name);
+        return '<tr><td class="di-k"><i class="bi bi-file-earmark"></i></td>' +
+          '<td class="di-v">' + esc(f.name) + "</td>" +
+          '<td class="di-v di-sz">' + (f.size ? (f.size / 1024 >= 1 ? (f.size / 1024).toFixed(1) + " KB" : f.size + " B") : "—") + "</td>" +
+          '<td class="di-v">' + (ext ? "文件（" + esc(ext) + "）" : "文件") + "</td></tr>";
+      }).join("");
+      const upInfo =
+        '<div class="del-info">' +
+        '<div class="di-sum">上传到目录：<b>' + esc(baseName(dir) || dir) + "</b>（" + esc(dir) + "）</div>" +
+        '<table class="di-tbl">' + upRows + "</table>" +
+        (reasons.length ? '<div class="di-note">以下文件将被跳过：' + esc(reasons.join("；")) + "</div>" : "") +
+        "</div>";
+      const confirmed = await uiModal({
+        title: "确认上传", icon: "bi-cloud-upload",
+        html: '<div class="m-msg">确定上传这 ' + ok.length + " 个文件吗？</div>" + upInfo,
+        okText: "上传", danger: false,
+      });
+      if (!confirmed) { toast("已取消上传", "info"); return; }
+      const fd = new FormData();
+      fd.append("dir", dir);
+      ok.forEach(f => fd.append("files", f));
+      toast("正在上传 " + ok.length + " 个文件到 " + baseName(dir) + " …");
+      try {
+        const r = await fetch("/api/files/upload", { method: "POST", body: fd });
+        const d = await r.json();
+        if (!r.ok || d.error) throw new Error(d.error || ("HTTP " + r.status));
+        const skips = (d.skipped || []).map(s => s.name + "：" + s.reason);
+        toast("已上传 " + (d.uploaded || []).length + " 个文件到 " + baseName(dir) +
+          (skips.length ? "，跳过：" + skips.join("；") : ""), skips.length ? "err" : "ok");
+        refreshTree();
+      } catch (err) {
+        toast("上传失败：" + (err.message || err), "err");
+      }
+    }
   }
 
   /* ---------- 多根工作区：在主项目之外追加更多项目，资源管理器里同级显示 ----------

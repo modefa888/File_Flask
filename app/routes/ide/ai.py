@@ -3,7 +3,9 @@
 GET  /api/ai/config            读取配置（key 脱敏返回）
 POST /api/ai/config            保存配置：{providers:[...]} 整体替换 / {active:{provider,model}} 切换
 POST /api/ai/chat              流式对话（SSE）：{messages:[{role, content}], provider_id?, model?}
-POST /api/ai/plugin            流式对话（SSE）：插件宿主专用入口，模块记为 plugin
+                               传 bg=1（面板对话）时改为后台运行：立即返回 {run_id}，
+                               由 /api/ai/agent/stream 接收进度（刷新后可重连回放）。
+POST /api/ai/plugin            流式对话（SSE）：插件宿主专用入口，模块记为 plugin（始终直连流式）
 
 配置保存在 data/storage/.file_manager_ai.json：
     {
@@ -26,6 +28,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 from flask import Blueprint, request, jsonify, Response, make_response, send_file
 
@@ -1386,6 +1389,27 @@ def api_ai_chat():
                          req=user_query, resp="".join(text_parts))
             reply = "".join(text_parts)
             _fire_notify_async("chat", user_query, reply)
+
+    # 后台模式（面板对话传 bg=1）：请求立即返回 run_id，执行放后台线程，前端再连
+    # /api/ai/agent/stream 接收进度 —— 刷新页面不中断，刷新后可重连回放 + 续传。
+    # 插件入口与「增强提示词」等仍走原来的直连流式，行为不变。
+    if data.get("bg") and not is_plugin:
+        from ...services.ide import agentrun
+        run_id = uuid.uuid4().hex[:12]
+        _log.info("AI 对话（后台）：run=%s provider=%s model=%s", run_id, provider["name"], model)
+        session_id = str(data.get("session_id") or "").strip()[:64]
+        agentrun.create(run_id, {"session_id": session_id, "root": root,
+                                 "user_id": getattr(config, "AUTH_USERNAME", "") or ""})
+
+        def _bg():
+            agentrun.worker(run_id, _gen_with_notify(), "对话执行失败")
+            try:                               # 兜底：把最终回复写进会话历史
+                agentrun.save_reply(run_id)
+            except Exception as e:             # noqa: BLE001
+                _log.warning("对话回复落库失败：%s", e)
+
+        threading.Thread(target=_bg, daemon=True, name="ai-chat-" + run_id).start()
+        return jsonify({"ok": True, "run_id": run_id})
 
     return Response(_gen_with_notify(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

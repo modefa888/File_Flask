@@ -116,8 +116,19 @@ File_Flask/
 ### 4.2 AI 智能体（`ide/agent.py`）
 
 - 端点：
-  - `POST /api/ai/agent` `{repo, messages, perm, provider_id?, model?}` —— SSE 流式。
+  - `POST /api/ai/agent` `{repo, messages, perm, provider_id?, model?}` —— 启动**后台运行**，立即返回 `{run_id}`。
+  - `GET /api/ai/agent/stream?run_id=&offset=` —— 连接 / 重连该运行的 SSE：先回放已产生的事件，再实时续传。
+  - `GET /api/ai/agent/status?run_id=` —— 查询是否还能重连（页面刷新后判断用）。
+  - `POST /api/ai/agent/stop` `{run_id}` —— 停止后台运行。
   - `POST /api/ai/agent/approve` `{run_id, call_id, allow, always}` —— 批准/拒绝待确认调用。
+- **后台运行 / 断线续传**（`services/ide/agentrun.py`）：执行放在后台线程，事件缓冲在内存；
+  页面刷新 / 断线不会中断任务，前端刷新后按 `run_id` 重连（`offset=0` 从头回放）即可看到实时进度。
+  缓冲默认保留 6 小时 / 最多 50 场；`POST /api/ai/agent/stop` 会同时拒绝该运行挂起的确认，让阻塞中的调用立刻退出。
+  普通对话（`POST /api/ai/chat`）传 `bg=1` 时同样走该后台通道（插件入口 `/api/ai/plugin` 保持直连流式）。
+- **回复兜底落库**（`agentrun.save_reply()`）：运行结束时服务端会把这一轮回复（正文 / 步骤 /
+  文件变更 / 任务清单）直接写进会话历史，`mid` 固定为 `"m"+run_id`（前端用同一个 mid 保存 → 覆盖更新，不会重复）。
+  因此即使前端没能重连、或用户直接关掉页面，下一次打开会话也能看到结果。
+  前端若丢失了 `run_id`，可用 `GET /api/ai/agent/for-session?sid=` 按会话 id 找回运行。
 - 内置工具：`list_dir / read_file / write_file / edit_file / search_files / run_command`，
   以及可开关的 `web_search / generate_image / code_intel / delegate_task / todo_write`。
 - 任务清单：`todo_write` 工具让模型把多步任务拆成待办清单（`pending / in_progress / completed`），
@@ -185,6 +196,7 @@ File_Flask/
 | `services/ide/procinfo.py` | 进程资源管理器采集：后台采样线程（2 秒）出快照，系统/分组占用、进程列表、按 pid 结束进程 |
 | `services/ide/procdiag.py` | AI 资源诊断专用逻辑：采集诊断快照、筛可安全结束的候选进程、组织提问、清洗模型结论（服务端是唯一真源） |
 | `services/ide/chatdb.py` | AI 对话历史 SQLite 存储层（`conversations` + `messages` 双表，按 `user_id` 隔离） |
+| `services/ide/agentrun.py` | AI 后台运行管理：把 Agent / 对话执行从 HTTP 请求解耦，事件入内存缓冲，支持刷新后按 run_id 重连（回放 + 实时续传） |
 | `services/ide/agent/` | Agent 智能体的工具实现与权限门控 |
 | `services/ide/cronutil.py` | cron 表达式解析 / 匹配 / 推算下次运行时间 |
 | `services/ide/crondb.py` | 定时任务与执行历史的 SQLite 存储层 |
@@ -240,8 +252,13 @@ Client ◀─响应─
         ├─ blocked → 直接返回拒绝
         ├─ need_ask → 挂起 Event，推送 SSE {"type":"ask"}，等待 /approve
         └─ allowed → 执行工具 → 结果回填 → 回到模型
-最多 12 轮，最后推送 {"type":"done"}
+无工具调用即结束，最后推送 {"type":"done"}
 ```
+
+**后台运行**：`POST /api/ai/agent` 只启动后台线程并返回 `{run_id}`；线程把每步事件写入
+`agentrun` 的内存缓冲。前端连 `GET /api/ai/agent/stream` 消费；刷新 / 断线后按同一
+`run_id` 重连即先回放缓冲、再实时续传 —— 因此「刷新页面任务仍在后台跑，刷新后能看到实时进度」。
+浏览器不会因为刷新而终止后台任务；只有点「停止」（`/api/ai/agent/stop`）才会取消。
 
 ---
 

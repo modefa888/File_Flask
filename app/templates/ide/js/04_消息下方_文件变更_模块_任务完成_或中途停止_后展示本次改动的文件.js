@@ -433,6 +433,7 @@
   })();
 
   function aiRenderAll() {
+    try { if (typeof aiDedupeMsgs === "function") aiDedupeMsgs(); } catch (_) {}   // 按 pid 去重，避免重复气泡
     aiRenderFiles();                     // 附加文件的小卡片（右键「添加到 AI 对话」）
     const box = $("aiMsgs");
     box.innerHTML = aiEmptyHtml();       // 空会话时的中间提示（含当前项目名）

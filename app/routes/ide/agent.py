@@ -1,8 +1,14 @@
 """AI 智能体（Agent）：让模型自动读文件、改文件、搜索、执行命令，多轮直到任务完成。
 
-POST /api/ai/agent           {repo, messages, perm, provider_id?, model?}   SSE 流式
+POST /api/ai/agent           {repo, messages, perm, provider_id?, model?}   启动后台运行，返回 {run_id}
+GET  /api/ai/agent/stream    ?run_id=&offset=                               连接/重连该运行的 SSE（回放 + 续传）
+GET  /api/ai/agent/status    ?run_id=                                       查询是否还能重连
+POST /api/ai/agent/stop      {run_id}                                       停止后台运行
 POST /api/ai/agent/approve   {run_id, call_id, allow, always, global}       批准/拒绝待确认的调用
                              global=true 时把该命令写入「设置 → 命令安全」的全局放行名单
+
+执行放在后台线程里（见 services/ide/agentrun.py）：页面刷新 / 断线不会中断任务，
+刷新后按 run_id 重新连接即可回放已产生的进度并继续实时接收。
 
 SSE 事件（data: {json}\\n\\n）：
     {"type":"run","run_id":"..."}                       本次运行 id（确认时回传）
@@ -39,6 +45,7 @@ from ... import config
 from ...log import get_logger
 from ...services.common.safety import check_command, is_delete_command, is_allowed_command
 from ...services.ide.web_search import search_web, format_results
+from ...services.ide import agentrun
 from ...services.common import undo, cmdguard
 from .ai import (_clean_content, _load_cfg, _sys_pick, _override_pick, _log_ai_call,
                  _estimate_msgs, _estimate_tokens,
@@ -1666,7 +1673,10 @@ def api_ai_agent():
             else:
                 answer_text = ""
             _fire_notify_async("agent", user_query, answer_text)
-            yield _sse({"type": "done"})
+        # 注意：done 事件必须放在 finally 之外。后台运行时若用户主动停止，
+        # worker 会 close() 这个生成器（抛 GeneratorExit），finally 里若再 yield 会报
+        # RuntimeError；放到外面后 close 才能干净退出。
+        yield _sse({"type": "done"})
 
     def _gen_counted():
         """包一层用于统计调用次数（成功与否只有把流读完才知道）"""
@@ -1690,8 +1700,74 @@ def api_ai_agent():
             _log_ai_call("agent", not err, int((time.time() - t0) * 1000), err, model,
                          tin, tout, est, req=user_query, resp="".join(usage_meta["texts"]))
 
-    return Response(_gen_counted(), mimetype="text/event-stream",
+    # 把执行放到后台线程：请求立即返回 run_id，前端再连 /api/ai/agent/stream 接收进度。
+    # 这样即使页面刷新 / 断线，后台任务也不会被打断，刷新后可重新连接继续看进度。
+    session_id = str(data.get("session_id") or "").strip()[:64]
+    agentrun.create(run_id, {"session_id": session_id, "root": root,
+                             "user_id": getattr(config, "AUTH_USERNAME", "") or ""})
+
+    def _bg():
+        agentrun.worker(run_id, _gen_counted(), "智能体执行失败")
+        try:                                   # 兜底：把最终回复写进会话历史，刷新/关页面也不丢
+            agentrun.save_reply(run_id)
+        except Exception as e:                 # noqa: BLE001
+            _log.warning("Agent 回复落库失败：%s", e)
+
+    threading.Thread(target=_bg, daemon=True, name="ai-agent-" + run_id).start()
+    return jsonify({"ok": True, "run_id": run_id})
+
+
+@bp.route("/api/ai/agent/stream", methods=["GET"])
+def api_ai_agent_stream():
+    """连接（或重连）一场后台运行：先回放已产生的事件，再实时续传。
+
+    参数：run_id；offset（可选，已消费的事件条数，默认 0＝从头回放）。
+    """
+    run_id = str(request.args.get("run_id") or "")
+    try:
+        offset = max(0, int(request.args.get("offset") or 0))
+    except (TypeError, ValueError):
+        offset = 0
+    if not agentrun.exists(run_id):
+        return jsonify({"error": "该任务已结束或不存在"}), 404
+    return Response(agentrun.sse_stream(run_id, offset), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@bp.route("/api/ai/agent/status", methods=["GET"])
+def api_ai_agent_status():
+    """查询某场运行是否还在（供刷新后判断能否重连）。"""
+    return jsonify(agentrun.info(str(request.args.get("run_id") or "")))
+
+
+@bp.route("/api/ai/agent/for-session", methods=["GET"])
+def api_ai_agent_for_session():
+    """按会话 id 找最近一场运行：前端丢了 run_id（清缓存等）时也能找回进度。"""
+    run_id = agentrun.find_by_session(str(request.args.get("sid") or ""))
+    if not run_id:
+        return jsonify({"exists": False})
+    info = agentrun.info(run_id)
+    return jsonify({"exists": True, "run_id": run_id, "done": bool(info.get("done"))})
+
+
+@bp.route("/api/ai/agent/stop", methods=["POST"])
+def api_ai_agent_stop():
+    """停止一场后台运行（前端「停止」按钮调用）。"""
+    data = request.get_json(silent=True) or {}
+    run_id = str(data.get("run_id") or "")
+    if not agentrun.cancel(run_id):
+        return jsonify({"ok": False, "error": "该任务不存在或已结束"}), 404
+    # 若正卡在「等用户确认工具调用」上，一并拒绝，让它立刻从阻塞中退出（否则要等确认超时）
+    with _PENDING_LOCK:
+        for k in [k for k in _PENDING if k[0] == run_id]:
+            st = _PENDING[k]
+            if isinstance(st.get("box"), dict):
+                st["box"]["allow"] = False
+            try:
+                st["ev"].set()
+            except Exception:  # noqa: BLE001
+                pass
+    return jsonify({"ok": True})
 
 
 @bp.route("/api/ai/agent/approve", methods=["POST"])

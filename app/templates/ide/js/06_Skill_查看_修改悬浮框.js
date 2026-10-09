@@ -1284,7 +1284,7 @@
   function aiSwitchSession(id) {
     $("aiHist").style.display = "none";
     if (id === AI.curId) return;
-    if (AI.busy && AI.ctrl) AI.ctrl.abort();     // 切换前停止正在生成的回复
+    if (AI.busy) aiHaltRun();                    // 切换前停止正在生成的回复（并通知服务端停止后台任务）
     aiPersistCurrent();                          // 先保存当前会话（异步）
     AI.curId = id;
     aiSetCur(id);
@@ -1305,7 +1305,7 @@
   $("aiCloseBtn").addEventListener("click", () => toggleAI(false));
   $("aiCfgBtn").addEventListener("click", () => aiOpenSettings());
   $("aiNewBtn").addEventListener("click", () => {
-    if (AI.busy && AI.ctrl) AI.ctrl.abort();
+    if (AI.busy) aiHaltRun();
     aiPersistCurrent();                          // 保存上一个会话
     AI.curId = "s" + Date.now().toString(36);
     AI.msgs = [];
@@ -1337,7 +1337,7 @@
     $("aiCtxFlag").style.display = AI.ctx ? "" : "none";
   });
   $("aiStop").addEventListener("click", () => {
-    if (AI.ctrl) AI.ctrl.abort();
+    aiHaltRun();                       // 断流 + 通知服务端停止后台运行
     aiTodoFloatSetPaused(true);        // 立即暂停任务清单（停止转圈），不等流收尾
   });
 
@@ -2236,7 +2236,8 @@
 
   /* 运行智能体：解析 SSE（步骤 / 确认 / 流式回答），返回 { text, steps }
      过程记录统一收进「AI 消息下方」的一个折叠区域，默认只占一行。 */
-  async function aiRunAgent(payload, bodyB, onDelta) {
+  async function aiRunAgent(payload, bodyB, onDelta, opts) {
+    opts = opts || {};
     const msgsBox = $("aiMsgs");
     const bodyRow = bodyB.parentElement;
     const stepMeta = new Map();          // call_id -> {tool, args}
@@ -2258,11 +2259,29 @@
       }
       return stepsBox;
     };
-    let runId = "", text = "";
-    const r = await fetch("/api/ai/agent", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload), signal: AI.ctrl.signal,
-    });
+    // 后台运行：请求只负责「启动 + 返回 run_id」，执行放服务端后台线程，
+    // 再连 /api/ai/agent/stream 接收（可回放）的事件；刷新后可按同一 run_id 重连。
+    let runId = opts.runId || "", text = "";
+    if (!runId) {
+      const r = await fetch("/api/ai/agent", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload), signal: AI.ctrl.signal,
+      });
+      if (!r.ok) {
+        let msg = "HTTP " + r.status;
+        try { msg = (await r.json()).error || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      const jd = await r.json().catch(() => ({}));
+      runId = jd.run_id || "";
+      if (!runId) throw new Error(jd.error || "启动任务失败：未返回 run_id");
+      AI._agentRunId = runId;
+      if (opts.onRunId) { try { opts.onRunId(runId); } catch (_) {} }
+    } else {
+      AI._agentRunId = runId;                        // 刷新后重连：沿用原 run_id
+    }
+    const r = await fetch("/api/ai/agent/stream?run_id=" + encodeURIComponent(runId) + "&offset=0",
+                          { signal: AI.ctrl.signal });
     if (!r.ok) {
       let msg = "HTTP " + r.status;
       try { msg = (await r.json()).error || msg; } catch (_) {}
@@ -2346,6 +2365,11 @@
             realIn += +u.prompt_tokens || 0;
             realOut += +u.completion_tokens || 0;
             ctxLast = +u.context_tokens || (+u.prompt_tokens || ctxLast);
+          } else if (e.type === "stopped") {
+            // 服务端已停止这场运行（例如在另一个标签页点了停止）：按「已停止」收尾
+            const err = new Error("已停止");
+            err.name = "AbortError";
+            throw err;
           } else if (e.type === "error") {
             throw new Error(e.error);
           }
@@ -2765,9 +2789,39 @@
   document.addEventListener("scroll", aiHideImgTip, true);   // 面板 / 页面滚动时收起
   window.addEventListener("blur", aiHideImgTip);
 
+  /* ---------- 助手回复按 pid 去重：刷新重连 / 服务端已落库时，避免同一轮回复被渲染两遍 ---------- */
+  function aiMsgIndexOfPid(pid) {
+    return (AI.msgs || []).findIndex(m => m && m.pid && m.pid === pid);
+  }
+  function aiDedupeMsgs() {                               // 按 pid 去重（同 pid 只保留最后一条）
+    const last = new Map();
+    (AI.msgs || []).forEach((m, i) => { if (m && m.pid) last.set(m.pid, i); });
+    if (last.size === (AI.msgs || []).length) return false;
+    const keep = new Set(last.values());
+    AI.msgs = (AI.msgs || []).filter((m, i) => !m || !m.pid || keep.get(m.pid) === i);
+    return true;
+  }
+  function aiUpsertAssistantMsg(msg) {                    // 覆盖写入（未提供的字段保留旧值），返回下标
+    const i = aiMsgIndexOfPid(msg.pid);
+    if (i >= 0) {
+      const merged = Object.assign({}, AI.msgs[i]);
+      for (const k in msg) if (msg[k] !== undefined) merged[k] = msg[k];
+      AI.msgs[i] = merged;
+      return i;
+    }
+    AI.msgs.push(msg);
+    return AI.msgs.length - 1;
+  }
+  /* 收尾一条助手回复：已在列表里（如服务端已落库 / 重连回放）→ 覆盖并整表重渲染，杜绝重复气泡 */
+  function aiFinalizeAssistant(msg) {
+    const existed = aiMsgIndexOfPid(msg.pid) >= 0;
+    return { mi: aiUpsertAssistantMsg(msg), existed: existed };
+  }
+
   async function aiSend(reuse) {                          // reuse={text,imgs}：重新生成，不重复 push 用户消息
     if (AI.busy) return;
     let rawText, text, imgs, skillIds = [];
+    const resumeRunId = (reuse && reuse.resumeRunId) || "";   // 非空＝刷新后重连上一次后台运行
     let imgNamesOfTurn = [];                        // 图片芯片的真实文件名（消息里按原名显示）
     if (reuse) {
       rawText = reuse.text || "";
@@ -2799,6 +2853,7 @@
     const pick = aiCurrentPick();
     const prov = pick.prov;
     if (!prov || !pick.model) {
+      console.warn("[AI] 未配置可用接口，已取消发送", { hasProvider: !!prov, model: pick.model });
       aiOpenSettings();
       toast("请先在 设置 → AI 助手 里添加接口（地址 / API Key / 模型列表）", "warn");
       return;
@@ -2829,7 +2884,7 @@
       aiRenderActiveSkills();
     }
     aiPersistCurrent(); aiRenderConv();
-    aiSavePendingTurn(text, imgs, skillIds, userMsgForPending);   // 记录本轮生成：刷新后可自动续接
+    aiSavePendingTurn(text, imgs, skillIds, userMsgForPending, resumeRunId);   // 记录本轮生成：刷新后可自动续接
 
     // ---- dsh 式记忆压缩：旧历史攒够就压成摘要，之后只带 摘要 + 最近几条 发送 ----
     const sess = AI.sessions.find(x => x.id === AI.curId);
@@ -2925,6 +2980,7 @@
     const skillChars = customSkillPrompts.reduce((a, p) => a + (p || "").length, 0);
     const inTok = Math.ceil((sysPrompt.length + mem.length + histTokChars + _estLen(curContent) + skillChars) / 1.5);
     const payload = {
+      session_id: AI.curId,                            // 供服务端把回复落库（刷新/关页面也不丢）
       provider_id: prov.id,
       model: pick.model,
       web_search: AI.webSearch,
@@ -2951,6 +3007,7 @@
     let turnSteps = [];                                   // 本轮工具步骤（普通对话路径用；智能体路径见 AI._agentTurnSteps）
     let turnTodos = [];                                   // 本轮任务清单（todo_write）
     let turnDone = false;                                 // 回复已入列：之后收尾出错不再覆盖/重复插入
+    let keepPending = false;                              // 流中断（刷新/断网）时保留续连标记，别清 pending
     /* 流式正文渲染节流：一帧最多重渲染一次（原本每收到一批 delta 就整段重解析 Markdown，密集流下易掉帧） */
     let _spPending = false, _spLast = "", _spAlive = true;
     const paintStream = () => {
@@ -2971,9 +3028,12 @@
     AI._agentStepsBox = null;
     AI._agentRunId = "";                                  // 本场运行的 id（停止后补拉变更用）
     AI.ctrl = new AbortController();
+    // 助手回复的消息 id 与后台运行绑定：服务端用同一个 mid 落库，重连时覆盖更新而不是新增一条
+    const runPid = () => (AI._agentRunId ? ("m" + AI._agentRunId) : aiNewPid());
     try {
-      if (AI.agent) {                                     // 智能体模式：走带工具的 Agent 接口
+      if (AI.agent || resumeRunId) {                      // 智能体模式：走带工具的 Agent 接口
         const res = await aiRunAgent({
+          session_id: AI.curId,                        // 供服务端把回复落库（刷新/关页面也不丢）
           repo: (typeof ROOT !== "undefined" ? ROOT : ""),
           perm: AI.perm,
           provider_id: prov.id,
@@ -3001,6 +3061,9 @@
         }, bodyB, (t) => {
           acc = t;
           schedulePaintStream();
+        }, {
+          runId: resumeRunId,                           // 刷新后重连：沿用原 run_id
+          onRunId: (rid) => aiSavePendingTurn(text, imgs, skillIds, userMsgForPending, rid),
         });
         stopPaintStream();                              // 结束：停掉排队中的流式重渲染
         acc = res.text || "";
@@ -3009,29 +3072,51 @@
         turnTodos = aiTodoFinalize(turnTodos);          // 正常跑完：剩余项补成已完成（模型偶尔忘记收尾）
         bodyB.innerHTML = aiMd(acc) || "（已完成，未产生文字说明）";
         const aMeta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
-        AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: acc, ms: aMeta.ms, ts: aMeta.ts,
+        const aFin = aiFinalizeAssistant({ role: "assistant", pid: runPid(), text: acc, ms: aMeta.ms, ts: aMeta.ts,
                        steps: res.steps.length ? res.steps : undefined,
                        changes: turnChanges.length ? turnChanges : undefined,
                        todos: turnTodos.length ? turnTodos : undefined });
-        bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
         turnDone = true;                                // 回复已落定：后续收尾出错只提示，不覆盖
-        aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
-        aiPersistCurrent(); aiRenderConv();
-        aiTodoFloatSyncFromMsgs();                      // 刷新底部「任务列表 / 文件列表」
+        if (aFin.existed) {                             // 服务端已存过（重连回放）：整表重渲染，避免两条
+          aiPersistCurrent(); aiRenderAll(); aiRenderConv(); aiTodoFloatSyncFromMsgs();
+        } else {
+          bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[aFin.mi], aFin.mi));
+          aiAppendChangesBox(bodyB.parentElement, AI.msgs[aFin.mi], aFin.mi);
+          aiPersistCurrent(); aiRenderConv();
+          aiTodoFloatSyncFromMsgs();                    // 刷新底部「任务列表 / 文件列表」
+        }
         aiRecordStat(true, aMeta.ms, acc.length, ttft, inTok, (res.usage || {}).in, (res.usage || {}).out,
                      (res.usage || {}).ctx);
         return;
       }
-      const r = await fetch("/api/ai/chat", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload), signal: AI.ctrl.signal,
-      });
-      if (!r.ok) {
-        let msg = "HTTP " + r.status;
-        try { msg = (await r.json()).error || msg; } catch (_) {}
+      // 普通对话同样走后台运行（bg=1）+ 可重连的事件流
+      let chatRunId = resumeRunId;
+      if (!chatRunId) {
+        const r = await fetch("/api/ai/chat", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(Object.assign({ bg: 1 }, payload)), signal: AI.ctrl.signal,
+        });
+        if (!r.ok) {
+          let msg = "HTTP " + r.status;
+          try { msg = (await r.json()).error || msg; } catch (_) {}
+          throw new Error(msg);
+        }
+        const jd = await r.json().catch(() => ({}));
+        chatRunId = jd.run_id || "";
+        if (!chatRunId) throw new Error(jd.error || "启动对话失败：未返回 run_id");
+        AI._agentRunId = chatRunId;
+        aiSavePendingTurn(text, imgs, skillIds, userMsgForPending, chatRunId);
+      } else {
+        AI._agentRunId = chatRunId;                    // 刷新后重连
+      }
+      const sr = await fetch("/api/ai/agent/stream?run_id=" + encodeURIComponent(chatRunId) + "&offset=0",
+                             { signal: AI.ctrl.signal });
+      if (!sr.ok) {
+        let msg = "HTTP " + sr.status;
+        try { msg = (await sr.json()).error || msg; } catch (_) {}
         throw new Error(msg);
       }
-      const reader = r.body.getReader();
+      const reader = sr.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
       // 普通对话也会调用读取类工具：把过程记录渲染在消息下方
@@ -3126,15 +3211,19 @@
       thinkB.parentElement.style.display = thinking.trim() ? "" : "none";
       const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
       turnTodos = aiTodoFinalize(turnTodos);            // 正常跑完：剩余项补成已完成
-      AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, reasoning: thinking.trim() || undefined,
+      const cFin = aiFinalizeAssistant({ role: "assistant", pid: runPid(), text: out, reasoning: thinking.trim() || undefined,
                      ms: meta.ms, ts: meta.ts, steps: chatSteps.length ? chatSteps : undefined,
                      changes: turnChanges.length ? turnChanges : undefined,
                      todos: turnTodos.length ? turnTodos : undefined });
-      bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
       turnDone = true;                                  // 回复已落定：后续收尾出错只提示，不覆盖
-      aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
-      aiPersistCurrent(); aiRenderConv();
-      aiTodoFloatSyncFromMsgs();                        // 刷新底部「任务列表 / 文件列表」
+      if (cFin.existed) {                               // 已在列表里（重连回放等）：整表重渲染，避免两条
+        aiPersistCurrent(); aiRenderAll(); aiRenderConv(); aiTodoFloatSyncFromMsgs();
+      } else {
+        bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[cFin.mi], cFin.mi));
+        aiAppendChangesBox(bodyB.parentElement, AI.msgs[cFin.mi], cFin.mi);
+        aiPersistCurrent(); aiRenderConv();
+        aiTodoFloatSyncFromMsgs();                      // 刷新底部「任务列表 / 文件列表」
+      }
       aiRecordStat(true, performance.now() - t0, out.length, ttft, inTok, realIn, realOut, ctxTok);
     } catch (e) {
       stopPaintStream();
@@ -3154,14 +3243,18 @@
           // 有文字 / 有文件改动 / 有步骤 / 有任务清单都保留模块（刷新后仍可见）
           if (out || abChanges.length || abSteps.length || abTodos.length) {
             const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
-            AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, ms: meta.ms, ts: meta.ts,
+            const abFin = aiFinalizeAssistant({ role: "assistant", pid: runPid(), text: out, ms: meta.ms, ts: meta.ts,
                            steps: abSteps.length ? abSteps : undefined,
                            changes: abChanges.length ? abChanges : undefined,
                            todos: abTodos.length ? abTodos : undefined });
-            bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
             turnDone = true;
-            aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
-            aiPersistCurrent(); aiRenderConv();
+            if (abFin.existed) {
+              aiPersistCurrent(); aiRenderAll(); aiRenderConv();
+            } else {
+              bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[abFin.mi], abFin.mi));
+              aiAppendChangesBox(bodyB.parentElement, AI.msgs[abFin.mi], abFin.mi);
+              aiPersistCurrent(); aiRenderConv();
+            }
           }
           aiRecordStat(!!out, performance.now() - t0, acc.length, ttft, inTok, realIn, realOut, ctxTok);   // 用户主动停止：有内容算成功，完全空回复才算失败
         };
@@ -3177,6 +3270,15 @@
             finalizeAbort(got.length ? got : ab0);
           }).catch(() => finalizeAbort(ab0));
         }
+      } else if (e && (e.name === "TypeError" ||
+                       /failed to fetch|networkerror|load failed|network request failed|aborted/i.test(e.message || ""))) {
+        // 刷新页面 / 断网导致事件流中断：后台任务其实还在跑，
+        // 这里不能写一条「出错了」的回复进会话，也不能清掉续连标记（否则刷新后就接不上了）
+        console.warn("[AI] 事件流中断（可能是刷新页面）：", e.message || e);
+        bodyB.innerHTML = aiMd(acc.replace(/^\s+/, "")) ||
+          '<span class="ai-waiting">后台任务仍在运行，刷新后会自动续上进度' +
+          '<span class="d"></span><span class="d"></span><span class="d"></span></span>';
+        keepPending = true;
       } else {
         bodyB.classList.remove("ai-md");
         const errText = "出错了：" + e.message;
@@ -3185,12 +3287,17 @@
         const meta = { ms: Math.round(performance.now() - t0), ts: Date.now(), err: true };
         const errChanges = (turnChanges.length ? turnChanges : (AI._agentTurnChanges || []));
         const errSteps = (turnSteps.length ? turnSteps : (AI._agentTurnSteps || [])).slice();   // 出错同样保留已完成的步骤
-        AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: errText, err: true, ms: meta.ms, ts: meta.ts,
+        const eFin = aiFinalizeAssistant({ role: "assistant", pid: runPid(), text: errText, err: true,
+                       ms: meta.ms, ts: meta.ts,
                        steps: errSteps.length ? errSteps : undefined,
                        changes: errChanges.length ? errChanges : undefined });
-        bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
-        aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
-        aiPersistCurrent(); aiRenderConv();
+        if (eFin.existed) {
+          aiPersistCurrent(); aiRenderAll(); aiRenderConv();
+        } else {
+          bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[eFin.mi], eFin.mi));
+          aiAppendChangesBox(bodyB.parentElement, AI.msgs[eFin.mi], eFin.mi);
+          aiPersistCurrent(); aiRenderConv();
+        }
         aiRecordStat(false, performance.now() - t0, acc.replace(/^\s+/, "").length, ttft, inTok, realIn, realOut, ctxTok);
       }
     } finally {
@@ -3198,20 +3305,27 @@
       $("aiSend").style.display = ""; $("aiStop").style.display = "none";
       aiTodoFloatSetPaused(true);   // 本轮结束（完成/停止/异常）：任务清单暂停，停止转圈
       aiScrollToBottom(true);
-      aiClearPendingTurn();   // 无论成功/失败/停止，本轮已结束
+      // 正常结束 / 出错 / 已停止才清掉续连标记；流被刷新打断时保留，下次才能重连
+      if (!keepPending) aiClearPendingTurn();
       if (typeof aiMaybeAutoTitle === "function") aiMaybeAutoTitle();   // 首轮完成后尝试智能标题
     }
   }
 
-  function aiSavePendingTurn(text, imgs, skillIds, userMsg) {
+  function aiSavePendingTurn(text, imgs, skillIds, userMsg, runId) {
     if (!ideSettingGet("restoreSession", true)) return;
+    let prev = null;
+    try { prev = JSON.parse(localStorage.getItem("ide.ai.pendingTurn") || "null"); } catch (_) { prev = null; }
+    const keep = (prev && prev.sid === AI.curId) ? prev : {};   // 同一会话的旧记录：合并保留（run_id / userMsg）
     try {
       localStorage.setItem("ide.ai.pendingTurn", JSON.stringify({
         sid: AI.curId,
-        text: text || "",
-        imgs: (imgs || []).slice(0, 10),
-        skills: (skillIds || []).slice(),
-        userMsg: userMsg || null,                 // 轻量备份：防止后端 flush 未完成时刷新导致用户消息丢失
+        text: text || keep.text || "",
+        imgs: (imgs && imgs.length) ? imgs.slice(0, 10) : (keep.imgs || []),
+        skills: (skillIds && skillIds.length) ? skillIds.slice() : (keep.skills || []),
+        userMsg: userMsg || keep.userMsg || null,   // 轻量备份：防止后端 flush 未完成时刷新导致用户消息丢失
+        // 后台运行 id：刷新后据此重连、回放实时进度。显式传空串＝新一轮（清掉旧 id）；
+        // 完全不传（undefined）＝沿用旧值（重连过程中保存时用）。
+        runId: (runId === undefined) ? (keep.runId || "") : (runId || ""),
         ts: Date.now()
       }));
     } catch (_) {}
@@ -3219,15 +3333,33 @@
   function aiClearPendingTurn() {
     try { localStorage.removeItem("ide.ai.pendingTurn"); } catch (_) {}
   }
-  function aiResumePendingTurn() {
+  /* 主动停止当前生成：本地断开事件流 + 通知服务端停止后台运行 */
+  function aiHaltRun() {
+    if (AI._agentRunId) {
+      try {
+        fetch("/api/ai/agent/stop", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ run_id: AI._agentRunId }),
+        }).catch(() => {});
+      } catch (_) {}
+    }
+    if (AI.ctrl) { try { AI.ctrl.abort(); } catch (_) {} }
+  }
+  /* 刷新 / 首次加载后：若上一轮还在后台运行，就重连它的进度（回放 + 续传）。
+     —— 这样刷新网页不会丢进度，能看到实时进度继续跑。 */
+  async function aiResumePendingTurn() {
     if (!AI.curId) return;
     let p = null;
     try { p = JSON.parse(localStorage.getItem("ide.ai.pendingTurn") || "null"); } catch (_) { p = null; }
     if (!p || p.sid !== AI.curId) return;
     let last = AI.msgs[AI.msgs.length - 1];
-    // 后端 flush 有 300ms 防抖：刷新时用户消息可能还没落库，从 localStorage 补回
-    if ((!last || last.role !== "user") && p.userMsg) {
-      const um = p.userMsg;
+    if (!last || last.role !== "user") {
+      // 最后一条不是用户消息：可能是「回复已落库（本轮已完成）」或「用户消息还没落库」。
+      // 用 pendingTurn 里备份的 userMsg.ts 判断用户消息是否真的缺失 —— 只有真缺失才补回，
+      // 否则会把同一个提问重复插一条（之前「同一问题显示两遍」就是这个原因）。
+      const um = p.userMsg || {};
+      const umMissing = um.ts ? !AI.msgs.some(m => m && m.role === "user" && m.ts === um.ts) : !um.text;
+      if (!umMissing) { aiClearPendingTurn(); return; }     // 提问已在，说明本轮已结束/已被处理
       const imgs = (p.imgs || []).slice();
       AI.msgs.push({
         role: "user", pid: aiNewPid(),
@@ -3241,7 +3373,62 @@
       aiPersistCurrent(); aiRenderConv();
       last = AI.msgs[AI.msgs.length - 1];
     }
-    if (!last || last.role !== "user") return;
+    if (!last || last.role !== "user") { aiClearPendingTurn(); return; }
+    // 找可以重连的后台运行：① 本地记录的 run_id ② 丢了就按会话 id 向服务端问
+    let runId = p.runId || "", done = false, found = false;
+    if (runId) {
+      let st = null;
+      try {
+        st = await (await fetch("/api/ai/agent/status?run_id=" + encodeURIComponent(runId))).json();
+      } catch (_) { st = null; }
+      if (st && st.exists) { found = true; done = !!st.done; }
+    }
+    if (!found) {
+      let st = null;
+      try {
+        st = await (await fetch("/api/ai/agent/for-session?sid=" + encodeURIComponent(AI.curId))).json();
+      } catch (_) { st = null; }
+      if (st && st.exists && st.run_id) { runId = st.run_id; done = !!st.done; found = true; }
+    }
+    console.info("[AI] 刷新续接：", { runId: runId, found: found, done: done, localRunId: p.runId || "" });
+    if (found) {
+      if (aiMsgIndexOfPid("m" + runId) >= 0) {  // 这一轮的回复已在列表里（已落库）：不再回放，避免出现两条一样的
+        aiClearPendingTurn();
+        return;
+      }
+      if (done) {                               // 后台已结束：直接从会话历史拉最新内容重绘（最可靠，不会卡在「思考中」）
+        toast("已取回上一次任务的结果…", "info");
+        setTimeout(async () => {
+          let got = false;
+          for (let k = 0; k < 4; k++) {         // 等服务端把回复落库（刚结束时可能有几百毫秒延迟）
+            try { await aiFetchSession(AI.curId); } catch (_) {}
+            const s = AI.sessions.find(x => x.id === AI.curId);
+            if (s && s.msgs) AI.msgs = s.msgs;
+            if (aiMsgIndexOfPid("m" + runId) >= 0) { got = true; break; }
+            await new Promise(r => setTimeout(r, 500));
+          }
+          if (got) {
+            aiRenderAll(); aiRenderConv(); aiTodoFloatSyncFromMsgs();
+            aiClearPendingTurn();
+          } else {                              // 服务端还没落库（少见）：退回按 run_id 回放
+            try {
+              await aiSend({ text: p.text || "", imgs: p.imgs || [], skills: p.skills || [], resumeRunId: runId });
+            } catch (e) { console.warn("[AI] 重连失败：", e); }
+          }
+        }, 50);
+        return;
+      }
+      toast("已重新连接后台任务，正在同步实时进度…", "info");   // 还在跑：回放 + 实时续传
+      setTimeout(() => aiSend({ text: p.text || "", imgs: p.imgs || [], skills: p.skills || [],
+                                resumeRunId: runId }), 50);
+      return;
+    }
+    if (p.runId) {
+      aiClearPendingTurn();                    // 后台运行已不在（服务重启 / 已过期）：不重复执行，避免副作用
+      toast("上一次任务已结束；如需继续请重新发送", "warn");
+      return;
+    }
+    // 兼容旧数据（没有 run_id）且服务端也没记录：沿用原「重发」行为
     //  slight delay so UI is fully mounted after toggleAI
     setTimeout(() => aiSend({ text: p.text || "", imgs: p.imgs || [], skills: p.skills || [] }), 50);
   }
@@ -3281,7 +3468,7 @@
     const pop = $("aiActiveSkillsPop");
     if (pop && pop.style.display !== "none" && !e.target.closest(".ai-hsk-wrap")) pop.style.display = "none";
   });
-  aiLoadSessions().then(() => aiResumePendingTurn());
+  aiLoadSessions().then(() => aiResumePendingTurn().catch(e => console.error("[AI] 刷新续接失败：", e)));
   aiRenderActiveSkills();
   try { if (localStorage.getItem("ide.ai.open") === "1") toggleAI(true); } catch (_) {}
 

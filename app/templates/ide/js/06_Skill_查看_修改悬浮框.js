@@ -2049,7 +2049,12 @@
     });
     return card;
   }
-  // 重新渲染底部 dock：任务卡 + 文件卡并排；两者都没有时整体隐藏
+  // 重新渲染底部 dock：任务列表 / 文件列表 用 tab 切换展示（不再左右并排，避免一边收起后留空白）
+  function aiDockTab() {
+    let t = "todo";
+    try { t = localStorage.getItem("ide.aiDockTab") || "todo"; } catch (_) {}
+    return t === "files" ? "files" : "todo";
+  }
   function aiDockRender() {
     const host = aiTodoFloatHost();
     if (!host) return;
@@ -2060,19 +2065,71 @@
       host.style.display = "none"; aiTodoFloatPad();
       return;
     }
+    let tab = aiDockTab();
+    if (tab === "todo" && !todos.length) tab = "files";      // 当前 tab 没内容时自动切到另一个
+    if (tab === "files" && !files.length) tab = "todo";
+
     host.innerHTML = "";
     const cards = document.createElement("div");
     cards.className = "ai-dock-cards";
-    if (todos.length) {
+    const card = document.createElement("div");
+    card.className = "ai-todo ai-dock-card ai-dock-tabs";
+    let folded = false;
+    try { folded = localStorage.getItem("ide.aiDockFold") === "1"; } catch (_) {}
+    if (folded) card.classList.add("collapsed");
+
+    const stats = todos.length ? aiTodoStats(todos) : { done: 0, total: 0 };
+    const head = document.createElement("div");
+    head.className = "ai-dock-tabhead";
+    head.innerHTML =
+      '<button type="button" class="ai-dock-tab' + (tab === "todo" ? " on" : "") + '" data-tab="todo"' +
+        (todos.length ? "" : " disabled") + '><i class="bi bi-list-check"></i>任务列表' +
+        (todos.length ? '<span class="cnt">' + stats.done + "/" + stats.total + "</span>" : "") + "</button>" +
+      '<button type="button" class="ai-dock-tab' + (tab === "files" ? " on" : "") + '" data-tab="files"' +
+        (files.length ? "" : " disabled") + '><i class="bi bi-files"></i>文件列表' +
+        (files.length ? '<span class="cnt">' + files.length + "</span>" : "") + "</button>" +
+      '<span class="ai-dock-fold" title="' + (folded ? "展开" : "收起") + '"><i class="bi ' +
+        (folded ? "bi-chevron-up" : "bi-chevron-down") + '"></i></span>';
+    card.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "ai-dock-tabbody";
+    card.appendChild(body);
+
+    head.addEventListener("click", (e) => {
+      if (e.target.closest(".ai-dock-fold")) {                // 收起 / 展开整块
+        const c = !card.classList.contains("collapsed");
+        card.classList.toggle("collapsed", c);
+        head.querySelector(".ai-dock-fold .bi").className = "bi " + (c ? "bi-chevron-up" : "bi-chevron-down");
+        head.querySelector(".ai-dock-fold").title = c ? "展开" : "收起";
+        try { localStorage.setItem("ide.aiDockFold", c ? "1" : "0"); } catch (_) {}
+        aiTodoFloatPad();
+        return;
+      }
+      const b = e.target.closest(".ai-dock-tab");             // 切换 tab
+      if (!b || b.disabled) return;
+      try { localStorage.setItem("ide.aiDockTab", b.dataset.tab); } catch (_) {}
+      aiDockRender();
+    });
+
+    if (tab === "todo") {                                     // 任务列表：复用 aiTodoBox（标题交给 tab，隐藏原头）
       const t = aiTodoBox(todos);
-      t.classList.add("ai-dock-card");
-      t.setPaused(!AI.busy);        // 没有正在运行的会话 → 暂停态（不转圈）
+      t.classList.add("ai-dock-embedded");
+      t._head.style.display = "none";
+      t._setCollapsed(false);
+      t.setPaused(!AI.busy);                                  // 没有正在运行的会话 → 暂停态（不转圈）
       host._todoPanel = t;
-      cards.appendChild(t);
-    } else {
+      body.appendChild(t);
+    } else {                                                  // 文件列表
       host._todoPanel = null;
+      const fc = aiDockFilesCard(files);
+      fc.classList.add("ai-dock-embedded");
+      const fh = fc.querySelector(".ai-todo-head");
+      if (fh) fh.style.display = "none";
+      fc.classList.remove("collapsed");
+      body.appendChild(fc);
     }
-    if (files.length) cards.appendChild(aiDockFilesCard(files));
+    cards.appendChild(card);
     host.appendChild(cards);
     host.style.display = "";
     aiTodoFloatPad();
@@ -2091,6 +2148,14 @@
   function aiTodoFloatSetPaused(p) {
     const host = aiTodoFloatHost();
     if (host && host._todoPanel && host._todoPanel.setPaused) host._todoPanel.setPaused(p);
+  }
+  /* 一轮「正常结束」时的清单收尾：模型偶尔会忘记把最后几项标成 completed，
+     导致任务已经做完、界面却停在「已暂停 1/4」。这里把仍未完成的项补成已完成。
+     （用户主动停止 / 出错时不调用，保持真实的中间状态） */
+  function aiTodoFinalize(list) {
+    const arr = (list || []).filter(t => t && t.content);
+    if (!arr.length || !arr.some(t => t.status !== "completed")) return arr;
+    return arr.map(t => (t.status === "completed" ? t : Object.assign({}, t, { status: "completed" })));
   }
   /* 加载 / 切换会话、或一轮结束后：取最后一条带清单的回复回放任务，并刷新文件列表 */
   function aiTodoFloatSyncFromMsgs() {
@@ -2941,6 +3006,7 @@
         acc = res.text || "";
         turnChanges = (res.changes && res.changes.length) ? res.changes : (AI._agentTurnChanges || []);
         turnTodos = (res.todos && res.todos.length) ? res.todos : (AI._agentTurnTodos || []);
+        turnTodos = aiTodoFinalize(turnTodos);          // 正常跑完：剩余项补成已完成（模型偶尔忘记收尾）
         bodyB.innerHTML = aiMd(acc) || "（已完成，未产生文字说明）";
         const aMeta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
         AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: acc, ms: aMeta.ms, ts: aMeta.ts,
@@ -3059,6 +3125,7 @@
       bodyB.innerHTML = aiMd(out) || (chatSteps.length ? "（已完成工具调用）" : "（空回复）");
       thinkB.parentElement.style.display = thinking.trim() ? "" : "none";
       const meta = { ms: Math.round(performance.now() - t0), ts: Date.now() };
+      turnTodos = aiTodoFinalize(turnTodos);            // 正常跑完：剩余项补成已完成
       AI.msgs.push({ role: "assistant", pid: aiNewPid(), text: out, reasoning: thinking.trim() || undefined,
                      ms: meta.ms, ts: meta.ts, steps: chatSteps.length ? chatSteps : undefined,
                      changes: turnChanges.length ? turnChanges : undefined,

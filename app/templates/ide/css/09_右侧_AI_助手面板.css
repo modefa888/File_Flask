@@ -754,9 +754,27 @@
   .ai-todo-float .ai-todo-body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   /* 高度由面板总的 60% 上限约束，超出时列表内部滚动（而不是撑破面板） */
   .ai-todo-float .ai-todo-list { flex: 1 1 auto; min-height: 0; max-height: none; }
-  /* 底部「任务列表 / 文件列表」并排折叠条 */
-  .ai-todo-float .ai-dock-cards { display: flex; gap: 8px; align-items: flex-end; min-height: 0; width: 100%; }
-  .ai-todo-float .ai-dock-card { flex: 1 1 0; min-width: 0; }
+  /* 底部「任务列表 / 文件列表」：tab 切换展示（避免一边收起后另一半留空白） */
+  .ai-todo-float .ai-dock-cards { display: flex; gap: 8px; align-items: stretch; min-height: 0; width: 100%; }
+  .ai-todo-float .ai-dock-card { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+  /* tab 头：任务列表 | 文件列表 + 右侧收起按钮 */
+  .ai-dock-tabhead { display: flex; align-items: center; gap: 2px; padding: 4px 6px; flex: none;
+    border-bottom: 1px solid #33333a; }
+  .ai-dock-tab { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: none;
+    color: #9a9aa2; font-size: 11.5px; padding: 3px 8px; border-radius: 5px; cursor: pointer; font-family: inherit; }
+  .ai-dock-tab:hover:not(:disabled) { color: #e2e2e6; background: #33333a; }
+  .ai-dock-tab.on { color: #e8f0ff; background: #2f3a4d; }
+  .ai-dock-tab:disabled { opacity: .45; cursor: default; }
+  .ai-dock-tab .bi { font-size: 11px; }
+  .ai-dock-tab .cnt { font-size: 10.5px; color: #8f8f97; }
+  .ai-dock-tab.on .cnt { color: #9dc4ff; }
+  .ai-dock-fold { margin-left: auto; color: #8a8a92; cursor: pointer; padding: 2px 5px; border-radius: 4px; }
+  .ai-dock-fold:hover { color: #e2e2e6; background: #33333a; }
+  /* tab 内容：内嵌卡片去掉自身外框（标题由 tab 承担） */
+  .ai-dock-tabbody { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+  .ai-todo-float .ai-dock-card.collapsed .ai-dock-tabbody { display: none; }
+  .ai-todo-float .ai-dock-embedded { background: transparent; border: none; border-radius: 0;
+    flex: 1 1 auto; min-height: 0; }
   .ai-todo-float .ai-dock-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1px 6px 6px;
     display: flex; flex-direction: column; gap: 1px; scrollbar-width: thin; scrollbar-color: #424242 transparent; }
   .ai-todo-float .ai-dock-list::-webkit-scrollbar { width: 8px; }

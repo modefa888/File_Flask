@@ -1097,6 +1097,9 @@ def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None, 
             "之后每完成一项就再次调用 todo_write 更新状态：传入【完整】清单，"
             "把正在做的标为 in_progress（同一时刻最多一项）、做完的标为 completed、其余为 pending；"
             "任务全部完成后把每一项都标为 completed。这样用户能在界面上实时看到任务进度。"
+            "★ 收尾硬性要求：在写最终答复的那一条回复里，必须再调用一次 todo_write，"
+            "把已完成的项全部标为 completed；确实没做完的才保留 pending/in_progress 并在答复里说明原因。"
+            "漏掉这一步，界面会一直停在「1/4 进行中」，用户会误以为任务没做完。"
             "判断标准：只要预计需要 3 个以上动作，就一定先建清单；只有简单的一两步任务才无需清单，"
             "也不要为了完成任务而虚构清单。"
         )

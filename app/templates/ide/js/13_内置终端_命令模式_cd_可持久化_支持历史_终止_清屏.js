@@ -833,11 +833,9 @@
     location.href = "/ide?path=" + encodeURIComponent(path);
   }
 
-  // 在项目根目录新建（工具栏按钮 / 文件菜单 / Ctrl+N / 命令面板共用）：
+  // 在项目根目录新建（文件菜单 / Ctrl+N / 命令面板 / 侧边栏按钮共用）：
   // 统一走树内联输入（仿 VS Code），不再弹模态框
   async function newInRoot(isDir) { return treeInlineCreate(ROOT, isDir); }
-  $("tbNewFile").onclick = () => newInRoot(false);
-  $("tbNewFolder").onclick = () => newInRoot(true);
   $("sideNewFile").onclick = () => newInRoot(false);
   $("sideNewFolder").onclick = () => newInRoot(true);
   $("sideTreeToggle").onclick = () => {

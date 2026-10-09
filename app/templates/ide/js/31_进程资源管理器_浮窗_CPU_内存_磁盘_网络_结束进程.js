@@ -286,8 +286,13 @@ function procPmSkeleton(key) {
         '<span class="pm-tinfo" id="pmCpuInfo"></span>' +
       '</div>' +
       '<div class="pm-tblwrap"><table class="pm-table"><thead><tr>' +
-        '<th>进程</th><th class="pm-c-num">PID</th><th>用户</th><th class="pm-c-num">CPU</th>' +
-        '<th class="pm-c-num">内存</th><th class="pm-c-num">线程</th><th>操作</th>' +
+        '<th class="pm-th-sort" data-psort="name" title="按进程名排序">进程</th>' +
+        '<th class="pm-c-num pm-th-sort" data-psort="pid" title="按 PID 排序">PID</th>' +
+        '<th class="pm-th-sort" data-psort="user" title="按用户排序">用户</th>' +
+        '<th class="pm-c-num pm-th-sort" data-psort="cpu" title="按 CPU 排序">CPU</th>' +
+        '<th class="pm-c-num pm-th-sort" data-psort="mem" title="按内存排序">内存</th>' +
+        '<th class="pm-c-num pm-th-sort" data-psort="threads" title="按线程数排序">线程</th>' +
+        '<th>操作</th>' +
       '</tr></thead><tbody id="pmTbody"><tr><td colspan="7" class="pm-empty">正在采集…</td></tr></tbody></table></div>';
   }
   if (key === "disk") {

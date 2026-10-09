@@ -120,6 +120,17 @@
   background: #2b2b2b; color: #9fd0ff; border-bottom: 1px solid #3a3a3a;
   font-weight: 500; font-size: 11.5px; text-align: left;
 }
+/* 可排序表头：hover 提示 + 当前排序列高亮并带方向箭头 */
+.pm-table th.pm-th-sort { cursor: pointer; user-select: none; }
+.pm-table th.pm-th-sort:hover { color: #ffffff; }
+.pm-table th.pm-th-sort.active { color: #4db8ff; }
+.pm-table th.pm-th-sort.active::after { margin-left: 4px; font-size: 9px; }
+.pm-table th.pm-th-sort.active[data-psort="cpu"]::after,
+.pm-table th.pm-th-sort.active[data-psort="mem"]::after,
+.pm-table th.pm-th-sort.active[data-psort="threads"]::after { content: "▼"; }
+.pm-table th.pm-th-sort.active[data-psort="name"]::after,
+.pm-table th.pm-th-sort.active[data-psort="pid"]::after,
+.pm-table th.pm-th-sort.active[data-psort="user"]::after { content: "▲"; }
 .pm-table td { padding: 6px 8px; vertical-align: top; border-bottom: 1px solid #2e2e2e; font-size: 12px; color: #d6d6d6; }
 .pm-table tbody tr:hover td { background: #2a2d2e; }
 .pm-table tbody tr.is-app td { background: #1e2a33; }        /* 本服务相关进程：淡蓝底 */
@@ -277,6 +288,8 @@
 :where(html.theme-light) .pm-tinfo { color: #6b6b6b; }
 :where(html.theme-light) .pm-tblwrap { background: #ffffff; border-color: #e2e2e2; }
 :where(html.theme-light) .pm-table th { background: #f0f0f0; color: #005fb8; border-bottom-color: #d8d8d8; }
+:where(html.theme-light) .pm-table th.pm-th-sort:hover { color: #1f2328; }
+:where(html.theme-light) .pm-table th.pm-th-sort.active { color: #0078d4; }
 :where(html.theme-light) .pm-table td { color: #24292f; border-bottom-color: #ececec; }
 :where(html.theme-light) .pm-table tbody tr:hover td { background: #eef1f4; }
 :where(html.theme-light) .pm-table tbody tr.is-app td { background: #eef6fd; }

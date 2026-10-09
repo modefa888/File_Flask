@@ -501,6 +501,7 @@ def processes(sort: str = "cpu", q: str = "", limit: int = 300) -> dict:
         "name": lambda r: (r["name"] or "").lower(),
         "threads": lambda r: -r["threads"],
         "started": lambda r: -r["started"],
+        "user": lambda r: (r["user"] or "").lower(),
     }
     rows.sort(key=keys.get(sort) or keys["cpu"])
     try:

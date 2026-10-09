@@ -143,6 +143,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         '<div class="set-navitem" data-sec="sec-network"><i class="bi bi-globe2"></i>网络/代理</div>' +
         '<div class="set-navitem" data-sec="sec-cmdguard"><i class="bi bi-shield-shaded"></i>命令安全</div>' +
         '<div class="set-navitem" data-sec="sec-chat"><i class="bi bi-chat-square-text"></i>对话</div>' +
+        '<div class="set-navitem" data-sec="sec-hints"><i class="bi bi-card-text"></i>文件说明</div>' +
       '</div>' +
       '<div class="set-content">' +
         '<div class="set-sec" id="sec-appearance"><h2 data-kw="外观 主题 背景 颜色 深色 浅色 白 黑 白天 黑夜 theme dark light">外观</h2>' +
@@ -311,6 +312,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         cronNotifyBuildSectionHTML() +
         cmdGuardBuildSectionHTML() +
         chatBuildSectionHTML() +
+        hintsBuildSectionHTML() +
       '</div>' +
     '</div>';
     const q = (s) => host.querySelector(s);
@@ -842,6 +844,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     notifyMountSettings(); // 挂载「通知」分区（设置 → 通知）
     cmdGuardMountSettings(host); // 挂载「命令安全」分区（设置 → 命令安全）
     chatMountSettings(host);   // 挂载「对话」分区（设置 → 对话）
+    hintsMountSettings(host);  // 挂载「文件说明」分区（设置 → 文件说明）
     if (typeof gitCredsMountSettings === "function") gitCredsMountSettings(host); // 挂载「Git 认证」分区
   }
   /* ---------- 命令注册表 + 自定义快捷键（设置 → 快捷键 可视化修改，localStorage 持久化） ---------- */
@@ -961,4 +964,142 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
   window.addEventListener("load", () => { refreshAllEditors(); });
 
   window.openSettingsTab = openSettingsTab;
+
+  /* ================================================================
+   * 设置 → 文件说明：管理资源管理器文件名后显示的中文说明。
+   * 内置基础说明来自 static/special_hints.json（只读，随代码维护）；
+   * 此处新增 / 修改的说明保存到数据库（/api/file_hints），同名时覆盖内置说明。
+   * ================================================================ */
+  function hintsBuildSectionHTML() {
+    return '<div class="set-sec" id="sec-hints">' +
+      '<h2 data-kw="文件说明 注释 命名 提示 hint 说明 自定义 内置">文件说明</h2>' +
+      '<div class="set-desc" data-kw="文件说明 注释 命名 提示 hint 说明 自定义 内置" style="margin-bottom:12px;">' +
+        '资源管理器中文件名后显示的灰色说明。内置基础说明来自 <code>static/special_hints.json</code>（只读）；' +
+        '此处新增或修改的说明会保存到数据库，同名时覆盖内置说明（留空保存 = 恢复默认）。</div>' +
+      '<div class="fh-add" data-kw="文件说明 新增 添加 名称 说明 hint add">' +
+        '<input type="text" class="fh-name" id="fhName" placeholder="文件名 / 文件夹名（如 requirements.txt）" autocomplete="off" spellcheck="false">' +
+        '<input type="text" class="fh-text" id="fhText" placeholder="说明（如 依赖列表）" autocomplete="off" spellcheck="false">' +
+        '<button class="set-btn" id="fhSaveBtn">添加 / 更新</button>' +
+      '</div>' +
+      '<div class="fh-tip" id="fhTip"></div>' +
+      '<div class="fh-toolbar" data-kw="文件说明 筛选 搜索 filter 自定义 内置">' +
+        '<div class="fh-seg" id="fhSeg">' +
+          '<button type="button" class="fh-seg-btn on" data-view="all">全部</button>' +
+          '<button type="button" class="fh-seg-btn" data-view="custom">自定义</button>' +
+          '<button type="button" class="fh-seg-btn" data-view="base">内置</button>' +
+        '</div>' +
+        '<input type="text" id="fhFilter" placeholder="筛选说明…" autocomplete="off" spellcheck="false">' +
+        '<span class="fh-count" id="fhCount"></span>' +
+      '</div>' +
+      '<div class="fh-list" id="fhList"></div>' +
+    '</div>';
+  }
+
+  function hintsMountSettings(host) {
+    const q = (s) => host.querySelector(s);
+    const listEl = q("#fhList"), nameEl = q("#fhName"), textEl = q("#fhText"),
+          tipEl = q("#fhTip"), countEl = q("#fhCount"), filterEl = q("#fhFilter");
+    let tipTimer = null;
+    let fhView = "all";                        // 列表视图：all 全部 / custom 仅自定义 / base 仅内置
+
+    const tip = (msg, isErr) => {
+      if (!tipEl) return;
+      tipEl.textContent = msg || "";
+      tipEl.style.color = isErr ? "#f14c4c" : "#7fd88f";
+      clearTimeout(tipTimer);
+      if (msg) tipTimer = setTimeout(() => { tipEl.textContent = ""; }, 2600);
+    };
+
+    // 保存一条说明（hint 为空 = 删除自定义项、恢复内置默认），并同步文件树与该列表
+    const doSave = async (name, hint) => {
+      name = (name || "").trim();
+      hint = (hint == null ? "" : String(hint)).trim();
+      if (!name) { tip("请输入文件名 / 文件夹名", true); if (nameEl) nameEl.focus(); return false; }
+      try {
+        await saveFileHint(name, hint);          // 存数据库 + 合并 + 刷新文件树
+        tip(hint ? ("已保存：" + name) : ("已恢复默认：" + name), false);
+        renderHintsList();
+        toast(hint ? "已保存说明" : "已恢复默认说明", "ok");
+        return true;
+      } catch (e) {
+        tip("保存失败：" + (e.message || e), true);
+        toast("保存说明失败：" + (e.message || e), "err");
+        return false;
+      }
+    };
+
+    const doEdit = async (name) => {
+      const cur = SPECIAL_NAME_CUSTOM[name] || SPECIAL_NAME_BASE[name] || "";
+      const v = await uiPrompt("编辑说明：" + name, cur, "输入说明文字（留空恢复默认）");
+      if (v === null) return;                    // 取消
+      await doSave(name, v);
+    };
+
+    function renderHintsList() {
+      if (!listEl) return;
+      const kw = ((filterEl && filterEl.value) || "").trim().toLowerCase();
+      const names = {};
+      if (fhView !== "custom") Object.keys(SPECIAL_NAME_BASE).forEach((n) => { names[n] = 1; });
+      if (fhView !== "base") Object.keys(SPECIAL_NAME_CUSTOM).forEach((n) => { names[n] = 1; });
+      const rows = Object.keys(names)
+        .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+        .filter((n) => {
+          if (!kw) return true;
+          const h = SPECIAL_NAME_CUSTOM[n] || SPECIAL_NAME_BASE[n] || "";
+          return n.toLowerCase().includes(kw) || h.toLowerCase().includes(kw);
+        });
+      if (countEl) countEl.textContent = rows.length + " 项";
+      if (!rows.length) {
+        listEl.innerHTML = '<div class="fh-empty">' + (fhView === "custom"
+          ? "还没有自定义说明：在上方填写后点「添加 / 更新」，或右键文件 → 编辑说明"
+          : "没有匹配的说明") + '</div>';
+        return;
+      }
+      listEl.innerHTML = rows.map((n) => {
+        const custom = Object.prototype.hasOwnProperty.call(SPECIAL_NAME_CUSTOM, n);
+        const h = custom ? SPECIAL_NAME_CUSTOM[n] : (SPECIAL_NAME_BASE[n] || "");
+        return '<div class="set-row fh-row" data-name="' + esc(n) + '" data-kw="' +
+            esc((n + " " + h + " 文件说明 说明").toLowerCase()) + '">' +
+          '<div class="set-info"><div class="set-label">' + esc(n) +
+            '<span class="fh-badge' + (custom ? " on" : "") + '">' + (custom ? "自定义" : "内置") + '</span></div>' +
+            '<div class="set-desc">' + esc(h) + '</div></div>' +
+          '<div class="fh-acts">' +
+            '<button class="set-btn" data-fh="edit">' + (custom ? "编辑" : "覆盖") + '</button>' +
+            (custom ? '<button class="set-btn fh-danger" data-fh="del">恢复默认</button>' : "") +
+          '</div></div>';
+      }).join("");
+    }
+
+    if (listEl) listEl.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-fh]"); if (!btn) return;
+      const row = btn.closest(".fh-row"); if (!row) return;
+      const name = row.dataset.name;
+      if (btn.dataset.fh === "edit") doEdit(name);
+      else if (btn.dataset.fh === "del") doSave(name, "");
+    });
+
+    const saveBtn = q("#fhSaveBtn");
+    const submitForm = async () => {
+      const ok = await doSave(nameEl ? nameEl.value : "", textEl ? textEl.value : "");
+      if (ok) { if (nameEl) nameEl.value = ""; if (textEl) textEl.value = ""; }
+    };
+    if (saveBtn) saveBtn.onclick = submitForm;
+    [nameEl, textEl].forEach((el) => {
+      if (el) el.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitForm(); } });
+    });
+    const segEl = q("#fhSeg");
+    if (segEl) segEl.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-view]"); if (!btn) return;
+      fhView = btn.dataset.view;
+      segEl.querySelectorAll("[data-view]").forEach((b) => b.classList.toggle("on", b === btn));
+      renderHintsList();
+    });
+    if (filterEl) filterEl.addEventListener("input", renderHintsList);
+
+    renderHintsList();
+    // 极端情况下（设置页比说明数据先就绪）再补拉一次
+    if (!Object.keys(SPECIAL_NAME_BASE).length && !Object.keys(SPECIAL_NAME_CUSTOM).length) {
+      try { loadSpecialHints().then(renderHintsList); } catch (_) {}
+    }
+  }
 

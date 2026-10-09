@@ -271,6 +271,14 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .set-navitem { color: #5a5a5a; }
 :where(html.theme-light) .set-navitem:hover { background: #e8e8e8; }
 :where(html.theme-light) .set-navitem.on { background: #e0e0e0; color: #000000; }
+/* 设置 → 文件说明 */
+:where(html.theme-light) .fh-add input, :where(html.theme-light) .fh-toolbar input { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .fh-badge { background: #f0f0f0; color: #6b6b6b; border-color: #e0e0e0; }
+:where(html.theme-light) .fh-badge.on { background: #e3f0fb; color: #0b63a8; border-color: #a8c8e8; }
+:where(html.theme-light) .fh-empty { color: #6b6b6b; }
+:where(html.theme-light) .fh-seg { background: #f0f0f0; border-color: #dcdcdc; }
+:where(html.theme-light) .fh-seg-btn { color: #5a5a5a; }
+:where(html.theme-light) .fh-seg-btn.on { background: #ffffff; color: #000000; box-shadow: 0 1px 2px rgba(0, 0, 0, .1); }
 :where(html.theme-light) .set-sec > h2 { color: #1f2328; }
 :where(html.theme-light) .set-row { background: #f8f8f8; border-color: #e5e5e5; }
 :where(html.theme-light) .set-row .set-label { color: #1f2328; }

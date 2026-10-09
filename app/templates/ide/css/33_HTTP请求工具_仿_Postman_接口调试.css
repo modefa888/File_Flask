@@ -202,6 +202,20 @@
 .api-tk-n { color: #b5cea8; }
 .api-tk-l { color: #569cd6; }
 .api-tk-p { color: #d4d4d4; }
+/* JSON 可折叠树（美化视图）：▾/▸ 折叠按钮 + 项数标注 + 缩进参考线 */
+.api-json { font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12.5px; line-height: 1.6; color: #d6d6d6; }
+.api-jline { white-space: pre-wrap; word-break: break-all; }
+.api-jnode > .api-jkids { margin-left: 7px; padding-left: 14px; border-left: 1px dotted #3a3a3a; }
+.api-jtog { display: inline-block; width: 14px; cursor: pointer; color: #8a8a8a; user-select: none; }
+.api-jtog::before { content: "▾"; }
+.api-jtog:hover { color: #fff; }
+.api-jtog.none { visibility: hidden; cursor: default; }
+.api-jmeta { color: #7d7d7d; font-size: 11.5px; margin-left: 6px; }
+.api-jfold { color: #7d7d7d; }
+.api-jnode.api-jclosed > .api-jkids, .api-jnode.api-jclosed > .api-jend { display: none; }
+.api-jnode > .api-jline > .api-jfold { display: none; }
+.api-jnode.api-jclosed > .api-jline > .api-jfold { display: inline; }
+.api-jnode.api-jclosed > .api-jline > .api-jtog::before { content: "▸"; }
 .api-tk-c { color: #6a9955; }
 .api-tk-t { color: #569cd6; }
 .api-tk-a { color: #9cdcfe; }
@@ -305,6 +319,11 @@
 :where(html.theme-light) .api-tk-n { color: #098658; }
 :where(html.theme-light) .api-tk-l { color: #0000ff; }
 :where(html.theme-light) .api-tk-p { color: #1f2328; }
+:where(html.theme-light) .api-json { color: #1f2328; }
+:where(html.theme-light) .api-jnode > .api-jkids { border-left-color: #d8d8d8; }
+:where(html.theme-light) .api-jtog { color: #8a8a8a; }
+:where(html.theme-light) .api-jtog:hover { color: #000; }
+:where(html.theme-light) .api-jmeta, :where(html.theme-light) .api-jfold { color: #9a9a9a; }
 :where(html.theme-light) .api-tk-c { color: #0a7a3d; }
 :where(html.theme-light) .api-tk-t { color: #0000ff; }
 :where(html.theme-light) .api-tk-a { color: #b5560a; }

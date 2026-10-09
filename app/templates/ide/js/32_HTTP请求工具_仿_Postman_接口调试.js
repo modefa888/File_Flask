@@ -1453,6 +1453,38 @@
     if (lang === "javascript") return apiHlJs(src);
     return esc(src);
   }
+  /* JSON 可折叠树（美化视图专用）：对象/数组带 ▾/▸ 折叠按钮，数组/对象后面标项数。
+     节点超过 8000 个时返回 null 退回静态高亮 —— 几万项全展开成 DOM 会把页面卡死 */
+  function apiJsonTreeHtml(v) {
+    var budget = { n: 0 };
+    function prim(x) {
+      if (x === null) return '<span class="api-tk-l">null</span>';
+      var t = typeof x;
+      if (t === "string") return '<span class="api-tk-s">' + esc(JSON.stringify(x)) + "</span>";
+      if (t === "number") return '<span class="api-tk-n">' + esc(String(x)) + "</span>";
+      return '<span class="api-tk-l">' + (x ? "true" : "false") + "</span>";
+    }
+    function node(x, key) {
+      if (++budget.n > 8000) throw "too-big";
+      var head = key === undefined ? "" :
+        '<span class="api-tk-k">"' + esc(key) + '"</span><span class="api-tk-p">: </span>';
+      if (x === null || typeof x !== "object")
+        return '<div class="api-jline"><span class="api-jtog none"></span>' + head + prim(x) + "</div>";
+      var isArr = Array.isArray(x), len = x.length || Object.keys(x).length;
+      if (!len) return '<div class="api-jline"><span class="api-jtog none"></span>' + head +
+        '<span class="api-tk-p">' + (isArr ? "[]" : "{}") + "</span></div>";
+      var kids = "", k;
+      if (isArr) for (var i = 0; i < len; i++) kids += node(x[i], undefined);
+      else for (k in x) if (Object.prototype.hasOwnProperty.call(x, k)) kids += node(x[k], k);
+      return '<div class="api-jnode"><div class="api-jline">' +
+        '<span class="api-jtog" title="折叠 / 展开"></span>' + head +
+        '<span class="api-tk-p">' + (isArr ? "[" : "{") + '</span><span class="api-jmeta">' +
+        len + (isArr ? " 项" : " 键") + '</span><span class="api-jfold">… </span></div>' +
+        '<div class="api-jkids">' + kids + "</div>" +
+        '<div class="api-jline api-jend"><span class="api-tk-p">' + (isArr ? "]" : "}") + "</span></div></div>";
+    }
+    try { return node(v, undefined); } catch (_) { return null; }
+  }
   /* 美化：JSON 重新缩进；其它语言只上色不重排 —— HTML/XML 自动缩进会把内联文本拆得面目全非，
      与其给一份看着像坏了的排版，不如老实按原文显示 */
   function apiResPrettyText(r, lang) {
@@ -1573,6 +1605,22 @@
       return;
     }
     const lang = apiResLangUsed(r);
+    if (eff === "pretty" && lang === "json" && apiResJson(r) !== null) {
+      const tree = apiJsonTreeHtml(apiResJson(r));
+      if (tree) {
+        if (!el.res._apiJWired) {       // 折叠按钮点击委托：容器常驻，只绑一次
+          el.res._apiJWired = true;
+          el.res.addEventListener("click", function (e) {
+            const tg = e.target.closest(".api-jtog");
+            if (!tg || tg.classList.contains("none")) return;
+            const nd = tg.closest(".api-jnode");
+            if (nd) nd.classList.toggle("api-jclosed");
+          });
+        }
+        el.res.innerHTML = '<div class="api-json">' + tree + "</div>";
+        return;
+      }
+    }
     const text = eff === "raw" ? apiResText(r) : apiResPrettyText(r, lang);
     el.res.innerHTML = '<pre class="api-pre' + (V.wrap ? "" : " api-pre-nowrap") + '">' +
       (eff === "raw" ? esc(text) : apiHl(text, lang)) + "</pre>";

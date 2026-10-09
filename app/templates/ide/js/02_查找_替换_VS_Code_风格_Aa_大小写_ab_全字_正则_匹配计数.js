@@ -422,12 +422,9 @@
     }
     if (act === "timeline") { await openFileTimeline(path, name); return; }
     if (act === "newfile" || act === "newfolder") {
-      const nm = await uiPrompt(isDir ? "新建文件夹" : "新建文件", isDir ? "新建文件夹" : "新建文件.txt", "输入名称");
-      if (!nm) return;
+      // 目标目录：对目录就是它自己，对文件是它所在目录（与 VS Code「在此新建」一致）
       const fd = isDir ? path : dirName(path);
-      fetch("/api/files/create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: fd, name: nm, is_dir: act === "newfolder" }) })
-        .then(r => r.json()).then(d => { if (d.error) throw new Error(d.error); toast("已创建：" + nm, "ok"); refreshTree(fd); if (act === "newfile") openFile(d.path, nm); })
-        .catch(e => toast("创建失败：" + (e.message || e), "err"));
+      treeInlineCreate(fd, act === "newfolder");
       return;
     }
     if (act === "rename") {
@@ -496,6 +493,49 @@
           toast("删除失败：" + (e.message || e), "err");
         });
     }
+  }
+  /* ---------- 资源管理器「空白处 / 项目根」右键菜单（仿 VS Code 工作区菜单） ----------
+     与树节点菜单（showCtxMenu）共用 renderDrop 基建，但操作对象是整个文件夹：
+     默认是工作区根目录；右键附加项目标题行时为目标项目，并可「从工作区移除」。 */
+  // 在指定目录下新建文件 / 文件夹（空白区右键菜单 / 项目根标题行共用）：
+  // 统一走树内联输入（仿 VS Code），不再弹模态框
+  async function newEntryIn(dir, isDir) { return treeInlineCreate(dir, isDir); }
+  function showTreeBgMenu(x, y, dir, wsRoot) {
+    dir = dir || ROOT;
+    if (!dir) return;
+    const nm = baseName(dir) || dir;
+    const items = [];
+    items.push({ label: "新建文件…", icon: "bi-file-earmark-plus", act: () => newEntryIn(dir, false) });
+    items.push({ label: "新建文件夹…", icon: "bi-folder-plus", act: () => newEntryIn(dir, true) });
+    items.push({ divider: true });
+    items.push({ label: "刷新", icon: "bi-arrow-clockwise", act: () => refreshTree() });
+    // 展开 / 折叠合并为一个开关项：按当前是否有展开中的目录决定显示「全部折叠」还是「全部展开」，
+    // 不论当时是哪种状态，点它总能切到另一种（与工具栏 sideTreeToggle 的图标/提示保持一致，见 syncTreeToggleBtn）
+    {
+      const anyOpen = treeHasOpenDirs();
+      items.push({
+        label: anyOpen ? "全部折叠" : "全部展开",
+        icon: anyOpen ? "bi-arrows-collapse" : "bi-arrows-expand",
+        act: () => (treeHasOpenDirs() ? treeCollapseAll() : treeExpandAll()),
+      });
+    }
+    items.push({ divider: true });
+    items.push({ label: "在集成终端中打开", icon: "bi-terminal", act: () => termOpenAt(dir) });
+    items.push({ label: "在文件管理器中打开", icon: "bi-box-arrow-up-right", act: () => revealInManager(dir) });
+    items.push({ divider: true });
+    items.push({ label: "添加文件夹到工作区…", icon: "bi-folder-symlink", act: () => openFolderDialog({ mode: "add" }) });
+    if (wsRoot) {
+      items.push({ label: "将文件夹从工作区移除", icon: "bi-x-lg", danger: true, act: () => removeWorkspaceFolder(wsRoot) });
+    }
+    items.push({ divider: true });
+    items.push({ label: "添加到 AI 对话（目录结构）", icon: "bi-chat-square-text", act: () => aiAddFileFromTree(dir, nm, true) });
+    items.push({ label: "在文件夹中查找…", icon: "bi-search", sc: "Ctrl+Shift+F", act: () => openGrepSearch() });
+    items.push({ divider: true });
+    items.push({ label: "粘贴", icon: "bi-clipboard", sc: "Ctrl+V", disabled: !fileClip, act: () => pasteClip(dir) });
+    items.push({ divider: true });
+    // 只留一个复制项：绝对路径（相对路径仍可用快捷键 Ctrl+Shift+Alt+C，不再占菜单位）
+    items.push({ label: "复制路径", icon: "bi-link-45deg", sc: "Ctrl+Alt+C", act: () => copyText(dir) });
+    renderDrop(items, null, "tree-bg-ctx", { x, y });
   }
   function closeTabSilent(tab) { tab.host.remove(); const i = tabs.indexOf(tab); if (i >= 0) tabs.splice(i, 1); renderTabsAll(); }
 
@@ -737,6 +777,8 @@
         ["标签栏 ⋯", "编辑器操作菜单：暂存更改 / 显示打开的编辑器 / 关闭等"],
         ["编辑器内右键", "撤销重做、剪切复制粘贴、查找替换、转到行、查找所有引用、保存 / 运行、Markdown 预览等"],
         ["资源管理器", "右键：打开 / 在侧边打开 / 打开方式… / 打开所在文件夹 / 选择以进行比较 / 打开时间线 / 剪切复制粘贴 / 复制路径 / 复制相对路径 / 重命名 / 删除"],
+        ["资源管理器空白处", "右键：新建文件 / 新建文件夹 / 刷新 / 全部展开折叠（同一个开关项）/ 在集成终端中打开 / 在文件管理器中打开 / 添加文件夹到工作区 / 添加到 AI 对话 / 在文件夹中查找 / 粘贴 / 复制路径"],
+        ["资源管理器项目行", "右键项目标题行：同上，且附加项目可「将文件夹从工作区移除」"],
         ["资源管理器按键", "选中文件后：Enter 打开，Ctrl+Enter 侧边打开，F2 重命名，Delete 删除，Ctrl+C/X/V 复制剪切粘贴，Ctrl+Alt+C 复制路径，Ctrl+Shift+Alt+C 复制相对路径"],
       ]},
       { head: "运行", items: [

@@ -264,6 +264,125 @@
       container.appendChild(er);
     }
   }
+  /* ---------- 树内联新建（仿 VS Code：在树里就地输入名称，取代模态框） ----------
+     流程：目标目录自动展开并加载 → 在其子项最前面插入一个带输入框的临时行
+     （默认名已填入并选中主名）→ Enter 确认 / Esc 取消 / 失焦确认。 */
+  let treeNewRow = null;                  // 当前打开的内联新建行（同时只允许一个）
+  // 关闭时打上 _cancelled：移除带焦点的输入框会触发 blur，若不标记会被当成「失焦确认」误创建
+  function treeNewRowClose() {
+    if (treeNewRow) { treeNewRow._cancelled = true; treeNewRow.remove(); treeNewRow = null; }
+  }
+  /* 取得某个目录的子容器：主项目根 / 附加项目分区根 / 普通目录行 */
+  function treeKidsOf(dir) {
+    if (!dir) return null;
+    if (dir === ROOT) return explorerPanel.querySelector(":scope > .tree-children");
+    const ws = [...explorerPanel.querySelectorAll(".tree-ws")].find(s => s.dataset.wsRoot === dir);
+    if (ws) return ws.querySelector(":scope > .tree-children");
+    const row = [...explorerPanel.querySelectorAll(".tree-row")].find(r => r.dataset.path === dir);
+    if (!row) return null;
+    const kids = row.nextElementSibling;
+    return (kids && kids.classList.contains("tree-children")) ? kids : null;
+  }
+  // 行 / 子项的层级深度（renderNode 用 paddingLeft = depth*14+8 记录，与 treeWalkExpand 同一算法）
+  const treeDepthOf = (row) => Math.round((parseFloat(row.style.paddingLeft || "8") - 8) / 14);
+  /* 展开并（首次）加载目标目录，保证内联行有地方可插：与点击目录行的展开逻辑保持一致 */
+  async function treeEnsureOpen(dir) {
+    if (!dir || dir === ROOT) return;      // 主项目根始终展开
+    const ws = [...explorerPanel.querySelectorAll(".tree-ws")].find(s => s.dataset.wsRoot === dir);
+    if (ws) {
+      const kids = ws.querySelector(":scope > .tree-children");
+      if (!kids) return;
+      if (!kids.classList.contains("open")) {
+        kids.classList.add("open");
+        const t = ws.querySelector(".tree-ws-head .twist i"); if (t) t.className = "bi bi-chevron-down";
+        treeOpenDirs.add(dir); saveTreeOpenDirs();
+      }
+      if (!kids._loaded) { kids._loaded = true; await loadChildren(dir, kids, 0); }
+      return;
+    }
+    const row = [...explorerPanel.querySelectorAll(".tree-row")].find(r => r.dataset.path === dir);
+    if (!row) return;
+    const kids = row.nextElementSibling;
+    if (!kids || !kids.classList.contains("tree-children")) return;
+    if (!kids.classList.contains("open")) {
+      kids.classList.add("open");
+      const t = row.querySelector(".twist i"); if (t) t.className = "bi bi-chevron-down";
+      treeOpenDirs.add(dir); saveTreeOpenDirs();
+    }
+    if (!kids._loaded) { kids._loaded = true; await loadChildren(dir, kids, treeDepthOf(row)); }
+  }
+  /* 在 dir 下就地新建（isDir=true 新建文件夹），失败时把输入行放回来方便改名重试 */
+  async function treeInlineCreate(dir, isDir, initialName) {
+    dir = dir || ROOT;
+    if (!dir) { toast("请先打开一个文件夹", "warn"); return; }
+    treeNewRowClose();
+    await treeEnsureOpen(dir);
+    const box = treeKidsOf(dir);
+    if (!box) { toast("找不到目标文件夹，请刷新资源管理器后重试", "err"); return; }
+    // 子项层级：主项目根 / 附加项目分区根的子项为 1，普通目录为其行深度 + 1
+    let depth = 1;
+    if (dir !== ROOT && ![...explorerPanel.querySelectorAll(".tree-ws")].some(s => s.dataset.wsRoot === dir)) {
+      const row = [...explorerPanel.querySelectorAll(".tree-row")].find(r => r.dataset.path === dir);
+      if (row) depth = treeDepthOf(row) + 1;
+    }
+    const defName = initialName || (isDir ? "新建文件夹" : "新建文件.txt");
+    const row = document.createElement("div");
+    row.className = "tree-row tree-new";
+    row.style.paddingLeft = (depth * 14 + 8) + "px";
+    row.innerHTML = '<span class="twist"></span><span class="ic">' + iconFor(defName, isDir) + "</span>" +
+      '<input class="tree-new-input" spellcheck="false" autocomplete="off">';
+    const inp = row.querySelector(".tree-new-input");
+    inp.value = defName;
+    box.insertBefore(row, box.firstChild);          // 与 VS Code 一致：新项出现在同级最前面
+    treeNewRow = row;
+    // 输入期间抑制「后台变更自动刷新」的整树重建，否则打字打到一半整行会被刷掉
+    holdTreeRefresh(60000);
+    inp.addEventListener("input", () => {
+      holdTreeRefresh(60000);                       // 边输入边续期，避免长时间输入时被自动刷新刷掉
+      if (isDir) return;
+      const ic = row.querySelector(".ic"), v = inp.value.trim();
+      if (ic && v) ic.innerHTML = iconFor(v, false);   // 图标跟着扩展名实时变化（仿 VS Code）
+    });
+    inp.addEventListener("click", (e) => e.stopPropagation());
+    inp.addEventListener("keydown", (e) => {
+      e.stopPropagation();                          // 别让 F2 / Esc 等资源管理器快捷键接管
+      if (e.key === "Enter") { e.preventDefault(); finish(true); }
+      else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    });
+    inp.addEventListener("blur", () => finish(true));   // 失焦即确认（仿 VS Code）
+    inp.focus();
+    if (row.scrollIntoView) row.scrollIntoView({ block: "nearest" });   // 新建行可能在可视区之外
+    // 默认名只选中主名，扩展名留在后面（新建文件.txt → 选中「新建文件」）
+    const dot = isDir ? -1 : defName.lastIndexOf(".");
+    if (dot > 0) inp.setSelectionRange(0, dot); else inp.select();
+    let done = false;                               // Enter 与随后触发的 blur 只允许提交一次
+    async function finish(commit) {
+      if (done || row._cancelled) return;           // 已被新一轮输入 / 整树重建收走：不要提交
+      done = true;
+      const name = inp.value.trim();
+      treeNewRowClose();
+      treeQuietUntil = 0;                           // 收手后恢复正常自动刷新
+      if (!commit || !name) return;
+      if (/[\/\\]/.test(name)) { toast("名称不能包含 / 或 \\", "err"); return; }
+      try {
+        const r = await fetch("/api/files/create", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: dir, name: name, is_dir: !!isDir }),
+        });
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        toast("已创建：" + name, "ok");
+        const newPath = d.path || (dir + "/" + name);
+        treeSel = { path: newPath, name: name, isDir: !!isDir };   // 让刷新后新项呈选中态
+        treeAnchor = newPath;
+        await refreshTree();
+        if (!isDir) openFile(newPath, name);
+      } catch (e) {
+        toast("创建失败：" + (e.message || e), "err");
+        treeInlineCreate(dir, isDir, name);         // 失败：带着刚输入的名字放回输入行，方便改名重试
+      }
+    }
+  }
   /* Seti 官方文件图标（microsoft/vscode theme-seti，本地化于 /static/vendor/seti/）：
      文件按官方映射渲染字形+官方配色；文件夹用 bootstrap 近似 VS Code 默认样式 */
   const _si = (cls, color) => '<i class="bi ' + cls + '" style="color:' + color + '"></i>';
@@ -655,6 +774,7 @@
            否则会静默覆盖它（同一 IIFE 内后声明者生效），自动刷新就会把整棵树折叠。 */
   async function refreshTree() {
     if (!ROOT) return;
+    treeNewRowClose();                 // 重建会连带删掉内联新建行，先主动收掉（避免其失焦后误提交）
     const openBases = new Set();
     explorerPanel.querySelectorAll(".tree-children.open").forEach(k => { if (k._base) openBases.add(k._base); });
     const prevScroll = explorerPanel.scrollTop;
@@ -704,6 +824,24 @@
   }
   $("sideRefresh").onclick = () => refreshTree();
 
+  /* ---------- 资源管理器空白处 / 项目根标题行右键菜单（仿 VS Code 工作区菜单） ----------
+     树节点的右键菜单在 renderNode 里（showCtxMenu）；这里补上「空白区域」与项目根标题行，
+     两者都以整个工作区根目录为操作对象。 */
+  explorerPanel.addEventListener("contextmenu", (e) => {
+    if (!ROOT) return;
+    if (e.target.closest && e.target.closest(".tree-row")) return;   // 行内右键由各行的处理器负责
+    e.preventDefault();
+    showTreeBgMenu(e.clientX, e.clientY, ROOT, null);
+  });
+  {
+    const sr = $("sideRoot");
+    if (sr) sr.addEventListener("contextmenu", (e) => {
+      if (!ROOT) return;
+      e.preventDefault();
+      showTreeBgMenu(e.clientX, e.clientY, ROOT, null);
+    });
+  }
+
   /* ---------- 多根工作区：在主项目之外追加更多项目，资源管理器里同级显示 ----------
      附加项目持久记忆（ide.settings 的 extraRoots），刷新页面后仍在；
      点击折叠占位区 / 无主项目引导卡里的「打开文件夹…」即可追加。
@@ -752,12 +890,15 @@
       }
       saveTreeOpenDirs();
     });
+    // 从工作区移除该项目：标题行 × 与右键菜单共用同一实现
     head.querySelector(".ws-rm").addEventListener("click", (e) => {
       e.stopPropagation();
-      extraRoots = extraRoots.filter(x => x !== base); saveExtraRoots();
-      sec.remove();
-      updateSideRootName();
-      toast("已从工作区移除：" + (baseName(base) || base));
+      removeWorkspaceFolder(base);
+    });
+    // 右键附加项目标题行：弹出「工作区分区」菜单（含「将文件夹从工作区移除」）
+    head.addEventListener("contextmenu", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      showTreeBgMenu(e.clientX, e.clientY, base, base);
     });
     explorerPanel.appendChild(sec);
     if (open) { kids._loaded = true; loadChildren(base, kids, 0); }
@@ -775,13 +916,35 @@
     updateSideRootName();
   }
   function addWorkspaceFolder(path) {
-    if (!path || !String(path).startsWith("/")) { toast("只能添加绝对路径的文件夹", "err"); return; }
-    if (path === ROOT) { toast("该文件夹已是主项目"); return; }
-    if (extraRoots.includes(path)) { toast("该项目已在工作区中"); return; }
+    if (!path || !String(path).startsWith("/")) { toast("只能添加绝对路径的文件夹", "err"); return false; }
+    if (path === ROOT) { toast("该文件夹已是主项目"); return false; }
+    if (extraRoots.includes(path)) { toast("该项目已在工作区中"); return false; }
     extraRoots.push(path); saveExtraRoots();
     renderWorkspaceFolder(path, { open: true });
     updateSideRootName();
     toast("已添加项目：" + (baseName(path) || path), "ok");
+    return true;
+  }
+  /* 从工作区移除一个附加项目（标题行 × 与右键菜单共用）：清持久化 + 移除对应 DOM 分区 */
+  function removeWorkspaceFolder(base) {
+    if (!base || !extraRoots.includes(base)) return;
+    extraRoots = extraRoots.filter(x => x !== base); saveExtraRoots();
+    const sec = [...explorerPanel.querySelectorAll(".tree-ws")].find(s => s.dataset.wsRoot === base);
+    if (sec) sec.remove();
+    updateSideRootName();
+    toast("已从工作区移除：" + (baseName(base) || base));
+  }
+  /* 追加项目后确保它真的看得见：文件树折叠时先自动展开，再滚动到该项目分区。
+     （折叠状态下 #explorerPanel 是 display:none，新分区会被藏起来，看起来像「点了没反应」） */
+  function revealWorkspaceFolder(base) {
+    if (ideSettingGet("explorerCollapsed", false)) {
+      ideSettingSet("explorerCollapsed", false);
+      explorerPanel.classList.remove("tree-hidden");
+      const op = $("sideRootOpen"); if (op) op.style.display = "none";
+      const chev = $("sideRootChevron"); if (chev) chev.className = "bi bi-chevron-down";
+    }
+    const sec = [...explorerPanel.querySelectorAll(".tree-ws")].find(s => s.dataset.wsRoot === base);
+    if (sec && sec.scrollIntoView) sec.scrollIntoView({ block: "nearest" });
   }
 
   /* 页面加载后恢复持久化的展开状态：只在 treeOpenDirs 里的目录逐层展开（懒加载），
@@ -826,7 +989,7 @@
           '<button class="g-btn outline" id="ewOpenBtn"><i class="bi bi-folder-symlink"></i> 打开文件夹…</button>' +
         '</div>';
       const btn = $("ewOpenBtn");
-      if (btn) btn.onclick = openFolderDialog;
+      if (btn) btn.onclick = () => openFolderDialog();
       explorerPanel.classList.remove("tree-hidden");   // 无工作区视图始终可见
       $("sideRootOpen").style.display = "none";        // 空工作区不需要折叠占位区
       return;
@@ -834,7 +997,7 @@
     updateSideRootName();
     // 折叠占位区里的「打开文件夹」入口（绑定一次即可，onclick 重复赋值无副作用）
     const _openBtn = $("sideOpenFolderBtn");
-    if (_openBtn) _openBtn.onclick = openFolderDialog;
+    if (_openBtn) _openBtn.onclick = () => openFolderDialog();
     // 全局配置最优先：构建 / 加载树之前就应用折叠状态，
     // 避免先看到「加载中…」再闪一下才收起。
     // 注意：用类名（tree-hidden）而非内联 display，否则会被 showPanel 的显隐管理清掉

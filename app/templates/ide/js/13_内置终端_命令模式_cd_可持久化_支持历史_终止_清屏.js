@@ -250,6 +250,16 @@
     }
   }
 
+  /* 在集成终端中打开指定目录：没有会话就新建一个（默认 cwd=ROOT），已在该目录则不重复 cd */
+  async function termOpenAt(dir) {
+    if (!(await termEnsure())) return;
+    toggleBottom(true, "term");
+    const cwd = curTerm && curTerm.cwd;
+    if (dir && dir !== cwd) await termRun('cd "' + String(dir).replace(/"/g, '\\"') + '"');
+    const inp = $("termInput");
+    if (inp) inp.focus();
+  }
+
   async function showTermRules() {
     try {
       const r = await fetch("/api/term/rules");
@@ -511,13 +521,27 @@
     });
   }
 
-  async function openFolderDialog() {
+  /* 目录选择器（「打开文件夹…」与右键菜单「添加文件夹到工作区…」共用同一个界面）。
+     opts.mode === "add"：追加语义 —— 主按钮直接是「添加到工作区」，当前项目保持不变，
+     不用再在「打开此文件夹」和「添加到工作区」之间二次选择。 */
+  async function openFolderDialog(opts) {
+    const addMode = !!(opts && opts.mode === "add");
     await loadRecentFolders();                       // 「最近」列表用于快速跳转
-    // 已有主项目时提供「添加到工作区」选项：默认点「打开此文件夹」直接切换工作区，
-    // 搜索 / 终端 / AI 全部跟随选中的文件夹；需要保留多项目再点「添加到工作区」。
-    const opts = { title: "打开文件夹" };
-    if (ROOT) opts.extraText = "添加到工作区";
-    const res = await pickFolderDialog(ROOT || recentFolders()[0] || "/", opts);
+    let dlg;
+    if (addMode) {
+      dlg = {
+        title: "添加文件夹到工作区",
+        okText: "添加到工作区",
+        hint: "选择一个文件夹加入工作区，当前项目（" + (baseName(ROOT) || ROOT || "—") +
+              "）保持不变。这里只显示文件夹；单击文件夹进入下一级，确认后把当前所在的文件夹加入工作区。",
+      };
+    } else {
+      // 已有主项目时提供「添加到工作区」选项：默认点「打开此文件夹」直接切换工作区，
+      // 搜索 / 终端 / AI 全部跟随选中的文件夹；需要保留多项目再点「添加到工作区」。
+      dlg = { title: "打开文件夹" };
+      if (ROOT) dlg.extraText = "添加到工作区";
+    }
+    const res = await pickFolderDialog(ROOT || recentFolders()[0] || "/", dlg);
     if (!res) return;
     const path = res.path;
     try {
@@ -525,8 +549,8 @@
       const d = await r.json();
       if (d.error) { toast("无法打开：" + d.error, "err"); return; }
       addRecentFolder(path);
-      if (res.action === "extra") {                  // 添加到工作区：与「当前项目」同级显示（仅浏览/编辑）
-        addWorkspaceFolder(path);
+      if (addMode || res.action === "extra") {       // 添加到工作区：与「当前项目」同级显示（仅浏览/编辑）
+        if (addWorkspaceFolder(path)) revealWorkspaceFolder(path);   // 折叠状态下自动展开，保证新增项目看得见
         return;
       }
       // 默认：切换工作区 —— 选中的文件夹成为主项目，搜索 / 终端 / AI 全部跟随它
@@ -805,17 +829,13 @@
     const path = await newProjectDialog();
     if (!path) return;
     addRecentFolder(path);
-    if (ROOT) { addWorkspaceFolder(path); return; }
+    if (ROOT) { addWorkspaceFolder(path); revealWorkspaceFolder(path); return; }
     location.href = "/ide?path=" + encodeURIComponent(path);
   }
 
-  async function newInRoot(isDir) {
-    const nm = await uiPrompt(isDir ? "新建文件夹" : "新建文件", isDir ? "新建文件夹" : "新建文件.txt", "在项目根目录下创建，输入名称");
-    if (!nm) return;
-    fetch("/api/files/create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: ROOT, name: nm, is_dir: isDir }) })
-      .then(r => r.json()).then(d => { if (d.error) throw new Error(d.error); toast("已创建：" + nm, "ok"); refreshTree(ROOT); if (!isDir) openFile(d.path, nm); })
-      .catch(e => toast("创建失败：" + (e.message || e), "err"));
-  }
+  // 在项目根目录新建（工具栏按钮 / 文件菜单 / Ctrl+N / 命令面板共用）：
+  // 统一走树内联输入（仿 VS Code），不再弹模态框
+  async function newInRoot(isDir) { return treeInlineCreate(ROOT, isDir); }
   $("tbNewFile").onclick = () => newInRoot(false);
   $("tbNewFolder").onclick = () => newInRoot(true);
   $("sideNewFile").onclick = () => newInRoot(false);

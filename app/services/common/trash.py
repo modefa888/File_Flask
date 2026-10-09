@@ -95,28 +95,94 @@ def _safe_filename(name):
     return safe[:180] or "unnamed"
 
 
+def _like_prefix(path):
+    """「自身 + 子树」的 LIKE 前缀（转义 LIKE 通配符，避免路径里的 % / _ 误匹配）"""
+    esc = path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return esc + "/%"
+
+
+# 命中 abs_path 唯一索引（_get_index_conn 已开 case_sensitive_like=ON）：
+# 只扫描「被删的这个文件/目录及其子树」，不碰索引库里的其它行
+_INDEX_COUNT_SQL = (
+    "SELECT COALESCE(SUM(CASE WHEN is_dir=0 THEN 1 ELSE 0 END), 0),"
+    "       COALESCE(SUM(CASE WHEN is_dir=1 THEN 1 ELSE 0 END), 0),"
+    "       COALESCE(SUM(CASE WHEN is_dir=0 THEN size ELSE 0 END), 0) "
+    "FROM index_files WHERE abs_path = ? OR abs_path LIKE ? ESCAPE '\\'"
+)
+_INDEX_DELETE_SQL = (
+    "DELETE FROM index_files WHERE abs_path = ? OR abs_path LIKE ? ESCAPE '\\'"
+)
+
+
+def _adjust_index_meta(conn, d_files, d_dirs, d_bytes):
+    """按增量修正索引合计（total_files / total_dirs / total_size）并同步内存镜像。
+
+    不再全表 COUNT/SUM 重算，只做「读旧值 → 减掉本次删除量」。
+    """
+    rows = dict(conn.execute("SELECT key, value FROM index_meta").fetchall())
+
+    def _cur(key, mem):
+        try:
+            return int(rows.get(key) if rows.get(key) is not None else mem)
+        except (TypeError, ValueError):
+            return int(mem or 0)
+
+    tf = max(_cur("total_files", _INDEX_META.get("total_files", 0)) + d_files, 0)
+    td = max(_cur("total_dirs", _INDEX_META.get("total_dirs", 0)) + d_dirs, 0)
+    ts = max(_cur("total_size", _INDEX_META.get("total_size", 0)) + d_bytes, 0)
+    for k, v in (("total_files", tf), ("total_dirs", td), ("total_size", ts)):
+        conn.execute("INSERT OR REPLACE INTO index_meta VALUES (?, ?)", (k, str(v)))
+    _INDEX_META["total_files"] = tf
+    _INDEX_META["total_dirs"] = td
+    _INDEX_META["total_size"] = ts
+
+
 def _update_index_after_delete(deleted_abs_paths):
-    """删除后更新索引：移除已删记录，重新计算统计"""
+    """删除后更新索引：移除已删记录，并按「增量」修正统计。
+
+    性能坑（历史现象：删一个空文件也要等 30~50 秒）：
+    索引是「全盘搜索」用的全盘索引，实测可达 690 万行 / 3.8GB。原先这里删完记录后
+    用三条全表聚合（COUNT(*) WHERE is_dir=0 / is_dir=1 / SUM(size)）重算总数，
+    而 index_files 没有 is_dir 索引 —— 每次删除都要全表扫几 GB，热缓存就要 20 秒+，
+    冷缓存 40 秒+，全部卡在删除请求里（其它读请求不受影响，所以表现为「只有删除卡住」）。
+
+    现在改为：
+      1) 先用 abs_path 唯一索引统计「本次真正删掉的行数 / 字节数」（代价只与子树规模相关）；
+      2) 删掉这些行；
+      3) 把统计量从 index_meta 的合计里减掉，不再重算全表。
+    路径不在索引里（隐藏目录、未索引位置）时连 DELETE 都不发，直接跳过。
+    """
+    if not deleted_abs_paths:
+        return
     try:
         conn = _get_index_conn()
+    except Exception as e:
+        _log.error("更新索引失败: %s", e)
+        return
+    try:
         conn.execute("BEGIN")
+        d_files = d_dirs = d_bytes = 0
         for abs_path in deleted_abs_paths:
             path_norm = os.path.normpath(abs_path).replace("\\", "/")
-            # 目录：删除自身及所有子记录
-            conn.execute("DELETE FROM index_files WHERE abs_path = ? OR abs_path LIKE ?",
-                         (path_norm, path_norm.rstrip("/") + "/%"))
+            if not path_norm:
+                continue
+            args = (path_norm, _like_prefix(path_norm))
+            row = conn.execute(_INDEX_COUNT_SQL, args).fetchone()
+            n_files, n_dirs, n_bytes = (row[0] or 0), (row[1] or 0), (row[2] or 0)
+            if not n_files and not n_dirs:
+                continue                     # 索引里没有：无需 DELETE，也无需改合计
+            conn.execute(_INDEX_DELETE_SQL, args)
+            d_files += n_files
+            d_dirs += n_dirs
+            d_bytes += n_bytes
+        if d_files or d_dirs:
+            _adjust_index_meta(conn, -d_files, -d_dirs, -d_bytes)
         conn.commit()
-        tf = conn.execute("SELECT COUNT(*) FROM index_files WHERE is_dir=0").fetchone()[0]
-        td = conn.execute("SELECT COUNT(*) FROM index_files WHERE is_dir=1").fetchone()[0]
-        ts = conn.execute("SELECT COALESCE(SUM(size), 0) FROM index_files WHERE is_dir=0").fetchone()[0]
-        conn.execute("INSERT OR REPLACE INTO index_meta VALUES ('total_files', ?)", (str(tf),))
-        conn.execute("INSERT OR REPLACE INTO index_meta VALUES ('total_dirs', ?)", (str(td),))
-        conn.execute("INSERT OR REPLACE INTO index_meta VALUES ('total_size', ?)", (str(ts),))
-        conn.commit()
-        _INDEX_META["total_files"] = tf
-        _INDEX_META["total_dirs"] = td
-        _INDEX_META["total_size"] = ts
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         _log.error("更新索引失败: %s", e)
     finally:
         try:

@@ -64,6 +64,7 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .tree-row .twist { color: #6b6b6b; }
 :where(html.theme-light) .tree-row .nm-hint { color: #8a8a8a; }
 :where(html.theme-light) .tree-row.dirty .nm { color: #a06a00; }
+:where(html.theme-light) .tree-new-input { color: #1f2328; background: #ffffff; border-color: #005fb8; }
 :where(html.theme-light) .tree-row.tree-deleting .nm { color: #999999; }
 :where(html.theme-light) .tree-delete-spin { color: #c0392b; }
 

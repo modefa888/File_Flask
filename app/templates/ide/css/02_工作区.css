@@ -78,6 +78,13 @@
   .tree-row .nm-hint { color: #8a8a8a; font-size: 11px; margin-left: 4px; flex: none; }
   .tree-row.dirty .nm { color: #e2c08a; }
 
+  /* 树内联新建（仿 VS Code）：输入框顶替文件名位置，默认名已选中，直接打字即替换 */
+  .tree-row.tree-new { cursor: default; }
+  .tree-new-input {
+    flex: 1; min-width: 0; height: 18px; padding: 0 4px; font: inherit; font-size: 13px;
+    color: #e6e6e6; background: #3c3c3c; border: 1px solid #0a6aa8; border-radius: 2px; outline: none;
+  }
+
   /* 删除进行中：图标处显示旋转图标，文件名淡化 */
   .tree-row.tree-deleting .nm { color: #777; opacity: 0.6; }
   .tree-row.tree-deleting .twist { visibility: hidden; }

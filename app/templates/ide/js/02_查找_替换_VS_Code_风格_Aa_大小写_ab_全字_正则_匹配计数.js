@@ -13,7 +13,7 @@
   const ffWrap = document.createElement("div");
   ffWrap.className = "ff-widget";
   ffWrap.innerHTML =
-    '<button class="ff-expand" id="ffExpand" title="展开替换 (Ctrl+H)">›</button>' +
+    '<button class="ff-expand" id="ffExpand" title="展开替换 (Ctrl+H)"><i class="bi bi-chevron-right"></i></button>' +
     '<div class="ff-row">' +
       '<input class="ff-input" id="ffFind" placeholder="查找" spellcheck="false" autocomplete="off">' +
       '<button class="ff-opt" data-opt="case" title="区分大小写 (Alt+C)">Aa</button>' +

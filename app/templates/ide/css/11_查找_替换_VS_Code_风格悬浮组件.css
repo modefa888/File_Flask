@@ -13,8 +13,10 @@
   /* 展开替换的箭头：垂直居中在左侧槽位，展开后旋转 90° */
   .ff-expand {
     position: absolute; left: 3px; top: 50%; transform: translateY(-50%);
-    padding: 4px 4px; font-size: 15px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    width: 20px; height: 22px; padding: 0; font-size: 14px; line-height: 1;
   }
+  .ff-expand i { display: block; font-size: 14px; line-height: 1; }
   .ff-widget.expanded .ff-expand { transform: translateY(-50%) rotate(90deg); }
   .ff-opt i { font-size: 13px; line-height: 1; }
   .ff-input {

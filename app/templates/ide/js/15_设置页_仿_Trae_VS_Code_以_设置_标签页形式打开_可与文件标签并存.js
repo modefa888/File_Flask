@@ -955,6 +955,8 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     _resizeTimer = setTimeout(() => {
       const w = parseInt($("sidebar").style.width, 10);      // 窗口变窄时收敛已拖动的宽度
       if (w) applySidebarWidth(w, false);
+      const ap = $("aiPanel");                               // AI 面板同样在窗口变窄 / 变宽时收敛
+      if (ap && ap.classList.contains("open")) applyAiWidth(parseInt(ap.style.width, 10) || AI_DEFAULT_W, false);
       const bp = $("bottomPanel");                           // 窗口变矮时重新夹取底部面板高度
       if (bp && bp.classList.contains("show")) applyBottomHeight(bp.offsetHeight, false);
       refreshAllEditors();

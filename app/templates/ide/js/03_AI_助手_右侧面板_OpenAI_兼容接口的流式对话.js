@@ -4,7 +4,7 @@
      会话历史存服务端 SQLite，并按【项目根目录 ROOT】隔离：
      切到别的项目只会看到那个项目自己的对话，没有历史时就是一段新对话。
      ================================================================== */
-  const AI_DEFAULT_W = 400;
+  const AI_DEFAULT_W = 460;
   // 内置 Skill 列表（与后端 _SKILL_PROMPTS 的 key 保持一致）
   const AI_SKILLS = [
     { id: "lsp-code-analysis", name: "代码分析", icon: "bi-search", desc: "用 LSP 语义分析定位定义、引用与实现", prompt: "你擅长代码语义分析，优先使用 LSP/IDE 的「转到定义」「查找引用」等功能定位代码，避免凭空猜测。" },
@@ -243,8 +243,11 @@
     try { await fetch("/api/ai/cur", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aiRootBody({ id })) }); } catch (_) {}
   }
   function applyAiWidth(w, save) {
-    const max = Math.min(620, Math.max(300, window.innerWidth - 420));
-    const width = Math.max(260, Math.min(max, Math.round(w)));
+    // 面板最多占窗口 72%，同时给编辑区至少留 320px；不再用固定 620 上限，
+    // 这样在宽屏上也能把 AI 区域拖得更大（参考 CodeBuddy 那种大半屏宽度）
+    const vw = window.innerWidth || 1280;
+    const max = Math.max(320, Math.min(vw - 320, Math.round(vw * 0.72)));
+    const width = Math.max(280, Math.min(max, Math.round(w)));
     $("aiPanel").style.width = width + "px";
     if (save) { try { localStorage.setItem("ide.ai.width", String(width)); } catch (_) {} }
     refreshAllEditors();

@@ -4,7 +4,7 @@
     width: 0; min-width: 0; flex: none; display: none; flex-direction: column; min-height: 0;
     background: #1f1f22; border-left: 1px solid #2c2c2c; overflow: hidden;
   }
-  .ai-panel.open { display: flex; width: 400px; min-width: 260px; container-type: inline-size; }
+  .ai-panel.open { display: flex; width: 460px; min-width: 260px; container-type: inline-size; }
   .workbench:not(.ai-open) #aiSplitter { display: none; }
   .ai-head {
     height: 35px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px;

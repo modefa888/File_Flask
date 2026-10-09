@@ -266,6 +266,10 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 }
 :where(html.theme-light) .set-btn { background: #e8e8e8; color: #333333; border-color: #cecece; }
 :where(html.theme-light) .set-btn:hover { background: #dcdcdc; }
+:where(html.theme-light) .net-test-res { color: #6b6b6b; }
+:where(html.theme-light) .net-test-res.ok { color: #1a7f37; }
+:where(html.theme-light) .net-test-res.bad { color: #c0392b; }
+:where(html.theme-light) .net-test-res.busy { color: #9a6700; }
 :where(html.theme-light) .set-key { color: #333333; background: #f8f8f8; border-color: #e5e5e5; }
 :where(html.theme-light) .set-key kbd { color: #5a5a5a; background: #ececec; border-color: #d4d4d4; }
 :where(html.theme-light) .kb-row { background: #f8f8f8; border-color: #e5e5e5; }

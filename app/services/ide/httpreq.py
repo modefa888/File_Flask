@@ -13,13 +13,13 @@
 from __future__ import annotations
 
 import base64
-import ssl
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from ...log import get_logger
+from ..common import proxyutil
 
 _log = get_logger()
 
@@ -34,13 +34,6 @@ _BINARY_EXACT = (
     "application/gzip", "application/x-tar", "application/wasm",
     "application/x-7z-compressed", "application/vnd.ms-fontobject",
 )
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """不自动跟随 3xx：把重定向响应本身返回，前端可以看到 Location。"""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):   # noqa: D102
-        return None
 
 
 def _is_binary(content_type: str) -> bool:
@@ -64,8 +57,13 @@ def _pick_charset(resp, content_type: str) -> str:
 
 
 def send(method="GET", url="", headers=None, body="", timeout=DEFAULT_TIMEOUT,
-         follow_redirects=True, verify_ssl=True, proxy="") -> dict:
+         follow_redirects=True, verify_ssl=True, proxy="", mode="", no_proxy="",
+         filter_mode="", filter_list="") -> dict:
     """代发一次 HTTP 请求，返回统一结构。
+
+    mode: none 直连 / manual 用 proxy / system 读环境变量；缺省按 manual。
+    no_proxy: 逗号分隔的「不走代理」例外。支持 http/https/socks5/socks5h 代理。
+    filter_mode / filter_list: 网站过滤（off / block 黑名单 / allow 白名单），命中直接拒绝。
 
     成功：{ok, url, status, status_text, headers:[[k,v]], content_type, size,
            truncated, elapsed_ms, redirected, encoding, text, body_b64}
@@ -77,6 +75,12 @@ def send(method="GET", url="", headers=None, body="", timeout=DEFAULT_TIMEOUT,
         return {"error": "仅支持 http / https 链接"}
     if not parsed.netloc:
         return {"error": "URL 不完整，缺少主机名"}
+
+    # 网站过滤：命中直接拒绝，不发任何网络请求
+    blocked, why = proxyutil.site_filtered(parsed.hostname or "", filter_mode, filter_list)
+    if blocked:
+        host = parsed.hostname or url
+        return {"error": "已阻止访问 %s：%s" % (host, why), "blocked": True, "host": host}
 
     method = (method or "GET").upper()
 
@@ -96,16 +100,13 @@ def send(method="GET", url="", headers=None, body="", timeout=DEFAULT_TIMEOUT,
     if body and method not in ("GET", "HEAD"):
         data = body.encode("utf-8") if isinstance(body, str) else bytes(body)
 
-    handlers = []
-    # 显式传 ProxyHandler({})：否则 urllib 会读取环境代理变量，导致「直连」的预期落空
-    handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy} if proxy else {}))
-    handlers.append(urllib.request.HTTPRedirectHandler() if follow_redirects else _NoRedirect())
-    if verify_ssl:
-        handlers.append(urllib.request.HTTPSHandler())
-    else:
-        handlers.append(urllib.request.HTTPSHandler(context=ssl._create_unverified_context()))
-
-    opener = urllib.request.build_opener(*handlers)
+    try:
+        proxy = proxyutil.resolve_proxy(mode, proxy)
+        opener = proxyutil.build_opener(proxy=proxy, no_proxy=no_proxy,
+                                        insecure=not verify_ssl,
+                                        follow_redirects=follow_redirects)
+    except ValueError as e:
+        return {"error": str(e)}
     req = urllib.request.Request(url, data=data, method=method, headers=hd)
 
     t0 = time.time()
@@ -114,7 +115,8 @@ def send(method="GET", url="", headers=None, body="", timeout=DEFAULT_TIMEOUT,
     except urllib.error.HTTPError as e:
         resp = e                    # 4xx / 5xx：协议层正常返回，交给前端展示
     except Exception as e:          # URLError / socket.timeout / ssl.SSLError …
-        return {"error": "请求失败：" + str(e)}
+        # 统一翻成中文提示，前端直接展示，不暴露 urlopen 的英文报错
+        return {"error": proxyutil.friendly_error(e, url)}
 
     try:
         status = getattr(resp, "status", None) or getattr(resp, "code", 0)

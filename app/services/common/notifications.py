@@ -50,7 +50,7 @@ from email.utils import formataddr, formatdate, make_msgid
 from typing import Any, Dict, List, Optional, Tuple
 
 from app import config
-from app.services.common import secret, transport
+from app.services.common import proxyutil, secret, transport
 from app.services.common.store_db import (
     store_conn, store_tx, migrate_json_once, flatten_cfg, unflatten_cfg,
 )
@@ -946,109 +946,11 @@ _TG_TEXT_LIMIT = 4096          # Telegram sendMessage 的正文上限
 # ---------------------------------------------------------------------------
 
 _TG_TIMEOUT = 15
-_PROXY_SCHEMES = ("http", "https", "socks5", "socks5h")
-
-_SOCKS5_ERR = {
-    0x01: "一般性失败", 0x02: "规则不允许连接", 0x03: "网络不可达", 0x04: "主机不可达",
-    0x05: "连接被拒绝", 0x06: "TTL 超时", 0x07: "代理不支持 CONNECT", 0x08: "地址类型不支持",
-}
 
 
 def _normalize_proxy(raw: Any) -> str:
-    """归一化代理地址；空字符串表示直连。写法不对时抛 ValueError（前端会弹提示）。"""
-    s = str(raw or "").strip().rstrip("/")
-    if not s:
-        return ""
-    if "://" not in s:
-        # 只填 host:port 时按 http 代理处理，省得用户记协议名
-        s = "http://" + s
-    u = urllib.parse.urlsplit(s)
-    if u.scheme.lower() not in _PROXY_SCHEMES:
-        raise ValueError("代理地址只支持 http:// https:// socks5:// socks5h:// 开头（当前是 %s://）" % u.scheme)
-    if not u.hostname:
-        raise ValueError("代理地址缺少主机名，应形如 http://127.0.0.1:7890")
-    if not u.port:
-        raise ValueError("代理地址缺少端口，应形如 http://127.0.0.1:7890")
-    return s
-
-
-def _parse_proxy(proxy: str):
-    u = urllib.parse.urlsplit(proxy)
-    scheme = u.scheme.lower()
-    port = u.port or (1080 if scheme.startswith("socks") else 8080)
-    user = urllib.parse.unquote(u.username) if u.username else ""
-    pwd = urllib.parse.unquote(u.password) if u.password else ""
-    return scheme, (u.hostname or ""), port, user, pwd
-
-
-def _recv_exact(sock: socket.socket, n: int) -> bytes:
-    buf = b""
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
-        if not chunk:
-            raise OSError("代理提前关闭了连接")
-        buf += chunk
-    return buf
-
-
-def _socks5_connect(proxy_host: str, proxy_port: int, host: str, port: int,
-                    timeout: Any, username: str = "", password: str = "",
-                    resolve_local: bool = False) -> socket.socket:
-    """极简 SOCKS5 CONNECT 客户端（纯标准库，不依赖 PySocks）。"""
-    t = timeout if isinstance(timeout, (int, float)) else _TG_TIMEOUT
-    s = socket.create_connection((proxy_host, proxy_port), t)
-    s.settimeout(t)
-    try:
-        # 1) 握手：声明支持的认证方式
-        s.sendall(b"\x05\x02\x00\x02" if username else b"\x05\x01\x00")
-        resp = _recv_exact(s, 2)
-        if resp[0] != 0x05:
-            raise OSError("该端口不是 SOCKS5 代理（返回版本 0x%02x）" % resp[0])
-        method = resp[1]
-        if method == 0x02:
-            if not username:
-                raise OSError("代理要求用户名 / 密码认证，请写成 socks5://用户:密码@主机:端口")
-            ub, pb = username.encode("utf-8"), (password or "").encode("utf-8")
-            s.sendall(b"\x01" + bytes([len(ub)]) + ub + bytes([len(pb)]) + pb)
-            if _recv_exact(s, 2)[1] != 0x00:
-                raise OSError("代理认证失败（用户名或密码不正确）")
-        elif method != 0x00:
-            raise OSError("代理不接受「无认证」连接（方式 0x%02x）" % method)
-
-        # 2) CONNECT 请求：默认把域名交给代理解析（等价 socks5h）
-        if resolve_local:
-            info = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
-            if not info:
-                raise OSError("本机无法解析域名 %s" % host)
-            fam, _, _, _, addr = info[0]
-            dst = (b"\x04" + socket.inet_pton(socket.AF_INET6, addr[0])) if fam == socket.AF_INET6 \
-                else (b"\x01" + socket.inet_aton(addr[0]))
-        else:
-            try:
-                hb = host.encode("ascii")
-            except UnicodeEncodeError:
-                hb = host.encode("idna")
-            dst = b"\x03" + bytes([len(hb)]) + hb
-        s.sendall(b"\x05\x01\x00" + dst + struct.pack(">H", int(port)))
-
-        head = _recv_exact(s, 4)
-        if head[1] != 0x00:
-            raise OSError("代理返回：%s（0x%02x）" % (_SOCKS5_ERR.get(head[1], "未知错误"), head[1]))
-        atyp = head[3]
-        if atyp == 0x01:
-            _recv_exact(s, 4)
-        elif atyp == 0x03:
-            _recv_exact(s, _recv_exact(s, 1)[0])
-        elif atyp == 0x04:
-            _recv_exact(s, 16)
-        _recv_exact(s, 2)
-        return s
-    except Exception:
-        try:
-            s.close()
-        except Exception:
-            pass
-        raise
+    """归一化代理地址；空字符串表示直连（实现见 services/common/proxyutil）。"""
+    return proxyutil.normalize_proxy(raw)
 
 
 def _tg_urlopen(req, proxy: str = "", timeout: int = _TG_TIMEOUT):
@@ -1056,52 +958,13 @@ def _tg_urlopen(req, proxy: str = "", timeout: int = _TG_TIMEOUT):
 
     proxy 为空 → 直连（沿用系统环境变量代理）；
     http/https → urllib 自带的 CONNECT 隧道；
-    socks5/socks5h → 用内置的极简 SOCKS5 客户端建立连接。
+    socks5/socks5h → 内置的极简 SOCKS5 客户端（见 services/common/proxyutil）。
     """
     # 兜底归一化：手工改过配置文件（或只填 host:port）时也能正常工作
     proxy = _normalize_proxy(proxy)
     if not proxy:
         return urllib.request.urlopen(req, timeout=timeout)
-
-    scheme, phost, pport, puser, ppass = _parse_proxy(proxy)
-    if scheme in ("http", "https"):
-        opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({"http": proxy, "https": proxy})
-        )
-        return opener.open(req, timeout=timeout)
-
-    import http.client as _http_client
-    # socks5h 把域名交给代理解析；socks5 在本机解析后再连 IP
-    resolve_local = (scheme == "socks5")
-
-    def _connect_socks(conn):
-        conn.sock = _socks5_connect(phost, pport, conn.host, conn.port, conn.timeout,
-                                    puser, ppass, resolve_local)
-        try:
-            conn.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        except OSError:
-            pass
-
-    class _SocksHTTP(_http_client.HTTPConnection):
-        def connect(self):
-            _connect_socks(self)
-
-    class _SocksHTTPS(_http_client.HTTPSConnection):
-        def connect(self):
-            _connect_socks(self)
-            self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
-
-    class _Handler(urllib.request.HTTPHandler):
-        def http_open(self, r):
-            return self.do_open(_SocksHTTP, r)
-
-    class _SHandler(urllib.request.HTTPSHandler):
-        def https_open(self, r):
-            return self.do_open(_SocksHTTPS, r, context=None)
-
-    # ProxyHandler({}) 显式关掉环境变量代理，避免和本设置互相打架
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _Handler(), _SHandler())
-    return opener.open(req, timeout=timeout)
+    return proxyutil.build_opener(proxy).open(req, timeout=timeout)
 
 
 

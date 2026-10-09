@@ -1,7 +1,13 @@
   /* ===== 定时任务（参考青龙面板） ===== */
-  .cron-tools { display: flex; gap: 6px; margin-bottom: 8px; }
+  /* 面板本身不横向滚：按钮行收窄时也不会把刷新按钮挤出面板外 */
+  #cronPanel { overflow-x: hidden; }
+  .cron-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  /* g-btn.block 默认 width:100%，放进 flex 行里会和刷新按钮一起撑破容器，
+     这里改成弹性占满剩余宽度（与 .api-tools 的做法一致） */
+  .cron-tools .g-btn.block { flex: 1 1 auto; width: auto; min-width: 0; margin-top: 0; }
+  .cron-tools .g-ico { flex: none; }
   .cron-list { display: flex; flex-direction: column; gap: 8px; min-width: 0;
-    overflow-y: auto; padding-right: 2px; }
+    overflow-y: auto; overflow-x: hidden; padding-right: 2px; }
   .cron-item { background: #2a2d2e; border: 1px solid #37373d; border-left: 2px solid #6fcf8a;
     border-radius: 4px; padding: 8px; min-width: 0; overflow: hidden; }
   .cron-item.off { border-left-color: #6a6a6a; opacity: .72; }

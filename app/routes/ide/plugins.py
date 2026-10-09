@@ -22,6 +22,7 @@ import re
 import shutil
 import socket
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -32,6 +33,7 @@ from flask import Blueprint, request, jsonify, send_file, send_from_directory
 
 from ... import config
 from ...log import get_logger
+from ...services.common import proxyutil
 from ...services.common.store_db import store_conn, store_tx, migrate_json_once
 
 _log = get_logger()
@@ -388,14 +390,21 @@ def fs_write():
 
 @bp.route("/api/plugins/http", methods=["POST"])
 def http_proxy():
-    """供插件请求「其他网站 / 第三方接口」的服务端转发。
+    """供插件请求「其他网站 / 第三方接口」的服务端转发（也可用于设置页的代理连通性测试）。
 
     两种用法（对应前端 IDE.api.direct / IDE.api.proxy）：
-      - 不代理：proxy 留空 → 由本服务直接发起请求（绕开浏览器 CORS）。
-      - 走代理：proxy 传地址（如 http://127.0.0.1:7890）→ 经由该代理访问目标。
+      - 不代理：proxy 留空 / mode=none → 由本服务直接发起请求（绕开浏览器 CORS）。
+      - 走代理：proxy 传地址（如 http://127.0.0.1:7890）或 mode=system → 经由代理访问目标。
 
-    body: { url, method?, headers?, body?, proxy? }
-    返回: { success, status, headers, text } 或 { error }（带状态码）
+    body: { url, method?, headers?, body?, proxy?, mode?, noProxy?, timeout?, insecure?,
+            filterMode?, filterList? }
+        mode       none / manual / system（缺省按 manual 处理，兼容旧调用）
+        noProxy    逗号分隔的「不走代理」例外（域名后缀 / 通配 / IP）
+        timeout    秒，夹到 1 ~ 120，默认 20
+        insecure   为 true 时跳过 SSL 证书校验
+        filterMode 网站过滤 off / block（黑名单）/ allow（白名单）
+        filterList 过滤名单，逗号分隔，支持域名后缀与通配
+    返回: { success, status, headers, text, elapsed, proxy, mode } 或 { error }（带状态码）
     """
     data = request.get_json(silent=True) or {}
     url = str(data.get("url", "")).strip()
@@ -404,6 +413,16 @@ def http_proxy():
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return jsonify({"error": "仅支持 http/https"}), 400
+
+    # 网站过滤：命中直接拒绝，不发任何网络请求（黑名单 / 白名单见「设置 → 网络/代理」）
+    f_mode = data.get("filterMode", data.get("filter_mode", ""))
+    f_list = data.get("filterList", data.get("filter_list", ""))
+    if proxyutil.normalize_filter_mode(f_mode) != "off":
+        blocked, why = proxyutil.site_filtered(parsed.hostname or "", f_mode, f_list)
+        if blocked:
+            host = parsed.hostname or url
+            return jsonify({"success": False, "blocked": True, "host": host,
+                            "error": "已阻止访问 %s：%s" % (host, why)}), 403
 
     method = str(data.get("method", "GET")).upper()
     headers = data.get("headers") or {}
@@ -414,30 +433,44 @@ def http_proxy():
     if raw_body is not None:
         body_bytes = raw_body.encode("utf-8") if isinstance(raw_body, str) else raw_body
 
-    proxy = str(data.get("proxy", "")).strip()
-    handlers = []
-    if proxy:
-        # 走代理：http 与 https 目标都经由该代理
-        handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
-    # 不传 ProxyHandler 时 urllib 不会读取环境代理变量 → 真正的「直连」
-    handlers.append(urllib.request.HTTPHandler())
-    handlers.append(urllib.request.HTTPSHandler())
-    opener = urllib.request.build_opener(*handlers)
-
-    req = urllib.request.Request(url, data=body_bytes, method=method, headers=dict(headers))
+    # 代理模式：none 直连 / manual 用 proxy / system 读环境变量；缺省视为 manual（兼容旧调用）
+    mode = str(data.get("mode", "") or "").strip().lower()
+    if mode not in ("none", "manual", "system"):
+        mode = "manual"
     try:
-        resp = opener.open(req, timeout=20)
+        proxy = proxyutil.resolve_proxy(mode, data.get("proxy", ""))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    no_proxy = str(data.get("noProxy", data.get("no_proxy", "")) or "").strip()
+    try:
+        timeout = float(data.get("timeout") or 20)
+    except (TypeError, ValueError):
+        timeout = 20
+    timeout = max(1, min(120, timeout))
+    insecure = bool(data.get("insecure"))
+
+    opener = proxyutil.build_opener(proxy=proxy, no_proxy=no_proxy, insecure=insecure)
+    req = urllib.request.Request(url, data=body_bytes, method=method, headers=dict(headers))
+
+    t0 = time.time()
+    meta = {"elapsed": 0, "proxy": proxy, "mode": mode}
+    try:
+        resp = opener.open(req, timeout=timeout)
         charset = resp.headers.get_content_charset() or "utf-8"
         text = resp.read().decode(charset, errors="replace")
+        meta["elapsed"] = int((time.time() - t0) * 1000)
         return jsonify({"success": True, "status": resp.status,
-                        "headers": dict(resp.headers), "text": text})
+                        "headers": dict(resp.headers), "text": text, **meta})
     except urllib.error.HTTPError as e:
         charset = (e.headers.get_content_charset() or "utf-8") if e.headers else "utf-8"
         text = e.read().decode(charset, errors="replace") if e.headers else ""
+        meta["elapsed"] = int((time.time() - t0) * 1000)
         return jsonify({"success": False, "status": e.code,
-                        "error": "HTTP " + str(e.code), "text": text}), e.code
+                        "error": proxyutil.http_status_text(e.code), "text": text, **meta}), e.code
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 502
+        # 网络层异常统一翻成中文，前端直接把 error 展示给用户，不暴露 urlopen 英文报错
+        meta["elapsed"] = int((time.time() - t0) * 1000)
+        return jsonify({"success": False, "error": proxyutil.friendly_error(e, url), **meta}), 502
 
 
 

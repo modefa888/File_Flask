@@ -1322,11 +1322,23 @@
     const sendBtn = tab.host.querySelector(".api-send");
     if (sendBtn) { sendBtn.disabled = true; }
     try {
+      const payload = { method: req.method, url: url, headers: headers,
+        body: (req.method === "GET" || req.method === "HEAD") ? "" : body,
+        timeout: 30, followRedirects: true, verifySsl: true };
+      // 设置 → 网络/代理 里勾了「「API 调试」也走此代理」→ 套用同一套代理与出站策略
+      if (typeof IDE_SETTINGS !== "undefined" && typeof httpProxySettings === "function") {
+        const cfg = httpProxySettings();
+        // 网站过滤属于全局策略：不受「API 调试也走此代理」开关影响，始终生效
+        payload.filterMode = cfg.filterMode; payload.filterList = cfg.filterList;
+        // 代理与出站策略只在开关打开时套用
+        if (IDE_SETTINGS.httpForApiDebug) {
+          payload.mode = cfg.mode; payload.proxy = cfg.proxy; payload.noProxy = cfg.noProxy;
+          payload.timeout = cfg.timeout; payload.verifySsl = !cfg.insecure;
+        }
+      }
       const res = await fetch("/api/http/send", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ method: req.method, url: url, headers: headers,
-          body: (req.method === "GET" || req.method === "HEAD") ? "" : body,
-          timeout: 30, followRedirects: true, verifySsl: true }),
+        body: JSON.stringify(payload),
       });
       const d = await res.json();
       if (d && d.error) throw new Error(d.error);

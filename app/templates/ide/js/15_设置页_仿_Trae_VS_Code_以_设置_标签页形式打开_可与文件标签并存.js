@@ -4,9 +4,37 @@
   const IDE_SETTINGS = Object.assign(
     { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
       showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true,
-      httpProxy: "", theme: "dark", playerTheme: "auto", actOrder: [] },
+      httpProxyMode: "", httpProxy: "", httpNoProxy: "", httpTimeout: 20,
+      httpInsecure: false, httpFilterMode: "", httpFilterList: "",
+      httpForApiDebug: false, httpTestUrl: "",
+      theme: "dark", playerTheme: "auto", actOrder: [] },
     (() => { try { return JSON.parse(localStorage.getItem("ide.settings") || "{}"); } catch (_) { return {}; } })()
   );
+  /* ---------- 网络 / 代理：模式与出站策略（设置页、插件宿主 API、API 调试共用） ---------- */
+  // 代理模式：none 直连 / manual 用自定义地址 / system 跟随系统环境变量。
+  // 未显式设置时按「填了地址就算 manual」推断，兼容旧版本只有 httpProxy 的存储。
+  function httpProxyMode() {
+    const m = IDE_SETTINGS.httpProxyMode;
+    if (m === "none" || m === "manual" || m === "system") return m;
+    return String(IDE_SETTINGS.httpProxy || "").trim() ? "manual" : "none";
+  }
+  // 网站过滤：off 不启用 / block 名单内禁止访问 / allow 仅名单内允许访问
+  function httpFilterMode() {
+    const m = IDE_SETTINGS.httpFilterMode;
+    return (m === "block" || m === "allow") ? m : "off";
+  }
+  function httpProxySettings() {
+    const t = parseInt(IDE_SETTINGS.httpTimeout, 10);
+    return {
+      mode: httpProxyMode(),
+      proxy: String(IDE_SETTINGS.httpProxy || "").trim(),
+      noProxy: String(IDE_SETTINGS.httpNoProxy || "").trim(),
+      timeout: Math.max(1, Math.min(120, isNaN(t) ? 20 : t)),
+      insecure: !!IDE_SETTINGS.httpInsecure,
+      filterMode: httpFilterMode(),
+      filterList: String(IDE_SETTINGS.httpFilterList || "").trim(),
+    };
+  }
   function ideIsLight() { return IDE_SETTINGS.theme === "light"; }                 // 当前是否浅色（白底）主题
   function ideCmTheme() { return ideIsLight() ? "default" : "material-darker"; }   // CodeMirror 主题名
   function saveIdeSettings() {
@@ -256,9 +284,18 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
           '</div>' +
         '</div>' +
 
-        '<div class="set-sec" id="sec-network"><h2 data-kw="网络 代理 proxy 插件 接口 请求">网络 / 代理</h2>' +
-          '<div class="set-desc" data-kw="网络 代理 proxy 插件 接口 请求" style="margin-bottom:10px;">插件通过 <code>IDE.api.proxy()</code> 请求外部网站 / 接口时使用的默认代理。留空 = 服务端直连。支持 http/https 目标经 http 代理转发，例如 <code>http://127.0.0.1:7890</code>。</div>' +
-          '<div class="set-row" data-kw="代理 proxy http 插件 接口 请求"><div class="set-info"><div class="set-label">默认代理地址</div><div class="set-desc">如 http://127.0.0.1:7890，留空 = 直连；插件调用 IDE.api.proxy() 时自动生效</div></div><input type="text" id="setHttpProxy" placeholder="留空 = 直连" autocomplete="off" spellcheck="false" style="width:300px"></div>' +
+        '<div class="set-sec" id="sec-network"><h2 data-kw="网络 代理 proxy 插件 接口 请求 超时 证书 socks 直连 系统 环境变量 网站过滤 黑名单 白名单 屏蔽 拦截 禁止">网络 / 代理</h2>' +
+          '<div class="set-desc" data-kw="网络 代理 proxy 插件 接口 请求 超时 证书 socks 直连 系统 环境变量 网站过滤 黑名单 白名单 屏蔽 拦截 禁止" style="margin-bottom:10px;">插件通过 <code>IDE.api.proxy()</code>、「API 调试」代发请求时使用的代理与出站策略。支持 <code>http</code> / <code>https</code> / <code>socks5</code> / <code>socks5h</code> 代理，可为内网地址设置例外，也可按网站过滤访问。</div>' +
+          '<div class="set-row" data-kw="代理 模式 直连 系统 环境变量 proxy mode direct system"><div class="set-info"><div class="set-label">代理模式</div><div class="set-desc">不使用代理（直连）/ 自定义代理（用下面的地址）/ 跟随系统环境变量（http_proxy、https_proxy、all_proxy）</div></div><select id="setHttpProxyMode"><option value="none">不使用代理（直连）</option><option value="manual">自定义代理</option><option value="system">跟随系统环境变量</option></select></div>' +
+          '<div class="set-row" data-kw="代理 地址 http https socks5 socks5h proxy 认证 用户名 密码"><div class="set-info"><div class="set-label">代理地址</div><div class="set-desc">如 <code>http://127.0.0.1:7890</code>、<code>socks5://127.0.0.1:1080</code>；需认证写成 <code>socks5://用户:密码@主机:端口</code>。仅「自定义代理」模式生效</div></div><input type="text" id="setHttpProxy" placeholder="http://127.0.0.1:7890" autocomplete="off" spellcheck="false" style="width:300px"></div>' +
+          '<div class="set-row" data-kw="不走代理 例外 白名单 内网 no_proxy bypass 直连"><div class="set-info"><div class="set-label">不走代理的地址</div><div class="set-desc">逗号分隔，命中则直连。支持域名后缀（<code>internal</code>）、通配（<code>*.corp.com</code>）与 IP，例如 <code>localhost,127.0.0.1,*.internal</code></div></div><input type="text" id="setHttpNoProxy" placeholder="localhost,127.0.0.1" autocomplete="off" spellcheck="false" style="width:300px"></div>' +
+          '<div class="set-row" data-kw="网站过滤 黑名单 白名单 屏蔽 拦截 禁止 域名 规则 filter blocklist allowlist site"><div class="set-info"><div class="set-label">网站过滤</div><div class="set-desc">对经服务端转发的请求生效（插件 <code>IDE.api.proxy()</code>、「API 调试」、连通性测试）：黑名单 = 名单内禁止访问，白名单 = 只允许访问名单内的网站，命中时直接拒绝、不发请求</div></div><select id="setHttpFilterMode"><option value="off">不启用</option><option value="block">黑名单（禁止访问名单内的网站）</option><option value="allow">白名单（只允许访问名单内的网站）</option></select></div>' +
+          '<div class="set-row" data-kw="网站过滤 名单 域名 后缀 通配 规则 filter list"><div class="set-info"><div class="set-label">过滤名单</div><div class="set-desc">逗号分隔。支持域名后缀（<code>ads.com</code> 同时匹配其子域名）、通配（<code>*.doubleclick.net</code>）与 IP，例如 <code>*.ads.com,doubleclick.net,127.0.0.1</code></div></div><input type="text" id="setHttpFilterList" placeholder="*.ads.com,example.net" autocomplete="off" spellcheck="false" style="width:300px"></div>' +
+          '<div class="set-row" data-kw="超时 timeout 秒 连接 读取"><div class="set-info"><div class="set-label">请求超时（秒）</div><div class="set-desc">出站请求的连接 / 读取超时，1–120</div></div><input type="number" min="1" max="120" id="setHttpTimeout"></div>' +
+          '<div class="set-row" data-kw="ssl 证书 校验 跳过 insecure https 自签名"><div class="set-info"><div class="set-label">跳过 SSL 证书校验</div><div class="set-desc">自签名 / 内网证书时勾选（存在中间人风险，请仅在可信网络下使用）</div></div><input type="checkbox" id="setHttpInsecure"></div>' +
+          '<div class="set-row" data-kw="api 调试 接口 请求 postman 走代理"><div class="set-info"><div class="set-label">「API 调试」也走此代理</div><div class="set-desc">开启后，仿 Postman 的接口调试代发请求同样套用上面的代理与出站策略</div></div><input type="checkbox" id="setHttpForApiDebug"></div>' +
+          '<div class="set-row" data-kw="测试 代理 连通 检测 可用 test"><div class="set-info"><div class="set-label">连通性测试</div><div class="set-desc">用当前设置请求下面的地址，检验代理是否可用</div></div>' +
+            '<div class="net-test-row"><input type="text" class="set-text" id="setHttpTestUrl" placeholder="https://www.google.com/generate_204" autocomplete="off" spellcheck="false"><button class="set-btn" id="setHttpTestBtn">测试</button><span class="net-test-res" id="setHttpTestRes"></span></div></div>' +
         '</div>' +
 
         notifyBuildSectionHTML() +
@@ -269,6 +306,34 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     '</div>';
     const q = (s) => host.querySelector(s);
     const setSearchInput = q(".set-search");
+    // 仅「自定义代理」模式允许编辑代理地址；「网站过滤」关闭时名单置灰
+    function syncProxyAddrUI() {
+      const el = q("#setHttpProxy");
+      if (el) {
+        const manual = httpProxyMode() === "manual";
+        el.disabled = !manual;
+        el.style.opacity = manual ? "" : ".55";
+      }
+      const fl = q("#setHttpFilterList");
+      if (fl) {
+        const on = httpFilterMode() !== "off";
+        fl.disabled = !on;
+        fl.style.opacity = on ? "" : ".55";
+      }
+    }
+    // 网络 / 代理相关的设置项统一落盘，避免漏存某一项
+    function saveProxySettings() {
+      saveIdeSettings();
+      ideSettingSet("httpProxyMode", IDE_SETTINGS.httpProxyMode || "");
+      ideSettingSet("httpProxy", IDE_SETTINGS.httpProxy || "");
+      ideSettingSet("httpNoProxy", IDE_SETTINGS.httpNoProxy || "");
+      ideSettingSet("httpTimeout", httpProxySettings().timeout);
+      ideSettingSet("httpInsecure", !!IDE_SETTINGS.httpInsecure);
+      ideSettingSet("httpFilterMode", IDE_SETTINGS.httpFilterMode || "");
+      ideSettingSet("httpFilterList", IDE_SETTINGS.httpFilterList || "");
+      ideSettingSet("httpForApiDebug", !!IDE_SETTINGS.httpForApiDebug);
+      ideSettingSet("httpTestUrl", IDE_SETTINGS.httpTestUrl || "");
+    }
 
   const SYS_KEYS = [
     ["重命名", "F2"], ["删除", "Delete"],
@@ -336,7 +401,16 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     q("#setGitView").value = IDE_SETTINGS.gitViewMode === "tree" ? "tree" : "list";
     q("#setGitCommitMode").value = IDE_SETTINGS.gitCommitFileMode === "list" ? "list" : "tree";
     q("#setRestoreSession").checked = IDE_SETTINGS.restoreSession !== false;
+    q("#setHttpProxyMode").value = httpProxyMode();
     q("#setHttpProxy").value = IDE_SETTINGS.httpProxy || "";
+    q("#setHttpNoProxy").value = IDE_SETTINGS.httpNoProxy || "";
+    q("#setHttpTimeout").value = httpProxySettings().timeout;
+    q("#setHttpInsecure").checked = !!IDE_SETTINGS.httpInsecure;
+    q("#setHttpFilterMode").value = httpFilterMode();
+    q("#setHttpFilterList").value = IDE_SETTINGS.httpFilterList || "";
+    q("#setHttpForApiDebug").checked = !!IDE_SETTINGS.httpForApiDebug;
+    q("#setHttpTestUrl").value = IDE_SETTINGS.httpTestUrl || "";
+    syncProxyAddrUI();
     q("#setTheme").value = ideIsLight() ? "light" : "dark";
     q("#setPlayerTheme").value = ["light", "dark"].indexOf(IDE_SETTINGS.playerTheme) >= 0 ? IDE_SETTINGS.playerTheme : "auto";
     q("#setFontSize").addEventListener("change", e => {
@@ -397,10 +471,94 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         } catch (_) {}
       }
     });
+    // ---- 网络 / 代理：模式 / 地址 / 例外 / 超时 / 证书 / API 调试 / 连通性测试 ----
+    q("#setHttpProxyMode").addEventListener("change", e => {
+      IDE_SETTINGS.httpProxyMode = e.target.value;
+      saveProxySettings();
+      syncProxyAddrUI();
+      toast(e.target.value === "system" ? "代理已跟随系统环境变量"
+          : e.target.value === "manual" ? "代理已改为自定义地址"
+          : "代理已关闭（直连）", "ok");
+    });
     q("#setHttpProxy").addEventListener("change", e => {
       IDE_SETTINGS.httpProxy = e.target.value.trim();
-      saveIdeSettings(); ideSettingSet("httpProxy", IDE_SETTINGS.httpProxy);
-      toast(IDE_SETTINGS.httpProxy ? "已保存默认代理" : "已设为直连（不使用代理）", "ok");
+      // 填了地址但模式还停在「直连 / 跟随系统」→ 自动切到「自定义代理」，省一步
+      if (IDE_SETTINGS.httpProxy && httpProxyMode() !== "manual") {
+        IDE_SETTINGS.httpProxyMode = "manual";
+        q("#setHttpProxyMode").value = "manual";
+        syncProxyAddrUI();
+      }
+      saveProxySettings();
+      toast(IDE_SETTINGS.httpProxy ? "已保存代理地址" : "已清空代理地址", "ok");
+    });
+    q("#setHttpNoProxy").addEventListener("change", e => {
+      IDE_SETTINGS.httpNoProxy = e.target.value.trim();
+      saveProxySettings();
+      toast("已保存「不走代理」列表", "ok");
+    });
+    q("#setHttpFilterMode").addEventListener("change", e => {
+      IDE_SETTINGS.httpFilterMode = e.target.value;
+      saveProxySettings();
+      syncProxyAddrUI();
+      const hasList = String(IDE_SETTINGS.httpFilterList || "").trim().length > 0;
+      toast(e.target.value === "off" ? "已关闭网站过滤"
+          : e.target.value === "block" ? (hasList ? "已启用黑名单：名单内网站将被拒绝访问"
+                                                  : "已启用黑名单，请填写要屏蔽的网站")
+          : (hasList ? "已启用白名单：只允许访问名单内的网站"
+                     : "已启用白名单，请填写允许访问的网站"),
+          e.target.value === "off" ? "ok" : "warn");
+    });
+    q("#setHttpFilterList").addEventListener("change", e => {
+      IDE_SETTINGS.httpFilterList = e.target.value.trim();
+      saveProxySettings();
+      toast("已保存网站过滤名单", "ok");
+    });
+    q("#setHttpTimeout").addEventListener("change", e => {
+      const v = Math.max(1, Math.min(120, parseInt(e.target.value, 10) || 20));
+      IDE_SETTINGS.httpTimeout = v; e.target.value = v;
+      saveProxySettings();
+    });
+    q("#setHttpInsecure").addEventListener("change", e => {
+      IDE_SETTINGS.httpInsecure = e.target.checked;
+      saveProxySettings();
+      toast(e.target.checked ? "已跳过 SSL 证书校验（请注意安全）" : "已恢复 SSL 证书校验",
+            e.target.checked ? "warn" : "ok");
+    });
+    q("#setHttpForApiDebug").addEventListener("change", e => {
+      IDE_SETTINGS.httpForApiDebug = e.target.checked;
+      saveProxySettings();
+      toast(e.target.checked ? "「API 调试」将使用此代理" : "「API 调试」已恢复直连", "ok");
+    });
+    q("#setHttpTestUrl").addEventListener("change", e => {
+      IDE_SETTINGS.httpTestUrl = e.target.value.trim();
+      saveProxySettings();
+    });
+    q("#setHttpTestBtn").addEventListener("click", () => {
+      const btn = q("#setHttpTestBtn"), res = q("#setHttpTestRes");
+      const url = (q("#setHttpTestUrl").value || "").trim() || "https://www.google.com/generate_204";
+      const cfg = httpProxySettings();
+      res.className = "net-test-res busy"; res.textContent = "测试中…";
+      btn.disabled = true;
+      fetch("/api/plugins/http", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url, method: "GET", mode: cfg.mode, proxy: cfg.proxy,
+                               noProxy: cfg.noProxy, timeout: cfg.timeout, insecure: cfg.insecure,
+                               filterMode: cfg.filterMode, filterList: cfg.filterList }),
+      }).then(r => r.json()).then(d => {
+        btn.disabled = false;
+        if (d && d.success) {
+          res.className = "net-test-res ok";
+          res.textContent = "可用 · HTTP " + d.status +
+            (d.elapsed ? " · " + d.elapsed + " ms" : "") + (d.proxy ? " · 经 " + d.proxy : " · 直连");
+        } else {
+          res.className = "net-test-res bad";
+          res.textContent = "失败：" + ((d && d.error) || "未知错误");
+        }
+      }).catch(err => {
+        btn.disabled = false;
+        res.className = "net-test-res bad";
+        res.textContent = "失败：" + ((err && err.message) || err);
+      });
     });
     // 界面主题：黑夜 / 白天（白色背景）切换，立即生效
     q("#setTheme").addEventListener("change", e => {
@@ -488,7 +646,10 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     q("#setClearRecent").onclick = () => { localStorage.removeItem("ide.recentFiles"); toast("已清除最近打开记录", "ok"); };
     q("#setReset").onclick = () => {
       Object.assign(IDE_SETTINGS, { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
-        showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true, httpProxy: "",
+        showAllFiles: false, gitViewMode: "list", gitCommitFileMode: "tree", restoreSession: true,
+        httpProxyMode: "", httpProxy: "", httpNoProxy: "", httpTimeout: 20, httpInsecure: false,
+        httpFilterMode: "", httpFilterList: "",
+        httpForApiDebug: false, httpTestUrl: "",
         theme: "dark", playerTheme: "auto", actOrder: [] });
       saveIdeSettings(); applyIdeSettings();
       ideSettingSet("actOrder", []); applyActOrder(); actOrderRender();   // 活动栏图标顺序也恢复默认
@@ -496,7 +657,13 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
       q("#setIndent").value = 4; q("#setHints").checked = true;
       q("#setShowAll").checked = false; q("#setGitView").value = "list"; q("#setGitCommitMode").value = "tree";
       q("#setRestoreSession").checked = true;
-      q("#setHttpProxy").value = "";
+      q("#setHttpProxyMode").value = "none";
+      q("#setHttpProxy").value = ""; q("#setHttpNoProxy").value = ""; q("#setHttpTimeout").value = 20;
+      q("#setHttpInsecure").checked = false; q("#setHttpForApiDebug").checked = false;
+      q("#setHttpFilterMode").value = "off"; q("#setHttpFilterList").value = "";
+      q("#setHttpTestUrl").value = ""; q("#setHttpTestRes").textContent = "";
+      q("#setHttpTestRes").className = "net-test-res";
+      syncProxyAddrUI();
       q("#setTheme").value = "dark";
       q("#setPlayerTheme").value = "auto";
       // 同步重置各开关的运行时状态

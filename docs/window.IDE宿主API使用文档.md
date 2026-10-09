@@ -268,10 +268,24 @@ off(); // 取消订阅
 经后端 `/api/plugins/http` **转发**请求（可绕开浏览器 CORS），返回 `{ success, status, headers, text }`。
 - `opts`：`{ method, headers, body }`。
 - `proxy` 优先级：显式 `proxyUrl` > `opts.proxy` > 默认代理配置。
+- 未显式指定代理时，自动套用「设置 → 网络/代理」的模式、例外列表、超时与证书策略；
+  显式传入（含 `direct` 的空串）则严格按参数来，不套用设置。
 - 失败抛 `Error`。
 
 ### `IDE.api.direct(url, opts)` / `IDE.api.proxy(url, opts, proxyUrl?)`
 便捷封装：`direct` 强制不走代理；`proxy` 默认用设置的代理（可显式覆盖）。
+
+代理写法：`http://127.0.0.1:7890`、`https://...`、`socks5://用户:密码@主机:端口`、`socks5h://...`
+（`socks5` 在本机解析域名，`socks5h` 交给代理解析）。代理下可设置「不走代理」的地址后缀 / 通配 / IP。
+
+**网站过滤**（同样在「设置 → 网络/代理」）是一层独立于代理的策略，对经服务端转发的请求一律生效
+（包括 `direct()` 强制直连的请求）：
+- 黑名单：名单内的网站禁止访问；白名单：只允许访问名单内的网站；
+- 名单支持域名后缀（`ads.com` 同时匹配子域名）、通配（`*.ads.com`）与 IP；
+- 命中时后端直接返回 403 + 中文 `error`（`blocked: true`），不会发起任何网络请求。
+
+网络层错误（DNS、连不上、超时、SSL 证书问题等）统一由后端翻成中文提示后放在 `error` 里返回，
+插件可直接把 `error` 展示给用户，不必自己解析 `urlopen` 的英文报错。
 
 ```js
 const d = await IDE.api.proxy("https://api.github.com/zen");

@@ -61,6 +61,13 @@
 .set-btn { background: #2f2f30; color: #dcdcdc; border: 1px solid #3c3c3d; border-radius: 5px;
   font-size: 12px; padding: 5px 12px; cursor: pointer; flex: none; }
 .set-btn:hover { background: #3a3a3b; }
+.set-btn:disabled { opacity: .6; cursor: default; }
+/* 设置 → 网络/代理：代理连通性测试行 */
+.net-test-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.net-test-res { font-size: 12px; color: #9aa4b2; max-width: 320px; word-break: break-all; }
+.net-test-res.ok { color: #7fd88f; }
+.net-test-res.bad { color: #e08a8a; }
+.net-test-res.busy { color: #e2c08a; }
 .set-keys { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 22px; }
 .set-key { display: flex; align-items: center; justify-content: space-between; color: #c8c8c8; font-size: 12.5px;
   background: #242425; border: 1px solid #303031; border-radius: 6px; padding: 8px 12px; }

@@ -378,17 +378,33 @@
     // 返回 { success, status, headers, text }，可绕开浏览器 CORS 限制。
     async requestProxy(url, opts, proxyUrl) {
       opts = opts || {};
+      // 显式传了 proxyUrl / opts.proxy（含 direct() 传的空串）→ 严格按参数来，不套用设置里的模式；
+      // 否则套用「设置 → 网络/代理」里的模式、例外、超时与证书策略。
+      const explicit = (proxyUrl !== undefined) || (opts.proxy !== undefined);
       const proxy = (proxyUrl !== undefined) ? proxyUrl
                   : (opts.proxy !== undefined ? opts.proxy : IDE.api.getProxy());
+      const body = {
+        url: url,
+        method: (opts.method || "GET").toUpperCase(),
+        headers: opts.headers || {},
+        body: opts.body != null ? String(opts.body) : null,
+        proxy: proxy || ""
+      };
+      if (explicit) {
+        body.mode = String(proxy || "").trim() ? "manual" : "none";
+      }
+      if (typeof httpProxySettings === "function") {
+        const cfg = httpProxySettings();
+        // 网站过滤属于全局策略：无论是否显式指定代理都照常生效
+        body.filterMode = cfg.filterMode; body.filterList = cfg.filterList;
+        if (!explicit) {
+          body.mode = cfg.mode; body.noProxy = cfg.noProxy;
+          body.timeout = cfg.timeout; body.insecure = cfg.insecure;
+        }
+      }
       const r = await fetch("/api/plugins/http", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: url,
-          method: (opts.method || "GET").toUpperCase(),
-          headers: opts.headers || {},
-          body: opts.body != null ? String(opts.body) : null,
-          proxy: proxy || ""
-        })
+        body: JSON.stringify(body)
       });
       const d = await r.json();
       if (!d.success) throw new Error(d.error || ("HTTP " + (d.status || r.status)));

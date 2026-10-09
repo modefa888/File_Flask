@@ -7,7 +7,9 @@ POST /api/http/send
       headers: { "Key": "Value", ... },        # 含认证头与 Content-Type
       body,                                    # 字符串（GET / HEAD 忽略）
       timeout?,                                # 秒，默认 30，服务端夹到 1 ~ 120
-      followRedirects?, verifySsl?, proxy?
+      followRedirects?, verifySsl?, proxy?,
+      mode?, noProxy?,                         # 代理模式 / 不走代理例外（设置 → 网络/代理）
+      filterMode?, filterList?                 # 网站过滤：off / block / allow
     }
     resp: {
       ok, url, status, statusText, redirected,
@@ -71,9 +73,15 @@ def api_http_send():
         follow_redirects=bool(data.get("followRedirects", True)),
         verify_ssl=bool(data.get("verifySsl", True)),
         proxy=str(data.get("proxy") or ""),
+        mode=str(data.get("mode") or ""),
+        no_proxy=str(data.get("noProxy") or data.get("no_proxy") or ""),
+        filter_mode=data.get("filterMode") or data.get("filter_mode") or "",
+        filter_list=str(data.get("filterList") or data.get("filter_list") or ""),
     )
     if res.get("error"):
-        return jsonify({"error": res["error"]}), 502
+        # 被网站过滤拦下属于「策略拒绝」，用 403 区分于网络错误（502）
+        return jsonify({"error": res["error"], "blocked": bool(res.get("blocked"))}), \
+            (403 if res.get("blocked") else 502)
 
     _log.info("POST /api/http/send %s %s -> %s", method, url, res.get("status"))
     return jsonify(res)

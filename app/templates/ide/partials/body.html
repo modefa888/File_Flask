@@ -254,20 +254,41 @@
         </div>
       </div>
         <div class="ai-todo-float" id="aiTodoFloat" style="display:none"></div>
+        <button class="ai-tobottom" id="aiToBottom" title="回到最新" style="display:none"><i class="bi bi-arrow-down"></i></button>
       </div>
       <div class="ai-imgs" id="aiImgs" style="display:none"></div>
       <div class="ai-input">
-        <div class="ai-files" id="aiFiles" style="display:none"></div>
-        <div id="aiText" contenteditable="true" spellcheck="false" data-placeholder="向 AI 提问…（Enter 发送，Shift+Enter 换行，可粘贴/添加图片）"></div>
-        <div class="ai-input-acts">
+        <div class="ai-input-tools">
+          <div class="ai-ctx-add-wrap">
+            <button class="ai-hbtn" id="aiCtxAddBtn" title="添加上下文：文件 / 文件夹 / 终端命令等"><i class="bi bi-at"></i></button>
+            <div class="ai-ctx-pop" id="aiCtxPop" style="display:none"></div>
+          </div>
+          <div class="ai-histq-wrap">
+            <button class="ai-hbtn" id="aiHistQBtn" title="历史提问"><i class="bi bi-list-ul"></i></button>
+            <div class="ai-histq-pop" id="aiHistQPop" style="display:none"></div>
+          </div>
           <button class="ai-hbtn" id="aiImgBtn" title="添加图片（支持多选）"><i class="bi bi-image"></i></button>
+          <button class="ai-agent-btn" id="aiAgentBtn" title="智能体模式：让 AI 自动读文件、改文件、执行命令（需在设置里配置接口）"><i class="bi bi-robot"></i></button>
+          <button class="ai-web-btn" id="aiWebBtn" title="联网模式：开启后 AI 会自动搜索网络实时信息"><i class="bi bi-globe"></i></button>
+          <span class="ai-ctx-flag" id="aiCtxFlag" style="display:none"><i class="bi bi-file-earmark-text"></i> 附带当前文件</span>
+        </div>
+        <div class="ai-textbox">
+          <div class="ai-files" id="aiFiles" style="display:none"></div>
+          <div id="aiText" contenteditable="true" spellcheck="false" data-placeholder="向 AI 提问…（Enter 发送，Shift+Enter 换行）"></div>
+        </div>
+        <div class="ai-input-foot">
           <div class="ai-perm-wrap">
             <button class="ai-perm" id="aiPermBtn" title="AI 操作权限"><i class="bi bi-pencil-square"></i><span id="aiPermName">工作区内修改</span><i class="bi bi-chevron-up"></i></button>
             <div class="ai-perm-pop" id="aiPermPop" style="display:none"></div>
           </div>
-          <button class="ai-agent-btn" id="aiAgentBtn" title="智能体模式：让 AI 自动读文件、改文件、执行命令（需在设置里配置接口）"><i class="bi bi-robot"></i><span>智能体</span></button>
-          <button class="ai-web-btn" id="aiWebBtn" title="联网模式：开启后 AI 会自动搜索网络实时信息"><i class="bi bi-globe"></i><span>联网</span></button>
-          <span class="ai-ctx-flag" id="aiCtxFlag" style="display:none"><i class="bi bi-file-earmark-text"></i> 附带当前文件</span>
+          <div class="ai-msel">
+            <button class="ai-msel-btn" id="aiMselBtn" title="选择接口 / 模型"><i class="bi bi-cpu"></i><span id="aiMselName">加载模型…</span><i class="bi bi-chevron-up"></i></button>
+            <div class="ai-msel-pop" id="aiMselPop" style="display:none"></div>
+          </div>
+          <div class="ai-skill-wrap">
+            <button class="ai-skill-btn" id="aiSkillBtn" title="选择 Skill（点击插入到输入框，可同时使用多个）"><i class="bi bi-magic"></i><span id="aiSkillName">技能</span><i class="bi bi-chevron-up"></i></button>
+            <div class="ai-skill-pop" id="aiSkillPop" style="display:none"></div>
+          </div>
           <span class="ai-spacer"></span>
           <span class="ai-ctx-ring" id="aiCtxRing" title="上下文占用">
             <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
@@ -275,16 +296,9 @@
               <circle class="cr-fg" id="aiCtxArc" cx="8" cy="8" r="6.2"></circle>
             </svg>
           </span>
-          <div class="ai-skill-wrap">
-            <button class="ai-skill-btn" id="aiSkillBtn" title="选择 Skill（点击插入到输入框，可同时使用多个）"><i class="bi bi-magic"></i><span id="aiSkillName">技能</span><i class="bi bi-chevron-up"></i></button>
-            <div class="ai-skill-pop" id="aiSkillPop" style="display:none"></div>
-          </div>
-          <div class="ai-msel">
-            <button class="ai-msel-btn" id="aiMselBtn" title="选择接口 / 模型"><i class="bi bi-cpu"></i><span id="aiMselName">加载模型…</span><i class="bi bi-chevron-up"></i></button>
-            <div class="ai-msel-pop" id="aiMselPop" style="display:none"></div>
-          </div>
+          <button class="ai-enhance-btn" id="aiEnhanceBtn" title="增强提示词：让 AI 把输入改写得更清晰、完整"><i class="bi bi-stars"></i></button>
           <button class="ai-send" id="aiStop" title="停止生成" style="display:none"><i class="bi bi-stop-fill"></i></button>
-          <button class="ai-send" id="aiSend" title="发送 (Enter)"><i class="bi bi-send-fill"></i></button>
+          <button class="ai-send" id="aiSend" title="发送 (Enter)"><i class="bi bi-send"></i></button>
         </div>
         <input type="file" id="aiFile" accept="image/png,image/jpeg,image/webp,image/gif" multiple style="display:none">
       </div>

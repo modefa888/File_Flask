@@ -77,11 +77,13 @@ _TOOLS = [
             "required": []}}},
     {"type": "function", "function": {
         "name": "read_file",
-        "description": "读取文本文件内容，可选起止行号",
+        "description": "读取文本文件内容，返回带行号的文本（格式「行号| 内容」）。"
+                       "大文件不要整篇读取：先用 start/end 只读需要的行段（例如 start=50, end=74），"
+                       "或先用 search_files 定位再按行段读取",
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string", "description": "文件路径（相对项目根或绝对路径）"},
-            "start": {"type": "integer", "description": "起始行号（从 1 开始，可选）"},
-            "end": {"type": "integer", "description": "结束行号（含，可选）"}},
+            "start": {"type": "integer", "description": "起始行号（从 1 开始，默认 1）"},
+            "end": {"type": "integer", "description": "结束行号（含，默认文件末行）"}},
             "required": ["path"]}}},
     {"type": "function", "function": {
         "name": "write_file",
@@ -1054,7 +1056,12 @@ def _agent_system(root, perm, skill=None, extra_prompts=None, extra_names=None, 
         "5. 路径优先使用相对项目根的相对路径；\n"
         "6. 每次工具调用后根据真实结果决定下一步，不要编造工具结果；\n"
         "7. 任务完成后用简体中文简洁说明做了什么、涉及哪些文件、有无遗留问题；\n"
-        "8. 需要用户提供信息（如密钥、路径偏好）时直接提问，不要臆造。"
+        "8. 需要用户提供信息（如密钥、路径偏好）时直接提问，不要臆造；\n"
+        "9. 读文件要「按需取段」：先用 search_files 定位，或先读开头几十行了解结构，"
+        "再用 read_file 的 start/end 只读相关行段；超过 300 行的文件不要一次性整篇读取"
+        "（既塞满上下文，也让回答变慢）；\n"
+        "10. 如果用户消息里给出了 `文件名:起-止`（例如 test_cron.py:50-74）或附带了选中代码片段，"
+        "就只读那个区间（read_file 的 start/end），不要从头读到尾。"
         % (root or "/", perm_desc, _TREE_DEPTH, tree or "（无法读取项目结构，请用 list_dir 自行查看）")
     )
     tool_lines = [

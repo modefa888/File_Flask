@@ -678,22 +678,25 @@
     await aiCopyText(text);
     return true;
   }
-  function aiUserMetaHtml(m, mi) {                        // 用户消息：时间 + 复制（含图片）
+  function aiUserMetaHtml(m, mi) {                        // 用户消息：时间 + 复制（含图片）/ 删除
     const t = aiFmtTime(m.ts);
     return '<div class="ai-meta user">' +
-      (t ? '<span>' + t + '</span>' : '') +
+      (t ? '<span class="mi">' + t + '</span>' : '') +
+      '<button class="ai-medit" data-mi="' + mi + '" title="编辑并重新发送"><i class="bi bi-pencil"></i></button>' +
       '<button class="ai-mcopy" data-mi="' + mi + '" title="复制（文字与图片一起复制）"><i class="bi bi-clipboard"></i></button>' +
+      '<button class="ai-mdel" data-mi="' + mi + '" title="删除这条消息"><i class="bi bi-trash3"></i></button>' +
       '</div>';
   }
   function aiMetaHtml(m, mi) {                            // 回复下方元信息行：复制/重答/重试/回撤 + tok · 用时 · 日期
     const parts = [];
-    const tok = Math.ceil((m.text || "").length / 2);
-    if (tok) parts.push('~' + tok + ' tok');
-    if (m.ms) {
+    if (m.ms) {                                          // 耗时
       const s = m.ms / 1000;
-      parts.push('用时 ' + (s >= 60 ? Math.floor(s / 60) + '分' + Math.round(s % 60) + '秒' : s.toFixed(1) + 's'));
+      parts.push('<span class="mi"><i class="bi bi-stopwatch"></i>' +
+        (s >= 60 ? Math.floor(s / 60) + '分' + Math.round(s % 60) + '秒' : s.toFixed(1) + 's') + '</span>');
     }
-    if (m.ts) parts.push(aiFmtTime(m.ts));
+    const tok = Math.ceil((m.text || "").length / 2);
+    if (tok) parts.push('<span class="mi"><i class="bi bi-hash"></i>' + tok + ' tokens</span>');   // 估算值
+    if (m.ts) parts.push('<span class="mi">' + aiFmtTime(m.ts) + '</span>');
     const retryBtn = m.role === "assistant" && m.err
       ? '<button class="ai-mretry" data-mi="' + mi + '" title="重新提问"><i class="bi bi-arrow-repeat"></i></button>'
       : '';
@@ -707,8 +710,9 @@
     return '<div class="ai-meta">' +
       '<button class="ai-mcopy" data-mi="' + mi + '" title="复制回复全文"><i class="bi bi-clipboard"></i></button>' +
       '<button class="ai-mregen" data-mi="' + mi + '" title="删除此回复并重新生成"><i class="bi bi-arrow-clockwise"></i></button>' +
+      '<button class="ai-mdel" data-mi="' + mi + '" title="删除这条消息"><i class="bi bi-trash3"></i></button>' +
       retryBtn + undoBtn +
-      '<span>' + parts.join(' · ') + '</span></div>';
+      '<span class="ai-meta-txt">' + parts.join('') + '</span></div>';
   }
   /* 回撤某条 AI 回复造成的文件改动 */
   async function aiUndoChanges(mi, btn) {

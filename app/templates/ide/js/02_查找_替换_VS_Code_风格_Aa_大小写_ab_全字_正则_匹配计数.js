@@ -1114,6 +1114,9 @@
     items.push({ label: "替换", sc: "Ctrl+H", disabled: ro, act: () => { activate(tab); ffOpen(true); } });
     items.push({ label: "转到行…", sc: "Ctrl+G", act: () => { activate(tab); gotoLine(); } });
     items.push({ divider: true });
+    // 选中代码 → 作为「代码片段芯片」加到 AI 对话输入框（未选中时置灰）
+    items.push({ label: "添加到 AI 对话", disabled: !hasSel, act: () => aiAddSelectionToChat(tab) });
+    items.push({ divider: true });
     items.push({ label: "查找所有引用", sc: "Shift+Alt+F12", disabled: ro,
       act: () => { activate(tab); findReferencesOf(tab); } });
     // 文件级操作：与资源管理器右键菜单能力对齐（编辑器内文件定位/重命名/复制路径/历史）

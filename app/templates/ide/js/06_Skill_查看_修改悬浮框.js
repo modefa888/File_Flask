@@ -230,7 +230,7 @@
       if (!u || u.role !== "user") { toast("找不到原始提问，无法重新生成", "warn"); return; }
       AI.msgs.splice(mi);                                 // 移除该回复及其后所有消息
       aiPersistCurrent(); aiRenderAll();
-      aiSend({ text: u.text || "", imgs: (u.images || []).slice(), skills: (u.skills || []).slice() });
+      aiSend({ text: u.text || "", imgs: (u.images || []).slice(), imgNames: (u.imgNames || []).slice(), skills: (u.skills || []).slice() });
       return;
     }
     const rt = e.target.closest(".ai-mretry");            // 重新提问（保留上下文再试一次）
@@ -239,7 +239,50 @@
       const mi = +rt.dataset.mi;
       const u = AI.msgs[mi - 1];
       if (!u || u.role !== "user") { toast("找不到原始提问，无法重新提问", "warn"); return; }
-      aiSend({ text: u.text || "", imgs: (u.images || []).slice(), skills: (u.skills || []).slice() });
+      aiSend({ text: u.text || "", imgs: (u.images || []).slice(), imgNames: (u.imgNames || []).slice(), skills: (u.skills || []).slice() });
+      return;
+    }
+    const ed = e.target.closest(".ai-medit");             // 编辑用户消息并重新发送：载入输入框并截断其后内容
+    if (ed) {
+      if (AI.busy) { toast("正在回复中，请先停止", "warn"); return; }
+      const mi = +ed.dataset.mi;
+      const m = AI.msgs[mi];
+      if (!m || m.role !== "user") return;
+      AI.msgs.splice(mi);                                 // 移除这条提问及其后的所有内容
+      aiPersistCurrent(); aiRenderAll();
+      const box = $("aiText");
+      if (box) {
+        box.textContent = m.text || m.content || "";
+        box.focus();
+        try {                                              // 光标移到末尾，附件芯片接着正文插入
+          const r = document.createRange();
+          r.selectNodeContents(box); r.collapse(false);
+          const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        } catch (_) {}
+      }
+      // 还原这条消息附带的附件：图片直接用缓存的 dataURL；文件按路径重新读取（选中代码重新选取更直观）
+      AI.pending = [];
+      if (typeof aiRenderPending === "function") aiRenderPending();
+      AI.files = [];
+      (m.images || []).forEach((u, i) => aiInsertImgTag(u, (m.imgNames && m.imgNames[i]) || "Image.png"));
+      (m.files || []).forEach(async (it) => {
+        const f = (typeof it === "string") ? { name: it } : it;
+        if (f.kind === "sel" || !f.path) return;
+        const r = await aiAttachOne(f.path, f.name, f.isDir);
+        if (r.ok) aiInsertFileTag({ path: f.path, name: f.name, isDir: !!f.isDir });
+      });
+      toast("已载入输入框，修改后回车重新发送", "ok");
+      return;
+    }
+    const dl = e.target.closest(".ai-mdel");              // 删除这条消息
+    if (dl) {
+      if (AI.busy) { toast("正在回复中，请先停止", "warn"); return; }
+      const mi = +dl.dataset.mi;
+      if (!AI.msgs[mi]) return;
+      AI.msgs.splice(mi, 1);
+      aiPersistCurrent();
+      aiRenderAll();
+      toast("已删除该消息", "ok");
       return;
     }
     const ins = e.target.closest(".ai-md-ins");
@@ -1134,10 +1177,10 @@
       models: card.querySelector(".ms").value.split(/[，,]/).map(s => s.trim()).filter(Boolean),
     }));
   }
-  function aiRecordStat(ok, ms, chars, ttft, inTok) {     // 每次请求统计（参考 Trae 底部状态栏）
+  function aiRecordStat(ok, ms, chars, ttft, inTok, realIn, realOut) {   // 每次请求统计（参考 Trae 底部状态栏）
     const s = AI.sessions.find(x => x.id === AI.curId);
     if (!s) return;
-    s.stats = s.stats || { total: 0, ok: 0, msSum: 0, msLast: 0, tokLast: 0, ttftSum: 0, ttftN: 0, inSum: 0, outSum: 0 };
+    s.stats = s.stats || { total: 0, ok: 0, msSum: 0, msLast: 0, tokLast: 0, ttftSum: 0, ttftN: 0, inSum: 0, outSum: 0, estN: 0 };
     const st = s.stats;
     st.total++;
     if (ok) st.ok++;
@@ -1145,8 +1188,16 @@
     st.msLast = Math.round(ms || 0);
     st.tokLast = Math.ceil((chars || 0) / 2);
     if (ttft > 0) { st.ttftSum = (st.ttftSum || 0) + ttft; st.ttftN = (st.ttftN || 0) + 1; }
-    st.inSum = (st.inSum || 0) + Math.round(inTok || 0);
-    if (ok) st.outSum = (st.outSum || 0) + st.tokLast;
+    // token：接口给了真实 usage 就用真实值（无「~」），拿不到才按字数估算（estN 记录估算次数，界面据此决定是否加「~」）
+    const exact = (realIn > 0) || (realOut > 0);
+    st.inSum = (st.inSum || 0) + (realIn > 0 ? Math.round(realIn) : Math.round(inTok || 0));
+    st.outSum = (st.outSum || 0) + (realOut > 0 ? Math.round(realOut) : st.tokLast);   // 输出无条件累计：失败/中途停止也可能已产出内容
+    if (exact) {
+      st.realIn = (st.realIn || 0) + Math.round(realIn || 0);
+      st.realOut = (st.realOut || 0) + Math.round(realOut || 0);
+    } else {
+      st.estN = (st.estN || 0) + 1;
+    }
     aiPersistCurrent();
     aiRenderStats();
     aiUpdateCtxRing();   // 上下文占用圆环：显示当前会话累计（inSum + outSum）
@@ -1157,6 +1208,11 @@
     const s = AI.sessions.find(x => x.id === AI.curId);
     const st = s && s.stats;
     const memLen = (s && s.mem || "").length;
+    // 兜底：旧版本仅在「成功」时才累计输出 token，历史会话 outSum 会一直停在 0 —— 按当前会话的回复内容重算一次
+    if (st && st.total && !st.outSum) {
+      const chars = (AI.msgs || []).reduce((a, m) => a + ((m && m.role === "assistant") ? (m.text || "").length : 0), 0);
+      if (chars) st.outSum = Math.ceil(chars / 2);
+    }
     if ((!st || !st.total) && !memLen) { el.style.display = "none"; return; }
     const fmtT = ms => { const v = ms / 1000; return v >= 60 ? Math.floor(v / 60) + "分" + Math.round(v % 60) + "秒" : v.toFixed(1) + "s"; };
     const fmtK = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? (n / 1000).toFixed(1) + "K" : String(Math.round(n));
@@ -1172,7 +1228,8 @@
         const speed = genMs > 0 && st.outSum > 0 ? Math.round(st.outSum / (genMs / 1000)) : 0;
         parts.push('首 token 平均 ' + avgTtft.toFixed(1) + 's' + (speed ? ' · ' + speed + ' tok/s' : ''));
       }
-      parts.push('输入 ~' + fmtK(st.inSum || 0) + ' tok · 输出 ~' + fmtK(st.outSum || 0) + ' tok');
+      const est = (st.estN || 0) > 0;        // 会话里出现过估算轮次 → 数字前加「~」提示不是精确值
+      parts.push('输入 ' + (est ? '~' : '') + fmtK(st.inSum || 0) + ' tok · 输出 ' + (est ? '~' : '') + fmtK(st.outSum || 0) + ' tok');
     }
     if (memLen) parts.push('记忆 ' + memLen + ' 字' + (s.cmp ? '（压缩×' + s.cmp + ' 省~' + (s.savedTok || 0) + ' tok）' : ''));
     el.innerHTML = parts.join(' <span class="ai-sep">|</span> ');
@@ -1250,6 +1307,8 @@
     AI.curId = "s" + Date.now().toString(36);
     AI.msgs = [];
     AI.files = [];                               // 新对话不继承上一个对话附加的文件
+    const _taNew = $("aiText");                  // 输入框里的文件 / 图片芯片一并清掉
+    if (_taNew) Array.from(_taNew.querySelectorAll(".ai-tag-file, .ai-tag-img")).forEach(el => el.remove());
     const s = { id: AI.curId, title: "", time: Date.now(), msgs: [], _dirty: true, _savedPids: new Set() };
     AI.sessions.unshift(s);
     aiSetCur(AI.curId);
@@ -1380,6 +1439,332 @@
     toast(AI.webSearch ? "已开启联网模式" : "已关闭联网模式", "ok");
   });
   aiRenderWebToggle();
+
+  /* 增强提示词：把输入框里的粗略需求交给 AI 改写成清晰、完整、结构化的提示词，再填回输入框 */
+  async function aiEnhancePrompt() {
+    const box = $("aiText");
+    const raw = (box ? box.textContent : "").trim();
+    if (!raw) { toast("先输入你的需求，再点「增强提示词」", "warn"); if (box) box.focus(); return; }
+    if (AI.busy) { toast("AI 正在回复中，请稍候", "warn"); return; }
+    const pick = aiCurrentPick();
+    if (!pick || !pick.prov) { toast("请先在设置里配置 AI 接口", "warn"); return; }
+    const btn = $("aiEnhanceBtn");
+    const html0 = btn ? btn.innerHTML : "";
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split"></i>'; }
+    try {
+      const r = await fetch("/api/ai/chat", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider_id: pick.prov.id,
+          model: pick.model,
+          perm: "readonly",
+          messages: [
+            { role: "system", content: "你是提示词优化助手。把用户给出的粗略需求改写为一条清晰、具体、结构化的提示词：点明目标、关键约束、期望输出与验收标准；保留用户原意，不添加无关内容，也不要去执行任务。只输出改写后的提示词本身。" },
+            { role: "user", content: raw },
+          ],
+        }),
+      });
+      if (!r.ok) { let m = "HTTP " + r.status; try { m = (await r.json()).error || m; } catch (_) {} throw new Error(m); }
+      const reader = r.body.getReader(), dec = new TextDecoder();
+      let buf = "", acc = "";
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const evt = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          for (const line of evt.split("\n")) {
+            if (!line.startsWith("data:")) continue;
+            const data = line.slice(5).trim();
+            if (data === "[DONE]") continue;
+            let obj; try { obj = JSON.parse(data); } catch (_) { continue; }
+            if (obj.error) throw new Error(obj.error);
+            if (obj.delta) acc += obj.delta;
+          }
+        }
+      }
+      const out = acc.replace(/^\s+/, "").trim();
+      if (!out) throw new Error("未返回内容");
+      box.textContent = out;
+      box.focus();
+      try {                                          // 光标移到末尾，方便继续编辑
+        const rng = document.createRange(); rng.selectNodeContents(box); rng.collapse(false);
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(rng);
+      } catch (_) {}
+      toast("已增强提示词", "ok");
+    } catch (e) {
+      toast("增强提示词失败：" + (e.message || e), "err");
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = html0; }
+    }
+  }
+  $("aiEnhanceBtn") && $("aiEnhanceBtn").addEventListener("click", aiEnhancePrompt);
+
+  /* ================================================================
+   * 添加上下文（@ 按钮）：编辑区打开的文件 / 选择文件或文件夹 / 终端输出
+   * 候选项点击即附加到 AI.files（输入框上方的文件小卡片），发送时由 aiBuildContext() 拼进请求。
+   * ================================================================ */
+  let _aiCtxView = "main";          // main 主视图 / browse 目录浏览
+  let _aiCtxDir = "";
+  function aiCtxRow(icon, name, sub, onClick) {
+    const row = document.createElement("div");
+    row.className = "ai-ctx-row";
+    row.innerHTML = '<i class="bi ' + icon + '"></i><span class="m"><span class="t"></span>' +
+      (sub ? '<span class="d"></span>' : "") + '</span>';
+    row.querySelector(".t").textContent = name;
+    if (sub) row.querySelector(".d").textContent = sub;
+    row.addEventListener("click", (e) => { e.stopPropagation(); onClick(); });
+    return row;
+  }
+  function aiCtxSection(title) {
+    const h = document.createElement("div");
+    h.className = "ai-ctx-g";
+    h.textContent = title;
+    return h;
+  }
+  function aiCloseCtxPop() {
+    const p = $("aiCtxPop");
+    if (p) { p.style.display = "none"; p.innerHTML = ""; }
+  }
+  // 附加一项（复用 aiAttachOne 的读取/去重/上限逻辑），成功返回 true
+  async function aiAttachPath(path, name, isDir) {
+    const r = await aiAttachOne(path, name, isDir);
+    if (!r.ok) {
+      if (r.reason === "dup") toast(name + " 已经在对话里了", "info");
+      else if (r.reason === "limit") toast("最多同时附加 " + AI_FILE_LIMIT + " 个文件 / 文件夹", "warn");
+      else if (r.reason === "unsupported") toast("该文件类型不支持作为文本附加：" + name, "warn");
+      else toast(r.msg || "添加失败", "err");
+      return false;
+    }
+    aiRenderFiles();
+    aiInsertFileTag({ path: path, name: name, isDir: !!isDir });   // 芯片直接排进输入框
+    return true;
+  }
+  // 当前终端的输出文本（作为上下文附加）
+  function aiTerminalText() {
+    try {
+      if (typeof curTerm !== "undefined" && curTerm && curTerm.body) {
+        return (curTerm.body.textContent || "").trim();
+      }
+    } catch (_) {}
+    return "";
+  }
+  // 主视图：编辑区打开的文件 → 选择文件/文件夹 → 终端输出 → 已附加
+  function aiBuildCtxPop() {
+    const p = $("aiCtxPop");
+    if (!p) return;
+    if (_aiCtxView === "browse") { aiCtxRenderBrowse(); return; }
+    p.innerHTML = '<div class="ai-ctx-head">添加文件、知识库和其他材料作为上下文</div><div class="ai-ctx-body"></div>';
+    const body = p.querySelector(".ai-ctx-body");
+
+    // 1) 编辑区打开的文件（放最上面）
+    const openTabs = (typeof tabs !== "undefined" ? tabs : []).filter(t => t && !t.diff && t.path);
+    if (openTabs.length) {
+      body.appendChild(aiCtxSection("编辑区打开的文件"));
+      openTabs.slice(0, 10).forEach(t => {
+        body.appendChild(aiCtxRow("bi-file-earmark-text", t.name, t.path, async () => {
+          if (await aiAttachPath(t.path, t.name, false)) { aiBuildCtxPop(); toast("已添加：" + t.name, "ok"); }
+        }));
+      });
+    }
+
+    // 2) 选择文件或文件夹
+    body.appendChild(aiCtxSection("选择"));
+    body.appendChild(aiCtxRow("bi-folder2-open", "File & Folders", "选择文件或文件夹作为上下文", () => {
+      aiCtxOpenBrowse(ROOT || "/");
+    }));
+
+    // 3) 终端输出
+    const termTxt = aiTerminalText();
+    body.appendChild(aiCtxRow("bi-terminal", "Terminal",
+      termTxt ? "添加当前终端的输出内容" : "当前没有终端输出", () => {
+        if (!termTxt) { toast("当前没有终端输出", "warn"); return; }
+        if (!Array.isArray(AI.files)) AI.files = [];
+        if (AI.files.some(f => f.path === "::terminal")) { toast("终端输出已在对话中", "info"); return; }
+        if (AI.files.length >= AI_FILE_LIMIT) { toast("最多同时附加 " + AI_FILE_LIMIT + " 项", "warn"); return; }
+        const text = termTxt.length > 8000 ? "…（前文已截断）\n" + termTxt.slice(-8000) : termTxt;
+        // 虚拟路径用 "::terminal"：不能带 \u0000 —— DOM 属性里的 NUL 会被解析成 U+FFFD，芯片和缓存就对不上了
+        AI.files.push({ path: "::terminal", kind: "term", name: "终端输出", text: text, isDir: false });
+        aiRenderFiles(); aiBuildCtxPop();
+        aiInsertFileTag({ path: "::terminal", name: "终端输出", isDir: false });   // 同样作为芯片排进输入框
+        toast("已添加上下文：终端输出", "ok");
+      }));
+
+    // 4) 已附加（可移除）
+    const files = AI.files || [];
+    body.appendChild(aiCtxSection("已附加 " + files.length + "/" + AI_FILE_LIMIT));
+    if (!files.length) {
+      const e = document.createElement("div");
+      e.className = "ai-ctx-empty";
+      e.textContent = "还没有附加任何内容";
+      body.appendChild(e);
+    } else {
+      files.forEach((f, i) => {
+        const row = aiCtxRow(f.isDir ? "bi-folder2" : "bi-file-earmark-text", f.name, f.path, () => {});
+        const rm = document.createElement("button");
+        rm.className = "rm"; rm.title = "移除"; rm.innerHTML = '<i class="bi bi-x-lg"></i>';
+        rm.addEventListener("click", (e) => {
+          e.stopPropagation();
+          AI.files.splice(i, 1); aiRenderFiles(); aiBuildCtxPop();
+        });
+        row.appendChild(rm);
+        body.appendChild(row);
+      });
+    }
+  }
+  // 进入「选择文件或文件夹」浏览视图
+  function aiCtxOpenBrowse(dir) {
+    _aiCtxView = "browse";
+    _aiCtxDir = dir || "/";
+    aiCtxRenderBrowse();
+  }
+  async function aiCtxRenderBrowse() {
+    const p = $("aiCtxPop");
+    if (!p) return;
+    const dir = _aiCtxDir || "/";
+    p.innerHTML = '<div class="ai-ctx-head">选择文件或文件夹作为上下文（点文件即添加）</div>';
+    const bar = document.createElement("div");
+    bar.className = "ai-ctx-browsebar";
+    const up = document.createElement("button");
+    up.className = "ai-ctx-upbtn"; up.title = "上一级"; up.innerHTML = '<i class="bi bi-arrow-up"></i>';
+    up.addEventListener("click", () => {
+      const clean = dir.replace(/\/+$/, "");
+      const par = clean.split("/").slice(0, -1).join("/") || "/";
+      if (par !== clean) aiCtxOpenBrowse(par);
+    });
+    const pathEl = document.createElement("span");
+    pathEl.className = "ai-ctx-path"; pathEl.textContent = dir; pathEl.title = dir;
+    const addDir = document.createElement("button");
+    addDir.className = "ai-ctx-adddir"; addDir.textContent = "添加此文件夹";
+    addDir.addEventListener("click", async () => {
+      const nm = dir.replace(/\/+$/, "").split("/").pop() || dir;
+      if (await aiAttachPath(dir, nm, true)) { toast("已添加目录结构：" + nm, "ok"); aiCtxRenderBrowse(); }
+    });
+    const back = document.createElement("button");
+    back.className = "ai-ctx-backbtn"; back.textContent = "返回";
+    back.addEventListener("click", () => { _aiCtxView = "main"; aiBuildCtxPop(); });
+    bar.appendChild(up); bar.appendChild(pathEl); bar.appendChild(addDir); bar.appendChild(back);
+    p.appendChild(bar);
+
+    const list = document.createElement("div");
+    list.className = "ai-ctx-list";
+    list.innerHTML = '<div class="ai-ctx-empty">加载中…</div>';
+    p.appendChild(list);
+    try {
+      const d = await (await fetch("/api/files?path=" + encodeURIComponent(dir))).json();
+      if (!list.isConnected) return;
+      if (d.error) { list.innerHTML = '<div class="ai-ctx-empty">无法读取该目录</div>'; return; }
+      const items = (d.items || [])
+        .filter(it => it && !it.name.startsWith("."))
+        .sort((a, b) => (b.is_dir - a.is_dir) || a.name.localeCompare(b.name, "zh"));
+      list.innerHTML = "";
+      if (!items.length) { list.innerHTML = '<div class="ai-ctx-empty">（空目录）</div>'; return; }
+      items.slice(0, 300).forEach(it => {
+        const full = dir.replace(/\/+$/, "") + "/" + it.name;
+        list.appendChild(aiCtxRow(it.is_dir ? "bi-folder2" : "bi-file-earmark-text",
+          it.name, it.is_dir ? "文件夹" : "", async () => {
+            if (it.is_dir) { aiCtxOpenBrowse(full); return; }
+            if (await aiAttachPath(full, it.name, false)) {
+              _aiCtxView = "main"; aiBuildCtxPop(); toast("已添加：" + it.name, "ok");
+            }
+          }));
+      });
+    } catch (_) {
+      if (list.isConnected) list.innerHTML = '<div class="ai-ctx-empty">加载失败</div>';
+    }
+  }
+  function aiOpenCtxPop() {
+    const p = $("aiCtxPop");
+    if (!p) return;
+    if (p.style.display === "block") { aiCloseCtxPop(); return; }
+    _aiCtxView = "main";                             // 每次打开都回到主视图
+    aiBuildCtxPop();
+    p.style.display = "block";
+  }
+  $("aiCtxAddBtn") && $("aiCtxAddBtn").addEventListener("click", (e) => { e.stopPropagation(); aiOpenCtxPop(); });
+  document.addEventListener("click", (e) => {
+    const p = $("aiCtxPop");
+    if (!p || p.style.display !== "block") return;
+    if (e.target.closest && (e.target.closest("#aiCtxPop") || e.target.closest("#aiCtxAddBtn"))) return;
+    aiCloseCtxPop();
+  });
+
+  /* ================================================================
+   * 历史提问：列出当前会话里问过的问题（去重，最新在上）
+   * 点击某条 → 滚动到对话中对应的消息并高亮
+   * ================================================================ */
+  let _aiHistHlTimer = null;
+  function aiHistQuestions() {
+    const out = [], seen = new Set();
+    const msgs = AI.msgs || [];
+    for (let i = msgs.length - 1; i >= 0; i--) {   // 倒序：最新的在最上面，重复问题保留最近一次的下标
+      const m = msgs[i];
+      if (!m || m.role !== "user") continue;
+      const t = (m.text || m.content || "").trim();
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      out.push({ text: t, mi: i });
+    }
+    return out;
+  }
+  // 滚动到第 mi 条消息并短暂高亮（找不到时提示）
+  function aiScrollToMsg(mi) {
+    const box = $("aiMsgs");
+    if (!box) return;
+    const row = box.querySelector('.ai-row[data-mi="' + mi + '"]');
+    if (!row) { toast("这条消息已不在当前对话里", "warn"); return; }
+    try { row.scrollIntoView({ block: "center", behavior: "smooth" }); }
+    catch (_) { try { row.scrollIntoView(); } catch (e) { /* ignore */ } }
+    box.querySelectorAll(".ai-row.ai-hl").forEach(el => el.classList.remove("ai-hl"));
+    row.classList.add("ai-hl");
+    clearTimeout(_aiHistHlTimer);
+    _aiHistHlTimer = setTimeout(() => row.classList.remove("ai-hl"), 2600);
+  }
+  function aiCloseHistQPop() {
+    const p = $("aiHistQPop");
+    if (p) { p.style.display = "none"; p.innerHTML = ""; }
+  }
+  function aiBuildHistQPop() {
+    const p = $("aiHistQPop");
+    if (!p) return;
+    const list = aiHistQuestions();
+    p.innerHTML =
+      '<div class="ai-histq-head"><i class="bi bi-list-ul"></i><span>历史提问</span>' +
+      '<span class="cnt">(' + list.length + ')</span>' +
+      '<button class="x" title="关闭"><i class="bi bi-x-lg"></i></button></div>' +
+      '<div class="ai-histq-body"></div>';
+    p.querySelector(".x").addEventListener("click", (e) => { e.stopPropagation(); aiCloseHistQPop(); });
+    const body = p.querySelector(".ai-histq-body");
+    if (!list.length) {
+      const e = document.createElement("div");
+      e.className = "ai-ctx-empty";
+      e.textContent = "还没有历史提问";
+      body.appendChild(e);
+      return;
+    }
+    list.forEach(item => {
+      const row = document.createElement("div");
+      row.className = "ai-histq-row";
+      row.textContent = item.text;
+      row.title = item.text;
+      row.addEventListener("click", () => { aiCloseHistQPop(); aiScrollToMsg(item.mi); });
+      body.appendChild(row);
+    });
+  }
+  function aiOpenHistQPop() {
+    const p = $("aiHistQPop");
+    if (!p) return;
+    if (p.style.display === "block") { aiCloseHistQPop(); return; }
+    aiBuildHistQPop();
+    p.style.display = "block";
+  }
+  $("aiHistQBtn") && $("aiHistQBtn").addEventListener("click", (e) => { e.stopPropagation(); aiOpenHistQPop(); });
+  document.addEventListener("click", (e) => {
+    const p = $("aiHistQPop");
+    if (!p || p.style.display !== "block") return;
+    if (e.target.closest && (e.target.closest("#aiHistQPop") || e.target.closest("#aiHistQBtn"))) return;
+    aiCloseHistQPop();
+  });
 
   /* 工具调用步骤卡片 */
   function aiRetryHint(ev) {
@@ -1601,9 +1986,11 @@
     return box;
   }
 
-  /* ---------- 任务清单：悬浮固定在消息区底部（参考 Trae / CodeBuddy） ----------
-     常驻在消息区底部的悬浮卡片，显示当前（或最近一次）任务清单，随运行实时更新。
-     它是消息区外层容器的绝对定位子元素，不随消息滚动、也不会被消息清空（aiRenderAll 只重建 #aiMsgs）。 */
+  /* ---------- 消息区底部「任务列表 / 文件列表」并排折叠条（参考 Trae / CodeBuddy） ----------
+     常驻在消息区底部的悬浮卡片，不随消息滚动、也不会被消息清空（aiRenderAll 只重建 #aiMsgs）：
+       · 任务列表：当前（或最近一次）任务清单，随运行实时更新；
+       · 文件列表：本次会话中 AI 改动过的文件汇总，点击直接打开对应文件。 */
+  let _aiDockTodos = null;                 // 当前任务清单（含流式中途增量更新的那一份）
   function aiTodoFloatHost() { return $("aiTodoFloat"); }
   /* 悬浮面板压在消息区底部：给消息区补一段底部内边距，避免最新内容被面板挡住 */
   function aiTodoFloatPad() {
@@ -1612,42 +1999,105 @@
     if (host.style.display === "none" || !host.offsetHeight) { box.style.paddingBottom = ""; return; }
     box.style.paddingBottom = (host.offsetHeight + 12) + "px";
   }
-  function aiTodoFloatShow(todos) {
+  // 汇总本次会话所有回复里改动过的文件（同一路径取最新动作）
+  function aiDockCollectFiles() {
+    const map = new Map();
+    (AI.msgs || []).forEach(m => {
+      if (!m || m.role !== "assistant" || !m.changes) return;
+      m.changes.forEach(c => {
+        const p = (c && c.path) || "";
+        if (!p) return;
+        const act = (c && c.action) || "modified";
+        const old = map.get(p);
+        if (!old || old.action === "modified") map.set(p, { path: p, action: act });
+      });
+    });
+    return [...map.values()];
+  }
+  // 文件列表卡片（可折叠，点条目直接打开文件）
+  function aiDockFilesCard(files) {
+    const card = document.createElement("div");
+    card.className = "ai-todo ai-dock-card";
+    let folded = false;
+    try { folded = localStorage.getItem("ide.aiFilesCollapsed") === "1"; } catch (_) {}
+    card.innerHTML =
+      '<div class="ai-todo-head"><i class="bi ' + (folded ? "bi-chevron-right" : "bi-chevron-down") + ' tw"></i>' +
+      '<span class="ttl">文件列表</span><span class="cnt"></span></div>' +
+      '<div class="ai-todo-body"><div class="ai-dock-list"></div></div>';
+    if (folded) card.classList.add("collapsed");
+    card.querySelector(".cnt").textContent = files.length;
+    const listEl = card.querySelector(".ai-dock-list");
+    files.forEach(f => {
+      const meta = AI_CHG_ICON[f.action] || AI_CHG_ICON.modified;
+      const row = document.createElement("div");
+      row.className = "ai-dock-row " + meta[1];
+      row.title = f.path;
+      row.innerHTML = '<i class="bi ' + meta[0] + '"></i><span class="nm"></span>';
+      row.querySelector(".nm").textContent = f.path;
+      row.addEventListener("click", () => { try { openFile(f.path, f.path.split("/").pop()); } catch (_) {} });
+      listEl.appendChild(row);
+    });
+    card.querySelector(".ai-todo-head").addEventListener("click", () => {
+      const c = !card.classList.contains("collapsed");
+      card.classList.toggle("collapsed", c);
+      card.querySelector(".tw").className = "bi " + (c ? "bi-chevron-right" : "bi-chevron-down") + " tw";
+      try { localStorage.setItem("ide.aiFilesCollapsed", c ? "1" : "0"); } catch (_) {}
+      aiTodoFloatPad();
+    });
+    return card;
+  }
+  // 重新渲染底部 dock：任务卡 + 文件卡并排；两者都没有时整体隐藏
+  function aiDockRender() {
     const host = aiTodoFloatHost();
     if (!host) return;
-    const list = (todos || []).filter(t => t && t.content);
-    if (!list.length) { aiTodoFloatHide(); return; }
-    if (!host._panel || !host._panel.isConnected) {
-      host.innerHTML = "";
-      host._panel = aiTodoBox(list);
-      host.appendChild(host._panel);
-    } else {
-      host._panel.update(list);
+    const todos = (_aiDockTodos || []).filter(t => t && t.content);
+    const files = aiDockCollectFiles();
+    if (!todos.length && !files.length) {
+      host.innerHTML = ""; host._todoPanel = null;
+      host.style.display = "none"; aiTodoFloatPad();
+      return;
     }
-    host._panel.setPaused(!AI.busy);       // 没有正在运行的会话 → 暂停态（不转圈）
+    host.innerHTML = "";
+    const cards = document.createElement("div");
+    cards.className = "ai-dock-cards";
+    if (todos.length) {
+      const t = aiTodoBox(todos);
+      t.classList.add("ai-dock-card");
+      t.setPaused(!AI.busy);        // 没有正在运行的会话 → 暂停态（不转圈）
+      host._todoPanel = t;
+      cards.appendChild(t);
+    } else {
+      host._todoPanel = null;
+    }
+    if (files.length) cards.appendChild(aiDockFilesCard(files));
+    host.appendChild(cards);
     host.style.display = "";
     aiTodoFloatPad();
+  }
+  function aiTodoFloatShow(todos) {
+    const list = (todos || []).filter(t => t && t.content);
+    _aiDockTodos = list.length ? list : null;
+    aiDockRender();
     if (typeof aiScrollToBottom === "function") aiScrollToBottom();
   }
   function aiTodoFloatHide() {
-    const host = aiTodoFloatHost();
-    if (host) host.style.display = "none";
-    aiTodoFloatPad();
+    _aiDockTodos = null;
+    aiDockRender();
   }
   /* 会话停止 / 结束时调用：把「进行中」的项切到暂停态（停止转圈） */
   function aiTodoFloatSetPaused(p) {
     const host = aiTodoFloatHost();
-    if (host && host._panel && host._panel.setPaused) host._panel.setPaused(p);
+    if (host && host._todoPanel && host._todoPanel.setPaused) host._todoPanel.setPaused(p);
   }
-  /* 加载 / 切换会话：取最后一条带任务清单的回复，回放到悬浮面板 */
+  /* 加载 / 切换会话、或一轮结束后：取最后一条带清单的回复回放任务，并刷新文件列表 */
   function aiTodoFloatSyncFromMsgs() {
     let todos = null;
     for (let i = (AI.msgs || []).length - 1; i >= 0; i--) {
       const m = AI.msgs[i];
       if (m && m.role === "assistant" && m.todos && m.todos.length) { todos = m.todos; break; }
     }
-    if (todos) aiTodoFloatShow(todos);
-    else aiTodoFloatHide();
+    _aiDockTodos = todos;
+    aiDockRender();
   }
   window.addEventListener("resize", () => { try { aiTodoFloatPad(); } catch (_) {} });
   (function initTodoFloatObserver() {                  // 面板高度变化（展开/收起、换行）时同步底部留白
@@ -1729,6 +2179,7 @@
     AI._agentTurnChanges = changes;      // 中断时也能拿到已产生的改动，供回撤按钮使用
     AI._agentTurnSteps = steps;          // 中断（手动停止）时也能拿到已完成的步骤，刷新后仍能展开查看
     AI._agentTurnTodos = todos;          // 中断时也能拿到当前任务清单
+    let realIn = 0, realOut = 0;         // 本轮真实 token 用量（后端每轮透传 usage，累加得到总消耗）
     let stepsBox = null;
     const ensureStepsBox = () => {
       if (!stepsBox) {
@@ -1819,6 +2270,11 @@
           } else if (e.type === "subagent") {
             // 子 Agent 实时进度：渲染到对应的 delegate_task 步骤行内
             aiSubStepEvent(rows.get(e.call_id), e.event);
+          } else if (e.type === "usage") {
+            // 每轮真实用量（后端透传 usage）：累加得到本轮总消耗
+            const u = e.usage || {};
+            realIn += +u.prompt_tokens || 0;
+            realOut += +u.completion_tokens || 0;
           } else if (e.type === "error") {
             throw new Error(e.error);
           }
@@ -1827,7 +2283,7 @@
       aiScrollToBottom(true);
     }
     if (stepsBox) { stepsBox._pending = 0; stepsBox._paint(); stepsBox._setCollapsed(true); }  // 本轮结束：自动折叠为一行
-    return { text: text, steps: steps, changes: changes, todos: todos };
+    return { text: text, steps: steps, changes: changes, todos: todos, usage: { in: realIn, out: realOut } };
   }
 
   /* ---------- 附加文件 / 文件夹到对话：资源管理器右键「添加到 AI 对话」→ 输入框上方出现小卡片 ---------- */
@@ -1875,9 +2331,17 @@
   }
   /* 单项附加内核：只做读取 + 入列，不弹提示（提示交给调用方，便于批量时汇总成一条）。
      返回 { ok:true } 或 { ok:false, reason:"dup"|"limit"|"unsupported"|"err", msg } */
+  /* 输入框里被删掉的芯片 → 同步清理 AI.files 缓存（否则再次添加同一文件会被判为重复） */
+  function aiPruneFilesByInput() {
+    const ta = $("aiText");
+    if (!ta || !Array.isArray(AI.files) || !AI.files.length) return;
+    const paths = new Set(Array.from(ta.querySelectorAll(".ai-tag-file")).map(el => el.dataset.path));
+    AI.files = AI.files.filter(f => paths.has(f.path));
+  }
   async function aiAttachOne(path, name, isDir, opts) {
     opts = opts || {};
     if (!Array.isArray(AI.files)) AI.files = [];
+    aiPruneFilesByInput();
     if (AI.files.some(f => f.path === path)) return { ok: false, reason: "dup" };
     if (AI.files.length >= AI_FILE_LIMIT) return { ok: false, reason: "limit" };
     let text = "";
@@ -1898,6 +2362,130 @@
     AI.files.push({ path: path, name: name, text: text, isDir: !!isDir });
     return { ok: true };
   }
+  /* ---------- 输入框内联芯片：文件 / 图片和文字一样排在输入框里（退格键整块删除） ---------- */
+  function aiAttr(s) { return esc(String(s == null ? "" : s)).replace(/"/g, "&quot;"); }
+  // 在输入框光标处插入一段 HTML（与 aiInsertSkillTag 同样的定位逻辑）
+  function aiInsertTagAtCaret(html) {
+    const ta = $("aiText");
+    if (!ta) return;
+    ta.focus();
+    const sel = window.getSelection();
+    let range;
+    if (AI._skillRange && ta.contains(AI._skillRange.commonAncestorContainer)) {
+      range = AI._skillRange.cloneRange();
+      AI._skillRange = null;
+    } else if (sel.rangeCount > 0 && ta.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      range = sel.getRangeAt(0);
+    } else {
+      range = document.createRange();
+      range.selectNodeContents(ta);
+      range.collapse(false);
+    }
+    range.deleteContents();
+    range.insertNode(range.createContextualFragment(html));
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    aiRenderActiveSkills();
+  }
+  // 文件 / 文件夹芯片（内容在添加时已读进 AI.files，发送时按芯片顺序取用）；
+  // 悬浮时图标位置变成「×」，点一下即可把这一项从输入框里删掉
+  function aiInsertFileTag(f) {
+    aiInsertTagAtCaret(
+      '<span class="ai-tag ai-tag-file' + (f.isDir ? " is-dir" : "") + '" contenteditable="false"' +
+      ' data-path="' + aiAttr(f.path) + '" data-name="' + aiAttr(f.name) + '"' +
+      ' data-isdir="' + (f.isDir ? "1" : "0") + '">' +
+      '<button type="button" class="ai-tag-x" title="移除"><i class="bi bi-x"></i></button>' +
+      '<i class="bi ' + (f.isDir ? "bi-folder2" : "bi-file-earmark-text") + ' ai-tag-ic"></i>' +
+      esc(f.name) +
+      '</span>&nbsp;');
+  }
+  // 图片芯片：只显示图标 + 文件名，dataURL 存在 data-src 上（发送时取出）；
+  // 悬浮时图标位置变成「×」，点一下即可把这张图片从输入框里删掉
+  function aiInsertImgTag(src, name) {
+    aiInsertTagAtCaret(
+      '<span class="ai-tag ai-tag-img" contenteditable="false" data-src="' + aiAttr(src) + '"' +
+      ' data-name="' + aiAttr(name) + '">' +
+      '<button type="button" class="ai-tag-x" title="移除此图片"><i class="bi bi-x"></i></button>' +
+      '<i class="bi bi-file-earmark-image ai-tag-ic"></i>' +
+      esc(name) + '</span>&nbsp;');
+  }
+  /* ---------- 编辑器里「选中的代码」→ 芯片（形如 [JS] 文件名:22-30） ---------- */
+  let _aiSelSeq = 0;
+  // 由文件名推断语言标签（用于芯片上的高亮徽标与代码块围栏）
+  function aiLangOf(name) {
+    const ext = String(name || "").split(".").pop().toLowerCase();
+    const m = { js: "JS", mjs: "JS", cjs: "JS", jsx: "JSX", ts: "TS", tsx: "TSX", py: "PY", json: "JSON",
+      html: "HTML", htm: "HTML", css: "CSS", scss: "SCSS", less: "LESS", md: "MD", markdown: "MD",
+      xml: "XML", yml: "YAML", yaml: "YAML", sh: "SH", bash: "SH", zsh: "SH", sql: "SQL", java: "Java",
+      c: "C", h: "C", cpp: "C++", cc: "C++", hpp: "C++", cs: "C#", go: "Go", rs: "RS", php: "PHP",
+      rb: "RB", lua: "Lua", vue: "Vue", ini: "INI", toml: "TOML", conf: "CONF", txt: "TXT" };
+    return m[ext] || (ext ? ext.toUpperCase().slice(0, 4) : "TXT");
+  }
+  // 代码片段芯片：语言徽标 + 文件名:起止行（内容存在 AI.files 里，芯片只带路径）
+  function aiInsertSelTag(s) {
+    aiInsertTagAtCaret(
+      '<span class="ai-tag ai-tag-file ai-tag-sel" contenteditable="false"' +
+      ' data-path="' + aiAttr(s.path) + '" data-name="' + aiAttr(s.name) + '" data-isdir="0">' +
+      '<button type="button" class="ai-tag-x" title="移除"><i class="bi bi-x"></i></button>' +
+      '<span class="ai-tag-lang ai-tag-ic">' + esc(s.lang) + '</span>' +
+      esc(s.name) +
+      '</span>&nbsp;');
+  }
+  // 编辑器右键「添加到 AI 对话」：把当前选中的代码作为一段上下文加进来
+  function aiAddSelectionToChat(tab) {
+    const cm = tab && tab.cm;
+    if (!cm) { toast("当前编辑器不支持取选中内容", "warn"); return; }
+    const code = cm.getSelection();
+    if (!code || !code.trim()) { toast("请先在编辑器里选中一段代码", "info"); return; }
+    let lineInfo = "";                                 // 文件名:起-止（单行只写一个行号）
+    const rs = cm.listSelections();
+    if (rs && rs.length) {
+      const s = Math.min(rs[0].anchor.line, rs[0].head.line) + 1;
+      const e = Math.max(rs[0].anchor.line, rs[0].head.line) + 1;
+      lineInfo = (s === e) ? (":" + s) : (":" + s + "-" + e);
+    }
+    if (!Array.isArray(AI.files)) AI.files = [];
+    if (AI.files.length >= AI_FILE_LIMIT) { toast("最多同时附加 " + AI_FILE_LIMIT + " 项", "warn"); return; }
+    const name = tab.name + lineInfo;
+    const lang = aiLangOf(tab.name);
+    const path = "sel#" + (++_aiSelSeq);               // 虚拟路径（不会与真实文件路径冲突）
+    AI.files.push({ path: path, kind: "sel", name: name, lang: lang, text: code, isDir: false });
+    toggleAI(true);                                    // 面板没打开时自动打开
+    aiRenderFiles();
+    aiInsertSelTag({ path: path, name: name, lang: lang });
+    toast("已添加选中代码：" + name, "ok");
+  }
+  /* 读取输入框：纯文字（不含芯片自带的文字）+ 文件芯片 + 图片芯片 */
+  function aiReadInputBox() {
+    const box = $("aiText");
+    const out = { text: "", files: [], imgs: [] };
+    if (!box) return out;
+    const buf = { s: "" };
+    const walk = (parent) => {
+      parent.childNodes.forEach(n => {
+        if (n.nodeType === 3) { buf.s += n.nodeValue; return; }
+        if (n.nodeType !== 1) return;
+        const el = n;
+        if (el.classList.contains("ai-tag-file")) {
+          out.files.push({ path: el.dataset.path, name: el.dataset.name, isDir: el.dataset.isdir === "1" });
+          return;
+        }
+        if (el.classList.contains("ai-tag-img")) {
+          out.imgs.push({ src: el.dataset.src, name: el.dataset.name || "Image.png" });
+          return;
+        }
+        if (el.tagName === "BR") { buf.s += "\n"; return; }
+        const isBlock = el.tagName === "DIV" || el.tagName === "P";
+        if (isBlock && buf.s && !buf.s.endsWith("\n")) buf.s += "\n";
+        walk(el);
+        if (isBlock && !buf.s.endsWith("\n")) buf.s += "\n";
+      });
+    };
+    walk(box);
+    out.text = buf.s.replace(/\u00a0/g, " ").replace(/\n{3,}/g, "\n\n").replace(/^\s+|\s+$/g, "");
+    return out;
+  }
   async function aiAddFileFromTree(path, name, isDir) {
     const r = await aiAttachOne(path, name, isDir);
     if (!r.ok) {
@@ -1910,7 +2498,7 @@
     }
     toggleAI(true);                            // 面板没打开时自动打开
     aiRenderFiles();
-    const t = $("aiText"); if (t) t.focus();   // 焦点给输入框，直接接着提问
+    aiInsertFileTag({ path: path, name: name, isDir: !!isDir });   // 直接插进输入框，和文字排在一起
     toast((isDir ? "已添加目录结构：" : "已添加到 AI 对话：") + name, "ok");
   }
   /* 多选批量添加：把选中的文件 / 文件夹一次性加进对话。
@@ -1925,17 +2513,25 @@
     let hitLimit = false;
     for (const it of list) {
       const r = await aiAttachOne(it.path, it.name, it.isDir, { quiet: true });
-      if (r.ok) { added.push(!!it.isDir); continue; }
+      if (r.ok) { added.push(it); continue; }
       if (r.reason === "dup") { dup.push(it.name); continue; }
       if (r.reason === "limit") { hitLimit = true; break; }   // 已达上限，后面的都放不下，不必再读
       bad.push(r.msg || (it.name + "（不支持的类型）"));   // r.msg 里已含条目名，不再重复拼接
     }
     if (added.length) {
       aiRenderFiles();
-      const t = $("aiText"); if (t) t.focus();   // 焦点给输入框，直接接着提问
+      // 批量插进输入框：一次插入，保持原顺序（和文字排在一起）
+      aiInsertTagAtCaret(added.map(it =>
+        '<span class="ai-tag ai-tag-file' + (it.isDir ? " is-dir" : "") + '" contenteditable="false"' +
+        ' data-path="' + aiAttr(it.path) + '" data-name="' + aiAttr(it.name) + '"' +
+        ' data-isdir="' + (it.isDir ? "1" : "0") + '">' +
+        '<button type="button" class="ai-tag-x" title="移除"><i class="bi bi-x"></i></button>' +
+        '<i class="bi ' + (it.isDir ? "bi-folder2" : "bi-file-earmark-text") + ' ai-tag-ic"></i>' +
+        esc(it.name) +
+        '</span>&nbsp;').join(""));
     }
     if (bad.length) console.warn("[AI] 以下条目未能加入对话：", bad);
-    const nDir = added.filter(Boolean).length, nFile = added.length - nDir;
+    const nDir = added.filter(x => x.isDir).length, nFile = added.length - nDir;
     const parts = [];
     if (nFile) parts.push(nFile + " 个文件");
     if (nDir) parts.push(nDir + " 个目录结构");
@@ -1951,30 +2547,9 @@
     toast(msg, added.length ? "ok" : "warn");
   }
   function aiRenderFiles() {
+    // 文件芯片已改为直接排在输入框内（见 aiInsertFileTag）：输入框上方的旧卡片区不再渲染
     const box = $("aiFiles");
-    if (!box) return;
-    const list = AI.files || [];
-    box.style.display = list.length ? "" : "none";
-    box.innerHTML = "";
-    list.forEach((f, i) => {
-      const chip = document.createElement("span");
-      chip.className = "ai-file-chip" + (f.isDir ? " is-dir" : "");
-      chip.title = f.path + (f.isDir ? "（目录结构，点击在资源管理器中定位）" : "（点击打开，× 移除）");
-      chip.innerHTML = '<i class="bi ' + (f.isDir ? "bi-folder2" : "bi-file-earmark-text") +
-        '"></i><span class="nm"></span>';
-      chip.querySelector(".nm").textContent = f.name;
-      const rm = document.createElement("button");
-      rm.className = "rm"; rm.title = "从对话中移除"; rm.textContent = "×";
-      rm.addEventListener("click", (e) => { e.stopPropagation(); AI.files.splice(i, 1); aiRenderFiles(); });
-      chip.appendChild(rm);
-      // 文件夹没有可打开的编辑器标签，改成在资源管理器里展开定位
-      chip.addEventListener("click", () => {
-        if (!f.isDir) { openFile(f.path, f.name); return; }
-        if (typeof revealInTree === "function") revealInTree(f.path);
-      });
-      box.appendChild(chip);
-    });
-    // 卡片出现/消失会改变输入框高度：消息列表原本贴底时保持贴底，避免最后一条被挤出可视区
+    if (box) { box.style.display = "none"; box.innerHTML = ""; }
     aiScrollToBottom();
   }
   function aiBuildContext() {
@@ -1984,8 +2559,16 @@
       if (text.length > 6000) text = text.slice(0, 6000) + "\n…（内容过长已截断）";
       out += "\n\n【参考：当前打开文件 " + active.name + "】\n```\n" + text + "\n```";
     }
-    (AI.files || []).forEach(f => {            // 从资源管理器附加进来的文件 / 文件夹
+    (AI.files || []).forEach(f => {            // 附加进来的文件 / 文件夹 / 选中代码 / 终端输出
       if (!f.text) return;
+      if (f.kind === "sel") {                  // 编辑器里选中的代码片段（形如 文件名:22-30）
+        out += "\n\n【参考：选中代码 " + f.name + "】\n```" + (f.lang || "") + "\n" + f.text + "\n```";
+        return;
+      }
+      if (f.kind === "term") {                 // 终端输出
+        out += "\n\n【参考：终端输出】\n```\n" + f.text + "\n```";
+        return;
+      }
       out += "\n\n【参考：" + (f.isDir ? "目录结构 " : "文件 ") + relPathOf(f.path) +
         "】\n```\n" + f.text + "\n```";
     });
@@ -2009,13 +2592,23 @@
       im.src = dataUrl;
     });
   }
+  function aiCountImgTags() {                            // 输入框里已有的图片芯片数（上限 6 张）
+    const ta = $("aiText");
+    return ta ? ta.querySelectorAll(".ai-tag-img").length : 0;
+  }
   function aiAddImgs(fileList) {
     const files = Array.from(fileList || []).filter(f => f.type && f.type.startsWith("image/"));
+    if (!files.length) return;
+    let n = aiCountImgTags();
     files.forEach(f => {
-      if (AI.pending.length >= 6) { toast("最多同时附带 6 张图片", "warn"); return; }
+      if (n >= 6) { toast("最多同时附带 6 张图片", "warn"); return; }
+      n++;
       const rd = new FileReader();
       rd.onload = () => {
-        aiMaybeDownscale(rd.result).then(u => { AI.pending.push(u); aiRenderPending(); });
+        aiMaybeDownscale(rd.result).then(u => {
+          aiInsertImgTag(u, f.name || "Image.png");      // 图片也作为芯片插进输入框，与文字混排
+          const t = $("aiText"); if (t) t.focus();
+        });
       };
       rd.readAsDataURL(f);
     });
@@ -2044,19 +2637,63 @@
       document.execCommand("insertText", false, txt);
     }
   });
+  /* ---------- 图片芯片悬浮预览：鼠标停在输入框里的图片芯片上 → 弹出一张小图 ---------- */
+  let _aiImgTip = null;
+  function aiHideImgTip() {
+    if (_aiImgTip) { _aiImgTip.remove(); _aiImgTip = null; }
+  }
+  function aiShowImgTip(src, anchor) {
+    if (!src) return;
+    if (_aiImgTip && _aiImgTip._anchor === anchor) return;    // 同一张芯片不重复弹
+    aiHideImgTip();
+    const d = document.createElement("div");
+    d.className = "ai-img-hover";
+    const im = document.createElement("img");
+    im.src = src;
+    im.alt = "图片预览";
+    d.appendChild(im);
+    d._anchor = anchor;
+    document.body.appendChild(d);
+    const r = anchor.getBoundingClientRect();
+    const w = d.offsetWidth, h = d.offsetHeight;
+    let left = r.left + r.width / 2 - w / 2;
+    left = Math.max(8, Math.min(window.innerWidth - w - 8, left));
+    let top = r.top - h - 8;                                  // 默认浮在芯片上方
+    if (top < 8) top = Math.min(window.innerHeight - h - 8, r.bottom + 8);   // 上方放不下就放到下方
+    d.style.left = Math.round(left) + "px";
+    d.style.top = Math.round(top) + "px";
+    _aiImgTip = d;
+  }
+  $("aiText").addEventListener("mouseover", (e) => {
+    const tag = e.target.closest(".ai-tag-img");
+    if (!tag || !e.currentTarget.contains(tag)) return;
+    aiShowImgTip(tag.dataset.src, tag);
+  });
+  $("aiText").addEventListener("mouseout", (e) => {
+    const tag = e.target.closest(".ai-tag-img");
+    if (!tag) return;
+    if (e.relatedTarget && tag.contains(e.relatedTarget)) return;   // 芯片内部移动不算离开
+    aiHideImgTip();
+  });
+  $("aiText").addEventListener("scroll", aiHideImgTip);
+  document.addEventListener("scroll", aiHideImgTip, true);   // 面板 / 页面滚动时收起
+  window.addEventListener("blur", aiHideImgTip);
 
   async function aiSend(reuse) {                          // reuse={text,imgs}：重新生成，不重复 push 用户消息
     if (AI.busy) return;
     let rawText, text, imgs, skillIds = [];
+    let imgNamesOfTurn = [];                        // 图片芯片的真实文件名（消息里按原名显示）
     if (reuse) {
       rawText = reuse.text || "";
       text = rawText;
       imgs = (reuse.imgs || []).slice();
+      imgNamesOfTurn = (reuse.imgNames || []).slice();
       skillIds = (reuse.skills || []).slice();      // 重新生成时沿用原消息的 Skill
     }
     else {
       const ta = $("aiText");
-      rawText = ta.innerText || "";
+      const box = aiReadInputBox();               // 文字 + 文件芯片 + 图片芯片（芯片自带的文字不计入正文）
+      rawText = box.text;
       const parsed = aiParseSkillTags(rawText);
       skillIds = parsed.ids;
       // 输入框里的 @技能 标签带 data-id：改名后也能准确识别
@@ -2065,8 +2702,12 @@
         if (id && !skillIds.includes(id)) skillIds.push(id);
       });
       text = parsed.text;
-      imgs = AI.pending.slice();
-      if (!text && !imgs.length) return;
+      // 文件芯片：按芯片顺序重建本轮要带的文件（内容在添加时已读进 AI.files 缓存）
+      const cached = AI.files || [];
+      AI.files = box.files.map(f => cached.find(x => x.path === f.path)).filter(Boolean);
+      imgs = box.imgs.map(x => x.src);            // 图片芯片：取出各自的 dataURL
+      imgNamesOfTurn = box.imgs.map(x => x.name || "Image.png");
+      if (!text && !imgs.length && !AI.files.length) return;
     }
     await aiLoadCfg();
     const pick = aiCurrentPick();
@@ -2081,17 +2722,21 @@
     let userMsgForPending = null;
     if (!reuse) {
       const userText = text || (imgs.length ? "（见图）" : "");
-      const attFiles = (AI.files || []).map(f => f.isDir ? f.name + "/" : f.name);   // 本条消息附带的文件 / 文件夹（消息上方显示）
+      // 本条消息附带的文件 / 文件夹 / 选中代码：与输入框芯片同序同形，显示在消息上方
+      const attFiles = (AI.files || []).map(f => ({ name: f.name, path: f.path,
+                                                    isDir: !!f.isDir, kind: f.kind || "", lang: f.lang || "" }));
       const userMsg = { role: "user", pid: aiNewPid(), text: userText, ts: Date.now(),
                         imgs: imgs.length || undefined,
                         images: imgs.length ? imgs : undefined,
+                        imgNames: imgNamesOfTurn.length ? imgNamesOfTurn : undefined,
                         files: attFiles.length ? attFiles : undefined,
                         skills: skillIds.length ? skillIds : undefined };
       AI.msgs.push(userMsg);
       userMsgForPending = { text: userText, ts: userMsg.ts, files: attFiles, skills: skillIds };
-      const ub = aiBubble("user", userText, "", imgs, false, attFiles);
+      const ub = aiBubble("user", userText, "", imgs, false, attFiles, imgNamesOfTurn);
       ub.parentElement.insertAdjacentHTML("beforeend", aiUserMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
       $("aiText").innerHTML = "";
+      aiHideImgTip();                            // 输入框清空（芯片一并消失）→ 收起图片预览
       AI.pending = [];
       aiRenderPending();
       aiRenderActiveSkills();
@@ -2213,10 +2858,25 @@
     const bodyB = aiBubble("assistant", "", "", null, true);
     bodyB.innerHTML = '<span class="ai-waiting">思考中<span class="d"></span><span class="d"></span><span class="d"></span></span>';
     let acc = "", thinking = "", ttft = 0;                // ttft：首 token 到达耗时
+    let realIn = 0, realOut = 0;                          // 后端透传的真实 token 用量（拿不到时退回字数估算）
     let turnChanges = [];                                 // 本轮 AI 产生的文件改动 id（供回撤）
     let turnSteps = [];                                   // 本轮工具步骤（普通对话路径用；智能体路径见 AI._agentTurnSteps）
     let turnTodos = [];                                   // 本轮任务清单（todo_write）
     let turnDone = false;                                 // 回复已入列：之后收尾出错不再覆盖/重复插入
+    /* 流式正文渲染节流：一帧最多重渲染一次（原本每收到一批 delta 就整段重解析 Markdown，密集流下易掉帧） */
+    let _spPending = false, _spLast = "", _spAlive = true;
+    const paintStream = () => {
+      _spPending = false;
+      if (!_spAlive) return;
+      const t = acc.replace(/^\s+/, "");
+      if (t === _spLast) return;                          // 文本没变就不重复渲染
+      _spLast = t;
+      bodyB.innerHTML = aiMd(t) + '<span class="ai-cursor"></span>';
+    };
+    const schedulePaintStream = () => {
+      if (_spAlive && !_spPending) { _spPending = true; requestAnimationFrame(paintStream); }
+    };
+    const stopPaintStream = () => { _spAlive = false; };   // 结束/出错时停掉排队中的渲染，避免覆盖最终结果
     AI._agentTurnChanges = [];
     AI._agentTurnSteps = [];                              // 由 aiRunAgent 填充：手动停止时保存步骤用
     AI._agentTurnTodos = [];                              // 由 aiRunAgent 填充：手动停止时保存任务清单用
@@ -2252,8 +2912,9 @@
           ],
         }, bodyB, (t) => {
           acc = t;
-          bodyB.innerHTML = aiMd(t) + '<span class="ai-cursor"></span>';
+          schedulePaintStream();
         });
+        stopPaintStream();                              // 结束：停掉排队中的流式重渲染
         acc = res.text || "";
         turnChanges = (res.changes && res.changes.length) ? res.changes : (AI._agentTurnChanges || []);
         turnTodos = (res.todos && res.todos.length) ? res.todos : (AI._agentTurnTodos || []);
@@ -2267,7 +2928,8 @@
         turnDone = true;                                // 回复已落定：后续收尾出错只提示，不覆盖
         aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
         aiPersistCurrent(); aiRenderConv();
-        aiRecordStat(true, aMeta.ms, acc.length, ttft, inTok);
+        aiTodoFloatSyncFromMsgs();                      // 刷新底部「任务列表 / 文件列表」
+        aiRecordStat(true, aMeta.ms, acc.length, ttft, inTok, (res.usage || {}).in, (res.usage || {}).out);
         return;
       }
       const r = await fetch("/api/ai/chat", {
@@ -2308,6 +2970,12 @@
               continue;
             }
             if (obj.error) throw new Error(obj.error);
+            if (obj.type === "usage") {                       // 后端透传的真实用量（累计值）
+              const u = obj.usage || {};
+              realIn = +u.prompt_tokens || 0;
+              realOut = +u.completion_tokens || 0;
+              continue;
+            }
             if (obj.type === "step") {
               chatStepMeta.set(obj.call_id, { tool: obj.tool, args: obj.args });
               const box = ensureChatSteps();
@@ -2357,10 +3025,11 @@
           thinkB.parentElement.style.display = "";
           thinkB.textContent = thinking;
         }
-        bodyB.innerHTML = aiMd(acc.replace(/^\s+/, "")) + '<span class="ai-cursor"></span>';   // 边流边渲染 MD
+        schedulePaintStream();                          // 边流边渲染 MD（每帧最多一次）
         aiScrollToBottom();
       }
       if (chatStepsBox) { chatStepsBox._pending = 0; chatStepsBox._paint(); chatStepsBox._setCollapsed(true); }  // 本轮结束：自动折叠为一行
+      stopPaintStream();
       const out = acc.replace(/^\s+/, "");
       bodyB.innerHTML = aiMd(out) || (chatSteps.length ? "（已完成工具调用）" : "（空回复）");
       thinkB.parentElement.style.display = thinking.trim() ? "" : "none";
@@ -2373,8 +3042,10 @@
       turnDone = true;                                  // 回复已落定：后续收尾出错只提示，不覆盖
       aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
       aiPersistCurrent(); aiRenderConv();
-      aiRecordStat(true, performance.now() - t0, out.length, ttft, inTok);
+      aiTodoFloatSyncFromMsgs();                        // 刷新底部「任务列表 / 文件列表」
+      aiRecordStat(true, performance.now() - t0, out.length, ttft, inTok, realIn, realOut);
     } catch (e) {
+      stopPaintStream();
       console.error("AI 回复处理出错：", e);
       if (turnDone) {                                   // 回复已成功入列：只提示，不覆盖已完成的回复
         toast("回复已完成，但界面更新出错：" + (e.message || e), "warn");
@@ -2400,7 +3071,7 @@
             aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
             aiPersistCurrent(); aiRenderConv();
           }
-          aiRecordStat(false, performance.now() - t0, acc.length, ttft, inTok);
+          aiRecordStat(!!out, performance.now() - t0, acc.length, ttft, inTok, realIn, realOut);   // 用户主动停止：有内容算成功，完全空回复才算失败
         };
         if (ab0.length || !AI._agentRunId) {
           finalizeAbort(ab0);
@@ -2428,7 +3099,7 @@
         bodyB.insertAdjacentHTML("afterend", aiMetaHtml(AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1));
         aiAppendChangesBox(bodyB.parentElement, AI.msgs[AI.msgs.length - 1], AI.msgs.length - 1);
         aiPersistCurrent(); aiRenderConv();
-        aiRecordStat(false, performance.now() - t0, 0, ttft, inTok);
+        aiRecordStat(false, performance.now() - t0, acc.replace(/^\s+/, "").length, ttft, inTok, realIn, realOut);
       }
     } finally {
       AI.busy = false; AI.ctrl = null;
@@ -2493,11 +3164,19 @@
       e.preventDefault(); aiSend();
     }
   });
+  // 文件 / 图片芯片上的「×」：按下即移除（阻止默认行为，避免把输入框焦点抢走、光标乱跳）
+  $("aiText").addEventListener("mousedown", (e) => {
+    const x = e.target.closest(".ai-tag-x");
+    if (!x) return;
+    e.preventDefault(); e.stopPropagation();
+    const chip = x.closest(".ai-tag-file, .ai-tag-img");
+    if (chip) { aiHideImgTip(); chip.remove(); }
+  });
   $("aiText").addEventListener("click", (e) => {          // 输入框里的 @技能 标签：点击查看/修改
     const tag = e.target.closest(".ai-tag");
     if (tag && tag.dataset.id) { e.preventDefault(); aiOpenSkillEditPop(tag.dataset.id, tag); }
   });
-  $("aiText").addEventListener("input", () => aiRenderActiveSkills());   // 输入变化时刷新标题栏激活技能
+  $("aiText").addEventListener("input", () => { aiRenderActiveSkills(); aiHideImgTip(); });   // 输入变化时刷新激活技能并收起图片预览
   // 标题栏「当前激活技能」：点击展开列表，点外部关闭
   $("aiActiveSkillsBtn").addEventListener("click", (e) => {
     e.stopPropagation();

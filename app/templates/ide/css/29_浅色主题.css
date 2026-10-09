@@ -795,11 +795,46 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ai-hero-list li { color: #55595f; }
 :where(html.theme-light) .ai-hero-list li::before { background: #b9b9bf; }
 :where(html.theme-light) .ai-hero-tip { color: #8a8a8a; }
-:where(html.theme-light) .ai-row .who { color: #8a8a8a; }
+:where(html.theme-light) .ai-row .who { color: #6b6b6b; }
 :where(html.theme-light) .ai-row .bubble { color: #1f2328; }
 :where(html.theme-light) .ai-row.user .bubble { background: #d7e8f8; }
-:where(html.theme-light) .ai-row.assistant .bubble { background: #f0f0f0; }
-:where(html.theme-light) .ai-row .bubble.ai-think { color: #8a8a8a; }
+:where(html.theme-light) .ai-think-hd { color: #6b6b6b; }
+:where(html.theme-light) .ai-think-bd { border-left-color: #e0e0e0; color: #6b6b6b; }
+:where(html.theme-light) .ai-tobottom { background: #ffffff; border-color: #d0d0d0; color: #444444; }
+:where(html.theme-light) .ai-tobottom:hover { background: #f0f0f0; color: #000000; }
+:where(html.theme-light) .ai-dock-row { color: #333333; }
+:where(html.theme-light) .ai-dock-row:hover { background: #e8e8e8; }
+:where(html.theme-light) .ai-meta .ai-medit { color: #6b6b6b; }
+:where(html.theme-light) .ai-meta .ai-medit:hover { color: #005fb8; }
+:where(html.theme-light) .ai-enhance-btn { color: #5a6a7a; }
+:where(html.theme-light) .ai-enhance-btn:hover { background: #e8e8e8; color: #5b3fa8; }
+:where(html.theme-light) .ai-send { color: #0b6fc0; }
+:where(html.theme-light) .ai-send:hover { background: #e8e8e8; color: #005fb8; }
+:where(html.theme-light) #aiStop { color: #c0392b; }
+:where(html.theme-light) #aiStop:hover { background: #f6e3e0; color: #a02718; }
+:where(html.theme-light) .ai-ctx-pop { background: #ffffff; border-color: #dcdcdc; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); }
+:where(html.theme-light) .ai-ctx-head { color: #6b6b6b; border-bottom-color: #e5e5e5; }
+:where(html.theme-light) .ai-ctx-g { color: #8a8a8a; }
+:where(html.theme-light) .ai-ctx-row { color: #333333; }
+:where(html.theme-light) .ai-ctx-row:hover { background: #f0f0f0; }
+:where(html.theme-light) .ai-ctx-row .d { color: #8a8a8a; }
+:where(html.theme-light) .ai-ctx-empty { color: #8a8a8a; }
+:where(html.theme-light) .ai-ctx-browsebar { border-bottom-color: #e5e5e5; }
+:where(html.theme-light) .ai-ctx-path { color: #5a6a7a; }
+:where(html.theme-light) .ai-ctx-upbtn, :where(html.theme-light) .ai-ctx-adddir, :where(html.theme-light) .ai-ctx-backbtn {
+  background: #f0f0f0; border-color: #d4d4d4; color: #333333;
+}
+:where(html.theme-light) .ai-ctx-upbtn:hover, :where(html.theme-light) .ai-ctx-adddir:hover, :where(html.theme-light) .ai-ctx-backbtn:hover {
+  background: #e4e4e4; color: #000000;
+}
+:where(html.theme-light) .ai-histq-pop { background: #ffffff; border-color: #dcdcdc; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); }
+:where(html.theme-light) .ai-histq-head { color: #333333; border-bottom-color: #e5e5e5; }
+:where(html.theme-light) .ai-histq-head .cnt { color: #8a8a8a; }
+:where(html.theme-light) .ai-histq-head .x { color: #6b6b6b; }
+:where(html.theme-light) .ai-histq-head .x:hover { background: #e8e8e8; color: #000000; }
+:where(html.theme-light) .ai-histq-row { color: #333333; }
+:where(html.theme-light) .ai-histq-row:hover { background: #f0f0f0; color: #000000; }
+:where(html.theme-light) .ai-row.ai-hl { background: #efe9fb; box-shadow: inset 3px 0 0 #8b6fd8; }
 :where(html.theme-light) .ai-row .bubble.err { color: #c0392b; background: #fbe9e7; }
 :where(html.theme-light) .bubble.ai-md h3, :where(html.theme-light) .bubble.ai-md h4, :where(html.theme-light) .bubble.ai-md h5 { color: #1f2328; }
 :where(html.theme-light) .bubble.ai-md code { background: #f0f0f0; border-color: #dcdcdc; color: #a05a00; }
@@ -836,14 +871,31 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ai-chg-chip { background: #ffffff; border-color: #dcdcdc; color: #333333; }
 :where(html.theme-light) .ai-chg-chip:hover { border-color: #a0a0a0; }
 :where(html.theme-light) .ai-img-thumb, :where(html.theme-light) .ai-bimgs img { border-color: #cecece; }
+:where(html.theme-light) .ai-img-chip { background: #efe6ff; border-color: #cbb8f0; color: #5b3fa8; }
+:where(html.theme-light) .ai-img-chip:hover { border-color: #8b6fd8; }
+:where(html.theme-light) .ai-img-peek { background: #ffffff; border-color: #dcdcdc; box-shadow: 0 10px 30px rgba(0, 0, 0, .25); }
 :where(html.theme-light) .ai-file-chip, :where(html.theme-light) .ai-bfile {
   background: #fbf3d9; border-color: #e5d9b0; color: #8a6a00;
 }
+:where(html.theme-light) .ai-bfile.is-dir { background: #e9f3f9; border-color: #b7d5e6; color: #22688c; }
+:where(html.theme-light) .ai-bfile.is-sel { background: #eef3fb; border-color: #b9cde6; color: #24354d; }
+:where(html.theme-light) .ai-bfile-lang { color: #1668c9; }
 :where(html.theme-light) .ai-file-chip.is-dir { background: #e8f2fa; border-color: #bcd8ea; color: #14587f; }
 :where(html.theme-light) .ai-file-chip.is-dir .rm { color: #4a7f9e; }
 :where(html.theme-light) .ai-file-chip .rm { color: #8a7a4a; }
 :where(html.theme-light) .ai-input { border-top-color: #e0e0e0; background: #f0f0f0; }
-:where(html.theme-light) .ai-input #aiText { background: #ffffff; border-color: #cecece; color: #1f2328; }
+:where(html.theme-light) .ai-textbox { background: #ffffff; border-color: #cecece; }
+:where(html.theme-light) .ai-textbox #aiText { color: #1f2328; }
+/* 输入框里的文件 / 图片芯片 */
+:where(html.theme-light) .ai-input #aiText .ai-tag-file { background: #f0f0f0; color: #333333; border-color: #d4d4d4; }
+:where(html.theme-light) .ai-input #aiText .ai-tag-file .bi { color: #a07800; }
+:where(html.theme-light) .ai-input #aiText .ai-tag-img { background: #efe6ff; color: #5b3fa8; border-color: #cbb8f0; }
+:where(html.theme-light) .ai-input #aiText .ai-tag-img .bi { color: #7c5cd6; }
+:where(html.theme-light) .ai-input #aiText .ai-tag-file .ai-tag-x .bi { color: #a07800; }
+:where(html.theme-light) .ai-input #aiText .ai-tag-img .ai-tag-x .bi { color: #7c5cd6; }
+:where(html.theme-light) .ai-input #aiText .ai-tag-sel { background: #eef3fb; color: #24354d; border-color: #b9cde6; }
+:where(html.theme-light) .ai-input #aiText .ai-tag-sel .ai-tag-lang { color: #1668c9; }
+:where(html.theme-light) .ai-img-hover { background: #ffffff; border-color: #d0d0d0; box-shadow: 0 8px 26px rgba(0, 0, 0, .18); }
 :where(html.theme-light) .ai-input #aiText:empty:before { color: #9a9a9a; }
 :where(html.theme-light) .ai-ctx-flag { color: #8a6a00; background: #fbf3d9; }
 :where(html.theme-light) .ai-perm { background: #ffffff; border-color: #cecece; color: #5a6a7a; }

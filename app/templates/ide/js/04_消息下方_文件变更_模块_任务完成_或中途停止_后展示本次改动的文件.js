@@ -167,22 +167,50 @@
     }
     return sec;
   }
-  function aiBubble(role, text, cls, imgs, md, files) {
+  function aiBubble(role, text, cls, imgs, md, files, imgNames) {
     const row = document.createElement("div");
     row.className = "ai-row " + role;
-    const who = document.createElement("div");
-    who.className = "who";
-    who.textContent = role === "user" ? "我" : (cls === "ai-think" ? "思考" : "AI");
-    row.appendChild(who);
-    if (files && files.length) {                 // 本条消息附带的文件：显示在消息上方
+    // 「深度思考」：折叠块（默认收起，点标题展开）；返回正文容器供流式更新
+    if (cls === "ai-think") {
+      row.classList.add("ai-think-box");
+      row.innerHTML =
+        '<button class="ai-think-hd" type="button">' +
+          '<i class="bi bi-chevron-right tw"></i><i class="bi bi-cpu"></i><span>深度思考</span>' +
+        '</button>' +
+        '<div class="ai-think-bd"></div>';
+      const bd = row.querySelector(".ai-think-bd");
+      bd.textContent = text || "";
+      row.querySelector(".ai-think-hd").addEventListener("click", () => row.classList.toggle("open"));
+      $("aiMsgs").appendChild(row);
+      aiScrollToBottom(true);
+      return bd;   // bd.parentElement 就是整行，调用方隐藏它即可不占位
+    }
+    // 助手身份行：圆形头像 + 名称（参考 CodeBuddy；用户消息不显示发送者标签）
+    if (role === "assistant") {
+      const who = document.createElement("div");
+      who.className = "who";
+      who.innerHTML = '<span class="who-av"><i class="bi bi-stars"></i></span><span class="who-nm">AI 助手</span>';
+      row.appendChild(who);
+    }
+    if (files && files.length) {                 // 本条消息附带的文件 / 文件夹 / 选中代码：显示在消息上方
       const g = document.createElement("div");
       g.className = "ai-bfiles";
-      files.forEach(n => {
+      files.forEach(it => {
+        const f = (typeof it === "string") ? { name: it } : it;   // 兼容历史会话里存的纯字符串
+        const label = f.isDir ? (f.name + "/") : f.name;          // 目录带尾斜杠
         const s = document.createElement("span");
-        s.className = "ai-bfile";
-        s.title = n;
-        s.innerHTML = '<i class="bi bi-file-earmark-text"></i>';
-        s.appendChild(document.createTextNode(n));
+        s.className = "ai-bfile" + (f.isDir ? " is-dir" : "") + (f.kind === "sel" ? " is-sel" : "");
+        s.title = label;
+        if (f.kind === "sel" && f.lang) {          // 选中代码：与输入框芯片一致，显示语言徽标
+          const lang = document.createElement("span");
+          lang.className = "ai-bfile-lang";
+          lang.textContent = f.lang;
+          s.appendChild(lang);
+          s.appendChild(document.createTextNode(label));
+        } else {
+          s.innerHTML = '<i class="bi ' + (f.isDir ? "bi-folder2" : "bi-file-earmark-text") + '"></i>';
+          s.appendChild(document.createTextNode(label));
+        }
         g.appendChild(s);
       });
       row.appendChild(g);
@@ -193,11 +221,22 @@
     else if (role === "user") { b.innerHTML = aiRenderUserText(text || ""); }
     else { b.textContent = text || ""; }
     row.appendChild(b);
-    if (imgs && imgs.length) {
+    if (imgs && imgs.length) {                   // 图片以「文件名小卡片」加进消息正文（参考 CodeBuddy），点击放大查看
       const g = document.createElement("div");
       g.className = "ai-bimgs";
-      imgs.forEach(u => { const im = document.createElement("img"); im.src = u; g.appendChild(im); });
-      row.appendChild(g);
+      imgs.forEach((u, i) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "ai-img-chip";
+        // 优先用真实文件名（新消息会带上）；旧会话没有记录时退回 Image.png
+        const nm = (imgNames && imgNames[i]) || (imgs.length > 1 ? ("Image-" + (i + 1) + ".png") : "Image.png");
+        chip.title = nm + "（点击查看）";
+        chip.dataset.src = u;
+        chip.innerHTML = '<i class="bi bi-file-earmark-image"></i><span></span>';
+        chip.querySelector("span").textContent = nm;
+        g.appendChild(chip);
+      });
+      b.appendChild(g);                          // 放进气泡内（即消息文本里）
     }
     $("aiMsgs").appendChild(row);
     aiScrollToBottom(true);
@@ -279,12 +318,51 @@
   }
   /* 点击聊天里的任意图片放大查看（历史重渲染 / 流式生成的图片同样生效） */
   $("aiMsgs").addEventListener("click", (e) => {
-    const im = e.target.closest(".ai-bimgs img");
+    const im = e.target.closest(".ai-bimgs img, .ai-img-chip");
     if (!im) return;
     e.preventDefault();
     e.stopPropagation();
-    aiOpenImage(im.src);
+    aiOpenImage(im.dataset.src || im.src);
   });
+
+  /* 悬停在图片文件名卡片上：浮出缩略图预览（跟随卡片位置，上方放不下自动翻到下方） */
+  let _aiImgPeek = null;
+  function aiImgPeekEl() {
+    if (!_aiImgPeek || !_aiImgPeek.isConnected) {
+      _aiImgPeek = document.createElement("div");
+      _aiImgPeek.className = "ai-img-peek";
+      _aiImgPeek.innerHTML = '<img alt="预览">';
+      document.body.appendChild(_aiImgPeek);
+    }
+    return _aiImgPeek;
+  }
+  function aiShowImgPeek(chip) {
+    const src = chip.dataset.src;
+    if (!src) return;
+    const peek = aiImgPeekEl();
+    peek.querySelector("img").src = src;
+    peek.style.display = "block";
+    const r = chip.getBoundingClientRect();
+    const pw = peek.offsetWidth || 220, ph = peek.offsetHeight || 160;
+    let top = r.top - ph - 8;
+    if (top < 8) top = Math.min(window.innerHeight - ph - 8, r.bottom + 8);
+    let left = r.left + r.width / 2 - pw / 2;
+    left = Math.max(8, Math.min(window.innerWidth - pw - 8, left));
+    peek.style.left = left + "px";
+    peek.style.top = Math.max(8, top) + "px";
+  }
+  function aiHideImgPeek() { if (_aiImgPeek) _aiImgPeek.style.display = "none"; }
+  $("aiMsgs").addEventListener("mouseover", (e) => {
+    const chip = e.target.closest(".ai-img-chip");
+    if (chip) aiShowImgPeek(chip);
+  });
+  $("aiMsgs").addEventListener("mouseout", (e) => {
+    const chip = e.target.closest(".ai-img-chip");
+    if (!chip) return;
+    if (e.relatedTarget && chip.contains(e.relatedTarget)) return;   // 仍在卡片内：不隐藏
+    aiHideImgPeek();
+  });
+  $("aiMsgs").addEventListener("scroll", aiHideImgPeek, { passive: true });
 
   /* 滚动消息列表到底部，让最后一条完整露出（而不是被输入框挡住半截）。
      force=true 强制滚动；否则只在用户原本就贴底时跟随滚动，避免打断用户回看历史。 */
@@ -300,6 +378,20 @@
     });
   }
 
+  /* 「回到最新」悬浮按钮：用户上滑离开底部时出现（参考 CodeBuddy 右下角 ⬇） */
+  (function initAiToBottom() {
+    const box = $("aiMsgs"), btn = $("aiToBottom");
+    if (!box || !btn) return;
+    const sync = () => {
+      const far = box.scrollHeight - box.scrollTop - box.clientHeight > 200;
+      btn.style.display = far ? "" : "none";
+    };
+    box.addEventListener("scroll", sync, { passive: true });
+    try { new MutationObserver(sync).observe(box, { childList: true, subtree: true }); } catch (_) {}
+    btn.addEventListener("click", () => aiScrollToBottom(true));
+    sync();
+  })();
+
   function aiRenderAll() {
     aiRenderFiles();                     // 附加文件的小卡片（右键「添加到 AI 对话」）
     const box = $("aiMsgs");
@@ -309,7 +401,8 @@
       const imgs = m.images || [];
       const extra = (!imgs.length && m.imgs) ? "\n[图片 ×" + m.imgs + "]" : "";
       if (m.reasoning) aiBubble("assistant", m.reasoning, "ai-think");
-      const b = aiBubble(m.role, text + extra, "", imgs, m.role === "assistant", m.files);
+      const b = aiBubble(m.role, text + extra, "", imgs, m.role === "assistant", m.files, m.imgNames);
+      b.parentElement.dataset.mi = String(mi);         // 行上标记消息下标，供「历史提问」跳转定位
       if (m.steps && m.steps.length) {                 // 智能体：过程记录收进消息下方的折叠区域
         b.parentElement.appendChild(aiBuildStepsBox(m.steps));
       }

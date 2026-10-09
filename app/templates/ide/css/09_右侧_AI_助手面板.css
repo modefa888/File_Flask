@@ -12,7 +12,7 @@
   }
   .ai-title { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: #e7e7e7; }
   .ai-title .bi { color: #c9a86a; }
-  .ai-msel { position: relative; flex: none; min-width: 0; }
+  .ai-msel { position: static; flex: none; min-width: 0; }
   .ai-msel-btn {
     display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; min-width: 0;
     background: #2d2d31; border: 1px solid #3c3c3c; border-radius: 5px; color: #a8c7e8;
@@ -23,7 +23,8 @@
   .ai-msel-btn .bi-cpu { font-size: 11px; flex: none; }
   .ai-msel-btn .bi-chevron-up { font-size: 9px; flex: none; }
   .ai-msel-pop {
-    position: absolute; bottom: 30px; right: 0; z-index: 40; width: max-content; min-width: 240px; max-width: 330px;
+    position: absolute; bottom: calc(100% + 6px); left: 0; right: auto; z-index: 40;
+    width: max-content; max-width: calc(100% - 8px);
     max-height: 280px; overflow-y: auto; background: #26262b; border: 1px solid #3c3c42; border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: 4px; display: flex; flex-direction: column; gap: 1px;
   }
@@ -130,14 +131,31 @@
   .ai-hero-tip .bi { font-size: 11px; }
   .ai-row { display: flex; flex-direction: column; }
   .ai-row.user { align-items: flex-end; }
-  .ai-row .who { font-size: 10.5px; color: #5f5f5f; margin-bottom: 3px; }
+  /* 助手身份行：圆形头像 + 名称（参考 CodeBuddy） */
+  .ai-row .who { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #9a9aa2; margin-bottom: 5px; }
+  .ai-row .who .who-av {
+    width: 18px; height: 18px; border-radius: 50%; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #6b5bff, #3f9dff); color: #fff; font-size: 10px;
+  }
   .ai-row .bubble {
     max-width: 92%; padding: 8px 10px; border-radius: 10px; font-size: 12.5px; line-height: 1.65;
     white-space: pre-wrap; word-break: break-word; color: #d4d4d4;
   }
-  .ai-row.user .bubble { background: #214d6e; border-bottom-right-radius: 3px; }
-  .ai-row.assistant .bubble { background: #2a2a2e; border-bottom-left-radius: 3px; }
-  .ai-row .bubble.ai-think { color: #7d7d7d; font-size: 11.5px; background: transparent; padding-top: 0; }
+  /* 用户消息：右侧圆角卡片；助手回答：平铺（不套气泡背景） */
+  .ai-row.user .bubble { max-width: 88%; padding: 9px 12px; border-radius: 12px; background: #214d6e; border-bottom-right-radius: 4px; }
+  .ai-row.assistant .bubble { max-width: 100%; padding: 0; background: transparent; }
+  /* 深度思考：折叠块（默认收起，点标题展开） */
+  .ai-think-box { margin: 0 0 6px; }
+  .ai-think-hd { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0;
+    background: transparent; border: none; color: #8a8a94; font-size: 11.5px; cursor: pointer; }
+  .ai-think-hd:hover { color: #c2c2c8; }
+  .ai-think-hd .tw { font-size: 10px; transition: transform .15s; }
+  .ai-think-hd .bi-cpu { color: #7f9ad0; }
+  .ai-think-box.open .ai-think-hd .tw { transform: rotate(90deg); }
+  .ai-think-bd { display: none; margin: 5px 0 2px; padding: 7px 10px; border-left: 2px solid #33333a;
+    color: #8f8f98; font-size: 11.5px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+  .ai-think-box.open .ai-think-bd { display: block; }
   /* Markdown 渲染样式 */
   .bubble.ai-md p { margin: 0 0 8px; }
   .bubble.ai-md > :last-child { margin-bottom: 0; }
@@ -209,6 +227,19 @@
   .ai-row.assistant .ai-bimgs { justify-content: flex-start; }
   .ai-bimgs img { max-width: 140px; max-height: 100px; border-radius: 6px; border: 1px solid #3c3c3c; object-fit: cover; cursor: zoom-in; }
   .ai-bimgs img:hover { border-color: #5a8ac0; }
+  /* 消息里的图片：文件名小卡片（参考 CodeBuddy；点击放大查看） */
+  .ai-img-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+    padding: 4px 9px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    background: #2c2440; border: 1px solid #5b4a86; color: #cbb8f0; }
+  .ai-img-chip:hover { border-color: #8b6fd8; filter: brightness(1.12); }
+  .ai-img-chip .bi { flex: none; font-size: 12px; }
+  .ai-img-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bubble .ai-bimgs { justify-content: flex-start; }
+  /* 悬停在图片文件名上：浮出缩略图预览 */
+  .ai-img-peek { position: fixed; z-index: 9999; display: none; padding: 4px; pointer-events: none;
+    background: #1b1b1e; border: 1px solid #3c3c44; border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .55); }
+  .ai-img-peek img { display: block; max-width: 210px; max-height: 150px; border-radius: 5px; }
   .ai-imgs { flex: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 0 10px 6px; background: #232326; }
   /* 图片放大查看：点击聊天里的图片 / 待发缩略图 → 全屏查看（滚轮缩放 / 拖动平移 / Esc 关闭） */
   .ai-lb { position: fixed; inset: 0; z-index: 10000; display: none; background: rgba(0,0,0,.88); }
@@ -240,6 +271,22 @@
   .ai-meta .ai-mundo:disabled { opacity: .5; cursor: default; }
   .ai-meta .ai-undone { color: #6e7681; font-size: 10.5px; display: inline-flex; align-items: center; gap: 3px; }
   .ai-meta.user { justify-content: flex-end; }
+  /* 元信息项：图标 + 数值（耗时 / tokens / 时间） */
+  .ai-meta .mi { display: inline-flex; align-items: center; gap: 3px; }
+  .ai-meta .mi .bi { font-size: 10px; opacity: .8; }
+  .ai-meta-txt { display: inline-flex; align-items: center; gap: 8px; margin-left: 2px; }
+  .ai-meta .ai-mdel { background: none; border: none; color: #8a8a8a; cursor: pointer; font-size: 11.5px; padding: 0 2px; }
+  .ai-meta .ai-mdel:hover { color: #e08a8a; }
+  .ai-meta .ai-medit { background: none; border: none; color: #8a8a8a; cursor: pointer; font-size: 11.5px; padding: 0 2px; }
+  .ai-meta .ai-medit:hover { color: #7fb3e0; }
+  /* 「回到最新」悬浮按钮（右下角） */
+  .ai-tobottom {
+    position: absolute; right: 12px; bottom: 12px; z-index: 21; width: 30px; height: 30px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #2f2f36; border: 1px solid #43434c; color: #d0d0d6; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+  }
+  .ai-tobottom:hover { background: #3a3a44; color: #fff; }
   /* 消息下方「文件变更」模块 */
   .ai-chg { margin: 4px 0 2px; padding: 7px 10px 8px; background: #222226; border: 1px solid #33333a; border-radius: 8px; }
   .ai-chg-head { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #c8c8c8; margin-bottom: 6px; }
@@ -286,6 +333,10 @@
     background: #2f2a1e; border: 1px solid #4a3f28; border-radius: 4px; padding: 1px 6px;
     font-size: 10.5px; color: #e2c08a; }
   .ai-bfile .bi { font-size: 11px; }
+  /* 文件夹 / 选中代码：与输入框芯片同色系（目录偏蓝、选中代码偏蓝灰 + 语言徽标） */
+  .ai-bfile.is-dir { background: #22303a; border-color: #35505f; color: #8ec8e8; }
+  .ai-bfile.is-sel { background: #2b3446; border-color: #3f5573; color: #cdd9ea; }
+  .ai-bfile-lang { color: #7fb3ff; font-weight: 600; font-size: 10px; letter-spacing: .3px; }
   .ai-cursor { display: inline-block; width: 7px; height: 13px; background: #9ecbff; vertical-align: -2px; animation: aiBlink 1s steps(1) infinite; }
   /* 等待首 token 的半透明「思考中…」占位（收到内容后被流式渲染自动覆盖） */
   .ai-waiting { display: inline-flex; align-items: center; gap: 4px; color: #9aa4b2; opacity: .6; font-size: 12px; user-select: none; }
@@ -294,14 +345,31 @@
   .ai-waiting .d:nth-of-type(3) { animation-delay: .36s; }
   @keyframes aiWaitDot { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
   @keyframes aiBlink { 50% { opacity: 0; } }
-  .ai-input { flex: none; border-top: 1px solid #2c2c2c; padding: 8px 10px; background: #232326; }
+  .ai-input { flex: none; border-top: 1px solid #2c2c2c; padding: 8px 10px 10px; background: #232326; }
+  /* 输入区顶栏：图标按钮（图片 / 权限 / 智能体 / 联网），参考 CodeBuddy 的工具栏 */
+  .ai-input-tools { position: relative; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; row-gap: 4px; padding: 0 0 7px; }
+  .ai-input-tools .ai-hbtn { width: 26px; height: 24px; }
   .ai-input #aiText {
-    width: 100%; min-height: 44px; max-height: 220px; overflow-y: auto; resize: none; background: #1b1b1e;
-    border: 1px solid #3c3c3c; border-radius: 8px; color: #d4d4d4; font-size: 12.5px; line-height: 1.5;
-    padding: 7px 9px; outline: none; font-family: inherit; white-space: pre-wrap; word-wrap: break-word;
+    width: 100%; min-height: 58px; max-height: 260px; overflow-y: auto; resize: none; background: #1b1b1e;
+    border: 1px solid #34343c; border-radius: 12px; color: #d4d4d4; font-size: 12.5px; line-height: 1.6;
+    padding: 10px 12px; outline: none; font-family: inherit; white-space: pre-wrap; word-wrap: break-word;
   }
   .ai-input #aiText:empty:before { content: attr(data-placeholder); color: #888; pointer-events: none; }
-  .ai-input #aiText:focus { border-color: #0a6aa8; }
+  .ai-input #aiText:focus { border-color: #0a6aa8; box-shadow: 0 0 0 2px rgba(10, 106, 168, .16); }
+  /* 输入框容器：把「已附加文件」也收进这个圆角框里（参考 CodeBuddy，文件显示在输入框内部） */
+  .ai-textbox {
+    display: flex; flex-direction: column; overflow: hidden;
+    background: #1b1b1e; border: 1px solid #34343c; border-radius: 12px;
+  }
+  .ai-textbox:focus-within { border-color: #0a6aa8; box-shadow: 0 0 0 2px rgba(10, 106, 168, .16); }
+  .ai-textbox .ai-files { padding: 9px 10px 0; margin-bottom: 0; }
+  .ai-textbox #aiText {
+    width: 100%; min-height: 52px; max-height: 260px; overflow-y: auto; resize: none;
+    background: transparent; border: none; border-radius: 0; box-shadow: none;
+    color: #d4d4d4; font-size: 12.5px; line-height: 1.6; padding: 10px 12px;
+    outline: none; font-family: inherit; white-space: pre-wrap; word-wrap: break-word;
+  }
+  .ai-textbox #aiText:focus { border-color: transparent; box-shadow: none; }
   .ai-input #aiText .ai-tag {
     display: inline-block; vertical-align: middle; background: #2d3e50; color: #7ec4ff;
     border: 1px solid #3a5a7c; border-radius: 4px; padding: 0 5px; margin: 0 1px; font-size: 12px;
@@ -309,10 +377,109 @@
   }
   .ai-input #aiText .ai-tag:hover { border-color: #7fb3e0; filter: brightness(1.15); }
   .ai-input #aiText .ai-tag.custom { background: #3a2d50; color: #d0aaff; border-color: #5a3a7c; }
+  /* 输入框里的「文件 / 图片芯片」：与文字混排，退格键可整块删除（参考 CodeBuddy） */
+  .ai-input #aiText .ai-tag-file,
+  .ai-input #aiText .ai-tag-img {
+    display: inline-flex; align-items: center; gap: 4px; vertical-align: middle;
+    max-width: 100%; padding: 0 6px;
+  }
+  .ai-input #aiText .ai-tag-file { background: #2f2f33; color: #d7d7dd; border-color: #45454c; }
+  .ai-input #aiText .ai-tag-file .bi { font-size: 11px; color: #e8c07a; }
+  .ai-input #aiText .ai-tag-file.is-dir .bi { color: #8ec8e8; }
+  .ai-input #aiText .ai-tag-file:hover { border-color: #6b6b74; }
+  .ai-input #aiText .ai-tag-img { background: #2c2440; color: #cbb8f0; border-color: #5b4a86; position: relative; }
+  .ai-input #aiText .ai-tag-img .bi { font-size: 11px; color: #a98ee8; }
+  .ai-input #aiText .ai-tag-img:hover { border-color: #8b6fd8; }
+  /* 文件 / 图片芯片上的「×」：默认隐藏，悬浮时顶掉前面的图标，点一下即可移除（无背景色） */
+  .ai-input #aiText .ai-tag-x {
+    display: none; align-items: center; justify-content: center;
+    width: 14px; height: 14px; padding: 0; border: none; background: transparent;
+    cursor: pointer; flex: none;
+  }
+  .ai-input #aiText .ai-tag-x .bi { font-size: 11px; line-height: 1; }
+  .ai-input #aiText .ai-tag-file .ai-tag-x .bi { color: #e8c07a; }
+  .ai-input #aiText .ai-tag-img .ai-tag-x .bi { color: #a98ee8; }
+  .ai-input #aiText .ai-tag-x:hover .bi { filter: brightness(1.4); }
+  .ai-input #aiText .ai-tag-file:hover .ai-tag-x,
+  .ai-input #aiText .ai-tag-img:hover .ai-tag-x { display: inline-flex; }
+  .ai-input #aiText .ai-tag-file:hover .ai-tag-ic,
+  .ai-input #aiText .ai-tag-img:hover .ai-tag-ic { display: none; }
+  /* 「选中代码」芯片：语言徽标 + 文件名:22-30（编辑器右键「添加到 AI 对话」） */
+  .ai-input #aiText .ai-tag-sel { background: #2b3446; color: #cdd9ea; border-color: #3f5573; }
+  .ai-input #aiText .ai-tag-sel:hover { border-color: #5b7ba6; }
+  .ai-input #aiText .ai-tag-sel .ai-tag-lang {
+    color: #7fb3ff; font-weight: 600; font-size: 10.5px; letter-spacing: .3px;
+  }
+  /* 图片芯片的悬浮预览（鼠标停在芯片上时弹出） */
+  .ai-img-hover {
+    position: fixed; z-index: 12000; pointer-events: none; padding: 4px;
+    background: #1e1e1e; border: 1px solid #3c3c3d; border-radius: 6px;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, .55);
+  }
+  .ai-img-hover img { display: block; max-width: 320px; max-height: 260px; border-radius: 4px; }
   .ai-input-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; row-gap: 4px; margin-top: 6px; }
+  /* 输入区底栏：模型 / Skills + 上下文占用 + 发送，参考 CodeBuddy */
+  .ai-input-foot { position: relative; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; row-gap: 4px; padding: 8px 0 0; }
+  /* 添加上下文（@）：面板挂在输入区工具栏上方 */
+  .ai-ctx-add-wrap { position: static; }
+  .ai-ctx-pop {
+    position: absolute; bottom: calc(100% + 6px); left: 0; right: auto; z-index: 120;
+    width: min(420px, 100%); max-width: 100%; max-height: min(52vh, 440px); overflow-y: auto;
+    background: #252528; border: 1px solid #3c3c3c; border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .5); padding: 6px;
+  }
+  .ai-ctx-head { font-size: 11px; color: #8a8a94; padding: 6px 8px 8px;
+    border-bottom: 1px solid #33333a; margin-bottom: 4px; }
+  .ai-ctx-g { font-size: 10.5px; color: #767676; padding: 7px 8px 3px; letter-spacing: .3px; }
+  .ai-ctx-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+    color: #d4d4d4; font-size: 12px; cursor: pointer; min-width: 0; }
+  .ai-ctx-row:hover { background: #33333a; }
+  .ai-ctx-row > .bi { flex: none; color: #9aa4b2; font-size: 13px; }
+  .ai-ctx-row .m { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .ai-ctx-row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-ctx-row .d { font-size: 10.5px; color: #7d7d7d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-ctx-row .rm { flex: none; background: none; border: none; color: #8a8a8a; cursor: pointer;
+    font-size: 11px; padding: 2px 4px; border-radius: 4px; }
+  .ai-ctx-row .rm:hover { color: #e08a8a; background: #3a2626; }
+  .ai-ctx-empty { font-size: 11.5px; color: #767676; padding: 4px 8px 6px; }
+  /* 选择文件 / 文件夹：浏览视图 */
+  .ai-ctx-browsebar { display: flex; align-items: center; gap: 6px; padding: 4px 6px 6px;
+    border-bottom: 1px solid #33333a; margin-bottom: 4px; }
+  .ai-ctx-path { flex: 1; min-width: 0; font-size: 11px; color: #9aa4b2;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-ctx-upbtn, .ai-ctx-adddir, .ai-ctx-backbtn {
+    flex: none; background: #2f2f36; border: 1px solid #43434c; border-radius: 5px;
+    color: #cfcfd4; font-size: 11px; padding: 3px 8px; cursor: pointer; }
+  .ai-ctx-upbtn { padding: 3px 6px; }
+  .ai-ctx-upbtn:hover, .ai-ctx-adddir:hover, .ai-ctx-backbtn:hover { background: #3a3a44; color: #fff; }
+  .ai-ctx-list { max-height: min(40vh, 340px); overflow-y: auto; scrollbar-width: thin; }
+  /* 历史提问：面板从输入区工具栏上方弹出 */
+  .ai-histq-wrap { position: static; }
+  .ai-histq-pop {
+    position: absolute; bottom: calc(100% + 6px); left: 0; right: auto; z-index: 121;
+    width: min(360px, 100%); max-width: 100%; max-height: min(52vh, 420px);
+    display: flex; flex-direction: column; overflow: hidden;
+    background: #252528; border: 1px solid #3c3c3c; border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .5);
+  }
+  .ai-histq-head { flex: none; display: flex; align-items: center; gap: 6px; padding: 9px 10px;
+    font-size: 12px; color: #d4d4d4; border-bottom: 1px solid #33333a; }
+  .ai-histq-head .bi { color: #9aa4b2; }
+  .ai-histq-head .cnt { color: #8a8a8a; font-size: 11px; }
+  .ai-histq-head .x { margin-left: auto; width: 22px; height: 22px; border-radius: 5px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: none; border: none; color: #8a8a8a; cursor: pointer; font-size: 11px; }
+  .ai-histq-head .x:hover { background: #3a3a44; color: #fff; }
+  .ai-histq-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px; scrollbar-width: thin; }
+  .ai-histq-row { padding: 8px 9px; border-radius: 6px; font-size: 12px; color: #d4d4d4; cursor: pointer;
+    line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ai-histq-row:hover { background: #33333a; color: #fff; }
+  /* 历史提问跳转：目标消息高亮（浅紫底 + 左侧竖线，参考 CodeBuddy） */
+  .ai-row.ai-hl { background: rgba(122, 92, 200, .16); box-shadow: inset 3px 0 0 #8b6fd8;
+    border-radius: 8px; padding: 6px 8px; transition: background .25s ease; }
   .ai-ctx-flag { font-size: 10.5px; color: #e2c08a; background: #332c1e; border-radius: 4px; padding: 2px 6px; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* AI 操作权限（仅可查看 / 工作区内修改 / 完全权限） */
-  .ai-perm-wrap { position: relative; flex: none; }
+  .ai-perm-wrap { position: static; flex: none; }
   .ai-perm {
     display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; max-width: 150px;
     background: #2d2d31; border: 1px solid #3c3c3c; border-radius: 5px; color: #b9c6d4; font-size: 11px; cursor: pointer;
@@ -324,7 +491,8 @@
   .ai-perm.ro { color: #e2c08a; }
   .ai-perm.full { color: #e08a8a; border-color: #5a3a3a; }
   .ai-perm-pop {
-    position: absolute; bottom: 30px; left: 0; z-index: 40; width: max-content; min-width: 226px;
+    position: absolute; bottom: calc(100% + 6px); left: 0; right: auto; z-index: 40;
+    width: max-content; max-width: 100%;
     background: #26262b; border: 1px solid #3c3c42; border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: 4px; display: flex; flex-direction: column; gap: 1px;
   }
@@ -355,7 +523,7 @@
   .ai-web-btn.on { background: #1e3a5f; border-color: #4a8fd8; color: #9fd4ff; }
   .ai-web-btn .bi { font-size: 12px; }
   /* Skill 选择器 */
-  .ai-skill-wrap { position: relative; flex: none; }
+  .ai-skill-wrap { position: static; flex: none; }
   .ai-skill-btn {
     display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px;
     background: #2d2d31; border: 1px solid #3c3c3c; border-radius: 5px; color: #9aa4b2; font-size: 11px; cursor: pointer;
@@ -366,8 +534,8 @@
   .ai-skill-btn .bi-chevron-up { font-size: 9px; flex: none; }
   .ai-skill-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ai-skill-pop {
-    position: absolute; bottom: calc(100% + 6px); right: 0;
-    min-width: 220px; max-width: 300px; max-height: 360px; overflow-y: auto;
+    position: absolute; bottom: calc(100% + 6px); left: 0; right: auto;
+    width: max-content; max-width: calc(100% - 8px); max-height: 360px; overflow-y: auto;
     background: #252528; border: 1px solid #3c3c3c; border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: 6px 0; display: none; z-index: 100;
   }
@@ -453,7 +621,7 @@
   .ai-skedit-pop .p-reset:hover { background: #3a3320; }
   /* 窄面板自动隐藏按钮文字，优先保证图标可见；发送/模型等核心按钮始终保留 */
   @container (max-width: 320px) {
-    .ai-input-acts { gap: 4px; }
+    .ai-input-acts, .ai-input-tools, .ai-input-foot { gap: 4px; }
     .ai-spacer { display: none; }
     .ai-ctx-ring { margin-left: auto; }
     .ai-perm span, .ai-agent-btn span, .ai-web-btn span, .ai-skill-btn span, .ai-msel-btn span { display: none; }
@@ -581,6 +749,22 @@
   .ai-todo-float .ai-todo-body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   /* 高度由面板总的 60% 上限约束，超出时列表内部滚动（而不是撑破面板） */
   .ai-todo-float .ai-todo-list { flex: 1 1 auto; min-height: 0; max-height: none; }
+  /* 底部「任务列表 / 文件列表」并排折叠条 */
+  .ai-todo-float .ai-dock-cards { display: flex; gap: 8px; align-items: flex-end; min-height: 0; width: 100%; }
+  .ai-todo-float .ai-dock-card { flex: 1 1 0; min-width: 0; }
+  .ai-todo-float .ai-dock-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1px 6px 6px;
+    display: flex; flex-direction: column; gap: 1px; scrollbar-width: thin; scrollbar-color: #424242 transparent; }
+  .ai-todo-float .ai-dock-list::-webkit-scrollbar { width: 8px; }
+  .ai-todo-float .ai-dock-list::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 4px;
+    border: 2px solid transparent; background-clip: content-box; }
+  .ai-dock-row { display: flex; align-items: center; gap: 5px; padding: 3px 5px; border-radius: 5px;
+    font-size: 11.5px; color: #c2c2c8; cursor: pointer; min-width: 0; }
+  .ai-dock-row:hover { background: #33333a; }
+  .ai-dock-row .bi { flex: none; font-size: 11px; }
+  .ai-dock-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-dock-row.add .bi { color: #7fd88f; }
+  .ai-dock-row.mod .bi { color: #e8c07a; }
+  .ai-dock-row.del .bi { color: #e08a8a; }
   /* 命令确认卡片 */
   .ai-ask { position: relative; z-index: 25; align-self: flex-start; max-width: 100%; background: #2c2718;
     border: 1px solid #5a4a26; border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #e2c08a; }
@@ -609,13 +793,19 @@
     0%, 100% { box-shadow: 0 0 0 0 rgba(226,192,138,0); }
     50% { box-shadow: 0 0 0 3px rgba(226,192,138,.28); }
   }
+  /* 增强提示词按钮（输入区底栏右侧） */
+  .ai-enhance-btn { width: 26px; height: 26px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; border: none; border-radius: 6px; color: #9aa4b2; font-size: 13px; cursor: pointer; }
+  .ai-enhance-btn:hover { background: #33333a; color: #d9c6ff; }
+  .ai-enhance-btn:disabled { opacity: .55; cursor: default; }
+  /* 发送 / 停止：与增强按钮同风格的描边图标（参考 CodeBuddy） */
   .ai-send {
     width: 28px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
-    background: #0a6aa8; border: none; border-radius: 6px; color: #fff; font-size: 12px; cursor: pointer;
+    background: transparent; border: none; border-radius: 6px; color: #7fb3e0; font-size: 15px; cursor: pointer;
   }
-  .ai-send:hover { background: #0d7dc4; }
-  #aiStop { background: #7a3c3c; }
-  #aiStop:hover { background: #964646; }
+  .ai-send:hover { background: #33333a; color: #a8d0ff; }
+  #aiStop { color: #e08a8a; }
+  #aiStop:hover { background: #3a2626; color: #ffb0b0; }
 
   /* 标签行：左侧标签栏可横向滚动，右侧固定留给「拆分/操作」按钮，
      按钮占真实位置而不是浮在标签上，标签多时不会被挡住 */

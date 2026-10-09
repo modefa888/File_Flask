@@ -13,3 +13,5 @@ redis>=5.0
 pymongo>=4.6
 # 进程资源管理器（CPU / 内存 / 磁盘 / 进程列表采集）
 psutil>=5.9
+# SSH 终端连接工具（远程主机连接，仿 Xshell）：paramiko 提供 SSH 客户端与密钥解析
+paramiko>=3.0

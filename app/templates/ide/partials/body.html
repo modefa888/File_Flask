@@ -28,6 +28,7 @@
       <div class="act" data-panel="dbconn" title="数据库（连接 SQLite / MySQL / PostgreSQL 并浏览管理）"><i class="bi bi-database"></i></div>
       <div class="act" data-panel="api" title="API 调试（HTTP 请求客户端，仿 Postman）"><i class="bi bi-send"></i></div>
       <div class="act" data-panel="cron" title="定时任务（cron 计划任务，参考青龙面板）"><i class="bi bi-alarm"></i><span class="runner-badge" id="actCronBadge" style="display:none">0</span></div>
+      <div class="act" data-panel="sshconn" title="终端连接工具（SSH 远程主机，仿 Xshell）"><i class="bi bi-hdd-network"></i></div>
       <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
       {# 底部两个图标：进程资源管理器在设置之上，设置永远在最底下。
          act-spacer 让「组内第一个」吸收上方全部空白，把整组顶到活动栏最底部（若两个都写 margin-top:auto，
@@ -162,6 +163,14 @@
         <button class="g-btn block outline" id="cronOpenView" title="在右侧编辑区打开完整的定时任务管理面板（统计 / 筛选 / 批量 / 详情 / 日志）"><i class="bi bi-window-stack"></i> 打开管理面板</button>
         <div class="s-hint" id="cronHint">按 cron 表达式定时执行命令（分 时 日 月 周）。调度在本服务进程内运行，服务停掉后不再触发。</div>
         <div class="cron-list scroll-thin" id="cronList"></div>
+      </div>
+      <div class="side-panel" id="sshconnPanel">
+        <div class="ssh-tools">
+          <button class="g-btn block" id="sshNew" title="新建一个 SSH 连接"><i class="bi bi-plus-lg"></i> 新建连接</button>
+          <button class="g-ico" id="sshRefresh" title="刷新连接列表"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+        <div class="s-hint" id="sshHint">连接仅保存在本机，密码 / 私钥加密存储。点击「连接」在右侧编辑器区打开远程终端（仿 Xshell）。</div>
+        <div class="ssh-list scroll-thin" id="sshList"></div>
       </div>
     </div>
 

@@ -1,0 +1,75 @@
+/* 38_ SSH 终端连接工具：侧栏列表 + 编辑器区远程终端 */
+.ssh-tools { display: flex; gap: 6px; padding: 8px 10px; }
+.ssh-tools .g-btn.block { flex: 1; }
+.ssh-list { padding: 4px 8px 12px; }
+.ssh-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 10px; margin-bottom: 6px; border-radius: 7px;
+  background: var(--bg-elev, #23252b); border: 1px solid transparent;
+}
+.ssh-item:hover { border-color: var(--border, #333); }
+.ssh-item.open { border-color: var(--accent, #4da3ff); background: var(--bg-elev2, #2a2d35); }
+.ssh-main { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; cursor: pointer; }
+.ssh-main > i { font-size: 17px; color: var(--accent, #4da3ff); }
+.ssh-meta { min-width: 0; }
+.ssh-name { font-size: 13px; color: var(--fg, #ddd); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ssh-sub { font-size: 11px; color: var(--fg-dim, #9aa); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ssh-acts { display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.ssh-item:hover .ssh-acts { opacity: 1; }
+.ssh-acts button {
+  width: 26px; height: 26px; border: none; border-radius: 6px; cursor: pointer;
+  background: transparent; color: var(--fg-dim, #9aa); font-size: 13px;
+}
+.ssh-acts button:hover { background: var(--bg-elev3, #353842); color: var(--fg, #ddd); }
+.ssh-acts [data-act="open"]:hover { color: #4ec98a; }
+.ssh-acts [data-act="del"]:hover { color: #ff6b6b; }
+
+/* 编辑器区终端 */
+.ssh-host { display: flex; }
+.ssh-term-wrap { display: flex; flex-direction: column; width: 100%; height: 100%; background: #1e1e1e; }
+.ssh-term-bar {
+  display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+  background: #252526; border-bottom: 1px solid #333; color: #cfcfcf; font-size: 12px;
+}
+.ssh-term-t { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ssh-term-t > i { color: #4da3ff; }
+.ssh-term-x {
+  margin-left: auto; width: 26px; height: 24px; border: none; border-radius: 5px; cursor: pointer;
+  background: transparent; color: #aaa; font-size: 13px;
+}
+.ssh-term-x:hover { background: #3a3d44; color: #fff; }
+.ssh-term-box { flex: 1; min-height: 0; padding: 6px 8px; overflow: hidden; }
+.ssh-term-box .xterm { height: 100%; }
+.ssh-term-box .xterm-viewport { background-color: transparent !important; }
+
+/* 新建 / 编辑 弹窗 */
+.ssh-modal {
+  width: 440px; max-width: 92vw; background: #252526; border: 1px solid #3a3d44;
+  border-radius: 10px; box-shadow: 0 18px 60px rgba(0,0,0,.5); overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.ssh-modal-head {
+  display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+  font-size: 14px; color: #ddd; border-bottom: 1px solid #333;
+}
+.ssh-modal-head > i { color: #4da3ff; }
+.ssh-modal-head span { flex: 1; }
+.ssh-modal-x { width: 28px; height: 26px; border: none; border-radius: 6px; cursor: pointer; background: transparent; color: #aaa; font-size: 14px; }
+.ssh-modal-x:hover { background: #3a3d44; color: #fff; }
+.ssh-form { padding: 12px 14px; display: flex; flex-direction: column; gap: 9px; }
+.ssh-row { display: flex; align-items: center; gap: 10px; }
+.ssh-lb { width: 64px; flex: none; font-size: 12px; color: #b9b9b9; text-align: right; }
+.ssh-in {
+  flex: 1; min-width: 0; height: 30px; padding: 0 9px; border-radius: 6px;
+  border: 1px solid #3a3d44; background: #1e1e1e; color: #ddd; font-size: 13px;
+}
+.ssh-in:focus { outline: none; border-color: #4da3ff; }
+.ssh-key { height: 70px; padding: 7px 9px; resize: vertical; font-family: Menlo, Consolas, monospace; font-size: 12px; line-height: 1.4; }
+.ssh-port { max-width: 90px; }
+.ssh-tip { padding: 0 14px 10px; font-size: 11px; color: #8a8a8a; display: flex; gap: 5px; align-items: flex-start; }
+.ssh-tip i { margin-top: 1px; }
+.ssh-modal-acts { display: flex; align-items: center; gap: 8px; padding: 10px 14px 14px; }
+.ssh-sp { flex: 1; }
+.ssh-list .ph { padding: 18px 12px; color: #8a8a8a; font-size: 12px; line-height: 1.7; }
+.ssh-list .ph.warn { color: #e0a458; }
+.ssh-list .ph code { background: #1e1e1e; padding: 1px 5px; border-radius: 4px; color: #ddd; }

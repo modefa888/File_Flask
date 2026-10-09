@@ -1388,3 +1388,30 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .cron-view .cv-run-row.on { background: #e3f0fb; }
 :where(html.theme-light) .cron-view .cv-run-t { color: #333333; }
 :where(html.theme-light) .cron-view .cv-log { background: #f7f7f7; color: #26323c; }
+
+/* ---------- SSH 终端连接工具（38） ---------- */
+/* 侧栏连接列表 */
+:where(html.theme-light) .ssh-item { background: #f3f3f3; border-color: transparent; }
+:where(html.theme-light) .ssh-item:hover { border-color: #d0d0d0; }
+:where(html.theme-light) .ssh-item.open { background: #e3f0fb; border-color: #a8c8e8; }
+:where(html.theme-light) .ssh-name { color: #1f2328; }
+:where(html.theme-light) .ssh-sub { color: #6b6b6b; }
+:where(html.theme-light) .ssh-acts button { color: #6b6b6b; }
+:where(html.theme-light) .ssh-acts button:hover { background: #e4e6e8; color: #1f2328; }
+:where(html.theme-light) .ssh-list .ph { color: #6b6b6b; }
+:where(html.theme-light) .ssh-list .ph.warn { color: #b26a00; }
+:where(html.theme-light) .ssh-list .ph code { background: #ececec; color: #1f2328; }
+/* 新建 / 编辑 弹窗 */
+:where(html.theme-light) .ssh-modal { background: #f8f8f8; border-color: #cecece; box-shadow: 0 18px 60px rgba(0, 0, 0, .25); }
+:where(html.theme-light) .ssh-modal-head { color: #1f2328; border-bottom-color: #e0e0e0; }
+:where(html.theme-light) .ssh-modal-x { color: #6b6b6b; }
+:where(html.theme-light) .ssh-modal-x:hover { background: #e4e6e8; color: #1f2328; }
+:where(html.theme-light) .ssh-lb { color: #5a5a5a; }
+:where(html.theme-light) .ssh-in { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .ssh-in:focus { border-color: #0098ff; }
+:where(html.theme-light) .ssh-tip { color: #8a8a8a; }
+/* 编辑器区远程终端外框（终端画布配色由 JS 主题控制） */
+:where(html.theme-light) .ssh-term-wrap { background: #ffffff; }
+:where(html.theme-light) .ssh-term-bar { background: #f3f3f3; border-bottom-color: #e0e0e0; color: #333333; }
+:where(html.theme-light) .ssh-term-x { color: #6b6b6b; }
+:where(html.theme-light) .ssh-term-x:hover { background: #e0e0e0; color: #000000; }

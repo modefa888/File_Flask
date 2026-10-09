@@ -175,6 +175,12 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         '</div>' +
         '<div class="set-sec" id="sec-data"><h2>数据</h2>' +
           '<div class="set-row" data-kw="最近 打开 记录 清除 recent"><div class="set-info"><div class="set-label">清除最近打开记录</div><div class="set-desc">清空 Quick Open 面板的「最近打开」列表</div></div><button class="set-btn" id="setClearRecent">清除</button></div>' +
+          '<div class="set-row" data-kw="会话 状态 面板 标签 布局 恢复 session"><div class="set-info"><div class="set-label">清除界面会话状态</div><div class="set-desc">清空记录的面板、打开的标签页、底部高度等，下次刷新回到初始界面</div></div><button class="set-btn" id="setClearSession">清除</button></div>' +
+          '<div class="set-row" data-kw="ai 助手 技能 待发 清除 custom skills"><div class="set-info"><div class="set-label">清除 AI 助手数据</div><div class="set-desc">删除自定义技能、技能开关覆盖与未发送的待发消息</div></div><button class="set-btn" id="setClearAI">清除</button></div>' +
+          '<div class="set-row" data-kw="布局 窗口 宽度 高度 浮窗 播放器 清除"><div class="set-info"><div class="set-label">清除窗口布局记录</div><div class="set-desc">重置侧边栏宽度、底部高度、浮窗位置与播放器记忆</div></div><button class="set-btn" id="setClearLayout">清除</button></div>' +
+          '<div class="set-row" data-kw="导出 备份 设置 下载 export"><div class="set-info"><div class="set-label">导出设置备份</div><div class="set-desc">将所有设置与自定义快捷键下载为 JSON 文件</div></div><button class="set-btn" id="setExport">导出</button></div>' +
+          '<div class="set-row" data-kw="导入 恢复 备份 设置 上传 import"><div class="set-info"><div class="set-label">导入设置备份</div><div class="set-desc">从导出的 JSON 文件恢复设置与快捷键</div></div><button class="set-btn" id="setImport">导入</button><input type="file" id="setImportFile" accept=".json,application/json" style="display:none"></div>' +
+          '<div class="set-row" data-kw="存储 占用 空间 磁盘 storage"><div class="set-info"><div class="set-label">本地存储占用</div><div class="set-desc">浏览器 localStorage 中本 IDE 相关数据的体积</div><div class="stor-list" id="setStorageInfo"></div></div></div>' +
           '<div class="set-row" data-kw="默认 重置 设置 reset"><div class="set-info"><div class="set-label">恢复默认设置</div><div class="set-desc">将所有设置项恢复为默认值</div></div><button class="set-btn" id="setReset">重置</button></div>' +
         '</div>' +
         '<div class="set-sec" id="sec-ai"><h2 data-kw="ai 助手 接口 token 模型 api">AI 助手</h2>' +
@@ -660,7 +666,68 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
       applyActOrder(); actOrderRender();
       toast("活动栏图标已恢复默认顺序", "ok");
     };
-    q("#setClearRecent").onclick = () => { localStorage.removeItem("ide.recentFiles"); toast("已清除最近打开记录", "ok"); };
+    q("#setClearRecent").onclick = () => { localStorage.removeItem("ide.recentFiles"); toast("已清除最近打开记录", "ok"); renderStorageInfo(); };
+    /* ---- 数据：分类清除 / 备份导入导出 / 存储占用 ---- */
+    const rmKeys = (keys, msg) => { keys.forEach(k => localStorage.removeItem(k)); toast(msg, "ok"); renderStorageInfo(); };
+    q("#setClearSession").onclick = () => rmKeys(
+      ["ide.session.panel", "ide.session.tabs", "ide.session.activeTab", "ide.session.bottom", "ide.session.settingsSec", "ide.session.search"],
+      "已清除界面会话状态，刷新后回到初始界面");
+    q("#setClearAI").onclick = () => rmKeys(
+      ["ide.ai.customSkills", "ide.ai.skillOverrides", "ide.ai.pendingTurn", "ide.aiTodoCollapsed"],
+      "已清除 AI 助手数据");
+    q("#setClearLayout").onclick = () => rmKeys(
+      ["ide.sidebarWidth", "ide.bottomHeight", "ide.ai.width", "ide.procpm.pos", "ide.procpm.max", "ide.procdiag.pos", "ide.procdiag.max", "ide.videoPlayer"],
+      "已清除窗口布局记录，刷新后生效");
+    q("#setExport").onclick = () => {
+      const data = { exportedAt: new Date().toISOString(), settings: {}, keybinds: {} };
+      try { data.settings = JSON.parse(localStorage.getItem("ide.settings") || "{}"); } catch (_) {}
+      try { data.keybinds = JSON.parse(localStorage.getItem("ide.keybinds") || "{}"); } catch (_) {}
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "ide-settings-" + new Date().toISOString().slice(0, 10) + ".json";
+      a.click(); URL.revokeObjectURL(a.href);
+      toast("设置已导出为 JSON 文件", "ok");
+    };
+    q("#setImport").onclick = () => q("#setImportFile").click();
+    q("#setImportFile").onchange = (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const d = JSON.parse(rd.result);
+          if (!d || typeof d !== "object" || Array.isArray(d)) throw new Error("bad");
+          if (d.settings && typeof d.settings === "object" && !Array.isArray(d.settings))
+            localStorage.setItem("ide.settings", JSON.stringify(d.settings));
+          if (d.keybinds && typeof d.keybinds === "object" && !Array.isArray(d.keybinds)) {
+            kbCustom = d.keybinds; saveKeybinds(); applyKeybinds(); renderKeybinds();
+          }
+          applyIdeSettings();
+          toast("设置已导入，部分项刷新页面后生效", "ok");
+          renderStorageInfo();
+        } catch (_) { toast("导入失败：不是有效的设置备份文件", "err"); }
+      };
+      rd.readAsText(f);
+    };
+    function renderStorageInfo() {
+      const box = q("#setStorageInfo");
+      if (!box) return;
+      const rows = []; let total = 0;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || !(k.startsWith("ide.") || k.startsWith("cb-") || k.startsWith("git"))) continue;
+        const n = k.length + (localStorage.getItem(k) || "").length;
+        total += n; rows.push([k, n]);
+      }
+      const fmt = (n) => n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB";
+      rows.sort((a, b) => b[1] - a[1]);
+      box.innerHTML = '<div class="stor-total">共 ' + rows.length + ' 项，占用约 ' + fmt(total) + '</div>' +
+        rows.slice(0, 10).map(r => '<div class="stor-row"><span class="stor-k">' + esc(r[0]) + '</span><span class="stor-s">' + fmt(r[1]) + '</span></div>').join("") +
+        (rows.length > 10 ? '<div class="stor-total">…以及 ' + (rows.length - 10) + ' 个更小的项</div>' : '');
+    }
+    renderStorageInfo();
     q("#setReset").onclick = () => {
       Object.assign(IDE_SETTINGS, { fontSize: 13, lineWrap: false, activeLine: true, indent: 4, hints: true,
         codeComplete: true, autoComplete: true,
@@ -700,24 +767,37 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     // ---- 自定义快捷键：渲染 + 捕获新组合键 ----
     let kbCapture = null;
     const KB_MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "Cmd" : "Ctrl";   // Mod 仅内部存储，展示时按平台翻译
-    const fmtBind = (b) => b.split(" ").map(p => p === "Mod" ? KB_MOD_KEY : p.replace(/^Mod\+/, KB_MOD_KEY + "+")).join(" ");
+    const KEY_PRETTY = { arrowleft: "ArrowLeft", arrowright: "ArrowRight", arrowup: "ArrowUp", arrowdown: "ArrowDown",
+      escape: "Esc", backspace: "Backspace", pageup: "PageUp", pagedown: "PageDown", enter: "Enter", tab: "Tab", space: "Space" };
+    const fmtBind = (b) => b.split(" ").map(p => {
+      if (p === "Mod") return KB_MOD_KEY;
+      return p.replace(/^Mod\+/, KB_MOD_KEY + "+").split("+")
+        .map(s => KEY_PRETTY[s.toLowerCase()] || (s.length === 1 ? s.toUpperCase() : s)).join("+");
+    }).join(" ");
     function renderKeybinds() {
       const box = q("#setKeybinds");
       box.innerHTML = KEY_COMMANDS.map(c => {
         const cur = effBind(c);
         const cap = kbCapture === c.id;
+        const off = !cur && typeof kbCustom[c.id] === "string";
         const keysHtml = cap ? '<kbd style="color:#7ab8ff;">按下新组合键…</kbd>'
           : (cur ? fmtBind(cur).split(" ").map(p => "<kbd>" + esc(p) + "</kbd>").join("")
-                 : '<span style="color:#777;font-size:11px;">未设置</span>');
-        return '<div class="kb-row' + (cap ? " capturing" : "") + '" data-kw="快捷键 ' + esc(c.label) + '">' +
-          '<span class="set-label">' + esc(c.label) + '</span><span class="kb-keys">' + keysHtml + '</span>' +
-          '<button class="kb-btn" data-kb="' + c.id + '">' + (cap ? "取消" : "修改") + '</button>' +
-          (cur ? '<button class="kb-btn" data-kbclr="' + c.id + '">清除</button>' : '') +
+                 : (off ? fmtBind(c.def).split(" ").map(p => "<kbd>" + esc(p) + "</kbd>").join("")
+                    : '<span style="color:#777;font-size:11px;">未设置</span>'));
+        return '<div class="kb-row' + (cap ? " capturing" : "") + (off ? " kb-off" : "") + '" data-kw="快捷键 ' + esc(c.label) + '">' +
+          '<span class="set-label">' + esc(c.label) + (off ? ' <span class="kb-off-tag">已禁用</span>' : '') + '</span>' +
+          '<div class="kb-foot"><span class="kb-keys">' + keysHtml + '</span>' +
+          '<span class="kb-acts"><button class="kb-btn" data-kb="' + c.id + '">' + (cap ? "取消" : "修改") + '</button>' +
+          (cur ? '<button class="kb-btn kb-danger" data-kbclr="' + c.id + '">禁用</button>'
+               : (typeof kbCustom[c.id] === "string" ? '<button class="kb-btn" data-kbdef="' + c.id + '">默认</button>' : '')) + '</span></div>' +
         '</div>';
       }).join("");
       box.querySelectorAll("[data-kb]").forEach(b => { b.onclick = () => startKbCapture(b.dataset.kb); });
       box.querySelectorAll("[data-kbclr]").forEach(b => {
         b.onclick = () => { kbCustom[b.dataset.kbclr] = ""; saveKeybinds(); applyKeybinds(); renderKeybinds(); toast("已禁用该快捷键", "ok"); };
+      });
+      box.querySelectorAll("[data-kbdef]").forEach(b => {
+        b.onclick = () => { delete kbCustom[b.dataset.kbdef]; saveKeybinds(); applyKeybinds(); renderKeybinds(); toast("已恢复默认快捷键", "ok"); };
       });
     }
     function stopKbCapture() {
@@ -804,13 +884,13 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
       const raw = JSON.parse(localStorage.getItem("ide.keybinds") || "{}");
       const out = {};
       if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-        for (const k in raw) if (typeof raw[k] === "string" && raw[k]) out[k] = raw[k];
+        for (const k in raw) if (typeof raw[k] === "string") out[k] = raw[k];   // 空字符串 = 已禁用，也要保留
       }
       return out;
     } catch (_) { return {}; }
   })();
   function saveKeybinds() { localStorage.setItem("ide.keybinds", JSON.stringify(kbCustom)); }
-  function effBind(c) { const v = kbCustom[c.id]; return typeof v === "string" && v ? v : c.def; }
+  function effBind(c) { const v = kbCustom[c.id]; return typeof v === "string" ? v : c.def; }   // "" = 已禁用，不再回退默认
   let kbMap = new Map();
   function applyKeybinds() {
     kbMap = new Map();

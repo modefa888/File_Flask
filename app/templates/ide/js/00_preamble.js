@@ -192,7 +192,12 @@
     ".git", ".svn", ".hg",               // 版本控制元数据
     ".idea", ".vscode",                  // 编辑器配置
   ]);
-  // 特殊命名的中文说明从 /static/special_hints.json 加载（便于单独维护）
+  // 文件 / 文件夹的中文说明：内置基础说明（JSON）+ 用户自定义说明（数据库）两层。
+  //   SPECIAL_NAME_BASE   —— /static/special_hints.json 的内置基础说明（只读，随代码维护）
+  //   SPECIAL_NAME_CUSTOM —— 界面上自定义的说明（存 store.db，同名覆盖基础说明）
+  //   SPECIAL_NAME_HINTS  —— 两者合并后的结果，渲染文件树时直接用这个
+  let SPECIAL_NAME_BASE = {};
+  let SPECIAL_NAME_CUSTOM = {};
   let SPECIAL_NAME_HINTS = {};
 
   /* 系统 AI 模块的启用状态：设置页可单独停用某模块，停用后「后端接口 + 前端入口」都不可用。
@@ -219,12 +224,63 @@
     if (d.error) throw new Error(d.error);
     return d;
   }
-  // 加载特殊命名 → 中文含义的映射表（独立 JSON，便于维护）
+  // 合并两层说明：自定义（数据库）优先于内置（JSON）
+  function mergeNameHints() {
+    SPECIAL_NAME_HINTS = Object.assign({}, SPECIAL_NAME_BASE);
+    Object.keys(SPECIAL_NAME_CUSTOM).forEach((k) => {
+      if (SPECIAL_NAME_CUSTOM[k]) SPECIAL_NAME_HINTS[k] = SPECIAL_NAME_CUSTOM[k];
+    });
+  }
+  // 加载「内置基础说明（JSON）+ 自定义说明（数据库）」并合并
   async function loadSpecialHints() {
     try {
       const r = await fetch("/static/special_hints.json");
-      if (r.ok) SPECIAL_NAME_HINTS = await r.json();
+      if (r.ok) SPECIAL_NAME_BASE = await r.json();
     } catch (e) { /* 加载失败时维持空映射，即不显示说明 */ }
+    try {
+      const r = await fetch("/api/file_hints");
+      if (r.ok) { const d = await r.json(); SPECIAL_NAME_CUSTOM = (d && d.hints) || {}; }
+    } catch (e) { SPECIAL_NAME_CUSTOM = {}; }
+    mergeNameHints();
+  }
+  // 保存一条自定义说明（hint 为空 = 删除自定义项、回落到内置基础说明）
+  async function saveFileHint(name, hint) {
+    const r = await fetch("/api/file_hints", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name, hint: hint }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    SPECIAL_NAME_CUSTOM = (d && d.hints) || {};
+    mergeNameHints();
+    refreshNameHintInTree(name);
+  }
+  // 就地刷新文件树里某个名称的说明（不重建整棵树）
+  function refreshNameHintInTree(name) {
+    explorerPanel.querySelectorAll(".tree-row").forEach((row) => {
+      if (row.dataset.name !== name) return;
+      const nm = row.querySelector(".nm");
+      if (!nm) return;
+      const text = SPECIAL_NAME_HINTS[name] || "";
+      let hintEl = row.querySelector(".nm-hint");
+      if (!text) { if (hintEl) hintEl.remove(); return; }
+      if (!hintEl) {
+        hintEl = document.createElement("span");
+        hintEl.className = "nm-hint";
+        nm.after(hintEl);
+      }
+      hintEl.textContent = text;
+    });
+  }
+  // 右键菜单「编辑说明…」入口：自定义说明存数据库，留空则恢复内置基础说明
+  async function editFileHint(name) {
+    const cur = SPECIAL_NAME_CUSTOM[name] || SPECIAL_NAME_BASE[name] || "";
+    const v = await uiPrompt("编辑说明：" + name, cur, "输入说明文字（留空恢复默认）");
+    if (v === null) return;                       // 取消
+    try {
+      await saveFileHint(name, v);
+      toast(v ? "已保存说明" : "已恢复默认说明", "ok");
+    } catch (e) { toast("保存说明失败：" + (e.message || e), "err"); }
   }
   async function loadChildren(path, container, depth) {
     const spinner = document.createElement("div");

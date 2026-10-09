@@ -365,6 +365,14 @@ CREATE TABLE IF NOT EXISTS cron_cfg (
     key   TEXT PRIMARY KEY,
     value TEXT DEFAULT ''
 );
+-- 文件说明（用户自定义）：键 = 文件名 / 文件夹名（与 special_hints.json 的键一致）。
+-- special_hints.json 提供内置「基础说明」（只读、随代码维护）；本表存界面上补充或覆盖的说明，
+-- 前端合并时自定义优先；hint 清空 = 删除该条自定义记录、回落到内置基础说明。
+CREATE TABLE IF NOT EXISTS file_hints (
+    name       TEXT PRIMARY KEY,
+    hint       TEXT NOT NULL DEFAULT '',
+    updated_at REAL NOT NULL DEFAULT 0
+);
 """
 
 

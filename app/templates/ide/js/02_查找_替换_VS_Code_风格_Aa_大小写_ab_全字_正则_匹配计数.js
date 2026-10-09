@@ -392,6 +392,7 @@
     items.push({ label: "复制路径", sc: "Ctrl+Alt+C", act: () => copyText(path) });
     items.push({ label: "复制相对路径", sc: "Ctrl+Shift+Alt+C", act: () => copyText(relPathOf(path)) });
     items.push({ divider: true });
+    items.push({ label: "编辑说明…", act: () => ctxAction("edit-hint") });
     items.push({ label: "重命名…", sc: "F2", act: () => ctxAction("rename") });
     const selCount = explorerPanel.querySelectorAll(".tree-row.selected").length;
     items.push({ label: selCount > 1 ? ("删除 " + selCount + " 项") : "删除", sc: "Delete", danger: true, act: () => ctxAction("delete") });
@@ -449,6 +450,7 @@
       treeInlineCreate(fd, act === "newfolder");
       return;
     }
+    if (act === "edit-hint") { await editFileHint(name); return; }
     if (act === "rename") {
       const nn = await uiPrompt("重命名", name, "输入新名称"); if (!nn || nn === name) return;
       fetch("/api/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, new_name: nn }) })

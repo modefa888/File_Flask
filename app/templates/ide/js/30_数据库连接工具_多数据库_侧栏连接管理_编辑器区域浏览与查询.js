@@ -167,6 +167,9 @@
           '<div class="dbc-row"><span class="dbc-lb">类型</span><div class="dbc-kinds"></div></div>' +
           '<div class="dbc-row"><span class="dbc-lb">名称</span>' +
             '<input class="dbc-in dbc-name-in" spellcheck="false" placeholder="我的数据库"></div>' +
+          '<div class="dbc-row dbc-uri-row"><span class="dbc-lb">连接串</span>' +
+            '<input class="dbc-in dbc-uri-in" spellcheck="false" ' +
+              'placeholder="mongodb+srv://用户:密码@主机/库名（粘贴后自动填下面的字段）"></div>' +
           '<div class="dbc-row dbc-host-row"><span class="dbc-lb">主机</span>' +
             '<input class="dbc-in dbc-host-in" spellcheck="false" placeholder="127.0.0.1"></div>' +
           '<div class="dbc-row dbc-host-row"><span class="dbc-lb">端口</span>' +
@@ -189,6 +192,7 @@
       var nameIn = box.querySelector(".dbc-name-in"), hostIn = box.querySelector(".dbc-host-in");
       var portIn = box.querySelector(".dbc-port-in"), userIn = box.querySelector(".dbc-user-in");
       var pwdIn = box.querySelector(".dbc-pwd-in"), dbIn = box.querySelector(".dbc-db-in");
+      var uriIn = box.querySelector(".dbc-uri-in");
       var tipEl = box.querySelector(".dbc-tip-t"), msgEl = box.querySelector(".dbc-msg");
       var okBtn = box.querySelector(".m-ok"), testBtn = box.querySelector(".dbc-test");
       var kind = cur.kind || (DBC.kinds[0] ? DBC.kinds[0].kind : "sqlite");
@@ -204,7 +208,9 @@
         msgEl.className = "dbc-msg" + (isErr ? " err" : (isOk ? " ok" : ""));
       }
       function renderKinds() {
-        kindEls.innerHTML = DBC.kinds.map(function (k) {
+        // 编辑已有连接时只显示它自己的类型，避免误切换到别的库类型
+        var kinds = conn ? DBC.kinds.filter(function (k) { return k.kind === kind; }) : DBC.kinds;
+        kindEls.innerHTML = kinds.map(function (k) {
           return '<button type="button" class="dbc-kind' + (k.kind === kind ? " on" : "") +
             (k.ready ? "" : " off") + '" data-k="' + escAttr(k.kind) + '" title="' +
             escAttr(k.ready ? k.hint : "未安装驱动，需先执行：" + k.install) + '">' +
@@ -224,16 +230,40 @@
         var k = dbcKind(kind);
         var isSqlite = kind === "sqlite";
         box.querySelectorAll(".dbc-host-row").forEach(function (r) { r.hidden = isSqlite; });
+        // 「连接串」只有 MongoDB 才有：mongodb+srv:// 的 SRV / 副本集 / TLS 等靠主机端口填不出来
+        box.querySelector(".dbc-uri-row").hidden = kind !== "mongodb";
         box.querySelector(".dbc-tip-t").textContent = k.hint || "";
         box.querySelector(".dbc-db-lb").textContent = isSqlite ? "文件" : (kind === "redis" ? "库序号" : "库名");
         dbIn.placeholder = { sqlite: "/path/to/database.db", redis: "0（默认 0 号库）" }[kind] || "可留空，连上后再选库";
         if (!portIn.value) portIn.placeholder = String(k.default_port || "");
       }
+      /* 粘贴连接串 → 顺手把主机 / 端口 / 账号 / 密码 / 库名填进下面的输入框（只为好核对，
+         真正生效的是整条连接串本身；密码里带未转义的 @ 时按最后一个 @ 切分）。 */
+      function fillFromUri() {
+        var m = /^mongodb(\+srv)?:\/\/([^/?#]*)(\/[^?#]*)?/i.exec(uriIn.value.trim());
+        if (!m) return;
+        var authority = m[2] || "", path = (m[3] || "").replace(/^\//, "");
+        var at = authority.lastIndexOf("@");
+        var creds = at >= 0 ? authority.slice(0, at) : "";
+        var hostPart = at >= 0 ? authority.slice(at + 1) : authority;
+        if (creds) {
+          var c = creds.split(":");
+          if (c[0]) userIn.value = decodeURIComponent(c[0]);
+          if (c.length > 1) pwdIn.value = decodeURIComponent(c.slice(1).join(":"));
+        }
+        if (hostPart) {
+          var hp = hostPart.split(",")[0].split(":");
+          if (hp[0]) hostIn.value = hp[0];
+          if (hp[1]) portIn.value = hp[1];
+        }
+        if (path) dbIn.value = decodeURIComponent(path);
+        if (!nameIn.value.trim()) nameIn.value = dbIn.value || hostIn.value || "MongoDB";
+      }
       function payload() {
         return { id: cur.id || "", kind: kind, name: nameIn.value.trim(),
                  host: hostIn.value.trim(), port: parseInt(portIn.value, 10) || 0,
                  username: userIn.value.trim(), password: pwdIn.value,
-                 dbname: dbIn.value.trim() };
+                 dbname: dbIn.value.trim(), uri: uriIn.value.trim() };
       }
       async function test() {
         if (busy) return;
@@ -263,8 +293,11 @@
       portIn.value = cur.port ? String(cur.port) : "";
       userIn.value = cur.username || "";
       dbIn.value = cur.dbname || "";
+      // 之前用连接串存过的连接：编辑时把那条串回显出来（已剥掉账号密码）
+      uriIn.value = /^mongodb(\+srv)?:\/\//i.test(cur.params || "") ? cur.params : "";
       pwdIn.placeholder = cur.has_password ? "留空表示不修改（已存 " + (cur.password_masked || "") + "）" : "密码";
       renderKinds(); refresh();
+      uriIn.addEventListener("input", fillFromUri);
       box.querySelector(".dbc-test").onclick = test;
       okBtn.onclick = save;
       box.querySelector(".m-cancel").onclick = function () { close(null); };

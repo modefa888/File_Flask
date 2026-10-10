@@ -62,7 +62,8 @@ KINDS = {
               "hint": "默认端口 6379；「库名」填 0-15 的库序号，留空为 0"},
     "mongodb": {"label": "MongoDB", "icon": "bi-collection-fill", "need_host": True,
                 "default_port": 27017, "driver": "pymongo", "pip": "pymongo",
-                "hint": "默认端口 27017；「库名」可留空，连上后再选库"},
+                "hint": "默认端口 27017；「库名」可留空，连上后再选库；"
+                        "也可直接粘贴 mongodb:// 或 mongodb+srv:// 连接字符串"},
 }
 # 非关系型：不走 SQL 那套（库表/行/SQL 语句），浏览与查询各自单独实现
 _NOSQL = ("redis", "mongodb")
@@ -178,6 +179,22 @@ def api_db_conns_save():
         port = int(data.get("port") or 0)
     except (TypeError, ValueError):
         port = 0
+
+    # MongoDB：允许直接粘贴连接字符串（mongodb:// / mongodb+srv://）。
+    # 账号密码从串里拆出来存进原来那两列（密码仍加密），串本身剥掉账号密码后存 params，
+    # 连库时整条用它 —— 这样 SRV / 副本集 / TLS / authSource 等参数都不会丢。
+    uri_pwd = ""
+    uri_in = str(data.get("uri") or "").strip()
+    if kind == "mongodb" and uri_in:
+        try:
+            params, info = _split_mongo_uri(uri_in)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        host = host or info["host"]
+        port = port or info["port"]
+        username = username or info["username"]
+        dbname = dbname or info["dbname"]
+        uri_pwd = info["password"]
     if not port:
         port = KINDS[kind]["default_port"]
 
@@ -195,7 +212,9 @@ def api_db_conns_save():
     old = _load_conf(cid, with_password=True) if cid else None
     if cid and not old:
         return jsonify({"error": "连接不存在（可能已被删除）"}), 404
-    if pwd_raw is None or str(pwd_raw) == "":
+    if uri_pwd:
+        pwd_plain = uri_pwd                                  # 连接串里带了密码 → 以它为准
+    elif pwd_raw is None or str(pwd_raw) == "":
         pwd_plain = (old or {}).get("password") or ""      # 留空 = 不改密码
     else:
         pwd_plain = str(pwd_raw)
@@ -335,19 +354,126 @@ def _sasl_bad_char(s):
     return None
 
 
+# MongoDB 支持用「连接字符串」添加：mongodb+srv:// 的 SRV 记录、多主机副本集、TLS、
+# authSource 这些靠 host/port 两个输入框根本表达不出来，所以原样保存整条 URI。
+_MONGO_URI_RE = re.compile(r"^mongodb(\+srv)?://", re.IGNORECASE)
+# 连接串拆件：scheme://[user:pass@]host[,host...][/db][?opts]
+# 账号密码段用贪婪匹配，密码里带未转义的 @ 时才按最后一个 @ 切分
+_MONGO_URI_PARTS_RE = re.compile(
+    r"^mongodb(?:\+srv)?://(?:(?P<userinfo>[^/?#]*)@)?(?P<hosts>[^/?#]*)(?P<path>/[^?#]*)?",
+    re.IGNORECASE)
+
+
+def _mongo_uri(conf: dict) -> str:
+    """配置里保存的连接字符串（存在 params 字段）；不是 mongodb URI 就当作没有。"""
+    raw = str(conf.get("params") or "").strip()
+    return raw if _MONGO_URI_RE.match(raw) else ""
+
+
+def _strip_mongo_credentials(uri: str) -> str:
+    """去掉连接串里的 user:pass@。
+
+    密码统一走「加密后落库」的那一列，连接串里不留明文；连库时再把账号密码单独传给驱动。
+    """
+    m = _MONGO_URI_RE.match(uri)
+    if not m:
+        return uri
+    head, rest = uri[:m.end()], uri[m.end():]
+    cut = len(rest)
+    for i, ch in enumerate(rest):               # 账号密码只在第一个 / ? # 之前的这一段里
+        if ch in "/?#":
+            cut = i
+            break
+    authority, tail = rest[:cut], rest[cut:]
+    if "@" in authority:                        # 密码里可能带未转义的 @，取最后一个
+        authority = authority.rsplit("@", 1)[1]
+    return head + authority + tail
+
+
+def _split_host_port(s: str):
+    """拆 host:port（IPv6 写成 [::1]:27017）。返回 (host, port)；端口不是数字则报错。"""
+    s = (s or "").strip()
+    if not s:
+        return "", 0
+    if s.startswith("["):                            # IPv6
+        host, _b, rest = s.partition("]")
+        rest = rest.lstrip(":")
+        if rest and not rest.isdigit():
+            raise ValueError("端口不是数字：%s" % rest)
+        return host[1:], (int(rest) if rest else 0)
+    head, sep, tail = s.rpartition(":")
+    if sep and head:
+        if not tail.isdigit():
+            raise ValueError("端口不是数字：%s" % tail)
+        return head, int(tail)
+    return s, 0
+
+
+def _parse_mongo_uri_basic(raw: str) -> dict:
+    """不依赖 pymongo 的兜底解析：认 scheme://user:pass@host1:port,host2:port/db?opts 这种写法。
+
+    （保存配置这一步不能因为没装驱动就失败，所以这里手工拆，够填输入框就行。）
+    """
+    from urllib.parse import unquote
+    m = _MONGO_URI_PARTS_RE.match(str(raw or "").strip())
+    if not m:
+        raise ValueError("连接字符串格式不正确：%s" % raw)
+    userinfo = m.group("userinfo") or ""
+    hosts = [h for h in (m.group("hosts") or "").split(",") if h]
+    path = (m.group("path") or "").lstrip("/")
+    user, _sep, pwd = userinfo.partition(":")
+    host, port = _split_host_port(hosts[0]) if hosts else ("", 0)
+    return {"username": unquote(user), "password": unquote(pwd),
+            # 没有主机名时，这段 path 是 unix socket 的路径而不是库名
+            "dbname": unquote(path) if host else "",
+            "host": ",".join(_split_host_port(h)[0] for h in hosts) if hosts else "",
+            "port": port}
+
+
+def _split_mongo_uri(uri: str):
+    """拆连接串：返回 (去掉账号密码的 URI, {username, password, dbname, host, port})。
+
+    优先用 pymongo 自带的解析器（认得 SRV / 多主机 / 百分号编码）；没装驱动或解析失败时
+    退回 urllib，至少保证「保存」这一步不依赖驱动能不能用。host / port / dbname 只是拿来
+    填输入框方便核对，真正连库用的是整条连接串。
+    """
+    raw = str(uri or "").strip()
+    if not _MONGO_URI_RE.match(raw):
+        raise ValueError("连接字符串需以 mongodb:// 或 mongodb+srv:// 开头")
+    info = {"username": "", "password": "", "dbname": "", "host": "", "port": 0}
+    try:
+        import pymongo
+        parsed = pymongo.uri_parser.parse_uri(raw)
+        nodes = parsed.get("nodelist") or []
+        if nodes:
+            info["host"] = ",".join(h for h, _p in nodes)
+            info["port"] = int(nodes[0][1] or 0)
+        info["username"] = parsed.get("username") or ""
+        info["password"] = parsed.get("password") or ""
+        info["dbname"] = parsed.get("database") or ""
+    except Exception:                            # 驱动缺失 / SRV 解析失败 → 手工兜底
+        info = _parse_mongo_uri_basic(raw)
+    return _strip_mongo_credentials(raw), info
+
+
 def _open_mongo(conf):
     import pymongo
     from urllib.parse import quote_plus
-    host = conf.get("host") or "127.0.0.1"
-    port = int(conf.get("port") or 27017)
     user = conf.get("username") or ""
     pwd = conf.get("password") or ""
-    auth = ("%s:%s@" % (quote_plus(user), quote_plus(pwd))) if user else ""
-    uri = "mongodb://%s%s:%d/" % (auth, host, port)
-    client = pymongo.MongoClient(uri,
-                                 serverSelectionTimeoutMS=_CONNECT_TIMEOUT * 1000,
-                                 connectTimeoutMS=_CONNECT_TIMEOUT * 1000,
-                                 socketTimeoutMS=_QUERY_TIMEOUT * 1000)
+    uri = _mongo_uri(conf)
+    if not uri:                                  # 没填连接串：按主机 / 端口 / 账号密码拼
+        host = conf.get("host") or "127.0.0.1"
+        port = int(conf.get("port") or 27017)
+        auth = ("%s:%s@" % (quote_plus(user), quote_plus(pwd))) if user else ""
+        uri = "mongodb://%s%s:%d/" % (auth, host, port)
+    opts = {"serverSelectionTimeoutMS": _CONNECT_TIMEOUT * 1000,
+            "connectTimeoutMS": _CONNECT_TIMEOUT * 1000,
+            "socketTimeoutMS": _QUERY_TIMEOUT * 1000}
+    if user or pwd:                              # 连接串里的账号密码已剥掉，这里补回去
+        opts["username"] = user
+        opts["password"] = pwd
+    client = pymongo.MongoClient(uri, **opts)
     try:
         client.admin.command("ping")                 # 连不上时立刻报错
     except Exception as e:
@@ -1975,7 +2101,9 @@ def api_db_test():
         conf = {"kind": kind, "host": str(data.get("host") or "").strip(),
                 "port": int(data.get("port") or 0) or KINDS[kind]["default_port"],
                 "username": str(data.get("username") or "").strip(),
-                "password": str(pwd), "dbname": str(data.get("dbname") or "").strip()}
+                "password": str(pwd), "dbname": str(data.get("dbname") or "").strip(),
+                # MongoDB 的连接串（未保存也能测）：优先用刚粘贴的那条
+                "params": str(data.get("uri") or data.get("params") or "").strip()}
     t0 = time.time()
     try:
         with _LOCK:

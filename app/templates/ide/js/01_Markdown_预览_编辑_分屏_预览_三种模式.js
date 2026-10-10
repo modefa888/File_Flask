@@ -865,18 +865,211 @@
   }
 
   /* ---------- 面包屑 / 状态栏 ---------- */
-  function renderBreadcrumbs(path) {
-    const parts = path.split("/").filter(Boolean);
-    let acc = "", html = "";
-    parts.forEach((p, i) => {
-      acc += "/" + p;
-      const cur = i === parts.length - 1 ? " cur" : "";
-      html += '<span class="bc' + cur + '">' + esc(p) + "</span>";
-      if (i < parts.length - 1) html += '<span class="sep">/</span>';
+  /* 面包屑只显示「相对当前工作区的路径」：/home/xxx/项目/... 这类绝对路径前缀不再展示
+     （对齐 VS Code / Trae 的观感）。命中最长的工作区根（主项目或附加项目）；
+     工作区之外的绝对路径按原样分层；非路径的显示名（设置 / 定时任务 / 插件视图标题）只做纯文本。
+     每一级都可点击：点开 = 列出「该级所在目录」的同级条目（见下方「面包屑下拉」）。 */
+  function isAbsPath(p) { return /^\//.test(p) || /^[a-zA-Z]:[\\/]/.test(p); }
+  function normPath(p) { return String(p == null ? "" : p).replace(/\\/g, "/").replace(/(.)\/+$/, "$1"); }
+  /* 命中最长的工作区根（主项目 / 附加项目）；返回 "" 表示不在任何工作区内 */
+  function wsRootOf(norm) {
+    const roots = [ROOT].concat(typeof extraRoots !== "undefined" ? extraRoots : [])
+      .filter(r => typeof r === "string" && r).map(normPath);
+    let hit = "";
+    roots.forEach(base => {
+      const ok = norm === base || norm.startsWith(base === "/" ? "/" : base + "/");
+      if (ok && base.length > hit.length) hit = base;
     });
-    $("breadcrumbs").innerHTML = html;
+    return hit;
+  }
+  function parentOf(p) {
+    const s = normPath(p);
+    const i = s.lastIndexOf("/");
+    if (i < 0) return s;
+    const head = s.slice(0, i);
+    if (!head) return "/";
+    return /^[a-zA-Z]:$/.test(head) ? head + "/" : head;
+  }
+  /* 面包屑层级：[{name, dir}]；dir 为该级的绝对路径（可点击开同级列表），非路径显示名为 ""（不可点） */
+  function breadcrumbTrail(path) {
+    const norm = normPath(path);
+    if (!norm) return [];
+    if (!isAbsPath(norm)) return [{ name: norm, dir: "" }];
+    const hit = wsRootOf(norm);
+    const rel = (hit ? norm.slice(hit.length) : norm).replace(/^\/+/, "");
+    if (!rel) return hit ? [{ name: baseName(hit) || hit, dir: hit }] : [];   // 路径即工作区根本身
+    let acc = hit === "/" ? "" : hit;
+    return rel.split("/").filter(Boolean).map(n => {
+      acc = acc ? acc + "/" + n : "/" + n;
+      return { name: n, dir: acc };
+    });
+  }
+  /* 下拉浮层标题用的短路径：项目名 / 子目录 / … */
+  function shortDirLabel(p) {
+    const norm = normPath(p);
+    if (!norm) return "";
+    const hit = wsRootOf(norm);
+    if (!hit) return norm;
+    const rel = norm.slice(hit.length).replace(/^\/+/, "");
+    const rootName = baseName(hit) || hit;
+    return rel ? rootName + " / " + rel.split("/").join(" / ") : rootName;
+  }
+  function renderBreadcrumbs(path) {
+    const box = $("breadcrumbs");
+    const trail = breadcrumbTrail(path);
+    box.innerHTML = "";
+    trail.forEach((t, i) => {
+      const last = i === trail.length - 1;
+      const el = document.createElement("span");
+      el.className = "bc" + (last ? " cur" : "") + (t.dir ? " clickable" : "");
+      el.textContent = t.name;
+      if (t.dir) { el.dataset.dir = t.dir; el.title = t.dir; }   // 悬停看完整路径，点击列出同级
+      box.appendChild(el);
+      if (!last) {
+        const sep = document.createElement("span");
+        sep.className = "sep"; sep.textContent = "/";
+        box.appendChild(sep);
+      }
+    });
+    bcPopClose();                     // 面包屑重绘（切标签 / 关标签）时收起可能开着的下拉
     $("sbPath").textContent = baseName(path);
   }
+
+  /* ---------- 面包屑下拉：点某一级 → 列出该级的同级条目（仿 VS Code / Trae 的面包屑选择器） ---------- */
+  var bcPop = null;          // 浮层元素（懒创建）
+  var bcPopAnchor = null;    // 当前高亮 / 定位用的面包屑节点
+  var bcPopCur = null;       // 当前列出的目录：{dir, curPath}
+  var bcPopHist = [];        // 钻入历史，供「← 返回上一级」用
+  var bcPopRows = [];        // 当前可点条目（键盘上下移动用）
+  var bcPopKb = -1;          // 键盘光标下标（-1 = 未选中）
+
+  function bcPopEl() {
+    if (bcPop) return bcPop;
+    bcPop = document.createElement("div");
+    bcPop.className = "bc-pop";
+    document.body.appendChild(bcPop);
+    bcPop.addEventListener("click", (e) => {
+      if (e.target.closest(".bc-pop-back")) { bcPopBack(); return; }
+      const row = e.target.closest(".bc-pop-item");
+      if (!row) return;
+      if (row.dataset.isdir === "1") bcPopDrill(row.dataset.dir);   // 文件夹：钻进去看子项
+      else { const p = row.dataset.dir; bcPopClose(); openFile(p, baseName(p)); }
+    });
+    // 点浮层以外 → 关闭；点其它面包屑层级时交给它自己的 click 处理，避免「关了又开」闪一下
+    document.addEventListener("mousedown", (e) => {
+      if (!bcPop.classList.contains("open")) return;
+      if (bcPop.contains(e.target)) return;
+      if (e.target.closest && e.target.closest("#breadcrumbs .bc.clickable")) return;
+      bcPopClose();
+    }, true);
+    document.addEventListener("keydown", (e) => {
+      if (!bcPop.classList.contains("open")) return;
+      if (e.key === "Escape") { e.preventDefault(); bcPopClose(); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); bcPopMove(1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); bcPopMove(-1); }
+      else if (e.key === "Enter" && bcPopKb >= 0) { e.preventDefault(); bcPopRows[bcPopKb].click(); }
+    }, true);
+    window.addEventListener("resize", bcPopClose);
+    return bcPop;
+  }
+  function bcPopClose() {
+    if (bcPop) bcPop.classList.remove("open");
+    if (bcPopAnchor) bcPopAnchor.classList.remove("sel");
+    bcPopAnchor = null; bcPopCur = null; bcPopHist = []; bcPopRows = []; bcPopKb = -1;
+  }
+  function bcPopMove(step) {
+    if (!bcPopRows.length) return;
+    bcPopKb = bcPopKb < 0 ? (step > 0 ? 0 : bcPopRows.length - 1)
+                          : Math.max(0, Math.min(bcPopRows.length - 1, bcPopKb + step));
+    bcPopRows.forEach((r, i) => r.classList.toggle("kb", i === bcPopKb));
+    const r = bcPopRows[bcPopKb];
+    if (r && r.scrollIntoView) r.scrollIntoView({ block: "nearest" });
+  }
+  /* 贴着触发它的那一级下方显示，右边 / 下边放不下就自动收进来 */
+  function bcPopPlace() {
+    if (!bcPop || !bcPop.classList.contains("open")) return;
+    const el = bcPop;
+    const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+    el.style.maxWidth = (vw - 16) + "px";
+    const a = bcPopAnchor || $("breadcrumbs");
+    const r = a ? a.getBoundingClientRect() : { left: 8, top: 40, bottom: 60 };
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const left = Math.max(6, Math.min(r.left, vw - w - 6));
+    let top = r.bottom + 2;
+    if (top + h > vh - 6) top = Math.max(6, r.top - h - 2);
+    el.style.left = left + "px";
+    el.style.top = top + "px";
+  }
+  /* 列出 dir 的条目；curPath 命中哪条就标成「当前」（点击的那一级 / 正在编辑的文件） */
+  async function bcPopList(dir, curPath) {
+    const el = bcPopEl();
+    bcPopCur = { dir: dir, curPath: curPath || "" };
+    el.classList.add("open");
+    el.innerHTML =
+      '<div class="bc-pop-head">' +
+        '<button class="bc-pop-back" title="返回上一级"' + (bcPopHist.length ? "" : " hidden") + '><i class="bi bi-arrow-left"></i></button>' +
+        '<span class="bc-pop-path"></span>' +
+      '</div>' +
+      '<div class="bc-pop-body"><div class="bc-pop-empty">加载中…</div></div>';
+    el.querySelector(".bc-pop-path").textContent = shortDirLabel(dir) || dir;
+    bcPopRows = []; bcPopKb = -1;
+    bcPopPlace();
+    let items = [];
+    try {
+      const d = await apiFiles(dir, showHidden);
+      items = (d.items || [])
+        .filter(it => showAllFiles || !TREE_IGNORE.has(it.name))   // 与资源管理器一致：隐藏依赖目录
+        .sort((a, b) => (b.is_dir - a.is_dir) || a.name.localeCompare(b.name, "zh"));
+    } catch (e) {
+      const b = el.querySelector(".bc-pop-body");
+      if (b) b.innerHTML = '<div class="bc-pop-empty">无法读取该目录</div>';
+      bcPopPlace();
+      return;
+    }
+    if (!bcPop || !bcPop.classList.contains("open") || bcPopCur.dir !== dir) return;   // 期间已关闭 / 已换目录
+    const body = el.querySelector(".bc-pop-body");
+    body.innerHTML = "";
+    if (!items.length) body.innerHTML = '<div class="bc-pop-empty">这个文件夹是空的</div>';
+    items.forEach(it => {
+      // /api/files 的 path 可能是「相对当前目录」的，统一换算成绝对路径（与主资源管理器一致）
+      const abs = it.abs_path || (isAbsPath(it.path) ? it.path : (dir === "/" ? "/" + it.name : dir + "/" + it.name));
+      const row = document.createElement("div");
+      row.className = "bc-pop-item" + (abs === curPath ? " cur" : "");
+      row.dataset.dir = abs;
+      row.dataset.isdir = it.is_dir ? "1" : "0";
+      row.innerHTML = '<span class="ic">' + iconFor(it.name, !!it.is_dir) + '</span><span class="nm"></span>';
+      row.querySelector(".nm").textContent = it.name;   // textContent：文件名里的 & < 等原样显示
+      body.appendChild(row);
+      bcPopRows.push(row);
+    });
+    bcPopPlace();
+  }
+  function bcPopOpen(crumbEl) {
+    const dir = crumbEl && crumbEl.dataset ? crumbEl.dataset.dir : "";
+    if (!dir) return;
+    if (bcPopAnchor && bcPopAnchor !== crumbEl) bcPopAnchor.classList.remove("sel");
+    bcPopAnchor = crumbEl;
+    crumbEl.classList.add("sel");
+    bcPopHist = [];
+    bcPopList(parentOf(dir), dir);     // 同级 = 所在目录的条目，且把点击的这一级标成当前
+  }
+  function bcPopDrill(dir) {
+    if (bcPopCur) bcPopHist.push(bcPopCur);
+    bcPopList(dir, "");                // 钻进文件夹：列它的子项
+  }
+  function bcPopBack() {
+    const prev = bcPopHist.pop();
+    if (!prev) { bcPopClose(); return; }
+    bcPopList(prev.dir, prev.curPath);
+  }
+  // 面包屑点击（委托到 document：不依赖脚本初始化时机）
+  document.addEventListener("click", (e) => {
+    if (!e.target || !e.target.closest) return;
+    const bc = e.target.closest("#breadcrumbs .bc.clickable");
+    if (!bc) return;
+    if (bc.classList.contains("sel")) { bcPopClose(); return; }   // 再点同一级 → 收起
+    bcPopOpen(bc);
+  });
   function updateStatus() {
     if (!active || !active.cm) {
       $("sbPos").textContent = "行 1, 列 1"; $("sbLang").textContent = "纯文本"; return;

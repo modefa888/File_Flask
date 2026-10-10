@@ -9,6 +9,7 @@
     .menubar span { padding: 3px 6px; }
     .titlebar .tb-title { display: none; }
     .editorarea .breadcrumbs { padding: 0 8px; }
+    .titlebar .tb-actions .tb-ai span { display: none; }   /* 窄屏只留图标 */
   }
   @media (max-width: 820px) {
     .traffic { display: none; }

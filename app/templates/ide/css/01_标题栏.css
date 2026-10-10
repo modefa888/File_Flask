@@ -19,4 +19,8 @@
   }
   .titlebar .tb-actions button:hover { background: #3a3a3a; }
   .titlebar .tb-actions button.on { color: #4daafc; }   /* 对应面板处于打开状态 */
+  /* AI 助手入口：从面包屑行移到标题栏最右侧，带文字标签，随面板开关高亮 */
+  .titlebar .tb-actions .tb-ai { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 10px; font-size: 12px; }
+  .titlebar .tb-actions .tb-ai i { font-size: 13px; }
+  .titlebar .tb-actions .tb-ai.on { color: #4daafc; background: #2f3a45; }
 

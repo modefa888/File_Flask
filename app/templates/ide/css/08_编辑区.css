@@ -16,4 +16,34 @@
   }
   .bc-btn:hover { color: #fff; border-color: #555; background: #2d2d2d; }
   .bc-btn.on { color: #e2c08a; border-color: #6b5a35; background: #332c1e; }
+  /* 可点击的面包屑层级：点开 = 该级的同级目录列表（见 01_Markdown js 的「面包屑下拉」） */
+  .breadcrumbs .bc.clickable { cursor: pointer; padding: 2px 5px; border-radius: 4px; }
+  .breadcrumbs .bc.clickable:hover, .breadcrumbs .bc.sel { background: #2d2d2d; color: #fff; }
+
+  /* ---------- 面包屑下拉浮层 ---------- */
+  .bc-pop {
+    position: fixed; left: 0; top: 0; z-index: 1000; display: none; min-width: 210px;
+    max-height: 340px; overflow: auto; padding: 4px 0;
+    background: #252526; border: 1px solid #454545; border-radius: 6px;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, .5); font-size: 13px; color: #cccccc;
+  }
+  .bc-pop.open { display: block; }
+  .bc-pop .bc-pop-head {
+    display: flex; align-items: center; gap: 6px; padding: 2px 8px 6px; margin-bottom: 2px;
+    border-bottom: 1px solid #3a3a3a; color: #8a8a8a; font-size: 11px;
+  }
+  .bc-pop .bc-pop-back {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 18px; padding: 0; background: transparent; border: none; border-radius: 4px;
+    color: #9aa0a6; font-size: 12px; cursor: pointer;
+  }
+  .bc-pop .bc-pop-back:hover { background: #3a3a3a; color: #ffffff; }
+  .bc-pop .bc-pop-back[hidden] { display: none; }      /* 作者样式会盖掉 UA 的 [hidden]，显式补一条 */
+  .bc-pop .bc-pop-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bc-pop .bc-pop-item { display: flex; align-items: center; gap: 8px; padding: 5px 12px; color: #cccccc; cursor: pointer; white-space: nowrap; }
+  .bc-pop .bc-pop-item .ic { flex: none; width: 16px; text-align: center; color: #9aa0a6; }
+  .bc-pop .bc-pop-item .nm { overflow: hidden; text-overflow: ellipsis; }
+  .bc-pop .bc-pop-item:hover, .bc-pop .bc-pop-item.kb { background: #094771; color: #ffffff; }
+  .bc-pop .bc-pop-item.cur { color: #7ec4ff; }        /* 当前所在的层级 / 正在编辑的文件 */
+  .bc-pop .bc-pop-empty { padding: 8px 12px; color: #8a8a8a; }
 

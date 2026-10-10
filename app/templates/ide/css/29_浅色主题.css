@@ -36,6 +36,7 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .titlebar .tb-actions button { color: #3b3b3b; }
 :where(html.theme-light) .titlebar .tb-actions button:hover { background: #d4d4d4; }
 :where(html.theme-light) .titlebar .tb-actions button.on { color: #005fb8; }
+:where(html.theme-light) .titlebar .tb-actions .tb-ai.on { color: #005fb8; background: #dbe6f2; }
 
 /* ---------- 工作区：活动栏 / 侧边栏 / 文件树（02） ---------- */
 :where(html.theme-light) .activitybar { background: #e8e8e8; }
@@ -92,6 +93,19 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .bc-btn { border-color: #cecece; color: #5a5a5a; }
 :where(html.theme-light) .bc-btn:hover { color: #000000; border-color: #a0a0a0; background: #f0f0f0; }
 :where(html.theme-light) .bc-btn.on { color: #8a6a00; border-color: #c9a94a; background: #fbf3d9; }
+/* 面包屑可点层级 + 同级目录下拉 */
+:where(html.theme-light) .breadcrumbs .bc.clickable:hover,
+:where(html.theme-light) .breadcrumbs .bc.sel { background: #e4e4e4; color: #000000; }
+:where(html.theme-light) .bc-pop {
+  background: #f8f8f8; border-color: #cecece; color: #333333; box-shadow: 0 6px 22px rgba(0, 0, 0, .2);
+}
+:where(html.theme-light) .bc-pop .bc-pop-head { border-bottom-color: #e0e0e0; color: #6b6b6b; }
+:where(html.theme-light) .bc-pop .bc-pop-back { color: #5a5a5a; }
+:where(html.theme-light) .bc-pop .bc-pop-back:hover { background: #e4e4e4; color: #000000; }
+:where(html.theme-light) .bc-pop .bc-pop-item { color: #333333; }
+:where(html.theme-light) .bc-pop .bc-pop-item .ic { color: #6b6b6b; }
+:where(html.theme-light) .bc-pop .bc-pop-item.cur { color: #005fb8; }
+:where(html.theme-light) .bc-pop .bc-pop-empty { color: #8a8a8a; }
 
 /* ---------- 标签栏（09 尾部） ---------- */
 :where(html.theme-light) .tab-row { background: #f3f3f3; }

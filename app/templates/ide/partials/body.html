@@ -182,9 +182,52 @@
       </div>
       <div class="ed-groups" id="edGroups">
         <div class="welcome" id="welcome">
-          <div class="big"><i class="bi bi-code-square"></i></div>
-          <div class="wt">在线项目 IDE</div>
-          <div class="ws" id="welcomeSub">从左侧资源管理器选择文件开始编辑。支持多标签页、语法高亮、保存对比，整体交互参考 VS Code 设计。</div>
+          <div class="wc-inner">
+            <div class="wc-head">
+              <div class="wc-mascot" aria-hidden="true">
+                <svg viewBox="0 0 140 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <linearGradient id="wcBody" x1="20" y1="28" x2="120" y2="126" gradientUnits="userSpaceOnUse">
+                      <stop offset="0" stop-color="#fbfdff"/><stop offset=".55" stop-color="#dde6f0"/><stop offset="1" stop-color="#bfcbd9"/>
+                    </linearGradient>
+                    <linearGradient id="wcScreen" x1="33" y1="42" x2="107" y2="96" gradientUnits="userSpaceOnUse">
+                      <stop offset="0" stop-color="#2c3748"/><stop offset="1" stop-color="#131922"/>
+                    </linearGradient>
+                    <linearGradient id="wcGlow" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stop-color="#7fe0ff"/><stop offset="1" stop-color="#37a9ff"/>
+                    </linearGradient>
+                  </defs>
+                  <line x1="70" y1="26" x2="70" y2="14" stroke="#a7b4c4" stroke-width="4.5" stroke-linecap="round"/>
+                  <circle cx="70" cy="11" r="6.5" fill="url(#wcGlow)"/>
+                  <rect x="10" y="52" width="15" height="32" rx="7.5" fill="url(#wcBody)"/>
+                  <rect x="115" y="52" width="15" height="32" rx="7.5" fill="url(#wcBody)"/>
+                  <rect x="18" y="30" width="104" height="84" rx="30" fill="url(#wcBody)"/>
+                  <rect x="32" y="44" width="76" height="56" rx="24" fill="url(#wcScreen)"/>
+                  <path d="M54 60l8 12-8 12" stroke="url(#wcGlow)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M82 60l8 12-8 12" stroke="url(#wcGlow)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+                  <rect x="44" y="108" width="52" height="24" rx="12" fill="url(#wcBody)"/>
+                  <circle cx="70" cy="120" r="5" fill="#9fb2c6"/>
+                  <rect x="27" y="112" width="16" height="9" rx="4.5" fill="#dbe3ec"/>
+                  <rect x="97" y="112" width="16" height="9" rx="4.5" fill="#dbe3ec"/>
+                </svg>
+              </div>
+              <div class="wc-hello">
+                <div class="wc-hi">Hi Buddy</div>
+                <div class="wc-wait">等待任务…</div>
+                <div class="wc-project" id="welcomeProj">项目：—</div>
+              </div>
+            </div>
+            <div class="wc-keys" id="welcomeKeys">
+              <button class="wc-key" data-act="quickOpen"><span class="wc-key-label">搜索文件</span><span class="wc-chips"><kbd>Ctrl</kbd><kbd>P</kbd></span></button>
+              <button class="wc-key" data-act="searchContent"><span class="wc-key-label">在文件中搜索</span><span class="wc-chips"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>F</kbd></span></button>
+              <button class="wc-key" data-act="gotoLine"><span class="wc-key-label">跳转到行</span><span class="wc-chips"><kbd>Ctrl</kbd><kbd>G</kbd></span></button>
+              <button class="wc-key" data-act="newFile"><span class="wc-key-label">新建文件</span><span class="wc-chips"><kbd>Ctrl</kbd><kbd>N</kbd></span></button>
+              <button class="wc-key" data-act="save"><span class="wc-key-label">保存</span><span class="wc-chips"><kbd>Ctrl</kbd><kbd>S</kbd></span></button>
+              <button class="wc-key" data-act="run"><span class="wc-key-label">运行当前文件</span><span class="wc-chips"><kbd>F5</kbd></span></button>
+              <button class="wc-key" data-act="terminal"><span class="wc-key-label">切换终端面板</span><span class="wc-chips"><kbd>Ctrl</kbd><kbd>`</kbd></span></button>
+            </div>
+            <button class="wc-more" data-act="shortcuts">查看全部快捷键</button>
+          </div>
         </div>
       </div>
       <div class="splitter-h hidden" id="bpSplitter" title="拖动调整面板高度（双击恢复默认）"></div>

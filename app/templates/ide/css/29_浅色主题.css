@@ -117,9 +117,15 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .logview .log-line.op-dim { color: #8a8a8a; }
 
 :where(html.theme-light) .welcome { color: #8a8a8a; }
-:where(html.theme-light) .welcome .big { color: #d0d0d0; }
-:where(html.theme-light) .welcome .wt { color: #5a5a5a; }
-:where(html.theme-light) .welcome .ws { color: #8a8a8a; }
+:where(html.theme-light) .welcome .wc-mascot { filter: drop-shadow(0 10px 22px rgba(0, 0, 0, .16)); }
+:where(html.theme-light) .welcome .wc-hi { color: #1f2328; }
+:where(html.theme-light) .welcome .wc-wait { color: #8a8a8a; }
+:where(html.theme-light) .welcome .wc-project { color: #9a9a9a; }
+:where(html.theme-light) .welcome .wc-key { color: #4c4c4c; }
+:where(html.theme-light) .welcome .wc-key:hover { background: rgba(0, 0, 0, .05); color: #000000; }
+:where(html.theme-light) .welcome .wc-chips kbd { background: #ececec; border-color: #d6d6d6; color: #333333; }
+:where(html.theme-light) .welcome .wc-more { color: #8a8a8a; }
+:where(html.theme-light) .welcome .wc-more:hover { color: #333333; }
 
 :where(html.theme-light) .cm-host .CodeMirror-selected { background: #cde3f8; }
 :where(html.theme-light) .cm-host .CodeMirror-activeline-background { background: rgba(0, 0, 0, .045); }

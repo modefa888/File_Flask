@@ -54,11 +54,34 @@
     outline: 1px solid #ffd08a; border-radius: 2px;
   }
 
+  /* 欢迎页（空编辑器占位）：吉祥物 + 问候 + 常用快捷键，参考 Cursor/Trae 观感 */
   .welcome {
-    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    color: #5a5a5a; gap: 10px; text-align: center; padding: 0 20px; z-index: 3;
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #8a8a8a; padding: 24px 20px; z-index: 3; overflow: auto;
   }
-  .welcome .big { font-size: 64px; color: #3a3a3a; }
-  .welcome .wt { font-size: 18px; color: #9aa0a6; }
-  .welcome .ws { font-size: 13px; color: #666; max-width: 460px; line-height: 1.7; }
+  .welcome .wc-inner { width: 520px; max-width: 100%; margin: auto; display: flex; flex-direction: column; gap: 22px; }
+  .welcome .wc-head { display: flex; align-items: center; gap: 24px; text-align: left; }
+  .welcome .wc-mascot { width: 112px; height: 112px; flex: none; filter: drop-shadow(0 10px 22px rgba(0, 0, 0, .45)); }
+  .welcome .wc-mascot svg { width: 100%; height: 100%; display: block; }
+  .welcome .wc-hello { min-width: 0; }
+  .welcome .wc-hi { font-size: 24px; line-height: 1.2; color: #e8eaed; letter-spacing: .2px; }
+  .welcome .wc-wait { font-size: 15px; color: #8b9098; margin-top: 7px; }
+  .welcome .wc-project { font-size: 12px; color: #6f747c; margin-top: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .welcome .wc-keys { display: flex; flex-direction: column; gap: 1px; }
+  .welcome .wc-key {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; box-sizing: border-box;
+    padding: 8px 12px; border: none; border-radius: 7px; background: transparent; cursor: pointer;
+    color: #c2c6cc; font-size: 13px; font-family: inherit; text-align: left; transition: background .12s ease, color .12s ease;
+  }
+  .welcome .wc-key:hover { background: rgba(255, 255, 255, .07); color: #ffffff; }
+  .welcome .wc-chips { display: flex; gap: 4px; flex: none; }
+  .welcome .wc-chips kbd {
+    font-family: inherit; font-size: 11px; line-height: 1; color: #c8ccd2; background: #2a2d31;
+    border: 1px solid #3c4046; border-radius: 4px; padding: 4px 7px; min-width: 10px; text-align: center;
+  }
+  .welcome .wc-more {
+    align-self: flex-start; margin-left: 12px; border: none; background: transparent; cursor: pointer;
+    color: #7f858d; font-size: 12px; font-family: inherit; padding: 2px 0;
+  }
+  .welcome .wc-more:hover { color: #c2c6cc; text-decoration: underline; }
 

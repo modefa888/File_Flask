@@ -46,6 +46,23 @@
   const $ = (id) => document.getElementById(id);
   const explorerPanel = $("explorerPanel");
   const welcome = $("welcome");
+  // 欢迎页（空编辑器占位）里的常用操作：点击即触发对应动作。
+  // 目标函数均为同 IIFE 内的函数声明（整段 <script> 解析时已提升），点击时调用安全。
+  if (welcome) {
+    welcome.addEventListener("click", (e) => {
+      const el = e.target.closest("[data-act]");
+      if (!el || !welcome.contains(el)) return;
+      const act = el.dataset.act;
+      if (act === "quickOpen" && typeof quickOpen === "function") quickOpen("");
+      else if (act === "searchContent" && typeof openGrepSearch === "function") openGrepSearch();
+      else if (act === "gotoLine" && typeof gotoLine === "function") gotoLine();
+      else if (act === "newFile" && typeof newInRoot === "function") newInRoot(false);
+      else if (act === "save" && typeof saveTab === "function") { if (active) saveTab(active); else toast("请先打开一个文件", "warn"); }
+      else if (act === "run" && typeof runCurrentFile === "function") runCurrentFile();
+      else if (act === "terminal" && typeof toggleBottom === "function") toggleBottom(undefined, "terminal");
+      else if (act === "shortcuts" && typeof showShortcuts === "function") showShortcuts();
+    });
+  }
   // 分屏：动态多组。tab.group 为组 id（递增不复用），组按 id 升序横向排列，空组自动消失
   const edGroups = $("edGroups");
   let curGroup = 0;                  // 焦点所在组：新打开的文件进入该组
@@ -1163,7 +1180,8 @@
       ideSettingSet("explorerCollapsed", !show);
     };
     $("tbTitle").textContent = "在线项目 IDE — " + baseName(ROOT);
-    $("welcomeSub").textContent = "项目：" + baseName(ROOT) + "\n从左侧资源管理器选择文件开始编辑。";
+    const _wp = $("welcomeProj");
+    if (_wp) _wp.textContent = "项目：" + baseName(ROOT) + "　·　从左侧资源管理器选择文件开始编辑";
     explorerPanel.innerHTML = "";                 // 防御重复建树：先清空再追加（并发触发时只保留最后一次）
     const root = document.createElement("div");
     root.className = "tree-children open"; root._base = ROOT; root._loaded = true;

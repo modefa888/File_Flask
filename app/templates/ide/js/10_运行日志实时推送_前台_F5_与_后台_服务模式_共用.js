@@ -41,8 +41,11 @@
   function ensureLogTab(t, auto) {
     let L = LOGS[t.id];
     if (!L) {
+      // replay：这个标签是「回看一个早就结束的任务」建立的历史视图（刷新后恢复时常见）。
+      // 此时回放末尾的 done 帧是旧结果，不能再弹一次「已手动终止」之类的提示。
       L = LOGS[t.id] = { name: t.name || "运行", buf: [], offset: 0, es: null, timer: null,
-                        done: false, promoted: false, target: t.target || "" };
+                        done: false, promoted: false, target: t.target || "",
+                        replay: t.running === false };
       const el = document.createElement("button");
       el.className = "bp-tab bp-log-tab";
       el.dataset.task = t.id;
@@ -58,6 +61,7 @@
       L.el = el;
     }
     if (t.target) L.target = t.target;                  // 供启动按钮判断「这个文件是否在跑」
+    if (t.running === true) L.replay = false;           // 中途发现它其实在跑 → 之后结束要正常提示
     selectLogTab(t.id, auto);
     return L;
   }
@@ -93,7 +97,8 @@
     if (L.es) { try { L.es.close(); } catch (e) { /* 忽略 */ } L.es = null; }
     clearTimeout(L.timer);
     if (L.el) L.el.classList.add("ended");
-    if (d && (d.stopped_by_user || d.timed_out || d.exit_code !== null)) {
+    // 只有「本会话里亲眼看着它结束」才提示；刷新后恢复历史标签属于回看，不重复打扰
+    if (!L.replay && d && (d.stopped_by_user || d.timed_out || d.exit_code !== null)) {
       toast(d.stopped_by_user ? "已手动终止：" + L.name
            : d.timed_out ? "执行超时已终止：" + L.name
            : (d.exit_code === 0 ? "运行完成：" : "进程已退出（代码 " + d.exit_code + "）：") + L.name,

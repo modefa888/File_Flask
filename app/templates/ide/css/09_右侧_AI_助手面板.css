@@ -757,19 +757,24 @@
   /* 底部「任务列表 / 文件列表」：tab 切换展示（避免一边收起后另一半留空白） */
   .ai-todo-float .ai-dock-cards { display: flex; gap: 8px; align-items: stretch; min-height: 0; width: 100%; }
   .ai-todo-float .ai-dock-card { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
-  /* tab 头：任务列表 | 文件列表 + 右侧收起按钮 */
-  .ai-dock-tabhead { display: flex; align-items: center; gap: 2px; padding: 4px 6px; flex: none;
-    border-bottom: 1px solid #33333a; }
-  .ai-dock-tab { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: none;
-    color: #9a9aa2; font-size: 11.5px; padding: 3px 8px; border-radius: 5px; cursor: pointer; font-family: inherit; }
-  .ai-dock-tab:hover:not(:disabled) { color: #e2e2e6; background: #33333a; }
-  .ai-dock-tab.on { color: #e8f0ff; background: #2f3a4d; }
+  /* tab 头（参考 CodeBuddy）：内嵌一条圆角行，左右两项铺开 —— 纯文字 + 计数 + 小箭头，
+     没有图标、没有选中底色、也没有单独的收起按钮（再点当前项即收起整块） */
+  .ai-dock-tabhead { display: flex; align-items: center; gap: 6px; flex: none;
+    padding: 3px 6px; margin: 4px 4px 2px; border-bottom: none;
+    background: rgba(255, 255, 255, .055); border-radius: 7px; }
+  /* 两项各占一半、内容居中（与 CodeBuddy 一致：文字不贴左右边） */
+  .ai-dock-tab { display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+    flex: 1 1 0; min-width: 0; overflow: hidden;
+    background: transparent; border: none; color: #9a9aa2; font-size: 12px; line-height: 1.5;
+    padding: 3px 9px; border-radius: 6px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+  .ai-dock-tab:hover:not(:disabled) { color: #e2e2e6; background: rgba(255, 255, 255, .07); }
+  .ai-dock-tab.on { color: #e8f0ff; background: transparent; }
   .ai-dock-tab:disabled { opacity: .45; cursor: default; }
-  .ai-dock-tab .bi { font-size: 11px; }
-  .ai-dock-tab .cnt { font-size: 10.5px; color: #8f8f97; }
-  .ai-dock-tab.on .cnt { color: #9dc4ff; }
-  .ai-dock-fold { margin-left: auto; color: #8a8a92; cursor: pointer; padding: 2px 5px; border-radius: 4px; }
-  .ai-dock-fold:hover { color: #e2e2e6; background: #33333a; }
+  .ai-dock-tab .cnt { font-size: 11px; color: #8f8f97; font-variant-numeric: tabular-nums; }
+  .ai-dock-tab.on .cnt { color: #b9c6d4; }
+  /* 小箭头：收起朝下、展开朝上（跟随 .on 旋转 180°） */
+  .ai-dock-tab .cv { font-size: 10px; color: #80808a; transition: transform .18s ease; }
+  .ai-dock-tab.on .cv { transform: rotate(180deg); color: #a9b6c6; }
   /* tab 内容：内嵌卡片去掉自身外框（标题由 tab 承担） */
   .ai-dock-tabbody { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
   .ai-todo-float .ai-dock-card.collapsed .ai-dock-tabbody { display: none; }

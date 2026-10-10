@@ -881,13 +881,14 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ai-bfile.is-sel { background: #eef3fb; border-color: #b9cde6; color: #24354d; }
 :where(html.theme-light) .ai-bfile-lang { color: #1668c9; }
 /* 底部 dock 的 tab 头 */
-:where(html.theme-light) .ai-dock-tabhead { border-bottom-color: #e4e4e4; }
-:where(html.theme-light) .ai-dock-tab { color: #5a5a62; }
-:where(html.theme-light) .ai-dock-tab:hover:not(:disabled) { background: #ededed; color: #12121a; }
-:where(html.theme-light) .ai-dock-tab.on { background: #dfe9fb; color: #12305c; }
-:where(html.theme-light) .ai-dock-tab.on .cnt { color: #2a63b5; }
-:where(html.theme-light) .ai-dock-fold { color: #6b6b73; }
-:where(html.theme-light) .ai-dock-fold:hover { background: #ededed; color: #12121a; }
+:where(html.theme-light) .ai-dock-tabhead { background: #f4f4f4; }
+:where(html.theme-light) .ai-dock-tab { color: #6b6b73; }
+:where(html.theme-light) .ai-dock-tab:hover:not(:disabled) { background: #e9e9e9; color: #12121a; }
+:where(html.theme-light) .ai-dock-tab.on { background: transparent; color: #1f2328; }
+:where(html.theme-light) .ai-dock-tab .cnt { color: #8a8a8a; }
+:where(html.theme-light) .ai-dock-tab.on .cnt { color: #3b3b3b; }
+:where(html.theme-light) .ai-dock-tab .cv { color: #a0a0a0; }
+:where(html.theme-light) .ai-dock-tab.on .cv { color: #4a4a4a; }
 :where(html.theme-light) .ai-file-chip.is-dir { background: #e8f2fa; border-color: #bcd8ea; color: #14587f; }
 :where(html.theme-light) .ai-file-chip.is-dir .rm { color: #4a7f9e; }
 :where(html.theme-light) .ai-file-chip .rm { color: #8a7a4a; }

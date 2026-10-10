@@ -117,8 +117,10 @@ File_Flask/
 
 - 端点：
   - `POST /api/ai/agent` `{repo, messages, perm, provider_id?, model?}` —— 启动**后台运行**，立即返回 `{run_id}`。
-  - `GET /api/ai/agent/stream?run_id=&offset=` —— 连接 / 重连该运行的 SSE：先回放已产生的事件，再实时续传。
-  - `GET /api/ai/agent/status?run_id=` —— 查询是否还能重连（页面刷新后判断用）。
+  - `GET /api/ai/agent/stream?run_id=&offset=` —— 连接该运行的 SSE：先回放已产生的事件，再实时续传（新任务用）。
+  - `GET /api/ai/agent/events?run_id=&offset=` —— 按 offset 取事件（JSON，含 `next`/`done`），**刷新续接用轮询**（比长挂 SSE 稳）。
+  - `GET /api/ai/agent/status?run_id=` —— 查询该运行是否还在。
+  - `GET /api/ai/agent/for-session?sid=` —— 按会话 id 找最近一场运行（本地 run_id 丢失时兜底）。
   - `POST /api/ai/agent/stop` `{run_id}` —— 停止后台运行。
   - `POST /api/ai/agent/approve` `{run_id, call_id, allow, always}` —— 批准/拒绝待确认调用。
 - **后台运行 / 断线续传**（`services/ide/agentrun.py`）：执行放在后台线程，事件缓冲在内存；
@@ -129,6 +131,11 @@ File_Flask/
   文件变更 / 任务清单）直接写进会话历史，`mid` 固定为 `"m"+run_id`（前端用同一个 mid 保存 → 覆盖更新，不会重复）。
   因此即使前端没能重连、或用户直接关掉页面，下一次打开会话也能看到结果。
   前端若丢失了 `run_id`，可用 `GET /api/ai/agent/for-session?sid=` 按会话 id 找回运行。
+- **中断来源必须区分**：前端用 `AI._userStop`（只有点「停止」/切换/新建会话才置位）与
+  `pagehide/beforeunload` 区分「用户主动停止」和「刷新/关闭页面」。刷新导致的事件流中断
+  **不能**写成「已停止/出错了」的回复，也**不能**清掉 `pendingTurn` 续连标记 —— 否则刷新后就再也接不上。
+  只有任务真正结束（正常收尾 / 用户停止 / 明确报错）才清标记。等待确认（`ask`）时刷新，
+  重连回放会重建确认卡片，服务端挂起状态仍在 `_PENDING`，点允许/拒绝照常生效（超时 600s）。
 - 内置工具：`list_dir / read_file / write_file / edit_file / search_files / run_command`，
   以及可开关的 `web_search / generate_image / code_intel / delegate_task / todo_write`。
 - 任务清单：`todo_write` 工具让模型把多步任务拆成待办清单（`pending / in_progress / completed`），

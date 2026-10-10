@@ -114,6 +114,37 @@ def started_at(run_id):
         return st["started"] if st else time.time()
 
 
+def events(run_id, offset=0):
+    """取 offset 之后的事件（解析成对象列表），供前端轮询渲染。
+
+    返回 {"exists": True, "done": bool, "events": [...], "next": <新 offset>}；
+    运行不存在返回 None。offset 以「原始事件条数」为单位，客户端应使用返回的 next 续取。
+    """
+    with _RUN_CV:
+        st = _RUNS.get(run_id)
+        if st is None:
+            return None
+        off = max(0, int(offset or 0))
+        raw = st["events"][off:]
+        done = bool(st["done"])
+        nxt = len(st["events"])
+    out = []
+    for chunk in raw:
+        for line in str(chunk).splitlines():
+            if not line.startswith("data:"):
+                continue
+            body_s = line[5:].strip()
+            if not body_s or body_s == "[DONE]":
+                continue
+            try:
+                obj = json.loads(body_s)
+            except ValueError:
+                continue
+            if isinstance(obj, dict):
+                out.append(obj)
+    return {"exists": True, "done": done, "events": out, "next": nxt}
+
+
 def info(run_id):
     """返回 {exists, done, events} 供前端判断是否还能重连。"""
     with _RUN_CV:

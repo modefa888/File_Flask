@@ -2081,15 +2081,17 @@
     const stats = todos.length ? aiTodoStats(todos) : { done: 0, total: 0 };
     const head = document.createElement("div");
     head.className = "ai-dock-tabhead";
+    // 参考 CodeBuddy：一条内嵌圆角行，左「任务列表 4/4 ⌄」右「文件列表 (6) ⌄」，
+    // 纯文字 + 计数 + 小箭头（无图标、无选中底色、没有单独的收起按钮）
     head.innerHTML =
-      '<button type="button" class="ai-dock-tab' + (tab === "todo" ? " on" : "") + '" data-tab="todo"' +
-        (todos.length ? "" : " disabled") + '><i class="bi bi-list-check"></i>任务列表' +
-        (todos.length ? '<span class="cnt">' + stats.done + "/" + stats.total + "</span>" : "") + "</button>" +
-      '<button type="button" class="ai-dock-tab' + (tab === "files" ? " on" : "") + '" data-tab="files"' +
-        (files.length ? "" : " disabled") + '><i class="bi bi-files"></i>文件列表' +
-        (files.length ? '<span class="cnt">' + files.length + "</span>" : "") + "</button>" +
-      '<span class="ai-dock-fold" title="' + (folded ? "展开" : "收起") + '"><i class="bi ' +
-        (folded ? "bi-chevron-up" : "bi-chevron-down") + '"></i></span>';
+      '<button type="button" class="ai-dock-tab' + (!folded && tab === "todo" ? " on" : "") +
+        '" data-tab="todo"' + (todos.length ? "" : " disabled") + ">任务列表" +
+        (todos.length ? '<span class="cnt">' + stats.done + "/" + stats.total + "</span>" : "") +
+        '<i class="bi bi-chevron-down cv"></i></button>' +
+      '<button type="button" class="ai-dock-tab' + (!folded && tab === "files" ? " on" : "") +
+        '" data-tab="files"' + (files.length ? "" : " disabled") + ">文件列表" +
+        '<span class="cnt">(' + files.length + ")</span>" +
+        '<i class="bi bi-chevron-down cv"></i></button>';
     card.appendChild(head);
 
     const body = document.createElement("div");
@@ -2097,18 +2099,15 @@
     card.appendChild(body);
 
     head.addEventListener("click", (e) => {
-      if (e.target.closest(".ai-dock-fold")) {                // 收起 / 展开整块
-        const c = !card.classList.contains("collapsed");
-        card.classList.toggle("collapsed", c);
-        head.querySelector(".ai-dock-fold .bi").className = "bi " + (c ? "bi-chevron-up" : "bi-chevron-down");
-        head.querySelector(".ai-dock-fold").title = c ? "展开" : "收起";
-        try { localStorage.setItem("ide.aiDockFold", c ? "1" : "0"); } catch (_) {}
-        aiTodoFloatPad();
-        return;
-      }
-      const b = e.target.closest(".ai-dock-tab");             // 切换 tab
+      const b = e.target.closest(".ai-dock-tab");
       if (!b || b.disabled) return;
-      try { localStorage.setItem("ide.aiDockTab", b.dataset.tab); } catch (_) {}
+      const t = b.dataset.tab;
+      const open = !card.classList.contains("collapsed");
+      const next = !(open && t === tab);                      // 再点当前项 = 整块收起/展开
+      try {
+        localStorage.setItem("ide.aiDockTab", t);
+        localStorage.setItem("ide.aiDockFold", next ? "0" : "1");
+      } catch (_) {}
       aiDockRender();
     });
 
@@ -2259,9 +2258,94 @@
       }
       return stepsBox;
     };
-    // 后台运行：请求只负责「启动 + 返回 run_id」，执行放服务端后台线程，
-    // 再连 /api/ai/agent/stream 接收（可回放）的事件；刷新后可按同一 run_id 重连。
+    // 后台运行：请求只负责「启动 + 返回 run_id」，执行放服务端后台线程。
+    // · 新任务：启动后用 SSE 接收（边推边渲染，延迟最低）
+    // · 刷新续接：改用「轮询事件接口」把已产生的进度取回来再增量续取 —— 比长期挂一条 SSE 稳，
+    //   不会被浏览器/代理卡住而永远停在「思考中」或空白。
     let runId = opts.runId || "", text = "";
+
+    /* 统一事件处理：SSE 与轮询两种来源共用同一套渲染逻辑 */
+    const handleEvent = (e) => {
+      if (!e || typeof e !== "object") return;
+      if (e.type === "run") { runId = e.run_id; AI._agentRunId = runId; }
+      else if (e.type === "retry") {
+        text = "";                                        // 限流重试：清空本轮已显示内容
+        if (onDelta) onDelta("");
+        if (bodyB) bodyB.innerHTML = aiRetryHint(e);
+      } else if (e.type === "delta") {
+        text += e.text;
+        if (onDelta) onDelta(text);
+      } else if (e.type === "step") {
+        stepMeta.set(e.call_id, { tool: e.tool, args: e.args });
+        const box = ensureStepsBox();
+        const row = aiStepRow(e);
+        box._body.appendChild(row);
+        rows.set(e.call_id, row);
+        const a = e.args || {};
+        box._live = (AI_TOOL_LABEL[e.tool] || e.tool) +
+          (a.path || a.command || a.pattern ? " " + (a.path || a.command || a.pattern) : "");
+        box._pending++;
+        box._paint();
+      } else if (e.type === "ask") {
+        // 需要用户确认：卡片必须「单独弹出来」且始终可见。
+        // 若塞进 .ai-steps-body，而该区域默认折叠（.ai-steps.collapsed 隐藏 body），
+        // 用户根本看不到，AI 只能干等到确认超时。所以直接挂在消息下方，
+        // 滚动到可见处，并做弹入 + 脉冲高亮提醒。
+        ensureStepsBox();
+        const askCard = aiAskCard(e, runId);
+        bodyRow.appendChild(askCard);
+        try {                                   // 还没输出正文：气泡里明说是「等你确认」，别只显示思考中
+          if (bodyB && !String(acc || "").trim()) {
+            bodyB.innerHTML = '<span class="ai-waiting">等待你确认后继续' +
+              '<span class="d"></span><span class="d"></span><span class="d"></span></span>';
+          }
+        } catch (_) {}
+        try {
+          askCard.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        } catch (_) { try { askCard.scrollIntoView(); } catch (_) {} }
+        askCard.classList.add("attn");
+        try { toast("AI 正在等待你确认一个操作", "warn"); } catch (_) {}
+      } else if (e.type === "result") {
+        const meta = stepMeta.get(e.call_id) || { tool: e.tool, args: {} };
+        aiStepDone(rows.get(e.call_id), e);
+        if (e.changes && e.changes.length) changes.push(...e.changes);
+        aiCloseTabsForChanges(e.changes);   // AI 删除了文件：对应编辑标签自动关闭
+        const rec = { tool: meta.tool, args: meta.args, ok: !!e.ok, denied: !!e.denied,
+                      ms: e.ms, summary: e.summary || "", detail: e.detail || "" };
+        steps.push(rec);
+        if (stepsBox) {
+          stepsBox._list.push(rec);
+          stepsBox._pending = Math.max(0, stepsBox._pending - 1);
+          stepsBox._paint();
+        }
+      } else if (e.type === "todos") {
+        // 任务清单更新（todo_write）：刷新底部悬浮面板（不随消息滚动）
+        const list = (e.todos || []).filter(t => t && t.content);
+        if (list.length) {
+          todos.length = 0;
+          todos.push(...list);
+          aiTodoFloatShow(todos);
+        }
+      } else if (e.type === "subagent") {
+        // 子 Agent 实时进度：渲染到对应的 delegate_task 步骤行内
+        aiSubStepEvent(rows.get(e.call_id), e.event);
+      } else if (e.type === "usage") {
+        // 每轮真实用量（后端透传 usage）：realIn/realOut 累加＝本轮总消耗；
+        // ctxLast 取最后一轮＝当前上下文占用（圆环显示用）
+        const u = e.usage || {};
+        realIn += +u.prompt_tokens || 0;
+        realOut += +u.completion_tokens || 0;
+        ctxLast = +u.context_tokens || (+u.prompt_tokens || ctxLast);
+      } else if (e.type === "stopped") {
+        // 服务端已停止这场运行（例如在另一个标签页点了停止）：按「已停止」收尾
+        const err = new Error("已停止");
+        err.name = "AbortError";
+        throw err;
+      } else if (e.type === "error") {
+        throw new Error(e.error);
+      }
+    };
+
     if (!runId) {
       const r = await fetch("/api/ai/agent", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2280,102 +2364,73 @@
     } else {
       AI._agentRunId = runId;                        // 刷新后重连：沿用原 run_id
     }
-    const r = await fetch("/api/ai/agent/stream?run_id=" + encodeURIComponent(runId) + "&offset=0",
-                          { signal: AI.ctrl.signal });
-    if (!r.ok) {
-      let msg = "HTTP " + r.status;
-      try { msg = (await r.json()).error || msg; } catch (_) {}
-      throw new Error(msg);
-    }
-    const reader = r.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf("\n\n")) >= 0) {
-        const evt = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-        for (const line of evt.split("\n")) {
-          if (!line.startsWith("data:")) continue;
-          let e;
-          try { e = JSON.parse(line.slice(5).trim()); } catch (_) { continue; }
-          if (e.type === "run") { runId = e.run_id; AI._agentRunId = runId; }
-          else if (e.type === "retry") {
-            text = "";                                        // 限流重试：清空本轮已显示内容
-            if (onDelta) onDelta("");
-            if (bodyB) bodyB.innerHTML = aiRetryHint(e);
-          } else if (e.type === "delta") {
-            text += e.text;
-            if (onDelta) onDelta(text);
-          } else if (e.type === "step") {
-            stepMeta.set(e.call_id, { tool: e.tool, args: e.args });
-            const box = ensureStepsBox();
-            const row = aiStepRow(e);
-            box._body.appendChild(row);
-            rows.set(e.call_id, row);
-            const a = e.args || {};
-            box._live = (AI_TOOL_LABEL[e.tool] || e.tool) +
-              (a.path || a.command || a.pattern ? " " + (a.path || a.command || a.pattern) : "");
-            box._pending++;
-            box._paint();
-          } else if (e.type === "ask") {
-            // 需要用户确认：卡片必须「单独弹出来」且始终可见。
-            // 若塞进 .ai-steps-body，而该区域默认折叠（.ai-steps.collapsed 隐藏 body），
-            // 用户根本看不到，AI 只能干等到确认超时。所以直接挂在消息下方，
-            // 滚动到可见处，并做弹入 + 脉冲高亮提醒。
-            ensureStepsBox();
-            const askCard = aiAskCard(e, runId);
-            bodyRow.appendChild(askCard);
-            try {
-              askCard.scrollIntoView({ block: "nearest", behavior: "smooth" });
-            } catch (_) { try { askCard.scrollIntoView(); } catch (_) {} }
-            askCard.classList.add("attn");
-            try { toast("AI 正在等待你确认一个操作", "warn"); } catch (_) {}
-          } else if (e.type === "result") {
-            const meta = stepMeta.get(e.call_id) || { tool: e.tool, args: {} };
-            aiStepDone(rows.get(e.call_id), e);
-            if (e.changes && e.changes.length) changes.push(...e.changes);
-            aiCloseTabsForChanges(e.changes);   // AI 删除了文件：对应编辑标签自动关闭
-            const rec = { tool: meta.tool, args: meta.args, ok: !!e.ok, denied: !!e.denied,
-                          ms: e.ms, summary: e.summary || "", detail: e.detail || "" };
-            steps.push(rec);
-            if (stepsBox) {
-              stepsBox._list.push(rec);
-              stepsBox._pending = Math.max(0, stepsBox._pending - 1);
-              stepsBox._paint();
-            }
-          } else if (e.type === "todos") {
-            // 任务清单更新（todo_write）：刷新底部悬浮面板（不随消息滚动）
-            const list = (e.todos || []).filter(t => t && t.content);
-            if (list.length) {
-              todos.length = 0;
-              todos.push(...list);
-              aiTodoFloatShow(todos);
-            }
-          } else if (e.type === "subagent") {
-            // 子 Agent 实时进度：渲染到对应的 delegate_task 步骤行内
-            aiSubStepEvent(rows.get(e.call_id), e.event);
-          } else if (e.type === "usage") {
-            // 每轮真实用量（后端透传 usage）：realIn/realOut 累加＝本轮总消耗；
-            // ctxLast 取最后一轮＝当前上下文占用（圆环显示用）
-            const u = e.usage || {};
-            realIn += +u.prompt_tokens || 0;
-            realOut += +u.completion_tokens || 0;
-            ctxLast = +u.context_tokens || (+u.prompt_tokens || ctxLast);
-          } else if (e.type === "stopped") {
-            // 服务端已停止这场运行（例如在另一个标签页点了停止）：按「已停止」收尾
-            const err = new Error("已停止");
-            err.name = "AbortError";
+
+    if (opts.runId) {
+      // —— 刷新续接：轮询事件接口（offset 递增），跑完即停 ——
+      let offset = 0, fails = 0;
+      const guard = Date.now() + 60 * 60 * 1000;
+      while (true) {
+        let d = null;
+        try {
+          const rr = await fetch("/api/ai/agent/events?run_id=" + encodeURIComponent(runId) +
+                                 "&offset=" + offset, { signal: AI.ctrl.signal });
+          d = await rr.json();
+        } catch (err) {
+          if (err && err.name === "AbortError") throw err;    // 用户点了停止 / 页面卸载（上层区分）
+          d = null;
+        }
+        if (d === null) {                                     // 网络抖动：重试，别把这一轮当结束
+          if (++fails >= 10) {
+            const err = new Error("与后台任务的连接中断");      // 交给上层按「中断」处理：保留续连标记
+            err.name = "TypeError";
             throw err;
-          } else if (e.type === "error") {
-            throw new Error(e.error);
+          }
+          await new Promise(res => setTimeout(res, 1200));
+          continue;
+        }
+        fails = 0;
+        if (!d.exists) break;                                 // 运行已不在：交给上层按会话历史兜底
+        const got = (d.events || []).length;
+        for (const e of (d.events || [])) handleEvent(e);
+        offset = (typeof d.next === "number") ? d.next : (offset + got);
+        if (d.done) break;
+        if (Date.now() > guard) {
+          const err = new Error("等待后台任务超时");           // 同上：保留续连标记，刷新还能接上
+          err.name = "TypeError";
+          throw err;
+        }
+        aiScrollToBottom(true);
+        // 有事件就快轮询（跟得紧），空转（例如正等你确认工具调用）就慢一点，少点请求
+        await new Promise(res => setTimeout(res, got ? 500 : 1500));
+      }
+    } else {
+      const r = await fetch("/api/ai/agent/stream?run_id=" + encodeURIComponent(runId) + "&offset=0",
+                            { signal: AI.ctrl.signal });
+      if (!r.ok) {
+        let msg = "HTTP " + r.status;
+        try { msg = (await r.json()).error || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const evt = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          for (const line of evt.split("\n")) {
+            if (!line.startsWith("data:")) continue;
+            let e;
+            try { e = JSON.parse(line.slice(5).trim()); } catch (_) { continue; }
+            handleEvent(e);
           }
         }
+        aiScrollToBottom(true);
       }
-      aiScrollToBottom(true);
     }
     if (stepsBox) { stepsBox._pending = 0; stepsBox._paint(); stepsBox._setCollapsed(true); }  // 本轮结束：自动折叠为一行
     return { text: text, steps: steps, changes: changes, todos: todos,
@@ -2820,6 +2875,7 @@
 
   async function aiSend(reuse) {                          // reuse={text,imgs}：重新生成，不重复 push 用户消息
     if (AI.busy) return;
+    AI._userStop = false; AI._unloading = false;   // 新一轮开始：重置「用户停止 / 页面卸载」标记
     let rawText, text, imgs, skillIds = [];
     const resumeRunId = (reuse && reuse.resumeRunId) || "";   // 非空＝刷新后重连上一次后台运行
     let imgNamesOfTurn = [];                        // 图片芯片的真实文件名（消息里按原名显示）
@@ -3066,6 +3122,16 @@
           onRunId: (rid) => aiSavePendingTurn(text, imgs, skillIds, userMsgForPending, rid),
         });
         stopPaintStream();                              // 结束：停掉排队中的流式重渲染
+        if (resumeRunId && !String(acc || "").trim() && !(res.steps || []).length &&
+            !(res.changes || []).length && !(res.todos || []).length) {
+          // 续接没取到任何内容（运行已结束 / 被清理）：直接以服务端会话历史为准重绘，
+          // 绝不写一条空回复进去（否则就会出现「刷新后一片空白」）
+          try { await aiFetchSession(AI.curId); } catch (_) {}
+          const _s2 = AI.sessions.find(x => x.id === AI.curId);
+          if (_s2 && _s2.msgs) AI.msgs = _s2.msgs;
+          aiRenderAll(); aiRenderConv(); aiTodoFloatSyncFromMsgs();
+          return;
+        }
         acc = res.text || "";
         turnChanges = (res.changes && res.changes.length) ? res.changes : (AI._agentTurnChanges || []);
         turnTodos = (res.todos && res.todos.length) ? res.todos : (AI._agentTurnTodos || []);
@@ -3230,6 +3296,16 @@
       console.error("AI 回复处理出错：", e);
       if (turnDone) {                                   // 回复已成功入列：只提示，不覆盖已完成的回复
         toast("回复已完成，但界面更新出错：" + (e.message || e), "warn");
+      } else if (e.name === "AbortError" && !AI._userStop) {
+        // 刷新 / 关闭页面导致的中断（不是用户点「停止」）：后台任务其实还在跑，
+        // 绝不能写「已停止 / 出错了」的回复，也绝不能清掉续连标记 —— 否则刷新后就啥也看不到。
+        console.warn("[AI] 页面卸载导致事件流中断，保留续连标记：", e.message || e);
+        keepPending = true;
+        if (!AI._unloading) {
+          bodyB.innerHTML = aiMd(acc.replace(/^\s+/, "")) ||
+            '<span class="ai-waiting">后台任务仍在运行，刷新后会自动续上进度' +
+            '<span class="d"></span><span class="d"></span><span class="d"></span></span>';
+        }
       } else if (e.name === "AbortError") {
         bodyB.innerHTML = aiMd(acc.replace(/^\s+/, "")) + "\n（已停止）";
         const out = acc.trim();
@@ -3305,8 +3381,9 @@
       $("aiSend").style.display = ""; $("aiStop").style.display = "none";
       aiTodoFloatSetPaused(true);   // 本轮结束（完成/停止/异常）：任务清单暂停，停止转圈
       aiScrollToBottom(true);
-      // 正常结束 / 出错 / 已停止才清掉续连标记；流被刷新打断时保留，下次才能重连
-      if (!keepPending) aiClearPendingTurn();
+      // 正常结束 / 出错 / 用户主动停止才清掉续连标记；
+      // 刷新、关闭页面导致的中断必须保留，否则刷新后就接不上了
+      if (!keepPending && !AI._unloading) aiClearPendingTurn();
       if (typeof aiMaybeAutoTitle === "function") aiMaybeAutoTitle();   // 首轮完成后尝试智能标题
     }
   }
@@ -3335,6 +3412,7 @@
   }
   /* 主动停止当前生成：本地断开事件流 + 通知服务端停止后台运行 */
   function aiHaltRun() {
+    AI._userStop = true;                 // 标记「这是用户主动停止」，区别于刷新/关闭页面导致的中断
     if (AI._agentRunId) {
       try {
         fetch("/api/ai/agent/stop", {
@@ -3345,6 +3423,10 @@
     }
     if (AI.ctrl) { try { AI.ctrl.abort(); } catch (_) {} }
   }
+  /* 页面被刷新 / 关闭时：卸载会 abort 正在进行的 fetch，
+     这个中断必须与「用户点停止」区分开，否则会误清续连标记（刷新后就接不上了） */
+  window.addEventListener("pagehide", () => { AI._unloading = true; });
+  window.addEventListener("beforeunload", () => { AI._unloading = true; });
   /* 刷新 / 首次加载后：若上一轮还在后台运行，就重连它的进度（回放 + 续传）。
      —— 这样刷新网页不会丢进度，能看到实时进度继续跑。 */
   async function aiResumePendingTurn() {

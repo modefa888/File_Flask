@@ -1740,6 +1740,24 @@ def api_ai_agent_status():
     return jsonify(agentrun.info(str(request.args.get("run_id") or "")))
 
 
+@bp.route("/api/ai/agent/events", methods=["GET"])
+def api_ai_agent_events():
+    """按 offset 取某场运行已产生的事件（JSON）。
+
+    刷新续接用：轮询这个接口比一直挂着 SSE 更稳（浏览器/代理不会把它卡住），
+    前端拿到事件后按与 SSE 完全相同的方式渲染，跑完（done=true）即停止。
+    """
+    run_id = str(request.args.get("run_id") or "")
+    try:
+        offset = max(0, int(request.args.get("offset") or 0))
+    except (TypeError, ValueError):
+        offset = 0
+    data = agentrun.events(run_id, offset)
+    if data is None:
+        return jsonify({"exists": False, "done": True, "events": []})
+    return jsonify(data)
+
+
 @bp.route("/api/ai/agent/for-session", methods=["GET"])
 def api_ai_agent_for_session():
     """按会话 id 找最近一场运行：前端丢了 run_id（清缓存等）时也能找回进度。"""

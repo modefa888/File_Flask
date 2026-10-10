@@ -1213,16 +1213,21 @@
     if (_promises[mode]) return _promises[mode];
     const deps = mode === "htmlmixed" ? ["xml.min.js", "css.min.js", "javascript.min.js"] : [];
     const p = new Promise((resolve) => {
+      let settled = false;
+      const finish = () => { if (settled) return; settled = true; _loaded.add(mode); resolve(mode); };
       let pending = deps.length + 1;
-      const done = () => { if (--pending === 0) { _loaded.add(mode); resolve(mode); } };
+      const done = () => { if (--pending === 0) finish(); };
       const loadOne = (r) => {
         const s = document.createElement("script");
         s.src = BASE + r;
         s.onload = done;
-        s.onerror = () => { pending--; if (pending <= 0) { _loaded.add(mode); resolve(mode); } };
+        // 失败也按完成处理：退化为纯文本，由 openFile 决定默认 mode，绝不让编辑器永久卡「正在加载」
+        s.onerror = done;
         document.head.appendChild(s);
       };
       loadOne(rel); deps.forEach(loadOne);
+      // 兜底：脚本事件没来（缓存命中未触发 onload / 请求被中断）也不能让 Promise 悬空
+      setTimeout(finish, 4000);
     });
     _promises[mode] = p; return p;
   }
@@ -1250,7 +1255,15 @@
 
   // raw=1：后端直接返回纯文本，省去 base64(膨胀33%) + JSON解析 + atob，大文件快很多
   async function loadFileText(path, name) {
-    const r = await fetch("/api/preview?path=" + encodeURIComponent(path) + "&raw=1");
+    let r;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 15000);   // 请求挂住时给明确提示，而非永久「正在加载」
+      try { r = await fetch("/api/preview?path=" + encodeURIComponent(path) + "&raw=1", { signal: ctrl.signal }); }
+      finally { clearTimeout(timer); }
+    } catch (e) {
+      return { error: e && e.name === "AbortError" ? "加载超时（请检查网络或刷新重试）" : ("网络错误：" + (e && e.message || e)) };
+    }
     let body = "";
     if (r.headers.get("X-Preview-Type") === "text") {
       body = await r.text();
@@ -1376,8 +1389,8 @@
           setupVideoView(tab, host, path, name);
           return;
         }
-        // 文件内容与语法模式并行加载，减少串行等待
-        const [res, mode] = await Promise.all([loadFileText(path, name), ensureMode(ext)]);
+        // 只等文件内容；语言模式脚本改为异步套用（见下方），避免它的脚本事件没来时编辑器永久卡在「正在加载」
+        const res = await loadFileText(path, name);
         // 不支持 / 打开失败：同样要走激活（否则只有内容切了、标签不高亮、面包屑还是旧文件）；
         // 竞态防护与正常路径一致：用户已切走就不抢焦点，提示信息留在后台标签里
         if (res.unsupported || res.error) {
@@ -1394,12 +1407,16 @@
         tab.big = big;
         host.innerHTML = "";
         // 容器此刻已可见（active），CodeMirror 才能测量正确，避免内容压住行号/错位
-        tab.cm = CodeMirror(host, {
-          value: text, mode: big ? "text/plain" : (mode || "text/plain"), theme: ideThemeLight() ? "default" : "material-darker",
+        // 先用 text/plain 让内容立即可见；语法高亮稍后异步套上，慢/失败也只是退化为纯文本
+        const cm = CodeMirror(host, {
+          value: text, mode: "text/plain", theme: ideThemeLight() ? "default" : "material-darker",
           lineNumbers: true, lineWrapping: IDE_SETTINGS.lineWrap, indentUnit: IDE_SETTINGS.indent, tabSize: IDE_SETTINGS.indent,
           styleActiveLine: IDE_SETTINGS.activeLine && !big, matchBrackets: !big, autoCloseBrackets: true,
           phrases: CM_PHRASES,
         });
+        tab.cm = cm;
+        // 语法模式异步套用：内容先可见，模式脚本即使慢/失败也不再阻塞打开
+        if (!big) ensureMode(ext).then(m => { if (m && tab.cm === cm) { cm.setOption("mode", m); scheduleRefresh(tab); } }).catch(() => {});
         // 代码补全（仿 VS Code IntelliSense）：候选来源与触发逻辑见 37_ 模块
         if (typeof cmAttachCompletion === "function") cmAttachCompletion(tab.cm, ext);
         if (big) toast("文件较大（" + fmtSize(res.size || text.length) + "），已关闭语法高亮以保证编辑流畅", "warn");

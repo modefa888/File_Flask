@@ -39,12 +39,12 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .titlebar .tb-actions .tb-ai.on { color: #005fb8; background: #dbe6f2; }
 
 /* ---------- 工作区：活动栏 / 侧边栏 / 文件树（02） ---------- */
-:where(html.theme-light) .activitybar { background: #e8e8e8; }
+:where(html.theme-light) .activitybar { background: #ffffff; }
 :where(html.theme-light) .activitybar .act { color: #4a4a4a; }
 :where(html.theme-light) .activitybar .act:hover { color: #000000; }
 :where(html.theme-light) .activitybar .act.active { color: #000000; border-left-color: #0066b8; }
 
-:where(html.theme-light) .sidebar { background: #f3f3f3; border-right-color: #e0e0e0; }
+:where(html.theme-light) .sidebar { background: #ffffff; border-right-color: #e0e0e0; }
 :where(html.theme-light) .side-header { color: #5a5a5a; }
 :where(html.theme-light) .side-header .side-actions button { color: #5a5a5a; }
 :where(html.theme-light) .side-header .side-actions button:hover { background: #e0e0e0; color: #000000; }
@@ -776,8 +776,8 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .sheetv-cell[contenteditable="true"]:focus { background: #e3f0fb; }
 
 /* ---------- 右侧 AI 助手面板（09） ---------- */
-:where(html.theme-light) .ai-panel { background: #f6f6f6; border-left-color: #e0e0e0; }
-:where(html.theme-light) .ai-head { background: #f0f0f0; border-bottom-color: #e0e0e0; }
+:where(html.theme-light) .ai-panel { background: #ffffff; border-left-color: #e0e0e0; }
+:where(html.theme-light) .ai-head { background: #ffffff; border-bottom-color: #e0e0e0; }
 :where(html.theme-light) .ai-title { color: #1f2328; }
 :where(html.theme-light) .ai-title .bi { color: #a07800; }
 :where(html.theme-light) .ai-msel-btn { background: #ffffff; border-color: #cecece; color: #005fb8; }

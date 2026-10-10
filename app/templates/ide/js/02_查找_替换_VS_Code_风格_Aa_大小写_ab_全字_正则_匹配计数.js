@@ -942,7 +942,8 @@
       const el = document.createElement("div");
       el.className = "mi" + (it.danger ? " danger" : "") + (it.disabled ? " disabled" : "");
       const subItems = it.sub ? ((typeof it.sub === "function" ? it.sub() : it.sub) || []) : null;
-      el.innerHTML = (it.icon ? '<i class="bi ' + it.icon + '"></i>' : "") + '<span>' + it.label + "</span>" +
+      const topIcon = it.icon || "";
+      el.innerHTML = (topIcon ? (topIcon.startsWith("<") ? topIcon : '<i class="bi ' + topIcon + '"></i>') : "") + '<span>' + it.label + "</span>" +
         (it.sc ? '<span class="sc">' + it.sc + "</span>" : "") +
         (subItems ? '<span class="sub-arrow"><i class="bi bi-chevron-right"></i></span>' : "");
       if (subItems) {
@@ -953,7 +954,8 @@
         subItems.forEach(s => {
           const se = document.createElement("div");
           se.className = "mi" + (s.disabled ? " disabled" : "");
-          se.innerHTML = '<i class="bi ' + (s.icon || "bi-folder2") + '"></i><span class="lt-nm">' + esc(s.label) + "</span>";
+          const subIcon = s.icon || "bi-folder2";
+          se.innerHTML = (subIcon.startsWith("<") ? subIcon : '<i class="bi ' + subIcon + '"></i>') + '<span class="lt-nm">' + esc(s.label) + "</span>";
           if (s.act && !s.disabled) se.onclick = (ev) => { ev.stopPropagation(); closeDrop(); s.act(); };
           sub.appendChild(se);
         });
@@ -1050,7 +1052,7 @@
           tabs.length
             ? tabs.map(t => ({
                 label: groupLabel(t.group) + t.name + (t.dirty ? " ●" : ""),
-                icon: "bi-file-earmark", act: () => activate(t),
+                icon: t.iconHtml || iconFor((t.diff && t.relPath) ? baseName(t.relPath) : t.name, false), act: () => activate(t),
               }))
             : [{ label: "（没有打开的编辑器）", icon: "bi-dash", disabled: true }] },
       { divider: true },

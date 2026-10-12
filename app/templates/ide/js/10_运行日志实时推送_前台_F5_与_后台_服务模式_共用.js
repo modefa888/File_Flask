@@ -30,7 +30,12 @@
     d.className = "log-line" + (cls ? " " + cls : "");
     d.textContent = m;
     body.appendChild(d);
-    while (body.childElementCount > LOG_BUF_MAX) body.firstElementChild.remove();
+    if (typeof opFindNewLine === "function") opFindNewLine(d);      // 搜索条开着时新行实时参与匹配
+    while (body.childElementCount > LOG_BUF_MAX) {                  // 超上限淘汰最旧的行
+      const gone = body.firstElementChild;
+      if (gone && typeof opFindDropLine === "function") opFindDropLine(gone);   // 命中行被淘汰要扣计数
+      if (gone) gone.remove();
+    }
     // 用户停在底部附近才自动滚动，往上翻历史时不打扰
     const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
     if (nearBottom) body.scrollTop = body.scrollHeight;
@@ -85,6 +90,7 @@
       body.appendChild(frag);
     }
     body.scrollTop = body.scrollHeight;
+    if (typeof opFindRescan === "function") opFindRescan();   // 切换日志标签：缓冲重绘后让命中有黄底 / 红字
     if (auto) autoShowBottom("log"); else toggleBottom(true, "log");   // 刷新自动恢复时不打扰已关闭的面板
     bpKillMode();                                      // 切换日志标签时刷新右侧按钮状态
   }

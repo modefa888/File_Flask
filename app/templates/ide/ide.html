@@ -205,6 +205,8 @@ try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'li
 {% include 'ide/js/39_分享_单文件分享设置与分享记录管理.js' %}
 {# 后台任务管理面板（编辑器区域标签页）：须放在 16_ 之前，复用闭包内的 $ / esc / findTab / activate / loadRunnerList #}
 {% include 'ide/js/40_后台任务_编辑器区域管理面板_列表_详情_实时日志.js' %}
+{# 底部「输出」面板内置搜索（🔍）：须放在 16_ 之前，复用闭包内的 $ / bottomPane / opBody #}
+{% include 'ide/js/41_底部输出面板_内置搜索_整行黄底_关键字红字_上下跳转.js' %}
 {% include 'ide/js/16_自定义悬停提示_全局接管所有_title_属性.js' %}
 {% include 'ide/js/17_SQLite数据库查看器_db_sqlite只读浏览_表列表_分页数据.js' %}
 {# 标签页内嵌视频播放器：openFile 的视频分支调用 setupVideoView（全局函数，须在 IIFE 关闭后加载） #}

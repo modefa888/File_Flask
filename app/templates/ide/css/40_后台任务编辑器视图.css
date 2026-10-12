@@ -163,9 +163,11 @@
   padding: 0 2px; color: #9d9d9d; font-size: 11px; line-height: 1; border-radius: 3px;
 }
 .rv-findbox .rv-mini:hover { background: #3a3a3a; color: #ffffff; }
-/* 命中行整行高亮（不拆文本节点，选中 / 复制照旧可用） */
+/* 命中行：整行黄底 + 行内关键字红字（关键字包成 .rv-kw，选中 / 复制照旧可用） */
 .rv-log .log-line.hit { background: rgba(226, 192, 138, 0.16); box-shadow: inset 2px 0 0 rgba(226, 192, 138, 0.55); }
-.rv-log .log-line.hit-on { background: rgba(226, 192, 138, 0.34); box-shadow: inset 3px 0 0 #e2c08a; color: #ffd8a6; }
+.rv-log .log-line.hit-on { background: rgba(226, 192, 138, 0.34); box-shadow: inset 3px 0 0 #e2c08a; }
+.rv-log .log-line.hit .rv-kw { color: #ff5c5c; font-weight: 600; }
+.rv-log .log-line.hit-on .rv-kw { color: #ff2d2d; }
 
 /* 窄窗口：左栏收窄，右栏操作按钮不换行挤压标题 */
 @media (max-width: 900px) {

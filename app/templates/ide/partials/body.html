@@ -239,6 +239,15 @@
           <span id="bpLogTabs" style="display:none"></span>
           <span class="bp-title" id="bpTitle"></span>
           <span class="op-spacer"></span>
+          <span class="op-find" id="opFind" hidden>
+            <i class="bi bi-search"></i>
+            <input class="op-find-in" id="opFindIn" type="text" spellcheck="false" placeholder="在当前面板中搜索…">
+            <span class="op-find-num" id="opFindNum">0/0</span>
+            <button class="op-find-b" id="opFindPrev" title="上一个命中（Shift+Enter）"><i class="bi bi-chevron-up"></i></button>
+            <button class="op-find-b" id="opFindNext" title="下一个命中（Enter / F3）"><i class="bi bi-chevron-down"></i></button>
+            <button class="op-find-b" id="opFindClose" title="关闭搜索（Esc）"><i class="bi bi-x-lg"></i></button>
+          </span>
+          <button class="bp-btn" id="opFindBtn" title="在当前面板中搜索（输出 / 运行日志）"><i class="bi bi-search"></i> 搜索</button>
           <button class="bp-btn" id="bpClear" title="清空当前面板">清空</button>
           <button class="bp-btn" id="bpToBg" title="转为后台运行（不再计时，可在「后台任务」查看）" style="display:none"><i class="bi bi-arrow-down-circle"></i></button>
           <button class="bp-btn" id="bpKill" title="终止正在运行的命令"><i class="bi bi-stop-circle"></i></button>

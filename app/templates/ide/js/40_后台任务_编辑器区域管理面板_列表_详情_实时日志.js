@@ -511,11 +511,36 @@ function rvLogLine(m, cls) {
   if (RUNVIEW.follow && near && !rvSelHoldIn(".rv-log")) pre.scrollTop = pre.scrollHeight;
 }
 
-/* ---------- 日志搜索（🔍）：整行高亮 + 上一个 / 下一个 ----------
+/* ---------- 日志搜索（🔍）：整行黄底 + 关键字红字 + 上一个 / 下一个 ----------
    只扫当前已显示在 DOM 里的日志行（不重新读文件），新推来的行会实时参与匹配。 */
-function rvFindMark(el) {                             // 该行是否命中（只判文本，不拆节点 → 不影响选区与复制）
-  const kw = RUNVIEW.findKw;
-  return !!kw && String((el && el.textContent) || "").toLowerCase().indexOf(kw) >= 0;
+function rvFindPaint(el, kw) {                        // 行内关键字包 <span class="rv-kw">；返回该行是否命中
+  if (!el) return false;
+  if (el.__rvText == null) el.__rvText = el.textContent;   // 行是纯文本、建好后不再变，缓存原文本便于还原
+  const raw = el.__rvText;
+  const low = raw.toLowerCase();
+  const first = kw ? low.indexOf(kw) : -1;
+  if (first < 0) {                                    // 不命中：还原成纯文本（去掉上次的红字节点）
+    if (el.childElementCount) el.textContent = raw;
+    return false;
+  }
+  const frag = document.createDocumentFragment();
+  let from = 0, at = first;
+  while (at >= 0) {
+    if (at > from) frag.appendChild(document.createTextNode(raw.slice(from, at)));
+    const s = document.createElement("span");
+    s.className = "rv-kw";
+    s.textContent = raw.slice(at, at + kw.length);
+    frag.appendChild(s);
+    from = at + kw.length;
+    at = low.indexOf(kw, from);
+  }
+  if (from < raw.length) frag.appendChild(document.createTextNode(raw.slice(from)));
+  el.textContent = "";
+  el.appendChild(frag);
+  return true;
+}
+function rvFindMark(el) {                             // 该行是否命中（命中则给关键字着红字）
+  return rvFindPaint(el, RUNVIEW.findKw);
 }
 function rvFindNum() {
   const el = rvQ(".rv-findnum");
@@ -575,7 +600,10 @@ function rvFindClose() {
   if (box) box.hidden = true;
   RUNVIEW.findKw = ""; RUNVIEW.findHits = 0; RUNVIEW.findIdx = -1;
   const pre = rvQ(".rv-log");
-  if (pre) pre.querySelectorAll(".log-line.hit, .log-line.hit-on").forEach(el => el.classList.remove("hit", "hit-on"));
+  if (pre) pre.querySelectorAll(".log-line.hit, .log-line.hit-on").forEach(el => {
+    el.classList.remove("hit", "hit-on");
+    if (el.childElementCount) el.textContent = el.__rvText != null ? el.__rvText : el.textContent;   // 去掉红字节点
+  });
   rvFindNum();
 }
 function rvFindStep(dir) {                            // 供快捷键 F3 / Shift+F3（搜索条开着时由它接管）

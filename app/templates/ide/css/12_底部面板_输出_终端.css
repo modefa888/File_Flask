@@ -45,6 +45,43 @@
   .op-body .op-head { color: #dcdcaa; }
   .op-body .op-link { color: #4fc1ff; text-decoration: underline; cursor: pointer; }
   .op-body .op-link:hover { color: #7fd4ff; }
+
+  /* ----- 「输出」面板内置搜索（🔍）：工具条高 32px 固定，搜索条 20px 不撑高、开关不抖动 ----- */
+  .op-find {
+    flex: none; display: inline-flex; align-items: center; gap: 2px;
+    height: 20px; box-sizing: border-box; margin-right: 2px;
+    background: #2b2b2b; border: 1px solid #3c3c3c; border-radius: 4px; padding: 0 3px;
+  }
+  .op-find[hidden] { display: none; }
+  .op-find > .bi { flex: none; color: #8a8a8a; font-size: 10.5px; }
+  .op-find-in {
+    width: 128px; height: 100%; box-sizing: border-box;
+    background: transparent; border: 0; outline: 0; color: #d4d4d4;
+    font-family: inherit; font-size: 11.5px; line-height: 1; padding: 0;
+  }
+  .op-find-in::placeholder { color: #6f6f6f; }
+  .op-find-num {
+    flex: none; min-width: 28px; text-align: center; color: #8a8a8a;
+    font-size: 11px; font-variant-numeric: tabular-nums;
+  }
+  .op-find-b {
+    flex: none; height: 100%; padding: 0 2px; border: 0; border-radius: 3px; cursor: pointer;
+    display: inline-flex; align-items: center; background: transparent;
+    color: #9d9d9d; font-family: inherit; font-size: 11px; line-height: 1;
+  }
+  .op-find-b:hover { background: #3a3a3a; color: #ffffff; }
+  /* 命中行：整行黄底 + 行内关键字红字（关键字包成 .op-kw）
+     两处复用：「输出」= .op-body 下的行，「运行日志」= .logview 下的 .log-line 行
+     （后者选择器带 .log-line，特异性高于 .logview .log-line.op-cmd 等行色规则） */
+  .op-body .op-hit,
+  .logview .log-line.op-hit { background: rgba(226, 192, 138, 0.16); box-shadow: inset 2px 0 0 rgba(226, 192, 138, 0.55); }
+  .op-body .op-hit-on,
+  .logview .log-line.op-hit-on { background: rgba(226, 192, 138, 0.34); box-shadow: inset 3px 0 0 #e2c08a; }
+  .op-body .op-hit .op-kw,
+  .logview .log-line.op-hit .op-kw { color: #ff5c5c; font-weight: 600; }
+  .op-body .op-hit-on .op-kw,
+  .logview .log-line.op-hit-on .op-kw { color: #ff2d2d; }
+
   /* 终端 */
   .term-body {
     flex: 1; margin: 0; padding: 8px 12px; overflow: auto; min-height: 0;

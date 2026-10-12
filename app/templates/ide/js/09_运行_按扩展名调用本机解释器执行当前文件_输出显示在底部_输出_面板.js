@@ -29,6 +29,8 @@
     if (bottomPane === "term") termEnsure().then(ok => { if (ok) $("termInput").focus(); });
     if (bottomPane === "log") { const lb = $("logBody"); if (lb) lb.scrollTop = lb.scrollHeight; }
     bpKillMode();                                      // 右侧按钮随当前标签刷新状态
+    // 搜索按钮归「输出」「运行日志」两个页签（终端页签隐藏）
+    if (typeof opFindShow === "function") opFindShow(bottomPane === "output" || bottomPane === "log");
     if (typeof sessionSaveBottom === "function") sessionSaveBottom();   // 记住当前标签，刷新后恢复
   }
   function toggleBottom(force, pane) {
@@ -58,10 +60,12 @@
     if (bottomPane === "log" && currentLogId && LOGS[currentLogId]) {
       LOGS[currentLogId].buf = [];                      // 清当前标签的缓冲与显示
       $("logBody").innerHTML = "";
+      if (typeof opFindReset === "function") opFindReset();   // 清空 → 搜索命中计数归零
       return;
     }
     $("opBody").innerHTML = "";
     $("bpTitle").textContent = "";
+    if (typeof opFindReset === "function") opFindReset();   // 输出清空 → 搜索命中计数归零
   }
   function opLine(text, cls) {
     const body = $("opBody");
@@ -69,6 +73,7 @@
     if (cls) span.className = cls;
     span.textContent = (text || "") + "\n";
     body.appendChild(span);
+    if (typeof opFindNewLine === "function") opFindNewLine(span);   // 搜索条开着时新行实时参与匹配
     body.scrollTop = body.scrollHeight;
   }
   function opLineHtml(html, cls) {
@@ -77,6 +82,7 @@
     if (cls) span.className = cls;
     span.innerHTML = html + "\n";
     body.appendChild(span);
+    if (typeof opFindNewLine === "function") opFindNewLine(span);
     body.scrollTop = body.scrollHeight;
   }
 

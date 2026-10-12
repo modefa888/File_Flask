@@ -187,6 +187,19 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .op-body .op-head { color: #7a5c00; }
 :where(html.theme-light) .op-body .op-link { color: #005fb8; }
 :where(html.theme-light) .op-body .op-link:hover { color: #004f99; }
+:where(html.theme-light) .op-find { background: #ffffff; border-color: #cecece; }
+:where(html.theme-light) .op-find-in { color: #333333; }
+:where(html.theme-light) .op-find-num { color: #6a6a6a; }
+:where(html.theme-light) .op-find-b { color: #555555; }
+:where(html.theme-light) .op-find-b:hover { background: #e8e8e8; color: #1f2328; }
+:where(html.theme-light) .op-body .op-hit,
+:where(html.theme-light) .logview .log-line.op-hit { background: #fdf3d3; box-shadow: inset 2px 0 0 #e3c069; }
+:where(html.theme-light) .op-body .op-hit-on,
+:where(html.theme-light) .logview .log-line.op-hit-on { background: #ffe9a8; box-shadow: inset 3px 0 0 #c99a1e; }
+:where(html.theme-light) .op-body .op-hit .op-kw,
+:where(html.theme-light) .logview .log-line.op-hit .op-kw { color: #d70015; }
+:where(html.theme-light) .op-body .op-hit-on .op-kw,
+:where(html.theme-light) .logview .log-line.op-hit-on .op-kw { color: #a80014; }
 :where(html.theme-light) .term-body { color: #333333; background: #ffffff; }
 :where(html.theme-light) .term-body .term-cmd { color: #005fb8; }
 :where(html.theme-light) .term-body .term-dim { color: #8a8a8a; }
@@ -1592,3 +1605,5 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .rv-findbox .rv-mini:hover { background: #e8e8e8; color: #1f2328; }
 :where(html.theme-light) .rv-log .log-line.hit { background: #fdf3d3; box-shadow: inset 2px 0 0 #e3c069; }
 :where(html.theme-light) .rv-log .log-line.hit-on { background: #ffe9a8; box-shadow: inset 3px 0 0 #c99a1e; color: #1f2328; }
+:where(html.theme-light) .rv-log .log-line.hit .rv-kw { color: #d70015; }
+:where(html.theme-light) .rv-log .log-line.hit-on .rv-kw { color: #a80014; }

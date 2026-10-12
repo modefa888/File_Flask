@@ -107,11 +107,15 @@
       if (!ok) return;
       try { await saveQuiet(active); } catch (e) { toast("保存失败：" + (e.message || e), "err"); return; }
     }
-    if (RUNBG.id) {
-      const ok = await uiConfirm("已有程序在运行",
-        "当前正在运行：" + RUNBG.name + "\n要停止它并重新运行吗？", "停止并运行", false);
+    // 只有「要运行的这个文件本身已经在跑」才需要先停一下 —— 别的项目在跑互不影响。
+    // （不能用 RUNBG.id 判断：那只是"当前在看谁的日志"，见 10_ 的 runningTaskFor）
+    const prev = runningTaskFor(target);
+    if (prev) {
+      const ok = await uiConfirm("该文件已有程序在运行",
+        "「" + (prev.name || baseName(target)) + "」正在运行：\n" + (prev.target || target) +
+        "\n要停止它，再用当前内容重新运行吗？", "停止并重新运行", false);
       if (!ok) return;
-      await stopBackground(true);
+      await stopRunTask(prev.id);                      // 按 id 停（可能不是当前在看的那个任务）
       await new Promise(r => setTimeout(r, 500));
     }
     try {

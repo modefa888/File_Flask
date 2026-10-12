@@ -269,7 +269,7 @@
     });
     /* 刷新后恢复：后端持久化了任务，本次会话还没有对应的日志标签，
        但程序其实仍在跑 —— 不把它们算进去，行号旁的按钮会退回 ▶（点了还会重复启动）。 */
-    (window.RUNNER && RUNNER.tasks || []).forEach(t => {
+    (RUNNER && RUNNER.tasks || []).forEach(t => {
       if (t.running && t.target) map[t.target] = t.id;
     });
     return map;
@@ -279,6 +279,44 @@
     if (typeof window.setRunningTargets === "function") window.setRunningTargets(runningTargets());
   }
   window.syncRunButtons = syncRunButtons;              // 11_ 后台任务面板恢复任务后也要刷一次
+
+  /* ---------- 「这个文件是不是已经有任务在跑」 ----------
+     必须按入口文件判断，不能拿 RUNBG.id 当依据：RUNBG 的含义是
+     「底部面板当前在看谁的日志」（点「查看日志」、以及刷新后接回输出都会设置它），
+     它完全可能是另一个项目的任务 —— 拿它判断就会在运行别的项目时误报
+     「当前正在运行 xxx，要停止它并重新运行吗？」。
+     后端启动时也同样是按入口文件去重的（run.py 的 _replace_task）。 */
+  function sameRunPath(a, b) {
+    const norm = p => String(p || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    const x = norm(a), y = norm(b);
+    if (!x || !y) return false;
+    if (x === y) return true;
+    const xa = x.charAt(0) === "/", ya = y.charAt(0) === "/";
+    if (xa === ya) return false;                       // 都是绝对（或都是相对）路径 → 必须完全相等
+    return xa ? x.endsWith("/" + y) : y.endsWith("/" + x);   // 一个是另一个的相对路径
+  }
+  function runningTaskFor(target) {
+    const t = (RUNNER && RUNNER.tasks || []).filter(x => x && x.running && sameRunPath(x.target, target))[0];
+    if (t) return t;
+    // 刚启动的前台任务可能还没进入列表：如果看的正好是它，也算
+    if (RUNBG.id && sameRunPath(RUNBG.target, target)) {
+      return { id: RUNBG.id, name: RUNBG.name, target: RUNBG.target };
+    }
+    return null;
+  }
+  async function stopRunTask(id) {                     // 按 id 终止（可能不是当前正在查看日志的那个任务）
+    if (!id) return;
+    try {
+      const r = await fetch("/api/run/stop", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: id }),
+      });
+      const d = await r.json();
+      if (d.error) toast(d.error, "err");
+    } catch (e) {
+      toast("终止失败：" + (e.message || e), "err");
+    }
+  }
 
   /* 刷新后：若后端仍有前台任务在跑，「输出」面板显示的就是它的输出 ——
      接回 RUNBG，从 offset 0 回放历史，再继续实时推送（不然刷新后这块是空的）。 */

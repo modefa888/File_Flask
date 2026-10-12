@@ -1,12 +1,12 @@
-  /* ===== 侧边栏拖动分隔条 ===== */
+  /* ===== 侧边栏拖动分隔条：视觉上只有 1px 细线 ===== */
   .splitter {
-    width: 5px; flex: none; background: #1a1a1a; cursor: col-resize; position: relative;
+    width: 1px; flex: none; background: #2c2c2c; cursor: col-resize; position: relative;
   }
+  /* 加宽透明热区（左右各 4px），细线不易点中但拖动手感不变；hover 时整条线高亮 */
   .splitter::after {
-    content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 1px;
-    background: transparent; transition: background .12s;
+    content: ""; position: absolute; top: 0; bottom: 0; left: -4px; width: 9px;
   }
-  .splitter:hover::after, .splitter.dragging::after { background: #007fd4; }
+  .splitter:hover, .splitter.dragging { background: #007fd4; }
   .sidebar.collapsed + .splitter { display: none; }
   body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none; }
   /* 拖动期间禁用侧边栏/分屏的宽度过渡：否则 width 会以 .12s 动画追赶鼠标而抖动 */

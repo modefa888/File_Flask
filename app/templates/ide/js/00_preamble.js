@@ -1,5 +1,14 @@
 (function () {
   "use strict";
+  /* 组装编辑器左侧 gutters：自动并入「代码折叠」列。
+     背景：requirements.txt / package.json / 可运行文件等模块会用自己的 setOption("gutters", …)
+     整份覆盖 gutters；若这里不带上折叠列，行号旁的折叠三角会整列消失。
+     折叠列是否出现取决于该标签的 foldGutter 选项（大文件时为 false，不显示）。 */
+  window.ideGutters = function (cm, list) {
+    const base = (list || []).filter(g => g !== "CodeMirror-foldgutter");
+    const fold = cm && cm.getOption && cm.getOption("foldGutter") ? ["CodeMirror-foldgutter"] : [];
+    return fold.concat(base);
+  };
   const BASE = "/static/vendor/codemirror/mode/";
   /* ---------- 路径混淆 + 本地持久化 ----------
      1) 用 ?path=<明文> 打开 IDE 后，把明文 URL 立即替换成 ?id=<混淆token>，地址栏不再暴露路径；
@@ -1415,6 +1424,19 @@
           lineNumbers: true, lineWrapping: IDE_SETTINGS.lineWrap, indentUnit: IDE_SETTINGS.indent, tabSize: IDE_SETTINGS.indent,
           styleActiveLine: IDE_SETTINGS.activeLine && !big, matchBrackets: !big, autoCloseBrackets: true,
           phrases: CM_PHRASES,
+          // 代码折叠：行号旁出现 − / + 折叠三角，可折叠/展开函数体、代码块、注释块、按缩进折叠（如 python）。
+          // 大文件关闭折叠，避免逐行计算卡顿。折叠控制列放在最左侧（仿 VS Code）。
+          gutters: big ? ["CodeMirror-linenumbers"] : ["CodeMirror-foldgutter", "CodeMirror-linenumbers"],
+          foldGutter: !big,
+          foldOptions: { minFoldSize: 1, widget: "…" },
+          extraKeys: {
+            "Ctrl-Alt-]": function (c) { c.foldCode(c.getCursor()); },                 // 折叠光标所在块（再按展开）
+            "Cmd-Alt-]":  function (c) { c.foldCode(c.getCursor()); },
+            "Ctrl-Alt-[": function (c) { c.foldCode(c.getCursor(), null, "unfold"); },  // 展开光标所在块
+            "Cmd-Alt-[":  function (c) { c.foldCode(c.getCursor(), null, "unfold"); },
+            "Ctrl-Alt-Shift-]": function (c) { CodeMirror.commands.foldAll(c); },        // 折叠全部
+            "Ctrl-Alt-Shift-[": function (c) { CodeMirror.commands.unfoldAll(c); }       // 展开全部
+          }
         });
         tab.cm = cm;
         // 语法模式异步套用：内容先可见，模式脚本即使慢/失败也不再阻塞打开

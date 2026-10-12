@@ -13,6 +13,38 @@
 <link rel="stylesheet" href="/static/vendor/codemirror/addon/dialog/dialog.css">
 {# 代码补全候选列表的基础样式（外观在 37_代码补全_智能提示.css 里覆盖） #}
 <link rel="stylesheet" href="/static/vendor/codemirror/show-hint.min.css">
+{# 代码折叠：折叠箭头（仿 VSCode 折线三角）样式 #}
+<link rel="stylesheet" href="/static/vendor/codemirror/addon/fold/foldgutter.css">
+{# 代码折叠外观：弱化官方默认蓝色发光标记，改为低调灰；
+   折叠箭头覆盖官方默认的实心字符 ▾/▸，用 CSS 边框画成 VSCode 那种折线三角
+   （展开 = 向下 ˅，折叠 = 向右 >），比字符更锐利，深浅主题各自适配 #}
+<style>
+.CodeMirror-foldmarker {
+  color: #9aa0a6; text-shadow: none; background: rgba(127,127,127,.20);
+  border-radius: 3px; padding: 0 2px; font-family: inherit; line-height: 1; cursor: pointer;
+}
+/* 折叠箭头：靠 CSS 边框画折线三角，content 置空以去掉默认字符 ▾/▸ */
+.CodeMirror-foldgutter-open:after,
+.CodeMirror-foldgutter-folded:after {
+  content: "";
+  display: inline-block;
+  width: .42em; height: .42em;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  vertical-align: middle;
+  color: #9aa0a6; opacity: .75;
+  transform: translateY(-1px) rotate(45deg);            /* 展开：向下 */
+  transition: opacity .12s ease, color .12s ease;
+}
+.CodeMirror-foldgutter-folded:after { transform: translateY(-1px) rotate(-45deg); }   /* 折叠：向右 */
+.CodeMirror-foldgutter-open:hover:after,
+.CodeMirror-foldgutter-folded:hover:after { opacity: 1; color: #d8d8d8; }
+html.theme-light .CodeMirror-foldmarker { color: #555; background: rgba(0,0,0,.08); }
+html.theme-light .CodeMirror-foldgutter-open:after,
+html.theme-light .CodeMirror-foldgutter-folded:after { color: #555; opacity: .85; }
+html.theme-light .CodeMirror-foldgutter-open:hover:after,
+html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacity: 1; }
+</style>
 <link rel="stylesheet" href="/static/vendor/codemirror/material-darker.min.css">
 <link rel="stylesheet" href="/static/vendor/xterm/css/xterm.css">
 <script src="/static/vendor/xterm/lib/xterm.js"></script>
@@ -154,6 +186,13 @@ try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'li
 <script src="/static/vendor/codemirror/addon/search/search.min.js"></script>
 {# 代码补全：show-hint 提供候选列表控件，候选内容由 37_代码补全 模块提供 #}
 <script src="/static/vendor/codemirror/show-hint.min.js"></script>
+{# 代码折叠：foldcode 提供折叠指令，foldgutter 提供行号旁 -/+ 折叠三角，
+   brace-fold（花括号）/ comment-fold（注释块）/ indent-fold（无花括号语言如 python/ruby）为具体折叠策略 #}
+<script src="/static/vendor/codemirror/addon/fold/foldcode.js"></script>
+<script src="/static/vendor/codemirror/addon/fold/foldgutter.js"></script>
+<script src="/static/vendor/codemirror/addon/fold/brace-fold.js"></script>
+<script src="/static/vendor/codemirror/addon/fold/comment-fold.js"></script>
+<script src="/static/vendor/codemirror/addon/fold/indent-fold.js"></script>
 {# 敏感字段传输加密：注入 RSA 公钥 + 纯 JS 加密工具（供各提交处调用 window.TP） #}
 <script>window.__tpPub = {{ (tp_pub or {'enabled': false})|tojson }};</script>
 <script>

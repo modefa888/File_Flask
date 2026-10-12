@@ -158,7 +158,7 @@
     if (tab.host.querySelector(".req-toolbar")) return;
 
     // 添加自定义 gutter（保留原有行号）
-    tab.cm.setOption("gutters", ["CodeMirror-linenumbers", "pip-status-gutter"]);
+    tab.cm.setOption("gutters", window.ideGutters(tab.cm, ["CodeMirror-linenumbers", "pip-status-gutter"]));
     tab.cm.refresh();
 
     const tb = document.createElement("div");
@@ -344,7 +344,7 @@
     if (tab.host.querySelector(".npm-toolbar")) return;
 
     // 行首标记：与 requirements.txt 共用同一套 gutter 与样式（绿勾 / 黄三角），行号保留
-    tab.cm.setOption("gutters", ["CodeMirror-linenumbers", "pip-status-gutter"]);
+    tab.cm.setOption("gutters", window.ideGutters(tab.cm, ["CodeMirror-linenumbers", "pip-status-gutter"]));
     tab.cm.refresh();
 
     const tb = document.createElement("div");
@@ -580,7 +580,7 @@
     tab.runBtnReady = true;
     RUN_BTN_TABS.push(tab);
 
-    tab.cm.setOption("gutters", ["run-btn-gutter", "CodeMirror-linenumbers"]);   // ▶ 在行号前面
+    tab.cm.setOption("gutters", window.ideGutters(tab.cm, ["run-btn-gutter", "CodeMirror-linenumbers"]));   // ▶ 在行号前面（折叠列在最左）
     tab.cm.refresh();
 
     const ext = getExt(tab.displayPath || tab.path);

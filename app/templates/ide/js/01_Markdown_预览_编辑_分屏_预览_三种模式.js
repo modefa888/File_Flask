@@ -104,26 +104,15 @@
       '<button data-m="preview" title="预览模式 (Ctrl+Shift+V)"><i class="bi bi-eye"></i>预览</button>' +
       (openHref ? '<span class="md-tb-sep"></span><a href="' + openHref + '" target="_blank" rel="noopener" title="在新标签页打开（本机用，含路径）"><i class="bi bi-box-arrow-up-right"></i></a>' : "") +
       '<span class="md-tb-sep"></span>' +
-      '<button class="md-share" title="复制分享链接：随机短链，不暴露服务器路径"><i class="bi bi-share"></i>分享</button>';
+      '<button class="md-share" title="分享文件：生成短链，并可查看/管理全部分享记录"><i class="bi bi-share"></i>分享</button>';
     tb.querySelectorAll("button").forEach(b => {
       b.addEventListener("mousedown", (e) => e.preventDefault());   // 不抢编辑器焦点
       if (b.dataset.m) b.addEventListener("click", () => setMdMode(tab, b.dataset.m));
     });
     const shareBtn = tb.querySelector(".md-share");
-    if (shareBtn) shareBtn.addEventListener("click", async () => {
-      try {
-        const r = await fetch("/api/share", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: tab.path }),
-        });
-        const d = await r.json();
-        if (d.error) throw new Error(d.error);
-        await copyText(location.origin + d.url);
-        toast("分享链接已复制（" + (d.name || "文件") + "）", "ok");
-      } catch (e) {
-        toast("分享失败：" + (e.message || e), "err");
-      }
+    if (shareBtn) shareBtn.addEventListener("click", () => {
+      if (typeof openShareManager === "function") openShareManager(tab.path);
+      else toast("分享模块未加载", "err");
     });
     wrap.appendChild(tb);
     host.appendChild(wrap);

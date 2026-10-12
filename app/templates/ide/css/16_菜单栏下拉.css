@@ -23,4 +23,6 @@
     font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* 子菜单里的 Seti 图标：去掉为行内文件名设计的下沉偏移，避免在 flex 居中行里偏下 */
+  .ctx-menu .mi .seti-ic { transform: none; }
 

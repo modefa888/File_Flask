@@ -299,6 +299,8 @@
       if (d.error) throw new Error(d.error);
       tab.original = tab.cm.getValue(); tab.dirty = false; tab.el.classList.remove("dirty");
       refreshTreeDirty(); toast("已保存：" + tab.name, "ok");
+      // 协作过的文件：保存时已把「共享前版本」备份到 data/collab_backups/
+      if (d.backup) toast("已备份共享前版本：" + d.backup.split("/").pop() + "（data/collab_backups/）", "ok");
       if (tab.path === ROOT + "/.gitignore") loadGitignoreRules();   // 保存 .gitignore → 文件树灰色状态实时刷新
     } catch (e) { toast("保存失败：" + (e.message || e), "err"); }
   }

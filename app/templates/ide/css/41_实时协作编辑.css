@@ -1,0 +1,270 @@
+/* ===================== 实时协作编辑 ===================== */
+.collab-overlay {
+  position: fixed; inset: 0; z-index: 9000; background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.collab-modal {
+  width: 520px; max-width: 100%; max-height: 90vh; overflow: auto;
+  background: #252526; border: 1px solid #333; border-radius: 10px;
+  box-shadow: 0 18px 60px rgba(0,0,0,.5); color: #ddd; font-size: 13px;
+}
+.collab-head {
+  display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+  border-bottom: 1px solid #333; font-weight: 600; font-size: 14px;
+}
+.collab-head .bi { color: #6cb6ff; font-size: 16px; }
+.collab-head .c-close {
+  margin-left: auto; background: none; border: none; color: #999; font-size: 18px;
+  cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 5px;
+}
+.collab-head .c-close:hover { background: #333; color: #fff; }
+.collab-body { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.collab-file { font-size: 12px; color: #9aa0a6; word-break: break-all; }
+.collab-file b { color: #c9d1d9; }
+
+/* 当前文件的协作详情面板：自身也是纵向布局，子项之间要有间隔 */
+#cCurPanel { display: flex; flex-direction: column; gap: 12px; }
+#cCurPanel:empty { display: none; }
+
+/* 「正在分享」房间列表 */
+.collab-sharing-head { margin: 2px 0 8px; }
+.collab-sharing-head .c-share-ic { color: #7fd88f; }
+.c-host-badge { color: #e5c07b; font-weight: 600; }
+.collab-room {
+  background: #1b1b1e; border: 1px solid #333; border-radius: 8px;
+  padding: 10px 12px; margin-bottom: 10px;
+}
+.collab-room .cr-info { margin-bottom: 6px; }
+.collab-room .cr-name { display: flex; align-items: center; gap: 8px; }
+.collab-room .cr-name b { color: #c9d1d9; font-size: 13px; }
+.collab-room .cr-peers { font-size: 11px; color: #7fd88f; }
+.collab-room .cr-name .collab-status { margin-left: auto; }
+.collab-room .cr-path {
+  font-size: 11px; color: #8a8a8a; word-break: break-all; margin-top: 2px;
+}
+.collab-room .cr-info .collab-peers { margin-top: 6px; }
+.collab-room .cr-ops { display: flex; gap: 6px; flex-wrap: wrap; }
+.collab-room .cr-ops .collab-btn { padding: 4px 10px; font-size: 12px; }
+
+.collab-row { display: flex; gap: 8px; align-items: center; }
+.collab-row label { color: #9aa0a6; min-width: 56px; }
+.collab-input, .collab-link {
+  flex: 1; background: #1b1b1e; border: 1px solid #3c3c3c; color: #d4d4d4;
+  border-radius: 5px; padding: 7px 9px; font-size: 12.5px; outline: none; font-family: inherit;
+}
+.collab-input:focus, .collab-link:focus { border-color: #0a6aa8; }
+.collab-link { color: #8cd0ff; }
+.collab-btn {
+  background: #0d7ec4; color: #fff; border: none; border-radius: 5px;
+  padding: 8px 14px; font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+.collab-btn:hover { background: #0a6aa8; }
+.collab-btn.ghost { background: #333338; color: #cfe3f7; }
+.collab-btn.ghost:hover { background: #3a3a3a; }
+.collab-btn.danger { background: #5a2b2b; color: #ffb4b4; }
+.collab-btn.danger:hover { background: #6e3434; }
+.collab-btn:disabled { opacity: .5; cursor: default; }
+/* 用 <a class="collab-btn"> 做「打开 / 二维码」：比 window.open 更可靠（不受弹窗拦截影响） */
+a.collab-btn { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
+
+.collab-qr-wrap { display: flex; gap: 12px; align-items: center; }
+.collab-qr { background: #fff; border-radius: 6px; padding: 6px; }
+.collab-qr img { display: block; width: 120px; height: 120px; }
+.collab-hint { font-size: 11.5px; color: #8a8a8a; line-height: 1.6; }
+
+.collab-peers { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.collab-peer {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 4px;
+  border-radius: 20px; font-size: 12px; color: #fff; background: #2d2d33;
+}
+.collab-peer .dot {
+  width: 18px; height: 18px; border-radius: 50%; display: inline-flex;
+  align-items: center; justify-content: center; font-size: 10px; color: #1b1b1e; font-weight: 700;
+}
+.collab-peer.you::after { content: "（你）"; color: #9aa0a6; font-size: 10px; }
+.collab-status { font-size: 12px; }
+.collab-status .on { color: #7fd88f; }
+.collab-status .off { color: #c98; }
+
+/* 远端协作者的光标与选区 */
+.collab-caret {
+  position: relative; width: 0; border-left: 2px solid var(--cc, #6cb6ff);
+  margin-left: -1px; pointer-events: none;
+}
+.collab-caret > span {
+  position: absolute; top: -1.05em; left: -2px; white-space: nowrap;
+  background: var(--cc, #6cb6ff); color: #fff; font-size: 10px; line-height: 1.4;
+  padding: 0 4px; border-radius: 3px 3px 3px 0; transform: translateY(-2px);
+}
+.collab-sel { background: var(--cc, #6cb6ff); opacity: .22; }
+
+/* 编辑器标签上的「协作中」标记：左侧色条 + 文件名前的脉冲绿点 */
+.tab.tab-collab { box-shadow: inset 3px 0 0 #2e7d54; }
+.tab.tab-collab.active { box-shadow: inset 3px 0 0 #7fd88f; }
+.tab.tab-collab .t-nm::before {
+  content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: #7fd88f; margin-right: 5px; vertical-align: middle;
+  animation: c-pulse 1.6s infinite;
+}
+
+/* 顶栏协作按钮的「进行中」脉冲点 */
+#tbCollab.on { color: #7fd88f; }
+#tbCollab .c-dot {
+  position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%;
+  background: #7fd88f; box-shadow: 0 0 0 0 rgba(127,216,143,.7); animation: c-pulse 1.6s infinite;
+}
+@keyframes c-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(127,216,143,.7); }
+  70% { box-shadow: 0 0 0 6px rgba(127,216,143,0); }
+  100% { box-shadow: 0 0 0 0 rgba(127,216,143,0); }
+}
+.c-col-widget {
+  position: fixed; right: 12px; bottom: 12px; z-index: 8000; display: none;
+  align-items: center; gap: 8px; background: #252526; border: 1px solid #333;
+  border-radius: 22px; padding: 6px 12px 6px 8px; box-shadow: 0 6px 22px rgba(0,0,0,.45);
+}
+.c-col-widget.on { display: inline-flex; }
+.c-col-widget .ci { display: inline-flex; gap: 4px; }
+
+/* ============ 编辑区右上角：协作图例（谁改过）+ 版本对比按钮 ============ */
+.collab-topright {
+  position: fixed; z-index: 60; display: flex; align-items: center; gap: 8px;
+  justify-content: flex-end; pointer-events: none;
+}
+.collab-topright > * { pointer-events: auto; }
+
+.collab-legend {
+  display: none; align-items: center; gap: 10px; padding: 4px 10px; border-radius: 18px;
+  background: rgba(37, 37, 38, .94); border: 1px solid #3c3c3c; color: #d4d4d4;
+  font-size: 11px; box-shadow: 0 6px 18px rgba(0, 0, 0, .4); white-space: nowrap;
+}
+.collab-legend.on { display: inline-flex; }
+.collab-legend .lg-hd { color: #9aa0a6; }
+.collab-legend .lg { display: inline-flex; align-items: center; gap: 4px; }
+.collab-legend .lg .dot {
+  width: 14px; height: 14px; border-radius: 50%; display: inline-flex;
+  align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: #10161d;
+}
+
+.collab-fab {
+  display: none; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 20px; cursor: pointer; white-space: nowrap;
+  background: #0d7ec4; color: #fff; border: 1px solid #0a6aa8;
+  font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.45);
+}
+.collab-fab.on { display: inline-flex; }
+.collab-fab:hover { background: #0a6aa8; }
+.collab-fab .bi { font-size: 14px; }
+/* 「停止分享」：与蓝色「版本对比」区分，用暖色表示终止性操作 */
+.collab-fab.stop { background: #a4312b; border-color: #8c2a25; }
+.collab-fab.stop:hover { background: #8c2a25; }
+
+/* ============ 版本对比弹层（分享前 vs 当前） ============ */
+.collab-diff-overlay {
+  position: fixed; inset: 0; z-index: 9100; background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.collab-diff-modal {
+  width: min(1240px, 96vw); height: min(82vh, 900px);
+  background: #1e1e1e; border: 1px solid #333; border-radius: 10px;
+  display: flex; flex-direction: column; overflow: hidden; color: #ddd; font-size: 13px;
+}
+.collab-diff-modal .cd-sum { margin-left: 10px; font-weight: 400; font-size: 12px; }
+.collab-diff-modal .cd-sum .add { color: #7fd88f; margin-right: 8px; }
+.collab-diff-modal .cd-sum .del { color: #ff7b72; }
+/* 头部导航：靠右，关闭按钮跟随其后 */
+.collab-diff-modal .collab-head .c-close { margin-left: 10px; }
+.collab-diff-modal .cd-nav { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.collab-diff-modal .cd-nav button {
+  background: #333338; color: #cfe3f7; border: 1px solid #3c3c3c;
+  border-radius: 5px; padding: 3px 8px; font-size: 12px; cursor: pointer; font-family: inherit;
+}
+.collab-diff-modal .cd-nav button:hover { background: #3a3a3a; }
+/* 「恢复备份版本」：会覆盖当前内容，用暖色以示需要确认 */
+.collab-diff-modal .cd-nav button.cd-restore {
+  background: #4a2b2b; color: #ffb4a9; border-color: #613b3b;
+}
+.collab-diff-modal .cd-nav button.cd-restore:hover { background: #5c3434; border-color: #7a4747; }
+.collab-diff-modal .cd-nav #cdPos { color: #9aa0a6; font-size: 12px; min-width: 54px; text-align: center; }
+.collab-diff-head {
+  display: grid; grid-template-columns: 1fr 1fr; flex: none;
+  background: #252526; border-bottom: 1px solid #333; color: #9aa0a6; font-size: 12px;
+}
+.collab-diff-head .cd-cell { padding: 6px 10px; font-weight: 600; }
+.collab-diff-body {
+  position: relative; flex: 1; overflow: auto; background: #1b1b1e;
+  font-family: ui-monospace, Menlo, Consolas, "Courier New", monospace;
+  font-size: 12px; line-height: 1.55;
+}
+.cd-row { display: grid; grid-template-columns: 1fr 1fr; }
+/* 当前跳转命中的差异行：叠加一层高亮（不遮挡原有 +/- 底色） */
+.cd-row.cd-cur .cd-cell { box-shadow: inset 0 0 0 9999px rgba(88,166,255,.16); }
+.cd-cell { display: flex; gap: 8px; padding: 0 10px; min-width: 0; }
+.cd-cell.l { border-right: 1px solid #2c2c2c; }
+.cd-ln { flex: none; width: 42px; text-align: right; color: #6a6a6a; user-select: none; }
+.cd-tx { white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.cd-row.add .cd-cell.r { background: rgba(63,185,80,.16); }
+.cd-row.del .cd-cell.l { background: rgba(248,81,73,.16); }
+/* 同一行的「修改」：左旧（红）右新（绿） */
+.cd-row.chg .cd-cell.l { background: rgba(248,81,73,.16); }
+.cd-row.chg .cd-cell.r { background: rgba(63,185,80,.16); }
+.cd-more { padding: 8px 12px; color: #9aa0a6; font-size: 12px; }
+/* 无基线 / 接口失败时的提示弹层 */
+.collab-diff-modal.cd-auto { height: auto; max-height: 70vh; }
+.cd-notice { padding: 20px 18px; color: #e5c07b; line-height: 1.8; font-size: 13px; }
+
+/* 语法着色：复用 CodeMirror tokenizer 产生的 .cm-* 类（深色=One Dark 系） */
+.collab-diff-body .cm-keyword { color: #c678dd; }
+.collab-diff-body .cm-atom { color: #d19a66; }
+.collab-diff-body .cm-number { color: #d19a66; }
+.collab-diff-body .cm-def { color: #61afef; }
+.collab-diff-body .cm-variable { color: #e06c75; }
+.collab-diff-body .cm-variable-2 { color: #e06c75; }
+.collab-diff-body .cm-variable-3,
+.collab-diff-body .cm-type { color: #e5c07b; }
+.collab-diff-body .cm-property { color: #61afef; }
+.collab-diff-body .cm-operator { color: #56b6c2; }
+.collab-diff-body .cm-comment { color: #7f848e; font-style: italic; }
+.collab-diff-body .cm-string { color: #98c379; }
+.collab-diff-body .cm-string-2 { color: #98c379; }
+.collab-diff-body .cm-meta { color: #56b6c2; }
+.collab-diff-body .cm-builtin { color: #e5c07b; }
+.collab-diff-body .cm-qualifier { color: #e5c07b; }
+.collab-diff-body .cm-bracket { color: #abb2bf; }
+.collab-diff-body .cm-tag { color: #e06c75; }
+.collab-diff-body .cm-attribute { color: #d19a66; }
+.collab-diff-body .cm-error { color: #ff5370; }
+
+/* ============ 改动行背景：整行淡色底（色值由 JS 按作者动态生成规则） ============ */
+.CodeMirror-linebackground[class^="collab-tint-"] { border-radius: 2px; }
+
+/* ============ 改动文字着色：只落在「实际被改动的字符」上，原本就有的代码不受影响 ============
+   --ca 由 JS 内联写在该标记上（=作者色）；!important 用于压过语法高亮 token 配色 */
+.collab-ink, .collab-ink span[class*="cm-"] {
+  color: var(--ca) !important;
+  font-weight: 700 !important;
+}
+
+/* ============ 改动处的作者标签：挂在被修改区域首行末尾的小药丸 ============ */
+.collab-tag {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 0 7px;
+  height: 14px;
+  line-height: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(30,36,46,.92);
+  color: #c9d1d9;
+  font-weight: 400;                          /* 所在行可能被改成粗体，标签自身保持正常字重 */
+  font-size: 10px;
+  vertical-align: middle;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;   /* 不挡编辑器里的点击与光标定位 */
+}
+.collab-tag .dot {
+  display: inline-block;
+  width: 6px; height: 6px; border-radius: 50%;
+  margin-right: 4px; vertical-align: middle;
+}

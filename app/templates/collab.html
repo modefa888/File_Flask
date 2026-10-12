@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>协作编辑 · 文件管理</title>
+<script>/* 尽早应用上次选择的主题，避免首屏先闪一下深色 */try { if (localStorage.getItem("collab.theme") === "light") document.documentElement.classList.add("theme-light"); } catch (e) {}</script>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<link rel="stylesheet" href="/static/vendor/codemirror/codemirror.min.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/material-darker.min.css">
+<script src="/static/vendor/codemirror/codemirror.min.js"></script>
+<script src="/static/vendor/codemirror/addon/selection/active-line.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  /* ---------- 全局自定义滚动条（与 IDE 视觉一致） ---------- */
+  * {
+    scrollbar-width: thin;                          /* Firefox */
+    scrollbar-color: #3a3a3a transparent;
+  }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: #3a3a3a; border-radius: 4px;
+    border: 2px solid transparent; background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background-color: #555; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  body {
+    display: flex; flex-direction: column;
+    background: #1e1e1e; color: #d4d4d4; font-size: 13px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+    background: #181818; border-bottom: 1px solid #2c2c2c; flex: none;
+  }
+  header .t { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  header .t i { color: #6cb6ff; }
+  /* 头部只显示文件夹名：放大加粗；文件名与完整路径见悬浮提示 */
+  header .room { color: inherit; font-size: 15px; font-weight: 700; word-break: break-all; }
+  .spacer { flex: 1; }
+  .st { font-size: 12px; white-space: nowrap; }
+  .st.on { color: #7fd88f; }
+  .st.off { color: #c98; }
+  .peers { display: flex; gap: 6px; flex-wrap: wrap; }
+  .peer {
+    display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px 2px 3px;
+    border-radius: 20px; font-size: 12px; background: #2d2d33;
+  }
+  .peer .dot {
+    width: 18px; height: 18px; border-radius: 50%; display: inline-flex;
+    align-items: center; justify-content: center; font-size: 10px; color: #1b1b1e; font-weight: 700;
+  }
+  header input, header button {
+    background: #252528; border: 1px solid #3c3c3c; color: #d4d4d4;
+    border-radius: 5px; padding: 5px 8px; font-size: 12px; outline: none;
+  }
+  header input:focus { border-color: #0a6aa8; }
+  header button { cursor: pointer; }
+  header button:hover { background: #333338; }
+  header button.primary { background: #0d7ec4; border-color: #0d7ec4; color: #fff; }
+  header button.primary:hover { background: #0a6aa8; }
+  header button.danger { background: #5a2b2b; border-color: #5a2b2b; color: #ffb4b4; }
+  main { flex: 1; display: flex; min-height: 0; }
+  /* 文件树 */
+  #tree {
+    width: 250px; flex: none; overflow: auto; background: #181818;
+    border-right: 1px solid #2c2c2c; padding: 8px 0; user-select: none;
+  }
+  #tree .head {
+    padding: 4px 12px 8px; color: #8a8a8a; font-size: 11px; letter-spacing: .05em;
+    display: flex; align-items: center; gap: 6px;
+  }
+  #tree .head .crumb { flex: 1; word-break: break-all; }
+  #tree .head button {
+    background: none; border: none; color: #8a8a8a; cursor: pointer; padding: 2px 4px;
+  }
+  #tree .tree-row {
+    display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 1px 8px 1px 4px;
+    font-size: 13px; line-height: 1.5; color: #cccccc; cursor: pointer; white-space: nowrap;
+  }
+  #tree .tree-row:hover { background: #2a2d2e; }
+  #tree .tree-row .twist { width: 16px; text-align: center; color: #9aa0a6; font-size: 10px; flex: none; }
+  #tree .tree-row .ic { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
+  #tree .tree-row .ic .bi, #tree .tree-row .ic .seti-ic { font-size: 1.4em; line-height: 1; }
+  #tree .tree-row .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  #tree .tree-row.file { cursor: default; }
+  #tree .tree-children { display: none; padding-left: 14px; }
+  #tree .tree-children.open { display: block; }
+  /* SETI 官方文件图标字体（与 IDE 资源管理器同源） */
+  @font-face { font-family: "seti"; src: url("/static/vendor/seti/seti.woff") format("woff"); font-display: block; }
+  .seti-ic { font-family: "seti"; font-style: normal; font-weight: normal; font-size: 1.4em; line-height: 1; display: inline-block; vertical-align: baseline; transform: translateY(.11em); }
+  /* 编辑器 */
+  #edwrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #edbar {
+    padding: 6px 12px; background: #181818; border-bottom: 1px solid #2c2c2c;
+    color: #9aa0a6; font-size: 12px; display: none;
+  }
+  #ed { flex: 1; min-height: 0; }
+  #ed .CodeMirror { height: 100%; font-size: 13px; }
+  /* 远端光标 */
+  .cc { position: relative; width: 0; border-left: 2px solid var(--cc, #6cb6ff); margin-left: -1px; pointer-events: none; }
+  .cc > span {
+    position: absolute; top: -1.05em; left: -2px; white-space: nowrap;
+    background: var(--cc, #6cb6ff); color: #fff; font-size: 10px; line-height: 1.4;
+    padding: 0 4px; border-radius: 3px 3px 3px 0; transform: translateY(-2px);
+  }
+  .sel { background: var(--cc, #6cb6ff); opacity: .22; }
+  /* 提示浮层 */
+  #tip {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 99;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #tip .box {
+    background: #252526; border: 1px solid #333; border-radius: 10px;
+    padding: 22px 28px; max-width: 380px; text-align: center; line-height: 1.7;
+  }
+  #tip .box .big { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+  #tip a { color: #6cb6ff; }
+
+  /* ============ 「谁改的」标注（与 IDE 同一套观感） ============ */
+  /* ① 改动行：整行淡色底（色值由 JS 按作者动态生成规则） */
+  .CodeMirror-linebackground[class^="collab-tint-"] { border-radius: 2px; }
+  /* ② 实际被改动的那几个字：加粗 + 作者色（--ca 由标记内联写入） */
+  .collab-ink, .collab-ink span[class*="cm-"] {
+    color: var(--ca) !important; font-weight: 700 !important;
+  }
+  /* ③ 行末作者标签 */
+  .collab-tag {
+    display: inline-block; margin-left: 10px; padding: 0 7px;
+    height: 14px; line-height: 14px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.18); background: rgba(30,36,46,.92);
+    color: #c9d1d9; font-weight: 400; font-size: 10px;
+    vertical-align: middle; white-space: nowrap; user-select: none; pointer-events: none;
+  }
+  .collab-tag .dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    margin-right: 4px; vertical-align: middle;
+  }
+
+  /* ============ 浅色主题（html.theme-light，与 IDE 浅色主题同色系） ============ */
+  html.theme-light * { scrollbar-color: #c0c0c0 transparent; }
+  html.theme-light ::-webkit-scrollbar-thumb { background: #c0c0c0; }
+  html.theme-light ::-webkit-scrollbar-thumb:hover { background-color: #a0a0a0; }
+  html.theme-light body { background: #ffffff; color: #1f2328; }
+  html.theme-light header { background: #f6f6f6; border-bottom-color: #d8d8d8; }
+  html.theme-light header .room { color: #1f2328; }
+  html.theme-light header input, html.theme-light header button {
+    background: #ffffff; border-color: #d0d0d0; color: #1f2328;
+  }
+  html.theme-light header input:focus { border-color: #005fb8; }
+  html.theme-light header button:hover { background: #e8e8e8; }
+  html.theme-light header button.primary { background: #005fb8; border-color: #004c94; color: #fff; }
+  html.theme-light header button.primary:hover { background: #004c94; }
+  html.theme-light header button.danger { background: #ffeceb; border-color: #f0b6b2; color: #b42318; }
+  html.theme-light header a { color: #6a6a6a !important; }
+  html.theme-light .peer { background: #ececec; }
+  html.theme-light .st.on { color: #1a7f37; }
+  html.theme-light #tree { background: #f6f6f6; border-right-color: #d8d8d8; }
+  html.theme-light #tree .head { color: #6a6a6a; }
+  html.theme-light #tree .head button { color: #6a6a6a; }
+  html.theme-light #tree .tree-row { color: #1f2328; }
+  html.theme-light #tree .tree-row:hover { background: #e6e6e6; }
+  html.theme-light #tree .tree-row .twist { color: #6a6a6a; }
+  html.theme-light #edbar { background: #f6f6f6; border-bottom-color: #d8d8d8; color: #6a6a6a; }
+  html.theme-light #tip { background: rgba(0, 0, 0, .28); }
+  html.theme-light #tip .box { background: #ffffff; border-color: #d0d0d0; color: #1f2328; }
+  html.theme-light #tip a { color: #005fb8; }
+  html.theme-light .collab-tag {
+    background: #ffffff; border-color: #d0d0d0; color: #4a5560;
+  }
+  /* 浅色底上把作者色略微加深，避免黄/浅绿在白底上看不清（只作用于改动字符，不含行背景） */
+  html.theme-light .collab-ink { filter: brightness(.72) saturate(1.15); }
+</style>
+</head>
+<body>
+<header>
+  <span class="t" title="协作编辑"><i class="bi bi-people-fill"></i></span>
+  <b class="room" id="roomName">连接中…</b>
+  <span class="spacer"></span>
+  <span class="peers" id="peers"></span>
+  <button id="themeBtn" title="切换主题（深色/浅色）"><i class="bi bi-sun"></i></button>
+  <input id="myName" style="width:110px" placeholder="你的昵称" maxlength="20">
+  <button id="renameBtn" title="修改在协作中显示的名字"><i class="bi bi-pencil"></i></button>
+  <button id="reloadBtn" title="重新载入房主的最新内容（解决内容不一致）"><i class="bi bi-arrow-clockwise"></i> 载入</button>
+  <span class="st off" id="st">○ 未连接</span>
+  <a href="/logout" title="退出登录" style="color:#9aa0a6;margin-left:4px"><i class="bi bi-box-arrow-right"></i></a>
+</header>
+<main>
+  <div id="tree">
+    <div class="head">
+      <span class="crumb" id="crumb">/</span>
+      <button id="rootBtn" title="收起全部并回到共享目录"><i class="bi bi-house"></i></button>
+    </div>
+    <div id="treeList"></div>
+  </div>
+  <div id="edwrap">
+    <div id="edbar"></div>
+    <div id="ed"></div>
+  </div>
+</main>
+<div id="tip" style="display:none"><div class="box" id="tipBox"></div></div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  };
+
+  var token = new URLSearchParams(location.search).get("collab") || "";
+  var isAdmin = {{ 'true' if is_admin else 'false' }};
+  // 登录用户名（数据库 users 表）：协作昵称固定用它，绝不能随机生成，
+  // 否则每次刷新都会变成新身份，「谁改的」记录也跟着乱
+  var collabUser = {{ (collab_user or '')|tojson }};
+
+  var S = {
+    ws: null, myId: null,
+    myName: (collabUser || "").trim() || ("访客" + Math.floor(1000 + Math.random() * 9000)),
+    version: 0, cm: null, applying: false, curTimer: null,
+    marks: {}, path: null, root: null, dir: "/",
+    pending: [],   // 已上报未回显的在途 op（服务端坐标系，随远端 op 折算更新）
+    opSeq: 0,      // 本端发出的操作自增序号：回显按 id 精确出队
+    closed: false, // 房间已关闭（房主退出），不再自动重连
+    peerInfo: {},  // id -> {name, color}：给「谁改的」标注查作者名/色
+  };
+
+  if (!token) {
+    showTip("缺少协作令牌", "请通过邀请链接打开本页面。" +
+      (isAdmin ? '<br><a href="/ide">返回 IDE</a>' : ""));
+    return;
+  }
+
+  /* ---------------- 编辑器 ---------------- */
+  var cm = CodeMirror($("ed"), {
+    value: "", lineNumbers: true, lineWrapping: false, indentUnit: 4,
+    autofocus: true, inputStyle: "textarea", theme: "material-darker",
+    styleActiveLine: true,
+  });
+  S.cm = cm;
+
+  /* ---------------- 主题切换（深色 / 浅色） ----------------
+     深色 = material-darker，浅色 = CodeMirror 自带的 default（与 IDE 浅色主题一致）。
+     选择记在 localStorage，<head> 里的早应用脚本负责首屏不闪深色。 */
+  function isLightTheme() { return document.documentElement.classList.contains("theme-light"); }
+  function applyTheme(light, save) {
+    document.documentElement.classList.toggle("theme-light", !!light);
+    try { cm.setOption("theme", light ? "default" : "material-darker"); } catch (e) {}
+    var btn = $("themeBtn");
+    if (btn) {
+      btn.title = light ? "切换主题（当前：浅色）" : "切换主题（当前：深色）";
+      btn.innerHTML = light ? '<i class="bi bi-moon"></i>' : '<i class="bi bi-sun"></i>';
+    }
+    if (save) { try { localStorage.setItem("collab.theme", light ? "light" : "dark"); } catch (e) {} }
+  }
+  $("themeBtn").onclick = function (e) {
+    applyTheme(!isLightTheme(), true);
+    e.currentTarget.blur();          // 免得焦点一直停在按钮上
+  };
+  applyTheme(isLightTheme(), false);  // 初始化：让 CM 主题与按钮图标跟 head 里已应用的状态一致
+
+  cm.on("changes", function (_, changes) {
+    if (S.applying) return;
+    // 自己改的地方立刻标注为「你」：整行淡色底 + 行末标签 + 改动字符加粗着色。
+    // 与连接状态无关——本地标注要即时可见，不能等 WebSocket 就绪。
+    try {
+      changes.forEach(function (c) {
+        var span = Math.max(c.to.line - c.from.line, (c.text || []).length - 1);
+        markLines(c.from.line, c.from.line + span, ME);
+        var ins = (c.text || []).join("\n");
+        var f = cm.indexFromPos(c.from);
+        markChars(f, f + ins.length, ME);
+      });
+    } catch (e) {}
+    if (!connected()) return;
+    var ops = [];
+    changes.forEach(function (c) {
+      // CodeMirror 的 change.from / change.to 是「修改前」文档坐标，而
+      // indexFromPos 按「修改后」行裁剪：删除使行变短时 to 会被裁小，导致
+      // 删除只同步一小段（表现为「删不掉，只有光标移动」）。用 from + 实际
+      // 被删文本长度得到正确终点。
+      var from = cm.indexFromPos(c.from);
+      var removed = (c.removed || []).join("\n").length;
+      var to = from + removed;
+      var text = c.text.join("\n");
+      if (from !== to || text !== "") ops.push({ from: from, to: to, text: text });
+    });
+    if (ops.length) {
+      ops.forEach(function (o) { o.id = ++S.opSeq; });   // 自增 id：服务端原样回显，用于精确出队
+      S.pending = S.pending.concat(ops);
+      send({ type: "op", base: S.version, ops: ops });
+    }
+  });
+
+  cm.on("cursorActivity", function () {
+    clearTimeout(S.curTimer);
+    S.curTimer = setTimeout(function () {
+      if (!connected()) return;
+      send({
+        type: "cursor", base: S.version,
+        from: cm.indexFromPos(cm.getCursor("anchor")),
+        to: cm.indexFromPos(cm.getCursor("head")),
+      });
+    }, 80);
+  });
+
+  /* ---------------- 语法高亮（与 IDE 00_preamble.js 同表同加载方式） ---------------- */
+  var MODES = {
+    js: ["javascript", "javascript.min.js"], ts: ["javascript", "javascript.min.js"], jsx: ["javascript", "javascript.min.js"],
+    json: ["javascript", "javascript.min.js"], mjs: ["javascript", "javascript.min.js"], cjs: ["javascript", "javascript.min.js"],
+    py: ["python", "python.min.js"], html: ["htmlmixed", "htmlmixed.min.js"], htm: ["htmlmixed", "htmlmixed.min.js"],
+    xml: ["xml", "xml.min.js"], css: ["css", "css.min.js"], scss: ["css", "css.min.js"], less: ["css", "css.min.js"],
+    md: ["markdown", "markdown.min.js"], c: ["clike", "clike.min.js"], cpp: ["clike", "clike.min.js"], h: ["clike", "clike.min.js"],
+    hpp: ["clike", "clike.min.js"], java: ["clike", "clike.min.js"], cs: ["clike", "clike.min.js"], go: ["go", "go.min.js"],
+    rs: ["clike", "clike.min.js"], php: ["php", "php.min.js"], rb: ["ruby", "ruby.min.js"], sh: ["shell", "shell.min.js"],
+    bash: ["shell", "shell.min.js"], yml: ["yaml", "yaml.min.js"], yaml: ["yaml", "yaml.min.js"],
+    toml: ["properties", "properties.min.js"], ini: ["properties", "properties.min.js"], conf: ["properties", "properties.min.js"],
+    sql: ["sql", "sql.min.js"], lua: ["lua", "lua.min.js"],
+  };
+  var _loaded = {}, _promises = {};
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = src; s.onload = resolve; s.onerror = function () { reject(new Error("load " + src)); };
+      document.head.appendChild(s);
+    });
+  }
+  function ensureMode(ext) {
+    var m = MODES[ext]; if (!m) return Promise.resolve(null);
+    var mode = m[0], rel = m[1];
+    if (_loaded[mode]) return Promise.resolve(mode);
+    if (_promises[mode]) return _promises[mode];
+    var deps = mode === "htmlmixed" ? ["xml.min.js", "css.min.js", "javascript.min.js"] : [];
+    var base = "/static/vendor/codemirror/mode/";
+    _promises[mode] = Promise.all([loadScript(base + rel)]
+      .concat(deps.map(function (d) { return loadScript(base + d); })))
+      .then(function () { _loaded[mode] = true; return mode; })
+      .catch(function () { return null; });
+    return _promises[mode];
+  }
+  function applyMode(path) {
+    var name = (path || "").split("/").pop().toLowerCase();
+    var i = name.lastIndexOf(".");
+    var ext = i >= 0 ? name.substring(i + 1) : "";
+    ensureMode(ext).then(function (mode) {
+      if (mode) try { cm.setOption("mode", mode); } catch (e) {}
+    });
+  }
+
+  /* ---------------- WebSocket ---------------- */
+  function connected() { return !!(S.ws && S.ws.readyState === 1); }
+  function send(obj) { try { S.ws.send(JSON.stringify(obj)); } catch (e) {} }
+
+  function connect() {
+    $("myName").value = S.myName;
+    var proto = location.protocol === "https:" ? "wss" : "ws";
+    var qs = "token=" + encodeURIComponent(token) +
+             "&name=" + encodeURIComponent(S.myName) +
+             "&color=" + encodeURIComponent(colorFor(S.myName));
+    var ws;
+    try { ws = new WebSocket(proto + "://" + location.host + "/ws/collab?" + qs); }
+    catch (e) { showTip("无法建立连接", "协作服务不可用，请联系管理员。"); return; }
+    S.ws = ws;
+    ws.onmessage = function (e) {
+      var m; try { m = JSON.parse(e.data); } catch (_) { return; }
+      switch (m.type) {
+        case "welcome":
+          S.myId = m.yourId; S.version = m.version;
+          S.pending = [];                       // 重同步后重新记账
+          S.closed = false;
+          S.path = m.path || null;
+          // 与 IDE 同款：按文件扩展名按需加载语法高亮 mode
+          applyMode(m.path || "");
+          // 浏览范围锁定在共享文件所在目录：协作者不应看到整个系统
+          if (!S.root && m.path) {
+            S.root = m.path.replace(/\/[^/]*$/, "") || "/";
+            renderTree();
+          }
+          // 头部只显示「所在文件夹名」（大号加粗）；文件名与完整路径放进悬浮提示
+          var rpath = m.path || "";
+          var parent = rpath.replace(/\/[^/]*$/, "").split("/").filter(Boolean).pop() || "";
+          var rn = $("roomName");
+          rn.textContent = parent || m.name || "未命名";
+          rn.title = (m.name ? m.name + " · " : "") + rpath;
+          setSt(true);
+          seed(m.text || "");
+          renderPeers(m.peers || []);
+          paintAuthors();      // 刷新/重连后按服务端记录重建「谁改的」标注
+          break;
+        case "op":
+          S.version = Math.max(S.version, m.version);
+          if (m.by === S.myId) {
+            // 自己的回显：按 id 精确出队。不再比对坐标——他人并发操作会改变在途队列
+            // 的位置，按坐标比对会误判为分叉并触发 resync（remake 全文、光标跳回 1:1）。
+            for (var pi = 0; pi < S.pending.length; pi++) {
+              if (S.pending[pi].id != null && S.pending[pi].id === m.id) { S.pending.splice(pi, 1); break; }
+            }
+            break;
+          }
+          applyRemote(m);
+          break;
+        case "cursor": renderCursor(m); break;
+        case "presence": renderPeers(m.peers || []); break;
+        case "leave": clearCursor(m.id); break;
+        case "closed":
+          // 房主退出：房间已失效，提示并停止自动重连
+          S.closed = true;
+          Object.keys(S.marks).forEach(clearCursor);
+          showTip("协作已结束", esc(m.message || "房主已退出，邀请链接已失效。"));
+          try { ws.close(); } catch (e) {}
+          break;
+        case "error":
+          S.closed = true;
+          showTip("无法加入协作", esc(m.message || "房间不存在或已结束。"));
+          break;
+      }
+    };
+    ws.onclose = function () {
+      setSt(false);
+      if (S.closed) return;                   // 房间已失效，不再重连
+      if (!$("tip").style.display || $("tip").style.display === "none")
+        toastBar("连接已断开，正在重连…");
+      setTimeout(connect, 2000);
+    };
+  }
+
+  function seed(text) {
+    // 保留光标位置，避免重同步/载入时光标跳回第 1 行第 1 列
+    var cur = null;
+    try { cur = cm.getCursor(); } catch (e) {}
+    S.applying = true;
+    cm.setValue(text);
+    clearTags(); clearAllInk();      // 重灌文档：旧的「谁改的」标注随之作废
+    cm.clearHistory();
+    try {
+      if (cur) {
+        var doc = cm.getDoc();
+        var line = Math.max(0, Math.min(cur.line, doc.lastLine()));
+        var ch = Math.max(0, Math.min(cur.ch, doc.getLine(line).length));
+        cm.setCursor({ line: line, ch: ch });
+      }
+    } catch (e) {}
+    S.applying = false;
+    $("edbar").style.display = "block";
+    $("edbar").textContent = "正在与房主实时共同编辑（改动会即时同步给所有协作者）";
+  }
+
+  /* 客户端 OT 变换：与服务端 _transform 同一套语义（含 delta 修正） */
+  function _otT(inc, other) {
+    var of = other.from, ot = other.to, otext = other.text || "";
+    var delta = otext.length - (ot - of);
+    var f = inc.from, t = inc.to, txt = inc.text || "";
+    if (f <= of) {
+      if (t <= of) return { from: f, to: t, text: txt };          // 完全在前
+      return { from: f, to: Math.max(t, ot) + delta, text: txt }; // 左重叠
+    }
+    if (f >= ot) return { from: f + delta, to: t + delta, text: txt }; // 完全在后
+    return { from: of + otext.length, to: Math.max(t, ot) + delta, text: txt }; // 起点被吞
+  }
+
+  function applyRemote(m) {
+    // 远端 op 是服务端坐标系；本地若有在途 op，必须先互相折算再应用——
+    // 绝不能丢 op，否则删除/插入会凭空消失
+    var op = { from: m.from, to: m.to, text: m.text || "" };
+    if (S.pending.length) {
+      var np = [];
+      S.pending.forEach(function (p) {
+        np.push(_otT(p, op));      // 在途 op 对远端 op 折算（用折算前的远端 op）
+        op = _otT(op, p);          // 远端 op 对在途 op 折算
+      });
+      S.pending = np;
+    }
+    S.applying = true;
+    cm.replaceRange(op.text, cm.posFromIndex(op.from), cm.posFromIndex(op.to));
+    S.applying = false;
+    // 「谁改的」：整行标注 + 只给本次真正写入的那几个字加粗着色
+    var pi = S.peerInfo[m.by] || {};
+    var who = (m.by === S.myId) ? ME
+            : { key: m.by, name: pi.name || "协作者", color: pi.color || "#6cb6ff" };
+    var start = cm.posFromIndex(op.from).line;
+    var nl = (String(op.text || "").match(/\n/g) || []).length;
+    markLines(start, start + nl, who);
+    markChars(op.from, op.from + String(op.text || "").length, who);
+  }
+
+  function renderCursor(m) {
+    if (m.id === S.myId) return;
+    if (m.id) S.peerInfo[m.id] = { name: m.name || "协作者", color: m.color || "#6cb6ff" };
+    clearCursor(m.id);
+    var from = cm.posFromIndex(m.from), to = cm.posFromIndex(m.to);
+    var el = document.createElement("span");
+    el.className = "cc"; el.style.setProperty("--cc", m.color || "#6cb6ff");
+    var tag = document.createElement("span"); tag.textContent = m.name || "协作者";
+    el.appendChild(tag);
+    var w = cm.setBookmark(from, { widget: el, insertLeft: true });
+    var mark = null;
+    if (from.line !== to.line || from.ch !== to.ch)
+      mark = cm.markText(from, to, { className: "sel", attributes: { style: "--cc:" + (m.color || "#6cb6ff") } });
+    S.marks[m.id] = { w: w, mark: mark };
+  }
+
+  function clearCursor(id) {
+    var r = S.marks[id]; if (!r) return;
+    try { r.w && r.w.clear(); } catch (e) {}
+    try { r.mark && r.mark.clear(); } catch (e) {}
+    delete S.marks[id];
+  }
+
+  /* ================= 「谁改的」标注 =================
+     ① 改动行整行淡色底  ② 行末作者名字标签  ③ 实际被改动的那几个字加粗 + 作者色
+     刷新页面后由 /api/collab/<token>/authors 重建，所以刷新也不会丢。 */
+  var ME = { key: "me", name: "你", color: "#8ab4f8" };
+  var TAGS = [], INKS = [], CLSWHO = {}, TINTSEEN = {};
+
+  function _safeKey(k) {
+    return String(k == null ? "" : k).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24) || "x";
+  }
+  function _rgba(hex, a) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+    if (!m) return "rgba(108,182,255," + a + ")";
+    var n = parseInt(m[1], 16);
+    return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
+  }
+  /* 按作者动态生成「行背景」色规则（同一作者只生成一次） */
+  function _authorCls(who) {
+    var cls = "collab-tint-" + _safeKey(who.key);
+    CLSWHO[cls] = who;
+    if (!TINTSEEN[cls]) {
+      TINTSEEN[cls] = true;
+      var st = document.getElementById("collabTintStyles");
+      if (!st) {
+        st = document.createElement("style"); st.id = "collabTintStyles";
+        document.head.appendChild(st);
+      }
+      st.textContent += "." + cls + "{background:" + _rgba(who.color || "#6cb6ff", .18) + ";}";
+    }
+    return cls;
+  }
+  function applyLineBg(line, who) {
+    clearLineBg(line);
+    try { cm.addLineClass(line, "background", _authorCls(who)); } catch (e) {}
+  }
+  function clearLineBg(line) {
+    var h = null;
+    try { h = cm.getLineHandle(line); } catch (e) {}
+    var cur = (h && h.bgClass) || "";
+    if (!cur) return;
+    Object.keys(TINTSEEN).forEach(function (cls) {
+      if (cur.indexOf(cls) < 0) return;
+      try { cm.removeLineClass(line, "background", cls); } catch (e) {}
+    });
+  }
+  /* 只给指定字符区间加粗着色：相邻/重叠的同色标记自动合并，不同作者可嵌套（内层优先） */
+  function markChars(from, to, who) {
+    if (!who || to <= from) return;
+    var style = "--ca:" + (who.color || "#6cb6ff");
+    var a = from, b = to;
+    INKS = INKS.filter(function (mk) {
+      var r = mk.find();
+      if (!r) return false;
+      if (!mk.attributes || mk.attributes.style !== style) return true;
+      var rf = cm.indexFromPos(r.from), rt = cm.indexFromPos(r.to);
+      if (rf <= b && rt >= a) {
+        if (rf < a) a = rf;
+        if (rt > b) b = rt;
+        try { mk.clear(); } catch (e) {}
+        return false;
+      }
+      return true;
+    });
+    try {
+      INKS.push(cm.markText(cm.posFromIndex(a), cm.posFromIndex(b), {
+        className: "collab-ink", attributes: { style: style },
+      }));
+    } catch (e) {}
+  }
+  function clearAllInk() {
+    INKS.forEach(function (mk) { try { mk.clear(); } catch (e) {} });
+    INKS = [];
+  }
+  function clearTags() {
+    TAGS.forEach(function (mk) { try { mk.clear(); } catch (e) {} });
+    TAGS = [];
+  }
+  function addTag(line, who) {
+    try {
+      var node = document.createElement("span");
+      node.className = "collab-tag";
+      node.title = who.name + " 修改了此处";
+      node.innerHTML = '<i class="dot" style="background:' + esc(who.color) + '"></i>' + esc(who.name);
+      var mk = cm.setBookmark({ line: line, ch: cm.getLine(line).length },
+                              { widget: node, insertLeft: true });
+      if (mk) TAGS.push(mk);
+    } catch (e) {}
+  }
+  function _lineCls(i) {
+    var h = null;
+    try { h = cm.getLineHandle(i); } catch (e) {}
+    var bg = h && h.bgClass;
+    if (!bg) return null;
+    var arr = String(bg).split(/\s+/);
+    for (var k = 0; k < arr.length; k++) if (arr[k].indexOf("collab-tint-") === 0) return arr[k];
+    return null;
+  }
+  /* 重建 [a, b] 所在「连续改动区间」内的行末标签（连续同一作者只挂一个） */
+  function refreshTags(a, b) {
+    var n = cm.lineCount();
+    var ra = Math.max(0, a), rb = Math.min(n - 1, b);
+    while (ra > 0 && _lineCls(ra - 1)) ra--;
+    while (rb + 1 < n && _lineCls(rb + 1)) rb++;
+    TAGS = TAGS.filter(function (mk) {
+      var p = mk.find();
+      if (!p) return false;
+      if (p.line >= ra && p.line <= rb) { try { mk.clear(); } catch (e) {} return false; }
+      return true;
+    });
+    var i = ra;
+    while (i <= rb) {
+      var cls = _lineCls(i);
+      if (!cls) { i++; continue; }
+      var j = i;
+      while (j + 1 <= rb && _lineCls(j + 1) === cls) j++;
+      var who = CLSWHO[cls];
+      if (who) addTag(i, who);
+      i = j + 1;
+    }
+  }
+  /* 把 [a, b] 行标注为 who：整行淡色底 + 行末作者标签 */
+  function markLines(a, b, who) {
+    if (!who) return;
+    for (var i = a; i <= b; i++) {
+      if (i < 0 || i >= cm.lineCount()) continue;
+      applyLineBg(i, who);
+    }
+    refreshTags(a, b);
+  }
+  /* 刷新 / 重连后按服务端记录重建全部标注（行背景 + 标签 + 改动字符着色） */
+  function paintAuthors() {
+    fetch("/api/collab/" + encodeURIComponent(token) + "/authors")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        var whoOf = function (sid, name, color) {
+          return (sid && sid === S.myId) ? ME
+            : { key: sid, name: name || "协作者", color: color || "#6cb6ff" };
+        };
+        (d.runs || []).forEach(function (run) {
+          var who = whoOf(run[2], run[3], run[4]);
+          var a = Math.max(0, run[0] | 0), b = Math.min(cm.lineCount() - 1, run[1] | 0);
+          for (var i = a; i <= b; i++) applyLineBg(i, who);
+        });
+        clearAllInk();
+        (d.chars || []).forEach(function (c) {
+          markChars(c[0] | 0, c[1] | 0, whoOf(c[2], c[3], c[4]));
+        });
+        clearTags();
+        refreshTags(0, cm.lineCount() - 1);
+      })
+      .catch(function () {});
+  }
+
+  var COLORS = ["#e06c75", "#61afef", "#98c379", "#e5c07b", "#c678dd",
+                "#56b6c2", "#d19a66", "#ff79c6", "#7ee787", "#f78c6c"];
+
+  /* 颜色只由昵称决定（与服务端 color_for 同一算法）：同一个人刷新 / 换页面颜色都不变 */
+  function colorFor(name) {
+    var s = String(name == null ? "" : name).trim();
+    if (!s) return COLORS[Math.floor(Math.random() * COLORS.length)];
+    var h = 0;
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 1000000007;
+    return COLORS[h % COLORS.length];
+  }
+  var INIT = function (s) { return (s || "?").trim().charAt(0).toUpperCase(); };
+
+  function renderPeers(peers) {
+    var list = (peers || []).slice();
+    if (S.myId && !list.some(function (p) { return p.id === S.myId; }))
+      list.unshift({ id: S.myId, name: S.myName, color: "#6cb6ff", host: false });
+    (peers || []).forEach(function (p) {          // 记住作者名/色，供「谁改的」标注使用
+      if (p && p.id) S.peerInfo[p.id] = { name: p.name || "协作者", color: p.color || "#6cb6ff" };
+    });
+    $("peers").innerHTML = list.map(function (p) {
+      var you = p.id === S.myId;
+      return '<span class="peer"><span class="dot" style="background:' + esc(p.color || "#888") + '">' +
+             esc(INIT(p.name)) + "</span>" + esc(p.name) +
+             (p.host ? '<b class="c-host-badge">· 房主</b>' : "") +
+             (you ? "（你）" : "") + "</span>";
+    }).join("");
+  }
+
+  function setSt(on) {
+    $("st").className = "st " + (on ? "on" : "off");
+    $("st").textContent = on ? "● 已连接" : "○ 未连接";
+  }
+
+  /* ---------------- 改名 ---------------- */
+  $("renameBtn").onclick = function () {
+    var nm = ($("myName").value || "").trim();
+    if (!nm) return;
+    S.myName = nm;
+    send({ type: "rename", name: nm });
+  };
+
+  /* ---------------- 重新载入（拉取房主/服务端最新内容） ---------------- */
+  $("reloadBtn").onclick = function () {
+    if (!connected()) { toastBar("未连接，无法载入"); return; }
+    // 丢弃在途队列并请求服务端重发权威文本（服务端 resync → welcome）
+    S.pending = [];
+    send({ type: "resync" });
+    toastBar("正在载入房主的最新内容…");
+  };
+
+  /* ---------------- 文件树（只读，嵌套树 + SETI 图标，与 IDE 资源管理器同款） ---------------- */
+  const _si = (cls, color) => '<i class="bi ' + cls + '" style="color:' + color + '"></i>';
+  var SETI = null;
+  fetch("/static/vendor/seti/seti-icons.json").then(function (r) {
+    return r.ok ? r.json() : Promise.reject(new Error("http " + r.status));
+  }).then(function (j) {
+    if (!j || !j.iconDefinitions) return;
+    SETI = { defs: j.iconDefinitions, names: j.fileNames || {}, exts: j.fileExtensions || {},
+             langs: j.languageIds || {} };
+    if (S.root) renderTree();                       // 图标数据晚到：重绘已加载的树
+  }).catch(function () {});
+  var SETI_LANG = {   // 常见扩展名 → seti languageId（与 IDE 00_preamble.js 同表）
+    py: "python", pyw: "python", js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript",
+    ts: "typescript", tsx: "typescript", html: "html", htm: "html", css: "css", scss: "scss", sass: "sass",
+    less: "less", json: "json", md: "markdown", markdown: "markdown", yml: "yaml", yaml: "yaml",
+    sh: "shellscript", bash: "shellscript", zsh: "shellscript", xml: "xml", xsl: "xml",
+    gitignore: "ignore", gitattributes: "ignore", dockerignore: "ignore",
+    go: "go", mod: "go", sum: "go", rs: "rust", java: "java", jar: "java", php: "php", phtml: "php",
+    rb: "ruby", c: "c", h: "c", cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp", cs: "csharp",
+    kt: "kotlin", swift: "swift", lua: "lua", dart: "dart", vue: "vue", pl: "perl", pm: "perl",
+    bat: "bat", cmd: "bat", ps1: "powershell", sql: "sql",
+  };
+  var SHEET_ICON_ALIAS = { et: "xls", ett: "xls", xlsx: "xls", xlsm: "xls", xlsb: "xls", ods: "xls", tsv: "csv" };
+  var SETI_NAME_ALIAS = { "go.mod": "_go2", "go.sum": "_go2", "go.work": "_go2", "go.work.sum": "_go2" };
+  function getExt(name) { var i = name.lastIndexOf("."); return i >= 0 ? name.substring(i + 1).toLowerCase() : ""; }
+  function iconFor(name, isDir) {
+    if (isDir) return _si("bi-folder2", "#c09553");
+    var lower = name.toLowerCase(), ext = getExt(lower);
+    var setiExt = SHEET_ICON_ALIAS[ext] || ext;
+    if (SETI) {
+      var def = SETI.defs[SETI.names[lower]] || SETI.defs[SETI_NAME_ALIAS[lower]] || SETI.defs[SETI.exts[setiExt]];
+      if (!def && SETI_LANG[ext]) def = SETI.defs[SETI.langs[SETI_LANG[ext]]];
+      if (def && def.fontCharacter) {
+        var code = String(def.fontCharacter).replace(/\\+/g, "");
+        return '<span class="seti-ic" style="color:' + (def.fontColor || "#9da8ab") + '">&#x' + code + ";</span>";
+      }
+    }
+    // bootstrap 兜底（图标数据未加载或未命中时，与 IDE 的兜底映射一致）
+    if (lower.startsWith("dockerfile")) return _si("bi-file-earmark-code", "#438eec");
+    if (ext === "spec") return _si("bi-gear", "#a074c4");
+    var map = {
+      py: ["bi-filetype-py", "#519aba"], go: ["bi-file-earmark-code", "#00add8"],
+      mod: ["bi-file-earmark-code", "#00add8"], sum: ["bi-file-earmark-code", "#00add8"],
+      html: ["bi-filetype-html", "#e37933"], htm: ["bi-filetype-html", "#e37933"],
+      css: ["bi-filetype-css", "#519aba"], scss: ["bi-filetype-css", "#e37933"], less: ["bi-filetype-css", "#519aba"],
+      js: ["bi-filetype-js", "#cbcb41"], mjs: ["bi-filetype-js", "#cbcb41"], cjs: ["bi-filetype-js", "#cbcb41"],
+      jsx: ["bi-filetype-js", "#519aba"], ts: ["bi-filetype-js", "#519aba"], tsx: ["bi-filetype-js", "#519aba"],
+      json: ["bi-filetype-json", "#cbcb41"],
+      md: ["bi-filetype-md", "#519aba"], markdown: ["bi-filetype-md", "#519aba"],
+      yml: ["bi-filetype-yml", "#a074c4"], yaml: ["bi-filetype-yml", "#a074c4"],
+      txt: ["bi-file-earmark-text", "#6d8086"], log: ["bi-file-text", "#6d8086"], lrc: ["bi-file-text", "#6d8086"],
+      ini: ["bi-gear", "#6d8086"], cfg: ["bi-gear", "#6d8086"], conf: ["bi-gear", "#6d8086"],
+      env: ["bi-gear", "#6d8086"], toml: ["bi-gear", "#6d8086"],
+      sh: ["bi-terminal", "#4ec9b0"], bash: ["bi-terminal", "#4ec9b0"], zsh: ["bi-terminal", "#4ec9b0"],
+      bat: ["bi-terminal", "#4ec9b0"], cmd: ["bi-terminal", "#4ec9b0"], ps1: ["bi-terminal", "#4ec9b0"],
+      sql: ["bi-database", "#519aba"], db: ["bi-database", "#519aba"], sqlite: ["bi-database", "#519aba"],
+      sqlite3: ["bi-database", "#519aba"], db3: ["bi-database", "#519aba"],
+      xls: ["bi-file-earmark-spreadsheet", "#8dc149"], xlsx: ["bi-file-earmark-spreadsheet", "#8dc149"],
+      xlsm: ["bi-file-earmark-spreadsheet", "#8dc149"], xlsb: ["bi-file-earmark-spreadsheet", "#8dc149"],
+      et: ["bi-file-earmark-spreadsheet", "#8dc149"], ett: ["bi-file-earmark-spreadsheet", "#8dc149"],
+      ods: ["bi-file-earmark-spreadsheet", "#8dc149"],
+      csv: ["bi-file-earmark-spreadsheet", "#8dc149"], tsv: ["bi-file-earmark-spreadsheet", "#8dc149"],
+      png: ["bi-image", "#a074c4"], jpg: ["bi-image", "#a074c4"], jpeg: ["bi-image", "#a074c4"],
+      gif: ["bi-image", "#a074c4"], svg: ["bi-image", "#a074c4"], webp: ["bi-image", "#a074c4"],
+      bmp: ["bi-image", "#a074c4"], ico: ["bi-image", "#a074c4"],
+      mp4: ["bi-film", "#dd7e2e"], webm: ["bi-film", "#dd7e2e"], mkv: ["bi-film", "#dd7e2e"],
+      avi: ["bi-film", "#dd7e2e"], mov: ["bi-film", "#dd7e2e"],
+      mp3: ["bi-music-note", "#519aba"], wav: ["bi-music-note", "#519aba"], flac: ["bi-music-note", "#519aba"],
+      aac: ["bi-music-note", "#519aba"], m4a: ["bi-music-note", "#519aba"], ogg: ["bi-music-note", "#519aba"],
+      m3u: ["bi-file-earmark-play", "#dd7e2e"], m3u8: ["bi-file-earmark-play", "#dd7e2e"],
+      zip: ["bi-file-earmark-zip", "#b5895f"], tar: ["bi-file-earmark-zip", "#b5895f"],
+      gz: ["bi-file-earmark-zip", "#b5895f"], rar: ["bi-file-earmark-zip", "#b5895f"], "7z": ["bi-file-earmark-zip", "#b5895f"],
+    };
+    var hit = map[ext];
+    if (hit) return _si(hit[0], hit[1]);
+    if (name.startsWith(".")) return _si("bi-file-earmark", "#6d8086");
+    return _si("bi-file-earmark", "#8a8a8a");
+  }
+
+  function fetchDir(path) {
+    return fetch("/api/files?path=" + encodeURIComponent(path))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.error) throw new Error(d.error);
+        return (d.items || []).sort(function (a, b) {
+          return (b.is_dir - a.is_dir) || a.name.localeCompare(b.name, "zh");
+        });
+      });
+  }
+
+  function buildRows(items, container, dirPath) {
+    if (!container || !container.isConnected) return;   // 容器已被重绘移除：丢弃过期写入
+    container.innerHTML = "";
+    if (!items.length) {
+      container.innerHTML = '<div class="tree-row file"><span class="twist"></span>' +
+        '<span class="nm" style="color:#666">空目录</span></div>';
+      return;
+    }
+    var base = (dirPath || "").replace(/\/+$/, "");
+    items.forEach(function (it) {
+      // 不使用 API 返回的相对 path：一律用「父目录绝对路径 + 名称」，
+      // 否则二级目录会被服务端按进程 CWD 解析、不存在时回退成根目录列表（表现为重复内容）
+      var full = base + "/" + it.name;
+      var row = document.createElement("div");
+      row.className = "tree-row" + (it.is_dir ? " dir" : " file");
+      row.innerHTML =
+        '<span class="twist">' + (it.is_dir ? "▸" : "") + "</span>" +
+        '<span class="ic">' + iconFor(it.name, it.is_dir) + "</span>" +
+        '<span class="nm" title="协作者仅可浏览目录结构">' + esc(it.name) + "</span>";
+      container.appendChild(row);
+      if (!it.is_dir) return;
+      var kids = document.createElement("div");
+      kids.className = "tree-children";
+      container.appendChild(kids);
+      var open = false, loaded = false;
+      row.onclick = function () {
+        open = !open;
+        kids.classList.toggle("open", open);
+        row.querySelector(".twist").textContent = open ? "▾" : "▸";
+        if (open && !loaded) {
+          loaded = true;
+          kids.innerHTML = '<div class="tree-row file"><span class="twist"></span>' +
+            '<span class="nm" style="color:#666">加载中…</span></div>';
+          fetchDir(full).then(function (list) { buildRows(list, kids, full); })
+            .catch(function () { kids.innerHTML = ""; });
+        }
+      };
+    });
+  }
+
+  function renderTree() {
+    // 只显示共享目录的文件夹名，完整路径放进悬浮提示（不再显示长路径）
+    var root = S.root || "/";
+    var crumb = $("crumb");
+    crumb.textContent = root.split("/").filter(Boolean).pop() || root;
+    crumb.title = root;
+    fetchDir(root).then(function (list) { buildRows(list, $("treeList"), root); })
+      .catch(function (e) { toastBar(e.message || "加载目录失败"); });
+  }
+  $("rootBtn").onclick = renderTree;
+
+  /* ---------------- 提示浮层 / 通知条 ---------------- */
+  function showTip(title, html) {
+    $("tipBox").innerHTML = '<div class="big">' + esc(title) + "</div><div>" + html + "</div>";
+    $("tip").style.display = "flex";
+  }
+  var bar = null;
+  function toastBar(msg) {
+    if (bar) bar.remove();
+    bar = document.createElement("div");
+    bar.textContent = msg;
+    bar.style.cssText = "position:fixed;bottom:16px;left:50%;transform:translateX(-50%);" +
+      "background:#333338;color:#d4d4d4;padding:8px 16px;border-radius:6px;font-size:12px;z-index:98";
+    document.body.appendChild(bar);
+    setTimeout(function () { bar && bar.remove(); bar = null; }, 3000);
+  }
+
+  connect();
+})();
+</script>
+</body>
+</html>

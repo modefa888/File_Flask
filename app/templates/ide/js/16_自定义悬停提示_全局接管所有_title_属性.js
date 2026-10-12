@@ -23,16 +23,20 @@
       }
     }
     /* 定位：跟着鼠标走（默认落在指针右下方，贴边自动翻到左侧/上方并夹回可视区）；
-       没有鼠标坐标时（比如键盘触发的悬停）退回「元素下方」。 */
+       没有鼠标坐标时（比如键盘触发的悬停）退回「元素下方」。
+       元素带 data-tip-pos="top" 时强制显示在指针上方（弹层顶部工具栏等场景，
+       避免气泡压住下方内容）。 */
     function place(el) {
       const tr = tip.getBoundingClientRect();
       const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+      const wantTop = !!(el && el.dataset && el.dataset.tipPos === "top");
       let left, top;
       if (hasMouse) {
         left = mx + 14;
-        top = my + 18;
+        top = wantTop ? (my - tr.height - 14) : (my + 18);
         if (left + tr.width > vw - 6) left = mx - tr.width - 12;      // 右边放不下 → 移到指针左侧
-        if (top + tr.height > vh - 6) top = my - tr.height - 12;      // 下面放不下 → 移到指针上方
+        if (!wantTop && top + tr.height > vh - 6) top = my - tr.height - 12;  // 下面放不下 → 移到指针上方
+        if (wantTop && top < 6) top = my + 18;                        // 上方放不下 → 退回下方
       } else {
         const r = el.getBoundingClientRect();
         left = r.left + Math.min(6, r.width / 2);

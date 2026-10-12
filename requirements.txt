@@ -15,3 +15,5 @@ pymongo>=4.6
 psutil>=5.9
 # SSH 终端连接工具（远程主机连接，仿 Xshell）：paramiko 提供 SSH 客户端与密钥解析
 paramiko>=3.0
+# 实时协作编辑：WebSocket 通道（兼容 Werkzeug 开发服务器）
+flask-sock>=0.7

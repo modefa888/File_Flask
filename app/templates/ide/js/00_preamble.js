@@ -1513,6 +1513,8 @@
     if (bundle) bundle.tabbar.appendChild(el);
     if (tab === groupActive.get(tab.group)) el.classList.add("active");
     tab.el = el;
+    // 协作标记：由 43_ 协作模块按会话状态打标（解耦；未加载协作模块时无副作用）
+    if (typeof window.IDECollabTabMark === "function") window.IDECollabTabMark(el, tab);
   }
   // 视频播放器播放列表原位切换时同步标签页（22 号视频播放器 js 调用）：
   // 更新 path/name 并重绘标签节点；当前激活时顺带刷新面包屑与状态栏

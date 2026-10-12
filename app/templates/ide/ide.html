@@ -163,6 +163,9 @@ html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacit
 {% include 'ide/css/39_分享管理.css' %}
 </style>
 <style>
+{% include 'ide/css/41_实时协作编辑.css' %}
+</style>
+<style>
 {% include 'ide/css/40_后台任务编辑器视图.css' %}
 {% include 'ide/css/41_后台任务历史日志.css' %}
 </style>
@@ -195,6 +198,7 @@ try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'li
 <script src="/static/vendor/codemirror/addon/fold/indent-fold.js"></script>
 {# 敏感字段传输加密：注入 RSA 公钥 + 纯 JS 加密工具（供各提交处调用 window.TP） #}
 <script>window.__tpPub = {{ (tp_pub or {'enabled': false})|tojson }};</script>
+<script>window.__collabUser = {{ (collab_user or '')|tojson }};</script>
 <script>
 {% include 'ide/js/24_敏感字段传输加密.js' %}
 </script>
@@ -249,6 +253,8 @@ try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'li
 {% include 'ide/js/42_后台任务历史日志_按日历选日期回看以往运行的输出.js' %}
 {# 底部「输出」面板内置搜索（🔍）：须放在 16_ 之前，复用闭包内的 $ / bottomPane / opBody #}
 {% include 'ide/js/41_底部输出面板_内置搜索_整行黄底_关键字红字_上下跳转.js' %}
+{# 实时协作编辑（邀请共同编辑）：须放在 16_（关闭大 IIFE）之前，复用闭包内的 $ / esc / toast / copyText / uiConfirm / active / findTab / openFile #}
+{% include 'ide/js/43_实时协作编辑_邀请共同编辑.js' %}
 {% include 'ide/js/16_自定义悬停提示_全局接管所有_title_属性.js' %}
 {% include 'ide/js/17_SQLite数据库查看器_db_sqlite只读浏览_表列表_分页数据.js' %}
 {# 标签页内嵌视频播放器：openFile 的视频分支调用 setupVideoView（全局函数，须在 IIFE 关闭后加载） #}

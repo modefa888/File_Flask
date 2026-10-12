@@ -14,6 +14,7 @@ from ...services.common.filecore import (
     safe_path, _invalidate_list_cache, _invalidate_dir_size, _human_size,
     _in_pseudo_fs,
 )
+from ...services.ide.collab import preshare_for, COLLAB_BACKUP_DIR
 
 
 _log = get_logger()
@@ -256,6 +257,30 @@ def api_files_create():
         return jsonify({"error": str(e)}), 500
 
 
+def _backup_preshare(full_path, new_content):
+    """保存「参与过协作的文件」前，把「共享前版本」备份到 data/collab_backups/。
+
+    文件名形如 test_cron.py.20260101-120000.preshare.bak（时间戳=那次共享的起始时间），
+    同一次共享只留一份；返回备份路径，无需备份时返回空串。
+    """
+    snap = preshare_for(full_path)
+    if not snap:
+        return ""
+    text = snap.get("text")
+    if not text or text == new_content:      # 没共享过 / 内容没变：不必备份
+        return ""
+    ts = datetime.fromtimestamp(snap.get("created") or time.time()).strftime("%Y%m%d-%H%M%S")
+    bak = os.path.join(COLLAB_BACKUP_DIR,
+                       "%s.%s.preshare.bak" % (os.path.basename(full_path), ts))
+    if os.path.exists(bak):
+        return bak                           # 这一次共享已经备份过了
+    os.makedirs(COLLAB_BACKUP_DIR, exist_ok=True)
+    with open(bak, "w", encoding="utf-8") as f:
+        f.write(text)
+    _log.info("保存协作文件：已备份共享前版本 -> %s", bak)
+    return bak
+
+
 @bp.route("/api/files/save", methods=["POST"])
 def api_files_save():
     _log.info("POST /api/files/save")
@@ -282,11 +307,18 @@ def api_files_save():
         # 确保不是目录
         if os.path.isdir(full_path):
             return jsonify({"error": "不能写入目录"}), 400
+        # 参与过协作的文件：覆盖前先把「共享前版本」备份到文件旁边（失败不影响保存）
+        try:
+            backup = _backup_preshare(full_path, content)
+        except Exception as e:
+            backup = ""
+            _log.info("共享前版本备份失败（忽略）：%s", e)
         with open(full_path, 'w', encoding='utf-8') as f:
             f.write(content)
         _invalidate_list_cache(parent_dir)
         _invalidate_dir_size(parent_dir)
-        return jsonify({"success": True, "path": full_path, "size": os.path.getsize(full_path)})
+        return jsonify({"success": True, "path": full_path,
+                        "size": os.path.getsize(full_path), "backup": backup})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

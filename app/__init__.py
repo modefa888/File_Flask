@@ -30,6 +30,7 @@ def create_app(test_config=None) -> Flask:
         app.config.update(test_config)
 
     _register_blueprints(app)
+    _init_collab_ws(app)
     _install_request_logging(app)
     _install_error_handlers(app)
     _init_chat_engine()
@@ -68,10 +69,11 @@ def _register_blueprints(app: Flask) -> None:
     from .routes.ide.cron import bp as cron_bp
     from .routes.ide.sshconn import bp as sshconn_bp
     from .routes.ide.hints import bp as hints_bp
+    from .routes.ide.collab import bp as collab_bp
     for bp in (auth_bp, pages_bp, browser_bp, zip_bp, delete_bp, archive_history_bp,
                fileops_bp, index_bp, progress_stream_bp, grep_bp, git_bp, run_bp, port_bp,
                term_bp, env_bp, proc_bp, shares_bp, ai_bp, agent_bp, chat_history_bp, pip_bp, npm_bp,
-               plugins_bp, dbconn_bp, httpreq_bp, cron_bp, sshconn_bp, hints_bp):
+               plugins_bp, dbconn_bp, httpreq_bp, cron_bp, sshconn_bp, hints_bp, collab_bp):
         app.register_blueprint(bp)
 
 
@@ -136,6 +138,22 @@ def _install_error_handlers(app: Flask) -> None:
 
     for _code in (400, 403, 404, 405, 429, 500):
         app.register_error_handler(_code, _handle_error)
+
+
+def _init_collab_ws(app: Flask) -> None:
+    """初始化协作编辑的 WebSocket 通道（flask-sock，兼容 Werkzeug 开发服务器）。
+
+    缺少依赖或初始化失败时仅告警，不阻断主服务启动。
+    """
+    try:
+        from flask_sock import Sock
+        from .routes.ide.collab import register_collab_ws
+        sock = Sock()
+        sock.init_app(app)
+        register_collab_ws(sock)
+        _log.info("协作编辑 WebSocket 已就绪 (/ws/collab)")
+    except Exception as e:                      # 失败不应阻断服务启动
+        _log.warning("协作编辑 WebSocket 初始化失败，继续启动: %s", e)
 
 
 def _init_chat_engine() -> None:

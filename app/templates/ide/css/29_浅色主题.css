@@ -1652,3 +1652,112 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .rv-hist-i1 .st.warn { color: #8a6a00; }
 :where(html.theme-light) .rv-hist-i1 .st.err { color: #c0392b; }
 :where(html.theme-light) .rv-hist-i2 { color: #8a8a8a; }
+
+/* ---------- 实时协作编辑（41） ---------- */
+:where(html.theme-light) .collab-overlay { background: rgba(0,0,0,.28); }
+:where(html.theme-light) .collab-modal { background: #f6f6f6; border-color: #d0d0d0; color: #1f2328; box-shadow: 0 18px 60px rgba(0,0,0,.18); }
+:where(html.theme-light) .collab-head { border-bottom-color: #d8d8d8; color: #1f2328; }
+:where(html.theme-light) .collab-head .bi { color: #005fb8; }
+:where(html.theme-light) .collab-head .c-close { color: #8a8a8a; }
+:where(html.theme-light) .collab-head .c-close:hover { background: #e0e0e0; color: #1f2328; }
+:where(html.theme-light) .collab-file { color: #6a6a6a; }
+:where(html.theme-light) .collab-file b { color: #1f2328; }
+:where(html.theme-light) .collab-row label { color: #6a6a6a; }
+:where(html.theme-light) .collab-input,
+:where(html.theme-light) .collab-link { background: #ffffff; border-color: #c8c8c8; color: #1f2328; }
+:where(html.theme-light) .collab-input:focus,
+:where(html.theme-light) .collab-link:focus { border-color: #005fb8; }
+:where(html.theme-light) .collab-link { color: #005fb8; }
+:where(html.theme-light) .collab-btn { background: #005fb8; color: #ffffff; }
+:where(html.theme-light) .collab-btn:hover { background: #004c94; }
+:where(html.theme-light) .collab-btn.ghost { background: #e8e8e8; color: #1f2328; }
+:where(html.theme-light) .collab-btn.ghost:hover { background: #dcdcdc; }
+:where(html.theme-light) .collab-btn.danger { background: #fbe9e9; color: #c0392b; }
+:where(html.theme-light) .collab-btn.danger:hover { background: #f5d5d5; }
+:where(html.theme-light) .collab-hint { color: #8a8a8a; }
+:where(html.theme-light) .collab-peer { background: #ececec; color: #1f2328; }
+:where(html.theme-light) .collab-peer.you::after { color: #6a6a6a; }
+:where(html.theme-light) .collab-status .on { color: #1a7f37; }
+:where(html.theme-light) .collab-status .off { color: #b0700f; }
+:where(html.theme-light) #tbCollab.on { color: #1a7f37; }
+:where(html.theme-light) .collab-room { background: #ffffff; border-color: #d8d8d8; }
+:where(html.theme-light) .collab-room .cr-name b { color: #1f2328; }
+:where(html.theme-light) .collab-room .cr-peers { color: #1a7f37; }
+:where(html.theme-light) .collab-room .cr-path { color: #6a6a6a; }
+:where(html.theme-light) .collab-sharing-head .c-share-ic { color: #1a7f37; }
+:where(html.theme-light) .c-host-badge { color: #9a6700; }
+
+/* ---------- 实时协作：标签标记 / 悬浮按钮 / 版本对比（41） ---------- */
+:where(html.theme-light) .tab.tab-collab { box-shadow: inset 3px 0 0 #7fb98a; }
+:where(html.theme-light) .tab.tab-collab.active { box-shadow: inset 3px 0 0 #1a7f37; }
+
+:where(html.theme-light) .collab-fab {
+  background: #005fb8; border-color: #004c94; color: #ffffff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .22);
+}
+:where(html.theme-light) .collab-fab:hover { background: #004c94; }
+:where(html.theme-light) .collab-fab.stop {
+  background: #b42318; border-color: #8f1a12; color: #ffffff;
+}
+:where(html.theme-light) .collab-fab.stop:hover { background: #8f1a12; }
+:where(html.theme-light) .collab-legend {
+  background: #ffffff; border-color: #d0d0d0; color: #1f2328;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+}
+:where(html.theme-light) .collab-legend .lg-hd { color: #6a6a6a; }
+
+:where(html.theme-light) .collab-diff-overlay { background: rgba(0, 0, 0, .28); }
+:where(html.theme-light) .collab-diff-modal {
+  background: #f6f6f6; border-color: #d0d0d0; color: #1f2328;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, .18);
+}
+:where(html.theme-light) .collab-diff-modal .cd-sum .add { color: #1a7f37; }
+:where(html.theme-light) .collab-diff-modal .cd-sum .del { color: #c0392b; }
+:where(html.theme-light) .collab-diff-modal .cd-nav button {
+  background: #efefef; border-color: #d5d5d5; color: #333333;
+}
+:where(html.theme-light) .collab-diff-modal .cd-nav button:hover { background: #e0e0e0; border-color: #a8a8a8; color: #000000; }
+:where(html.theme-light) .collab-diff-modal .cd-nav button.cd-restore {
+  background: #ffeceb; border-color: #f0b6b2; color: #b42318;
+}
+:where(html.theme-light) .collab-diff-modal .cd-nav button.cd-restore:hover {
+  background: #ffdedb; border-color: #e09a95; color: #8f1a12;
+}
+:where(html.theme-light) .collab-diff-modal .cd-nav #cdPos { color: #6a6a6a; }
+
+:where(html.theme-light) .collab-diff-head {
+  background: #eaeaea; border-bottom-color: #d8d8d8; color: #4a5560;
+}
+:where(html.theme-light) .collab-diff-body { background: #ffffff; }
+:where(html.theme-light) .cd-cell.l { border-right-color: #e4e4e4; }
+:where(html.theme-light) .cd-ln { color: #9a9a9a; }
+:where(html.theme-light) .cd-row.add .cd-cell.r { background: #e6f5ea; }
+:where(html.theme-light) .cd-row.del .cd-cell.l { background: #fdeaea; }
+:where(html.theme-light) .cd-row.chg .cd-cell.l { background: #fdeaea; }
+:where(html.theme-light) .cd-row.chg .cd-cell.r { background: #e6f5ea; }
+:where(html.theme-light) .cd-row.cd-cur .cd-cell { box-shadow: inset 0 0 0 9999px rgba(0, 95, 184, .12); }
+:where(html.theme-light) .cd-more { color: #6a6a6a; }
+:where(html.theme-light) .cd-notice { color: #8a5a00; }
+
+/* 版本对比里的语法着色（浅色=One Light 系） */
+:where(html.theme-light) .collab-diff-body .cm-keyword { color: #a626a4; }
+:where(html.theme-light) .collab-diff-body .cm-atom { color: #986801; }
+:where(html.theme-light) .collab-diff-body .cm-number { color: #986801; }
+:where(html.theme-light) .collab-diff-body .cm-def { color: #4078f2; }
+:where(html.theme-light) .collab-diff-body .cm-variable { color: #e45649; }
+:where(html.theme-light) .collab-diff-body .cm-variable-2 { color: #e45649; }
+:where(html.theme-light) .collab-diff-body .cm-variable-3,
+:where(html.theme-light) .collab-diff-body .cm-type { color: #c18401; }
+:where(html.theme-light) .collab-diff-body .cm-property { color: #4078f2; }
+:where(html.theme-light) .collab-diff-body .cm-operator { color: #0184bc; }
+:where(html.theme-light) .collab-diff-body .cm-comment { color: #a0a1a7; font-style: italic; }
+:where(html.theme-light) .collab-diff-body .cm-string { color: #50a14f; }
+:where(html.theme-light) .collab-diff-body .cm-string-2 { color: #50a14f; }
+:where(html.theme-light) .collab-diff-body .cm-meta { color: #0184bc; }
+:where(html.theme-light) .collab-diff-body .cm-builtin { color: #c18401; }
+:where(html.theme-light) .collab-diff-body .cm-qualifier { color: #c18401; }
+:where(html.theme-light) .collab-diff-body .cm-bracket { color: #383a42; }
+:where(html.theme-light) .collab-diff-body .cm-tag { color: #e45649; }
+:where(html.theme-light) .collab-diff-body .cm-attribute { color: #986801; }
+:where(html.theme-light) .collab-diff-body .cm-error { color: #ca1243; }
+

@@ -25,6 +25,9 @@
             border-radius: 8px; padding: 8px 12px; font-size: 0.85rem; margin-bottom: 16px;
         }
         .btn-login { width: 100%; }
+        .reg-link { text-align: center; font-size: 0.82rem; color: #64748b; margin-top: 16px; }
+        .reg-link a { color: #2563eb; text-decoration: none; }
+        .reg-link a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -45,6 +48,9 @@
             </div>
             <button type="submit" class="btn btn-primary btn-login">登 录</button>
         </form>
+        <div class="reg-link">
+            没有账号？<a href="{{ url_for('auth.register', next=request.args.get('next', '')) }}">注册新账号</a>
+        </div>
     </div>
 </body>
 </html>

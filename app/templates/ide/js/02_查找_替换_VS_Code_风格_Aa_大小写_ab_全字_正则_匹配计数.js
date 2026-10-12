@@ -1093,10 +1093,20 @@
       toast("浏览器未授权读取剪贴板，请用 Ctrl+V 粘贴", "warn");
     }
   }
+  function pageSelText() {
+    try {
+      const s = window.getSelection();
+      return s ? String(s.toString() || "").trim() : "";
+    } catch (_) { return ""; }
+  }
   function openEditorCtxMenu(tab, x, y) {
     const cm = tab.cm;
     const ro = !!tab.diff;                                    // 差异视图只读
     const hasSel = !!(cm && cm.somethingSelected());
+    // 自定义视图（后台任务 / 数据库浏览 / SSH 终端…）没有 CodeMirror：
+    // 这时改用页面上鼠标选中的文字，"复制"在详情、日志、表格里同样可用
+    const pageSel = cm ? "" : pageSelText();
+    const selText = hasSel ? cm.getSelection() : pageSel;
     const isMd = ["md", "markdown"].includes(getExt(tab.name));
     const items = [];
     if (!ro) {
@@ -1104,11 +1114,11 @@
       items.push({ label: "重做", sc: "Ctrl+Y", disabled: !cm, act: () => { cm.redo(); cm.focus(); } });
       items.push({ divider: true });
       items.push({ label: "剪切", sc: "Ctrl+X", disabled: !hasSel, act: () => { copyText(cm.getSelection()); cm.replaceSelection(""); cm.focus(); } });
-      items.push({ label: "复制", sc: "Ctrl+C", disabled: !hasSel, act: () => copyText(cm.getSelection()) });
+      items.push({ label: "复制", sc: "Ctrl+C", disabled: !selText, act: () => copyText(selText) });
       items.push({ label: "粘贴", sc: "Ctrl+V", disabled: !cm, act: () => pasteIntoEditor(tab) });
       items.push({ divider: true });
-    } else if (hasSel) {
-      items.push({ label: "复制", sc: "Ctrl+C", act: () => copyText(cm.getSelection()) });
+    } else if (selText) {
+      items.push({ label: "复制", sc: "Ctrl+C", act: () => copyText(selText) });
       items.push({ divider: true });
     }
     items.push({ label: "全选", sc: "Ctrl+A", disabled: !cm, act: () => { cm.execCommand("selectAll"); cm.focus(); } });

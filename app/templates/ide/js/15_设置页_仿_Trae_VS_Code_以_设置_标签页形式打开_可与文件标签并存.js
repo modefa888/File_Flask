@@ -848,6 +848,13 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     if (typeof gitCredsMountSettings === "function") gitCredsMountSettings(host); // 挂载「Git 认证」分区
   }
   /* ---------- 命令注册表 + 自定义快捷键（设置 → 快捷键 可视化修改，localStorage 持久化） ---------- */
+  /* 当前激活的是没有代码编辑器的自定义视图（后台任务等）时，Ctrl+F / F3 / Shift+F3
+     交给视图自己的搜索（40_ 的日志内置搜索），别再弹「请先打开一个文件」 */
+  function kbViewFind(dir) {
+    if (!active || active.cm) return false;
+    if (!dir) return typeof rvFindOpen === "function" && runnerViewOpen() ? (rvFindOpen(), true) : false;
+    return typeof rvFindStep === "function" && rvFindStep(dir);
+  }
   const KEY_COMMANDS = [
     { id: "kb-save",        label: "保存当前文件",       def: "Mod+S",        run: () => { if (active) saveTab(active); } },
     { id: "kb-save-all",    label: "保存全部",           def: "Mod+K S",      run: () => saveAllTabs() },
@@ -857,10 +864,10 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     { id: "kb-search",      label: "搜索文件内容",       def: "Mod+Shift+F",  run: () => openSearch() },
     { id: "kb-goto",        label: "跳转到行",           def: "Mod+G",        run: () => gotoLine() },
     { id: "kb-gen-commit",  label: "生成提交内容",       def: "Mod+Alt+G",    run: () => gitGenerateCommitMsg() },
-    { id: "kb-find",        label: "文件内查找",         def: "Mod+F",        run: () => ffOpen(false) },
-    { id: "kb-replace",     label: "文件内替换",         def: "Mod+H",        run: () => ffOpen(true) },
-    { id: "kb-find-next",   label: "查找下一个",         def: "F3",           run: () => ffNext(1) },
-    { id: "kb-find-prev",   label: "查找上一个",         def: "Shift+F3",     run: () => ffNext(-1) },
+    { id: "kb-find",        label: "文件内查找",         def: "Mod+F",        run: () => { if (!kbViewFind(0)) ffOpen(false); } },
+    { id: "kb-replace",     label: "文件内替换",         def: "Mod+H",        run: () => { if (active && !active.cm) return; ffOpen(true); } },   // 自定义视图没有替换概念，静默忽略
+    { id: "kb-find-next",   label: "查找下一个",         def: "F3",           run: () => { if (!kbViewFind(1)) ffNext(1); } },
+    { id: "kb-find-prev",   label: "查找上一个",         def: "Shift+F3",     run: () => { if (!kbViewFind(-1)) ffNext(-1); } },
     { id: "kb-new",         label: "新建文件",           def: "Mod+N",        run: () => newInRoot(false) },
     { id: "kb-close-tab",   label: "关闭标签",           def: "Mod+W",        run: () => { if (active) closeTab(active); } },
     { id: "kb-sidebar",     label: "切换侧边栏",         def: "Mod+B",        run: () => toggleSidebar() },

@@ -1540,3 +1540,55 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ssh-term-bar { background: #f3f3f3; border-bottom-color: #e0e0e0; color: #333333; }
 :where(html.theme-light) .ssh-term-x { color: #6b6b6b; }
 :where(html.theme-light) .ssh-term-x:hover { background: #e0e0e0; color: #000000; }
+
+/* ---------- 后台任务：编辑器区域管理面板（标签页） ---------- */
+:where(html.theme-light) .runner-view-host { background: #ffffff; }
+:where(html.theme-light) .rv { background: #ffffff; color: #333333; }
+:where(html.theme-light) .rv-left { background: #f3f3f3; border-right-color: #e0e0e0; }
+:where(html.theme-light) .rv-lhead,
+:where(html.theme-light) .rv-rhead,
+:where(html.theme-light) .rv-logbar { background: #f3f3f3; border-color: #e0e0e0; }
+:where(html.theme-light) .rv-tools .rv-filter,
+:where(html.theme-light) .rv-tools .rv-search { background: #ffffff; color: #333333; border-color: #cecece; }
+:where(html.theme-light) .rv-tools .rv-search:focus,
+:where(html.theme-light) .rv-tools .rv-filter:focus { border-color: #0098ff; }
+:where(html.theme-light) .rv-stat { color: #6a6a6a; }
+:where(html.theme-light) .rv-stat b { color: #1f2328; }
+:where(html.theme-light) .rv-stat b.ok { color: #1a7f37; }
+:where(html.theme-light) .rv-stat b.warn { color: #8a6a00; }
+:where(html.theme-light) .rv-item.on { border-color: #005fb8; box-shadow: inset 0 0 0 1px #005fb8; }
+:where(html.theme-light) .rv-list .ph,
+:where(html.theme-light) .rv-info .ph { color: #8a8a8a; }
+:where(html.theme-light) .rv-item.on .ri-name { color: #000000; }
+:where(html.theme-light) .rv-title { color: #1f2328; }
+:where(html.theme-light) .rv-title-edit:hover { background: #e6e6e6; }
+:where(html.theme-light) .rv-state { color: #6a6a6a; border-color: #cecece; }
+:where(html.theme-light) .rv-state.running { color: #1a7f37; border-color: #a8d5b5; }
+:where(html.theme-light) .rv-state.paused { color: #8a6a00; border-color: #e0cf9a; }
+:where(html.theme-light) .rv-btn { background: #e8e8e8; border-color: #cecece; color: #333333; }
+:where(html.theme-light) .rv-btn:hover { background: #dcdcdc; color: #000000; }
+:where(html.theme-light) .rv-mini { background: #ececec; border-color: #cecece; color: #444444; }
+:where(html.theme-light) .rv-mini:hover { background: #dedede; color: #000000; }
+:where(html.theme-light) .rv-info { border-bottom-color: #e0e0e0; }
+:where(html.theme-light) .rv-info .ti-row { border-top-color: #e6e6e6; }
+:where(html.theme-light) .rv-info .ti-k { color: #8a8a8a; }
+:where(html.theme-light) .rv-info .ti-v { color: #333333; }
+:where(html.theme-light) .rv-info .ti-v.mono { color: #1a5c46; }
+:where(html.theme-light) .rv-info .ti-hist-i { border-top-color: #e6e6e6; color: #333333; }
+:where(html.theme-light) .rv-info .ti-hist-i .hh-r { color: #333333; }
+:where(html.theme-light) .rv-info .ti-port { color: #1a7f6b; background: #e8f7f2; border-color: #b7e0d5; }
+:where(html.theme-light) .rv-logtitle { color: #1f2328; }
+:where(html.theme-light) .rv-logmsg { color: #6a6a6a; }
+:where(html.theme-light) .rv-logmsg.err { color: #c0392b; }
+:where(html.theme-light) .rv-log { background: #ffffff; color: #333333; }
+:where(html.theme-light) .rv-log .log-line.op-cmd { color: #005fb8; }
+:where(html.theme-light) .rv-log .log-line.op-err { color: #c0392b; }
+:where(html.theme-light) .rv-log .log-line.op-ok { color: #1a7f37; }
+:where(html.theme-light) .rv-log .log-line.op-dim { color: #8a8a8a; }
+:where(html.theme-light) .rv-findbox { background: #ffffff; border-color: #cecece; }
+:where(html.theme-light) .rv-findinput { color: #333333; }
+:where(html.theme-light) .rv-findnum { color: #6a6a6a; }
+:where(html.theme-light) .rv-findbox .rv-mini { color: #555555; }
+:where(html.theme-light) .rv-findbox .rv-mini:hover { background: #e8e8e8; color: #1f2328; }
+:where(html.theme-light) .rv-log .log-line.hit { background: #fdf3d3; box-shadow: inset 2px 0 0 #e3c069; }
+:where(html.theme-light) .rv-log .log-line.hit-on { background: #ffe9a8; box-shadow: inset 3px 0 0 #c99a1e; color: #1f2328; }

@@ -224,8 +224,10 @@
       const d = await r.json();
       if (d.error) throw new Error(d.error);
       RUNNER.tasks = d.tasks || [];
+      if (typeof applyRunnerAliases === "function") applyRunnerAliases();   // 套用自定义显示名
       setRunnerBadge(d.running || 0);
       renderRunnerList();
+      if (typeof rvSync === "function") rvSync();   // 编辑区「后台任务」面板开着时同步刷新
       refreshTaskInfo();   // 详情悬浮框开着时，同步刷新内容
       // 行号旁的 ▶/⏸ 跟随后端真实状态（刷新后也不会退回 ▶）
       if (window.syncRunButtons) window.syncRunButtons();
@@ -383,6 +385,7 @@
     setRunnerBadge((RUNNER.tasks || []).filter(x => x.running).length);
     if (box && !RUNNER.tasks.length) box.innerHTML = RUNNER_EMPTY_HTML;
     if (_taskInfo.tid === tid) hideTaskInfo();     // 详情悬浮框正开着这条 → 一并收起
+    if (typeof rvSync === "function") rvSync();    // 编辑区面板里也把这卡片摘掉（不重新拉列表）
   }
 
   async function removeTaskById(t) {
@@ -445,6 +448,11 @@
   }
 
   // 「清理已结束记录」入口已移除：每张卡片有「移除」，后端也会自动清理过期记录
+
+  /* 「编辑区打开」按钮：在编辑器区域以标签页形式打开后台任务管理面板
+     （左侧任务列表 + 右侧详情与实时日志，实现见 40_后台任务_编辑器区域管理面板） */
+  const _runnerOpenBtn = $("runnerOpenView");
+  if (_runnerOpenBtn) _runnerOpenBtn.onclick = () => openRunnerView();
 
   /* 鼠标按在任务卡片上时，短暂跳过自动刷新：面板可见时每 3s 会重建整块列表，
      若恰好落在「按下 → 抬起」之间，按钮会被换成新 DOM，这一下点击就丢了。 */

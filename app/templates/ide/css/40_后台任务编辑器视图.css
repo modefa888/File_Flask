@@ -1,0 +1,178 @@
+/* ===== 后台任务：编辑器区域管理面板（标签页） ===== */
+/* 侧栏里多了「编辑区打开」按钮：两个 g-btn.block（默认 width:100%）并排放下 */
+.runner-head .g-btn.block { flex: 1 1 auto; width: auto; min-width: 0; margin: 0; }
+
+.runner-view-host { background: #1e1e1e; }
+
+.rv { display: flex; height: 100%; min-height: 0; background: #1e1e1e; color: #d4d4d4; font-size: 12.5px; }
+
+/* ---------- 左栏：任务列表 ---------- */
+.rv-left {
+  flex: none; width: 330px; min-width: 220px; max-width: 46%;
+  display: flex; flex-direction: column; min-height: 0;
+  background: #232323; border-right: 1px solid #333333;
+}
+.rv-lhead { flex: none; padding: 8px 8px 6px; border-bottom: 1px solid #2f2f2f; }
+.rv-tools { display: flex; align-items: center; gap: 6px; }
+.rv-tools .rv-filter {
+  flex: none; max-width: 96px; background: #2b2b2b; color: #cccccc; border: 1px solid #3c3c3c;
+  border-radius: 4px; font-size: 11.5px; padding: 3px 4px; font-family: inherit; outline: none;
+}
+.rv-tools .rv-search {
+  flex: 1 1 auto; min-width: 0; background: #1e1e1e; color: #dddddd; border: 1px solid #3c3c3c;
+  border-radius: 4px; font-size: 11.5px; padding: 3px 7px; font-family: inherit; outline: none;
+}
+.rv-tools .rv-search:focus, .rv-tools .rv-filter:focus { border-color: #0a6aa8; }
+.rv-stat { margin-top: 6px; font-size: 11px; color: #8a8a8a; }
+.rv-stat b { color: #cccccc; }
+.rv-stat b.ok { color: #6fcf8a; }
+.rv-stat b.warn { color: #e2c08a; }
+/* 统计行右侧的「收起任务列表」按钮 */
+.rv-statrow { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.rv-statrow .rv-stat { flex: 1; min-width: 0; margin-top: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-list {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 8px; display: flex; flex-direction: column; gap: 8px;
+}
+/* 空态（沿用侧栏 .ph 的观感，但这里不在 .side-panel 里，需要自己给一份） */
+.rv-list .ph, .rv-info .ph { color: #777777; font-size: 12px; padding: 14px 4px; line-height: 1.7; }
+.rv-item { cursor: pointer; }
+.rv-item:hover { border-color: #4a4a4a; }
+.rv-item.on { border-color: #0a6aa8; box-shadow: inset 0 0 0 1px #0a6aa8; }
+.rv-item.on .ri-name { color: #ffffff; }
+
+/* ---------- 右栏：详情 + 日志 ---------- */
+.rv-right { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.rv-rhead {
+  flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 10px; background: #232323; border-bottom: 1px solid #2f2f2f;
+}
+.rv-title {
+  min-width: 0; max-width: 44%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; font-weight: 600; color: #e6e6e6;
+}
+/* 标题可点击改名：悬停给一点反馈，避免"能不能点"靠猜 */
+.rv-title-edit { cursor: text; border-radius: 3px; padding: 1px 5px; margin: 0 -5px; }
+.rv-title-edit:hover { background: #2f2f2f; text-decoration: underline dotted; }
+.rv-state {
+  flex: none; font-size: 10.5px; border-radius: 3px; padding: 1px 6px;
+  color: #9d9d9d; border: 1px solid #454545;
+}
+.rv-state.running { color: #7fd88f; border-color: #3d6b47; }
+.rv-state.paused { color: #e2c08a; border-color: #6b5a34; }
+.rv-state.off { color: #9d9d9d; border-color: #454545; }
+.rv-sp { flex: 1; }
+.rv-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rv-btn {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-family: inherit;
+  background: #37373d; border: 1px solid #454545; color: #cccccc; border-radius: 4px;
+  font-size: 11.5px; padding: 3px 9px;
+}
+.rv-btn:hover { background: #45494e; color: #ffffff; }
+.rv-btn .bi { font-size: 12px; }
+.rv-btn.v-go { color: #6fcf8a; }
+.rv-btn.v-pause { color: #e2c08a; }
+.rv-btn.v-re { color: #4fc1ff; }
+.rv-btn.v-stop { color: #f14c4c; }
+.rv-btn.v-del { color: #e08a8a; }
+.rv-btn.v-port { color: #4ec9b0; }
+.rv-mini {
+  flex: none; background: #2b2b2b; border: 1px solid #3c3c3c; color: #bbbbbb; border-radius: 4px;
+  font-size: 11.5px; padding: 2px 7px; cursor: pointer; font-family: inherit;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.rv-mini:hover { background: #3a3a3a; color: #ffffff; }
+
+.rv-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.rv-info {
+  flex: none; max-height: 30%; overflow-y: auto; overscroll-behavior: contain;
+  padding: 8px 12px 10px; border-bottom: 1px solid #2f2f2f;
+}
+/* 详情行：复用「查看详细信息」悬浮卡的版式（那边作用域限定在 .runner-info-pop） */
+.rv-info .ti-row { display: flex; gap: 8px; font-size: 11.5px; line-height: 1.6; padding: 3px 0; border-top: 1px solid #2c2c33; }
+.rv-info .ti-row:first-child { border-top: none; }
+.rv-info .ti-k { flex: none; width: 64px; color: #8a8a8a; }
+.rv-info .ti-v { flex: 1; min-width: 0; color: #d4d4d4; word-break: break-all; overflow-wrap: anywhere; }
+.rv-info .ti-v.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: #cfe3d8; }
+.rv-info .ti-port {
+  display: inline-flex; align-items: center; gap: 3px; color: #4ec9b0; text-decoration: none;
+  background: #1e2f2b; border: 1px solid #2f5a4e; border-radius: 4px; padding: 0 6px; margin: 1px 3px 1px 0;
+}
+.rv-info .ti-port:hover { color: #7fe0c8; }
+.rv-info .ti-hist-h { margin-top: 8px; display: flex; align-items: center; gap: 4px; font-size: 11px; color: #9d9d9d; }
+.rv-info .ti-hist { margin-top: 4px; display: flex; flex-direction: column; }
+.rv-info .ti-hist-i {
+  display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 3px 0;
+  border-top: 1px solid #2c2c33; color: #cfcfcf;
+}
+.rv-info .ti-hist-i:first-child { border-top: none; }
+.rv-info .ti-hist-i .hh-r { font-family: ui-monospace, Menlo, Consolas, monospace; color: #c8c8c8; white-space: nowrap; }
+.rv-info .ti-hist-i .hh-a { color: #7d7d7d; }
+.rv-info .ti-hist-i .hh-d { color: #6fcf8a; white-space: nowrap; }
+.rv-info .ti-hist-i .hh-x { margin-left: auto; color: #8a8a8a; white-space: nowrap; }
+.rv-info .ti-hist-i.live .hh-d { color: #e2c08a; }
+
+/* ---------- 日志 ---------- */
+.rv-logwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.rv-logbar {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  min-height: 31px;                      /* 锁定高度：搜索条展开 / 收起都不改变日志区高度 */
+  padding: 5px 10px; background: #232323; border-bottom: 1px solid #2f2f2f;
+  font-size: 11.5px; color: #9d9d9d;
+}
+.rv-logtitle { flex: none; display: inline-flex; align-items: center; gap: 4px; color: #cccccc; font-weight: 600; }
+.rv-logtitle .bi { color: #6cb6ff; }
+.rv-logmsg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-logmsg.err { color: #e06c75; }
+.rv-chk { flex: none; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
+.rv-chk input { accent-color: #0a6aa8; margin: 0; }
+.rv-log {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  margin: 0; padding: 8px 12px 20px; background: #1e1e1e;
+  font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55;
+  color: #d4d4d4; white-space: pre-wrap; word-break: break-all;
+}
+.rv-log .log-line { min-height: 1.2em; }
+.rv-log .log-line.op-cmd { color: #4fc1ff; font-weight: 600; }
+.rv-log .log-line.op-err { color: #f48771; }
+.rv-log .log-line.op-ok { color: #6fcf8a; }
+.rv-log .log-line.op-dim { color: #8a8a8a; }
+
+/* ---------- 日志搜索（🔍） ---------- */
+/* 整条固定 20px（= .rv-mini 高度），展开 / 关闭时日志栏高度不变 → 日志区不抖动 */
+.rv-findbox {
+  flex: none; display: inline-flex; align-items: center; gap: 2px;
+  height: 20px; box-sizing: border-box;
+  background: #2b2b2b; border: 1px solid #3c3c3c; border-radius: 4px; padding: 0 3px;
+}
+.rv-findbox[hidden] { display: none; }
+.rv-findbox > .bi { flex: none; color: #8a8a8a; font-size: 10.5px; }
+.rv-findinput {
+  width: 118px; height: 100%; box-sizing: border-box;
+  background: transparent; border: 0; outline: 0; color: #d4d4d4;
+  font-family: inherit; font-size: 11.5px; line-height: 1; padding: 0;
+}
+.rv-findinput::placeholder { color: #6f6f6f; }
+.rv-findnum {
+  flex: none; min-width: 28px; text-align: center; color: #8a8a8a;
+  font-size: 11px; font-variant-numeric: tabular-nums;
+}
+/* 搜索条里的图标按钮：去掉边框 / 竖向 padding，别把外框顶高 */
+.rv-findbox .rv-mini {
+  flex: none; height: 100%; border: 0; background: transparent;
+  padding: 0 2px; color: #9d9d9d; font-size: 11px; line-height: 1; border-radius: 3px;
+}
+.rv-findbox .rv-mini:hover { background: #3a3a3a; color: #ffffff; }
+/* 命中行整行高亮（不拆文本节点，选中 / 复制照旧可用） */
+.rv-log .log-line.hit { background: rgba(226, 192, 138, 0.16); box-shadow: inset 2px 0 0 rgba(226, 192, 138, 0.55); }
+.rv-log .log-line.hit-on { background: rgba(226, 192, 138, 0.34); box-shadow: inset 3px 0 0 #e2c08a; color: #ffd8a6; }
+
+/* 窄窗口：左栏收窄，右栏操作按钮不换行挤压标题 */
+@media (max-width: 900px) {
+  .rv-left { width: 260px; }
+}
+
+/* ---------- 收起左栏（任务列表） ---------- */
+.rv.no-left .rv-left { display: none; }          /* 详情与日志占满整个面板 */
+.rv-rhead .rv-expand { display: none; }          /* 展开入口只在收起后出现（右上角） */
+.rv.no-left .rv-rhead .rv-expand { display: inline-flex; }

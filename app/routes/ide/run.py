@@ -11,8 +11,11 @@ POST /api/run/pause  {id}                    暂停任务（SIGSTOP 挂起进程
 POST /api/run/resume {id}                    继续运行被暂停的任务（SIGCONT）
 POST /api/run/restart {id}                   启动 / 重启任务（运行中则先停止；沿用原文件与工作目录）
 POST /api/run/promote {id}                   把前台任务转为后台（不再计时）
-POST /api/run/remove {id}                    移除一条已结束的任务记录（连同日志文件）
+POST /api/run/remove {id}                    移除一条已结束的任务记录（连同日志文件与历史日志）
 POST /api/run/prune                          清理全部已结束的任务记录
+GET  /api/run/history/days                   有历史日志的日期列表（供日历高亮）
+GET  /api/run/history?date=YYYY-MM-DD        某天归档下来的每次运行（名称 / 起止 / 状态 / 体积）
+GET  /api/run/history/log?date=&key=         读取某一次运行的历史日志正文
 
 持久化设计（这是「后台任务管理」的基础）：
 - 子进程的 stdout/stderr 直接写入 data/run_logs/<task-id>.log：日志可回溯，
@@ -20,6 +23,14 @@ POST /api/run/prune                          清理全部已结束的任务记�
 - 任务注册表写入 data/storage/.file_runner_tasks.json：服务 / 页面重启后仍能看到任务，
   对仍然存活的进程会自动「重新接管」，继续跟踪日志；
 - 因此关掉浏览器页面、甚至重启本服务，后台程序都照常在跑。
+
+历史日志（「后台任务 → 历史」按日历查看）：
+- 当前日志文件是「一次运行一个」，重启 / 重新启动会换新的日志文件；
+  所以在每次运行结束时把它的日志**拷贝**一份到 data/run_logs_history/<日期>/ 下，
+  按日期分目录保存（<启动时间戳>_<task-id>.log + 同名 .json 元信息），
+  这样「上次运行到底输出了什么」随时能翻出来；
+- 保留天数见 config.RUN_LOG_KEEP_DAYS（默认 30 天，0 = 永久保留）；
+- 用户在面板里「移除」某条任务记录时，会连它的历史日志一起删掉。
 
 注意：该接口会在服务器所在机器上执行代码，仅应在受信任的环境中使用。
 """
@@ -147,11 +158,18 @@ def _fail(msg, code=400):
 # 任务存储：日志文件 + JSON 注册表（持久化，跨页面 / 跨服务重启）
 # ======================================================================
 _RUN_DIR_NAME = "run_logs"                    # 日志目录（位于 data/ 下）
+_HIST_DIR_NAME = "run_logs_history"           # 历史日志目录（按日期分文件夹）
 _REG_NAME = ".file_runner_tasks.json"         # 任务注册表
 _TASK_TTL = 6 * 3600                          # 已结束记录保留时长（自动清理）
 _MAX_LINES = 4000                             # 每个任务内存中保留的最大行数
 _LINE_MAX = 4000                              # 单行最大长度
 _MAX_RUNS = 30                                # 每个任务保留的运行历史条数（启动 → 停止）
+_HIST_KEEP_DAYS = 30                          # 历史日志默认保留天数（0 = 永久，见 config.RUN_LOG_KEEP_DAYS）
+_HIST_READ_MAX = 4 * 1024 * 1024              # 单次读取历史日志的上限（超出只取末尾，避免一次读爆内存）
+
+# 历史日志的日期目录名 / 归档键（都直接用正则卡死，杜绝路径穿越）
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_HIST_KEY_RE = re.compile(r"^[0-9]{9,12}_[0-9a-zA-Z_.-]{1,64}$")
 
 # 从任务日志里反推「监听端口」用的模式（仅在读不到 /proc 归属时兜底）
 _LOG_URL_PORT_RE = re.compile(r"https?://[^\s/'\"]{1,64}?:(\d{2,5})", re.I)
@@ -178,6 +196,136 @@ def _log_dir() -> str:
 
 def _log_path(tid: str) -> str:
     return os.path.join(_log_dir(), tid + ".log")
+
+
+# ======================================================================
+# 历史日志归档：每次运行结束把日志留一份副本，供面板按日期回看
+# ======================================================================
+def _hist_root() -> str:
+    d = os.path.join(_data_root(), _HIST_DIR_NAME)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _hist_keep_days() -> int:
+    """历史日志保留天数（config.RUN_LOG_KEEP_DAYS，0 = 永久保留）。"""
+    from ... import config
+    try:
+        return max(0, int(getattr(config, "RUN_LOG_KEEP_DAYS", _HIST_KEEP_DAYS) or 0))
+    except (TypeError, ValueError):
+        return _HIST_KEEP_DAYS
+
+
+def _hist_prune() -> None:
+    """按保留天数清理过期日期目录（整日过期才删，避免删掉今天的档案）。"""
+    days = _hist_keep_days()
+    if not days:
+        return
+    cut = time.time() - days * 86400
+    root = _hist_root()
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return
+    for name in names:
+        if not _DATE_RE.match(name):
+            continue
+        try:
+            ts = time.mktime(time.strptime(name, "%Y-%m-%d"))
+        except ValueError:
+            continue
+        if ts + 86400 < cut:                       # 这一天已经完全过期
+            shutil.rmtree(os.path.join(root, name), ignore_errors=True)
+
+
+def _hist_purge_task(tid: str) -> None:
+    """删掉某个任务的全部历史日志（用户在面板里「移除」记录时调用）。"""
+    tid = str(tid or "")
+    if not tid:
+        return
+    suffix = "_" + tid
+    root = _hist_root()
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return
+    for name in names:
+        dirp = os.path.join(root, name)
+        if not os.path.isdir(dirp):
+            continue
+        try:
+            files = os.listdir(dirp)
+        except OSError:
+            continue
+        for f in files:
+            stem, ext = os.path.splitext(f)
+            if ext in (".log", ".json") and stem.endswith(suffix):
+                try:
+                    os.remove(os.path.join(dirp, f))
+                except OSError:
+                    pass
+        try:
+            if not os.listdir(dirp):               # 日期目录空了就顺手删掉
+                os.rmdir(dirp)
+        except OSError:
+            pass
+
+
+def _hist_write_meta(dirp: str, key: str, meta: dict) -> None:
+    try:
+        with open(os.path.join(dirp, key + ".json"), "w", encoding="utf-8") as fh:
+            json.dump(meta, fh, ensure_ascii=False)
+    except OSError as e:
+        _log.warning("写入历史日志元信息失败：%s", e)
+
+
+def _archive_run(task, run=None) -> str:
+    """把「刚结束的这一次运行」的日志归档到按日期分目录的历史里。
+
+    归档键 = <启动时间戳>_<task-id>，天然幂等：同一次运行被归档多次也只会覆盖同一个文件
+    （服务重启后重新接管、退出时再走一遍，不会出现重复记录）。
+    """
+    if task is None or getattr(task, "archived", False):
+        return ""
+    runs = getattr(task, "runs", None) or []
+    run = run or (runs[-1] if runs else None)
+    start = float((run or {}).get("start") or getattr(task, "started", 0) or time.time())
+    day = time.strftime("%Y-%m-%d", time.localtime(start))
+    key = "%d_%s" % (int(start), task.id or "task")
+    dirp = os.path.join(_hist_root(), day)
+    try:
+        os.makedirs(dirp, exist_ok=True)
+    except OSError as e:
+        _log.warning("创建历史日志目录失败：%s", e)
+        return ""
+    log_dst = os.path.join(dirp, key + ".log")
+    try:
+        src = getattr(task, "log_path", "") or ""
+        if src and os.path.exists(src):
+            shutil.copyfile(src, log_dst)
+        elif not os.path.exists(log_dst):
+            open(log_dst, "ab").close()            # 日志文件没了也要留个（空的）档案位
+    except OSError as e:
+        _log.warning("归档运行日志失败 %s：%s", log_dst, e)
+        return ""
+    try:
+        size = os.path.getsize(log_dst)
+    except OSError:
+        size = 0
+    r = run or {}
+    _hist_write_meta(dirp, key, {
+        "id": task.id, "name": os.path.basename(task.target or task.id),
+        "target": task.target, "command": " ".join(task.cmd or []), "cwd": task.cwd,
+        "mode": task.mode, "pid": r.get("pid", task.pid),
+        "start": start, "end": r.get("end"), "duration": r.get("duration"),
+        "exit_code": r.get("exit_code"),
+        "stopped_by_user": bool(r.get("stopped_by_user", task.stopped_by_user)),
+        "timed_out": bool(r.get("timed_out", task.timed_out)),
+        "size": size, "archived_at": time.time(),
+    })
+    task.archived = True
+    _hist_prune()
+    return key
 
 
 def _reg_path() -> str:
@@ -284,6 +432,7 @@ class _BgTask:
         self.rev = 0
         self.runs = []                  # 运行历史：每次「启动 → 停止」记一条（起止时间 / 时长 / 退出码）
         self.tail_thread = None         # 跟随日志的线程句柄（替换记录前可等待其收尾）
+        self.archived = False           # 本次运行的日志是否已归档（避免重启接管后重复归档）
 
     # ---- 序列化 ------------------------------------------------------
     def to_record(self) -> dict:
@@ -661,6 +810,7 @@ def _on_task_exit(task) -> None:
         task.add(f"— 进程已退出，代码 {code} —", "ok" if code == 0 else "err")
     task.finish(code)
     task.end_run()          # 给本次运行收尾（结束时间 / 时长 / 退出码），写入历史
+    _archive_run(task)      # 本次运行的日志留一份归档，面板可按日期回看
     _persist()
 
 
@@ -872,6 +1022,8 @@ def _settle_for_replace(task):
             code = None
         task.finish(code)
     task.end_run()
+    # 归档要赶在调用方 _remove_log_file(旧任务) 删除日志之前：先留副本，历史才不丢
+    _archive_run(task)
     _persist()
     return None
 
@@ -1035,6 +1187,106 @@ def api_run_stream():
         "Cache-Control": "no-cache, no-transform",
         "X-Accel-Buffering": "no",                 # 关掉反向代理缓冲，保证实时
         "Connection": "keep-alive",
+    })
+
+
+# ======================================================================
+# 接口：历史日志（按日历选日期回看以往运行的输出）
+# ======================================================================
+@bp.route("/api/run/history/days")
+def api_run_history_days():
+    """有历史日志的日期列表：日历用高亮 + 标题提示「当天几条 / 多大」。"""
+    root = _hist_root()
+    days = []
+    try:
+        names = os.listdir(root)
+    except OSError:
+        names = []
+    for name in names:
+        dirp = os.path.join(root, name)
+        if not _DATE_RE.match(name) or not os.path.isdir(dirp):
+            continue
+        try:
+            files = [f for f in os.listdir(dirp) if f.endswith(".log")]
+        except OSError:
+            continue
+        size = 0
+        for f in files:
+            try:
+                size += os.path.getsize(os.path.join(dirp, f))
+            except OSError:
+                pass
+        days.append({"date": name, "count": len(files), "size": size})
+    days.sort(key=lambda x: x["date"], reverse=True)
+    return jsonify({"ok": True, "days": days, "keep_days": _hist_keep_days()})
+
+
+@bp.route("/api/run/history")
+def api_run_history():
+    """某一天归档下来的「每次运行」列表（新的在前）。"""
+    date = (request.args.get("date") or "").strip()
+    if not _DATE_RE.match(date):
+        return _fail("日期格式应为 YYYY-MM-DD")
+    dirp = os.path.join(_hist_root(), date)
+    items = []
+    try:
+        names = os.listdir(dirp)
+    except OSError:
+        names = []
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        key = name[:-5]
+        if not _HIST_KEY_RE.match(key):
+            continue
+        try:
+            with open(os.path.join(dirp, name), "r", encoding="utf-8") as fh:
+                meta = json.load(fh) or {}
+        except (OSError, ValueError):
+            meta = {}
+        if not isinstance(meta, dict):
+            continue
+        meta["key"] = key
+        meta["date"] = date
+        items.append(meta)
+    items.sort(key=lambda m: -(m.get("start") or 0))
+    return jsonify({"ok": True, "date": date, "items": items})
+
+
+@bp.route("/api/run/history/log")
+def api_run_history_log():
+    """读取某一次运行的历史日志正文（普通文本；过大时只返回末尾一段）。"""
+    date = (request.args.get("date") or "").strip()
+    key = (request.args.get("key") or "").strip()
+    if not _DATE_RE.match(date) or not _HIST_KEY_RE.match(key):
+        return _fail("参数不合法")
+    path = os.path.join(_hist_root(), date, key + ".log")
+    if not os.path.isfile(path):
+        return _fail("历史日志不存在或已清理", 404)
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return _fail("历史日志读取失败", 500)
+    truncated = size > _HIST_READ_MAX
+    try:
+        with open(path, "rb") as fh:
+            if truncated:
+                fh.seek(size - _HIST_READ_MAX)
+                fh.readline()                       # 丢掉可能被截断的半行
+            data = fh.read()
+    except OSError as e:
+        return _fail(f"历史日志读取失败：{e}", 500)
+    meta = {}
+    try:
+        with open(os.path.join(_hist_root(), date, key + ".json"), "r", encoding="utf-8") as fh:
+            meta = json.load(fh) or {}
+    except (OSError, ValueError):
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    return jsonify({
+        "ok": True, "date": date, "key": key, "size": size, "truncated": truncated,
+        "meta": meta, "text": data.decode("utf-8", "replace"),
     })
 
 
@@ -1213,6 +1465,7 @@ def api_run_remove():
         _TASKS.pop(tid, None)
         _write_registry_locked()
     _remove_log_file(task)
+    _hist_purge_task(tid)                 # 用户要连同日志一起删掉：历史归档也一并清除
     return jsonify({"ok": True, "removed": True})
 
 

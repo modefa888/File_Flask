@@ -132,6 +132,7 @@
 </style>
 <style>
 {% include 'ide/css/40_后台任务编辑器视图.css' %}
+{% include 'ide/css/41_后台任务历史日志.css' %}
 </style>
 {# 29_浅色主题 必须最后一个 <style> 加载：它的浅色覆盖与原始规则同权重，靠「后加载者胜」生效 #}
 <style>
@@ -205,6 +206,8 @@ try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'li
 {% include 'ide/js/39_分享_单文件分享设置与分享记录管理.js' %}
 {# 后台任务管理面板（编辑器区域标签页）：须放在 16_ 之前，复用闭包内的 $ / esc / findTab / activate / loadRunnerList #}
 {% include 'ide/js/40_后台任务_编辑器区域管理面板_列表_详情_实时日志.js' %}
+{# 后台任务「历史日志」（按日历选日期回看）：须放在 40_ 之后、16_ 之前，复用 40_ 的 rvQ / rvCur / rvLogOpen 等 #}
+{% include 'ide/js/42_后台任务历史日志_按日历选日期回看以往运行的输出.js' %}
 {# 底部「输出」面板内置搜索（🔍）：须放在 16_ 之前，复用闭包内的 $ / bottomPane / opBody #}
 {% include 'ide/js/41_底部输出面板_内置搜索_整行黄底_关键字红字_上下跳转.js' %}
 {% include 'ide/js/16_自定义悬停提示_全局接管所有_title_属性.js' %}

@@ -391,7 +391,7 @@
   async function removeTaskById(t) {
     const proj = taskProject(t);
     const ok = await uiConfirm("移除任务记录",
-      "确定移除「" + t.name + "」这条记录吗？会连同它的日志文件一起删除，此操作不可撤销。" +
+      "确定移除「" + t.name + "」这条记录吗？会连同它的日志文件（含「历史」里归档的日志）一起删除，此操作不可撤销。" +
       (proj ? "\n项目：" + proj : ""), "移除", true);
     if (!ok) return;
     try {

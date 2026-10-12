@@ -1613,3 +1613,37 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .rv-log .log-line.hit-on { background: #ffe9a8; box-shadow: inset 3px 0 0 #c99a1e; color: #1f2328; }
 :where(html.theme-light) .rv-log .log-line.hit .rv-kw { color: #d70015; }
 :where(html.theme-light) .rv-log .log-line.hit-on .rv-kw { color: #a80014; }
+
+/* ---------- 后台任务：历史日志（41）---------- */
+:where(html.theme-light) .rv-histbar { color: #8a6a00; }
+:where(html.theme-light) .rv-logbar.hist .rv-logtitle .bi,
+:where(html.theme-light) .rv-logbar.hist .rv-histbtn { color: #8a6a00; }
+:where(html.theme-light) .rv-hist-pop {
+  background: #ffffff; border-color: #d0d0d0; color: #333333;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .18);
+}
+:where(html.theme-light) .rv-hist-mon { color: #1f2328; }
+:where(html.theme-light) .rv-hist-nav,
+:where(html.theme-light) .rv-hist-x { color: #6b6b6b; }
+:where(html.theme-light) .rv-hist-nav:hover,
+:where(html.theme-light) .rv-hist-x:hover { background: #e6e6e6; color: #000000; }
+:where(html.theme-light) .rv-hist-wk { color: #8a8a8a; }
+:where(html.theme-light) .rv-hist-d { color: #8a8a8a; }
+:where(html.theme-light) .rv-hist-d:hover { background: #e6e6e6; color: #000000; }
+:where(html.theme-light) .rv-hist-d.today { border-color: #cecece; color: #333333; }
+:where(html.theme-light) .rv-hist-d.has { color: #005fb8; }
+:where(html.theme-light) .rv-hist-d.on { background: #005fb8; border-color: #005fb8; color: #ffffff; }
+:where(html.theme-light) .rv-hist-dot { background: #005fb8; }
+:where(html.theme-light) .rv-hist-d.on .rv-hist-dot { background: #ffffff; }
+:where(html.theme-light) .rv-hist-only { color: #6a6a6a; }
+:where(html.theme-light) .rv-hist-list { border-top-color: #e0e0e0; }
+:where(html.theme-light) .rv-hist-list .ph { color: #8a8a8a; }
+:where(html.theme-light) .rv-hist-i { background: #f6f6f6; border-color: #e0e0e0; }
+:where(html.theme-light) .rv-hist-i:hover { background: #efefef; border-color: #c8c8c8; }
+:where(html.theme-light) .rv-hist-i.on { border-color: #005fb8; box-shadow: inset 0 0 0 1px #005fb8; }
+:where(html.theme-light) .rv-hist-i1 .nm { color: #1f2328; }
+:where(html.theme-light) .rv-hist-i1 .st { color: #6a6a6a; }
+:where(html.theme-light) .rv-hist-i1 .st.ok { color: #1a7f37; }
+:where(html.theme-light) .rv-hist-i1 .st.warn { color: #8a6a00; }
+:where(html.theme-light) .rv-hist-i1 .st.err { color: #c0392b; }
+:where(html.theme-light) .rv-hist-i2 { color: #8a8a8a; }

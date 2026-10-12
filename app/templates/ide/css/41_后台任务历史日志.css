@@ -1,0 +1,78 @@
+/* ===== 后台任务：历史日志（按日历选日期回看，实现见 42_） ===== */
+
+/* ---------- 日志栏上的「历史」按钮 / 回看中的信息条 ---------- */
+.rv-histbar {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  color: #e2c08a; font-size: 11.5px;
+}
+.rv-histbar[hidden] { display: none; }
+.rv-histbar .rv-histtext {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 44ch;
+}
+/* 回看中：标题与按钮换个色，一眼能看出「现在不是实时」 */
+.rv-logbar.hist .rv-logtitle .bi { color: #e2c08a; }
+.rv-logbar.hist .rv-histbtn { color: #e2c08a; }
+.rv-logbar.hist .rv-chk { display: none; }        /* 「自动滚底」在回看时没有意义 */
+
+/* ---------- 日历弹层 ---------- */
+.rv-hist-pop {
+  position: fixed; z-index: 60; width: 292px; padding-bottom: 6px;
+  background: #252526; border: 1px solid #3c3c3c; border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .5); color: #d4d4d4; font-size: 12px;
+}
+.rv-hist-h { display: flex; align-items: center; gap: 4px; padding: 7px 8px 6px; }
+.rv-hist-mon { flex: none; font-size: 12.5px; font-weight: 600; color: #e6e6e6; }
+.rv-hist-nav, .rv-hist-x {
+  flex: none; background: transparent; border: 0; cursor: pointer; font-family: inherit;
+  color: #9d9d9d; font-size: 12px; line-height: 1; padding: 3px 5px; border-radius: 3px;
+}
+.rv-hist-nav:hover, .rv-hist-x:hover { background: #3a3a3a; color: #ffffff; }
+.rv-hist-today { font-size: 11px; padding: 1px 6px; }
+
+.rv-hist-wk {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+  padding: 0 8px; font-size: 10.5px; color: #8a8a8a; text-align: center;
+}
+.rv-hist-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; padding: 4px 8px 6px;
+}
+.rv-hist-pad { height: 24px; }
+.rv-hist-d {
+  position: relative; height: 24px; border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: #8f8f8f; font-family: inherit; font-size: 11.5px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.rv-hist-d:hover { background: #3a3a3a; color: #ffffff; }
+.rv-hist-d.today { border-color: #4a4a4a; color: #cccccc; }
+.rv-hist-d.has { color: #7fd8ff; font-weight: 600; }      /* 有历史日志：高亮 */
+.rv-hist-d.on { background: #0a6aa8; border-color: #0a6aa8; color: #ffffff; }
+.rv-hist-dot {
+  position: absolute; left: 50%; bottom: 2px; transform: translateX(-50%);
+  width: 3px; height: 3px; border-radius: 50%; background: #4fc1ff;
+}
+.rv-hist-d.on .rv-hist-dot { background: #ffffff; }
+
+.rv-hist-only { margin: 2px 10px 4px; font-size: 11px; color: #9d9d9d; }
+.rv-hist-list {
+  border-top: 1px solid #333333; padding: 6px 8px; max-height: 210px; overflow-y: auto;
+  overscroll-behavior: contain; display: flex; flex-direction: column; gap: 4px;
+}
+.rv-hist-list .ph { color: #777777; font-size: 11.5px; line-height: 1.7; padding: 8px 2px; }
+.rv-hist-i {
+  background: #2b2b2b; border: 1px solid #3a3a3a; border-radius: 4px; padding: 5px 7px; cursor: pointer;
+}
+.rv-hist-i:hover { background: #323232; border-color: #4a4a4a; }
+.rv-hist-i.on { border-color: #0a6aa8; box-shadow: inset 0 0 0 1px #0a6aa8; }
+.rv-hist-i1 { display: flex; align-items: center; gap: 6px; }
+.rv-hist-i1 .nm {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #e0e0e0; font-weight: 600;
+}
+.rv-hist-i1 .st { flex: none; font-size: 10.5px; color: #9d9d9d; }
+.rv-hist-i1 .st.ok { color: #6fcf8a; }
+.rv-hist-i1 .st.warn { color: #e2c08a; }
+.rv-hist-i1 .st.err { color: #f48771; }
+.rv-hist-i2 {
+  margin-top: 2px; font-size: 11px; color: #8a8a8a;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}

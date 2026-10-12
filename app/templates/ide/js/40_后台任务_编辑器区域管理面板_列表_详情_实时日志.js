@@ -18,6 +18,7 @@ const RUNVIEW = {
   logId: "", logOff: 0, lines: 0, logDone: false, follow: true,
   listCollapsed: false,                  // 左栏（任务列表）是否收起
   infoH: 0,                              // 详情区高度（px，0 = 按 CSS 的 30% 自适应）
+  histOn: false, histTask: "",           // 是否正在看历史日志 / 看的是哪个任务的历史（实现见 42_）
   findKw: "", findHits: 0, findIdx: -1,  // 日志搜索：关键字（小写）/ 命中数 / 当前命中序号
   findT: null,                           // 输入防抖定时器
 };
@@ -46,6 +47,8 @@ function openRunnerView(tid) {
     tab.onBeforeClose = () => {          // 关标签：断日志连接、停自动刷新
       clearTimeout(RUNVIEW.tick);
       RUNVIEW.tick = null;
+      if (typeof rvHistClosePop === "function") rvHistClosePop();   // 历史日历弹层一并收起
+      RUNVIEW.histOn = false; RUNVIEW.histTask = "";
       rvLogClose();
       RUNVIEW.sel = ""; RUNVIEW.logId = "";
       return true;
@@ -238,8 +241,12 @@ function rvBuild() {
           '<div class="rv-split" title="上下拖动调整「详情」与「日志」的高度 · 双击恢复默认"></div>' +
           '<div class="rv-logwrap">' +
             '<div class="rv-logbar">' +
-              '<span class="rv-logtitle"><i class="bi bi-terminal"></i> 实时日志</span>' +
+              '<span class="rv-logtitle"><i class="bi bi-terminal"></i> <span class="rv-logtitle-t">实时日志</span></span>' +
               '<span class="rv-logmsg"></span>' +
+              '<span class="rv-histbar" hidden>' +
+                '<i class="bi bi-clock-history"></i><span class="rv-histtext"></span>' +
+                '<button class="rv-mini rv-histback" title="回到实时日志并继续推送"><i class="bi bi-arrow-left"></i> 返回实时</button>' +
+              '</span>' +
               '<span class="rv-sp"></span>' +
               '<label class="rv-chk" title="有新输出时自动滚到底部"><input type="checkbox" class="rv-follow" checked> 自动滚底</label>' +
               '<span class="rv-findbox" hidden>' +
@@ -250,6 +257,7 @@ function rvBuild() {
                 '<button class="rv-mini rv-find-next" title="下一个命中（Enter / F3）"><i class="bi bi-chevron-down"></i></button>' +
                 '<button class="rv-mini rv-find-close" title="关闭搜索（Esc）"><i class="bi bi-x-lg"></i></button>' +
               '</span>' +
+              '<button class="rv-mini rv-histbtn" title="历史日志：按日历选日期回看以往运行的输出"><i class="bi bi-calendar3"></i> 历史</button>' +
               '<button class="rv-mini rv-findbtn" title="在日志中搜索（Ctrl+F）"><i class="bi bi-search"></i> 搜索</button>' +
               '<button class="rv-mini rv-copy" title="复制当前显示的全部日志"><i class="bi bi-clipboard"></i> 复制</button>' +
               '<button class="rv-mini rv-clear" title="只清空这里的显示，不影响任务与日志文件"><i class="bi bi-eraser"></i> 清屏</button>' +
@@ -309,6 +317,7 @@ function rvBuild() {
     rvLogMsg("已清屏 · 实时推送不受影响");
   };
   rvFindBind();                          // 日志搜索（🔍）
+  if (typeof rvHistBind === "function") rvHistBind();   // 历史日志（按日历选日期查看，见 42_）
   rvSplitBind();                         // 详情 / 日志 分隔条（上下拖动）
 
   // 左栏：点卡片选中（端口链接照旧打开新标签，不触发选中）
@@ -451,6 +460,9 @@ function rvPaintRight() {
   const stateEl = rvQ(".rv-state");
   const actsEl = rvQ(".rv-acts");
   const infoEl = rvQ(".rv-info");
+  // 正在看历史日志时：任务被切走 / 没了 → 自动退出历史模式，回到实时
+  if (RUNVIEW.histOn && (!t || String(t.id) !== String(RUNVIEW.histTask)) &&
+      typeof rvHistExit === "function") rvHistExit();
   if (!t) {
     if (titleEl) { titleEl.textContent = "未选择任务"; titleEl.title = ""; }
     if (stateEl) { stateEl.textContent = ""; stateEl.className = "rv-state"; }
@@ -474,7 +486,8 @@ function rvPaintRight() {
   if (actsEl && !hold) actsEl.innerHTML = rvActsHtml(t);
   else if (actsEl && !actsEl.innerHTML) actsEl.innerHTML = rvActsHtml(t);
   if (infoEl && !hold && !rvSelHoldIn(".rv-info")) infoEl.innerHTML = taskInfoRows(t);   // 选文字时不重建
-  if (RUNVIEW.logId !== t.id) rvLogOpen(t);            // 切换任务 → 换日志源
+  // 看历史日志时不重连实时流（否则历史内容会被新推来的行冲掉）
+  if (!RUNVIEW.histOn && RUNVIEW.logId !== t.id) rvLogOpen(t);   // 切换任务 → 换日志源
 }
 
 /* ---------- 选中 ---------- */
@@ -569,6 +582,7 @@ async function rvLogPoll(id) {
 function rvLogLine(m, cls) {
   const pre = rvQ(".rv-log");
   if (!pre) return;
+  if (RUNVIEW.histOn) return;                            // 正在看历史日志：实时行不要混进来
   const near = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 60;
   const d = document.createElement("div");
   d.className = "log-line" + (cls ? " " + cls : "");

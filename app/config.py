@@ -87,6 +87,12 @@ RUN_TIMEOUT_MAX = _env_int("RUN_TIMEOUT_MAX", 300)       # 允许前端传入的
 #              background=自动转为后台继续跑（旧行为） / kill=自动终止
 RUN_TIMEOUT_ACTION = _env_str("RUN_TIMEOUT_ACTION", "keep")
 
+# ===== 后台任务的「历史日志」=====
+# 每次运行结束（进程退出 / 重启替换 / 服务重启后接管再退出）时，把这次运行的日志
+# 拷贝一份归档到 data/run_logs_history/<日期>/ 下，可在「后台任务」面板点「历史」
+# 按日历选日期回看。下面控制归档保留天数（0 = 永久保留，注意磁盘占用）。
+RUN_LOG_KEEP_DAYS = _env_int("RUN_LOG_KEEP_DAYS", 30)
+
 # ===== Demo / 小游戏目录（与 data 平级，独立于默认浏览根）=====
 DEMO_DIR = os.path.join(os.path.dirname(BASE_DIR), "demo")
 if not os.path.isdir(DEMO_DIR):

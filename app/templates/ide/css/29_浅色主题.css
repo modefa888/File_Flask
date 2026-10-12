@@ -1628,16 +1628,19 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .rv-hist-nav:hover,
 :where(html.theme-light) .rv-hist-x:hover { background: #e6e6e6; color: #000000; }
 :where(html.theme-light) .rv-hist-wk { color: #8a8a8a; }
-:where(html.theme-light) .rv-hist-d { color: #8a8a8a; }
+:where(html.theme-light) .rv-hist-d { color: #4a4a4a; }
 :where(html.theme-light) .rv-hist-d:hover { background: #e6e6e6; color: #000000; }
-:where(html.theme-light) .rv-hist-d.today { border-color: #cecece; color: #333333; }
+:where(html.theme-light) .rv-hist-d.today { border-color: #cecece; color: #1f2328; }
 :where(html.theme-light) .rv-hist-d.has { color: #005fb8; }
+:where(html.theme-light) .rv-hist-d.has:hover { color: #003e78; }
 :where(html.theme-light) .rv-hist-d.on { background: #005fb8; border-color: #005fb8; color: #ffffff; }
 :where(html.theme-light) .rv-hist-dot { background: #005fb8; }
 :where(html.theme-light) .rv-hist-d.on .rv-hist-dot { background: #ffffff; }
 :where(html.theme-light) .rv-hist-only { color: #6a6a6a; }
+:where(html.theme-light) .rv-hist-scope { color: #6a7a8a; }
 :where(html.theme-light) .rv-hist-list { border-top-color: #e0e0e0; }
 :where(html.theme-light) .rv-hist-list .ph { color: #8a8a8a; }
+:where(html.theme-light) .rv-hist-list .ph .hint { color: #9a9a9a; }
 :where(html.theme-light) .rv-hist-i { background: #f6f6f6; border-color: #e0e0e0; }
 :where(html.theme-light) .rv-hist-i:hover { background: #efefef; border-color: #c8c8c8; }
 :where(html.theme-light) .rv-hist-i.on { border-color: #005fb8; box-shadow: inset 0 0 0 1px #005fb8; }

@@ -1239,7 +1239,8 @@
     // 端口搜索框只在「后台任务」面板显示
     [$("sideNewFile"), $("sideNewFolder"), $("sideTreeToggle"), $("sideShowAll"), $("sideRefresh"), $("sideRoot")].forEach(b => { if (b) b.style.display = (name === "explorer") ? "" : "none"; });
     if ($("sidePortSearch")) $("sidePortSearch").style.display = (name === "runner") ? "block" : "none";   // CSS 默认隐藏，runner 面板显式放开
-    if (name !== "runner") clearTimeout(RUNNER.timer);      // 面板不可见时停止自动刷新
+    // 面板切换后重排后台任务轮询：切走时如果是唯一可见界面就停，编辑区还开着标签则继续（见 11_）
+    if (typeof runnerPollArm === "function") runnerPollArm(); else clearTimeout(RUNNER.timer);
     if (name !== "cron" && typeof CRON !== "undefined") clearTimeout(CRON.timer);
   }
   document.getElementById("activitybar").addEventListener("click", (e) => {

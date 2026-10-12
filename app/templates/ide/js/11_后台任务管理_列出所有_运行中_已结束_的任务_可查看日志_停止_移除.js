@@ -7,7 +7,7 @@
        · 重启本服务 -> 自动重新接管仍在运行的进程，继续跟踪日志。
      var 声明，避免 showPanel 提前调用时命中 TDZ。
      ================================================================== */
-  var RUNNER = { timer: null, tasks: [], holdUntil: 0 };
+  var RUNNER = { timer: null, tasks: [], holdUntil: 0, rightHoldUntil: 0, polling: false };
   const RUNNER_EMPTY_HTML =
     '<div class="ph">暂时没有运行任务。<br>在「运行和调试」面板点「运行当前文件」或「后台运行（服务模式）」。</div>';
 
@@ -237,6 +237,7 @@
         $("runnerHint").textContent = "读取任务列表失败：" + (e.message || e);
       }
     }
+    runnerPollArm();   // 拿到最新状态后重排下一次：有任务在跑 3s，都没跑 10s（页面不可见则停）
   }
 
   function renderRunnerList() {
@@ -437,15 +438,57 @@
     setTimeout(restoreRunnerState, 0);           // 等 01_ 注册好 setRunningTargets
   }
 
-  // 面板可见时每 3s 刷新一次状态（不可见就停，不产生无谓请求）
-  function runnerTick() {
-    clearTimeout(RUNNER.timer);
-    if (!$("runnerPanel") || !$("runnerPanel").classList.contains("active")) return;
-    RUNNER.timer = setTimeout(async () => {
-      await loadRunnerList({ silent: true });
-      runnerTick();
-    }, 3000);
+  /* ---------- 后台任务的统一轮询 ----------
+     侧栏「后台任务」面板与编辑区「后台任务」标签是两个界面，但读的是同一份
+     /api/run/tasks。以前两边各挂一个 3s 定时器 —— 同时开着就会在同一时刻发两个请求，
+     而且浏览器切到后台标签也照发。这里收敛成一条循环：
+
+       · 「后台任务」界面正显示才轮询；两个都不显示就彻底停（切走到别的侧栏面板 / 关掉编辑区标签）；
+       · 编辑区标签还开着但没在看（后台标签）→ 频率降到 20s，只用来维持左上角运行角标；
+       · 浏览器标签页不可见（切到别的标签、最小化）时暂停，切回来立刻刷一次；
+       · 界面可见时：有任务在跑 3s 一次，全都没在跑降到 10s（那段时间状态本来就几乎不变）；
+       · 上一轮请求还没回来就跳过本轮，慢请求不会堆积成并发。
+
+     其它地方想「立刻刷一下」调 runnerPollArm(0) 即可；只调 runnerPollArm() 则按节奏排下一次。 */
+  const RUNNER_POLL_BUSY = 3000;      // 界面可见 + 有任务在跑：保持原来的 3s
+  const RUNNER_POLL_IDLE = 10000;     // 界面可见 + 都没在跑：拉长到 10s
+  const RUNNER_POLL_BG = 20000;       // 只在后台标签里挂着：20s 兜个底
+
+  /* on = 界面正显示；bg = 只剩个后台标签；off = 完全不用刷 */
+  function runnerVisibleMode() {
+    const p = $("runnerPanel");
+    if (p && p.classList.contains("active")) return "on";
+    if (typeof runnerViewOpen !== "function" || !runnerViewOpen()) return "off";
+    return (typeof runnerViewActive === "function" && runnerViewActive()) ? "on" : "bg";
   }
+  function runnerBusy() { return (RUNNER.tasks || []).some(t => t && t.running); }
+
+  function runnerPollArm(ms) {
+    clearTimeout(RUNNER.timer);
+    RUNNER.timer = null;
+    if (document.hidden) return;
+    const mode = runnerVisibleMode();
+    if (mode === "off") return;                            // 看不见就别刷：等重新可见时再唤醒
+    const delay = (ms != null) ? ms
+      : (mode === "bg" ? RUNNER_POLL_BG : (runnerBusy() ? RUNNER_POLL_BUSY : RUNNER_POLL_IDLE));
+    RUNNER.timer = setTimeout(runnerPollRun, delay);
+  }
+  async function runnerPollRun() {
+    if (document.hidden || runnerVisibleMode() === "off") { runnerPollArm(); return; }
+    if (!RUNNER.polling) {                                 // 上一轮没回来 → 跳过本轮
+      RUNNER.polling = true;
+      try { await loadRunnerList({ silent: true }); } catch (_) { /* 单次失败不影响下一轮 */ }
+      finally { RUNNER.polling = false; }
+    }
+    runnerPollArm();
+  }
+  function runnerTick() { runnerPollArm(); }               // 兼容旧调用（02_ / 12_）
+
+  document.addEventListener("visibilitychange", () => {
+    clearTimeout(RUNNER.timer);
+    RUNNER.timer = null;
+    if (!document.hidden) runnerPollArm(0);                 // 回到前台：立刻同步一次
+  });
 
   // 「清理已结束记录」入口已移除：每张卡片有「移除」，后端也会自动清理过期记录
 

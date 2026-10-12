@@ -11,6 +11,8 @@
    - 用户点击/展开后短暂静默，绝不打断刚打开的状态。
    - Git：轮询 /api/git/status，与上次结果不同才重渲染。
    - 浏览器标签页隐藏时暂停；侧栏折叠时跳过文件树轮询；上一轮未完成则跳过。
+   - 侧栏切到别的面板时（文件树 / 源代码管理都看不见）不再轮询对应的接口，
+     切回该面板时立刻刷新一次 —— 看不见的内容没必要每隔几秒去问一次服务端。
    ================================================================ */
 (function () {
   const AUTO_REFRESH_MS = 5000;
@@ -47,8 +49,15 @@
       .join(",");
   }
 
+  // 侧栏面板是否正显示（showPanel 用内联 display 切换，最可靠）
+  function panelVisible(id) {
+    const el = $(id);
+    return !!el && el.style.display !== "none";
+  }
+
   async function pollTree() {
     if (!ROOT) return;
+    if (!panelVisible("explorerPanel")) return;      // 没在看文件树（比如切到了「后台任务」）就别刷
     const sb = $("sidebar");
     if (sb && sb.classList.contains("collapsed")) return;
     if (!explorerPanel.querySelector(".tree-children")) return;
@@ -82,17 +91,34 @@
 
   async function pollGit() {
     if (!ROOT || typeof loadGitStatus !== "function") return;
+    if (!panelVisible("gitPanel")) return;           // 没在看源代码管理就别刷
     const d = await fetchJson("/api/git/status?path=" + encodeURIComponent(ROOT));
     const sig = JSON.stringify(d);
     if (gitSig !== null && sig !== gitSig) loadGitStatus();
     gitSig = sig;
   }
 
-  setInterval(async () => {
+  async function pollOnce() {
     if (polling || document.hidden) return;
     polling = true;
     try { await pollTree(); } catch (_) {}
     try { await pollGit(); } catch (_) {}
     polling = false;
-  }, AUTO_REFRESH_MS);
+  }
+
+  setInterval(pollOnce, AUTO_REFRESH_MS);
+
+  // 面板重新显示时立刻刷一次：轮询在它隐藏期间是空转的，否则要等最多一个周期才看到最新内容
+  function refreshOnShow(id) {
+    const el = $(id);
+    if (!el || !window.MutationObserver) return;
+    let hidden = el.style.display === "none";
+    new MutationObserver(() => {
+      const nowHidden = el.style.display === "none";
+      if (hidden && !nowHidden) pollOnce();
+      hidden = nowHidden;
+    }).observe(el, { attributes: true, attributeFilter: ["style"] });
+  }
+  refreshOnShow("explorerPanel");
+  refreshOnShow("gitPanel");
 })();

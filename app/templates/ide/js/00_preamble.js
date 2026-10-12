@@ -1740,6 +1740,7 @@
     sessionSaveTabs();
     if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏高亮跟随当前标签
     if (typeof apiSyncOpenMarks === "function") apiSyncOpenMarks();   // API 调试侧栏高亮跟随当前标签
+    if (typeof runnerViewOnActivate === "function") runnerViewOnActivate();   // 后台任务轮询跟随当前标签
   }
   async function closeTab(tab) {
     const i = tabs.indexOf(tab);

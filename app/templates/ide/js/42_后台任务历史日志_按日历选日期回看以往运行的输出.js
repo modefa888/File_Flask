@@ -17,10 +17,11 @@ const RVH = {
   day: "",                        // 选中的日期："YYYY-MM-DD"
   items: [],                      // 当天归档下来的每次运行
   sel: "",                        // 选中的归档键（高亮用）
-  onlyCur: false,                 // 只看当前选中任务的日志
+  onlyCur: true,                  // 只看当前选中任务（归档里可能有很多任务，面板默认只看这一个）
   el: null,                       // 弹层 DOM
   msg: "",                        // 弹层列表区的提示（读取中 / 失败 / 空）
   logMax: 4000,                   // 回看时最多渲染的行数（超出只显示末尾）
+  paintKey: "",                   // 上次渲染时的「范围」指纹（任务变了才跟着重绘，见 rvHistOnPaint）
 };
 const RVH_WK = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -85,11 +86,13 @@ function rvHistOpenPop() {
     '</div>' +
     '<div class="rv-hist-wk">' + RVH_WK.map(w => "<span>" + w + "</span>").join("") + '</div>' +
     '<div class="rv-hist-grid"></div>' +
-    '<label class="rv-chk rv-hist-only" title="只列出当前选中任务的归档日志">' +
+    '<label class="rv-chk rv-hist-only">' +
       '<input type="checkbox" class="rv-hist-onlyc"> 只看当前任务</label>' +
+    '<div class="rv-hist-scope"></div>' +
     '<div class="rv-hist-list scroll-thin"></div>';
   document.body.appendChild(pop);
   RVH.el = pop;
+  RVH.paintKey = "";
 
   pop.querySelectorAll(".rv-hist-nav").forEach(b => {
     b.onclick = () => rvHistMonth(parseInt(b.dataset.nav, 10));
@@ -98,7 +101,12 @@ function rvHistOpenPop() {
   pop.querySelector(".rv-hist-today").onclick = () => rvHistPick(rvhToday());
   const only = pop.querySelector(".rv-hist-onlyc");
   only.checked = !!RVH.onlyCur;
-  only.onchange = () => { RVH.onlyCur = only.checked; rvHistRenderList(); };
+  only.onchange = () => {
+    RVH.onlyCur = only.checked;
+    rvHistRenderScope();
+    rvHistRenderList();
+    rvHistLoadDays();        // 日历上的小圆点也跟着切：只标出「当前任务 / 全部任务」的归档
+  };
   pop.querySelector(".rv-hist-grid").addEventListener("click", (e) => {
     const b = e.target.closest ? e.target.closest("[data-day]") : null;
     if (b) rvHistPick(b.dataset.day);
@@ -120,13 +128,16 @@ function rvHistOpenPop() {
   rvHistLoadDays();
 }
 
-/* 点弹层外部 / Esc 收起（与任务详情悬浮框同一套做法） */
+/* 点弹层外部 / Esc 收起（与任务详情悬浮框同一套做法）
+   必须用捕获阶段判断归属：点日期 / 日志条目时内部会**立即重绘**，
+   被点中的节点随即脱离 DOM（closest 再也找不到 .rv-hist-pop），
+   放到冒泡阶段就会把「点了日期」误判成「点了外面」而收起弹层。 */
 document.addEventListener("click", (e) => {
   if (!RVH.el) return;
   const t = e.target;
   if (t && t.closest && (t.closest(".rv-hist-pop") || t.closest(".rv-histbtn"))) return;
   rvHistClosePop();
-});
+}, true);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && RVH.el) rvHistClosePop(); });
 
 /* ---------- 日历 ---------- */
@@ -179,8 +190,10 @@ function rvHistPick(ds) {
 async function rvHistLoadDays() {
   RVH.msg = "正在读取历史日志…";
   rvHistRenderAll();
+  const cur = rvhCurTarget();
+  const q = (RVH.onlyCur && cur) ? "?target=" + encodeURIComponent(cur) : "";
   try {
-    const r = await fetch("/api/run/history/days");
+    const r = await fetch("/api/run/history/days" + q);
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     RVH.days = d.days || [];
@@ -218,8 +231,41 @@ async function rvHistLoadItems() {
   rvHistRenderList();
 }
 function rvHistRenderAll() {
+  rvHistRenderScope();
   rvHistRenderCal();
   rvHistRenderList();
+}
+/* 面板每 3s 重绘一次（见 40_ rvPaintRight）：弹层开着时，切换任务要跟着更新范围；
+   只在「范围」真的变了才重绘列表，避免把用户正要点的条目换掉。 */
+function rvHistOnPaint() {
+  if (!RVH.el) return;
+  const key = (RVH.onlyCur ? rvhCurTarget() : "*") + "|" + (RUNNER.tasks || []).length;
+  if (key === RVH.paintKey) return;
+  RVH.paintKey = key;
+  rvHistRenderScope();
+  rvHistRenderList();
+}
+/* 当前列出的范围：归档里存着**所有任务**的每次运行，所以这里明确告诉用户看的是谁 */
+function rvHistRenderScope() {
+  const pop = RVH.el;
+  if (!pop) return;
+  const el = pop.querySelector(".rv-hist-scope");
+  const only = pop.querySelector(".rv-hist-onlyc");
+  const t = rvCur();
+  const cur = t ? String(t.target || "") : "";
+  const name = t ? (t.name || "当前任务") : "";
+  if (only) {
+    only.disabled = !cur;                    // 没选中任务时这个开关没有意义
+    if (!cur) only.checked = false;
+    only.title = cur
+      ? "勾选：只列出「" + name + "」的归档；取消勾选：列出全部任务的归档日志"
+      : "先在左侧选一个任务，才能按任务过滤";
+  }
+  if (!el) return;
+  el.textContent = (RVH.onlyCur && cur)
+    ? "范围：仅「" + name + "」"
+    : "范围：全部任务（共 " + (RUNNER.tasks || []).length + " 个任务）";
+  el.title = el.textContent;
 }
 function rvHistRenderList() {
   const pop = RVH.el;
@@ -234,8 +280,13 @@ function rvHistRenderList() {
   let list = RVH.items || [];
   if (RVH.onlyCur && cur) list = list.filter(it => String(it.target || "") === cur);
   if (!list.length) {
-    box.innerHTML = '<div class="ph">' + esc(RVH.day) + " 没有" +
-      (RVH.onlyCur ? "当前任务的" : "") + "历史日志<br>（每次运行结束会自动归档一份）</div>";
+    const t = rvCur();
+    const empty = (RVH.onlyCur && cur)
+      ? esc(RVH.day) + " 没有「" + esc(t ? (t.name || "当前任务") : "当前任务") + "」的归档日志<br>" +
+        '<span class="hint">取消勾选「只看当前任务」可查看其它任务的归档</span>'
+      : esc(RVH.day) + " 没有归档日志<br>" +
+        '<span class="hint">任务每次运行结束时会自动归档一份</span>';
+    box.innerHTML = '<div class="ph">' + empty + '</div>';
     return;
   }
   box.innerHTML = list.map(it => {

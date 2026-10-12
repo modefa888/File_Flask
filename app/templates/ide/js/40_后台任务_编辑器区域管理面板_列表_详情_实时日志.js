@@ -51,6 +51,7 @@ function openRunnerView(tid) {
       RUNVIEW.histOn = false; RUNVIEW.histTask = "";
       rvLogClose();
       RUNVIEW.sel = ""; RUNVIEW.logId = "";
+      if (typeof runnerPollArm === "function") runnerPollArm();     // 重新判断：侧栏还开着就继续轮询，否则停
       return true;
     };
     tabs.push(tab);
@@ -65,19 +66,30 @@ function openRunnerView(tid) {
   return tab;
 }
 function runnerViewOpen() { return !!findTab(RUNNER_VIEW_PATH); }
+/* 面板正显示（而不只是标签开着）：轮询频率按它决定（见 11_ 的统一轮询） */
+function runnerViewActive() {
+  return !!findTab(RUNNER_VIEW_PATH) && !!active && active.path === RUNNER_VIEW_PATH;
+}
+/* 切回本标签时唤醒轮询（activate 里的钩子，与 dbc/api 的 *SyncOpenMarks 同一套做法）：
+   面板在后台时不刷，切回来必须立刻同步一次，否则要等一个周期才看到最新状态。 */
+function runnerViewOnActivate() {
+  // 延到下一个事件循环：脚本刚加载完时 11_ 的轮询常量可能还没初始化（activate 有可能被提前调用）
+  setTimeout(() => {
+    if (typeof runnerPollArm !== "function") return;
+    if (active && active.path === RUNNER_VIEW_PATH) runnerPollArm(0);   // 切回来看：立刻同步
+    else runnerPollArm();                                              // 切走：按「后台标签」的节奏重排
+  }, 0);
+}
 
 /* 侧栏 / 卡片操作后同步视图（11_ 的 loadRunnerList、removeTaskCard 会调用） */
 function rvSync() {
   if (!runnerViewOpen() || !rvRoot()) return;
   rvPaint();
 }
-/* 视图存在时自己按 3s 刷新：侧栏面板关掉、切到别的面板也不会停更 */
+/* 视图存在时刷新：交给 11_ 的统一轮询（与侧栏面板共用一条循环，不再各发一个 3s 请求）。
+   这里只负责「按需唤醒」——侧栏面板关掉、切到别的侧栏面板也照样继续更。 */
 function rvTick() {
-  clearTimeout(RUNVIEW.tick);
-  if (!runnerViewOpen()) return;
-  RUNVIEW.tick = setTimeout(() => {
-    loadRunnerList({ silent: true }).then(() => { rvPaint(); rvTick(); });
-  }, 3000);
+  if (typeof runnerPollArm === "function") runnerPollArm();
 }
 
 /* ---------- 任务显示名称（点标题即可改） ----------
@@ -330,9 +342,10 @@ function rvBuild() {
   // 按住卡片时跳过自动重绘，避免把要点的卡片换掉（与侧栏同一机制）
   listEl.addEventListener("pointerdown", () => { RUNNER.holdUntil = Date.now() + 1200; }, true);
 
-  // 右栏同理：正按着按钮 / 链接时，自动刷新不重建按钮（否则这一下点击会丢）
+  // 右栏同理：正按着按钮 / 链接时，自动刷新不重建按钮（否则这一下点击会丢）。
+  // 用独立的 rightHoldUntil：在左栏点一下不该把右栏冻结 1.2s（那会让详情/按钮明显"慢半拍"）。
   const rightEl = rvQ(".rv-right");
-  if (rightEl) rightEl.addEventListener("pointerdown", () => { RUNNER.holdUntil = Date.now() + 1200; }, true);
+  if (rightEl) rightEl.addEventListener("pointerdown", () => { RUNNER.rightHoldUntil = Date.now() + 1200; }, true);
 
   // 右栏：操作按钮
   rvQ(".rv-acts").addEventListener("click", (e) => {
@@ -452,7 +465,7 @@ function rvActsHtml(t) {
   return h;
 }
 
-function rvPaintRight() {
+function rvPaintRight(force) {
   const root = rvRoot();
   if (!root) return;
   const t = rvCur();
@@ -463,6 +476,7 @@ function rvPaintRight() {
   // 正在看历史日志时：任务被切走 / 没了 → 自动退出历史模式，回到实时
   if (RUNVIEW.histOn && (!t || String(t.id) !== String(RUNVIEW.histTask)) &&
       typeof rvHistExit === "function") rvHistExit();
+  if (typeof rvHistOnPaint === "function") rvHistOnPaint();   // 历史日历弹层开着时跟着换任务/刷新
   if (!t) {
     if (titleEl) { titleEl.textContent = "未选择任务"; titleEl.title = ""; }
     if (stateEl) { stateEl.textContent = ""; stateEl.className = "rv-state"; }
@@ -482,10 +496,13 @@ function rvPaintRight() {
     stateEl.textContent = taskStatusText(t);
     stateEl.className = "rv-state " + (t.paused ? "paused" : t.running ? "running" : "off");
   }
-  const hold = Date.now() < RUNNER.holdUntil;      // 用户正按着右栏：别把按钮 / 链接换掉
+  // 用户正按着右栏（按钮 / 端口链接）→ 本次不重建，免得这一下点击落空；
+  // force=true（左栏点选任务）时无视它 —— 那是明确操作，详情必须立刻跟过去。
+  const hold = !force && Date.now() < (RUNNER.rightHoldUntil || 0);
   if (actsEl && !hold) actsEl.innerHTML = rvActsHtml(t);
   else if (actsEl && !actsEl.innerHTML) actsEl.innerHTML = rvActsHtml(t);
-  if (infoEl && !hold && !rvSelHoldIn(".rv-info")) infoEl.innerHTML = taskInfoRows(t);   // 选文字时不重建
+  // 选文字时不重建（但在左栏明确点选了任务时照建 —— 换任务本来就得换内容）
+  if (infoEl && !hold && (force || !rvSelHoldIn(".rv-info"))) infoEl.innerHTML = taskInfoRows(t);
   // 看历史日志时不重连实时流（否则历史内容会被新推来的行冲掉）
   if (!RUNVIEW.histOn && RUNVIEW.logId !== t.id) rvLogOpen(t);   // 切换任务 → 换日志源
 }
@@ -497,7 +514,7 @@ function rvSelect(id) {
   const root = rvRoot();
   if (!root) return;
   root.querySelectorAll(".rv-item").forEach(el => el.classList.toggle("on", el.dataset.tid === String(id)));
-  rvPaintRight();
+  rvPaintRight(true);          // 点选任务：右侧详情 / 按钮立刻刷新，不等 3s 轮询
 }
 
 /* ---------- 实时日志（独立 SSE，不影响底部面板那条） ---------- */

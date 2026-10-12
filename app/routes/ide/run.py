@@ -279,6 +279,15 @@ def _hist_write_meta(dirp: str, key: str, meta: dict) -> None:
         _log.warning("写入历史日志元信息失败：%s", e)
 
 
+def _hist_read_meta(dirp: str, key: str) -> dict:
+    try:
+        with open(os.path.join(dirp, key + ".json"), "r", encoding="utf-8") as fh:
+            meta = json.load(fh)
+        return meta if isinstance(meta, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def _archive_run(task, run=None) -> str:
     """把「刚结束的这一次运行」的日志归档到按日期分目录的历史里。
 
@@ -1195,7 +1204,12 @@ def api_run_stream():
 # ======================================================================
 @bp.route("/api/run/history/days")
 def api_run_history_days():
-    """有历史日志的日期列表：日历用高亮 + 标题提示「当天几条 / 多大」。"""
+    """有历史日志的日期列表：日历用高亮 + 标题提示「当天几条 / 多大」。
+
+    可选 ?target=<入口文件绝对路径>：只统计该任务的归档 —— 面板里的日历默认
+    只看当前选中任务，取消「只看当前任务」后才把全部任务的归档一起标出来。
+    """
+    target = (request.args.get("target") or "").strip()
     root = _hist_root()
     days = []
     try:
@@ -1209,6 +1223,11 @@ def api_run_history_days():
         try:
             files = [f for f in os.listdir(dirp) if f.endswith(".log")]
         except OSError:
+            continue
+        if target:
+            files = [f for f in files
+                     if str(_hist_read_meta(dirp, f[:-4]).get("target") or "") == target]
+        if not files:
             continue
         size = 0
         for f in files:
@@ -1239,12 +1258,8 @@ def api_run_history():
         key = name[:-5]
         if not _HIST_KEY_RE.match(key):
             continue
-        try:
-            with open(os.path.join(dirp, name), "r", encoding="utf-8") as fh:
-                meta = json.load(fh) or {}
-        except (OSError, ValueError):
-            meta = {}
-        if not isinstance(meta, dict):
+        meta = _hist_read_meta(dirp, key)
+        if not meta:                                # 元信息缺失 / 损坏 → 跳过这条
             continue
         meta["key"] = key
         meta["date"] = date
@@ -1276,14 +1291,7 @@ def api_run_history_log():
             data = fh.read()
     except OSError as e:
         return _fail(f"历史日志读取失败：{e}", 500)
-    meta = {}
-    try:
-        with open(os.path.join(_hist_root(), date, key + ".json"), "r", encoding="utf-8") as fh:
-            meta = json.load(fh) or {}
-    except (OSError, ValueError):
-        meta = {}
-    if not isinstance(meta, dict):
-        meta = {}
+    meta = _hist_read_meta(os.path.join(_hist_root(), date), key)
     return jsonify({
         "ok": True, "date": date, "key": key, "size": size, "truncated": truncated,
         "meta": meta, "text": data.decode("utf-8", "replace"),

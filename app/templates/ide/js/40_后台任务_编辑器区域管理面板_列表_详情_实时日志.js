@@ -11,16 +11,19 @@
    ================================================================== */
 const RUNNER_VIEW_PATH = "\u0000runner";
 const RV_LIST_KEY = "ide.runnerView.listCollapsed";   // 左栏收起偏好
+const RV_INFO_H_KEY = "ide.runnerView.infoH";         // 详情区高度（分隔条拖动结果）
 const RUNVIEW = {
   sel: "", kw: "", filter: "all",
   es: null, poll: null, tick: null,      // 日志流 / 轮询兜底 / 视图自动刷新定时器
   logId: "", logOff: 0, lines: 0, logDone: false, follow: true,
   listCollapsed: false,                  // 左栏（任务列表）是否收起
+  infoH: 0,                              // 详情区高度（px，0 = 按 CSS 的 30% 自适应）
   findKw: "", findHits: 0, findIdx: -1,  // 日志搜索：关键字（小写）/ 命中数 / 当前命中序号
   findT: null,                           // 输入防抖定时器
 };
 const RV_LOG_MAX = 4000;                 // 视图里最多保留的日志行数
 try { RUNVIEW.listCollapsed = localStorage.getItem(RV_LIST_KEY) === "1"; } catch (_) { /* 忽略隐私模式报错 */ }
+try { RUNVIEW.infoH = parseInt(localStorage.getItem(RV_INFO_H_KEY) || "0", 10) || 0; } catch (_) { /* 忽略隐私模式报错 */ }
 
 function rvRoot() { return document.getElementById("runnerView"); }
 function rvQ(sel) { const r = rvRoot(); return r ? r.querySelector(sel) : null; }
@@ -53,6 +56,7 @@ function openRunnerView(tid) {
   }
   activate(tab);
   if (tid) RUNVIEW.sel = tid;
+  rvSplitRestore();        // 面板可见后，按实际高度把「详情 / 日志」的分隔位置重新夹紧
   rvPaint();
   loadRunnerList({ silent: true }).then(() => { rvPaint(); rvTick(); });
   return tab;
@@ -127,6 +131,74 @@ function rvApplyList() {
   if (wrap) wrap.classList.toggle("no-left", !!RUNVIEW.listCollapsed);
 }
 
+/* ---------- 详情 / 日志 分隔条：上下拖动调整两块高度 ----------
+   详情区（.rv-info）默认 flex:none + max-height:30%（内容少时按内容高度收）。
+   一旦拖动过，就改成显式 height（并解除 30% 上限），结果记在 localStorage，下次打开沿用。
+   双击分隔条 = 清除显式高度，恢复默认的 30% 自适应。 */
+function rvSplitBody() { const el = rvQ(".rv-logwrap"); return el ? el.parentElement : null; }
+function rvSplitClamp(h) {                 // 详情区最小 40px；日志区至少留 80px（日志栏 + 几行）
+  const body = rvSplitBody();
+  const total = body ? body.clientHeight : 0;
+  const minInfo = 40, minLog = 80;
+  if (!total) return Math.max(minInfo, Math.round(h || 0));
+  return Math.min(Math.max(minInfo, Math.round(h || 0)), Math.max(minInfo, total - minLog));
+}
+function rvSplitApply(h) {                 // h <= 0 → 恢复默认（30% 自适应）
+  const info = rvQ(".rv-info");
+  if (!info) return;
+  RUNVIEW.infoH = Math.max(0, Math.round(h || 0));
+  if (RUNVIEW.infoH) {
+    info.style.height = RUNVIEW.infoH + "px";
+    info.style.maxHeight = "none";
+  } else {
+    info.style.height = "";
+    info.style.maxHeight = "";
+  }
+}
+function rvSplitSave() {
+  try { localStorage.setItem(RV_INFO_H_KEY, RUNVIEW.infoH ? String(RUNVIEW.infoH) : ""); } catch (_) { /* 忽略 */ }
+}
+/* 面板变为可见 / 窗口尺寸变化时，按当前实际高度重新夹紧已保存的值 */
+function rvSplitRestore() {
+  if (!RUNVIEW.infoH) return;
+  const h = rvSplitClamp(RUNVIEW.infoH);
+  rvSplitApply(h);
+  if (h !== RUNVIEW.infoH) rvSplitSave();
+}
+function rvSplitBind() {
+  const bar = rvQ(".rv-split");
+  const body = rvSplitBody();
+  if (!bar || !body) return;
+  let startY = 0, startH = 0;
+  const onMove = (e) => {
+    rvSplitApply(rvSplitClamp(startH + (e.clientY - startY)));
+    e.preventDefault();
+  };
+  const onUp = () => {
+    bar.classList.remove("on");
+    document.body.classList.remove("rv-split-drag");
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onUp);
+    rvSplitSave();
+  };
+  bar.addEventListener("pointerdown", (e) => {
+    const info = rvQ(".rv-info");
+    if (!info || e.button !== 0) return;
+    e.preventDefault();
+    startY = e.clientY;
+    startH = info.getBoundingClientRect().height;
+    bar.classList.add("on");
+    document.body.classList.add("rv-split-drag");   // 拖动期间全局光标保持 ns-resize
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  });
+  bar.addEventListener("dblclick", () => { rvSplitApply(0); rvSplitSave(); });
+  window.addEventListener("resize", rvSplitRestore);
+  rvSplitRestore();                                  // 沿用上次拖出的高度
+}
+
 /* ---------- 骨架（只建一次） ---------- */
 function rvBuild() {
   const root = rvRoot();
@@ -163,6 +235,7 @@ function rvBuild() {
         '</div>' +
         '<div class="rv-body">' +
           '<div class="rv-info scroll-thin"></div>' +
+          '<div class="rv-split" title="上下拖动调整「详情」与「日志」的高度 · 双击恢复默认"></div>' +
           '<div class="rv-logwrap">' +
             '<div class="rv-logbar">' +
               '<span class="rv-logtitle"><i class="bi bi-terminal"></i> 实时日志</span>' +
@@ -236,6 +309,7 @@ function rvBuild() {
     rvLogMsg("已清屏 · 实时推送不受影响");
   };
   rvFindBind();                          // 日志搜索（🔍）
+  rvSplitBind();                         // 详情 / 日志 分隔条（上下拖动）
 
   // 左栏：点卡片选中（端口链接照旧打开新标签，不触发选中）
   const listEl = rvQ(".rv-list");

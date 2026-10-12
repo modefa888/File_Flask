@@ -1583,6 +1583,12 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .rv-mini { background: #ececec; border-color: #cecece; color: #444444; }
 :where(html.theme-light) .rv-mini:hover { background: #dedede; color: #000000; }
 :where(html.theme-light) .rv-info { border-bottom-color: #e0e0e0; }
+/* 「详情 / 日志」分隔条（40）：与 rv-logbar 同底色，悬停 / 拖动时加深并点亮抓手 */
+:where(html.theme-light) .rv-split { background: #f3f3f3; border-bottom-color: #e0e0e0; }
+:where(html.theme-light) .rv-split::after { background: #c4c4c4; }
+:where(html.theme-light) .rv-split:hover { background: #e8e8e8; }
+:where(html.theme-light) .rv-split:hover::after,
+:where(html.theme-light) .rv-split.on::after { background: #005fb8; }
 :where(html.theme-light) .rv-info .ti-row { border-top-color: #e6e6e6; }
 :where(html.theme-light) .rv-info .ti-k { color: #8a8a8a; }
 :where(html.theme-light) .rv-info .ti-v { color: #333333; }

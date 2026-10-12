@@ -21,15 +21,24 @@
   }
   .git-commit-msg #gitCommitMsg:focus { border-color: #007fd4; }
   .git-commit-msg #gitCommitMsg::placeholder { color: #8a8a8a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .g-ai-split { flex: none; display: flex; gap: 2px; align-self: stretch; }
+  /* AI 生成按钮：与下方「提交」拆分按钮同款蓝色样式（主按钮 + 下拉箭头） */
+  .g-ai-split { flex: none; display: flex; align-self: stretch; }
   .g-ai-split button {
-     height: 100%; min-height: 30px; padding: 0; cursor: pointer; background: #3a3d41; border: 1px solid #4a4a4a;
-     border-radius: 3px; color: #d7ba7d; display: flex; align-items: center; justify-content: center;
+     height: 100%; min-height: 30px; padding: 0; cursor: pointer; background: #0d7ec4; border: none;
+     color: #fff; display: flex; align-items: center; justify-content: center;
      font-size: 13px; line-height: 1;
   }
-  .g-ai-split #gitGenMsg { width: 30px; }
-  .g-ai-split #gitGenMsgMore { width: 16px; font-size: 8px; color: #9aa0a6; }
-  .g-ai-split button:hover { background: #45494e; color: #ffd479; }
+  .g-ai-split #gitGenMsg { width: 30px; border-radius: 3px 0 0 3px; }
+  /* 星星图标：金→粉→蓝渐变彩色，悬浮/生成中不变色 */
+  .g-ai-split #gitGenMsg i {
+    background: linear-gradient(135deg, #ffd76e, #ff8fb1 45%, #7fd0ff);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+  }
+  .g-ai-split #gitGenMsg:hover { background: #0a6aa8; }
+  .g-ai-split #gitGenMsgMore { width: 18px; font-size: 10px; border-radius: 0 3px 3px 0;
+    background: #0a6aa8; border-left: 1px solid rgba(255,255,255,.25); }
+  .g-ai-split #gitGenMsgMore:hover { background: #0d7cc4; }
   .g-ai-split button:disabled { opacity: .55; cursor: default; }
   .g-ai-split.busy #gitGenMsg i { animation: gspin .9s linear infinite; }
   @keyframes gspin { to { transform: rotate(360deg); } }

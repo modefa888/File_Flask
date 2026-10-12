@@ -534,8 +534,10 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .g-ico:hover { background: #e0e0e0; color: #000000; }
 :where(html.theme-light) .git-commit-msg #gitCommitMsg { background: #ffffff; border-color: #cecece; color: #1f2328; }
 :where(html.theme-light) .git-commit-msg #gitCommitMsg::placeholder { color: #8a8a8a; }
-:where(html.theme-light) .g-ai-split button { background: #e8e8e8; border-color: #cecece; color: #8a6a00; }
-:where(html.theme-light) .g-ai-split button:hover { background: #dcdcdc; color: #6b5200; }
+:where(html.theme-light) .g-ai-split button { background: #0d7ec4; color: #ffffff; }
+:where(html.theme-light) .g-ai-split #gitGenMsg:hover { background: #0a6aa8; }
+:where(html.theme-light) .g-ai-split #gitGenMsgMore { background: #0a6aa8; color: #ffffff; }
+:where(html.theme-light) .g-ai-split #gitGenMsgMore:hover { background: #0d7cc4; }
 :where(html.theme-light) .g-btn.outline { background: #e0e0e0; color: #333333; }
 :where(html.theme-light) .g-btn.outline:hover { background: #d0d0d0; }
 :where(html.theme-light) .git-sec-head { color: #333333; }
@@ -1037,7 +1039,7 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 
 /* ---------- 源代码管理 / 更改汇总（04、05） ---------- */
 :where(html.theme-light) .git-head .bi-git { color: #a06400; }
-:where(html.theme-light) .g-ai-split #gitGenMsgMore { color: #5a5a5a; }
+:where(html.theme-light) .g-ai-split #gitGenMsgMore { color: #ffffff; }
 :where(html.theme-light) .git-file .gf-st { color: #8a5a00; }
 :where(html.theme-light) .git-commit-file .gf-st { color: #8a5a00; }
 :where(html.theme-light) .git-dir .git-dir-ic { color: #8a5a00; }

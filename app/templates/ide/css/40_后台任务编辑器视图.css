@@ -5,6 +5,9 @@
 .runner-view-host { background: #1e1e1e; }
 
 .rv { display: flex; height: 100%; min-height: 0; background: #1e1e1e; color: #d4d4d4; font-size: 12.5px; }
+/* host > #runnerView(.rv) > .rv（rvBuild 又套了一层）。外层是 flex(row)，
+   内层会被当成 flex 项按内容宽度收缩，面板右侧就空出一大片 —— 让内层撑满外层。 */
+#runnerView > .rv { flex: 1 1 0; min-width: 0; }
 
 /* ---------- 左栏：任务列表 ---------- */
 .rv-left {

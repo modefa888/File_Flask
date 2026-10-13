@@ -8,6 +8,8 @@ ADM.modules.push({
     icon: 'bi-database',
     async load(el) {
         el.innerHTML = ADM.loading('加载数据库连接…');
+        var dbTotal = 0;
+        try { dbTotal = (await ADM.api('/api/db/conns?page=1&page_size=1')).total || 0; } catch (e) { }
         var dbCols = [
             { label: '名称', render: function (r) { return '<span class="adm-cell-strong">' + ADM.esc(r.name) + '</span>'; } },
             { label: '类型', render: function (r) { return ADM.badge(r.kind, 'info'); } },
@@ -24,7 +26,11 @@ ADM.modules.push({
                 }
             }
         ];
-        var html = '<div class="adm-section">' + ADM.sectionHead('bi-database', '数据库连接',
+        var html = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '连接总览',
+            '<span class="adm-hint">数据来源：store.db（db_conns 表）</span>') + '<div class="adm-stat-grid">';
+        html += ADM.stat('bi-database', '数据库连接', dbTotal, '密码已加密存储，仅展示状态');
+        html += '</div></div>';
+        html += '<div class="adm-section">' + ADM.sectionHead('bi-database', '数据库连接',
             '<span class="adm-hint" id="dbCount"></span>');
         html += ADM.servTable(dbCols, {
             key: 'db-conns',
@@ -78,6 +84,8 @@ ADM.modules.push({
     icon: 'bi-terminal-fill',
     async load(el) {
         el.innerHTML = ADM.loading('加载 SSH 连接…');
+        var sum = {};
+        try { sum = await ADM.api('/api/ssh/list?page=1&page_size=1'); } catch (e) { }
         var sshCols = [
             { label: '名称', render: function (r) { return '<span class="adm-cell-strong">' + ADM.esc(r.name) + '</span>'; } },
             { label: '主机', render: function (r) { return ADM.esc(r.host) + ':' + (r.port || 22); } },
@@ -94,7 +102,13 @@ ADM.modules.push({
                 }
             }
         ];
-        var html = '<div class="adm-section">' + ADM.sectionHead('bi-terminal-fill', 'SSH 连接',
+        var html = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '连接总览',
+            '<span class="adm-hint">数据来源：data/.ssh_connections.json</span>') + '<div class="adm-stat-grid">';
+        html += ADM.stat('bi-terminal-fill', 'SSH 连接', sum.total || 0, '密码 / 私钥已加密存储');
+        html += ADM.stat('bi-plug', 'paramiko', sum.paramiko ? '可用' : '未安装',
+            sum.paramiko ? '远程建连依赖正常' : '安装后才能建立 SSH 连接');
+        html += '</div></div>';
+        html += '<div class="adm-section">' + ADM.sectionHead('bi-terminal-fill', 'SSH 连接',
             '<span class="adm-hint" id="sshInfo"></span>');
         html += ADM.servTable(sshCols, {
             key: 'ssh-conns',

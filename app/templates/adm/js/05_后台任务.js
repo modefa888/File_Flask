@@ -11,6 +11,13 @@ ADM.modules.push({
 });
 
 async function refreshRunner(el) {
+    /* 顶部统计（失败不阻塞列表） */
+    var sum = {};
+    try {
+        var s = await ADM.api('/api/run/tasks?page=1&page_size=1');
+        sum = { total: s.total || 0, running: s.running || 0 };
+    } catch (e) { }
+
     var runnerCols = [
         { label: '任务', render: function (r) { return '<span class="adm-cell-strong">' + ADM.esc(r.name || r.target) + '</span>'; } },
         {
@@ -41,7 +48,17 @@ async function refreshRunner(el) {
             }
         }
     ];
-    var html = '<div class="adm-section">';
+    /* ---- 后台任务总览 ---- */
+    var html = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '任务总览',
+        '<span class="adm-hint">数据来源：运行时进程管理器</span>') + '<div class="adm-stat-grid">';
+    html += ADM.stat('bi-terminal', '任务总数', sum.total || 0,
+        '运行中 ' + (sum.running || 0) + ' · 已结束 ' + Math.max(0, (sum.total || 0) - (sum.running || 0)));
+    html += ADM.stat('bi-play-circle', '运行中', sum.running || 0, '进程存活，占用资源中');
+    html += ADM.stat('bi-stop-circle', '已结束', Math.max(0, (sum.total || 0) - (sum.running || 0)),
+        '可点「清理已结束」释放记录');
+    html += '</div></div>';
+
+    html += '<div class="adm-section">';
     html += ADM.sectionHead('bi-terminal', '后台任务',
         '<div class="adm-btn-row"><span class="adm-hint" id="runnerCount" style="align-self:center"></span>' +
         '<button class="adm-btn sm ghost" id="admRunPrune" type="button"><i class="bi bi-trash3"></i> 清理已结束</button></div>');

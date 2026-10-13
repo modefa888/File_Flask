@@ -11,6 +11,10 @@ ADM.modules.push({
 });
 
 async function refreshHints(el) {
+    /* 顶部统计（失败不阻塞列表） */
+    var total = 0;
+    try { total = (await ADM.api('/api/file_hints/list?page=1&page_size=1')).total || 0; } catch (e) { }
+
     var hintCols = [
         { label: '名称（文件 / 文件夹名）', render: function (r) { return '<span class="adm-cell-strong">' + ADM.esc(r.name) + '</span>'; } },
         { label: '说明', render: function (r) { return ADM.esc(r.hint); } },
@@ -23,7 +27,13 @@ async function refreshHints(el) {
             }
         }
     ];
-    var html = '<div class="adm-section">';
+    /* ---- 说明总览 ---- */
+    var html = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '说明总览',
+        '<span class="adm-hint">数据来源：store.db（file_hints 表）</span>') + '<div class="adm-stat-grid">';
+    html += ADM.stat('bi-info-circle', '自定义说明', total, '与内置说明合并展示，自定义优先');
+    html += '</div></div>';
+
+    html += '<div class="adm-section">';
     html += ADM.sectionHead('bi-info-circle', '自定义文件说明',
         '<div class="adm-btn-row"><span class="adm-hint" id="hintCount" style="align-self:center"></span>' +
         '<button class="adm-btn primary" id="admAddHint" type="button"><i class="bi bi-plus-lg"></i> 新增说明</button></div>');

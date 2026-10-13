@@ -62,12 +62,18 @@ def api_cron_tasks():
     tasks.sort(key=lambda x: (not x.get("enabled"), x.get("created_at") or 0))
     from ..common.paginate import paginate_opt
     page_items, total = paginate_opt(tasks, request)
+    summary = {
+        "total": len(tasks),
+        "enabled": sum(1 for t in tasks if t.get("enabled")),
+        "running": sum(1 for t in tasks if t["running"]),
+        "ok": sum(int(t.get("ok_count") or 0) for t in tasks),
+        "fail": sum(int(t.get("fail_count") or 0) for t in tasks),
+    }
     if total is None:
-        return jsonify({"ok": True, "tasks": tasks,
-                        "running": sum(1 for t in tasks if t["running"])})
-    return jsonify({"ok": True, "tasks": page_items,
-                    "running": sum(1 for t in tasks if t["running"]),
-                    "total": total})
+        return jsonify({"ok": True, "tasks": tasks, "running": summary["running"],
+                        "summary": summary})
+    return jsonify({"ok": True, "tasks": page_items, "total": total,
+                    "running": summary["running"], "summary": summary})
 
 
 @bp.route("/api/cron/save", methods=["POST"])

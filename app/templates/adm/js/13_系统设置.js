@@ -16,7 +16,22 @@ ADM.modules.push({
             return h + '</dl>';
         }
 
-        var html = '<div class="adm-section">' + ADM.sectionHead('bi-gear', '系统设置') + '<div class="adm-col-grid">';
+        /* ---- 配置总览 ---- */
+        var ruleTotal = (rules.blocked || 0) + (rules.confirm || 0) + (rules.delete || 0);
+        var extTotal = (media.text_exts || 0) + (media.image_exts || 0) + (media.video_exts || 0) + (media.audio_exts || 0);
+        var html = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '配置总览',
+            '<span class="adm-hint">数据来源：app/config.py 与 .env（只读）</span>') + '<div class="adm-stat-grid">';
+        html += ADM.stat('bi-shield-check', '安全规则', ruleTotal,
+            '硬拦截 ' + (rules.blocked || 0) + ' · 二次确认 ' + (rules.confirm || 0) + ' · 删除类 ' + (rules.delete || 0));
+        html += ADM.stat('bi-terminal', '命令执行', ex.enable_exec ? '开启' : '关闭',
+            ex.enable_exec ? ('安全校验' + (ex.exec_enforce_safety ? '已开启' : '未开启') + ' · 超时 ' + ex.run_timeout + ' 秒') : '功能未启用');
+        html += ADM.stat('bi-files', '可预览格式', extTotal,
+            '文本 ' + media.text_exts + ' · 图片 ' + media.image_exts + ' · 视频 ' + media.video_exts + ' · 音频 ' + media.audio_exts);
+        html += ADM.stat('bi-gear', '服务地址', svc.host + ':' + svc.port,
+            '调试模式' + (svc.debug ? '开启' : '关闭') + ' · 请求体上限 ' + media.max_content_mb + ' MB');
+        html += '</div></div>';
+
+        html += '<div class="adm-section">' + ADM.sectionHead('bi-gear', '系统设置') + '<div class="adm-col-grid">';
         html += '<div class="adm-card">' + kv([
             ['服务地址', ADM.esc(svc.host + ':' + svc.port)],
             ['调试模式', flag(svc.debug)],

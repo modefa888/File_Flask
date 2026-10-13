@@ -11,6 +11,10 @@ ADM.modules.push({
 });
 
 async function refreshCron(el) {
+    /* 顶部统计（失败不阻塞列表） */
+    var sum = {};
+    try { sum = (await ADM.api('/api/cron/tasks?page=1&page_size=1')).summary || {}; } catch (e) { }
+
     var cronCols = [
         { label: '任务名', render: function (r) { return '<span class="adm-cell-strong">' + ADM.esc(r.name) + '</span>'; } },
         {
@@ -51,7 +55,18 @@ async function refreshCron(el) {
             }
         }
     ];
-    var html = '<div class="adm-section">';
+    /* ---- 定时任务总览 ---- */
+    var html = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '任务总览',
+        '<span class="adm-hint">数据来源：store.db（cron_tasks / cron_runs）</span>') + '<div class="adm-stat-grid">';
+    html += ADM.stat('bi-clock-history', '任务总数', sum.total || 0,
+        '已启用 ' + (sum.enabled || 0) + ' · 运行中 ' + (sum.running || 0));
+    html += ADM.stat('bi-toggle-on', '已启用', sum.enabled || 0, '按 cron 计划自动执行');
+    html += ADM.stat('bi-play-circle', '运行中', sum.running || 0, '正在执行的任务');
+    html += ADM.stat('bi-check-circle', '累计成功', sum.ok || 0, '全部任务的执行成功次数');
+    html += ADM.stat('bi-x-circle', '累计失败', sum.fail || 0, '全部任务的执行失败次数');
+    html += '</div></div>';
+
+    html += '<div class="adm-section">';
     html += ADM.sectionHead('bi-clock-history', '定时任务',
         '<span class="adm-hint" id="cronCount"></span>');
     html += ADM.servTable(cronCols, {

@@ -11,6 +11,11 @@ ADM.modules.push({
 });
 
 async function refreshHistory(el) {
+    /* 顶部统计（失败不阻塞列表） */
+    var delTotal = 0, arcTotal = 0;
+    try { delTotal = (await ADM.api('/api/delete-history?page=1&page_size=1')).total || 0; } catch (e) { }
+    try { arcTotal = (await ADM.api('/api/archive-history?page=1&page_size=1')).total || 0; } catch (e) { }
+
     /* ---- Tab 1：删除 / 回收站历史（服务端搜索 + 分页） ---- */
     var delCols = [
         { label: '名称', render: function (r) { return '<span class="adm-cell-strong">' + ADM.esc(r.name || '-') + '</span>'; } },
@@ -56,7 +61,14 @@ async function refreshHistory(el) {
             pageSize: 10, onRender: function (host) { bindHistoryEvents(host, el); }
         });
 
-    var html = ADM.tabs([
+    /* ---- 历史总览 ---- */
+    var cards = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '历史总览',
+        '<span class="adm-hint">数据来源：store.db（delete_history / archive_history）</span>') + '<div class="adm-stat-grid">';
+    cards += ADM.stat('bi-trash', '删除记录', delTotal, '删除历史与回收站条目');
+    cards += ADM.stat('bi-file-zip', '压缩记录', arcTotal, '压缩 / 解压操作记录');
+    cards += '</div></div>';
+
+    var html = cards + ADM.tabs([
         { id: 'del', name: '删除 / 回收站历史', icon: 'bi-trash', content: delContent },
         { id: 'arc', name: '压缩 / 解压历史', icon: 'bi-file-zip', content: arcContent }
     ], { key: 'history-tabs' });

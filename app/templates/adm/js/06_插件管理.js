@@ -15,6 +15,14 @@ async function refreshPlugins(el) {
     try { reg = await ADM.api('/api/plugins/registry'); } catch (e) { reg = {}; }
     var registry = (reg && reg.plugins) || {};
 
+    /* 统计（插件数量级很小，取全量一页算启用 / 禁用） */
+    var pTotal = 0, pOn = 0, pOff = 0, pHist = ((reg && reg.history) || []).length;
+    try {
+        var pl = await ADM.api('/api/plugins/list?page=1&page_size=200');
+        pTotal = pl.total || (pl.items || []).length;
+        (pl.items || []).forEach(function (r) { if (r.enabled === false) pOff++; else pOn++; });
+    } catch (e) { }
+
     var pluginCols = [
         { label: '名称', render: function (r) { return '<span class="adm-cell-strong">' + ADM.esc(r.name || r.id) + '</span><div class="adm-hint">' + ADM.esc(r.id) + '</div>'; } },
         { label: '版本', render: function (r) { return ADM.esc(r.version || '0.0.0'); } },
@@ -35,7 +43,16 @@ async function refreshPlugins(el) {
             }
         }
     ];
-    var html = '<div class="adm-section">';
+    /* ---- 插件总览 ---- */
+    var html = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '插件总览',
+        '<span class="adm-hint">数据来源：data/plugins 与 store.db（plugin_registry）</span>') + '<div class="adm-stat-grid">';
+    html += ADM.stat('bi-puzzle', '已安装', pTotal, '启用 ' + pOn + ' · 禁用 ' + pOff);
+    html += ADM.stat('bi-check-circle', '已启用', pOn, '已挂载生效');
+    if (pOff) html += ADM.stat('bi-pause-circle', '已禁用', pOff, '文件保留，未加载');
+    html += ADM.stat('bi-clock-arrow-down', '安装历史', pHist, '安装 / 卸载操作累计次数');
+    html += '</div></div>';
+
+    html += '<div class="adm-section">';
     html += ADM.sectionHead('bi-puzzle', '已安装插件',
         '<div class="adm-btn-row">' +
         '<input type="file" id="admPluginFile" accept=".zip" style="display:none">' +

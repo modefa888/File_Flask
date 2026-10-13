@@ -662,7 +662,9 @@ def api_ai_usage_list():
     total_ok = sum(r["ok"] for r in rows)
     total_fail = sum(r["fail"] for r in rows)
     return jsonify({"items": page_items, "total": total,
-                    "total_ok": total_ok, "total_fail": total_fail})
+                    "total_ok": total_ok, "total_fail": total_fail,
+                    "tokens_in": sum(r["tokens_in"] for r in rows),
+                    "tokens_out": sum(r["tokens_out"] for r in rows)})
 
 
 @bp.route("/api/ai/usage/detail", methods=["GET"])

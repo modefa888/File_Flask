@@ -6,6 +6,11 @@ ADM.modules.push({
     icon: 'bi-journal-text',
     async load(el) {
         el.innerHTML = ADM.loading('加载日志文件…');
+        var sum = {};
+        try {
+            var lr = await ADM.api('/api/adm/logs?page=1&page_size=1');
+            sum = lr.summary || {}; sum.total = lr.total || 0;
+        } catch (e) { }
         var logCols = [
             { label: '文件', render: function (r) { return '<span class="adm-cell-strong">' + ADM.esc(r.name) + '</span>'; } },
             { label: '大小', render: function (r) { return ADM.bytes(r.size); } },
@@ -16,7 +21,14 @@ ADM.modules.push({
                 }
             }
         ];
-        var html = '<div class="adm-section">';
+        var html = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '日志总览',
+            '<span class="adm-hint">数据来源：logs/ 目录</span>') + '<div class="adm-stat-grid">';
+        html += ADM.stat('bi-journal-text', '日志文件', sum.total || 0, '按天轮转 · 保留 15 天');
+        html += ADM.stat('bi-hdd', '总占用', ADM.bytes(sum.total_size || 0), 'logs/ 目录全部文件');
+        html += ADM.stat('bi-clock', '最近写入', sum.latest_mtime ? ADM.dt(sum.latest_mtime) : '-',
+            '最近一次日志落盘时间');
+        html += '</div></div>';
+        html += '<div class="adm-section">';
         html += ADM.sectionHead('bi-journal-text', '日志文件',
             '<span class="adm-hint" id="logDir"></span>');
         html += ADM.servTable(logCols, {

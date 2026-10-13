@@ -7,9 +7,19 @@ ADM.modules.push({
     async load(el) {
         el.innerHTML = ADM.loading('加载请求集合…');
 
+        /* 顶部统计（失败不阻塞页面） */
+        var sum = {};
+        try { sum = await ADM.api('/api/http/collection/list?page=1&page_size=1'); } catch (e) { }
+
         var inited = {};   // 各 Tab 只在首次显示时加载数据
 
-        var html = ADM.tabs([
+        var cards = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '集合总览',
+            '<span class="adm-hint">数据来源：store.db（IDE API 调试集合）</span>') + '<div class="adm-stat-grid">';
+        cards += ADM.stat('bi-send', '请求集合', sum.total || 0, 'IDE 面板保存的调试请求');
+        cards += ADM.stat('bi-folder-fill', '分组数', sum.groups || 0, '请求可归入不同分组');
+        cards += '</div></div>';
+
+        var html = cards + ADM.tabs([
             {
                 id: 'reqs', name: '请求集合', icon: 'bi-send', content: reqsPanelHtml(),
                 onShow: function () { if (!inited.reqs) { inited.reqs = 1; mountReqsTab(el); } }

@@ -191,6 +191,8 @@ async function refreshNotify(el) {
     NOTIFY.cron = cr;
     NOTIFY.cronRecords = (rec && rec.records) || [];
     NOTIFY.cronTotal = (rec && rec.total != null) ? rec.total : NOTIFY.cronRecords.length;
+    NOTIFY.aiTotal = null;
+    try { NOTIFY.aiTotal = (await ADM.api('/api/ai/notify/history?page=1&page_size=1')).total; } catch (e) { }
     renderNotify(el);
 }
 
@@ -408,7 +410,23 @@ function renderNotify(el) {
             }
         ], { key: 'notify-history-tabs' });
 
-    var html = ADM.tabs([
+    /* ---- 通知总览卡片 ---- */
+    var chans = cfg.channels || {};
+    var chAll = Object.keys(chans).length;
+    var chOn = Object.keys(chans).filter(function (k) { return chans[k]; }).length;
+    var scopeText = { both: 'AI 助手 + 智能体', chat: '仅 AI 助手对话', agent: '仅 AI 智能体' }[cfg.scope || 'both'] || '-';
+    var cards = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '通知总览',
+        '<span class="adm-hint">数据来源：通知配置与 store.db（notify_history 等）</span>') + '<div class="adm-stat-grid">';
+    cards += ADM.stat('bi-bell', '通知功能', cfg.enabled ? '已启用' : '未启用',
+        '通知范围：' + scopeText);
+    cards += ADM.stat('bi-hdd-network', '启用通道', chOn + ' / ' + chAll, '桌面 / 邮件 / Telegram 等');
+    cards += ADM.stat('bi-robot', 'AI 通知记录', (NOTIFY.aiTotal != null ? NOTIFY.aiTotal : '-') + ' 条',
+        '助手 / 智能体触发的通知');
+    cards += ADM.stat('bi-clock-history', '任务通知记录', (NOTIFY.cronTotal != null ? NOTIFY.cronTotal : '-') + ' 条',
+        '定时任务失败 / 超时等触发');
+    cards += '</div></div>';
+
+    var html = cards + ADM.tabs([
         { id: 'basic', name: '基础设置', icon: 'bi-sliders', content: basic },
         { id: 'desktop', name: '桌面通知', icon: 'bi-display', content: desktop },
         { id: 'email', name: '邮件 (SMTP)', icon: 'bi-envelope-at', content: email },

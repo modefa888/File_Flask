@@ -20,6 +20,10 @@ function shareStateBadge(state) {
 }
 
 async function refreshShares(el) {
+    /* 顶部统计（失败不阻塞列表） */
+    var sum = {};
+    try { sum = (await ADM.api('/api/shares?include_revoked=1&page=1&page_size=1')).summary || {}; } catch (e) { }
+
     /* sortKey = 该列排序时传给后端的字段名（后端按 ?sort= 排序；无 sortKey 的列不可排序） */
     var shareCols = [
         { label: '文件', sortKey: 'name', render: function (r) { return '<span class="adm-cell-strong">' + ADM.esc(r.name) + '</span>'; } },
@@ -41,7 +45,18 @@ async function refreshShares(el) {
             }
         }
     ];
-    var html = '<div class="adm-section">';
+    /* ---- 分享总览 ---- */
+    var html = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '分享总览',
+        '<span class="adm-hint">数据来源：store.db（shares 表）</span>') + '<div class="adm-stat-grid">';
+    html += ADM.stat('bi-share', '分享总数', sum.total || 0,
+        '有效中 ' + (sum.active || 0) + ' · 已取消 ' + (sum.revoked || 0));
+    html += ADM.stat('bi-check-circle', '有效中', sum.active || 0, '可正常访问');
+    html += ADM.stat('bi-hourglass-split', '已失效', sum.expired || 0, '过期或次数用尽');
+    if (sum.revoked) html += ADM.stat('bi-slash-circle', '已取消', sum.revoked, '手动取消分享');
+    html += ADM.stat('bi-eye', '累计浏览', sum.views || 0, '所有分享的访问次数合计');
+    html += '</div></div>';
+
+    html += '<div class="adm-section">';
     html += ADM.sectionHead('bi-share', '分享链接');
     html += ADM.servTable(shareCols, {
         key: 'shares',

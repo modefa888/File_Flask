@@ -93,8 +93,12 @@ def api_config():
 def api_logs():
     from ..common.paginate import paginate
     data = overview.list_logs()
-    page_items, total = paginate(data.get("items") or [], request)
-    return jsonify({"items": page_items, "total": total, "dir": data.get("dir") or ""})
+    all_items = data.get("items") or []
+    summary = {"total_size": sum(x.get("size") or 0 for x in all_items),
+               "latest_mtime": max([x.get("mtime") or 0 for x in all_items], default=0)}
+    page_items, total = paginate(all_items, request)
+    return jsonify({"items": page_items, "total": total, "dir": data.get("dir") or "",
+                    "summary": summary})
 
 
 @bp.route("/api/adm/log")

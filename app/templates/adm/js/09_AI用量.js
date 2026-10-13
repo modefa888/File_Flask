@@ -11,6 +11,16 @@ ADM.modules.push({
 });
 
 async function refreshAiUsage(el) {
+    /* 顶部统计（与列表同源，取一次全量汇总；失败不阻塞列表） */
+    var sum = {};
+    try {
+        var s = await ADM.api('/api/ai/usage/list?page=1&page_size=1');
+        sum = { ok: s.total_ok || 0, fail: s.total_fail || 0, modules: s.total || 0,
+            tin: s.tokens_in || 0, tout: s.tokens_out || 0 };
+    } catch (e) { }
+    var calls = (sum.ok || 0) + (sum.fail || 0);
+    var pct = function (n) { return calls ? Math.round((n || 0) / calls * 100) + '%' : '暂无调用'; };
+
     var aiCols = [
         { label: '模块', render: function (r) { return '<span class="adm-cell-strong">' + ADM.esc(r.module) + '</span>'; } },
         { label: '成功', render: function (r) { return '<span style="color:#6ee7b7">' + r.ok + '</span>'; } },
@@ -24,7 +34,19 @@ async function refreshAiUsage(el) {
             }
         }
     ];
-    var html = '<div class="adm-section">';
+    /* ---- 用量总览（样式与其他模块统计卡一致） ---- */
+    var html = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '用量总览',
+        '<span class="adm-hint">数据来源：store.db（ai_usage / ai_calls）</span>') + '<div class="adm-stat-grid">';
+    html += ADM.stat('bi-activity', '累计调用', calls,
+        '成功 ' + (sum.ok || 0) + ' · 失败 ' + (sum.fail || 0));
+    html += ADM.stat('bi-check-circle', '成功调用', sum.ok || 0, '占比 ' + pct(sum.ok));
+    html += ADM.stat('bi-x-circle', '失败调用', sum.fail || 0,
+        calls ? ('失败率 ' + pct(sum.fail)) : '暂无调用');
+    html += ADM.stat('bi-hash', 'Token 输入', sum.tin || 0, '输出 ' + (sum.tout || 0));
+    html += ADM.stat('bi-collection', '调用模块', sum.modules || 0, '表内点「明细」查看单模块');
+    html += '</div></div>';
+
+    html += '<div class="adm-section">';
     html += ADM.sectionHead('bi-activity', 'AI 调用用量',
         '<div class="adm-btn-row"><span class="adm-hint" id="aiCount" style="align-self:center"></span>' +
         '<button class="adm-btn sm ghost" id="admAiClear" type="button"><i class="bi bi-eraser"></i> 清空统计</button></div>');

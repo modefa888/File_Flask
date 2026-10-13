@@ -383,9 +383,16 @@ def api_list_shares():
     items = [_decorate(r) for r in list_shares(include_revoked=include_revoked)]
     from .paginate import paginate_opt
     page_items, total = paginate_opt(items, request)
+    summary = {
+        "total": len(items),
+        "active": sum(1 for r in items if r.get("state") == "ok"),
+        "expired": sum(1 for r in items if r.get("state") in ("expired", "exhausted")),
+        "revoked": sum(1 for r in items if r.get("revoked")),
+        "views": sum(int(r.get("views") or 0) for r in items),
+    }
     if total is None:
-        return jsonify({"items": items, "count": len(items)})
-    return jsonify({"items": page_items, "total": total, "count": total})
+        return jsonify({"items": items, "count": len(items), "summary": summary})
+    return jsonify({"items": page_items, "total": total, "count": total, "summary": summary})
 
 
 @bp.route("/api/share", methods=["GET"])

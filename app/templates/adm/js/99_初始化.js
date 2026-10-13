@@ -57,8 +57,11 @@
         resizeTimer = setTimeout(function () { ADM.refitTables(document); }, 120);
     });
 
-    /* 默认打开概览；支持 #hash 直达指定模块 */
+    /* 初始模块优先级：#hash 直达 > 上次打开的模块（localStorage，刷新自动恢复） > 概览 */
     var initial = (location.hash || '').replace('#', '');
+    if (!ADM.modules.some(function (m) { return m.id === initial; })) {
+        try { initial = localStorage.getItem('adm_module') || ''; } catch (e) { initial = ''; }
+    }
     var exists = ADM.modules.some(function (m) { return m.id === initial; });
     ADM.render(exists ? initial : 'overview');
 })();

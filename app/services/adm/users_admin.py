@@ -5,6 +5,8 @@
 - 默认管理员（config.AUTH_USERNAME）不可降级、不可删除；
 - 系统至少保留一个管理员，避免把自己锁在门外。
 """
+import time
+
 from ... import config
 from ...log import get_logger
 from ..common.store_db import store_conn, store_tx
@@ -13,6 +15,32 @@ from ..common.users import _ensure_table, create_user
 _log = get_logger()
 
 _MIN_PASSWORD_LEN = 6
+
+
+def summary():
+    """用户统计：总数 / 角色分布 / 状态分布 / 近 7 天新增（供后台用户管理页顶部卡片）。"""
+    _ensure_table()
+    out = {"total": 0, "admins": 0, "members": 0, "normal": 0, "banned": 0, "recent": 0}
+    try:
+        conn = store_conn()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total, "
+                "COALESCE(SUM(role='admin'),0) AS admins, "
+                "COALESCE(SUM(role='member'),0) AS members, "
+                "COALESCE(SUM(banned=0),0) AS normal, "
+                "COALESCE(SUM(banned=1),0) AS banned, "
+                "COALESCE(SUM(created >= ?),0) AS recent "
+                "FROM users",
+                (int(time.time()) - 7 * 86400,)).fetchone()
+            if row is not None:
+                for k in out:
+                    out[k] = int(row[k] or 0)
+        finally:
+            conn.close()
+    except Exception as e:
+        _log.warning("汇总用户统计失败：%s", e)
+    return out
 
 
 def list_users():

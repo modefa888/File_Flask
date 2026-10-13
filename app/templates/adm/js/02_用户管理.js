@@ -11,6 +11,9 @@ ADM.modules.push({
 });
 
 async function refreshUsers(el) {
+    /* 顶部统计：失败不阻塞列表 */
+    var sum = {};
+    try { sum = (await ADM.api('/api/adm/users/summary')).summary || {}; } catch (e) { }
     var userCols = [
         {
             label: '用户名', sortKey: 'username', render: function (r) {
@@ -51,7 +54,19 @@ async function refreshUsers(el) {
             }
         }
     ];
-    var html = '<div class="adm-section">';
+    /* ---- 用户总览（样式与接口模块的「接口总览」一致） ---- */
+    var html = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '用户总览',
+        '<span class="adm-hint">数据来源：store.db（users 表）</span>') + '<div class="adm-stat-grid">';
+    html += ADM.stat('bi-people', '用户总数', sum.total || 0,
+        '管理员 ' + (sum.admins || 0) + ' · 协作者 ' + (sum.members || 0));
+    html += ADM.stat('bi-person-badge', '管理员', sum.admins || 0, '全部权限（含后台管理）');
+    html += ADM.stat('bi-person', '协作者', sum.members || 0, '仅协作编辑');
+    html += ADM.stat('bi-unlock', '正常账号', sum.normal || 0, '可正常登录');
+    if (sum.banned) html += ADM.stat('bi-lock', '已封禁', sum.banned, '禁止登录');
+    html += ADM.stat('bi-person-plus', '近 7 天新增', sum.recent || 0, '新建与注册的账号');
+    html += '</div></div>';
+
+    html += '<div class="adm-section">';
     html += ADM.sectionHead('bi-people', '用户账号',
         '<button class="adm-btn primary" id="admAddUser" type="button"><i class="bi bi-person-plus"></i> 新建用户</button>');
     html += ADM.servTable(userCols, {

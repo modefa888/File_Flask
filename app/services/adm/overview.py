@@ -181,6 +181,17 @@ def _system_block():
     }
 
 
+def system_resource():
+    """仅系统资源快照（procinfo 后台线程每 2 秒采集，读取开销极小；供概览页轮询刷新）。"""
+    if psutil is None:
+        return {"error": "未安装 psutil（pip install psutil），无法采集系统资源"}
+    try:
+        from ..ide import procinfo
+        return procinfo.overview()
+    except Exception as e:
+        return {"error": str(e)}
+
+
 _STORAGE_CACHE = {"t": 0.0, "data": None}
 
 

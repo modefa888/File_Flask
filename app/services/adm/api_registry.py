@@ -68,9 +68,11 @@ MODULE_NAMES = {
 RULE_DESC = {
     ("/admin", "GET"): "后台管理控制台页面",
     ("/api/adm/overview", "GET"): "概览：业务计数 + 系统资源 + 存储 + 最近动态",
+    ("/api/adm/overview/resource", "GET"): "概览：仅系统资源快照（轻量，供页面轮询刷新）",
     ("/api/adm/config", "GET"): "系统配置快照（只读、无密钥）",
     ("/api/adm/logs", "GET"): "日志文件列表",
     ("/api/adm/log", "GET"): "读取日志文件尾部",
+    ("/api/adm/users/summary", "GET"): "用户统计：总数 / 角色 / 状态 / 近 7 天新增",
     ("/api/adm/users", "GET"): "用户列表",
     ("/api/adm/users", "POST"): "新建用户",
     ("/api/adm/users/update", "POST"): "修改用户角色 / 重置密码",

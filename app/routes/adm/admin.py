@@ -77,6 +77,12 @@ def api_overview():
     return jsonify(overview.dashboard())
 
 
+@bp.route("/api/adm/overview/resource")
+def api_overview_resource():
+    """仅系统资源快照（procinfo 后台线程每 2 秒采集，读缓存，供概览页轮询）。"""
+    return jsonify(overview.system_resource())
+
+
 @bp.route("/api/adm/config")
 def api_config():
     return jsonify(overview.config_snapshot())
@@ -105,6 +111,12 @@ def api_log():
 
 
 # --------------------------------------------------------------------------- 用户管理
+@bp.route("/api/adm/users/summary")
+def api_users_summary():
+    """用户统计：总数 / 角色分布 / 状态分布 / 近 7 天新增（用户管理页顶部卡片）。"""
+    return jsonify({"summary": users_admin.summary()})
+
+
 @bp.route("/api/adm/users", methods=["GET"])
 def api_users():
     from ..common.paginate import paginate

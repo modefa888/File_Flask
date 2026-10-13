@@ -24,7 +24,7 @@ ADM.modules.push({
             host.innerHTML = ADM.table(apiCatalogCols(), rows(), {
                 key: 'apis',
                 empty: '没有符合条件的接口',
-                actionsWidth: 230,
+                actionsWidth: 300,
                 detailTitle: function (r) { return r.method + '  ' + r.path; },
                 onRender: function (h) { bindApiRowActions(h, refresh); }
             });
@@ -80,6 +80,7 @@ ADM.modules.push({
                 '<div id="apiTableHost"></div>' +
                 '<div class="adm-hint" style="margin-top:10px">' +
                 '「编辑」可改说明与访问级别（留空恢复默认）；「停用」后所有角色都无法访问（接口返回 403）。' +
+                '「测试」会在悬浮框里以当前登录会话向该接口发一次真实请求，可填路径 / 查询参数与请求体。' +
                 '「请求次数」为累计调用量（含成功与失败，统计在 store.db 的 api_stats 表，后台每数秒批量落库）。' +
                 '登录入口、静态资源与后台管理接口为受保护接口，不允许停用或改权限。<b>同步接口</b>会从代码路由刷新登记表：' +
                 '新增路由自动登记、已移除的路由标记为「已失效」。' +
@@ -165,17 +166,20 @@ function apiCols(withAccess) {
     return cols;
 }
 
-/* 接口「操作」列：编辑（说明 + 访问级别）/ 停用启用；失效与受保护接口只给提示 */
+/* 接口「操作」列：测试（悬浮框内发真实请求）/ 编辑（说明 + 访问级别）/ 停用启用；失效接口只给提示 */
 function apiActionCell(r) {
     if (r.orphan) return '<span class="adm-hint" title="代码中已无此路由">已失效</span>';
-    if (r.can_manage === false) {
-        return '<span class="adm-hint" title="受保护接口：不允许停用或改权限">受保护</span>';
-    }
     var p = ADM.esc(r.path), m = ADM.esc(r.method);
+    var test = '<button class="adm-btn sm" data-act="test" data-path="' + p + '" data-method="' + m +
+        '" title="在悬浮框内填参数并真实请求一次"><i class="bi bi-play"></i> 测试</button>';
+    if (r.can_manage === false) {
+        return '<div class="adm-btn-row">' + test +
+            '<span class="adm-hint" title="受保护接口：不允许停用或改权限">受保护</span></div>';
+    }
     var toggle = r.disabled
         ? '<button class="adm-btn sm" data-act="enable" data-path="' + p + '" data-method="' + m + '">启用</button>'
         : '<button class="adm-btn sm warn" data-act="disable" data-path="' + p + '" data-method="' + m + '">停用</button>';
-    return '<div class="adm-btn-row">' +
+    return '<div class="adm-btn-row">' + test +
         '<button class="adm-btn sm" data-act="edit" data-path="' + p + '" data-method="' + m +
         '" data-access="' + ADM.esc(r.access_override || '') + '" data-default="' + ADM.esc(r.access_default || '') +
         '" data-desc="' + ADM.esc(r.desc || '') + '">编辑</button>' + toggle + '</div>';
@@ -248,7 +252,7 @@ function openModuleInterfaces(name, getItems, refresh) {
                         key: 'api-mod-' + name,
                         pageSize: 10,
                         empty: '该模块暂无接口',
-                        actionsWidth: 230,
+                        actionsWidth: 300,
                         detailTitle: function (r) { return r.method + '  ' + r.path; },
                         onRender: function (h) { bindApiRowActions(h, reload); }
                     });
@@ -265,6 +269,9 @@ function openModuleInterfaces(name, getItems, refresh) {
 
 /* ---------- 行内按钮事件 ---------- */
 function bindApiRowActions(host, refresh) {
+    host.querySelectorAll('[data-act="test"]').forEach(function (b) {
+        b.addEventListener('click', function () { openApiTestDialog(b); });
+    });
     host.querySelectorAll('[data-act="edit"]').forEach(function (b) {
         b.addEventListener('click', function () { openApiEditDialog(b, refresh); });
     });
@@ -306,6 +313,101 @@ function openApiEditDialog(btn, refresh) {
             return true;
         }
     });
+}
+
+/* ---------- 接口测试 ----------
+ * 悬浮框里以当前登录会话向该接口发一次真实请求（fetch 同源带 Cookie），
+ * 可填 Flask 路由的路径参数 <...>、查询参数（每行 key=value）与请求体。
+ * 响应只在前端展示：状态码 / 耗时 / Content-Type / 格式化后的内容。
+ * 注意：请求会像正常调用一样被计入接口请求统计（api_stats）。 */
+function openApiTestDialog(btn) {
+    var path = btn.dataset.path, method = (btn.dataset.method || 'GET').toUpperCase();
+    var segs = path.match(/<[^<>]*>/g) || [];   // 路由里的路径参数，如 /share/<token>、/api/file/<path:subpath>
+    var html = '<div class="adm-hint" style="margin-bottom:10px">以当前登录会话请求 <span class="adm-cell-mono">' +
+        ADM.esc(method + ' ' + path) + '</span>。停用 / 权限不足的接口会按服务端规则返回 401 / 403。</div>';
+    if (segs.length) {
+        html += '<div class="adm-field"><label>路径参数</label>' + segs.map(function (s, i) {
+            return '<input class="adm-input" name="seg_' + i + '" placeholder="' + ADM.esc(s) + '" style="margin-bottom:6px" spellcheck="false">';
+        }).join('') + '</div>';
+    }
+    html += ADM.fieldHtml({ name: 'query', label: '查询参数（每行 key=value，可留空）', type: 'textarea', placeholder: 'q=关键字\npage=1' }) +
+        ADM.fieldHtml({ name: 'body', label: '请求体（JSON 或原文，可留空；GET 一般留空）', type: 'textarea', placeholder: '{"name": "value"}' }) +
+        '<div id="apiTestOut"><div class="adm-hint">填写参数后点击左下角「发送请求」，响应会显示在这里。</div></div>';
+
+    ADM.modal({
+        title: '测试接口 · ' + method + ' ' + path,
+        icon: 'bi-play-circle',
+        size: 'big',
+        noOk: true,
+        cancelText: '关闭',
+        html: html,
+        footer: '<button class="adm-btn primary" type="button" data-adm-test-send><i class="bi bi-send"></i> 发送请求</button>',
+        onOpen: function (box) {
+            var sendBtn = box.querySelector('[data-adm-test-send]');
+            if (sendBtn) sendBtn.addEventListener('click', function () { runApiTest(box, path, method, segs, sendBtn); });
+        }
+    });
+}
+
+async function runApiTest(box, path, method, segs, sendBtn) {
+    var out = box.querySelector('#apiTestOut');
+    if (!out) return;
+    var v = ADM.readForm(box);
+
+    /* 路径参数替换：<path:...> 允许带 /（逐段编码），其余按单段编码 */
+    var url = path;
+    for (var i = 0; i < segs.length; i++) {
+        var raw = String(v['seg_' + i] || '').trim();
+        if (!raw) { ADM.toast('请填写路径参数 ' + segs[i], 'warn'); return; }
+        var enc = segs[i].indexOf('path:') >= 0
+            ? raw.split('/').map(encodeURIComponent).join('/')
+            : encodeURIComponent(raw);
+        url = url.replace(segs[i], enc);
+    }
+
+    /* 查询参数：每行 key=value（在第一个 = 处切分，value 里可以再带 =） */
+    var qs = [];
+    String(v.query || '').split('\n').forEach(function (line) {
+        line = line.trim();
+        if (!line) return;
+        var eq = line.indexOf('=');
+        if (eq < 1) return;
+        qs.push(encodeURIComponent(line.slice(0, eq)) + '=' + encodeURIComponent(line.slice(eq + 1)));
+    });
+    if (qs.length) url += (url.indexOf('?') >= 0 ? '&' : '?') + qs.join('&');
+
+    /* 请求体：能解析成 JSON 就按 application/json 发，否则按纯文本；GET/HEAD 不允许带 body */
+    var opts = { method: method, credentials: 'same-origin', headers: {} };
+    var bodyText = String(v.body || '').trim();
+    if (bodyText && method !== 'GET' && method !== 'HEAD') {
+        opts.headers['Content-Type'] = 'application/json';
+        try { JSON.parse(bodyText); } catch (e) { opts.headers['Content-Type'] = 'text/plain;charset=utf-8'; }
+        opts.body = bodyText;
+    }
+
+    sendBtn.disabled = true;
+    out.innerHTML = '<div class="adm-hint">请求中…</div>';
+    try {
+        var t0 = performance.now();
+        var resp = await fetch(url, opts);
+        var ms = Math.round(performance.now() - t0);
+        var text = await resp.text();
+        var ct = resp.headers.get('content-type') || '';
+        var pretty = text;
+        if (/json/i.test(ct) || /^[ \t]*[\[{]/.test(text)) {
+            try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (e) { /* 非 JSON，保持原文 */ }
+        }
+        if (pretty.length > 20000) pretty = pretty.slice(0, 20000) + '\n…（响应过长已截断，共 ' + pretty.length + ' 字符）';
+        out.innerHTML =
+            '<div style="margin-bottom:8px">' + ADM.badge('HTTP ' + resp.status, resp.ok ? 'ok' : 'bad') +
+            '<span class="adm-hint" style="margin-left:8px">耗时 ' + ms + ' ms · ' + ADM.esc(ct || '无 Content-Type') + '</span></div>' +
+            '<pre style="margin:0;max-height:340px;overflow:auto;background:var(--adm-bg-soft,#f6f8fa);border:1px solid var(--adm-border-soft,#e5e7eb);border-radius:6px;padding:10px;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-all">' +
+            ADM.esc(pretty) + '</pre>';
+    } catch (e) {
+        out.innerHTML = '<div class="adm-hint">请求失败：' + ADM.esc(String((e && e.message) || e)) + '</div>';
+    } finally {
+        sendBtn.disabled = false;
+    }
 }
 
 async function toggleApiDisabled(btn, disabled, refresh) {

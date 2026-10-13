@@ -954,6 +954,11 @@ var ADM = window.ADM = {
         var mod = ADM.modules.find(function (m) { return m.id === id; });
         if (!mod) return;
         ADM.current = id;
+        /* 记住当前打开的模块：localStorage 供刷新后恢复，URL hash 便于收藏 / 分享直达 */
+        try {
+            localStorage.setItem('adm_module', id);
+            if (window.history && history.replaceState) history.replaceState(null, '', '#' + id);
+        } catch (e) { }
         document.querySelectorAll('.adm-nav-item').forEach(function (el) {
             el.classList.toggle('active', el.dataset.id === id);
         });

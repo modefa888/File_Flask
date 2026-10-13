@@ -25,33 +25,17 @@ ADM.modules.push({
         html += ADM.stat('bi-star', '收藏夹', c.favorites || 0, '文件说明 ' + (c.file_hints || 0) + ' 条');
         html += '</div></div>';
 
-        /* ---- 系统资源 ---- */
-        html += '<div class="adm-section">' + ADM.sectionHead('bi-cpu', '系统资源') + '<div class="adm-col-grid">';
+        /* ---- 系统资源（初始渲染一次，之后每 2 秒原位更新，不重建 DOM） ---- */
+        html += '<div class="adm-section">' + ADM.sectionHead('bi-cpu', '系统资源',
+            '<span class="adm-hint">每 2 秒自动刷新</span>') + '<div class="adm-col-grid" id="ovResWrap">';
         if (res && !res.error) {
-            var cpu = res.cpu || {}, mem = res.mem || {}, disk = res.disk || {};
-            html += '<div class="adm-card">';
-            html += ADM.metric('CPU 使用率', (cpu.percent || 0) + '%（' + (cpu.cores || 1) + ' 核）',
-                cpu.percent || 0, cpu.load && cpu.load.length ? ('负载 ' + cpu.load.join(' / ')) : '');
-            html += ADM.metric('内存使用率', (mem.percent || 0) + '%',
-                mem.percent || 0, ADM.bytes(mem.used) + ' / ' + ADM.bytes(mem.total));
-            html += ADM.metric('磁盘使用率', (disk.percent || 0) + '%',
-                disk.percent || 0, ADM.bytes(disk.used) + ' / ' + ADM.bytes(disk.total) + '（' + (disk.mount || '-') + '）');
+            var t = ovResTexts(res);
+            html += '<div class="adm-card" id="ovResMetrics">';
+            html += ADM.metric('CPU 使用率', t.cpu.value, t.cpu.pct, t.cpu.sub);
+            html += ADM.metric('内存使用率', t.mem.value, t.mem.pct, t.mem.sub);
+            html += ADM.metric('磁盘使用率', t.disk.value, t.disk.pct, t.disk.sub);
             html += '</div>';
-            html += '<div class="adm-card">';
-            html += '<dl class="adm-kv">';
-            html += '<dt>健康结论</dt><dd>' + ADM.badge(
-                res.health === 'bad' ? '压力较大' : (res.health === 'warn' ? '需关注' : '正常'),
-                res.health === 'bad' ? 'bad' : (res.health === 'warn' ? 'warn' : 'ok')) +
-                ' <span class="adm-hint">' + ADM.esc(res.summary || '') + '</span></dd>';
-            html += '<dt>系统运行时长</dt><dd>' + ADM.dur(res.uptime || 0) + '</dd>';
-            html += '<dt>进程总数</dt><dd>' + ((res.counts && res.counts.total) || 0) + '（本服务相关 ' +
-                ((res.counts && res.counts.app) || 0) + '）</dd>';
-            html += '<dt>本服务进程</dt><dd>PID ' + ((res.self && res.self.pid) || sys.pid || '-') + ' · 内存 ' +
-                ADM.bytes(res.self && res.self.rss) + '</dd>';
-            html += '<dt>交换分区</dt><dd>' + ADM.bytes(mem.swap_used) + ' / ' + ADM.bytes(mem.swap_total) + '</dd>';
-            html += '<dt>网络实时速率</dt><dd>↑ ' + ADM.bytes((res.net && res.net.up) || 0) + '/s · ↓ ' +
-                ADM.bytes((res.net && res.net.down) || 0) + '/s</dd>';
-            html += '</dl></div>';
+            html += '<div class="adm-card"><dl class="adm-kv">' + ovResKvHtml(res, sys.pid) + '</dl></div>';
         } else {
             html += '<div class="adm-card"><div class="adm-hint">' +
                 ADM.esc((res && res.error) || '无法采集系统资源') + '</div></div>';
@@ -118,6 +102,23 @@ ADM.modules.push({
 
         el.innerHTML = html;
         ADM.mountTables(el);
+
+        /* 系统资源轮询：每 2 秒拉一次轻量快照（后端读采集线程缓存，开销极小），
+         * 原位更新文本 / 进度条，不重建 DOM → 不抖动。离开概览页（DOM 被替换）后自动停止。 */
+        var sysPid = sys.pid, pollBusy = false, pollTimer = null;
+        async function pollResource() {
+            if (pollBusy) return;
+            pollBusy = true;
+            try {
+                var r = await ADM.api('/api/adm/overview/resource');
+                patchSystemResource(r, sysPid);
+            } catch (e) { /* 网络抖动等静默跳过，等下一轮 */ }
+            pollBusy = false;
+        }
+        pollTimer = setInterval(function () {
+            if (!document.getElementById('ovResWrap')) { clearInterval(pollTimer); return; }
+            pollResource();
+        }, 2000);
     }
 });
 
@@ -129,4 +130,76 @@ function taskStatusBadge(status) {
     };
     var it = map[status] || [status || '未知', 'mute'];
     return ADM.badge(it[0], it[1]);
+}
+
+/* ---------- 系统资源：初渲染与 2 秒轮询共用的格式化工具 ---------- */
+
+/* 三项指标的展示文本 / 百分比 / 说明（两处共用，保证格式一致） */
+function ovResTexts(res) {
+    var cpu = res.cpu || {}, mem = res.mem || {}, disk = res.disk || {};
+    return {
+        cpu: { value: (cpu.percent || 0) + '%（' + (cpu.cores || 1) + ' 核）', pct: cpu.percent || 0,
+            sub: cpu.load && cpu.load.length ? ('负载 ' + cpu.load.join(' / ')) : '' },
+        mem: { value: (mem.percent || 0) + '%', pct: mem.percent || 0,
+            sub: ADM.bytes(mem.used) + ' / ' + ADM.bytes(mem.total) },
+        disk: { value: (disk.percent || 0) + '%', pct: disk.percent || 0,
+            sub: ADM.bytes(disk.used) + ' / ' + ADM.bytes(disk.total) + '（' + (disk.mount || '-') + '）' }
+    };
+}
+
+/* 右侧键值卡的各 dd 内容（带 id，供轮询原位更新） */
+function ovResKvValues(res, sysPid) {
+    var counts = res.counts || {}, self = res.self || {}, mem = res.mem || {}, net = res.net || {};
+    var health = res.health === 'bad' ? ['压力较大', 'bad'] : (res.health === 'warn' ? ['需关注', 'warn'] : ['正常', 'ok']);
+    return {
+        ovDHealth: ADM.badge(health[0], health[1]) + ' <span class="adm-hint">' + ADM.esc(res.summary || '') + '</span>',
+        ovDUptime: ADM.esc(ADM.dur(res.uptime || 0)),
+        ovDCounts: (counts.total || 0) + '（本服务相关 ' + (counts.app || 0) + '）',
+        ovDSelf: 'PID ' + (self.pid || sysPid || '-') + ' · 内存 ' + ADM.bytes(self.rss),
+        ovDSwap: ADM.bytes(mem.swap_used) + ' / ' + ADM.bytes(mem.swap_total),
+        ovDNet: '↑ ' + ADM.bytes(net.up || 0) + '/s · ↓ ' + ADM.bytes(net.down || 0) + '/s'
+    };
+}
+
+/* 右侧键值卡的初始 HTML */
+function ovResKvHtml(res, sysPid) {
+    var v = ovResKvValues(res, sysPid);
+    return '<dt>健康结论</dt><dd id="ovDHealth">' + v.ovDHealth + '</dd>' +
+        '<dt>系统运行时长</dt><dd id="ovDUptime">' + v.ovDUptime + '</dd>' +
+        '<dt>进程总数</dt><dd id="ovDCounts">' + v.ovDCounts + '</dd>' +
+        '<dt>本服务进程</dt><dd id="ovDSelf">' + v.ovDSelf + '</dd>' +
+        '<dt>交换分区</dt><dd id="ovDSwap">' + v.ovDSwap + '</dd>' +
+        '<dt>网络实时速率</dt><dd id="ovDNet">' + v.ovDNet + '</dd>';
+}
+
+/* 轮询到新快照后原位更新：只改文本节点 / 进度条宽度 / 颜色等级，不重建任何节点 → 不抖动 */
+function patchSystemResource(res, sysPid) {
+    if (!res || res.error) return;
+    if (!document.getElementById('ovResWrap')) return;
+    var t = ovResTexts(res);
+
+    /* 左卡：三项指标（值 / 进度条 / 说明） */
+    var metrics = document.querySelectorAll('#ovResMetrics > .adm-metric');
+    [t.cpu, t.mem, t.disk].forEach(function (m, i) {
+        var card = metrics[i];
+        if (!card) return;
+        var b = card.querySelector('.adm-metric-row b');
+        if (b && b.textContent !== m.value) b.textContent = m.value;
+        var bar = card.querySelector('.adm-bar');
+        if (bar) {
+            var fill = bar.querySelector('i');
+            if (fill) fill.style.width = Math.max(0, Math.min(100, m.pct)) + '%';
+            var cls = 'adm-bar' + (m.pct >= 90 ? ' bad' : (m.pct >= 75 ? ' warn' : ''));
+            if (bar.className !== cls) bar.className = cls;
+        }
+        var hint = card.querySelector('.adm-hint');
+        if (hint && hint.textContent !== m.sub) hint.textContent = m.sub;
+    });
+
+    /* 右卡：逐个 dd 原位更新（内容没变不写 DOM，避免无谓重绘） */
+    var v = ovResKvValues(res, sysPid);
+    Object.keys(v).forEach(function (id) {
+        var n = document.getElementById(id);
+        if (n && n.innerHTML !== v[id]) n.innerHTML = v[id];
+    });
 }

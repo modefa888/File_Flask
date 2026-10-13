@@ -1071,3 +1071,10 @@
 .adm-module-chip:active {
     transform: translateY(1px);
 }
+
+/* 选中态（如「页面模块」里点击分组筛选当前分组） */
+.adm-module-chip.on {
+    color: #fff;
+    border-color: var(--adm-brand);
+    background: var(--adm-brand);
+}

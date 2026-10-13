@@ -458,7 +458,9 @@ var ADM = window.ADM = {
         access_override: '自定义级别', overridden: '是否改过权限', disabled: '是否停用',
         can_manage: '可管理', orphan: '已失效', rule: '路径规则', params: '路径参数',
         allowed: '角色允许情况', perm_override: '权限是否改过',
-        total: '请求次数', last_status: '最近状态码'
+        total: '请求次数', last_status: '最近状态码',
+        name: '名称', path: '路径', method: '方法', methods: '方法', endpoint: '端点',
+        href: '预览地址', group: '分组', type: '类型', last_at: '最近访问'
     },
     rowLabel: function (k) {
         return ADM.ROW_LABELS[k] || k;

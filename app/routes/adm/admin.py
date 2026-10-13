@@ -25,6 +25,9 @@ POST /api/adm/apis/permission/materialize  生成默认权限快照（全量物�
 POST /api/adm/apis/permission/clear        清除默认权限快照
 POST /api/adm/apis/stats/reset  清零接口请求统计
 GET  /api/adm/permissions      权限视图（角色 → 可访问接口 + 权限矩阵）
+GET  /api/adm/pages            页面清单（登录 / 分享 / IDE / 文件管理 / 协作 / 后台等）
+GET  /api/adm/pages/summary    页面模块统计（总数 / 级别 / 分组）
+POST /api/adm/pages/update     编辑页面登记 {path, desc?|access?|disabled?}
 
 其余功能（分享 / 定时任务 / 后台任务 / 插件 / 数据库连接 / SSH / 通知 / AI 用量 /
 文件说明 / 操作历史）直接复用各业务模块已有的 `/api/...` 接口，后台页只做聚合展示。
@@ -309,3 +312,45 @@ def api_permissions():
     """权限视图：每个角色可访问的接口清单 + 权限矩阵。"""
     from ...services.adm import api_registry
     return jsonify(api_registry.permission_view())
+
+
+# --------------------------------------------------------------------------- 页面模块
+@bp.route("/api/adm/pages")
+def api_pages():
+    """页面清单：全部页面级路由（登录 / 分享 / IDE / 文件管理 / 协作 / 后台等）。
+
+    数据来自接口登记表（api_interface，kind='页面'），叠加页面语义（友好名称 /
+    分组 / 图标 / 预览地址）后返回，供「页面模块」展示与管理。
+    """
+    from ...services.adm import page_registry
+    return jsonify({"items": page_registry.list_pages()})
+
+
+@bp.route("/api/adm/pages/summary")
+def api_pages_summary():
+    """页面模块统计：总数 / 级别分布 / 停用 / 失效 / 分组汇总。"""
+    from ...services.adm import page_registry
+    return jsonify(page_registry.summary())
+
+
+@bp.route("/api/adm/pages/update", methods=["POST"])
+def api_pages_update():
+    """编辑页面登记：说明 / 访问级别 / 停用启用。
+
+    body: {path, desc?, access?, disabled?}
+    - access 传空串表示恢复默认级别；
+    - 受保护页面（登录入口、后台页面等）不允许改级别 / 停用，返回 400。
+    """
+    from ...services.adm import page_registry
+    data = request.get_json(silent=True) or {}
+    path = (data.get("path") or "").strip()
+    if not path:
+        return _fail("缺少页面路径")
+    err = page_registry.update_page(
+        path,
+        desc=data.get("desc") if "desc" in data else None,
+        access=data.get("access") if "access" in data else None,
+        disabled=bool(data.get("disabled")) if "disabled" in data else None)
+    if err:
+        return _fail(err)
+    return _ok()

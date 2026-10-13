@@ -88,6 +88,9 @@ RULE_DESC = {
     ("/api/adm/apis/sync", "POST"): "从路由同步接口登记表",
     ("/api/shared/files", "GET"): "协作者：被分享文件清单 / 分享范围内目录",
     ("/api/adm/permissions", "GET"): "权限视图（角色 → 可访问接口）",
+    ("/api/adm/pages", "GET"): "页面模块：全部页面级路由清单",
+    ("/api/adm/pages/summary", "GET"): "页面模块：统计（总数 / 级别 / 分组）",
+    ("/api/adm/pages/update", "POST"): "页面模块：编辑页面登记（说明 / 级别 / 停用）",
     ("/login", "*"): "登录页 / 提交登录",
     ("/register", "*"): "注册页 / 提交注册",
     ("/logout", "*"): "退出登录",
@@ -101,6 +104,7 @@ _PROTECTED_RULES = {
     "/api/adm/apis/permission", "/api/adm/apis/permission/materialize",
     "/api/adm/apis/permission/clear", "/api/adm/apis/stats/reset",
     "/api/adm/apis/sync", "/api/adm/apis/cleanup", "/api/adm/permissions",
+    "/api/adm/pages", "/api/adm/pages/summary", "/api/adm/pages/update",
 }
 _PROTECTED_PREFIXES = ("/static", "/ws/")
 

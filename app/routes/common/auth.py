@@ -106,7 +106,9 @@ def _require_login():
             or p.startswith("/static")          # 静态资源对协作者开放，否则 JS 会被重定向成 HTML
             or p.startswith("/ws/")             # WebSocket 对协作者开放，否则 /ws/collab 握手被 302
             or (p, request.method) in _MEMBER_ALLOW_API
-            or (p.startswith("/api/collab/") and request.method == "GET")
+            # HEAD 与 GET 等同（Flask 中 HEAD 由 GET 视图处理，如协作页下载确认框
+            # 用 HEAD 探测文件大小），必须一并放行，否则 403 的错误体大小会被误当文件大小
+            or (p.startswith("/api/collab/") and request.method in ("GET", "HEAD"))
         )
         if not allowed:
             _log.warning("协作者越权访问已拦截: %s %s", request.method, p)

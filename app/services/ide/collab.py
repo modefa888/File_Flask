@@ -129,7 +129,7 @@ def _persist():
                 "created": r.created, "version": r.version,
                 "host_key": r.host_key, "group": r.group,
                 "max_peers": r.max_peers, "allowed_users": r.allowed_users,
-                "expires_at": r.expires_at,
+                "expires_at": r.expires_at, "view": r.view,
                 "text": r.text, "baseline": r.baseline, "log": r.log,
                 "char_authors": _pack_authors(r.char_authors),
                 "author_info": r.author_info,
@@ -184,6 +184,8 @@ def _load():
             au = d.get("allowed_users")
             r.allowed_users = [str(u) for u in au if str(u).strip()] if isinstance(au, list) and au else None
             r.expires_at = d.get("expires_at")
+            # 老数据没有 view 字段：按文件现况补算（新房间持久化里有）
+            r.view = bool(d.get("view")) or is_view_only(r.path)
             _rooms[r.token] = r
         except Exception:
             continue
@@ -207,13 +209,41 @@ def _read_file_text(path):
         return ""
 
 
+# 只能「共享查看」、不能共同编辑的文件类型：图片 / PDF / 音视频 /
+# 压缩包 / 二进制产物（字体、可执行、数据库等）。它们照样能出现在
+# 批量分享里给其他用户打开查看或下载，但不进 OT 编辑房间。
+_VIEW_EXTS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".avif",
+    ".pdf",
+    ".mp4", ".webm", ".mov", ".mkv", ".mp3", ".wav", ".ogg", ".flac",
+    ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz",
+    ".exe", ".dll", ".so", ".dylib", ".bin", ".iso", ".apk", ".jar",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    ".db", ".sqlite", ".pyc", ".o", ".a", ".wasm",
+}
+
+
+def is_view_only(path):
+    """判断某文件是否为「仅查看」：按扩展名识别，可疑时再嗅探二进制字节。"""
+    ext = os.path.splitext(path or "")[1].lower()
+    if ext in _VIEW_EXTS:
+        return True
+    try:
+        with open(path, "rb") as f:
+            return b"\x00" in f.read(1024)     # 含 NUL 字节基本可断定是二进制
+    except OSError:
+        return False
+
+
 class Room:
     def __init__(self, token, path, name):
         self.token = token
         self.path = path                      # 被协作编辑的文件绝对路径
         self.name = name
+        self.view = is_view_only(path)        # 仅查看（二进制等）：不参与共同编辑
         self.created = int(time.time())
-        self.text = _read_file_text(path)     # 服务端权威文本（从磁盘种子）
+        # 仅查看的文件不做文本种子：二进制按 UTF-8 解出来是乱码，没有编辑意义
+        self.text = "" if self.view else _read_file_text(path)
         self.baseline = self.text             # 「分享前」的基线内容，用于版本对比
         self.char_authors = [None] * len(self.text)   # 逐字符归属：这个字最后是谁写的
         self.author_info = {}                 # sid -> {"name","color"}：归属展示用
@@ -232,7 +262,8 @@ class Room:
     def peers_list(self, skip_sid=None):
         return [
             {"id": p["id"], "name": p["name"], "color": p["color"],
-             "host": p["id"] == self.host_sid}
+             "host": p["id"] == self.host_sid,
+             "viewer": bool(p.get("viewer"))}   # 仅查看成员（二进制等文件的观看者）
             for p in self.peers.values()
             if p["id"] != skip_sid
         ]
@@ -278,6 +309,7 @@ def create_room(path, name=None, group=None, max_peers=None, allowed_users=None,
             if r.path == path:
                 if group and not r.group:
                     r.group = group        # 老房间并入这次的分享组
+                r.view = is_view_only(path)  # 复用房间也按文件现况刷新「仅查看」
                 _apply_limits(r)
                 _persist_soon()
                 return r, r.token
@@ -303,7 +335,8 @@ def list_group(gid):
     rooms.sort(key=lambda r: r.created)
     return [
         {"token": r.token, "name": r.name, "path": r.path,
-         "peers": len(r.peers), "version": r.version, "created": r.created}
+         "peers": len(r.peers), "version": r.version, "created": r.created,
+         "view": r.view}
         for r in rooms
     ]
 
@@ -337,6 +370,7 @@ def list_rooms():
                 "max_peers": r.max_peers,
                 "allowed_users": r.allowed_users or [],
                 "expires_at": r.expires_at,
+                "view": r.view,       # 仅查看（二进制等）：不参与共同编辑
             })
     for t in expired:
         delete_room(t)

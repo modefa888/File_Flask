@@ -52,6 +52,8 @@
     width: 18px; height: 18px; border-radius: 50%; display: inline-flex;
     align-items: center; justify-content: center; font-size: 10px; color: #1b1b1e; font-weight: 700;
   }
+  .c-view-badge { color: #9aa0a6; font-weight: 400; font-size: 11px; }
+  html.theme-light .c-view-badge { color: #6a6a6a; }
   header input, header button {
     background: #252528; border: 1px solid #3c3c3c; color: #d4d4d4;
     border-radius: 5px; padding: 5px 8px; font-size: 12px; outline: none;
@@ -116,6 +118,106 @@
   #tabs .tb.on { background: #2a2d2e; color: #fff; border-color: #2c2c2c; }
   #tabs .tb .seti-ic { font-size: 1.2em; transform: translateY(.08em); }
   #tabs .tb .tb-nm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+  #tabs .tb .tb-eye { color: #8a8a8a; font-size: 11px; }
+  /* 仅查看文件的预览区：图片/PDF/音视频内联展示，压缩包等提供下载 */
+  #viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #1e1e1e; }
+  #viewer .vw-bar {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; background: #181818; border-bottom: 1px solid #2c2c2c;
+    color: #9aa0a6; font-size: 12px;
+  }
+  #viewer .vw-bar .sp { flex: 1; }
+  #viewer .vw-body {
+    flex: 1; min-height: 0; overflow: auto; padding: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #viewer .vw-body img, #viewer .vw-body video { max-width: 100%; max-height: 100%; border-radius: 6px; }
+  #viewer .vw-body iframe { width: 100%; height: 100%; border: 0; background: #fff; border-radius: 6px; }
+  #viewer .vw-dl {
+    text-align: center; color: #9aa0a6; font-size: 13px; line-height: 2;
+    padding: 26px 36px; border: 1px dashed #3a3a3a; border-radius: 10px;
+  }
+  #viewer .vw-dl .bi { font-size: 34px; display: block; margin-bottom: 4px; color: #dcb67a; }
+  #viewer a {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px;
+    background: #2a2d2e; color: #e6e6e6; border: 1px solid #3a3a3a; border-radius: 6px;
+    text-decoration: none; font-size: 12.5px; cursor: pointer;
+  }
+  #viewer a:hover { background: #33373a; }
+  /* 视频播放器（参考 IDE 标签页内嵌播放器）：底部悬浮控制条 + 自动隐藏 */
+  #viewer .vw-body.vw-full { padding: 0; }
+  #viewer .vpv-wrap { position: relative; width: 100%; height: 100%; background: #000; border-radius: 6px; overflow: hidden; }
+  #viewer .vpv-wrap video { width: 100%; height: 100%; object-fit: contain; }
+  #viewer .vpv-controls {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 4px 14px 8px; background: linear-gradient(transparent, rgba(0, 0, 0, .78));
+    transition: opacity .2s ease;
+  }
+  #viewer .vpv-wrap.idle { cursor: none; }
+  #viewer .vpv-wrap.idle .vpv-controls { opacity: 0; pointer-events: none; }
+  #viewer .vpv-timerow { display: flex; align-items: center; gap: 10px; }
+  #viewer .vpv-time { flex: none; color: #e6e6e6; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  #viewer .vpv-progress { flex: 1; padding: 7px 0; cursor: pointer; touch-action: none; }
+  #viewer .vpv-track { position: relative; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .22); }
+  #viewer .vpv-buffered { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 2px; background: rgba(255, 255, 255, .32); }
+  #viewer .vpv-played { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 2px; background: #4a9eff; }
+  #viewer .vpv-knob {
+    position: absolute; top: 50%; left: 0; width: 11px; height: 11px; border-radius: 50%;
+    background: #4a9eff; transform: translate(-50%, -50%); box-shadow: 0 0 4px rgba(0, 0, 0, .5);
+  }
+  #viewer .vpv-row { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+  #viewer .vpv-btn {
+    background: none; border: 0; color: #dcdcdc; font-size: 15px; line-height: 1;
+    padding: 3px 7px; cursor: pointer; border-radius: 5px;
+  }
+  #viewer .vpv-btn:hover { color: #fff; background: rgba(255, 255, 255, .12); }
+  #viewer .vpv-btn.active { color: #4a9eff; }
+  #viewer .vpv-vol { display: flex; align-items: center; gap: 2px; }
+  #viewer .vpv-vol-range { width: 72px; accent-color: #4a9eff; height: 3px; cursor: pointer; }
+  #viewer .vpv-spacer { flex: 1; }
+  #viewer .vpv-speed { position: relative; }
+  #viewer .vpv-speed-cur { font-size: 12px; }
+  #viewer .vpv-speed-menu {
+    display: none; position: absolute; bottom: 28px; right: 0; z-index: 6;
+    background: #222; border: 1px solid #3a3a3a; border-radius: 8px; padding: 4px; min-width: 72px;
+  }
+  #viewer .vpv-speed.open .vpv-speed-menu { display: block; }
+  #viewer .vpv-speed-item {
+    display: block; width: 100%; text-align: center; background: none; border: 0;
+    color: #ccc; font-size: 12px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+  }
+  #viewer .vpv-speed-item:hover { background: #333; color: #fff; }
+  #viewer .vpv-speed-item.active { color: #4a9eff; }
+  /* 下载二次确认悬浮框 */
+  #dl-confirm {
+    position: fixed; inset: 0; z-index: 300; display: flex;
+    align-items: center; justify-content: center; background: rgba(0, 0, 0, .45);
+  }
+  #dl-confirm .dc-box {
+    width: 330px; max-width: calc(100vw - 48px); background: #252526; color: #ddd;
+    border: 1px solid #3a3a3a; border-radius: 10px; padding: 16px 18px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, .5); font-size: 13px;
+  }
+  #dl-confirm .dc-title {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+    font-size: 14px; font-weight: 600; color: #fff;
+  }
+  #dl-confirm .dc-name { word-break: break-all; color: #e6e6e6; margin-bottom: 4px; }
+  #dl-confirm .dc-size { color: #9aa0a6; font-size: 12px; min-height: 16px; }
+  #dl-confirm .dc-note { color: #8a8a8a; font-size: 12px; margin-top: 8px; line-height: 1.5; }
+  #dl-confirm .dc-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  #dl-confirm button { border-radius: 6px; font-size: 12.5px; padding: 5px 14px; cursor: pointer; }
+  #dl-confirm .dc-cancel { background: none; border: 1px solid #444; color: #ccc; }
+  #dl-confirm .dc-cancel:hover { background: #333; color: #fff; }
+  #dl-confirm .dc-ok { background: #2f6feb; border: 1px solid #2f6feb; color: #fff; }
+  #dl-confirm .dc-ok:hover { background: #3b7bf5; }
+  html.theme-light #dl-confirm .dc-box { background: #fff; color: #1f2328; border-color: #d8d8d8; }
+  html.theme-light #dl-confirm .dc-title { color: #1f2328; }
+  html.theme-light #dl-confirm .dc-name { color: #1f2328; }
+  html.theme-light #dl-confirm .dc-size,
+  html.theme-light #dl-confirm .dc-note { color: #6a6a6a; }
+  html.theme-light #dl-confirm .dc-cancel { border-color: #d0d0d0; color: #57606a; }
+  html.theme-light #dl-confirm .dc-cancel:hover { background: #f2f2f2; color: #1f2328; }
   #ed .CodeMirror { height: 100%; font-size: 13px; }
   /* 远端光标 */
   .cc { position: relative; width: 0; border-left: 2px solid var(--cc, #6cb6ff); margin-left: -1px; pointer-events: none; }
@@ -189,6 +291,10 @@
   html.theme-light #tabs .tb { color: #6a6a6a; }
   html.theme-light #tabs .tb:hover { background: #ececec; color: #1f2328; }
   html.theme-light #tabs .tb.on { background: #e0e0e0; color: #1f2328; border-color: #d8d8d8; }
+  html.theme-light #viewer { background: #ffffff; }
+  html.theme-light #viewer .vw-bar { background: #f6f6f6; border-bottom-color: #d8d8d8; color: #6a6a6a; }
+  html.theme-light #viewer .vw-dl { border-color: #d0d0d0; color: #6a6a6a; }
+  html.theme-light #viewer a { background: #fff; color: #1f2328; border-color: #d0d0d0; }
   html.theme-light #tip { background: rgba(0, 0, 0, .28); }
   html.theme-light #tip .box { background: #ffffff; border-color: #d0d0d0; color: #1f2328; }
   html.theme-light #tip a { color: #005fb8; }
@@ -224,9 +330,23 @@
     <div id="tabs"></div>
     <div id="edbar"></div>
     <div id="ed"></div>
+    <div id="viewer" style="display:none"></div>
   </div>
 </main>
 <div id="tip" style="display:none"><div class="box" id="tipBox"></div></div>
+<!-- 下载二次确认悬浮框：点「下载」后先确认，再真正发起下载 -->
+<div id="dl-confirm" style="display:none">
+  <div class="dc-box">
+    <div class="dc-title"><i class="bi bi-download"></i> 确认下载</div>
+    <div class="dc-name"></div>
+    <div class="dc-size"></div>
+    <div class="dc-note">即将下载房主共享的文件，请确认来源可信后再继续</div>
+    <div class="dc-btns">
+      <button class="dc-cancel" type="button">取消</button>
+      <button class="dc-ok" type="button">确认下载</button>
+    </div>
+  </div>
+</div>
 
 <script>
 (function () {
@@ -727,7 +847,8 @@
   function renderPeers(peers) {
     var list = (peers || []).slice();
     if (S.myId && !list.some(function (p) { return p.id === S.myId; }))
-      list.unshift({ id: S.myId, name: S.myName, color: "#6cb6ff", host: false });
+      list.unshift({ id: S.myId, name: S.myName, color: "#6cb6ff", host: false,
+                     viewer: !!S.amViewer });
     (peers || []).forEach(function (p) {          // 记住作者名/色，供「谁改的」标注使用
       if (p && p.id) S.peerInfo[p.id] = { name: p.name || "协作者", color: p.color || "#6cb6ff" };
     });
@@ -736,6 +857,7 @@
       return '<span class="peer"><span class="dot" style="background:' + esc(p.color || "#888") + '">' +
              esc(INIT(p.name)) + "</span>" + esc(p.name) +
              (p.host ? '<b class="c-host-badge">· 房主</b>' : "") +
+             (p.viewer && !p.host ? '<b class="c-view-badge" title="仅查看，不参与编辑">· 仅查看</b>' : "") +
              (you ? "（你）" : "") + "</span>";
     }).join("");
   }
@@ -924,9 +1046,345 @@
 
   /* ---------------- 批量分享组：左侧被勾选的文件列表 + 点击进入对应文件 ---------------- */
 
+  /* ---------------- 仅查看的共享文件（zip/图片等二进制） ----------------
+     不进编辑房间：展示预览（图片/PDF/音视频）或提供下载，也不连 WebSocket。 */
+  function roomByTok(tok) {
+    return (S.rooms || []).filter(function (r) { return r.token === tok; })[0] || null;
+  }
+  /* 协作页视频播放器：参考 IDE 标签页内嵌播放器的底部控制条
+     （播放/暂停、时间+进度+缓冲、音量、倍速、循环、全屏、控制条自动隐藏）。
+     音量/静音/倍速偏好记在 localStorage["collab.vpv"]，与 IDE 播放器互不影响。 */
+  var _vpvKeysInstalled = false;   // 播放器全局快捷键只装一次
+  function _collabVpvLoad() {
+    try { return Object.assign({ volume: 1, muted: false, rate: 1 },
+      JSON.parse(localStorage.getItem("collab.vpv") || "{}")); }
+    catch (e) { return { volume: 1, muted: false, rate: 1 }; }
+  }
+  function mountCollabVideo(wrap) {
+    if (!wrap) return;
+    var video = wrap.querySelector("video");
+    var store = _collabVpvLoad();
+    var save = function () { try { localStorage.setItem("collab.vpv", JSON.stringify(store)); } catch (e) {} };
+    var $ = function (s) { return wrap.querySelector(s); };
+    var playBtn = $(".vpv-play"), muteBtn = $(".vpv-mute"), volRange = $(".vpv-vol-range");
+    var speedWrap = $(".vpv-speed"), speedCur = $(".vpv-speed-cur"), loopBtn = $(".vpv-loop"), fullBtn = $(".vpv-full");
+    var progress = $(".vpv-progress"), played = $(".vpv-played"), buffered = $(".vpv-buffered"), knob = $(".vpv-knob");
+    var timeCur = $(".vpv-time-cur"), timeDur = $(".vpv-time-dur");
+    var fmt = function (s) {
+      if (!isFinite(s)) return "--:--";
+      s = Math.max(0, Math.floor(s));
+      var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+      var mm = String(m).padStart(2, "0"), s2 = String(sec).padStart(2, "0");
+      return h ? h + ":" + mm + ":" + s2 : mm + ":" + s2;
+    };
+    var setPlayIcon = function () { playBtn.innerHTML = '<i class="bi ' + (video.paused ? "bi-play-fill" : "bi-pause-fill") + '"></i>'; };
+    var togglePlay = function () { if (video.paused) video.play().catch(function () {}); else video.pause(); };
+    playBtn.onclick = togglePlay;
+    video.onclick = togglePlay;
+    video.ondblclick = function () { fullBtn.click(); };
+    video.onplay = video.onpause = setPlayIcon;
+    setPlayIcon();
+
+    var updateProgress = function () {
+      var dur = video.duration || 0, cur = video.currentTime;
+      var pct = dur ? cur / dur * 100 : 0;
+      played.style.width = pct + "%"; knob.style.left = pct + "%";
+      timeCur.textContent = fmt(cur);
+      timeDur.textContent = dur ? fmt(dur) : "--:--";
+      if (video.buffered.length && dur) {
+        buffered.style.width = Math.min(100, video.buffered.end(video.buffered.length - 1) / dur * 100) + "%";
+      }
+    };
+    video.addEventListener("timeupdate", updateProgress);
+    video.addEventListener("progress", updateProgress);
+    video.addEventListener("loadedmetadata", function () {
+      video.playbackRate = Math.min(4, Math.max(0.25, +store.rate || 1));
+      updateProgress();
+    });
+
+    var dragging = false;
+    var seekTo = function (x) {
+      if (!isFinite(video.duration) || !video.duration) return;
+      var rect = progress.getBoundingClientRect();
+      video.currentTime = Math.min(1, Math.max(0, (x - rect.left) / rect.width)) * video.duration;
+      updateProgress();
+    };
+    progress.addEventListener("pointerdown", function (e) {
+      dragging = true;
+      try { progress.setPointerCapture(e.pointerId); } catch (err) {}
+      seekTo(e.clientX);
+    });
+    progress.addEventListener("pointermove", function (e) { if (dragging) seekTo(e.clientX); });
+    progress.addEventListener("pointerup", function () { dragging = false; });
+    progress.addEventListener("pointercancel", function () { dragging = false; });
+
+    var volIcon = function () {
+      var v = video.muted ? 0 : video.volume;
+      muteBtn.innerHTML = '<i class="bi ' + (v === 0 ? "bi-volume-mute-fill" : v < 0.5 ? "bi-volume-down-fill" : "bi-volume-up-fill") + '"></i>';
+    };
+    volRange.addEventListener("input", function () {
+      video.volume = +volRange.value; video.muted = false;
+      store.volume = video.volume; store.muted = false; save();
+    });
+    muteBtn.onclick = function () { video.muted = !video.muted; };
+    video.addEventListener("volumechange", function () {
+      store.volume = video.volume; store.muted = video.muted; save();
+      volRange.value = video.muted ? 0 : video.volume;
+      volIcon();
+    });
+    video.volume = Math.min(1, Math.max(0, +store.volume || 1));
+    video.muted = !!store.muted;
+    volRange.value = video.muted ? 0 : video.volume;
+    volIcon();
+
+    $(".vpv-speed-btn").onclick = function (e) { e.stopPropagation(); speedWrap.classList.toggle("open"); };
+    wrap.querySelectorAll(".vpv-speed-item").forEach(function (el) {
+      el.onclick = function (e) {
+        e.stopPropagation();
+        video.playbackRate = +el.dataset.rate;
+        store.rate = +el.dataset.rate; save();
+        speedCur.textContent = el.textContent;
+        wrap.querySelectorAll(".vpv-speed-item").forEach(function (x) { x.classList.toggle("active", x === el); });
+        speedWrap.classList.remove("open");
+      };
+    });
+    var initRate = Math.min(4, Math.max(0.25, +store.rate || 1));
+    speedCur.textContent = initRate + "x";
+    var ri = wrap.querySelector('.vpv-speed-item[data-rate="' + initRate + '"]');
+    if (ri) ri.classList.add("active");
+    loopBtn.onclick = function () {
+      video.loop = !video.loop;
+      loopBtn.classList.toggle("active", video.loop);
+      loopBtn.title = video.loop ? "循环播放：开" : "循环播放：关";
+    };
+
+    fullBtn.onclick = function () {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else if (wrap.requestFullscreen) wrap.requestFullscreen();
+    };
+
+    /* 控制条自动隐藏：播放中鼠标静止 2.5s 淡出 */
+    var idleTimer = null;
+    var wake = function () {
+      wrap.classList.remove("idle");
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(function () { if (!video.paused) wrap.classList.add("idle"); }, 2500);
+    };
+    wrap.addEventListener("mousemove", wake);
+    wrap.addEventListener("mouseleave", function () { if (!video.paused) wrap.classList.add("idle"); });
+    video.addEventListener("pause", function () { wrap.classList.remove("idle"); });
+    wake();
+  }
+  /* 播放器快捷键（空格/M/F/←→）：只在预览区可见且有视频时接管，全局只装一次 */
+  if (!_vpvKeysInstalled) {
+    _vpvKeysInstalled = true;
+    document.addEventListener("keydown", function (e) {
+      var vw = $("viewer");
+      if (!vw || vw.style.display === "none") return;
+      var v = vw.querySelector("video");
+      if (!v) return;
+      var tag = (e.target && e.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || (e.target && e.target.isContentEditable)) return;
+      var k = (e.key || "").toLowerCase();
+      if (e.key === " ") {
+        e.preventDefault(); e.stopPropagation();
+        if (v.paused) v.play().catch(function () {}); else v.pause();
+      } else if (k === "m") {
+        e.preventDefault(); e.stopPropagation();
+        v.muted = !v.muted;
+      } else if (k === "f") {
+        e.preventDefault(); e.stopPropagation();
+        var w = v.closest(".vpv-wrap");
+        if (w) { var fb = w.querySelector(".vpv-full"); if (fb) fb.click(); }
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault(); e.stopPropagation();
+        v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + (e.key === "ArrowRight" ? 5 : -5)));
+      }
+    }, true);
+    document.addEventListener("click", function () {   // 点空白处收起倍速菜单
+      var vw = $("viewer");
+      if (vw) { var m = vw.querySelector(".vpv-speed.open"); if (m) m.classList.remove("open"); }
+    });
+  }
+  /* 下载二次确认悬浮框：所有 .vw-dlgo 下载按钮统一走这里。
+     弹窗里显示文件名 + 大小（HEAD 请求取 Content-Length），
+     点「确认下载」才真正发起下载；取消 / 点遮罩 / Esc 关闭。 */
+  function askDownload(tok, name) {
+    var box = $("dl-confirm");
+    if (!box) {   // 兜底：结构缺失时直接下载
+      var a = document.createElement("a");
+      a.href = "/api/collab/" + encodeURIComponent(tok) + "/raw?dl=1";
+      a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      return;
+    }
+    var src = "/api/collab/" + encodeURIComponent(tok) + "/raw";
+    box.querySelector(".dc-name").textContent = name;
+    box.querySelector(".dc-size").textContent = "";
+    box.style.display = "flex";
+    var settled = false;
+    var close = function () { box.style.display = "none"; };
+    box.querySelector(".dc-ok").onclick = function () {
+      settled = true;
+      close();
+      var d = document.createElement("a");
+      d.href = src + "?dl=1";
+      d.download = name;
+      document.body.appendChild(d); d.click(); d.remove();
+    };
+    box.querySelector(".dc-cancel").onclick = close;
+    box.onclick = function (e) { if (e.target === box) close(); };
+    fetch(src, { method: "HEAD" }).then(function (r) {
+      if (settled) return;
+      if (!r.ok) return;   // 404/403 等错误响应也有 Content-Length，但那是错误体大小，不能当文件大小展示
+      var n = +r.headers.get("Content-Length") || 0;
+      if (n) box.querySelector(".dc-size").textContent =
+        "文件大小：" + (n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB");
+    }).catch(function () {});
+  }
+  /* 委托拦截所有下载按钮（预览顶栏 / 下载卡片通用），只装一次 */
+  document.addEventListener("click", function (e) {
+    var t = e.target && e.target.closest ? e.target.closest(".vw-dlgo") : null;
+    if (!t) return;
+    e.preventDefault();   // 阻止 <a href="?dl=1"> 直接下载，先弹确认
+    askDownload(t.getAttribute("data-tok") || "", t.getAttribute("data-nm") || "未命名");
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    var box = $("dl-confirm");
+    if (box && box.style.display !== "none") box.style.display = "none";
+  });
+  function openView(tok) {
+    var r = roomByTok(tok);
+    if (!r) return;
+    if (S.ws) { var old = S.ws; S.ws = null; try { old.onclose = null; old.close(); } catch (e) {} }
+    S.token = tok; S.closed = false; S.version = 0; S.pending = [];
+    S.myId = null; S.amViewer = true; S.peerInfo = {};
+    Object.keys(S.marks).forEach(clearCursor);
+    $("peers").innerHTML = "";
+    $("st").style.display = "";            // 仅查看也连 WS（出现在房主在线列表），状态照常显示
+    setSt(false);
+    $("ed").style.display = "none";
+    $("edbar").style.display = "none";
+    var nm = (r.path || "").split("/").filter(Boolean).pop() || "未命名";
+    var rn = $("roomName"); rn.textContent = nm; rn.title = (r.path || "") + "（仅查看）";
+    var src = "/api/collab/" + encodeURIComponent(tok) + "/raw";
+    var ext = (nm.split(".").pop() || "").toLowerCase();
+    var IMG = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "ico", "avif"];
+    var VID = ["mp4", "webm", "mov", "mkv"];
+    var AUD = ["mp3", "wav", "ogg", "flac"];
+    var body, isVid = false;
+    if (IMG.indexOf(ext) >= 0) body = '<img src="' + src + '" alt="' + esc(nm) + '">';
+    else if (ext === "pdf") body = '<iframe src="' + src + '"></iframe>';
+    else if (VID.indexOf(ext) >= 0) {
+      isVid = true;
+      body = '<div class="vpv-wrap">' +
+        '<video playsinline preload="metadata" src="' + src + '"></video>' +
+        '<div class="vpv-controls">' +
+          '<div class="vpv-timerow">' +
+            '<span class="vpv-time vpv-time-cur">00:00</span>' +
+            '<div class="vpv-progress"><div class="vpv-track">' +
+              '<div class="vpv-buffered"></div><div class="vpv-played"></div><div class="vpv-knob"></div>' +
+            '</div></div>' +
+            '<span class="vpv-time vpv-time-dur">--:--</span>' +
+          '</div>' +
+          '<div class="vpv-row">' +
+            '<button class="vpv-btn vpv-play" title="播放/暂停 (空格)"><i class="bi bi-play-fill"></i></button>' +
+            '<div class="vpv-vol">' +
+              '<button class="vpv-btn vpv-mute" title="静音 (M)"><i class="bi bi-volume-up-fill"></i></button>' +
+              '<input type="range" class="vpv-vol-range" min="0" max="1" step="0.01" value="1" title="音量">' +
+            '</div>' +
+            '<div class="vpv-spacer"></div>' +
+            '<div class="vpv-speed">' +
+              '<button class="vpv-btn vpv-speed-btn" title="倍速播放"><span class="vpv-speed-cur">1.0x</span></button>' +
+              '<div class="vpv-speed-menu">' +
+                '<button class="vpv-speed-item" data-rate="0.5">0.5x</button>' +
+                '<button class="vpv-speed-item" data-rate="0.75">0.75x</button>' +
+                '<button class="vpv-speed-item active" data-rate="1">1.0x</button>' +
+                '<button class="vpv-speed-item" data-rate="1.25">1.25x</button>' +
+                '<button class="vpv-speed-item" data-rate="1.5">1.5x</button>' +
+                '<button class="vpv-speed-item" data-rate="2">2.0x</button>' +
+              '</div></div>' +
+            '<button class="vpv-btn vpv-loop" title="循环播放"><i class="bi bi-arrow-repeat"></i></button>' +
+            '<button class="vpv-btn vpv-full" title="全屏 (F)"><i class="bi bi-fullscreen"></i></button>' +
+          '</div></div></div>';
+    }
+    else if (AUD.indexOf(ext) >= 0) body = '<audio controls src="' + src + '"></audio>';
+    else body = '<div class="vw-dl"><i class="bi bi-file-earmark-zip"></i>' + esc(nm) +
+      '<br>该文件不参与共同编辑，可下载后在本机打开' +
+      '<br><a class="vw-dlgo" href="' + src + '?dl=1" data-tok="' + esc(tok) + '" data-nm="' + esc(nm) + '"><i class="bi bi-download"></i> 下载文件</a></div>';
+    $("viewer").innerHTML =
+      '<div class="vw-bar"><i class="bi bi-eye"></i> 仅查看模式：该文件不参与共同编辑' +
+        '<span class="sp"></span>' +
+        '<a class="vw-dlgo" href="' + src + '?dl=1" data-tok="' + esc(tok) + '" data-nm="' + esc(nm) + '"><i class="bi bi-download"></i> 下载</a></div>' +
+      '<div class="vw-body' + (isVid ? " vw-full" : "") + '">' + body + '</div>';
+    $("viewer").style.display = "flex";
+    if (isVid) mountCollabVideo($("viewer").querySelector(".vpv-wrap"));
+    renderTabs();
+    connectView();
+  }
+
+  /* 仅查看房间的轻量 WS 连接：不进编辑器、不收发 op，只为挂进房间——
+     房主的「在线」列表能看到观看者，观看者也能看到房主/其他人在线。 */
+  function connectView() {
+    if (!S.token) return;
+    $("myName").value = S.myName;
+    var proto = location.protocol === "https:" ? "wss" : "ws";
+    var qs = "token=" + encodeURIComponent(S.token) +
+             "&name=" + encodeURIComponent(S.myName) +
+             "&color=" + encodeURIComponent(colorFor(S.myName));
+    var ws;
+    try { ws = new WebSocket(proto + "://" + location.host + "/ws/collab?" + qs); }
+    catch (e) { return; }
+    S.ws = ws;
+    ws.onmessage = function (e) {
+      var m; try { m = JSON.parse(e.data); } catch (_) { return; }
+      switch (m.type) {
+        case "welcome":
+          S.myId = m.yourId;
+          S.closed = false;
+          setSt(true);
+          renderPeers(m.peers || []);
+          break;
+        case "presence":
+          renderPeers(m.peers || []);
+          break;
+        case "closed":
+          S.closed = true;
+          try { ws.close(); } catch (e2) {}
+          setSt(false);
+          if (S.shareType === "group") {
+            // 组分享里该文件被房主停止：切到组里其它还在共享的文件
+            toastBar(m.message || "该文件的协作已结束");
+            removeShareItem(S.token);
+            autoSwitchRoom(S.token);
+          } else {
+            showTip("协作已结束", esc(m.message || "房主已退出，邀请链接已失效。"));
+          }
+          break;
+        case "error":
+          S.closed = true;   // 连接时房间已不存在：不再自动重连
+          setSt(false);
+          if (S.shareType === "group") {
+            toastBar(m.message || "该文件的协作已结束");
+            removeShareItem(S.token);
+            autoSwitchRoom(S.token);
+          }
+          break;
+      }
+    };
+    ws.onclose = function () {
+      setSt(false);
+      if (S.closed) return;
+      setTimeout(connectView, 2000);   // 掉线自动重连，保持出现在在线列表
+    };
+  }
+
   /* 进入某个共享文件的共同编辑（组分享模式下点击左侧文件时调用） */
   function startRoom(tok) {
     if (!tok) return;
+    var target = roomByTok(tok);
+    if (target && target.view) { openView(tok); return; }   // 仅查看：走预览
     if (S.token === tok) { if (!connected()) connect(); return; }
     S.token = tok;
     S.closed = false;
@@ -936,10 +1394,15 @@
       try { old.onclose = null; old.close(); } catch (e) {}
     }
     S.version = 0; S.pending = []; S.applying = false;
+    S.myId = null; S.amViewer = false;
     S.peerInfo = {};
     Object.keys(S.marks).forEach(clearCursor);
     clearTags(); clearAllInk();
     setSt(false);
+    $("viewer").style.display = "none";    // 离开预览：恢复编辑器区域
+    $("viewer").innerHTML = "";            // 清空预览内容，顺带停掉正在播的视频
+    $("ed").style.display = "block";
+    $("st").style.display = "";
     $("edbar").style.display = "none";
     $("roomName").textContent = "连接中…";
     renderTabs();
@@ -960,9 +1423,10 @@
     bar.innerHTML = items.map(function (r) {
       var p = r.path || "";
       var nm = p.split("/").filter(Boolean).pop() || "未命名";
+      var eye = r.view ? '<i class="bi bi-eye tb-eye" title="仅查看（不可编辑）"></i>' : "";
       return '<span class="tb' + (r.token === S.token ? " on" : "") +
-        '" data-tok="' + esc(r.token) + '" title="' + esc(p) + '">' +
-        iconFor(nm, false) +
+        '" data-tok="' + esc(r.token) + '" title="' + esc(p) + (r.view ? "（仅查看）" : "") + '">' +
+        iconFor(nm, false) + eye +
         '<span class="tb-nm">' + esc(nm) + '</span></span>';
     }).join("");
     bar.style.display = "block";
@@ -1003,7 +1467,7 @@
         if (!node.dirs[segs[i]]) node.dirs[segs[i]] = { dirs: {}, files: [] };
         node = node.dirs[segs[i]];
       }
-      node.files.push({ name: segs[segs.length - 1], token: it.token, path: it.path });
+      node.files.push({ name: segs[segs.length - 1], token: it.token, path: it.path, view: it.view });
     });
 
     var listEl = $("treeList");
@@ -1035,7 +1499,10 @@
         row.setAttribute("data-token", f.token);
         row.title = f.path || "";
         row.innerHTML = '<span class="twist"></span><span class="ic">' + iconFor(f.name, false) +
-          '</span><span class="nm">' + esc(f.name) + "</span>";
+          '</span><span class="nm">' + esc(f.name) +
+          (f.view ? ' <i class="bi bi-eye" style="color:#8a8a8a;font-size:11px" title="仅查看（不可编辑）"></i>' : "") +
+          "</span>";
+        row.title = (f.path || "") + (f.view ? "（仅查看）" : "");
         row.onclick = function () { startRoom(f.token); markActive(); };
         box.appendChild(row);
       });
@@ -1085,7 +1552,11 @@
         }
         S.shareType = d.type;
         S.rooms = d.items || [];
-        if (d.type === "group") renderShareTree();   // 先列出被勾选的文件/文件夹
+        if (d.type === "group") {
+          renderShareTree();                         // 先列出被勾选的文件/文件夹
+        } else {
+          $("tree").style.display = "none";          // 单文件分享：没有可切换的列表，隐藏侧边栏
+        }
         startRoom(S.rooms[0].token);                 // 默认进入第一个共享文件
       })
       .catch(function (e) { showTip("无法加入协作", esc(e.message || "网络错误，请稍后重试。")); });

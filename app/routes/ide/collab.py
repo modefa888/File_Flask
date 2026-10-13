@@ -91,13 +91,13 @@ def api_collab_share(sid):
     if room:
         return jsonify({"type": "room", "items": [{
             "token": room.token, "name": room.name, "path": room.path,
-            "peers": len(room.peers),
+            "peers": len(room.peers), "view": room.view,
         }]})
     items = list_group(sid)
     if items:
         return jsonify({"type": "group", "items": [{
             "token": it["token"], "name": it["name"], "path": it["path"],
-            "peers": it["peers"],
+            "peers": it["peers"], "view": it.get("view", False),
         } for it in items]})
     return jsonify({"error": "分享不存在或已结束"}), 404
 
@@ -145,6 +145,34 @@ def api_collab_authors(token):
         chars, runs = author_runs(room)
         version = room.version
     return jsonify({"version": version, "chars": chars, "runs": runs})
+
+
+@bp.route("/api/collab/<token>/raw")
+def api_collab_raw(token):
+    """仅查看文件的原始内容：图片/PDF/音视频内联预览，压缩包等下载。
+
+    与 WebSocket 一样凭 token 即可访问（受邀者免登录查看被共享的文件）。
+    ?dl=1 强制按附件下载。
+    """
+    _logf().info("GET /api/collab/%s/raw", token)
+    room = get_room(token)
+    if not room:
+        return jsonify({"error": "房间不存在"}), 404
+    import os
+    if not os.path.isfile(room.path):
+        return jsonify({"error": "文件不存在"}), 404
+    from flask import send_file
+    from urllib.parse import quote
+    import mimetypes
+    mt = mimetypes.guess_type(room.path)[0] or "application/octet-stream"
+    resp = send_file(room.path, mimetype=mt, conditional=True)
+    if request.args.get("dl"):
+        fname = os.path.basename(room.path)
+        resp.headers["Content-Disposition"] = "attachment; filename*=UTF-8''" + quote(fname)
+    else:
+        resp.headers["Content-Disposition"] = "inline"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @bp.route("/api/collab/<token>/qr")
@@ -277,7 +305,8 @@ def register_collab_ws(sock):
             elif room.host_key is None and room.host_sid is None:
                 room.host_sid = sid          # 旧数据兼容：无密钥房间保持先到先得
                 _cancel_close_timer(room)
-            room.peers[sid] = {"id": sid, "name": name, "color": color, "ws": ws}
+            room.peers[sid] = {"id": sid, "name": name, "color": color, "ws": ws,
+                               "viewer": bool(room.view)}   # 仅查看房间的成员只是观看者
 
         # 首帧：把当前权威文本、版本、在线成员发给新成员
         def _send_welcome():
@@ -289,6 +318,7 @@ def register_collab_ws(sock):
                 "text": room.text,
                 "path": room.path,
                 "name": room.name,
+                "view": room.view,
                 "peers": room.peers_list(skip_sid=sid),
             }))
 
@@ -311,6 +341,8 @@ def register_collab_ws(sock):
                 mtype = msg.get("type")
 
                 if mtype == "op":
+                    if room.view:
+                        continue       # 仅查看房间（二进制等）：不接受任何编辑操作
                     base = int(msg.get("base", room.version))
                     ops = msg.get("ops") or []
                     if not isinstance(ops, list):

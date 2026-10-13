@@ -596,6 +596,7 @@
         '<span class="collab-peer"><span class="dot" style="background:' + esc(p.color || "#888") + '">' +
         esc(_initial(p.name)) + '</span>' + esc(p.name) +
         (p.host ? '<b class="c-host-badge">· 房主</b>' : "") +
+        (p.viewer && !p.host ? ' <span class="cr-limits" title="该成员仅查看，不参与编辑"><i class="bi bi-eye"></i> 仅查看</span>' : "") +
         (p.id === s.myId ? "（你）" : "") + '</span>').join("");
     }
 
@@ -789,6 +790,7 @@
       const lim = _limitBadges(r);
       return '<div class="collab-room" data-tok="' + esc(r.token) + '">' +
         '<div class="cr-info"><div class="cr-name"><b>' + esc(r.name) + '</b>' +
+          (r.view ? ' <span class="cr-limits" title="二进制等文件不参与共同编辑，协作者只能查看/下载"><i class="bi bi-eye"></i> 仅查看</span>' : "") +
           '<span class="cr-peers">' + (r.peers || 0) + ' 人在线</span>' + st + '</div>' +
           '<div class="cr-path">' + esc(r.path || "") +
             (lim ? ' <span class="cr-limits">· ' + esc(lim) + '</span>' : '') + '</div>' +

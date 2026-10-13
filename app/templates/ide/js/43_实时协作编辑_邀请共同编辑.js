@@ -733,6 +733,7 @@
       if (plain.length) {
         const base = _commonRoot(plain.map((r) => r.path)) || "/";
         html += _treeHtml(_dirTree(plain, base), "");
+        plain.forEach((r) => wired.push(r));
       }
       box.innerHTML = html;
       wired.forEach((r) => _wireRoomOps(box, r));

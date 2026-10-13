@@ -1686,6 +1686,13 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .collab-room .cr-path { color: #6a6a6a; }
 :where(html.theme-light) .collab-sharing-head .c-share-ic { color: #1a7f37; }
 :where(html.theme-light) .c-host-badge { color: #9a6700; }
+:where(html.theme-light) .collab-left { border-right-color: #d8d8d8; }
+:where(html.theme-light) .collab-folder .cf-head { background: #f3f3f3; border-color: #d8d8d8; }
+:where(html.theme-light) .collab-folder .cf-head:hover { background: #e9e9e9; }
+:where(html.theme-light) .collab-folder .cf-meta { color: #6a6a6a; }
+:where(html.theme-light) .collab-room .cr-limits { color: #6a6a6a; }
+:where(html.theme-light) .collab-limits { border-color: #c8c8c8; }
+:where(html.theme-light) .collab-limits .lt-hd { color: #6a6a6a; }
 
 /* ---------- 实时协作：标签标记 / 悬浮按钮 / 版本对比（41） ---------- */
 :where(html.theme-light) .tab.tab-collab { box-shadow: inset 3px 0 0 #7fb98a; }
@@ -1700,6 +1707,19 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
   background: #b42318; border-color: #8f1a12; color: #ffffff;
 }
 :where(html.theme-light) .collab-fab.stop:hover { background: #8f1a12; }
+:where(html.theme-light) .sp-tree { background: #ffffff; border-color: #d0d0d0; }
+:where(html.theme-light) .sp-row { color: #1f2328; }
+:where(html.theme-light) .sp-row:hover { background: #e6e6e6; }
+:where(html.theme-light) .sp-row.on .nm { color: #1a7f37; }
+:where(html.theme-light) .sp-row .ic { color: #b58900; }
+:where(html.theme-light) .collab-modal .sp-path { color: #6a6a6a; }
+:where(html.theme-light) .sp-link input {
+  background: #ffffff; border-color: #d0d0d0; color: #1f2328;
+}
+:where(html.theme-light) .collab-grp { background: #f0f0f0; border-color: #d0d0d0; }
+:where(html.theme-light) .collab-grp .cg-name { color: #1f2328; }
+:where(html.theme-light) .collab-grp .cg-ic { color: #b58900; }
+:where(html.theme-light) .collab-grp .cg-body .collab-room { background: #ffffff; }
 :where(html.theme-light) .collab-legend {
   background: #ffffff; border-color: #d0d0d0; color: #1f2328;
   box-shadow: 0 6px 18px rgba(0, 0, 0, .12);

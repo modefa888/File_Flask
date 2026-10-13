@@ -31,6 +31,7 @@
       knownRooms: [],   // 服务端现存房间（含非本机会话），用于列表展示
       overlay: null,
       nameDraft: "",    // 昵称输入草稿（避免弹窗重绘时丢失）
+      folded: {},       // 左侧列表按文件夹分组的折叠状态（key -> true=已折叠）
     };
 
     const _isOpen = (s) => !!(s && s.ws && s.ws.readyState === 1);
@@ -522,16 +523,37 @@
       if (!b) return;
       _defaultName();
       b.innerHTML =
-        '<div class="collab-row"><label>昵称</label>' +
-          '<input class="collab-input" id="cName" placeholder="协作中显示的名字" value="' + esc(S.nameDraft) + '"></div>' +
-        '<div id="cCurPanel"></div>' +
-        '<div class="collab-file" id="cCurFile"></div>' +
-        '<button class="collab-btn" id="cCreate">共享当前文件并邀请</button>' +
-        '<div id="cRooms"></div>' +
-        '<div style="border-top:1px solid #333;margin:2px 0"></div>' +
-        '<div class="collab-row"><label>加入</label>' +
-          '<input class="collab-input" id="cJoin" placeholder="粘贴邀请链接或令牌">' +
-          '<button class="collab-btn ghost" id="cJoinBtn">加入</button></div>';
+        /* 左右两栏：左侧=其它协作中的文件；右侧=昵称/当前文件/加入 */
+        '<div class="collab-cols">' +
+          '<div class="collab-left" id="cRooms"></div>' +
+          '<div class="collab-right">' +
+            '<div class="collab-row"><label>昵称</label>' +
+              '<input class="collab-input" id="cName" placeholder="协作中显示的名字" value="' + esc(S.nameDraft) + '"></div>' +
+            '<div id="cCurPanel"></div>' +
+            '<div class="collab-file" id="cCurFile"></div>' +
+            '<div class="collab-limits">' +
+              '<div class="lt-hd"><i class="bi bi-sliders"></i> 共享限制（均可留空/不限）</div>' +
+              '<div class="collab-row"><label>指定用户</label>' +
+                '<input class="collab-input" id="cLimitUsers" placeholder="仅这些用户名可加入，逗号分隔，留空不限"></div>' +
+              '<div class="collab-row"><label>人数上限</label>' +
+                '<input class="collab-input" id="cLimitPeers" type="number" min="1" max="99" placeholder="不限"></div>' +
+              '<div class="collab-row"><label>有效时间</label>' +
+                '<select class="collab-input" id="cLimitTtl">' +
+                  '<option value="0">永久有效</option>' +
+                  '<option value="1800">30 分钟</option>' +
+                  '<option value="3600">1 小时</option>' +
+                  '<option value="21600">6 小时</option>' +
+                  '<option value="86400">24 小时</option>' +
+                  '<option value="604800">7 天</option>' +
+                '</select></div>' +
+            '</div>' +
+            '<button class="collab-btn" id="cCreate">共享当前文件并邀请</button>' +
+            '<div style="border-top:1px solid #333;margin:2px 0"></div>' +
+            '<div class="collab-row"><label>加入</label>' +
+              '<input class="collab-input" id="cJoin" placeholder="粘贴邀请链接或令牌">' +
+              '<button class="collab-btn ghost" id="cJoinBtn">加入</button></div>' +
+          '</div>' +
+        '</div>';
 
       const nameEl = b.querySelector("#cName");
       nameEl.addEventListener("input", () => { S.nameDraft = nameEl.value; });
@@ -638,7 +660,12 @@
       const map = new Map();
       S.knownRooms.forEach((r) => {
         if (!r || !r.token) return;
-        map.set(r.token, { token: r.token, name: r.name, path: r.path, peers: r.peers || 0, sess: null });
+        map.set(r.token, {
+          token: r.token, name: r.name, path: r.path, peers: r.peers || 0, sess: null,
+          group: r.group || null,
+          maxPeers: r.max_peers || null, expiresAt: r.expires_at || null,
+          allowedUsers: r.allowed_users || [],
+        });
       });
       _listSessions().forEach((s) => {
         const cur = map.get(s.token) || {};
@@ -648,9 +675,30 @@
           path: s.room.path || cur.path || "",
           peers: _isOpen(s) ? (s.peers || []).length : (cur.peers || 0),
           sess: s,
+          group: cur.group || null,     // 批量分享组 id（服务端随房间列表下发）
+          maxPeers: cur.maxPeers || null,
+          expiresAt: cur.expiresAt || null,
+          allowedUsers: cur.allowedUsers || [],
         });
       });
       return Array.from(map.values());
+    }
+
+    /* 一组路径的最长公共目录前缀（用作分享组名与组内相对路径显示） */
+    function _commonRoot(paths) {
+      let root = (paths[0] || "").replace(/\/[^/]*$/, "") || "/";
+      let again = true;
+      while (again) {
+        again = false;
+        for (const p of paths) {
+          if (p && p !== root && p.indexOf(root + "/") !== 0) {
+            root = root.replace(/\/[^/]*$/, "") || "/";
+            again = true;
+            break;
+          }
+        }
+      }
+      return root;
     }
 
     function _updateRoomsList() {
@@ -665,11 +713,72 @@
                : "还没有共享任何文件。打开一个文件后点上方「共享当前文件并邀请」。") + '</div>';
         return;
       }
-      box.innerHTML = '<div class="collab-sharing-head"><b><i class="bi bi-broadcast c-share-ic"></i> 其它协作中的文件</b></div>' +
-        rows.map(_roomCardHtml).join("");
-      rows.forEach((r) => _wireRoomOps(box, r));
+      /* 顶部先分「批量分享组 / 普通文件」，组内再按目录层级嵌套折叠（二级及更深
+         的文件夹各自成可折叠节点）。折叠状态记在 S.folded，重绘时保持不丢。 */
+      const groups = new Map(), plain = [];
+      rows.forEach((r) => {
+        if (r.group) {
+          if (!groups.has(r.group)) groups.set(r.group, []);
+          groups.get(r.group).push(r);
+        } else plain.push(r);
+      });
+      let html = '<div class="collab-sharing-head"><b><i class="bi bi-broadcast c-share-ic"></i> 其它协作中的文件</b></div>';
+      const wired = [];
+      groups.forEach((grp, gid) => {
+        const base = _commonRoot(grp.map((r) => r.path)) || "/";
+        html += _groupFolderHtml(gid, grp, base);
+        grp.forEach((r) => wired.push(r));
+      });
+      if (plain.length) {
+        const base = _commonRoot(plain.map((r) => r.path)) || "/";
+        html += _treeHtml(_dirTree(plain, base), "");
+      }
+      box.innerHTML = html;
+      wired.forEach((r) => _wireRoomOps(box, r));
+      groups.forEach((grp, gid) => {
+        const card = box.querySelector('.collab-folder[data-gid="' + gid + '"]');
+        if (card) _wireGroupOps(card, gid, grp);
+      });
+      // 点组头折叠/展开（组头上的按钮除外）；重绘后 onclick 重新绑，无需解绑
+      box.onclick = (e) => {
+        const head = e.target.closest && e.target.closest(".cf-head");
+        if (!head || e.target.closest("[data-gact]")) return;
+        const card = head.closest(".collab-folder");
+        if (!card || !card.dataset.fkey) return;
+        S.folded[card.dataset.fkey] = !S.folded[card.dataset.fkey];
+        card.classList.toggle("folded", !!S.folded[card.dataset.fkey]);
+      };
     }
 
+    /* 文件所在目录（用于按文件夹分组） */
+    function _dirname(p) {
+      const s = String(p || "").replace(/\/+$/, "");
+      const i = s.lastIndexOf("/");
+      return i > 0 ? s.slice(0, i) : "/";
+    }
+
+    /* 有效期剩余的可读文本（列表行内小字展示） */
+    function _fmtLeft(ms) {
+      const m = Math.floor(ms / 60000);
+      if (m < 1) return "不足1分钟";
+      if (m < 60) return m + "分钟";
+      const h = Math.floor(m / 60);
+      if (h < 24) return h + " 小时" + (m % 60 ? " " + (m % 60) + " 分" : "");
+      return Math.floor(h / 24) + " 天" + (h % 24 ? " " + (h % 24) + " 小时" : "");
+    }
+    /* 房间限制摘要：≤N人 · 剩余时间（无限制则返回空串） */
+    function _limitBadges(r) {
+      const parts = [];
+      if (r.maxPeers) parts.push("≤" + r.maxPeers + " 人");
+      if (r.allowedUsers && r.allowedUsers.length) parts.push("指定用户");
+      if (r.expiresAt) {
+        const left = r.expiresAt * 1000 - Date.now();
+        parts.push(left <= 0 ? "已过期" : "剩 " + _fmtLeft(left));
+      }
+      return parts.join(" · ");
+    }
+
+    /* 左侧房间卡片（完整信息版）：文件名 + 在线数/状态 + 路径与限制摘要 + 在线成员 */
     function _roomCardHtml(r) {
       const s = r.sess;
       const on = s && _isOpen(s);
@@ -677,10 +786,13 @@
         ? '<span class="collab-status">' + (on ? '<span class="on">● 已连接</span>' : '<span class="off">○ 未连接</span>') + '</span>'
         : "";
       const peersHtml = on ? '<div class="collab-peers">' + _peersHtml(s) + '</div>' : "";
+      const lim = _limitBadges(r);
       return '<div class="collab-room" data-tok="' + esc(r.token) + '">' +
         '<div class="cr-info"><div class="cr-name"><b>' + esc(r.name) + '</b>' +
           '<span class="cr-peers">' + (r.peers || 0) + ' 人在线</span>' + st + '</div>' +
-          '<div class="cr-path">' + esc(r.path || "") + '</div>' + peersHtml + '</div>' +
+          '<div class="cr-path">' + esc(r.path || "") +
+            (lim ? ' <span class="cr-limits">· ' + esc(lim) + '</span>' : '') + '</div>' +
+          peersHtml + '</div>' +
         '<div class="cr-ops">' +
           '<button class="collab-btn ghost" data-act="link" title="复制邀请链接"><i class="bi bi-clipboard"></i> 链接</button>' +
           '<a class="collab-btn ghost" href="/api/collab/' + _enc(r.token) + '/qr" target="_blank" rel="noopener" title="查看二维码"><i class="bi bi-qr-code"></i> 二维码</a>' +
@@ -689,6 +801,92 @@
             : '<button class="collab-btn ghost" data-act="join" title="接入该房间继续同步">接入</button>') +
           '<button class="collab-btn danger" data-act="stop" title="关闭该房间">停止</button>' +
         '</div></div>';
+    }
+
+    /* 把若干房间按目录层级组织成树：base 为公共根（会被剥掉），每级子目录一个节点 */
+    function _dirTree(rows, base) {
+      const root = { name: "", path: base, dirs: new Map(), files: [] };
+      rows.forEach((r) => {
+        let dir = _dirname(r.path);
+        if (base && base !== "/" && dir.indexOf(base) === 0) dir = dir.slice(base.length);
+        let node = root;
+        dir.split("/").filter(Boolean).forEach((s) => {
+          const p = (node.path === "/" ? "" : node.path) + "/" + s;
+          if (!node.dirs.has(s)) node.dirs.set(s, { name: s, path: p, dirs: new Map(), files: [] });
+          node = node.dirs.get(s);
+        });
+        node.files.push(r);
+      });
+      return root;
+    }
+    function _treeCount(n) { let c = n.files.length; n.dirs.forEach((d) => { c += _treeCount(d); }); return c; }
+    function _treePeers(n) {
+      let p = n.files.reduce((a, r) => a + (r.peers || 0), 0);
+      n.dirs.forEach((d) => { p += _treePeers(d); });
+      return p;
+    }
+    /* 渲染一层：子文件夹在前（各为可折叠节点），其后是本层文件卡片 */
+    function _treeHtml(node, keyPrefix) {
+      let html = "";
+      Array.from(node.dirs.values()).sort((a, b) => a.name.localeCompare(b.name))
+        .forEach((d) => { html += _folderSection(d, keyPrefix); });
+      node.files.forEach((r) => { html += _roomCardHtml(r); });
+      return html;
+    }
+    /* 文件夹节点（任意层级通用）：组头可折叠，组内继续嵌套子文件夹/文件卡片 */
+    function _folderSection(d, keyPrefix) {
+      const key = keyPrefix + d.path;
+      const folded = !!S.folded[key];
+      return '<div class="collab-folder' + (folded ? " folded" : "") + '" data-fkey="' + esc(key) + '">' +
+        '<div class="cf-head" title="' + esc(d.path) + '">' +
+          '<span class="cf-arrow"><i class="bi bi-chevron-down"></i></span>' +
+          '<span class="cf-ic"><i class="bi bi-folder2"></i></span>' +
+          '<span class="cf-name">' + esc(d.name) + '</span>' +
+          '<span class="cf-meta">' + _treeCount(d) + ' 个文件 · ' + _treePeers(d) + ' 人在线</span>' +
+        '</div>' +
+        '<div class="cf-body">' + _treeHtml(d, keyPrefix) + '</div>' +
+        '</div>';
+    }
+    /* 批量分享组顶层卡片：组名取公共根目录名，组内再按目录层级嵌套折叠 */
+    function _groupFolderHtml(gid, grp, base) {
+      const key = "g:" + gid;
+      const folded = !!S.folded[key];
+      const name = base.split("/").filter(Boolean).pop() || "批量分享";
+      const peers = grp.reduce((n, r) => n + (r.peers || 0), 0);
+      return '<div class="collab-folder' + (folded ? " folded" : "") + '" data-fkey="' + esc(key) + '" data-gid="' + esc(gid) + '">' +
+        '<div class="cf-head" title="' + esc(base) + '">' +
+          '<span class="cf-arrow"><i class="bi bi-chevron-down"></i></span>' +
+          '<span class="cf-ic"><i class="bi bi-collection"></i></span>' +
+          '<span class="cf-name">' + esc(name) + '</span>' +
+          '<span class="cf-meta">' + grp.length + ' 个文件 · ' + peers + ' 人在线</span>' +
+          '<span class="cf-ops">' +
+            '<button class="collab-btn ghost" data-gact="glink" title="复制整组邀请链接（打开后列出组内全部文件）"><i class="bi bi-clipboard"></i> 组链接</button>' +
+            '<button class="collab-btn danger" data-gact="gstop" title="停止整组分享">停止全部</button>' +
+          '</span>' +
+        '</div>' +
+        '<div class="cf-body">' + _treeHtml(_dirTree(grp, base), key + "|") + '</div>' +
+        '</div>';
+    }
+
+    function _wireGroupOps(card, gid, rows) {
+      if (!card) return;
+      const glink = card.querySelector('[data-gact="glink"]');
+      if (glink) glink.onclick = () => {
+        copyText(location.origin + "/collab?collab=" + _enc(gid));
+        toast("整组邀请链接已复制", "ok");
+      };
+      const gstop = card.querySelector('[data-gact="gstop"]');
+      if (gstop) gstop.onclick = (e) => {
+        uiConfirmPop(e.currentTarget, {
+          title: "停止整组分享",
+          msg: "将停止该组内全部 " + rows.length + " 个文件的协作：所有协作者断开、链接失效。确定继续？",
+          okText: "全部停止", danger: true,
+        }).then((ok) => {
+          if (!ok) return;
+          rows.forEach((r) => _endSession(r.token, { stopRoom: true }));
+          toast("已停止 " + rows.length + " 个文件的分享", "ok");
+        });
+      };
     }
 
     function _wireRoomOps(box, r) {
@@ -707,7 +905,7 @@
         const nm = ((nameEl && nameEl.value) || "").trim() || _defaultName();
         _closeModal();
         _openPath(r.path);                 // 立刻打开该文件（不等 welcome 往返）
-        _connectSession(r.token, nm, _randColor(), _hostKeys()[r.token], { focus: true });
+        _connectSession(r.token, nm, _colorFor(nm), _hostKeys()[r.token], { focus: true });
       };
 
       const reloadBtn = row.querySelector('[data-act="reload"]');
@@ -765,15 +963,30 @@
     }
 
     /* ---------------- 创建 / 加入 ---------------- */
+    /* 读取右侧「共享限制」输入：指定用户 / 人数上限 / 有效时间（秒），未填=不限 */
+    function _readLimits() {
+      const q = (id) => S.overlay && S.overlay.querySelector(id);
+      const users = ((q("#cLimitUsers") || {}).value || "")
+        .split(/[,，;；\s]+/).map((x) => x.trim()).filter(Boolean);
+      const mp = parseInt((q("#cLimitPeers") || {}).value, 10);
+      const ttl = parseInt((q("#cLimitTtl") || {}).value, 10);
+      return {
+        allowedUsers: users.length ? users : null,
+        maxPeers: mp > 0 ? mp : null,
+        expiresIn: ttl > 0 ? ttl : null,
+      };
+    }
+
     function _createAndConnect(name) {
       if (!active || !active.path) { toast("请先打开一个文件", "warn"); return; }
       const path = active.path;
       const existing = _listSessions().find((s) => s.room.path === path);
       if (existing) { _openSessionFile(existing); toast("该文件已在协作中", "ok"); return; }
       const nm = (name || "").trim() || _defaultName();
+      const limits = _readLimits();
       fetch("/api/collab/rooms", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path }),
+        body: JSON.stringify(Object.assign({ path }, limits)),
       }).then((r) => r.json()).then((d) => {
         if (d.error) { toast(d.error, "err"); return; }
         _saveHostKey(d.token, d.hostKey);
@@ -831,7 +1044,9 @@
         _onMsg(s, m);
       };
       ws.onclose = () => { _updateUI(); };
-      ws.onerror = () => toast("协作连接出错", "err");
+      // 会话已被 _endSession 摘除（主动停止/退出）时的 error 不再弹错，
+      // 只对仍然在册的会话报告真正的连接故障
+      ws.onerror = () => { if (S.sessions[token] === s) toast("协作连接出错", "err"); };
       _updateUI();
     }
 
@@ -1338,7 +1553,14 @@
       const s = S.sessions[token];
       if (s) {
         if (s._bindTimer) { clearInterval(s._bindTimer); s._bindTimer = null; }
-        if (s.ws) { try { s.ws.close(); } catch (e) {} s.ws = null; }
+        if (s.ws) {
+          // 主动关闭前先摘掉事件回调：ws.close() 是异步握手，紧随其后的
+          // 「停止房间」DELETE 会在握手完成前向本连接广播 closed，连接被
+          // 异常断开会触发 onerror 误报「协作连接出错」——这里摘掉即静默
+          try { s.ws.onclose = s.ws.onerror = s.ws.onmessage = null; } catch (e) {}
+          try { s.ws.close(); } catch (e) {}
+          s.ws = null;
+        }
         if (s.cm) {
           try { s.cm.off("changes", s.onChanges); s.cm.off("cursorActivity", s.onCursor); } catch (e) {}
           // 退出协作后把协作期留下的标注（改动行背景 / 字符着色 / 作者标签）全部清掉：
@@ -1357,6 +1579,183 @@
       }
       _updateUI();
     }
+
+    /* ================= 批量分享：勾选文件夹/文件一起共同编辑 =================
+       右键菜单「分享共同编辑…」打开选择器：勾选若干文件/文件夹 →
+       为每个文件建一个房间（同批次共用一个「分享组」id）→ 受邀者页按组列出
+       被勾选的文件，点击即可进入对应文件的共同编辑。 */
+    const SHARE_SKIP_RE = /^(node_modules|\.git|__pycache__|\.venv|venv|dist|build|\.idea|\.vscode|logs?|site-packages|\.next|target)$/i;
+    const SHARE_MAX_FILES = 120;
+    let _shareOv = null;
+
+    function _spClose() {
+      if (_shareOv) { _shareOv.remove(); _shareOv = null; }
+      document.removeEventListener("keydown", _spKey, true);
+    }
+    function _spKey(ev) { if (ev.key === "Escape") { ev.stopPropagation(); _spClose(); } }
+
+    window.IDECollabSharePicker = function (rootDir) {
+      _spClose();
+      const ov = document.createElement("div");
+      ov.className = "collab-overlay";
+      ov.innerHTML =
+        '<div class="collab-modal sp-modal">' +
+          '<div class="collab-head"><i class="bi bi-share"></i> 分享共同编辑' +
+            '<span class="sp-path">' + esc(rootDir) + '</span>' +
+            '<button class="c-close" id="spClose" title="关闭 (Esc)">×</button></div>' +
+          '<div class="sp-bar"><span class="sp-hint">勾选文件或文件夹（勾选文件夹＝共享其中全部文件，' +
+            '最多 ' + SHARE_MAX_FILES + ' 个，自动跳过 node_modules / .git 等）</span></div>' +
+          '<div class="sp-tree" id="spTree"></div>' +
+          '<div class="sp-foot"><span class="sp-count" id="spCount">已勾选：0 个文件</span>' +
+            '<button class="collab-btn" id="spGo">开始分享</button></div>' +
+          '<div class="sp-link" id="spLink" style="display:none"></div>' +
+        '</div>';
+      document.body.appendChild(ov);
+      _shareOv = ov;
+      const pickedFiles = new Set(), pickedDirs = new Set();
+      const treeEl = ov.querySelector("#spTree");
+      const countEl = ov.querySelector("#spCount");
+      const updCount = () => {
+        countEl.textContent = "已勾选：文件 " + pickedFiles.size + " 个 · 文件夹 " + pickedDirs.size + " 个";
+      };
+
+      function mkRow(path, name, isDir, depth) {
+        const item = document.createElement("div");
+        item.className = "sp-item";
+        const r = document.createElement("div");
+        r.className = "sp-row" + (isDir ? " dir" : "");
+        r.style.paddingLeft = (6 + depth * 16) + "px";
+        r.innerHTML =
+          '<span class="tw">' + (isDir ? '<i class="bi bi-chevron-right"></i>' : "") + '</span>' +
+          '<input type="checkbox" class="sp-ck">' +
+          '<span class="ic"><i class="bi ' + (isDir ? "bi-folder-fill" : "bi-file-earmark") + '"></i></span>' +
+          '<span class="nm">' + esc(name) + '</span>';
+        const kids = document.createElement("div");
+        kids.className = "sp-kids";
+        kids.style.display = "none";
+        item.appendChild(r);
+        item.appendChild(kids);
+        const ck = r.querySelector(".sp-ck");
+        if (isDir) {
+          const toggleOpen = () => {
+            const open = kids.style.display !== "none";
+            if (!open && !kids.dataset.loaded) {
+              kids.dataset.loaded = "1";
+              loadDir(path, kids, depth + 1);
+            }
+            kids.style.display = open ? "none" : "block";
+            r.querySelector(".tw").innerHTML =
+              open ? '<i class="bi bi-chevron-right"></i>' : '<i class="bi bi-chevron-down"></i>';
+          };
+          r.querySelector(".tw").onclick = (e) => { e.stopPropagation(); toggleOpen(); };
+          r.querySelector(".nm").onclick = toggleOpen;
+          ck.onchange = () => {
+            if (ck.checked) pickedDirs.add(path); else pickedDirs.delete(path);
+            r.classList.toggle("on", ck.checked);
+            updCount();
+          };
+        } else {
+          ck.onchange = () => {
+            if (ck.checked) pickedFiles.add(path); else pickedFiles.delete(path);
+            r.classList.toggle("on", ck.checked);
+            updCount();
+          };
+        }
+        return item;
+      }
+
+      function loadDir(dir, box, depth) {
+        box.innerHTML = '<div class="sp-row" style="padding-left:' + (6 + depth * 16) + 'px">' +
+          '<span class="nm" style="color:#8a8a8a">加载中…</span></div>';
+        fetch("/api/files?path=" + _enc(dir))
+          .then((r) => r.json())
+          .then((d) => {
+            box.innerHTML = "";
+            const items = (d && d.items) || [];
+            if (!items.length) {
+              box.innerHTML = '<div class="sp-row" style="padding-left:' + (6 + depth * 16) + 'px">' +
+                '<span class="nm" style="color:#8a8a8a">（空）</span></div>';
+              return;
+            }
+            items.sort((a, b) => (!!b.is_dir - !!a.is_dir) ||
+              String(a.name || "").localeCompare(String(b.name || ""), "zh-CN"));
+            items.forEach((it) => {
+              const p = dir.replace(/\/+$/, "") + "/" + it.name;
+              box.appendChild(mkRow(p, it.name || "", !!it.is_dir, depth));
+            });
+          })
+          .catch(() => { box.innerHTML = '<div class="sp-row"><span class="nm" style="color:#c98">加载失败</span></div>'; });
+      }
+
+      /* 把勾选的文件夹展开成其中的文件清单（跳过依赖目录，限制数量） */
+      function collectDir(dir, out, depth) {
+        if (depth > 6 || out.length >= SHARE_MAX_FILES) return Promise.resolve();
+        return fetch("/api/files?path=" + _enc(dir))
+          .then((r) => r.json())
+          .then((d) => Promise.all(((d && d.items) || []).map((it) => {
+            if (out.length >= SHARE_MAX_FILES) return null;
+            const p = dir.replace(/\/+$/, "") + "/" + it.name;
+            if (it.is_dir) {
+              if (SHARE_SKIP_RE.test(it.name)) return null;
+              return collectDir(p, out, depth + 1);
+            }
+            if (out.indexOf(p) < 0) out.push(p);
+            return null;
+          })))
+          .catch(() => {});
+      }
+
+      ov.querySelector("#spClose").onclick = _spClose;
+      ov.addEventListener("mousedown", (e) => { if (e.target === ov) _spClose(); });
+      document.addEventListener("keydown", _spKey, true);
+      loadDir(rootDir, treeEl, 0);
+
+      ov.querySelector("#spGo").onclick = async () => {
+        const goBtn = ov.querySelector("#spGo");
+        goBtn.disabled = true;
+        goBtn.textContent = "正在创建…";
+        const files = [];
+        pickedFiles.forEach((f) => { if (files.indexOf(f) < 0) files.push(f); });
+        for (const d of pickedDirs) await collectDir(d, files, 0);
+        if (!files.length) {
+          toast("请先勾选要共享的文件", "warn");
+          goBtn.disabled = false; goBtn.textContent = "开始分享";
+          return;
+        }
+        const gid = "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        const nm = _defaultName();
+        let ok = 0, fail = 0;
+        for (const f of files) {
+          try {
+            const r = await fetch("/api/collab/rooms", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ path: f, group: gid }),
+            });
+            const d = await r.json();
+            if (d.error) { fail++; continue; }
+            _saveHostKey(d.token, d.hostKey);
+            // 已在编辑区打开的文件立刻接上会话；没打开的等用户打开时自动载入
+            const tab = findTab(f);
+            if (tab && tab.cm) {
+              _connectSession(d.token, nm, _colorFor(nm), d.hostKey, { autoOpen: false });
+            }
+            ok++;
+          } catch (e) { fail++; }
+        }
+        _refreshRooms();
+        toast("已共享 " + ok + " 个文件" + (fail ? "（失败 " + fail + " 个）" : ""), ok ? "ok" : "err");
+        // 展示一条组邀请链接：打开即看到被勾选的全部文件
+        const link = location.origin + "/collab?collab=" + encodeURIComponent(gid);
+        const linkEl = ov.querySelector("#spLink");
+        linkEl.style.display = "block";
+        linkEl.innerHTML =
+          '<div class="sp-linktxt">邀请链接（打开后可见上面勾选的全部文件，点击即可共同编辑）：</div>' +
+          '<div class="sp-linkrow"><input readonly value="' + esc(link) + '">' +
+          '<button class="collab-btn ghost" id="spCopy">复制</button></div>';
+        linkEl.querySelector("#spCopy").onclick = () => { copyText(link); toast("邀请链接已复制", "ok"); };
+        goBtn.textContent = "已分享 " + ok + " 个文件";
+      };
+    };
 
     /* ---------------- 对外暴露：标题栏按钮 & 链接自动加入 ---------------- */
     window.openCollab = openCollab;

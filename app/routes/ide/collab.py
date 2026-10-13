@@ -25,7 +25,7 @@ from flask import (
 )
 
 from ...services.ide.collab import (
-    create_room, get_room, list_rooms, delete_room,
+    create_room, get_room, list_rooms, list_group, delete_room,
     apply_op, author_runs, color_for, _transform,
 )
 bp = Blueprint("collab", __name__)
@@ -52,7 +52,15 @@ def api_create_room():
     path = os.path.abspath(path)
     if not os.path.isfile(path):
         return jsonify({"error": "文件不存在"}), 404
-    room, token = create_room(path, name=os.path.basename(path))
+    # group：批量分享（勾选多个文件/文件夹一起共享）时共用一个组 id
+    # 限制项（均可缺省=不限）：maxPeers 人数上限；allowedUsers 指定用户名单；
+    # expiresIn 有效秒数。由 create_room 统一做类型清洗。
+    room, token = create_room(
+        path, name=os.path.basename(path), group=body.get("group"),
+        max_peers=body.get("maxPeers"),
+        allowed_users=body.get("allowedUsers"),
+        expires_in=body.get("expiresIn"),
+    )
     host = request.host_url.rstrip("/")
     # 指向 IDE 页：受邀者打开即进入编辑器并自动加入协作（首页 ?collab= 已做重定向兜底）
     url = f"{host}/ide?collab={token}"
@@ -69,6 +77,29 @@ def api_create_room():
 def api_list_rooms():
     _logf().info("GET /api/collab/rooms")
     return jsonify({"items": list_rooms(), "count": len(list_rooms())})
+
+
+@bp.route("/api/collab/share/<sid>")
+def api_collab_share(sid):
+    """解析分享 id：既可能是单个房间 token，也可能是一次批量分享的组 id。
+
+    统一返回 {type, items:[{token,name,path,peers}]}，受邀者页据此渲染
+    「被勾选的文件夹/文件列表」并逐个进入共同编辑。
+    """
+    _logf().info("GET /api/collab/share/%s", sid)
+    room = get_room(sid)
+    if room:
+        return jsonify({"type": "room", "items": [{
+            "token": room.token, "name": room.name, "path": room.path,
+            "peers": len(room.peers),
+        }]})
+    items = list_group(sid)
+    if items:
+        return jsonify({"type": "group", "items": [{
+            "token": it["token"], "name": it["name"], "path": it["path"],
+            "peers": it["peers"],
+        } for it in items]})
+    return jsonify({"error": "分享不存在或已结束"}), 404
 
 
 @bp.route("/api/collab/rooms/<token>", methods=["DELETE"])
@@ -210,6 +241,33 @@ def register_collab_ws(sock):
 
         sid = uuid.uuid4().hex
         host_key = (_req.args.get("host") or "").strip()
+        # 房主凭密钥不受「指定用户 / 人数上限」约束（本来就要能回到自己的房间）
+        _is_host_key = bool(host_key and room.host_key and host_key == room.host_key)
+        # 限制校验：有效期 → 指定用户 → 人数上限（校验失败直接拒之门外）
+        if room.expires_at and time.time() > room.expires_at:
+            try:
+                ws.send(json.dumps({"type": "error", "message": "邀请已过期，该协作已自动结束"}))
+            except Exception:
+                pass
+            _broadcast(room, {"type": "closed", "message": "协作已超过有效时间，自动结束"})
+            delete_room(room.token)
+            return
+        if room.allowed_users and not _is_host_key and name not in room.allowed_users:
+            try:
+                ws.send(json.dumps({"type": "error",
+                                    "message": "房主限制了可加入的用户，你不在允许名单中"}))
+            except Exception:
+                pass
+            return
+        with room.lock:
+            _full = bool(room.max_peers and not _is_host_key and len(room.peers) >= room.max_peers)
+        if _full:
+            try:
+                ws.send(json.dumps({"type": "error",
+                                    "message": "协作人数已满（上限 " + str(room.max_peers) + " 人）"}))
+            except Exception:
+                pass
+            return
         with room.lock:
             # 房主身份只认密钥（创建房间时下发给创建者），访客抢先加入
             # 也绝不会被标成房主，房主身份不可被"转换"

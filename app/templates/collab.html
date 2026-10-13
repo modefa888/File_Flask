@@ -85,7 +85,11 @@
   #tree .tree-row .ic { width: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
   #tree .tree-row .ic .bi, #tree .tree-row .ic .seti-ic { font-size: 1.4em; line-height: 1; }
   #tree .tree-row .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-  #tree .tree-row.file { cursor: default; }
+  #tree .tree-row.file { cursor: pointer; }
+  /* 批量分享模式：当前正在共同编辑的文件高亮 */
+  #tree .tree-row.active { background: #0d7ec4; color: #fff; }
+  #tree .tree-row.active .nm { color: #fff; }
+  #tree .tree-row.active .ic { color: #fff; }
   #tree .tree-children { display: none; padding-left: 14px; }
   #tree .tree-children.open { display: block; }
   /* SETI 官方文件图标字体（与 IDE 资源管理器同源） */
@@ -98,6 +102,20 @@
     color: #9aa0a6; font-size: 12px; display: none;
   }
   #ed { flex: 1; min-height: 0; }
+  /* 编辑区上方标签页：批量分享时在共享文件间快速切换（与左侧树联动） */
+  #tabs {
+    display: none; background: #181818; border-bottom: 1px solid #2c2c2c;
+    padding: 4px 8px 0; overflow-x: auto; white-space: nowrap;
+  }
+  #tabs .tb {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; margin-right: 2px;
+    font-size: 12.5px; color: #9aa0a6; border: 1px solid transparent; border-bottom: none;
+    border-radius: 8px 8px 0 0; cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  #tabs .tb:hover { background: #232323; color: #cccccc; }
+  #tabs .tb.on { background: #2a2d2e; color: #fff; border-color: #2c2c2c; }
+  #tabs .tb .seti-ic { font-size: 1.2em; transform: translateY(.08em); }
+  #tabs .tb .tb-nm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
   #ed .CodeMirror { height: 100%; font-size: 13px; }
   /* 远端光标 */
   .cc { position: relative; width: 0; border-left: 2px solid var(--cc, #6cb6ff); margin-left: -1px; pointer-events: none; }
@@ -162,8 +180,15 @@
   html.theme-light #tree .head button { color: #6a6a6a; }
   html.theme-light #tree .tree-row { color: #1f2328; }
   html.theme-light #tree .tree-row:hover { background: #e6e6e6; }
+  html.theme-light #tree .tree-row.active { background: #005fb8; color: #fff; }
+  html.theme-light #tree .tree-row.active .nm,
+  html.theme-light #tree .tree-row.active .ic { color: #fff; }
   html.theme-light #tree .tree-row .twist { color: #6a6a6a; }
   html.theme-light #edbar { background: #f6f6f6; border-bottom-color: #d8d8d8; color: #6a6a6a; }
+  html.theme-light #tabs { background: #f6f6f6; border-bottom-color: #d8d8d8; }
+  html.theme-light #tabs .tb { color: #6a6a6a; }
+  html.theme-light #tabs .tb:hover { background: #ececec; color: #1f2328; }
+  html.theme-light #tabs .tb.on { background: #e0e0e0; color: #1f2328; border-color: #d8d8d8; }
   html.theme-light #tip { background: rgba(0, 0, 0, .28); }
   html.theme-light #tip .box { background: #ffffff; border-color: #d0d0d0; color: #1f2328; }
   html.theme-light #tip a { color: #005fb8; }
@@ -196,6 +221,7 @@
     <div id="treeList"></div>
   </div>
   <div id="edwrap">
+    <div id="tabs"></div>
     <div id="edbar"></div>
     <div id="ed"></div>
   </div>
@@ -212,14 +238,14 @@
     });
   };
 
-  var token = new URLSearchParams(location.search).get("collab") || "";
+  var shareId = new URLSearchParams(location.search).get("collab") || "";
   var isAdmin = {{ 'true' if is_admin else 'false' }};
   // 登录用户名（数据库 users 表）：协作昵称固定用它，绝不能随机生成，
   // 否则每次刷新都会变成新身份，「谁改的」记录也跟着乱
   var collabUser = {{ (collab_user or '')|tojson }};
 
   var S = {
-    ws: null, myId: null,
+    ws: null, myId: null, token: null,
     myName: (collabUser || "").trim() || ("访客" + Math.floor(1000 + Math.random() * 9000)),
     version: 0, cm: null, applying: false, curTimer: null,
     marks: {}, path: null, root: null, dir: "/",
@@ -227,9 +253,11 @@
     opSeq: 0,      // 本端发出的操作自增序号：回显按 id 精确出队
     closed: false, // 房间已关闭（房主退出），不再自动重连
     peerInfo: {},  // id -> {name, color}：给「谁改的」标注查作者名/色
+    shareType: null, // "room"=单文件分享（原行为）；"group"=批量分享（左侧列出被勾选的文件）
+    rooms: [],       // 批量分享组里的房间列表
   };
 
-  if (!token) {
+  if (!shareId) {
     showTip("缺少协作令牌", "请通过邀请链接打开本页面。" +
       (isAdmin ? '<br><a href="/ide">返回 IDE</a>' : ""));
     return;
@@ -356,9 +384,10 @@
   function send(obj) { try { S.ws.send(JSON.stringify(obj)); } catch (e) {} }
 
   function connect() {
+    if (!S.token) return;
     $("myName").value = S.myName;
     var proto = location.protocol === "https:" ? "wss" : "ws";
-    var qs = "token=" + encodeURIComponent(token) +
+    var qs = "token=" + encodeURIComponent(S.token) +
              "&name=" + encodeURIComponent(S.myName) +
              "&color=" + encodeURIComponent(colorFor(S.myName));
     var ws;
@@ -376,9 +405,10 @@
           // 与 IDE 同款：按文件扩展名按需加载语法高亮 mode
           applyMode(m.path || "");
           // 浏览范围锁定在共享文件所在目录：协作者不应看到整个系统
+          // （批量分享模式下左侧固定为「被勾选的文件列表」，不做目录浏览）
           if (!S.root && m.path) {
             S.root = m.path.replace(/\/[^/]*$/, "") || "/";
-            renderTree();
+            if (S.shareType !== "group") renderTree();
           }
           // 头部只显示「所在文件夹名」（大号加粗）；文件名与完整路径放进悬浮提示
           var rpath = m.path || "";
@@ -407,14 +437,32 @@
         case "presence": renderPeers(m.peers || []); break;
         case "leave": clearCursor(m.id); break;
         case "closed":
-          // 房主退出：房间已失效，提示并停止自动重连
           S.closed = true;
           Object.keys(S.marks).forEach(clearCursor);
+          if (S.shareType === "group") {
+            // 批量分享里某个文件被房主停止：断开本连接（房间已删，挂着无意义，
+            // 也避免之后 onclose 误走「正在重连」）、从列表移除，
+            // 再自动切到组里其它还在共享的文件
+            try { ws.close(); } catch (e) {}
+            setSt(false);
+            toastBar(m.message || "该文件的协作已结束");
+            removeShareItem(S.token);
+            autoSwitchRoom(S.token);
+            break;
+          }
           showTip("协作已结束", esc(m.message || "房主已退出，邀请链接已失效。"));
           try { ws.close(); } catch (e) {}
           break;
         case "error":
           S.closed = true;
+          if (S.shareType === "group") {
+            // 连接时房间已不存在（组里某文件刚被房主停止）：
+            // 移除失效项并自动切换，不再弹阻断式「无法加入协作」
+            toastBar(m.message || "该文件的协作已结束");
+            removeShareItem(S.token);
+            autoSwitchRoom(S.token);
+            break;
+          }
           showTip("无法加入协作", esc(m.message || "房间不存在或已结束。"));
           break;
       }
@@ -640,7 +688,7 @@
   }
   /* 刷新 / 重连后按服务端记录重建全部标注（行背景 + 标签 + 改动字符着色） */
   function paintAuthors() {
-    fetch("/api/collab/" + encodeURIComponent(token) + "/authors")
+    fetch("/api/collab/" + encodeURIComponent(S.token || "") + "/authors")
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d) return;
@@ -723,7 +771,10 @@
     if (!j || !j.iconDefinitions) return;
     SETI = { defs: j.iconDefinitions, names: j.fileNames || {}, exts: j.fileExtensions || {},
              langs: j.languageIds || {} };
-    if (S.root) renderTree();                       // 图标数据晚到：重绘已加载的树
+    // 图标数据晚到：重绘已渲染的树（批量分享组模式此前不重绘，
+    // 会一直停留在 bootstrap 兜底图标——表现为红底「HTML」字样徽章）
+    if (S.shareType === "group") { if ((S.rooms || []).length) renderShareTree(); }
+    else if (S.root) renderTree();
   }).catch(function () {});
   var SETI_LANG = {   // 常见扩展名 → seti languageId（与 IDE 00_preamble.js 同表）
     py: "python", pyw: "python", js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript",
@@ -871,7 +922,176 @@
     setTimeout(function () { bar && bar.remove(); bar = null; }, 3000);
   }
 
-  connect();
+  /* ---------------- 批量分享组：左侧被勾选的文件列表 + 点击进入对应文件 ---------------- */
+
+  /* 进入某个共享文件的共同编辑（组分享模式下点击左侧文件时调用） */
+  function startRoom(tok) {
+    if (!tok) return;
+    if (S.token === tok) { if (!connected()) connect(); return; }
+    S.token = tok;
+    S.closed = false;
+    // 切换文件：断开旧房间连接（抑制其自动重连），清掉上一份的标注状态
+    if (S.ws) {
+      var old = S.ws; S.ws = null;
+      try { old.onclose = null; old.close(); } catch (e) {}
+    }
+    S.version = 0; S.pending = []; S.applying = false;
+    S.peerInfo = {};
+    Object.keys(S.marks).forEach(clearCursor);
+    clearTags(); clearAllInk();
+    setSt(false);
+    $("edbar").style.display = "none";
+    $("roomName").textContent = "连接中…";
+    renderTabs();
+    connect();
+  }
+
+  /* 编辑区上方标签页：每个共享文件一个标签，点击切换（与左侧树联动）。
+     单文件分享只有一个目标，不显示标签栏。 */
+  function renderTabs() {
+    var bar = $("tabs");
+    if (!bar) return;
+    if (S.shareType !== "group" || !(S.rooms || []).length) {
+      bar.style.display = "none"; bar.innerHTML = ""; return;
+    }
+    var items = S.rooms.slice().sort(function (a, b) {
+      return String(a.path || "").localeCompare(String(b.path || ""));
+    });
+    bar.innerHTML = items.map(function (r) {
+      var p = r.path || "";
+      var nm = p.split("/").filter(Boolean).pop() || "未命名";
+      return '<span class="tb' + (r.token === S.token ? " on" : "") +
+        '" data-tok="' + esc(r.token) + '" title="' + esc(p) + '">' +
+        iconFor(nm, false) +
+        '<span class="tb-nm">' + esc(nm) + '</span></span>';
+    }).join("");
+    bar.style.display = "block";
+    Array.prototype.forEach.call(bar.querySelectorAll(".tb"), function (t) {
+      t.onclick = function () { startRoom(t.getAttribute("data-tok")); };
+    });
+  }
+
+  /* 批量分享模式：按被勾选的房间路径渲染左侧列表（只显示共享内容，点击即进入） */
+  function renderShareTree() {
+    var items = (S.rooms || []).slice().sort(function (a, b) {
+      return String(a.path || "").localeCompare(String(b.path || ""));
+    });
+    if (!items.length) return;
+    // 求所有共享路径的最长公共目录前缀，作为树的根
+    var root = (items[0].path || "").replace(/\/[^/]*$/, "") || "/";
+    var again = true;
+    while (again) {
+      again = false;
+      for (var i = 0; i < items.length; i++) {
+        var p = items[i].path || "";
+        if (p !== root && p.indexOf(root + "/") !== 0) {
+          root = root.replace(/\/[^/]*$/, "") || "/";
+          again = true;
+          break;
+        }
+      }
+    }
+    var rootNode = { dirs: {}, files: [] };
+    items.forEach(function (it) {
+      var p = it.path || "";
+      if (root === "/") p = p.replace(/^\//, "");
+      else if (p.indexOf(root + "/") === 0) p = p.slice(root.length + 1);
+      var segs = p.split("/").filter(Boolean);
+      if (!segs.length) return;
+      var node = rootNode;
+      for (var i = 0; i < segs.length - 1; i++) {
+        if (!node.dirs[segs[i]]) node.dirs[segs[i]] = { dirs: {}, files: [] };
+        node = node.dirs[segs[i]];
+      }
+      node.files.push({ name: segs[segs.length - 1], token: it.token, path: it.path });
+    });
+
+    var listEl = $("treeList");
+    listEl.innerHTML = "";
+    var crumb = $("crumb");
+    crumb.textContent = root.split("/").filter(Boolean).pop() || root;
+    crumb.title = root;
+
+    var markActive = markActiveRow;   // 与自动切换共用同一份高亮逻辑
+    (function render(node, box) {
+      Object.keys(node.dirs).sort(function (a, b) { return a.localeCompare(b, "zh"); }).forEach(function (dn) {
+        var row = document.createElement("div");
+        row.className = "tree-row dir";
+        row.innerHTML = '<span class="twist">▸</span><span class="ic">' + iconFor(dn, true) +
+          '</span><span class="nm">' + esc(dn) + "</span>";
+        var kids = document.createElement("div");
+        kids.className = "tree-children open";
+        row.onclick = function () {
+          var open = kids.style.display !== "none";
+          kids.style.display = open ? "none" : "block";
+        };
+        box.appendChild(row);
+        box.appendChild(kids);
+        render(node.dirs[dn], kids);
+      });
+      node.files.sort(function (a, b) { return a.name.localeCompare(b.name, "zh"); }).forEach(function (f) {
+        var row = document.createElement("div");
+        row.className = "tree-row file";
+        row.setAttribute("data-token", f.token);
+        row.title = f.path || "";
+        row.innerHTML = '<span class="twist"></span><span class="ic">' + iconFor(f.name, false) +
+          '</span><span class="nm">' + esc(f.name) + "</span>";
+        row.onclick = function () { startRoom(f.token); markActive(); };
+        box.appendChild(row);
+      });
+    })(rootNode, listEl);
+    markActive();
+    renderTabs();
+  }
+
+  /* 左侧列表按当前房间 token 高亮（renderShareTree 与自动切换共用） */
+  function markActiveRow() {
+    var listEl = $("treeList");
+    if (!listEl) return;
+    Array.prototype.forEach.call(listEl.querySelectorAll(".tree-row[data-token]"), function (r) {
+      r.classList.toggle("active", r.getAttribute("data-token") === S.token);
+    });
+  }
+
+  /* 房主停止了某个文件的协作：从批量分享列表里移除它 */
+  function removeShareItem(tok) {
+    S.rooms = (S.rooms || []).filter(function (r) { return r.token !== tok; });
+    if (S.shareType === "group") renderShareTree();
+  }
+
+  /* 当前查看（或正要进入）的文件被停止后：组里还有其它文件就自动切过去，
+     一个都不剩才给出终结提示 */
+  function autoSwitchRoom(endedTok) {
+    if (S.shareType !== "group") return;
+    var left = (S.rooms || []).filter(function (r) { return r.token && r.token !== endedTok; });
+    if (!left.length) {
+      $("roomName").textContent = "协作已结束";
+      showTip("协作已结束", "该批量分享中的文件都已停止共享，邀请链接已失效。");
+      return;
+    }
+    if (S.token !== endedTok) return;    // 结束的不是当前房间：留在原地
+    startRoom(left[0].token);
+    markActiveRow();
+  }
+
+  /* 启动：解析分享 id（单个房间 token，或一次批量分享的组 id） */
+  function boot() {
+    fetch("/api/collab/share/" + encodeURIComponent(shareId))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.error || !(d.items || []).length) {
+          showTip("无法加入协作", esc(d.error || "分享不存在或已结束。"));
+          return;
+        }
+        S.shareType = d.type;
+        S.rooms = d.items || [];
+        if (d.type === "group") renderShareTree();   // 先列出被勾选的文件/文件夹
+        startRoom(S.rooms[0].token);                 // 默认进入第一个共享文件
+      })
+      .catch(function (e) { showTip("无法加入协作", esc(e.message || "网络错误，请稍后重试。")); });
+  }
+
+  boot();
 })();
 </script>
 </body>

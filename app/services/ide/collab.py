@@ -127,7 +127,9 @@ def _persist():
             data.append({
                 "token": r.token, "path": r.path, "name": r.name,
                 "created": r.created, "version": r.version,
-                "host_key": r.host_key,
+                "host_key": r.host_key, "group": r.group,
+                "max_peers": r.max_peers, "allowed_users": r.allowed_users,
+                "expires_at": r.expires_at,
                 "text": r.text, "baseline": r.baseline, "log": r.log,
                 "char_authors": _pack_authors(r.char_authors),
                 "author_info": r.author_info,
@@ -177,6 +179,11 @@ def _load():
             r.author_info = dict(ai) if isinstance(ai, dict) else {}
             r.created = int(d.get("created", time.time()))
             r.host_key = d.get("host_key")
+            r.group = d.get("group")
+            r.max_peers = d.get("max_peers")
+            au = d.get("allowed_users")
+            r.allowed_users = [str(u) for u in au if str(u).strip()] if isinstance(au, list) and au else None
+            r.expires_at = d.get("expires_at")
             _rooms[r.token] = r
         except Exception:
             continue
@@ -215,6 +222,10 @@ class Room:
         self.peers = {}                      # sid -> {"id","name","color","ws"}
         self.host_sid = None                 # 房主（邀请人）的 WS 连接 sid
         self.host_key = None                 # 房主认领密钥：只有创建者持有，访客无法冒充
+        self.group = None                    # 所属「分享组」id：一次勾选多个文件共享时共用
+        self.max_peers = None                # 人数上限（None=不限）：含房主在内的并发连接数
+        self.allowed_users = None            # 指定用户名单（None/空=不限）：按昵称（登录用户名）匹配
+        self.expires_at = None               # 有效期截止时间戳（None=永久）
         self.close_timer = None              # 房主断线宽限期的待关闭定时器（None=无）
         self.lock = threading.Lock()
 
@@ -230,20 +241,51 @@ class Room:
 _load()   # 启动时恢复上次未关闭的房间（Room 类已定义）
 
 
-def create_room(path, name=None):
+def create_room(path, name=None, group=None, max_peers=None, allowed_users=None, expires_in=None):
     """为某文件创建协作房间（已存在则复用 token）。
 
     返回 (room, token)。room.host_key 是房主认领密钥：仅下发给创建者，
     WS 连接凭它认领房主身份——访客抢先是拿不到房主身份的。
+    group：批量分享组 id（一次勾选多个文件/文件夹一起共享时共用）。
+    max_peers：人数上限（含房主）；allowed_users：指定用户名单（按昵称匹配）；
+    expires_in：有效秒数，超时后房间自动失效。
     """
     path = os.path.abspath(path)
+    group = (group or "").strip() or None
+
+    def _apply_limits(r):
+        # 复用已有房间时也按本次输入刷新限制（房主调整上限/有效期是合理操作）
+        try:
+            mp = int(max_peers) if max_peers not in (None, "", 0) else None
+        except (TypeError, ValueError):
+            mp = None
+        r.max_peers = max(1, mp) if mp else None
+        if allowed_users is None:
+            pass                      # 未传：保持原名单不变
+        elif isinstance(allowed_users, str):
+            r.allowed_users = [u.strip() for u in allowed_users.replace("，", ",").split(",") if u.strip()] or None
+        elif isinstance(allowed_users, list):
+            r.allowed_users = [str(u).strip() for u in allowed_users if str(u).strip()] or None
+        try:
+            ttl = int(expires_in) if expires_in else 0
+        except (TypeError, ValueError):
+            ttl = 0
+        if ttl > 0:
+            r.expires_at = int(time.time()) + ttl
+
     with _rooms_lock:
         for r in _rooms.values():
             if r.path == path:
+                if group and not r.group:
+                    r.group = group        # 老房间并入这次的分享组
+                _apply_limits(r)
+                _persist_soon()
                 return r, r.token
         token = secrets.token_urlsafe(16)
         room = Room(token, path, name or os.path.basename(path))
         room.host_key = secrets.token_urlsafe(16)
+        room.group = group
+        _apply_limits(room)
         _rooms[token] = room
         # 记下这次共享前的版本：保存该文件时据此在文件旁留一份备份
         record_preshare(room.path, room.baseline, token, room.created)
@@ -251,23 +293,54 @@ def create_room(path, name=None):
         return room, token
 
 
+def list_group(gid):
+    """某次批量分享（组）里的全部房间，按创建时间排序。"""
+    gid = (gid or "").strip()
+    if not gid:
+        return []
+    with _rooms_lock:
+        rooms = [r for r in _rooms.values() if r.group == gid]
+    rooms.sort(key=lambda r: r.created)
+    return [
+        {"token": r.token, "name": r.name, "path": r.path,
+         "peers": len(r.peers), "version": r.version, "created": r.created}
+        for r in rooms
+    ]
+
+
 def get_room(token):
-    return _rooms.get(token)
+    """取房间；已过有效期的房间顺带清除（惰性过期，不依赖定时器）。"""
+    r = _rooms.get(token)
+    if r and r.expires_at and time.time() > r.expires_at:
+        delete_room(token)
+        return None
+    return r
 
 
 def list_rooms():
+    expired = []
     with _rooms_lock:
-        return [
-            {
+        now = time.time()
+        out = []
+        for r in _rooms.values():
+            if r.expires_at and now > r.expires_at:
+                expired.append(r.token)      # 延后到锁外清除（锁不可重入）
+                continue
+            out.append({
                 "token": r.token,
                 "name": r.name,
                 "path": r.path,
                 "peers": len(r.peers),
                 "version": r.version,
                 "created": r.created,
-            }
-            for r in _rooms.values()
-        ]
+                "group": r.group,     # 批量分享组 id：受邀者/弹窗按组分卡片显示
+                "max_peers": r.max_peers,
+                "allowed_users": r.allowed_users or [],
+                "expires_at": r.expires_at,
+            })
+    for t in expired:
+        delete_room(t)
+    return out
 
 
 def delete_room(token):

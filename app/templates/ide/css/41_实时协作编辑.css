@@ -4,10 +4,52 @@
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
 .collab-modal {
-  width: 520px; max-width: 100%; max-height: 90vh; overflow: auto;
+  width: 820px; max-width: 100%; max-height: 90vh; overflow: auto;
   background: #252526; border: 1px solid #333; border-radius: 10px;
   box-shadow: 0 18px 60px rgba(0,0,0,.5); color: #ddd; font-size: 13px;
 }
+/* 左右两栏：左侧=其它协作中的文件，右侧=昵称/当前文件/加入（窄屏回落为上下堆叠） */
+.collab-cols { display: flex; gap: 14px; align-items: stretch; min-height: 0; }
+.collab-left {
+  flex: 1 1 46%; min-width: 0;
+  border-right: 1px solid #333; padding-right: 14px;
+  max-height: 64vh; overflow-y: auto;   /* 列表独立滚动 */
+}
+.collab-right { flex: 1 1 54%; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+@media (max-width: 700px) {
+  .collab-modal { width: 520px; }
+  .collab-cols { flex-direction: column; }
+  .collab-left { border-right: none; padding-right: 0; max-height: 40vh; }
+}
+
+/* 左侧按文件夹折叠的分组：组头可点（折叠/展开），组内是完整信息房间卡片 */
+.collab-folder { margin-bottom: 10px; }
+.collab-folder .cf-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; border-radius: 8px; cursor: pointer; user-select: none;
+  background: #2b2b2b; border: 1px solid #333;
+}
+.collab-folder .cf-head:hover { background: #323232; }
+.collab-folder .cf-arrow { flex: none; color: #8a8a8a; font-size: 11px; transition: transform .15s ease; }
+.collab-folder.folded .cf-arrow { transform: rotate(-90deg); }
+.collab-folder .cf-ic { flex: none; color: #dcb67a; }
+.collab-folder .cf-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collab-folder .cf-meta { flex: none; color: #8a8a8a; font-size: 11px; }
+.collab-folder .cf-ops { margin-left: auto; flex: none; display: inline-flex; gap: 4px; }
+.collab-folder .cf-ops .collab-btn { padding: 2px 8px; font-size: 12px; }
+.collab-folder .cf-body { padding: 6px 0 0 10px; }
+.collab-folder.folded .cf-body { display: none; }
+.collab-room .cr-limits { color: #8a8a8a; }
+
+/* 右侧「共享限制」面板 */
+.collab-limits {
+  display: flex; flex-direction: column; gap: 10px;
+  border: 1px dashed #3c3c3c; border-radius: 8px; padding: 10px 10px 12px;
+}
+.collab-limits .lt-hd { color: #9aa0a6; font-size: 12px; }
+.collab-limits .lt-hd .bi { color: #6cb6ff; margin-right: 4px; }
+.collab-limits .collab-row label { min-width: 62px; }
+.collab-limits select.collab-input { cursor: pointer; }
 .collab-head {
   display: flex; align-items: center; gap: 8px; padding: 12px 14px;
   border-bottom: 1px solid #333; font-weight: 600; font-size: 14px;
@@ -158,6 +200,55 @@ a.collab-btn { display: inline-flex; align-items: center; gap: 4px; text-decorat
 /* 「停止分享」：与蓝色「版本对比」区分，用暖色表示终止性操作 */
 .collab-fab.stop { background: #a4312b; border-color: #8c2a25; }
 .collab-fab.stop:hover { background: #8c2a25; }
+
+/* ============ 批量分享选择器（勾选文件夹/文件一起共同编辑） ============ */
+.sp-modal { width: min(620px, 94vw); height: min(72vh, 680px); }
+.collab-modal .sp-path {
+  margin-left: 8px; font-weight: 400; font-size: 12px; color: #9aa0a6;
+  word-break: break-all; flex: 1; min-width: 0;
+}
+.sp-bar { padding: 8px 14px 4px; }
+.sp-bar .sp-hint { color: #8a8a8a; font-size: 11px; }
+.sp-tree {
+  flex: 1; overflow: auto; margin: 6px 10px; padding: 4px 0;
+  background: #1b1b1e; border: 1px solid #333; border-radius: 8px;
+}
+.sp-row {
+  display: flex; align-items: center; gap: 6px; min-height: 24px; padding-right: 8px;
+  font-size: 12px; color: #c9d1d9; user-select: none;
+}
+.sp-row:hover { background: #2a2d2e; }
+.sp-row.on .nm { color: #7fd88f; }
+.sp-row .tw { width: 14px; flex: none; text-align: center; color: #9aa0a6; cursor: pointer; font-size: 10px; }
+.sp-row .ic { width: 16px; flex: none; color: #e5c07b; display: inline-flex; justify-content: center; }
+.sp-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sp-row.dir .nm { cursor: pointer; }
+.sp-row .sp-ck { flex: none; margin: 0; }
+.sp-foot { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid #333; }
+.sp-foot .sp-count { flex: 1; color: #9aa0a6; font-size: 12px; }
+.sp-link { padding: 10px 14px; border-top: 1px solid #333; }
+.sp-link .sp-linktxt { color: #9aa0a6; font-size: 11px; margin-bottom: 6px; }
+.sp-link .sp-linkrow { display: flex; gap: 8px; }
+.sp-link input {
+  flex: 1; min-width: 0; background: #1b1b1e; border: 1px solid #3c3c3c; color: #cfe3f7;
+  border-radius: 5px; padding: 6px 8px; font-size: 12px;
+}
+
+/* ============ 批量分享组卡片（弹窗里按分享组分卡片显示） ============ */
+.collab-grp {
+  border: 1px solid #3c3c3c; border-radius: 10px; padding: 8px 10px; margin-bottom: 12px;
+  background: #202023;
+}
+.collab-grp .cg-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 8px; }
+.collab-grp .cg-ic { color: #e5c07b; display: inline-flex; }
+.collab-grp .cg-name {
+  font-weight: 700; color: #e6e6e6; font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.collab-grp .cg-meta { color: #9aa0a6; font-size: 11px; white-space: nowrap; }
+.collab-grp .cg-ops { margin-left: auto; display: inline-flex; gap: 6px; flex: none; }
+.collab-grp .cg-body .collab-room { margin-bottom: 8px; background: #1b1b1e; }
+.collab-grp .cg-body .collab-room:last-child { margin-bottom: 0; }
 
 /* ============ 版本对比弹层（分享前 vs 当前） ============ */
 .collab-diff-overlay {

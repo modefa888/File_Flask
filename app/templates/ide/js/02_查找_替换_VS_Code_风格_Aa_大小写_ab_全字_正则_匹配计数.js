@@ -385,6 +385,11 @@
       items.push({ label: "打开时间线", act: () => ctxAction("timeline") });
     }
     items.push({ divider: true });
+    if (typeof window.IDECollabSharePicker === "function") {
+      // 批量分享共同编辑：弹出勾选框，根目录为该条目所在文件夹
+      items.push({ label: "分享共同编辑…", icon: "bi-share",
+        act: () => window.IDECollabSharePicker(isDir ? path : (path.slice(0, path.lastIndexOf("/")) || path)) });
+    }
     if (!isDir) {
       items.push({ label: "剪切", sc: "Ctrl+X", act: () => ctxAction("cut") });
       items.push({ label: "复制", sc: "Ctrl+C", act: () => ctxAction("copy") });
@@ -559,6 +564,10 @@
     items.push({ label: "添加到 AI 对话（目录结构）", icon: "bi-chat-square-text", act: () => aiAddFileFromTree(dir, nm, true) });
     items.push({ label: "在文件夹中查找…", icon: "bi-search", sc: "Ctrl+Shift+F", act: () => openGrepSearch() });
     items.push({ divider: true });
+    if (typeof window.IDECollabSharePicker === "function") {
+      // 批量分享共同编辑：弹出勾选框，可勾选该文件夹下的文件/子文件夹
+      items.push({ label: "分享共同编辑…", icon: "bi-share", act: () => window.IDECollabSharePicker(dir) });
+    }
     items.push({ label: "粘贴", icon: "bi-clipboard", sc: "Ctrl+V", disabled: !fileClip, act: () => pasteClip(dir) });
     items.push({ divider: true });
     // 只留一个复制项：绝对路径（相对路径仍可用快捷键 Ctrl+Shift+Alt+C，不再占菜单位）

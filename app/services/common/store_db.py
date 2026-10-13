@@ -373,6 +373,52 @@ CREATE TABLE IF NOT EXISTS file_hints (
     hint       TEXT NOT NULL DEFAULT '',
     updated_at REAL NOT NULL DEFAULT 0
 );
+-- 接口登记表（后台「接口模块」）：一行一个「路径规则 + 方法」。
+-- 随代码路由变化自动同步：新增路由自动登记，已移除的路由标记 orphan=1（不删除，保留人工配置）。
+-- access 为空表示跟随代码默认级别 access_default；desc / access / disabled 可由后台编辑。
+-- 由 services/adm/api_registry.py 读写，auth._require_login 每次请求实时读取。
+CREATE TABLE IF NOT EXISTS api_interface (
+    rule           TEXT NOT NULL,
+    method         TEXT NOT NULL,
+    endpoint       TEXT DEFAULT '',
+    module         TEXT DEFAULT '',
+    module_name    TEXT DEFAULT '',
+    kind           TEXT DEFAULT '',
+    params         TEXT DEFAULT '',
+    desc           TEXT DEFAULT '',
+    access         TEXT DEFAULT '',
+    access_default TEXT DEFAULT '',
+    disabled       INTEGER NOT NULL DEFAULT 0,
+    orphan         INTEGER NOT NULL DEFAULT 0,
+    created_at     REAL NOT NULL DEFAULT 0,
+    updated_at     REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (rule, method)
+);
+-- 权限表（后台「权限模块」）：一行一个「角色 + 接口」的允许与否。
+-- source='manual'  后台手动设置的权限：权威，鉴权以它为准；
+-- source='default' 默认快照（「生成默认快照」按访问级别一次性物化）：仅供查库查看 / 导出，
+--                  不参与鉴权（改接口级别后会随同步自动重建），因此不会因快照过期造成越权。
+CREATE TABLE IF NOT EXISTS api_permission (
+    role       TEXT NOT NULL,
+    rule       TEXT NOT NULL,
+    method     TEXT NOT NULL,
+    allowed    INTEGER NOT NULL DEFAULT 0,
+    source     TEXT NOT NULL DEFAULT 'manual',
+    updated_at REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (role, rule, method)
+);
+-- 接口请求统计（后台「接口模块」）：一行一个「路径规则 + 方法」的累计请求次数（含成功 / 失败）。
+-- 由 services/adm/api_registry.record_request() 在内存累加、后台每隔数秒批量落库。
+CREATE TABLE IF NOT EXISTS api_stats (
+    rule        TEXT NOT NULL,
+    method      TEXT NOT NULL,
+    total       INTEGER NOT NULL DEFAULT 0,
+    ok          INTEGER NOT NULL DEFAULT 0,
+    fail        INTEGER NOT NULL DEFAULT 0,
+    last_at     REAL NOT NULL DEFAULT 0,
+    last_status INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (rule, method)
+);
 """
 
 

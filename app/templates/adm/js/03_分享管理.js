@@ -20,14 +20,15 @@ function shareStateBadge(state) {
 }
 
 async function refreshShares(el) {
+    /* sortKey = 该列排序时传给后端的字段名（后端按 ?sort= 排序；无 sortKey 的列不可排序） */
     var shareCols = [
-        { label: '文件', render: function (r) { return '<span class="adm-cell-strong">' + ADM.esc(r.name) + '</span>'; } },
-        { label: '大小', render: function (r) { return ADM.esc(r.size_str); } },
-        { label: '状态', render: function (r) { return shareStateBadge(r.state); } },
-        { label: '访问量', render: function (r) { return (r.views || 0) + ' / ' + (r.max_views || '∞'); } },
-        { label: '有效期', render: function (r) { return ADM.esc(r.expires_str); } },
-        { label: '创建', render: function (r) { return ADM.esc(r.created_str); } },
-        { label: '最近访问', render: function (r) { return ADM.esc(r.last_view_str); } },
+        { label: '文件', sortKey: 'name', render: function (r) { return '<span class="adm-cell-strong">' + ADM.esc(r.name) + '</span>'; } },
+        { label: '大小', sortKey: 'size', render: function (r) { return ADM.esc(r.size_str); } },
+        { label: '状态', sortKey: 'state', render: function (r) { return shareStateBadge(r.state); } },
+        { label: '访问量', sortKey: 'views', render: function (r) { return (r.views || 0) + ' / ' + (r.max_views || '∞'); } },
+        { label: '有效期', sortKey: 'expires_at', render: function (r) { return ADM.esc(r.expires_str); } },
+        { label: '创建', sortKey: 'created_at', render: function (r) { return ADM.esc(r.created_str); } },
+        { label: '最近访问', sortKey: 'last_view_at', render: function (r) { return ADM.esc(r.last_view_str); } },
         {
             label: '操作', render: function (r) {
                 var id = r.id, token = ADM.esc(r.token);
@@ -45,12 +46,15 @@ async function refreshShares(el) {
     html += ADM.servTable(shareCols, {
         key: 'shares',
         actionsWidth: 360,
+        sortable: true,                       // 点击表头 → 后端按 sortKey 字段排序
         fetch: function (p) {
             return ADM.api('/api/shares?include_revoked=1&q=' + encodeURIComponent(p.q) +
-                '&page=' + p.page + '&page_size=' + p.size);
+                '&page=' + p.page + '&page_size=' + p.size +
+                (p.sort ? '&sort=' + encodeURIComponent(p.sort) + '&order=' + encodeURIComponent(p.order) : ''));
         },
         onRender: function (host) { bindShareEvents(host, el); }
     });
+    html += '<div class="adm-hint" style="margin-top:10px">点击表头可按该列排序（再点一次切换升 / 降序）。</div>';
     html += '</div>';
     el.innerHTML = html;
     ADM.mountServTables(el);

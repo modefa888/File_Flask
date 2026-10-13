@@ -15,6 +15,16 @@ POST /api/adm/users            新建用户 {username, password, role}
 POST /api/adm/users/update     修改角色 / 重置密码 {username, role?|password?}
 POST /api/adm/users/ban        封禁 / 解封 {username, banned}
 POST /api/adm/users/delete     删除用户 {username}
+GET  /api/adm/apis             接口目录（数据库登记表：清单 + 访问级别）
+GET  /api/adm/apis/summary     接口目录统计（按级别 / 模块汇总）
+POST /api/adm/apis/sync        从 Flask 路由同步接口登记表
+POST /api/adm/apis/cleanup     清理已失效的接口登记
+POST /api/adm/apis/update      编辑接口登记 {path, method, desc?|access?|disabled?}
+POST /api/adm/apis/permission  修改角色权限 {role, path, method, allowed}
+POST /api/adm/apis/permission/materialize  生成默认权限快照（全量物化）
+POST /api/adm/apis/permission/clear        清除默认权限快照
+POST /api/adm/apis/stats/reset  清零接口请求统计
+GET  /api/adm/permissions      权限视图（角色 → 可访问接口 + 权限矩阵）
 
 其余功能（分享 / 定时任务 / 后台任务 / 插件 / 数据库连接 / SSH / 通知 / AI 用量 /
 文件说明 / 操作历史）直接复用各业务模块已有的 `/api/...` 接口，后台页只做聚合展示。
@@ -165,3 +175,121 @@ def api_users_delete():
     if err:
         return _fail(err)
     return _ok()
+
+
+# --------------------------------------------------------------------------- 接口目录 / 权限
+@bp.route("/api/adm/apis")
+def api_apis():
+    """接口目录：全部后端 HTTP 接口（可 ?access= 过滤访问级别）。
+
+    不传 page 时返回全量（供前端一次性加载后本地搜索 / 分页）；
+    传 page 时按通用分页返回切片。
+    """
+    from ...services.adm import api_registry
+    from ..common.paginate import paginate_opt
+    rows = api_registry.list_interfaces()
+    access = (request.args.get("access") or "").strip()
+    if access in api_registry.ACCESS_META:
+        rows = [r for r in rows if r["access"] == access]
+    page_items, total = paginate_opt(rows, request)
+    if total is None:
+        return jsonify({"items": page_items, "total": len(page_items)})
+    return jsonify({"items": page_items, "total": total})
+
+
+@bp.route("/api/adm/apis/summary")
+def api_apis_summary():
+    """接口目录统计：总数 + 各级别条数 + 已停用 / 已改权限 + 按模块汇总。"""
+    from ...services.adm import api_registry
+    return jsonify(api_registry.summary())
+
+
+@bp.route("/api/adm/apis/sync", methods=["POST"])
+def api_apis_sync():
+    """从 Flask 路由同步接口登记表（新增登记 / 刷新 / 标记失效）。"""
+    from ...services.adm import api_registry
+    return _ok({"sync": api_registry.sync_interfaces()})
+
+
+@bp.route("/api/adm/apis/cleanup", methods=["POST"])
+def api_apis_cleanup():
+    """清理已失效（代码中已不存在）的接口登记。"""
+    from ...services.adm import api_registry
+    return _ok({"removed": api_registry.cleanup_orphans()})
+
+
+@bp.route("/api/adm/apis/update", methods=["POST"])
+def api_apis_update():
+    """编辑接口登记：说明 / 访问级别 / 停用启用。
+
+    body: {path, method, desc?, access?, disabled?}
+    - access 传空串表示恢复默认级别；
+    - 受保护接口（登录入口、后台接口等）不允许改级别 / 停用，返回 400。
+    """
+    from ...services.adm import api_registry
+    data = request.get_json(silent=True) or {}
+    path = (data.get("path") or "").strip()
+    method = (data.get("method") or "GET").strip().upper()
+    if not path:
+        return _fail("缺少接口路径")
+    err = api_registry.update_interface(
+        path, method,
+        desc=data.get("desc") if "desc" in data else None,
+        access=data.get("access") if "access" in data else None,
+        disabled=bool(data.get("disabled")) if "disabled" in data else None)
+    if err:
+        return _fail(err)
+    return _ok()
+
+
+@bp.route("/api/adm/apis/permission", methods=["POST"])
+def api_apis_permission():
+    """修改「角色 + 接口」权限。
+
+    body: {role, path, method, allowed}
+    - allowed 为 true / false 时写入权限表；为 null 时删除记录（恢复默认）。
+    """
+    from ...services.adm import api_registry
+    data = request.get_json(silent=True) or {}
+    role = (data.get("role") or "").strip()
+    path = (data.get("path") or "").strip()
+    method = (data.get("method") or "GET").strip().upper()
+    if not path:
+        return _fail("缺少接口路径")
+    if "allowed" not in data:
+        return _fail("缺少 allowed 参数")
+    allowed = data.get("allowed")
+    if allowed is not None:
+        allowed = bool(allowed)
+    err = api_registry.set_permission(role, path, method, allowed)
+    if err:
+        return _fail(err)
+    return _ok()
+
+
+@bp.route("/api/adm/apis/permission/materialize", methods=["POST"])
+def api_apis_permission_materialize():
+    """生成默认权限快照：把全部「角色×接口」按当前规则物化进 api_permission（仅查看用）。"""
+    from ...services.adm import api_registry
+    return _ok({"rows": api_registry.materialize_permissions()})
+
+
+@bp.route("/api/adm/apis/permission/clear", methods=["POST"])
+def api_apis_permission_clear():
+    """清除默认权限快照（保留手动设置的权限）。"""
+    from ...services.adm import api_registry
+    return _ok({"removed": api_registry.clear_default_permissions()})
+
+
+@bp.route("/api/adm/apis/stats/reset", methods=["POST"])
+def api_apis_stats_reset():
+    """清零接口请求统计。"""
+    from ...services.adm import api_registry
+    return _ok({"removed": api_registry.reset_stats()})
+
+
+@bp.route("/api/adm/permissions")
+def api_permissions():
+    """权限视图：每个角色可访问的接口清单 + 权限矩阵。"""
+    from ...services.adm import api_registry
+    return jsonify(api_registry.permission_view())

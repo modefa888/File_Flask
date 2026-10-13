@@ -36,6 +36,7 @@ def create_app(test_config=None) -> Flask:
     _init_chat_engine()
     _init_index_engine()
     _init_cron_engine(app)
+    _sync_api_registry(app)
 
     return app
 
@@ -79,6 +80,16 @@ def _register_blueprints(app: Flask) -> None:
         app.register_blueprint(bp)
 
 
+def _sync_api_registry(app: Flask) -> None:
+    """把当前路由同步进接口登记表（store.db），供后台「接口模块 / 权限模块」与鉴权使用。"""
+    try:
+        from .services.adm import api_registry
+        with app.app_context():
+            api_registry.ensure_synced(force=True)
+    except Exception as e:                      # 同步失败不应阻断服务启动
+        _log.warning("接口登记表同步失败，继续启动: %s", e)
+
+
 def _install_request_logging(app: Flask) -> None:
     """为每个 HTTP 请求/响应记录 JSON 结构化日志。"""
     from flask import request
@@ -106,6 +117,14 @@ def _install_request_logging(app: Flask) -> None:
                 "status": response.status_code, "latency_ms": latency,
             },
         )
+        # 接口请求统计（累计次数，含成功 / 失败）：只累加内存，后台线程批量落库
+        try:
+            rule = getattr(request, "url_rule", None)
+            from .services.adm import api_registry
+            api_registry.record_request(rule.rule if rule is not None else path, method,
+                                        response.status_code)
+        except Exception:
+            pass
         return response
 
 

@@ -524,11 +524,20 @@
           S.path = m.path || null;
           // 与 IDE 同款：按文件扩展名按需加载语法高亮 mode
           applyMode(m.path || "");
-          // 浏览范围锁定在共享文件所在目录：协作者不应看到整个系统
-          // （批量分享模式下左侧固定为「被勾选的文件列表」，不做目录浏览）
+          // 浏览范围锁定在「被分享的路径」本身：绝不回退到所在目录，
+          // 避免协作者看到同级 / 上级文件；其它任何路径由 /api/shared/files 一律 403
           if (!S.root && m.path) {
-            S.root = m.path.replace(/\/[^/]*$/, "") || "/";
-            if (S.shareType !== "group") renderTree();
+            var _cur = (S.rooms || []).filter(function (r) { return r.token === S.token; })[0] || {};
+            S.root = m.path;
+            S.rootIsDir = !!_cur.is_dir;
+            if (S.shareType === "group") {
+              // 批量分享：左侧固定为「被勾选的文件列表」，不做目录浏览
+            } else if (S.rootIsDir) {
+              renderTree();                 // 被分享的是目录：浏览该目录本身
+            } else {
+              var _rb = $("rootBtn"); if (_rb) _rb.style.display = "none";
+              renderShareTree();            // 被分享的是单个文件：只列出该条目
+            }
           }
           // 头部只显示「所在文件夹名」（大号加粗）；文件名与完整路径放进悬浮提示
           var rpath = m.path || "";
@@ -896,7 +905,7 @@
     // 图标数据晚到：重绘已渲染的树（批量分享组模式此前不重绘，
     // 会一直停留在 bootstrap 兜底图标——表现为红底「HTML」字样徽章）
     if (S.shareType === "group") { if ((S.rooms || []).length) renderShareTree(); }
-    else if (S.root) renderTree();
+    else if (S.root && S.rootIsDir) renderTree();
   }).catch(function () {});
   var SETI_LANG = {   // 常见扩展名 → seti languageId（与 IDE 00_preamble.js 同表）
     py: "python", pyw: "python", js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript",
@@ -967,7 +976,10 @@
   }
 
   function fetchDir(path) {
-    return fetch("/api/files?path=" + encodeURIComponent(path))
+    // 专用接口：只允许浏览「被分享的文件目录」；其它路径由服务端 403 拒绝
+    var u = "/api/shared/files?share=" + encodeURIComponent(shareId) +
+            "&path=" + encodeURIComponent(path);
+    return fetch(u)
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (d.error) throw new Error(d.error);

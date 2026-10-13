@@ -13,25 +13,25 @@ ADM.modules.push({
 async function refreshUsers(el) {
     var userCols = [
         {
-            label: '用户名', render: function (r) {
+            label: '用户名', sortKey: 'username', render: function (r) {
                 var self = (r.username === ADM.user);
                 return '<span class="adm-cell-strong">' + ADM.esc(r.username) + '</span>' +
                     (self ? ' ' + ADM.badge('当前账号', 'info') : '');
             }
         },
         {
-            label: '角色', render: function (r) {
+            label: '角色', sortKey: 'role', render: function (r) {
                 return r.role === 'admin' ? ADM.badge('管理员', 'info') : ADM.badge('协作者', 'mute');
             }
         },
         {
-            label: '状态', render: function (r) {
+            label: '状态', sortKey: 'banned', render: function (r) {
                 return r.banned ? ADM.badge('已封禁', 'bad') : ADM.badge('正常', 'ok');
             }
         },
-        { label: '创建时间', render: function (r) { return ADM.dt(r.created); } },
+        { label: '创建时间', sortKey: 'created', render: function (r) { return ADM.dt(r.created); } },
         {
-            label: '操作', render: function (r) {
+            label: '操作', sortable: false, render: function (r) {
                 var name = ADM.esc(r.username);
                 var self = (r.username === ADM.user);
                 var pwd = '<button class="adm-btn sm" data-act="pwd" data-name="' + name + '">重置密码</button>';
@@ -57,14 +57,16 @@ async function refreshUsers(el) {
     html += ADM.servTable(userCols, {
         key: 'users',
         actionsWidth: 400,
+        sortable: true,                       // 点击表头 → 后端按 sortKey 字段排序
         fetch: function (p) {
             return ADM.api('/api/adm/users?q=' + encodeURIComponent(p.q) +
-                '&page=' + p.page + '&page_size=' + p.size)
+                '&page=' + p.page + '&page_size=' + p.size +
+                (p.sort ? '&sort=' + encodeURIComponent(p.sort) + '&order=' + encodeURIComponent(p.order) : ''))
                 .then(function (r) { return { items: r.users || [], total: r.total || 0 }; });
         },
         onRender: function (host) { bindUserEvents(host, el); }
     });
-    html += '<div class="adm-hint" style="margin-top:10px">默认管理员账号及当前登录账号不可降级 / 删除 / 封禁，系统始终保留至少一个管理员。封禁后该账号将无法登录。</div>';
+    html += '<div class="adm-hint" style="margin-top:10px">点击表头可按该列排序（再点一次切换升 / 降序）。默认管理员账号及当前登录账号不可降级 / 删除 / 封禁，系统始终保留至少一个管理员。封禁后该账号将无法登录。</div>';
     html += '</div>';
     el.innerHTML = html;
     ADM.mountServTables(el);

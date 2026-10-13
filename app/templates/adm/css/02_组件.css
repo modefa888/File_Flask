@@ -198,6 +198,28 @@
     border-bottom: none;
 }
 
+/* 可排序表头：点击切换升序 / 降序，箭头指示当前排序列与方向 */
+.adm-table th.adm-sortable {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.adm-table th.adm-sortable:hover {
+    color: var(--adm-text);
+}
+
+.adm-sort-ind {
+    margin-left: 6px;
+    font-size: 10px;
+    opacity: .4;
+}
+
+.adm-sort-ind.on {
+    opacity: 1;
+    color: var(--adm-brand);
+}
+
 /* 点击整行查看该行信息 */
 .adm-table tbody tr {
     cursor: pointer;
@@ -949,6 +971,39 @@
     margin: 0;
 }
 
+/* 日志查看器：关键字搜索工具栏 + 命中高亮 */
+.adm-log-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.adm-log-search .adm-input {
+    width: 260px;
+    padding: 5px 10px;
+    font-size: 12.5px;
+}
+
+.adm-log-search .adm-switch {
+    font-size: 12.5px;
+}
+
+/* 命中高亮：用「黄底 + 深色字」，深色 / 浅色主题下都清晰可读 */
+.adm-pre mark.adm-log-hit {
+    background: #ffe066;
+    color: #1f2937;
+    border-radius: 3px;
+    padding: 0 1px;
+}
+
+/* 当前定位处：蓝底白字，与其它命中区分 */
+.adm-pre mark.adm-log-hit.cur {
+    background: #2f5bd6;
+    color: #ffffff;
+}
+
 .adm-kv {
     display: grid;
     grid-template-columns: 190px 1fr;
@@ -990,4 +1045,29 @@
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+}
+
+/* 「按模块统计」里的可点击模块胶囊：点击弹出该模块的接口列表 */
+.adm-module-chip {
+    appearance: none;
+    cursor: pointer;
+    border: 1px solid var(--adm-border);
+    background: rgba(148, 163, 184, 0.12);
+    color: var(--adm-text-dim);
+    border-radius: 999px;
+    padding: 3px 11px;
+    font-size: 12px;
+    line-height: 1.7;
+    font-family: inherit;
+    transition: color .15s, background .15s, border-color .15s;
+}
+
+.adm-module-chip:hover {
+    color: var(--adm-brand);
+    border-color: var(--adm-brand);
+    background: rgba(91, 140, 255, 0.12);
+}
+
+.adm-module-chip:active {
+    transform: translateY(1px);
 }

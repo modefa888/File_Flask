@@ -5,6 +5,7 @@ REST（需登录的房主操作 + 公开加入）：
 - GET    /api/collab/rooms           列出进行中的协作房间
 - DELETE /api/collab/rooms/<token>   停止房间（断开所有协作者）
 - GET    /api/collab/<token>/qr      邀请链接二维码（PNG）
+- GET    /api/shared/files           协作者专用：被分享文件清单 / 分享范围内目录（越权一律 403）
 
 WebSocket（免登录，凭 token 即可加入，见 auth 公开路径 /ws/）：
 - 连接 /ws/collab?token=..&name=..&color=..
@@ -89,17 +90,126 @@ def api_collab_share(sid):
     _logf().info("GET /api/collab/share/%s", sid)
     room = get_room(sid)
     if room:
-        return jsonify({"type": "room", "items": [{
-            "token": room.token, "name": room.name, "path": room.path,
-            "peers": len(room.peers), "view": room.view,
-        }]})
+        item = dict(_share_item_info(room.path) or {})
+        item.update({"token": room.token, "name": room.name, "path": room.path,
+                     "peers": len(room.peers), "view": room.view})
+        return jsonify({"type": "room", "items": [item]})
     items = list_group(sid)
     if items:
-        return jsonify({"type": "group", "items": [{
-            "token": it["token"], "name": it["name"], "path": it["path"],
-            "peers": it["peers"], "view": it.get("view", False),
-        } for it in items]})
+        out = []
+        for it in items:
+            o = dict(_share_item_info(it["path"]) or {})
+            o.update({"token": it["token"], "name": it["name"], "path": it["path"],
+                      "peers": it["peers"], "view": it.get("view", False)})
+            out.append(o)
+        return jsonify({"type": "group", "items": out})
     return jsonify({"error": "分享不存在或已结束"}), 404
+
+
+@bp.route("/api/shared/files")
+def api_shared_files():
+    """协作者专用：只暴露「被分享的文件」，杜绝按任意路径越权读取。
+
+    - ?share=<分享id>                被分享的文件清单（名称 / 是否目录 / 大小 / 修改时间 / token）
+    - ?share=<分享id>&path=<绝对路径>  被分享目录范围内的某个目录列表
+
+    访问范围严格限定在「该分享实际共享的路径」内：只有被共享的「目录」才允许浏览，
+    其余任何路径（哪怕传入一个已知文件路径）一律 403。分享 id 既可以是单个房间
+    token，也可以是一次批量分享的组 id；与其它协作接口一样凭 id 解析，不额外放宽。
+    """
+    import os
+    from ...services.common.filecore import list_directory, format_size
+
+    sid = (request.args.get("share") or "").strip()
+    if not sid:
+        return jsonify({"error": "缺少分享标识 share"}), 400
+    rooms = _resolve_share_rooms(sid)
+    if not rooms:
+        return jsonify({"error": "分享不存在或已结束"}), 404
+
+    # 仅「被分享的目录」可作为可浏览的根；被分享的单个文件不暴露其所在目录
+    dir_roots = [os.path.abspath(r.path) for r in rooms
+                 if r.path and os.path.isdir(r.path)]
+    path = (request.args.get("path") or "").strip()
+
+    # ① 清单模式：返回被分享的文件信息
+    if not path:
+        items = []
+        for r in rooms:
+            info = _share_item_info(r.path)
+            if info is None:
+                continue
+            info.update({"token": r.token, "view": bool(getattr(r, "view", False)),
+                         "peers": len(r.peers)})
+            items.append(info)
+        return jsonify({
+            "type": "room" if get_room(sid) else "group",
+            "share": sid, "roots": dir_roots, "items": items,
+        })
+
+    # ② 目录模式：只允许浏览「被分享目录」范围内的目录
+    target = os.path.abspath(path)
+    if not _within_any(target, dir_roots):
+        _logf().warning("协作者请求分享范围外的路径，已拒绝: %s", target)
+        return jsonify({"error": "仅允许访问被分享的文件目录"}), 403
+    if not os.path.isdir(target):
+        return jsonify({"error": "路径不存在或不是目录"}), 400
+
+    items = list_directory(target, get_sizes=False, show_hidden=False)
+    total_files = sum(1 for it in items if not it.get("is_dir"))
+    total_dirs = sum(1 for it in items if it.get("is_dir"))
+    total_size = sum(it["size"] for it in items if it.get("size", 0) >= 0)
+    return jsonify({
+        "current_path": target, "current_path_abs": target,
+        "items": items, "total_items": len(items),
+        "stats": {"total_files": total_files, "total_dirs": total_dirs,
+                  "total_size": total_size, "total_size_str": format_size(total_size)},
+        "roots": dir_roots,
+    })
+
+
+def _resolve_share_rooms(sid):
+    """把分享 id（单个房间 token 或批量分享组 id）解析成房间对象列表。"""
+    room = get_room(sid)
+    if room:
+        return [room]
+    rooms = []
+    for it in (list_group(sid) or []):
+        r = get_room(it.get("token"))
+        if r is not None:
+            rooms.append(r)
+    return rooms
+
+
+def _share_item_info(path):
+    """被分享条目的基本信息（文件不存在返回 None）。"""
+    import os
+    from datetime import datetime
+    from ...services.common.filecore import format_size
+    if not path:
+        return None
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    is_dir = os.path.isdir(path)
+    return {
+        "name": os.path.basename(path), "path": path, "is_dir": is_dir,
+        "size": 0 if is_dir else st.st_size,
+        "size_str": "" if is_dir else format_size(st.st_size),
+        "mtime": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def _within_any(target, roots):
+    """target 是否等于某个根目录或位于其下（限制协作者可浏览的范围）。"""
+    import os
+    t = os.path.abspath(target)
+    for r in (roots or []):
+        r = os.path.abspath(r)
+        if t == r or t.startswith(r.rstrip(os.sep) + os.sep):
+            return True
+    return False
 
 
 @bp.route("/api/collab/rooms/<token>", methods=["DELETE"])

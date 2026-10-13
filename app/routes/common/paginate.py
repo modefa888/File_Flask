@@ -19,12 +19,51 @@ def _match(row, q):
     return False
 
 
-def paginate(rows, request, search=True):
-    """对 rows（list[dict]）做关键字过滤 + 分页，返回 (page_items, total)。"""
+def _sort_value(v):
+    """归一化排序值，保证不同类型可比较：数字 < 字符串 < 空值。"""
+    if isinstance(v, bool):
+        return (0, float(v), "")
+    if isinstance(v, (int, float)):
+        return (0, float(v), "")
+    if v is None or v == "":
+        return (2, 0.0, "")
+    return (1, 0.0, str(v).lower())
+
+
+def _field_of(row, field):
+    if isinstance(row, dict):
+        return row.get(field)
+    return getattr(row, field, None)
+
+
+def apply_sort(rows, request, keymap=None):
+    """按 ?sort=<字段>&order=asc|desc 排序；未传 sort 时原样返回。
+
+    - keymap：可选的「前端列名 → 行字段」映射（通常直接传字段名即可）；
+    - 空值（None / 空串）始终排在最后，不受升序 / 降序影响。
+    """
+    field = (request.args.get("sort") or "").strip()
+    if not field:
+        return list(rows)
+    if keymap:
+        field = keymap.get(field, field)
+    rev = (request.args.get("order") or "asc").strip().lower() == "desc"
+
+    present, empty = [], []
+    for r in rows:
+        (empty if _sort_value(_field_of(r, field))[0] == 2 else present).append(r)
+    present.sort(key=lambda r: _sort_value(_field_of(r, field)), reverse=rev)
+    return present + empty
+
+
+def paginate(rows, request, search=True, sort=True, sort_key=None):
+    """对 rows（list[dict]）做关键字过滤 + 排序 + 分页，返回 (page_items, total)。"""
     rows = list(rows)
     q = (request.args.get("q") or "").strip().lower()
     if search and q:
         rows = [r for r in rows if _match(r, q)]
+    if sort:
+        rows = apply_sort(rows, request, sort_key)
     total = len(rows)
     try:
         page = max(1, int(request.args.get("page", 1)))

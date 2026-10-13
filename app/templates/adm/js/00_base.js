@@ -118,6 +118,7 @@ var ADM = window.ADM = {
             rows: rows || [],
             page: page,
             size: size,
+            sort: (prev && !opts.reset) ? (prev.sort || null) : null,  // 排序：{idx, dir}，点击表头切换
             q: (prev && !opts.reset) ? (prev.q || '') : '',   // 关键字搜索（刷新后保留）
             sizes: opts.sizes || [10, 20, 50, 100],
             empty: opts.empty || '暂无数据',
@@ -132,8 +133,10 @@ var ADM = window.ADM = {
     },
 
     /* 只渲染「表头 + 数据行」部分（不含分页控件）。
-     * widths 传入时用固定表格布局并锁定每列宽度（避免内容变化造成列宽抖动）。 */
-    _tableHtml: function (cols, rows, empty, widths) {
+     * widths 传入时用固定表格布局并锁定每列宽度（避免内容变化造成列宽抖动）。
+     * sortOpt 传入时可点击表头排序：{active, dir, idOf}——idOf(col, idx) 返回该列的排序 id
+     * （前端分页表用列下标，服务端分页表用后端字段名）；返回 null 表示该列不可排序。 */
+    _tableHtml: function (cols, rows, empty, widths, sortOpt) {
         // 空数据：直接用固定高度的占位块，让空表与有数据的表看起来一样高
         if (!rows || !rows.length) {
             return '<div class="adm-table-wrap adm-table-empty">' + ADM.esc(empty || '暂无数据') + '</div>';
@@ -155,7 +158,18 @@ var ADM = window.ADM = {
         var html = '<div class="adm-table-wrap"><table class="adm-table' + (fixed ? ' adm-fixed' : '') + '"><thead><tr>';
         cols.forEach(function (c, ci) {
             var w = fixed && widths[ci] ? ' style="width:' + widths[ci] + 'px"' : '';
-            html += '<th class="' + (isAct[ci] ? 'adm-col-actions' : '') + '"' + w + '>' + ADM.esc(c.label) + '</th>';
+            // 排序表头：sortOpt 存在且该列可排序（未显式关闭 sortable，且有排序 id）
+            var sid = (sortOpt && c.sortable !== false) ? sortOpt.idOf(c, ci) : null;
+            var sortable = !!sid;
+            var ind = '';
+            if (sortable) {
+                var on = (sortOpt.active === sid);
+                ind = '<span class="adm-sort-ind' + (on ? ' on' : '') + '">' +
+                    (on ? (sortOpt.dir === 'desc' ? '▼' : '▲') : '↕') + '</span>';
+            }
+            html += '<th class="' + (isAct[ci] ? 'adm-col-actions' : '') + (sortable ? ' adm-sortable' : '') + '"' +
+                w + (sortable ? ' data-sort="' + ADM.esc(String(sid)) + '"' : '') + '>' +
+                ADM.esc(c.label) + ind + '</th>';
         });
         html += '</tr></thead><tbody>';
         rows.forEach(function (r, i) {
@@ -223,6 +237,22 @@ var ADM = window.ADM = {
                 });
             });
         }
+        // 排序（点击表头）：数值列用 col.sortVal 返回数字，其余按渲染后的文本比较
+        if (st.sort && st.cols[st.sort.idx]) {
+            var _sc = st.cols[st.sort.idx];
+            var _dir = st.sort.dir === 'desc' ? -1 : 1;
+            var _sv = function (r) {
+                if (_sc.sortVal) return _sc.sortVal(r);
+                var v = _sc.render ? _sc.render(r) : (r[_sc.key] == null ? '' : r[_sc.key]);
+                return String(v == null ? '' : v).replace(/<[^>]*>/g, ' ').trim();
+            };
+            rows = rows.slice().sort(function (a, b) {
+                var x = _sv(a), y = _sv(b);
+                if (typeof x === 'number' && typeof y === 'number') return (x - y) * _dir;
+                return String(x).localeCompare(String(y), 'zh') * _dir;
+            });
+        }
+
         var total = rows.length;
         var size = st.size || 10;
         var pages = Math.max(1, Math.ceil(total / size));
@@ -247,7 +277,12 @@ var ADM = window.ADM = {
                 return '<option value="' + s + '"' + (s === size ? ' selected' : '') + '>' + s + ' 条</option>';
             }).join('') + '</select></div>';
 
-        h += ADM._tableHtml(st.cols, slice, st.empty, st.colW || null);
+        // 始终传入 sortOpt：让「↕」占位从一开始就参与列宽测量，后续出现箭头时列宽不再变化
+        h += ADM._tableHtml(st.cols, slice, st.empty, st.colW || null, {
+            active: st.sort ? String(st.sort.idx) : null,
+            dir: st.sort ? st.sort.dir : 'asc',
+            idOf: function (c, ci) { return String(ci); }
+        });
 
         if (pages > 1) {
             var from = Math.max(1, page - 2);
@@ -272,6 +307,19 @@ var ADM = window.ADM = {
 
         // 首次渲染后测量并冻结列宽：之后无论内容怎么变（按钮增减、徽标文字变化），列宽都不再跳动
         if (!st.colW) ADM._freezeCols(host, st);
+
+        // 表头点击排序：同列在 升序 / 降序 间切换，换列则从升序开始
+        host.querySelectorAll('th[data-sort]').forEach(function (th) {
+            th.addEventListener('click', function () {
+                var idx = parseInt(th.dataset.sort, 10);
+                if (isNaN(idx)) return;
+                st.sort = (st.sort && st.sort.idx === idx)
+                    ? { idx: idx, dir: st.sort.dir === 'asc' ? 'desc' : 'asc' }
+                    : { idx: idx, dir: 'asc' };
+                st.page = 1;
+                ADM._renderTable(host, key, st);
+            });
+        });
 
         // 关键字搜索（防抖 250ms；重渲染后恢复焦点与光标位置）
         var searchInp = host.querySelector('.adm-table-search');
@@ -389,7 +437,7 @@ var ADM = window.ADM = {
         last_ms: '上次耗时', last_exit: '上次退出码', ok_count: '成功次数', fail_count: '失败次数',
         max_retries: '最大重试', retry_interval: '重试间隔', depends_on: '依赖任务', pre_hook: '前置钩子',
         post_hook: '后置钩子', notify: '失败通知', remark: '备注', timeout: '超时(秒)',
-        size: '大小', is_dir: '是否目录', views: '访问次数', max_views: '次数上限', revoked: '已取消',
+        size: '大小', mtime: '修改时间', is_dir: '是否目录', views: '访问次数', max_views: '次数上限', revoked: '已取消',
         created_at: '创建时间', expires_at: '过期时间', last_view_at: '最近访问', note: '备注',
         token: '访问令牌', url: '访问地址', full_url: '完整地址', original_path: '原路径',
         trash_path: '回收站路径', deleted_at: '删除时间', exists: '回收站文件存在',
@@ -404,7 +452,13 @@ var ADM = window.ADM = {
         hasKey: '有私钥', has_password: '有密码', password_masked: '密码(脱敏)', dbname: '库 / 文件',
         params: '连接参数', version: '版本', description: '描述', installed: '已安装', main: '入口文件',
         action: '动作', at: '时间', content: '内容', text: '内容', desc: '说明',
-        label: '标签', icon: '图标', hint: '说明', value: '值', records: '记录', items: '条目'
+        label: '标签', icon: '图标', hint: '说明', value: '值', records: '记录', items: '条目',
+        module_name: '所属模块', access: '访问级别', access_default: '默认级别',
+        access_default_label: '默认级别', access_label: '访问级别', access_tone: '级别色调',
+        access_override: '自定义级别', overridden: '是否改过权限', disabled: '是否停用',
+        can_manage: '可管理', orphan: '已失效', rule: '路径规则', params: '路径参数',
+        allowed: '角色允许情况', perm_override: '权限是否改过',
+        total: '请求次数', last_status: '最近状态码'
     },
     rowLabel: function (k) {
         return ADM.ROW_LABELS[k] || k;
@@ -530,6 +584,10 @@ var ADM = window.ADM = {
                 sizes: opts.sizes || [10, 20, 50, 100],
                 actionsWidth: opts.actionsWidth || 0,
                 colW: null, rowH: 0,
+                sort: null,          // 服务端排序：{key, dir}，key 为后端字段名
+                onRender: opts.onRender || null,   // 供「行信息」弹窗复用行内按钮绑定
+                detail: opts.detail || null,       // 可选：自定义行详情 (row) => HTML
+                detailTitle: opts.detailTitle || null,
                 last: null
             };
         }
@@ -548,7 +606,13 @@ var ADM = window.ADM = {
         if (!st || !host) return;
         host.innerHTML = '<div class="adm-table-wrap adm-table-empty">加载中…</div>';
         Promise.resolve()
-            .then(function () { return st.opts.fetch({ q: st.q, page: st.page, size: st.size }); })
+            .then(function () {
+                return st.opts.fetch({
+                    q: st.q, page: st.page, size: st.size,
+                    sort: st.sort ? st.sort.key : '',
+                    order: st.sort ? st.sort.dir : ''
+                });
+            })
             .then(function (res) {
                 if (!host || ADM._servTables[key] !== st) return;   // 已被新实例替换
                 st.last = res || {};
@@ -589,7 +653,13 @@ var ADM = window.ADM = {
             st.sizes.map(function (s) { return '<option value="' + s + '"' + (s === size ? ' selected' : '') + '>' + s + ' 条</option>'; }).join('') +
             '</select></div>';
 
-        h += ADM._tableHtml(cols, items, st.opts.empty || '暂无数据', st.colW || null);
+        // 服务端排序：仅当 opts.sortable 开启时给表头加排序（列需提供 sortKey = 后端字段名）
+        var sortOpt = st.opts.sortable ? {
+            active: st.sort ? st.sort.key : null,
+            dir: st.sort ? st.sort.dir : 'asc',
+            idOf: function (c) { return c.sortKey || null; }
+        } : null;
+        h += ADM._tableHtml(cols, items, st.opts.empty || '暂无数据', st.colW || null, sortOpt);
 
         if (pages > 1) {
             var from = Math.max(1, page - 2);
@@ -633,6 +703,30 @@ var ADM = window.ADM = {
                 if (!isNaN(v)) { st.page = v; ADM.loadServ(host, key); }
             });
         }
+        // 表头点击排序：把 sortKey 作为字段名交给后端排序，然后重新拉取
+        if (st.opts.sortable) {
+            host.querySelectorAll('th[data-sort]').forEach(function (th) {
+                th.addEventListener('click', function () {
+                    var sk = th.dataset.sort;
+                    if (!sk) return;
+                    st.sort = (st.sort && st.sort.key === sk)
+                        ? { key: sk, dir: st.sort.dir === 'asc' ? 'desc' : 'asc' }
+                        : { key: sk, dir: 'asc' };
+                    st.page = 1;
+                    ADM.loadServ(host, key);
+                });
+            });
+        }
+
+        // 整行点击 → 弹出该行信息（与服务端分页表格保持一致；点行内按钮 / 链接时不触发）
+        host.querySelectorAll('tbody tr[data-row]').forEach(function (tr) {
+            tr.addEventListener('click', function (e) {
+                if (e.target.closest('button, a, input, select, textarea, label')) return;
+                var idx = parseInt(tr.dataset.row, 10);
+                var row = items[idx];
+                if (row) ADM._rowInfo(row, st, tr);
+            });
+        });
 
         if (!st.colW) ADM._freezeCols(host, st);
         ADM._fitTable(host, st);
@@ -878,17 +972,113 @@ var ADM = window.ADM = {
 };
 
 /* 通用日志查看器：fetcher(offset) 需返回 { text, offset, running, status } 结构。
- * 运行中自动逐秒轮询追加，关闭弹窗即停止。 */
+ * 运行中自动逐秒轮询追加，关闭弹窗即停止。
+ * 支持自定义关键字搜索：多个关键字用空格分隔；命中处高亮、可上下定位、可「仅显示匹配行」。 */
 function openLogViewer(title, fetcher, runningKey) {
     var offset = 0, timer = null, closed = false;
+    var raw = '';          // 累积的原始日志文本（搜索 / 过滤 / 高亮都基于它）
+    var kw = '';           // 当前关键字（空格分隔多个）
+    var active = 0;        // 当前定位到的匹配序号
+    var boxRef = null;     // 弹窗容器
+
+    function keywords() {
+        return kw.split(/\s+/).filter(function (x) { return !!x; });
+    }
+
+    /* 在 text 中找出所有关键字命中区间（不区分大小写，重叠区间已合并） */
+    function spansOf(text, kws) {
+        var lower = text.toLowerCase(), spans = [];
+        kws.forEach(function (k) {
+            var kk = k.toLowerCase(), from = 0, i;
+            if (!kk) return;
+            while ((i = lower.indexOf(kk, from)) !== -1) {
+                spans.push([i, i + kk.length]);
+                from = i + kk.length;
+            }
+        });
+        spans.sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
+        var merged = [];
+        spans.forEach(function (s) {
+            var last = merged[merged.length - 1];
+            if (last && s[0] <= last[1]) last[1] = Math.max(last[1], s[1]);
+            else merged.push([s[0], s[1]]);
+        });
+        return merged;
+    }
+
+    /* 取「过滤后的文本」：勾选「仅显示匹配行」时只保留含关键字的行 */
+    function currentText(kws, only) {
+        if (!kws.length || !only) return raw;
+        return raw.split('\n').filter(function (line) {
+            var low = line.toLowerCase();
+            return kws.some(function (k) { return low.indexOf(k.toLowerCase()) !== -1; });
+        }).join('\n');
+    }
+
+    function render() {
+        if (!boxRef) return;
+        var pre = boxRef.querySelector('#admLogPre');
+        var countEl = boxRef.querySelector('#admLogCount');
+        if (!pre) return;
+        var onlyEl = boxRef.querySelector('#admLogOnly');
+        var only = !!(onlyEl && onlyEl.checked);
+        var kws = keywords();
+        var text = currentText(kws, only);
+        var spans = kws.length ? spansOf(text, kws) : [];
+        if (spans.length && active >= spans.length) active = spans.length - 1;   // 匹配数变少后夹紧
+
+        if (!kws.length) {
+            pre.textContent = text;
+        } else if (only && !spans.length) {
+            pre.innerHTML = '<span class="adm-hint">没有匹配的行</span>';
+        } else {
+            var out = [], cur = 0;
+            spans.forEach(function (s, i) {
+                out.push(ADM.esc(text.slice(cur, s[0])));
+                out.push('<mark class="adm-log-hit' + (i === active ? ' cur' : '') + '">' +
+                    ADM.esc(text.slice(s[0], s[1])) + '</mark>');
+                cur = s[1];
+            });
+            out.push(ADM.esc(text.slice(cur)));
+            pre.innerHTML = out.join('');
+        }
+
+        if (countEl) {
+            countEl.textContent = kws.length
+                ? (spans.length ? ('匹配 ' + spans.length + ' 处' +
+                    (spans.length > 1 ? '（第 ' + Math.min(active + 1, spans.length) + ' 处）' : ''))
+                    : '无匹配')
+                : '';
+        }
+
+        var curEl = spans.length ? pre.querySelector('mark.cur') : null;
+        if (curEl) {                            // 定位到当前匹配（在 pre 内滚动，不带动整页）
+            var pr = pre.getBoundingClientRect(), cr = curEl.getBoundingClientRect();
+            pre.scrollTop += (cr.top - pr.top) - pre.clientHeight / 2 + cr.height / 2;
+        } else if (!kws.length) {
+            pre.scrollTop = pre.scrollHeight;   // 无搜索时跟随最新日志
+        }
+    }
+
+    /* 上一个 / 下一个匹配 */
+    function step(delta) {
+        if (!boxRef) return;
+        var onlyEl = boxRef.querySelector('#admLogOnly');
+        var kws = keywords();
+        var n = kws.length ? spansOf(currentText(kws, !!(onlyEl && onlyEl.checked)), kws).length : 0;
+        if (!n) return;
+        active = (active + delta + n) % n;
+        render();
+    }
+
     function tick(pre, meta) {
         if (closed) return;
         fetcher(offset).then(function (res) {
             if (res.error) { meta.textContent = res.error; return; }
             if (res.text) {
-                pre.textContent += res.text;
+                raw += res.text;
                 if (typeof res.offset === 'number') offset = res.offset;
-                pre.scrollTop = pre.scrollHeight;
+                render();
             }
             var running;
             if (runningKey === null) running = false;
@@ -900,17 +1090,46 @@ function openLogViewer(title, fetcher, runningKey) {
             meta.textContent = '读取失败：' + ((e && e.message) || e);
         });
     }
+
     ADM.modal({
         title: title,
         icon: 'bi-terminal',
         size: 'big',
         noOk: true,
         cancelText: '关闭',
-        html: '<pre class="adm-pre" id="admLogPre" style="min-height:220px"></pre>' +
+        html: '<div class="adm-log-search">' +
+                '<input class="adm-input" id="admLogKw" type="search" spellcheck="false" ' +
+                'placeholder="关键字搜索（空格分隔多个）">' +
+                '<span class="adm-hint" id="admLogCount"></span>' +
+                '<button class="adm-btn sm ghost" id="admLogPrev" type="button">上一个</button>' +
+                '<button class="adm-btn sm ghost" id="admLogNext" type="button">下一个</button>' +
+                '<label class="adm-switch" style="margin-left:auto"><input type="checkbox" id="admLogOnly"> 仅显示匹配行</label>' +
+            '</div>' +
+            '<pre class="adm-pre" id="admLogPre" style="min-height:220px"></pre>' +
             '<div class="adm-hint" id="admLogMeta" style="margin-top:8px">读取中…</div>',
         onOpen: function (box) {
+            boxRef = box;
             var pre = box.querySelector('#admLogPre');
             var meta = box.querySelector('#admLogMeta');
+            var inp = box.querySelector('#admLogKw');
+            var kwTimer = null;
+
+            inp.addEventListener('input', function () {          // 输入防抖后即时高亮
+                clearTimeout(kwTimer);
+                kwTimer = setTimeout(function () { kw = inp.value.trim(); active = 0; render(); }, 180);
+            });
+            inp.addEventListener('keydown', function (e) {        // 回车定位下一个，Shift+回车上一个
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                clearTimeout(kwTimer);
+                var nv = inp.value.trim();
+                if (nv !== kw) { kw = nv; active = 0; render(); }
+                else step(e.shiftKey ? -1 : 1);
+            });
+            box.querySelector('#admLogPrev').addEventListener('click', function () { step(-1); });
+            box.querySelector('#admLogNext').addEventListener('click', function () { step(1); });
+            box.querySelector('#admLogOnly').addEventListener('change', function () { active = 0; render(); });
+
             tick(pre, meta);
         }
     }).then(function () {

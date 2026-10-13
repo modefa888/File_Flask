@@ -119,6 +119,14 @@
   #tabs .tb .seti-ic { font-size: 1.2em; transform: translateY(.08em); }
   #tabs .tb .tb-nm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
   #tabs .tb .tb-eye { color: #8a8a8a; font-size: 11px; }
+  /* 关闭按钮：默认不可见，鼠标划过标签才显示（用 visibility 保留占位，避免标签宽度抖动） */
+  #tabs .tb .tb-close {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; margin-left: 2px; border-radius: 4px;
+    color: #9aa0a6; font-size: 11px; line-height: 1; visibility: hidden;
+  }
+  #tabs .tb:hover .tb-close { visibility: visible; }
+  #tabs .tb .tb-close:hover { background: #4a4a4a; color: #fff; }
   /* 仅查看文件的预览区：图片/PDF/音视频内联展示，压缩包等提供下载 */
   #viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #1e1e1e; }
   #viewer .vw-bar {
@@ -291,6 +299,8 @@
   html.theme-light #tabs .tb { color: #6a6a6a; }
   html.theme-light #tabs .tb:hover { background: #ececec; color: #1f2328; }
   html.theme-light #tabs .tb.on { background: #e0e0e0; color: #1f2328; border-color: #d8d8d8; }
+  html.theme-light #tabs .tb .tb-close { color: #6a6a6a; }
+  html.theme-light #tabs .tb .tb-close:hover { background: #d0d0d0; color: #000000; }
   html.theme-light #viewer { background: #ffffff; }
   html.theme-light #viewer .vw-bar { background: #f6f6f6; border-bottom-color: #d8d8d8; color: #6a6a6a; }
   html.theme-light #viewer .vw-dl { border-color: #d0d0d0; color: #6a6a6a; }
@@ -375,6 +385,7 @@
     peerInfo: {},  // id -> {name, color}：给「谁改的」标注查作者名/色
     shareType: null, // "room"=单文件分享（原行为）；"group"=批量分享（左侧列出被勾选的文件）
     rooms: [],       // 批量分享组里的房间列表
+    closedTabs: {},  // 本端已关闭的标签（token→1）：只影响标签栏显示，不改变房主的分享
   };
 
   if (!shareId) {
@@ -1395,6 +1406,7 @@
   /* 进入某个共享文件的共同编辑（组分享模式下点击左侧文件时调用） */
   function startRoom(tok) {
     if (!tok) return;
+    if (S.closedTabs) delete S.closedTabs[tok];   // 从左侧列表重新打开：清掉该标签的「已关闭」标记
     var target = roomByTok(tok);
     if (target && target.view) { openView(tok); return; }   // 仅查看：走预览
     if (S.token === tok) { if (!connected()) connect(); return; }
@@ -1426,12 +1438,10 @@
   function renderTabs() {
     var bar = $("tabs");
     if (!bar) return;
-    if (S.shareType !== "group" || !(S.rooms || []).length) {
+    var items = visibleRooms();
+    if (S.shareType !== "group" || !items.length) {
       bar.style.display = "none"; bar.innerHTML = ""; return;
     }
-    var items = S.rooms.slice().sort(function (a, b) {
-      return String(a.path || "").localeCompare(String(b.path || ""));
-    });
     bar.innerHTML = items.map(function (r) {
       var p = r.path || "";
       var nm = p.split("/").filter(Boolean).pop() || "未命名";
@@ -1439,12 +1449,49 @@
       return '<span class="tb' + (r.token === S.token ? " on" : "") +
         '" data-tok="' + esc(r.token) + '" title="' + esc(p) + (r.view ? "（仅查看）" : "") + '">' +
         iconFor(nm, false) + eye +
-        '<span class="tb-nm">' + esc(nm) + '</span></span>';
+        '<span class="tb-nm">' + esc(nm) + '</span>' +
+        '<span class="tb-close" data-close="' + esc(r.token) + '" title="关闭标签（可在左侧列表重新打开）"><i class="bi bi-x"></i></span>' +
+        '</span>';
     }).join("");
     bar.style.display = "block";
     Array.prototype.forEach.call(bar.querySelectorAll(".tb"), function (t) {
-      t.onclick = function () { startRoom(t.getAttribute("data-tok")); };
+      t.onclick = function (e) {
+        // 点「关闭」只收起标签，不切换当前文件
+        if (e.target && e.target.closest && e.target.closest(".tb-close")) {
+          e.stopPropagation();
+          closeTab(t.getAttribute("data-tok"));
+          return;
+        }
+        startRoom(t.getAttribute("data-tok"));
+      };
     });
+  }
+
+  /* 标签栏里当前可见的房间（排除本端已关闭的标签），按路径排序 */
+  function visibleRooms() {
+    var closed = S.closedTabs || {};
+    return (S.rooms || []).filter(function (r) {
+      return r.token && !closed[r.token];
+    }).sort(function (a, b) {
+      return String(a.path || "").localeCompare(String(b.path || ""));
+    });
+  }
+
+  /* 关闭标签：只从标签栏移除，不改变房主的分享，也不动左侧列表（点左侧条目可重新打开）。
+     关闭当前标签时自动切到相邻标签；至少保留一个标签页。 */
+  function closeTab(tok) {
+    if (!tok || !S.closedTabs) return;
+    var items = visibleRooms();
+    if (items.length <= 1) { toastBar("至少保留一个标签页"); return; }
+    var idx = -1;
+    for (var i = 0; i < items.length; i++) { if (items[i].token === tok) { idx = i; break; } }
+    S.closedTabs[tok] = 1;
+    if (S.token === tok && idx >= 0) {
+      var next = items[idx + 1] || items[idx - 1];   // 优先右邻，没有就左邻
+      if (next) { startRoom(next.token); markActiveRow(); return; }
+    }
+    renderTabs();
+    markActiveRow();
   }
 
   /* 批量分享模式：按被勾选的房间路径渲染左侧列表（只显示共享内容，点击即进入） */

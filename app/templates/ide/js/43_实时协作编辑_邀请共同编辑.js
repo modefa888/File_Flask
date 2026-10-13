@@ -790,7 +790,7 @@
       const peersHtml = on ? '<div class="collab-peers">' + _peersHtml(s) + '</div>' : "";
       const lim = _limitBadges(r);
       return '<div class="collab-room" data-tok="' + esc(r.token) + '">' +
-        '<div class="cr-info"><div class="cr-name"><b>' + esc(r.name) + '</b>' +
+        '<div class="cr-info"><div class="cr-name"><b title="' + escAttr(r.name) + '">' + esc(r.name) + '</b>' +
           (r.view ? ' <span class="cr-limits" title="二进制等文件不参与共同编辑，协作者只能查看/下载"><i class="bi bi-eye"></i> 仅查看</span>' : "") +
           '<span class="cr-peers">' + (r.peers || 0) + ' 人在线</span>' + st + '</div>' +
           '<div class="cr-path">' + esc(r.path || "") +

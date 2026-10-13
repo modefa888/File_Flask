@@ -33,7 +33,7 @@
 .collab-folder .cf-arrow { flex: none; color: #8a8a8a; font-size: 11px; transition: transform .15s ease; }
 .collab-folder.folded .cf-arrow { transform: rotate(-90deg); }
 .collab-folder .cf-ic { flex: none; color: #dcb67a; }
-.collab-folder .cf-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collab-folder .cf-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .collab-folder .cf-meta { flex: none; color: #8a8a8a; font-size: 11px; }
 .collab-folder .cf-ops { margin-left: auto; flex: none; display: inline-flex; gap: 4px; }
 .collab-folder .cf-ops .collab-btn { padding: 2px 8px; font-size: 12px; }
@@ -75,10 +75,18 @@
 .collab-room {
   background: #1b1b1e; border: 1px solid #333; border-radius: 8px;
   padding: 10px 12px; margin-bottom: 10px;
+  min-width: 0; overflow: hidden;   /* 极长文件名不撑破卡片 */
 }
-.collab-room .cr-info { margin-bottom: 6px; }
-.collab-room .cr-name { display: flex; align-items: center; gap: 8px; }
-.collab-room .cr-name b { color: #c9d1d9; font-size: 13px; }
+.collab-room .cr-info { margin-bottom: 6px; min-width: 0; }
+.collab-room .cr-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* 文件名可能极长且无空格：允许收缩并省略，避免把「N 人在线」挤出卡片 */
+.collab-room .cr-name b {
+  color: #c9d1d9; font-size: 13px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.collab-room .cr-name .cr-limits,
+.collab-room .cr-name .cr-peers,
+.collab-room .cr-name .collab-status { flex: none; }
 .collab-room .cr-peers { font-size: 11px; color: #7fd88f; }
 .collab-room .cr-name .collab-status { margin-left: auto; }
 .collab-room .cr-path {

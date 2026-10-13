@@ -51,10 +51,18 @@ def _ensure_table():
                     username TEXT PRIMARY KEY,
                     pw_hash  TEXT NOT NULL,
                     role     TEXT NOT NULL DEFAULT 'member',
-                    created  INTEGER NOT NULL
+                    created  INTEGER NOT NULL,
+                    banned   INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
+            # 老库补列：CREATE TABLE IF NOT EXISTS 不会给已存在的表加列
+            try:
+                cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+                if "banned" not in cols:
+                    conn.execute("ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0")
+            except Exception as e:
+                _log.warning("给 users 补 banned 列失败：%s", e)
             conn.commit()
         finally:
             conn.close()
@@ -138,11 +146,15 @@ def verify_user(username: str, password: str):
     conn = _conn()
     try:
         row = conn.execute(
-            "SELECT pw_hash, role FROM users WHERE username = ?", (username,)
+            "SELECT pw_hash, role, banned FROM users WHERE username = ?", (username,)
         ).fetchone()
     finally:
         conn.close()
     if row is not None:
+        # 已封禁账号：即使密码正确也拒绝登录
+        if int(row["banned"] or 0):
+            _log.warning("已封禁账号尝试登录：%s", username)
+            return None
         try:
             if check_password_hash(row["pw_hash"], password or ""):
                 return {"username": username, "role": row["role"]}
@@ -169,3 +181,31 @@ def count_users() -> int:
         return conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
     finally:
         conn.close()
+
+
+def is_banned(username: str) -> bool:
+    """账号是否已被封禁（账号不存在返回 False）。"""
+    _ensure_table()
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT banned FROM users WHERE username = ?", ((username or "").strip(),)
+        ).fetchone()
+        return bool(row and int(row["banned"] or 0))
+    finally:
+        conn.close()
+
+
+def set_banned(username: str, banned: bool):
+    """封禁 / 解封账号。成功返回 None，失败返回错误信息。"""
+    username = (username or "").strip()
+    if not username:
+        return "缺少用户名"
+    _ensure_table()
+    with store_tx() as conn:
+        cur = conn.execute("UPDATE users SET banned = ? WHERE username = ?",
+                           (1 if banned else 0, username))
+        if cur.rowcount == 0:
+            return "用户不存在"
+    _log.info("账号封禁状态变更：%s -> %s", username, "已封禁" if banned else "正常")
+    return None

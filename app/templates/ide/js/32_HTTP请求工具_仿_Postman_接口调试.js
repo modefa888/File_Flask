@@ -4,6 +4,7 @@
   const API_VIEW_PREFIX = "\u0000http:";
   const API_STORE_KEY = "ide.http.reqs";
   const API_GROUP_KEY = "ide.http.groups";     // 分组单独存一个键：旧数据没有 gid 字段，天然落在「未分组」，无需迁移
+  const API_DIRTY_KEY = "ide.http.unsaved";    // 「有未保存草稿」标记：真正编辑过才置位，避免本地旧数据误报
   const API_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
   const API_METHOD_CLS = { GET: "get", POST: "post", PUT: "put", PATCH: "patch", DELETE: "delete", HEAD: "head", OPTIONS: "options" };
   const API_REQ_H_KEY = "ide.http.reqHeight";  // 拖过响应状态栏后的「请求区」高度（px）；没拖过就没有这个键
@@ -29,7 +30,10 @@
     if (!Array.isArray(API_REQS)) API_REQS = [];
     return API_REQS;
   }
-  function apiPersist() { try { localStorage.setItem(API_STORE_KEY, JSON.stringify(API_REQS || [])); } catch (_) {} }
+  function apiPersist() {
+    try { localStorage.setItem(API_STORE_KEY, JSON.stringify(API_REQS || [])); } catch (_) {}
+    apiCloudPush();
+  }
   function apiList() { return apiLoad(); }
   function apiFind(id) { return apiLoad().filter(function (r) { return r.id === id; })[0] || null; }
   function apiNewId() { return "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
@@ -53,7 +57,114 @@
     });
     return API_GROUPS;
   }
-  function apiPersistGroups() { try { localStorage.setItem(API_GROUP_KEY, JSON.stringify(API_GROUPS || [])); } catch (_) {} }
+  function apiPersistGroups(markDirty) {
+    try { localStorage.setItem(API_GROUP_KEY, JSON.stringify(API_GROUPS || [])); } catch (_) {}
+    if (markDirty === false) return;   // 仅视图偏好（如折叠/展开）：落本地即可，不算「未保存改动」
+    apiCloudPush();
+  }
+  /* ---------------- 云存储（服务端 store.db）：换浏览器 / 换设备不丢 ----------------
+     localStorage 仍保留一份作缓存与离线兜底；任何增删改只写本地草稿并标记「未保存」，
+     只有点工具栏「保存」按钮（或 Ctrl+S）才把全量推到服务端数据库。
+     页面打开时拉一次服务端：服务端有数据 → 以服务端为准（并回写本地缓存）；
+     服务端为空而本地有旧数据（历史版本只存本地的）→ 自动迁移上云（仅此一次的历史迁移）。 */
+  let _cloudDirty = false;
+  function apiDirtyFlag(set) {
+    try {
+      if (set) localStorage.setItem(API_DIRTY_KEY, "1");
+      else localStorage.removeItem(API_DIRTY_KEY);
+    } catch (_) {}
+  }
+  function apiCloudPush() { _cloudDirty = true; apiDirtyFlag(true); apiSavePaint(); }   // 旧调用点：只标记「有未保存改动」
+  function apiSavePaint(saving) {
+    document.querySelectorAll(".api-save").forEach(function (b) {
+      if (saving) { b.disabled = true; b.innerHTML = '<i class="bi bi-arrow-repeat pa-spin"></i> 保存中'; return; }
+      b.disabled = !_cloudDirty;
+      b.innerHTML = _cloudDirty ? '<i class="bi bi-cloud-arrow-up-fill"></i> 保存' : '<i class="bi bi-cloud-check"></i> 已保存';
+      b.title = _cloudDirty ? "保存到数据库 (Ctrl+S)" : "没有未保存的改动";
+    });
+  }
+  function apiSaveCloud() {
+    if (!_cloudDirty) { toast("没有需要保存的改动", "info"); return; }
+    apiSavePaint(true);
+    fetch("/api/http/collection", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reqs: apiLoad(), groups: apiLoadGroups() }),
+    }).then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.ok) { _cloudDirty = false; apiDirtyFlag(false); toast("已保存到数据库", "ok"); }
+        else { toast("保存失败：" + ((d && d.error) || "未知错误"), "err"); }
+      })
+      .catch(function () { toast("保存失败：网络错误", "err"); })
+      .finally(function () { apiSavePaint(); });
+  }
+  /* 已通过确认框的破坏性操作（删除请求 / 删除分组）立即同步到数据库：无需等「保存」按钮，
+     否则刷新后数据库里还在、又会被判成「未保存草稿」。静默推送，不弹 toast。 */
+  function apiPushNow() {
+    fetch("/api/http/collection", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reqs: apiLoad(), groups: apiLoadGroups() }),
+    }).then(function (r) { return r.json(); })
+      .then(function (d) { if (d && d.ok) { _cloudDirty = false; apiDirtyFlag(false); apiSavePaint(); } })
+      .catch(function () {});
+  }
+  /* 不用浏览器原生 beforeunload 弹窗（样式不可控）；未保存的草稿本来就在 localStorage 里，
+     刷新/关闭不会丢。下次进页面时若「草稿标记」还在（真正编辑过且没保存），用自定义悬浮框确认。
+     注意：不能只靠「本地 ≠ 数据库」来判断 —— 本地缓存里常有历史遗留的旧数据，会误报。 */
+  function apiUnsavedDraftDialog(sReqs, sGroups) {
+    uiModal({
+      title: "有未保存的改动", icon: "bi-exclamation-triangle",
+      msg: "上次会话的草稿还没有保存到数据库。可以保存草稿；或放弃草稿，以数据库内容为准。",
+      okText: "保存到数据库", cancelText: "放弃改动",
+    }).then(function (ok) {
+      if (ok) { apiSaveCloud(); return; }
+      // 放弃：以数据库为准回滚本地缓存
+      API_REQS = sReqs; API_GROUPS = sGroups; _cloudDirty = false; apiDirtyFlag(false);
+      try {
+        localStorage.setItem(API_STORE_KEY, JSON.stringify(API_REQS));
+        localStorage.setItem(API_GROUP_KEY, JSON.stringify(API_GROUPS));
+      } catch (_) {}
+      apiSavePaint(); apiRenderList();
+      toast("已放弃草稿，以数据库为准", "info");
+    });
+  }
+  (function apiCloudInit() {
+    fetch("/api/http/collection").then(function (r) { return r.json(); }).then(function (d) {
+      if (_cloudDirty) return;                 // 拉取期间用户已改过本地 → 本地草稿为准（仍未保存）
+      const sReqs = (d && Array.isArray(d.reqs)) ? d.reqs : [];
+      const sGroups = (d && Array.isArray(d.groups)) ? d.groups : [];
+      const lReqs = apiLoad(), lGroups = apiLoadGroups();
+      let flag = false;
+      try { flag = localStorage.getItem(API_DIRTY_KEY) === "1"; } catch (_) {}
+      if (sReqs.length || sGroups.length) {
+        const same = JSON.stringify(lReqs) === JSON.stringify(sReqs) &&
+                     JSON.stringify(lGroups) === JSON.stringify(sGroups);
+        if (flag && !same && (lReqs.length || lGroups.length)) {
+          // 真正编辑过且没保存（草稿标记还在）→ 草稿继续作为工作副本，弹自定义悬浮框确认
+          _cloudDirty = true; apiSavePaint(); apiRenderList();
+          apiUnsavedDraftDialog(sReqs, sGroups);
+        } else {
+          // 无草稿标记（或本地为空）→ 以服务端为准；折叠状态是本地视图偏好，从本地缓存继承
+          const lCollapsed = {};
+          lGroups.forEach(function (g) { if (g && g.id) lCollapsed[g.id] = !!g.collapsed; });
+          API_REQS = sReqs;
+          API_GROUPS = sGroups.map(function (g) {
+            return (g && lCollapsed[g.id] !== undefined) ? Object.assign({}, g, { collapsed: lCollapsed[g.id] }) : g;
+          });
+          apiDirtyFlag(false);
+          try {
+            localStorage.setItem(API_STORE_KEY, JSON.stringify(API_REQS));
+            localStorage.setItem(API_GROUP_KEY, JSON.stringify(API_GROUPS));
+          } catch (_) {}
+          apiRenderList();                                    // 面板若已打开，立即重绘
+        }
+      } else if (lReqs.length || lGroups.length) {
+        // 服务端为空、本地有旧数据 → 一次性迁移上云（历史版本只存本地，迁完以后全靠手动保存）
+        apiDirtyFlag(false);
+        fetch("/api/http/collection", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reqs: apiLoad(), groups: apiLoadGroups() }) }).catch(function () {});
+      }
+    }).catch(function () { /* 服务端不可用：继续用本地 */ });
+  })();
   function apiGroupFind(gid) { return apiLoadGroups().filter(function (g) { return g.id === gid; })[0] || null; }
   function apiNewGroupId() { return "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
   function apiGroupAdd(name) {
@@ -927,6 +1038,7 @@
           '</select>' +
           '<input class="api-url" spellcheck="false" autocomplete="off" placeholder="请求 URL，例如 https://api.example.com/users" value="' + apiAttr(req.url) + '">' +
           '<button class="g-btn api-send" title="发送 (Ctrl+Enter)"><i class="bi bi-send-fill"></i> 发送</button>' +
+          '<button class="g-btn api-save" title="保存到数据库 (Ctrl+S)"><i class="bi bi-cloud-arrow-up-fill"></i> 保存</button>' +
           '<span class="api-bar-sp"></span>' +
           '<button class="api-mini" id="apiCodeBtn" title="生成多语言代码"><i class="bi bi-code"></i> 代码</button>' +
           '<button class="api-mini" id="apiCurlBtn" title="复制为 cURL"><i class="bi bi-terminal"></i> cURL</button>' +
@@ -976,6 +1088,10 @@
     tab.api.el.url.addEventListener("input", function () { req.url = tab.api.el.url.value; apiPersist(); apiRenderList(); });
     tab.api.el.url.addEventListener("keydown", function (e) { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); apiSend(tab); } });
     h.querySelector(".api-send").addEventListener("click", function () { apiSend(tab); });
+    h.querySelector(".api-save").addEventListener("click", function () { apiSaveCloud(); });
+    h.addEventListener("keydown", function (e) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) { e.preventDefault(); apiSaveCloud(); }
+    });
     h.querySelector("#apiCurlBtn").addEventListener("click", function () {
       const txt = apiCurl(req);
       apiCopy(txt).then(function () { toast("cURL 已复制到剪贴板", "ok"); })
@@ -993,6 +1109,7 @@
     apiShowPane(tab, apiPrefGet(API_PANE_KEY, API_PANES, "params"));
     apiShowRes(tab, apiPrefGet(API_RTAB_KEY, API_RTABS, "body"));
     apiWireResize(tab);        // 响应状态栏可上下拖动：调整请求区 / 响应区的高度
+    apiSavePaint();            // 新标签页的「保存」按钮对齐当前未保存状态
   }
 
   /* ---------------- 请求区 / 响应区高度（拖动响应状态栏） ----------------
@@ -1742,11 +1859,11 @@
           const msg = "确定删除分组「" + g.name + "」吗？" +
             (cnt ? "\n组内 " + cnt + " 个请求会移到「未分组」，请求本身不会删除。" : "\n该分组是空的。");
           if (!(await uiConfirm("删除分组", msg, "删除", true))) return;
-          apiGroupRemove(gid); apiRenderList(); toast("已删除分组", "ok");
+          apiGroupRemove(gid); apiRenderList(); apiPushNow(); toast("已删除分组", "ok");
           return;
         }
         g.collapsed = !g.collapsed;        // 点标题空白处 = 折叠 / 展开
-        apiPersistGroups(); apiRenderList();
+        apiPersistGroups(false); apiRenderList();   // 视图偏好：只落本地，不算未保存改动
         return;
       }
       /* ---------- 请求条目 ---------- */
@@ -1757,10 +1874,11 @@
         // （与「数据库连接」删除用同一套 uiConfirm 弹窗，标题 + 危险色按钮）
         const cur = apiFind(id);
         const nm = cur ? (cur.name || "未命名") : "该请求";
-        if (!(await uiConfirm("删除请求", "确定删除「" + nm + "」吗？\n（只删除本机保存的这条请求，不可撤销）", "删除", true))) return;
+        if (!(await uiConfirm("删除请求", "确定删除「" + nm + "」吗？\n（会同时从服务端数据库删除，不可撤销）", "删除", true))) return;
         const t = findTab(API_VIEW_PREFIX + id);
         if (t) closeTab(t);          // 标签还在的话一并关闭
-        API_REQS = apiLoad().filter(function (r) { return r.id !== id; }); apiPersist(); apiRenderList();
+        API_REQS = apiLoad().filter(function (r) { return r.id !== id; }); apiPersist(); apiPushNow(); apiRenderList();
+        toast("已删除", "ok");
         return;
       }
       if (e.target.closest(".api-ren")) { uiPrompt("重命名请求", apiFind(id) ? apiFind(id).name : "", "新建请求").then(function (n) { const r = apiFind(id); if (r && n) { r.name = n; apiPersist(); const t = findTab(API_VIEW_PREFIX + id); if (t) { t.name = n; if (t.el) renderTab(t); } apiRenderList(); } }); return; }
@@ -1803,7 +1921,7 @@
       const gid = apiMoveReq(id, z.gid);
       // 拖进折叠的分组要自动展开，否则看不到落进去的结果
       const g = gid ? apiGroupFind(gid) : null;
-      if (g && g.collapsed) { g.collapsed = false; apiPersistGroups(); }
+      if (g && g.collapsed) { g.collapsed = false; apiPersistGroups(false); }   // 视图偏好：只落本地
       apiRenderList();
     });
   }

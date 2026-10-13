@@ -1,0 +1,65 @@
+* {
+    box-sizing: border-box;
+}
+
+:root {
+    --adm-bg: #0b1020;
+    --adm-bg-soft: #10172b;
+    --adm-panel: #121a30;
+    --adm-panel-2: #16203a;
+    --adm-border: #24314f;
+    --adm-border-soft: #1c2740;
+    --adm-text: #e6ebf5;
+    --adm-text-dim: #96a3bd;
+    --adm-text-mute: #6b7893;
+    --adm-brand: #5b8cff;
+    --adm-brand-2: #7c5cff;
+    --adm-cyan: #22d3ee;
+    --adm-ok: #34d399;
+    --adm-warn: #fbbf24;
+    --adm-bad: #f87171;
+    /* 表格视口高度兜底值（JS 会按「实测行高 × 10 行」精确覆盖）：
+     * 每页 10 条正好放下；每页更多时保持该高度，超出部分区内滚动 */
+    --adm-table-h: 480px;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+}
+
+body {
+    background: radial-gradient(1200px 600px at 12% -10%, #16224a 0%, transparent 60%),
+        radial-gradient(1000px 500px at 110% 10%, #1b1740 0%, transparent 55%),
+        var(--adm-bg);
+    color: var(--adm-text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    font-size: 14px;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #2a3a5e;
+    border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #35486f;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}

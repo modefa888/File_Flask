@@ -6,7 +6,7 @@ from flask import (
 
 from ... import config
 from ...log import get_logger
-from ...services.common.users import create_user, verify_user
+from ...services.common.users import create_user, verify_user, user_exists, is_banned
 
 
 _log = get_logger()
@@ -143,8 +143,13 @@ def login():
             session["role"] = user["role"]
             _log.info("登录成功: %s (role=%s)", user["username"], user["role"])
             return redirect(_safe_next() or url_for("pages.index"))
-        error = "用户名或密码错误"
-        _log.warning("登录失败: %s", username)
+        elif user_exists(username) and is_banned(username):
+            # 账号存在且被封禁：给出明确提示，避免用户反复试密码
+            error = "该账号已被封禁，请联系管理员"
+            _log.warning("已封禁账号登录被拒: %s", username)
+        else:
+            error = "用户名或密码错误"
+            _log.warning("登录失败: %s", username)
     return render_template("login.html", error=error)
 
 

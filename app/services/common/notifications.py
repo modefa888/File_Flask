@@ -348,11 +348,30 @@ def _read_latest() -> Dict[str, Any]:
         return {"latest": None, "history": [], "cursor": 0}
 
 
+# 历史容量：总上限不限制（无限量保存）；单一来源（如定时任务 cron）最多 200 条，
+# 防止某一类高频通知无限制膨胀。
+NOTIFY_HIST_SOURCE_MAX = 200
+
+
+def _trim_history(hist: list) -> list:
+    """按「单来源」上限裁剪历史（hist 为最新在前，保留顺序）；总量不限制。"""
+    keep, cron_n = [], 0
+    for r in hist:
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("source") or "") == "cron":
+            if cron_n >= NOTIFY_HIST_SOURCE_MAX:
+                continue
+            cron_n += 1
+        keep.append(r)
+    return keep
+
+
 def _write_latest(d: Dict[str, Any]) -> None:
     """整表覆盖写入（保持调用方原有的「读-改-写」语义）。"""
     try:
         latest = d.get("latest")
-        hist = d.get("history") if isinstance(d.get("history"), list) else []
+        hist = _trim_history(d.get("history") if isinstance(d.get("history"), list) else [])
         with store_tx() as conn:
             conn.execute("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('notify.latest', ?)",
                          (json.dumps(latest, ensure_ascii=False) if latest else "",))
@@ -361,7 +380,7 @@ def _write_latest(d: Dict[str, Any]) -> None:
             conn.execute("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('notify.latest_at', ?)",
                          (str(int(d.get("latest_at") or 0)),))
             conn.execute("DELETE FROM notify_history")
-            for rec in hist[:200]:
+            for rec in hist:
                 if not isinstance(rec, dict):
                     continue
                 conn.execute("INSERT INTO notify_history (id, ts, rec) VALUES (?,?,?)",
@@ -401,7 +420,7 @@ _migrate_legacy_notify()
 
 
 def append_history(rec: Dict[str, Any]) -> int:
-    """追加到 history（最多 200 条），返回新 cursor（该条目的 id）。"""
+    """追加到 history（总量与单来源均有上限），返回新 cursor（该条目的 id）。"""
     d = _read_latest()
     hist = d.get("history") or []
     cursor = int(d.get("cursor") or 0) + 1
@@ -410,7 +429,7 @@ def append_history(rec: Dict[str, Any]) -> int:
     rec["id"] = rec_id
     rec["ts"] = int(rec.get("ts") or time.time())
     hist.insert(0, rec)
-    hist = hist[:200]
+    hist = _trim_history(hist)
     d["latest"] = rec
     d["history"] = hist
     d["cursor"] = cursor
@@ -437,11 +456,27 @@ def read_latest(after_cursor: int = 0) -> Dict[str, Any]:
     return d
 
 
-def clear_recent() -> int:
-    """清空通知历史；返回被清掉的条数。"""
+def clear_recent(source: str | None = None, keep_source: str | None = None) -> int:
+    """清空通知历史；指定 source 时仅删除该来源，指定 keep_source 时仅保留该来源。
+    返回被清掉的条数。"""
     d = _read_latest()
-    n = len(d.get("history") or [])
-    _write_latest({"latest": None, "history": [], "cursor": int(d.get("cursor") or 0), "latest_at": 0})
+    hist = d.get("history") or []
+    if source is None and keep_source is None:
+        _write_latest({"latest": None, "history": [], "cursor": int(d.get("cursor") or 0), "latest_at": 0})
+        return len(hist)
+    if source is not None:
+        keep = [r for r in hist if str(r.get("source") or "") != source]
+    else:
+        keep = [r for r in hist if str(r.get("source") or "") == keep_source]
+    n = len(hist) - len(keep)
+    if not n:
+        return 0
+    _write_latest({
+        "latest": keep[0] if keep else None,
+        "history": keep,
+        "cursor": int(d.get("cursor") or 0),
+        "latest_at": int(keep[0].get("ts") or 0) if keep else 0,
+    })
     return n
 
 

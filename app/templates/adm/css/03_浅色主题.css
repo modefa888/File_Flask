@@ -1,0 +1,225 @@
+/* 后台管理：浅色主题。
+ * 通过 <html data-theme="light"> 切换；变量在 html 上覆盖后自动向下级联，
+ * 这里只针对「硬编码颜色」的组件做覆盖。 */
+
+html[data-theme="light"] {
+    --adm-bg: #f4f6fb;
+    --adm-bg-soft: #eef1f8;
+    --adm-panel: #ffffff;
+    --adm-panel-2: #f8fafc;
+    --adm-border: #dfe4ee;
+    --adm-border-soft: #ebeef6;
+    --adm-text: #1b2438;
+    --adm-text-dim: #5a6683;
+    --adm-text-mute: #8b95ac;
+}
+
+/* ---------------- 页面底色 ---------------- */
+html[data-theme="light"] body {
+    background: radial-gradient(1200px 600px at 12% -10%, #e6ecfb 0%, transparent 60%),
+        radial-gradient(1000px 500px at 110% 10%, #ece7fb 0%, transparent 55%),
+        var(--adm-bg);
+}
+
+html[data-theme="light"] ::-webkit-scrollbar-thumb {
+    background: #c3cbdd;
+}
+
+html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+    background: #aab4cb;
+}
+
+/* ---------------- 侧栏 ---------------- */
+html[data-theme="light"] .adm-side {
+    background: linear-gradient(180deg, #ffffff, #f5f8fd);
+    box-shadow: 1px 0 0 var(--adm-border);
+}
+
+html[data-theme="light"] .adm-nav-item:hover {
+    background: rgba(91, 140, 255, 0.1);
+}
+
+html[data-theme="light"] .adm-nav-item.active {
+    background: linear-gradient(135deg, rgba(91, 140, 255, 0.16), rgba(124, 92, 255, 0.12));
+    border-color: rgba(91, 140, 255, 0.45);
+    color: #1b2438;
+}
+
+html[data-theme="light"] .adm-nav-item .adm-nav-count {
+    background: #eef1f8;
+    color: #5a6683;
+}
+
+html[data-theme="light"] .adm-foot-link:hover {
+    background: rgba(90, 102, 131, 0.1);
+}
+
+html[data-theme="light"] .adm-foot-link.danger:hover {
+    background: rgba(220, 80, 80, 0.12);
+    color: #b42318;
+}
+
+/* ---------------- 顶栏 ---------------- */
+html[data-theme="light"] .adm-top {
+    background: rgba(255, 255, 255, 0.82);
+}
+
+html[data-theme="light"] .adm-user {
+    background: rgba(91, 140, 255, 0.1);
+}
+
+/* ---------------- 卡片 / 统计 ---------------- */
+html[data-theme="light"] .adm-card {
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05);
+}
+
+html[data-theme="light"] .adm-stat {
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05);
+}
+
+html[data-theme="light"] .adm-bar {
+    background: #e4e9f3;
+}
+
+/* ---------------- 表格 ---------------- */
+html[data-theme="light"] .adm-table-wrap {
+    background: #ffffff;
+}
+
+html[data-theme="light"] .adm-table th {
+    background: #eef2f9;
+    color: #5a6683;
+}
+
+html[data-theme="light"] .adm-table tbody tr:hover td {
+    background: rgba(91, 140, 255, 0.05);
+}
+
+/* ---------------- 徽标 ---------------- */
+html[data-theme="light"] .adm-badge.ok {
+    color: #0f7a52;
+    background: rgba(52, 211, 153, 0.18);
+    border-color: rgba(52, 211, 153, 0.45);
+}
+
+html[data-theme="light"] .adm-badge.warn {
+    color: #9a6700;
+    background: rgba(251, 191, 36, 0.2);
+    border-color: rgba(251, 191, 36, 0.5);
+}
+
+html[data-theme="light"] .adm-badge.bad {
+    color: #b42318;
+    background: rgba(248, 113, 113, 0.16);
+    border-color: rgba(248, 113, 113, 0.45);
+}
+
+html[data-theme="light"] .adm-badge.info {
+    color: #1d4ed8;
+    background: rgba(91, 140, 255, 0.16);
+    border-color: rgba(91, 140, 255, 0.45);
+}
+
+html[data-theme="light"] .adm-badge.mute {
+    color: #5a6683;
+    background: rgba(90, 102, 131, 0.12);
+    border-color: rgba(90, 102, 131, 0.28);
+}
+
+/* ---------------- 按钮 ---------------- */
+html[data-theme="light"] .adm-btn {
+    background: rgba(91, 140, 255, 0.12);
+    color: #2f5bd6;
+}
+
+html[data-theme="light"] .adm-btn.primary {
+    background: linear-gradient(135deg, var(--adm-brand), var(--adm-brand-2));
+    border-color: transparent;
+    color: #fff;
+}
+
+html[data-theme="light"] .adm-switch input:checked {
+    background: linear-gradient(135deg, var(--adm-brand), var(--adm-brand-2));
+}
+
+html[data-theme="light"] .adm-btn:hover {
+    background: rgba(91, 140, 255, 0.2);
+}
+
+html[data-theme="light"] .adm-btn.ghost {
+    background: rgba(90, 102, 131, 0.08);
+    color: #5a6683;
+}
+
+html[data-theme="light"] .adm-btn.ghost:hover {
+    background: rgba(90, 102, 131, 0.15);
+    color: #1b2438;
+}
+
+html[data-theme="light"] .adm-btn.danger {
+    background: rgba(220, 80, 80, 0.12);
+    border-color: rgba(220, 80, 80, 0.35);
+    color: #b42318;
+}
+
+html[data-theme="light"] .adm-btn.danger:hover {
+    background: rgba(220, 80, 80, 0.2);
+}
+
+/* ---------------- 表单 ---------------- */
+html[data-theme="light"] .adm-input,
+html[data-theme="light"] .adm-select,
+html[data-theme="light"] .adm-textarea {
+    background: #ffffff;
+}
+
+html[data-theme="light"] .adm-switch input {
+    background: #cfd6e6;
+}
+
+/* ---------------- 行信息弹窗 ---------------- */
+html[data-theme="light"] .adm-rowjson {
+    background: #f4f7fc;
+}
+
+/* ---------------- Tab ---------------- */
+html[data-theme="light"] .adm-tab:hover {
+    background: rgba(91, 140, 255, 0.08);
+}
+
+html[data-theme="light"] .adm-tab.active {
+    color: #2f5bd6;
+    border-bottom-color: #2f5bd6;
+    background: rgba(91, 140, 255, 0.1);
+}
+
+/* ---------------- Toast / 弹窗 ---------------- */
+html[data-theme="light"] .adm-toast {
+    background: #ffffff;
+    box-shadow: 0 12px 34px rgba(16, 24, 40, 0.16);
+}
+
+html[data-theme="light"] .adm-modal-mask {
+    background: rgba(20, 28, 48, 0.42);
+}
+
+html[data-theme="light"] .adm-modal {
+    background: #ffffff;
+    box-shadow: 0 24px 60px rgba(16, 24, 40, 0.28);
+}
+
+html[data-theme="light"] .adm-modal-foot {
+    background: #f5f7fc;
+}
+
+html[data-theme="light"] .adm-pre {
+    background: #f6f8fc;
+    color: #2a3550;
+}
+
+/* ---------------- 规则分组 ---------------- */
+html[data-theme="light"] .adm-rule-group {
+    background: #f7f9fd;
+}

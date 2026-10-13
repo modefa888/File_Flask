@@ -27,7 +27,7 @@ import qrcode
 
 from flask import (
     Blueprint, request, jsonify, send_file, render_template, session,
-    Response as FlaskResponse,
+    make_response, Response as FlaskResponse,
 )
 
 from ...config import _STORAGE_DIR
@@ -103,7 +103,7 @@ def _guard_share_action(token, action):
     if not _check_same_origin():
         return None, (jsonify({"error": "该地址仅允许从分享页内访问"}), 403)
     rec = get_share_secret(token=token)
-    if share_state(rec) != "ok":
+    if not _content_allowed(token, rec):
         return None, (jsonify({"error": "分享无效或已失效"}), 403)
     if rec.get("password_hash") and not session.get("share_auth_" + token):
         return None, (jsonify({"error": "需要访问密码"}), 403)
@@ -314,8 +314,32 @@ def _parse_expires(body):
     return (int(time.time()) + secs) if secs > 0 else 0
 
 
+def _nocache(resp):
+    """分享页一律禁止缓存。
+
+    否则「访问次数用尽 / 已过期 / 已取消」后，浏览器仍可能直接复用缓存里的
+    旧分享页，表现为：明明已经没次数了，却还显示着文件标题、大小、下载按钮等信息。
+    """
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
+
 def _error_page(message, status=404):
-    return render_template("share.html", mode="error", message=message), status
+    return _nocache(make_response(render_template("share.html", mode="error", message=message))), status
+
+
+def _content_allowed(token, rec):
+    """本次会话是否允许取分享内容（raw / download / 封面 / 歌词）。
+
+    正常要求分享状态为 ok；但对「打开分享页时刚计入一次访问」的同一会话放行 ——
+    否则正好用掉最后一次访问的那个页面会变成「页面在、内容 403」的半残状态
+    （在线播放尤其明显：播放器黑屏、时长 00:00）。
+    """
+    if share_state(rec) == "ok":
+        return True
+    return bool(session.get("share_view_" + token))
 
 
 # ============================ 管理接口（需登录） ============================
@@ -352,11 +376,32 @@ def api_list_shares():
     """分享记录列表（含状态、访问量、有效期）。
 
     include_revoked=1 时连已取消（revoked）的记录一起返回，供「分享历史」查看。
+    支持 q（关键字搜索）/ page / page_size 做服务端过滤与分页。
     """
-    _log.info("GET /api/shares include_revoked=%s", request.args.get("include_revoked", ""))
+    _log.info("GET /api/shares include_revoked=%s q=%s", request.args.get("include_revoked", ""), request.args.get("q", ""))
     include_revoked = _truthy(request.args.get("include_revoked", ""))
     items = [_decorate(r) for r in list_shares(include_revoked=include_revoked)]
-    return jsonify({"items": items, "count": len(items)})
+    from .paginate import paginate_opt
+    page_items, total = paginate_opt(items, request)
+    if total is None:
+        return jsonify({"items": items, "count": len(items)})
+    return jsonify({"items": page_items, "total": total, "count": total})
+
+
+@bp.route("/api/share", methods=["GET"])
+def api_get_share():
+    """按 id 获取单条分享记录（后台「修改配置」用）。"""
+    _log.info("GET /api/share id=%s", request.args.get("id", ""))
+    sid = request.args.get("id")
+    if not sid:
+        return jsonify({"error": "缺少 id"}), 400
+    try:
+        rec = get_share(share_id=int(sid))
+    except (TypeError, ValueError):
+        return jsonify({"error": "id 非法"}), 400
+    if not rec:
+        return jsonify({"error": "分享记录不存在"}), 404
+    return jsonify({"item": _decorate(rec)})
 
 
 @bp.route("/api/share/update", methods=["POST"])
@@ -446,8 +491,9 @@ def view_share(token):
         else:
             err = "密码错误，请重试"
     if not authed:
-        return render_template("share.html", mode="password", token=token,
-                               file_name=rec.get("name", ""), error=err)
+        return _nocache(make_response(render_template(
+            "share.html", mode="password", token=token,
+            file_name=rec.get("name", ""), error=err)))
 
     path = rec.get("abs_path", "")
     if not os.path.isfile(path):
@@ -455,6 +501,8 @@ def view_share(token):
 
     if request.method == "GET":
         bump_view(token)
+        # 记下「本次会话的这一页已计入访问」：允许它继续取内容（否则最后一次访问会半残）
+        session["share_view_" + token] = True
         rec = get_share_secret(token=token) or rec
 
     size = rec.get("size") or 0
@@ -479,15 +527,16 @@ def view_share(token):
         except (OSError, PermissionError):
             text_preview = ""
     qr_link, qr_scope = _phone_target(token)
-    return render_template("share.html", mode="view", token=token,
-                           file=info, text_preview=text_preview,
-                           raw_url=_signed_url(token, "raw"),
-                           download_url=_signed_url(token, "download"),
-                           cover_url=_signed_url(token, "cover"),
-                           lyrics_url=_signed_url(token, "lyrics"),
-                           qr_url=f"/share/{token}/qr",
-                           qr_link=qr_link,
-                           qr_scope=qr_scope)
+    return _nocache(make_response(render_template(
+        "share.html", mode="view", token=token,
+        file=info, text_preview=text_preview,
+        raw_url=_signed_url(token, "raw"),
+        download_url=_signed_url(token, "download"),
+        cover_url=_signed_url(token, "cover"),
+        lyrics_url=_signed_url(token, "lyrics"),
+        qr_url=f"/share/{token}/qr",
+        qr_link=qr_link,
+        qr_scope=qr_scope)))
 
 
 @bp.route("/share/<token>/qr")
@@ -561,7 +610,7 @@ def share_raw(token):
     if not _check_same_origin():
         return jsonify({"error": "该地址仅允许从分享页内访问"}), 403
     rec = get_share_secret(token=token)
-    if share_state(rec) != "ok":
+    if not _content_allowed(token, rec):
         return jsonify({"error": "分享无效或已失效"}), 403
     if rec.get("password_hash") and not session.get("share_auth_" + token):
         return jsonify({"error": "需要访问密码"}), 403
@@ -583,7 +632,7 @@ def share_download(token):
     if not _check_same_origin():
         return jsonify({"error": "该地址仅允许从分享页内访问"}), 403
     rec = get_share_secret(token=token)
-    if share_state(rec) != "ok":
+    if not _content_allowed(token, rec):
         return jsonify({"error": "分享无效或已失效"}), 403
     if rec.get("password_hash") and not session.get("share_auth_" + token):
         return jsonify({"error": "需要访问密码"}), 403

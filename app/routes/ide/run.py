@@ -1342,10 +1342,18 @@ def api_run_tasks():
             b["ports"] = sorted(ports)
             items.append(b)
     items.sort(key=lambda x: (not x["running"], -x["duration"]))
+    from ..common.paginate import paginate_opt
+    page_items, total = paginate_opt(items, request)
+    if total is None:
+        return jsonify({
+            "ok": True, "tasks": items,
+            "running": sum(1 for x in items if x["running"]),
+            "total": len(items),
+        })
     return jsonify({
-        "ok": True, "tasks": items,
+        "ok": True, "tasks": page_items,
         "running": sum(1 for x in items if x["running"]),
-        "total": len(items),
+        "total": total,
     })
 
 

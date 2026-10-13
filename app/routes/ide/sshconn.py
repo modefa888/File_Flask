@@ -276,7 +276,11 @@ def _cleanup():
 def api_ssh_list():
     conns = [_public(c) for c in _load_conns()]
     conns.sort(key=lambda c: (c.get("name") or "").lower())
-    return jsonify({"ok": True, "paramiko": _PARAMIKO_OK, "connections": conns})
+    from ..common.paginate import paginate_opt
+    page_items, total = paginate_opt(conns, request)
+    if total is None:
+        return jsonify({"ok": True, "paramiko": _PARAMIKO_OK, "connections": conns})
+    return jsonify({"ok": True, "paramiko": _PARAMIKO_OK, "connections": page_items, "total": total})
 
 
 @bp.route("/api/ssh/save", methods=["POST"])

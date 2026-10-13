@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>后台管理 · File_Flask</title>
+    <script>
+        /* 尽早应用已保存的主题，避免刷新时先闪一下深色再切浅色 */
+        (function () {
+            try {
+                if (localStorage.getItem('adm_theme') === 'light') {
+                    document.documentElement.setAttribute('data-theme', 'light');
+                }
+            } catch (e) { }
+        })();
+    </script>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
+    <link href="/static/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/vendor/bootstrap-icons/bootstrap-icons.css">
+    <style>{% include "adm/css/00_base.css" %}</style>
+    <style>{% include "adm/css/01_布局.css" %}</style>
+    <style>{% include "adm/css/02_组件.css" %}</style>
+    <style>{% include "adm/css/03_浅色主题.css" %}</style>
+</head>
+
+<body>
+    <div class="adm-shell">
+        <aside class="adm-side">
+            <div class="adm-brand">
+                <span class="adm-brand-icon"><i class="bi bi-hdd-stack-fill"></i></span>
+                <span class="adm-brand-text">
+                    <b>File_Flask</b>
+                    <small>后台管理台</small>
+                </span>
+            </div>
+            <nav class="adm-nav" id="admNav"></nav>
+            <div class="adm-side-foot">
+                <a href="/desktop" class="adm-foot-link"><i class="bi bi-window-stack"></i> 返回桌面端</a>
+                <a href="/ide" class="adm-foot-link"><i class="bi bi-code-square"></i> 打开 IDE</a>
+                <a href="/logout" class="adm-foot-link danger"><i class="bi bi-box-arrow-right"></i> 退出登录</a>
+            </div>
+        </aside>
+
+        <main class="adm-main">
+            <header class="adm-top">
+                <button class="adm-menu-btn" id="admMenuBtn" type="button" title="展开 / 收起菜单">
+                    <i class="bi bi-list"></i>
+                </button>
+                <div class="adm-top-title">
+                    <h1 id="admTitle">概览</h1>
+                    <p id="admSubtitle">系统运行状态与管理入口</p>
+                </div>
+                <div class="adm-top-actions">
+                    <button class="adm-btn ghost" id="admTheme" type="button" title="切换浅色 / 深色主题">
+                        <i class="bi bi-sun"></i><span id="admThemeText">浅色</span>
+                    </button>
+                    <button class="adm-btn ghost" id="admRefresh" type="button" title="刷新当前面板">
+                        <i class="bi bi-arrow-clockwise"></i><span>刷新</span>
+                    </button>
+                    <span class="adm-user"><i class="bi bi-person-circle"></i>{{ username }}</span>
+                </div>
+            </header>
+            <div class="adm-body" id="admView"></div>
+        </main>
+    </div>
+
+    <div id="admToast"></div>
+    <div id="admModalRoot"></div>
+
+    <script>
+        window.ADM_USER = {{ username|tojson }};
+        {% include "adm/js/00_base.js" %}
+        {% include "adm/js/01_概览.js" %}
+        {% include "adm/js/02_用户管理.js" %}
+        {% include "adm/js/03_分享管理.js" %}
+        {% include "adm/js/04_定时任务.js" %}
+        {% include "adm/js/05_后台任务.js" %}
+        {% include "adm/js/06_插件管理.js" %}
+        {% include "adm/js/07_数据库与SSH.js" %}
+        {% include "adm/js/08_通知中心.js" %}
+        {% include "adm/js/09_AI用量.js" %}
+        {% include "adm/js/10_文件说明.js" %}
+        {% include "adm/js/11_操作历史.js" %}
+        {% include "adm/js/12_系统日志.js" %}
+        {% include "adm/js/13_API调试.js" %}
+        {% include "adm/js/13_系统设置.js" %}
+        {% include "adm/js/14_初始化.js" %}
+    </script>
+</body>
+
+</html>

@@ -46,6 +46,154 @@ _log = get_logger()
 bp = Blueprint("httpreq", __name__)
 
 
+# ---------------- 请求集合云存储（存 store.db 的 store_meta 表，换浏览器 / 换设备不丢） ----------------
+from ...services.common.store_db import get_meta, set_meta
+
+_HTTP_REQS_KEY = "http.reqs"
+_HTTP_GROUPS_KEY = "http.groups"
+
+
+def _loads_list(raw):
+    try:
+        v = json.loads(raw)
+        return v if isinstance(v, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def _collection_data():
+    """读出完整集合：{reqs: [...], groups: [...]}。"""
+    return {
+        "reqs": _loads_list(get_meta(_HTTP_REQS_KEY, "[]")),
+        "groups": _loads_list(get_meta(_HTTP_GROUPS_KEY, "[]")),
+    }
+
+
+@bp.route("/api/http/collection", methods=["GET"])
+def http_collection_get():
+    """读取请求集合（请求 + 分组）。"""
+    return jsonify(_collection_data())
+
+
+@bp.route("/api/http/collection/list", methods=["GET"])
+def http_collection_list():
+    """请求集合（后台管理用）：支持关键字搜索与分页，分组名随行返回。"""
+    from ..common.paginate import paginate
+    d = _collection_data()
+    gname = {}
+    for g in d["groups"]:
+        if isinstance(g, dict) and g.get("id"):
+            gname[str(g["id"])] = str(g.get("name") or "")
+    rows = []
+    for r in d["reqs"]:
+        if not isinstance(r, dict):
+            continue
+        body = r.get("body") if isinstance(r.get("body"), dict) else {}
+        auth = r.get("auth") if isinstance(r.get("auth"), dict) else {}
+        rows.append({
+            "id": str(r.get("id") or ""),
+            "name": str(r.get("name") or "未命名"),
+            "method": str(r.get("method") or "GET").upper(),
+            "url": str(r.get("url") or ""),
+            "group": gname.get(str(r.get("gid") or "")) or "未分组",
+            "body_mode": str(body.get("mode") or "none"),
+            "auth": str(auth.get("type") or "none"),
+        })
+    page_items, total = paginate(rows, request)
+    return jsonify({"items": page_items, "total": total, "groups": len(d["groups"])})
+
+
+@bp.route("/api/http/collection/delete", methods=["POST"])
+def http_collection_delete():
+    """从集合中删除指定请求（后台管理用）。"""
+    d = request.get_json(silent=True) or {}
+    rid = str(d.get("id") or "")
+    if not rid:
+        return jsonify({"error": "缺少 id"}), 400
+    data = _collection_data()
+    keep = [r for r in data["reqs"] if isinstance(r, dict) and str(r.get("id") or "") != rid]
+    if len(keep) == len(data["reqs"]):
+        return jsonify({"error": "请求不存在"}), 404
+    set_meta(_HTTP_REQS_KEY, json.dumps(keep, ensure_ascii=False))
+    return jsonify({"ok": True, "removed": len(data["reqs"]) - len(keep)})
+
+
+@bp.route("/api/http/collection/groups", methods=["GET"])
+def http_collection_groups():
+    """分组列表（后台管理用）：含各分组内的请求数与未分组请求数。"""
+    d = _collection_data()
+    cnt = {}
+    ungrouped = 0
+    for r in d["reqs"]:
+        if not isinstance(r, dict):
+            continue
+        gid = str(r.get("gid") or "")
+        if gid:
+            cnt[gid] = cnt.get(gid, 0) + 1
+        else:
+            ungrouped += 1
+    items = [{"id": str(g.get("id") or ""), "name": str(g.get("name") or "未命名分组"),
+              "requests": cnt.get(str(g.get("id") or ""), 0)}
+             for g in d["groups"] if isinstance(g, dict)]
+    return jsonify({"items": items, "ungrouped": ungrouped, "total_requests": len(d["reqs"])})
+
+
+@bp.route("/api/http/collection/groups/rename", methods=["POST"])
+def http_collection_groups_rename():
+    """重命名分组（后台管理用）。"""
+    d = request.get_json(silent=True) or {}
+    gid = str(d.get("id") or "")
+    name = str(d.get("name") or "").strip()
+    if not gid or not name:
+        return jsonify({"error": "缺少 id 或 name"}), 400
+    data = _collection_data()
+    hit = False
+    for g in data["groups"]:
+        if isinstance(g, dict) and str(g.get("id") or "") == gid:
+            g["name"] = name
+            hit = True
+            break
+    if not hit:
+        return jsonify({"error": "分组不存在"}), 404
+    set_meta(_HTTP_GROUPS_KEY, json.dumps(data["groups"], ensure_ascii=False))
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/http/collection/groups/delete", methods=["POST"])
+def http_collection_groups_delete():
+    """删除分组（后台管理用）：组内请求落回「未分组」，与 IDE 端行为一致。"""
+    d = request.get_json(silent=True) or {}
+    gid = str(d.get("id") or "")
+    if not gid:
+        return jsonify({"error": "缺少 id"}), 400
+    data = _collection_data()
+    groups = [g for g in data["groups"] if isinstance(g, dict) and str(g.get("id") or "") != gid]
+    if len(groups) == len(data["groups"]):
+        return jsonify({"error": "分组不存在"}), 404
+    changed = False
+    for r in data["reqs"]:
+        if isinstance(r, dict) and str(r.get("gid") or "") == gid:
+            r["gid"] = ""
+            changed = True
+    set_meta(_HTTP_GROUPS_KEY, json.dumps(groups, ensure_ascii=False))
+    if changed:
+        set_meta(_HTTP_REQS_KEY, json.dumps(data["reqs"], ensure_ascii=False))
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/http/collection", methods=["POST"])
+def http_collection_set():
+    """整体保存请求集合：前端把全量状态（防抖后）推上来，最后一次写入生效。"""
+    d = request.get_json(silent=True) or {}
+    reqs = d.get("reqs") if isinstance(d.get("reqs"), list) else []
+    groups = d.get("groups") if isinstance(d.get("groups"), list) else []
+    if len(json.dumps(reqs, ensure_ascii=False)) > 2_000_000:
+        return jsonify({"error": "请求集合过大（超过 2MB）"}), 413
+    set_meta(_HTTP_REQS_KEY, json.dumps(reqs, ensure_ascii=False))
+    set_meta(_HTTP_GROUPS_KEY, json.dumps(groups, ensure_ascii=False))
+    return jsonify({"ok": True})
+
+
 def _default_export_password() -> str:
     """导出弹窗里不填口令时用的默认口令：.env 的 EXPORT_PASSWORD（留空回退 SECRET_SALT）。
     两者都没配就返回空串 —— 此时导出必须手填口令（空口令等于明文，不能默默放行）。"""

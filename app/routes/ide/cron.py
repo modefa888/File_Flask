@@ -60,8 +60,14 @@ def _with_runtime(t):
 def api_cron_tasks():
     tasks = [_with_runtime(t) for t in crondb.list_tasks()]
     tasks.sort(key=lambda x: (not x.get("enabled"), x.get("created_at") or 0))
-    return jsonify({"ok": True, "tasks": tasks,
-                    "running": sum(1 for t in tasks if t["running"])})
+    from ..common.paginate import paginate_opt
+    page_items, total = paginate_opt(tasks, request)
+    if total is None:
+        return jsonify({"ok": True, "tasks": tasks,
+                        "running": sum(1 for t in tasks if t["running"])})
+    return jsonify({"ok": True, "tasks": page_items,
+                    "running": sum(1 for t in tasks if t["running"]),
+                    "total": total})
 
 
 @bp.route("/api/cron/save", methods=["POST"])
@@ -312,8 +318,23 @@ def api_cron_notify_test():
 
 @bp.route("/api/cron/notify-history")
 def api_cron_notify_history():
-    """定时任务触发的通知记录（按来源过滤，最新在前，最多 50 条）。"""
-    return jsonify({"ok": True, "records": cronnotify.history(50)})
+    """定时任务触发的通知记录（按来源过滤，最新在前）；支持关键字搜索与分页。"""
+    from ..common.paginate import paginate_opt
+    recs = cronnotify.history(1000 if request.args.get("page") else 50)
+    page_items, total = paginate_opt(recs, request)
+    if total is None:
+        return jsonify({"ok": True, "records": recs, "total": cronnotify.count()})
+    return jsonify({"ok": True, "records": page_items, "total": total})
+
+
+@bp.route("/api/cron/notify-history", methods=["DELETE"])
+def api_cron_notify_history_clear():
+    """清空定时任务触发的通知记录。"""
+    try:
+        n = cronnotify.clear_history()
+        return jsonify({"ok": True, "cleared": n})
+    except Exception as e:                              # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 # ---------------------------------------------------------------- 备份 / 恢复

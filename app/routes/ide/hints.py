@@ -16,7 +16,17 @@ bp = Blueprint("file_hints", __name__)
 
 @bp.route("/api/file_hints", methods=["GET"])
 def api_file_hints_list():
+    """自定义文件说明（返回 {hints: {名: 说明}}，IDE 文件树依赖此结构）。"""
     return jsonify({"hints": hints_db.load_hints()})
+
+
+@bp.route("/api/file_hints/list", methods=["GET"])
+def api_file_hints_list_paged():
+    """自定义文件说明（后台管理用）：支持关键字搜索与分页，返回 {items, total}。"""
+    from ..common.paginate import paginate
+    items = [{"name": k, "hint": v} for k, v in hints_db.load_hints().items()]
+    page_items, total = paginate(items, request)
+    return jsonify({"items": page_items, "total": total})
 
 
 @bp.route("/api/file_hints", methods=["POST"])

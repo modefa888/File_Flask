@@ -156,7 +156,11 @@ def api_db_conns():
         items = [_conn_row(dict(r)) for r in rows]
     except Exception as e:
         return jsonify({"error": "读取连接列表失败：%s" % e}), 500
-    return jsonify({"conns": items, "kinds": list(KINDS.keys())})
+    from .paginate import paginate_opt
+    page_items, total = paginate_opt(items, request)
+    if total is None:
+        return jsonify({"conns": items, "kinds": list(KINDS.keys())})
+    return jsonify({"conns": page_items, "total": total, "kinds": list(KINDS.keys())})
 
 
 @bp.route("/api/db/conns", methods=["POST"])

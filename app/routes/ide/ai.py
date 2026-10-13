@@ -644,8 +644,25 @@ def api_ai_config_get():
 
 @bp.route("/api/ai/usage", methods=["GET"])
 def api_ai_usage():
-    """系统 AI 各模块的调用次数统计（成功 / 失败 / 最近一次）"""
+    """系统 AI 各模块的调用次数统计（返回 {usage: {模块: 统计}}，IDE 设置页依赖此结构）。"""
     return jsonify({"usage": _usage_all()})
+
+
+@bp.route("/api/ai/usage/list", methods=["GET"])
+def api_ai_usage_list():
+    """AI 调用统计（后台管理用）：支持关键字搜索与分页，返回 {items, total}。"""
+    from ..common.paginate import paginate
+    usage = _usage_all()
+    rows = [{"module": m, "ok": u.get("ok", 0), "fail": u.get("fail", 0),
+             "last_at": u.get("last_at", ""), "last_ms": u.get("last_ms", 0),
+             "last_error": u.get("last_error", ""),
+             "tokens_in": u.get("tokens_in", 0), "tokens_out": u.get("tokens_out", 0)}
+            for m, u in usage.items()]
+    page_items, total = paginate(rows, request)
+    total_ok = sum(r["ok"] for r in rows)
+    total_fail = sum(r["fail"] for r in rows)
+    return jsonify({"items": page_items, "total": total,
+                    "total_ok": total_ok, "total_fail": total_fail})
 
 
 @bp.route("/api/ai/usage/detail", methods=["GET"])
@@ -1033,10 +1050,13 @@ def api_ai_notify_get():
     after = request.args.get("cursor", 0, type=int)
     cfg = notify_svc.sanitize_notify_cfg()
     d = notify_svc.read_latest(after_cursor=after)
+    # 定时任务的通知记录（source="cron"）在「定时任务通知」页签展示，这里只返回 AI 自己的
+    hist = [r for r in (d.get("history") or []) if str(r.get("source") or "") != "cron"]
     return jsonify({
         "cfg": cfg,
-        # 磁盘上最多留 200 条，界面只展示最近 30 条（与卡片上的说明一致）
-        "recent": (d.get("history") or [])[:30],
+        # 界面只展示最近 30 条，recent_total 为存储里的实际条数（供页签角标显示）
+        "recent": hist[:30],
+        "recent_total": len(hist),
         "latest": d.get("latest"),
         "cursor": int(d.get("cursor") or 0),
         "has_new": bool(d.get("has_new")),
@@ -1068,11 +1088,22 @@ def api_ai_notify_test():
         return jsonify({"ok": False, "error": str(e)}), 400
 
 
+@bp.route("/api/ai/notify/history", methods=["GET"])
+def api_ai_notify_history():
+    """通知历史（AI 助手 / 智能体触发，不含定时任务）：支持关键字搜索与分页。"""
+    from ..common.paginate import paginate
+    d = notify_svc.read_latest()
+    hist = [r for r in (d.get("history") or []) if str(r.get("source") or "") != "cron"]
+    page_items, total = paginate(hist, request)
+    return jsonify({"items": page_items, "total": total})
+
+
 @bp.route("/api/ai/notify/history", methods=["DELETE"])
 def api_ai_notify_history_clear():
     """清空通知历史。"""
     try:
-        n = notify_svc.clear_recent()
+        # 只清 AI 自己的记录，保留定时任务的通知（source="cron"）
+        n = notify_svc.clear_recent(keep_source="cron")
         return jsonify({"ok": True, "cleared": n})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400

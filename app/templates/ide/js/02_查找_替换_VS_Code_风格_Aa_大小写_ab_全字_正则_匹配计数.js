@@ -1253,6 +1253,16 @@
     // 面板切换后重排后台任务轮询：切走时如果是唯一可见界面就停，编辑区还开着标签则继续（见 11_）
     if (typeof runnerPollArm === "function") runnerPollArm(); else clearTimeout(RUNNER.timer);
     if (name !== "cron" && typeof CRON !== "undefined") clearTimeout(CRON.timer);
+    // 面板内容加载：放在 showPanel 里（而不是只挂在活动栏点击事件上），
+    // 这样会话恢复、代码调用等任何途径切到面板都会刷新内容，
+    // 否则恢复到「API 调试」等面板时侧栏是空白，直到点一次按钮才渲染。
+    if (name === "git" && typeof loadGitStatus === "function") loadGitStatus();
+    if (name === "run" && typeof loadRuntimes === "function") loadRuntimes();
+    if (name === "runner" && typeof loadRunnerList === "function") loadRunnerList().then(runnerTick);
+    if (name === "env" && typeof loadEnv === "function") loadEnv(false);
+    if (name === "dbconn" && typeof loadDbConns === "function") loadDbConns();
+    if (name === "api" && typeof loadApiReqs === "function") loadApiReqs();
+    if (name === "cron" && typeof loadCron === "function") loadCron().then(cronTick);
   }
   document.getElementById("activitybar").addEventListener("click", (e) => {
     const a = e.target.closest(".act[data-panel]"); if (!a) return;
@@ -1260,14 +1270,7 @@
     // 再点一次当前面板则折叠侧栏
     if (a.classList.contains("active") && !$("sidebar").classList.contains("collapsed") && p === "explorer") { toggleSidebar(); return; }
     $("sidebar").classList.remove("collapsed");
-    showPanel(p);
-    if (p === "git") loadGitStatus();
-    if (p === "run") loadRuntimes();
-    if (p === "runner") loadRunnerList().then(runnerTick);
-    if (p === "env") loadEnv(false);
-    if (p === "dbconn" && typeof loadDbConns === "function") loadDbConns();
-    if (p === "api" && typeof loadApiReqs === "function") loadApiReqs();
-    if (p === "cron" && typeof loadCron === "function") loadCron().then(cronTick);
+    showPanel(p);   // 各面板的内容加载已收进 showPanel，这里不再重复调用
   });
   function toggleSidebar() {
     $("sidebar").classList.toggle("collapsed");

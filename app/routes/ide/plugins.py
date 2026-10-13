@@ -200,7 +200,10 @@ def _list_plugins():
         meta = _load_meta(name)
         if meta is None:
             continue
-        meta.setdefault("id", name)
+        # 目录名是插件唯一真实 id（toggle/uninstall/main.js 等路由都以目录名为键）。
+        # 强制覆盖 manifest 里的 id，避免手工拷贝的目录与已装插件 manifest 同 id 时，
+        # 列表出现两张相同卡片、启用状态互相干扰的问题。
+        meta["id"] = name
         meta.setdefault("name", name)
         meta.setdefault("version", "0.0.0")
         meta.setdefault("enabled", True)
@@ -215,7 +218,16 @@ def _save_meta(pid, meta):
 
 @bp.route("/api/plugins", methods=["GET"])
 def list_plugins():
+    """插件列表（返回数组，IDE 插件系统依赖此结构，勿改动返回形态）。"""
     return jsonify(_list_plugins())
+
+
+@bp.route("/api/plugins/list", methods=["GET"])
+def list_plugins_paged():
+    """插件列表（后台管理用）：支持关键字搜索与分页，返回 {items, total}。"""
+    from ..common.paginate import paginate
+    page_items, total = paginate(_list_plugins(), request)
+    return jsonify({"items": page_items, "total": total})
 
 
 @bp.route("/api/plugins/registry", methods=["GET"])

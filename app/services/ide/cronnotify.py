@@ -322,6 +322,21 @@ def history(limit=50):
     return out
 
 
+def clear_history() -> int:
+    """清空定时任务触发的通知记录（仅删 source == "cron"）；返回被清掉的条数。"""
+    return notifications.clear_recent(source="cron")
+
+
+def count() -> int:
+    """定时任务触发的通知记录总数（存储里的实际条数，供页签角标显示）。"""
+    try:
+        d = notifications.read_latest(0)
+    except Exception:                                   # noqa: BLE001
+        return 0
+    return sum(1 for r in (d.get("history") or [])
+               if str(r.get("source") or "") == "cron")
+
+
 def test(channel):
     """对单个渠道发一条测试消息（忽略总开关）；channel: 渠道名或 "all"。
 

@@ -552,10 +552,27 @@ def api_trash_raw():
         return jsonify({"error": f"无法读取文件: {str(e)}"}), 500
 
 
+def _row_match(row, q):
+    """不区分大小写地在所有基础类型字段中做子串匹配（用于关键字搜索）。"""
+    if not q:
+        return True
+    for v in row.values():
+        if isinstance(v, (str, int, float, bool)):
+            if q in str(v).lower():
+                return True
+    return False
+
+
 @bp.route("/api/delete-history")
 def api_delete_history():
-    """获取删除历史记录"""
+    """获取删除历史记录（支持关键字搜索与分页）。"""
     _log.info("GET /api/delete-history")
+    q = (request.args.get("q") or "").strip().lower()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        size = max(1, min(200, int(request.args.get("page_size", 10))))
+    except (TypeError, ValueError):
+        page, size = 1, 10
     with _DELETE_HISTORY_LOCK:
         history = _load_delete_history()
     # 反转：最新的在前
@@ -563,7 +580,11 @@ def api_delete_history():
     # 检查回收站文件是否仍存在
     for item in history:
         item["exists"] = os.path.exists(item.get("trash_path", ""))
-    return jsonify({"items": history, "count": len(history)})
+    if q:
+        history = [i for i in history if _row_match(i, q)]
+    total = len(history)
+    start = (page - 1) * size
+    return jsonify({"items": history[start:start + size], "total": total, "count": total})
 
 
 @bp.route("/api/delete-history/clear", methods=["POST"])

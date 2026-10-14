@@ -34,6 +34,9 @@
   header {
     display: flex; align-items: center; gap: 10px; padding: 8px 14px;
     background: #181818; border-bottom: 1px solid #2c2c2c; flex: none;
+    /* 抬到「提示浮层 #tip(z-index:99)」之上：即使弹出全屏提示（如「缺少协作令牌」），
+       头部的「退出登录」等按钮依然可点击，避免被浮层挡住无法操作 */
+    position: relative; z-index: 100;
   }
   header .t { font-weight: 600; display: flex; align-items: center; gap: 6px; }
   header .t i { color: #6cb6ff; }
@@ -390,7 +393,8 @@
 
   if (!shareId) {
     showTip("缺少协作令牌", "请通过邀请链接打开本页面。" +
-      (isAdmin ? '<br><a href="/ide">返回 IDE</a>' : ""));
+      (isAdmin ? '<br><a href="/ide">返回 IDE</a>' : "") +
+      '<br><a href="/logout">退出登录</a>');
     return;
   }
 

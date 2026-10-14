@@ -12,6 +12,7 @@ import time
 from ... import config
 from ...log import get_logger, _LOG_DIR
 from ..common.store_db import store_conn
+from ...services.common.auth_settings import registration_open
 
 _log = get_logger()
 
@@ -288,6 +289,7 @@ def config_snapshot():
             "admin_username": config.AUTH_USERNAME,
             "secret_salt_set": bool(config.SECRET_SALT),
             "export_password_set": bool(config.EXPORT_PASSWORD),
+            "allow_register": registration_open(),
         },
         "exec": {
             "enable_exec": bool(config.ENABLE_EXEC),

@@ -7,6 +7,7 @@ from flask import (
 from ... import config
 from ...log import get_logger
 from ...services.common.users import create_user, verify_user, user_exists, is_banned
+from ...services.common.auth_settings import registration_open
 
 
 _log = get_logger()
@@ -216,12 +217,19 @@ def login():
         else:
             error = "用户名或密码错误"
             _log.warning("登录失败: %s", username)
-    return render_template("login.html", error=error)
+    return render_template("login.html", error=error, allow_register=registration_open())
 
 
 @bp.route("/register", methods=["GET", "POST"])
 def register():
-    """开放注册：协作者没有账号时自行注册，注册成功直接登录并回到 ?next=。"""
+    """开放注册：协作者没有账号时自行注册，注册成功直接登录并回到 ?next=。
+
+    受「前端注册开关」控制：关闭后不再展示 / 处理注册表单，只能由管理员在后台建号。
+    """
+    if not registration_open():
+        return render_template("register.html", closed=True,
+                               error="注册功能已关闭，请使用已有账号登录，或联系管理员开通。"), 403
+
     nxt = _safe_next()
     if request.method == "GET" and is_logged_in():
         return redirect(nxt or url_for("pages.index"))

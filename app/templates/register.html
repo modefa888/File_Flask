@@ -37,6 +37,7 @@
         {% if error %}
         <div class="error-banner">{{ error }}</div>
         {% endif %}
+        {% if not closed %}
         <form method="post" action="{{ url_for('auth.register', next=next) }}">
             <div class="mb-3">
                 <label class="form-label" style="font-size:0.85rem;color:#475569;">用户名</label>
@@ -56,6 +57,7 @@
             </div>
             <button type="submit" class="btn btn-primary btn-login">注 册</button>
         </form>
+        {% endif %}
         <div class="login-link">
             已有账号？<a href="{{ url_for('auth.login', next=next) }}">去登录</a>
         </div>

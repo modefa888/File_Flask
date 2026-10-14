@@ -196,6 +196,18 @@ def api_users_delete():
     return _ok()
 
 
+# --------------------------------------------------------------------------- 系统设置（注册开关）
+@bp.route("/api/adm/settings/register-open", methods=["POST"])
+def api_set_register_open():
+    """切换「是否允许前端自助注册」开关（store_meta 持久化，不重启生效）。"""
+    from ...services.common.auth_settings import set_registration_open
+    data = request.get_json(silent=True) or {}
+    on = bool(data.get("open"))
+    set_registration_open(on)
+    _log.info("前端注册开关被设置为: %s", on)
+    return _ok({"open": on})
+
+
 # --------------------------------------------------------------------------- 接口目录 / 权限
 @bp.route("/api/adm/apis")
 def api_apis():

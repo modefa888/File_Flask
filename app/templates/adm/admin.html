@@ -6,11 +6,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>后台管理 · File_Flask</title>
     <script>
-        /* 尽早应用已保存的主题，避免刷新时先闪一下深色再切浅色 */
+        /* 尽早应用已保存的主题与侧栏收起状态，避免刷新时先闪一下（深色 / 展开）再切换 */
         (function () {
             try {
                 if (localStorage.getItem('adm_theme') === 'light') {
                     document.documentElement.setAttribute('data-theme', 'light');
+                }
+                /* 侧栏收起：仅桌面端（>900px）生效，断点与 99_初始化.js 保持一致 */
+                if (localStorage.getItem('adm_side_collapsed') === '1' && window.innerWidth > 900) {
+                    document.documentElement.classList.add('adm-side-collapsed');
                 }
             } catch (e) { }
         })();
@@ -34,12 +38,15 @@
                     <b>File_Flask</b>
                     <small>后台管理台</small>
                 </span>
+                <button class="adm-side-toggle" id="admSideToggle" type="button" title="收起侧栏">
+                    <i class="bi bi-chevron-bar-left"></i>
+                </button>
             </div>
             <nav class="adm-nav" id="admNav"></nav>
             <div class="adm-side-foot">
-                <a href="/desktop" class="adm-foot-link"><i class="bi bi-window-stack"></i> 返回桌面端</a>
-                <a href="/ide" class="adm-foot-link"><i class="bi bi-code-square"></i> 打开 IDE</a>
-                <a href="/logout" class="adm-foot-link danger"><i class="bi bi-box-arrow-right"></i> 退出登录</a>
+                <a href="/desktop" class="adm-foot-link" title="返回桌面端"><i class="bi bi-window-stack"></i> <span>返回桌面端</span></a>
+                <a href="/ide" class="adm-foot-link" title="打开 IDE"><i class="bi bi-code-square"></i> <span>打开 IDE</span></a>
+                <a href="/logout" class="adm-foot-link danger" title="退出登录"><i class="bi bi-box-arrow-right"></i> <span>退出登录</span></a>
             </div>
         </aside>
 

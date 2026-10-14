@@ -41,6 +41,21 @@
     padding: 13px 15px;
 }
 
+/* 设置型卡片：左侧说明 + 右侧开关横排（注册开关等） */
+.adm-setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+.adm-setting-text { min-width: 0; }
+.adm-setting-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--adm-text, #e6ebf5);
+    margin-bottom: 4px;
+}
+
 .adm-stat-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -98,6 +113,11 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: 13px;
+}
+
+/* 网格项允许收缩，避免内部长内容（长路径/命令）把列撑宽、溢出到相邻卡片 */
+.adm-col-grid > * {
+    min-width: 0;
 }
 
 /* ---------------- 进度条 ---------------- */
@@ -1006,20 +1026,32 @@
 
 .adm-kv {
     display: grid;
-    grid-template-columns: 190px 1fr;
+    /* 标签列自适应（110~190px），值列可压缩到 0：
+       窄卡片里长路径/命令也不会把整张卡片撑宽、溢出到相邻卡片 */
+    grid-template-columns: minmax(110px, 190px) minmax(0, 1fr);
     gap: 8px 16px;
     font-size: 13px;
+    min-width: 0;
 }
 
 .adm-kv dt {
     color: var(--adm-text-mute);
     font-size: 12.5px;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .adm-kv dd {
     margin: 0;
     color: var(--adm-text);
     word-break: break-word;
+    min-width: 0;         /* 允许网格项收缩，不被内容最小宽度顶开 */
+    overflow: hidden;     /* 兜底：极端长串也裁掉，不溢出卡片 */
+}
+
+/* 键值卡里的长路径 / 命令：按卡片可用宽度省略，避免溢出到相邻卡片 */
+.adm-kv .adm-cell-mono {
+    max-width: 100%;
 }
 
 .adm-rule-group {

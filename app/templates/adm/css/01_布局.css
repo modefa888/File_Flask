@@ -13,15 +13,21 @@
     background: linear-gradient(180deg, rgba(22, 32, 58, 0.9), rgba(13, 19, 36, 0.92));
     border-right: 1px solid var(--adm-border);
     backdrop-filter: blur(8px);
-    transition: width .2s ease, flex-basis .2s ease;
+    /* 刻意不给 width / flex-basis 加过渡：宽度过渡期间主区会被连续重排，
+       网格列数在半路跳变（3 列→4 列）、卡片文字逐帧重新折行，肉眼就是「抖动」。
+       收起 / 展开改成瞬时切换，主区只重排一次。 */
+    overflow: hidden;   /* 兜底裁切：内部元素（含超长文字）不会溢出到主区 */
 }
 
 .adm-brand {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 20px 18px 16px;
+    /* 左侧 14px = (68-40)/2：Logo 正好居中于收起后的 68px 图标条，
+       所以收起 / 展开时 Logo 不需要换位置；右侧 56px 给绝对定位的切换按钮留位 */
+    padding: 20px 56px 16px 14px;
     border-bottom: 1px solid var(--adm-border-soft);
+    position: relative;
 }
 
 .adm-brand-icon {
@@ -53,6 +59,33 @@
     font-size: 11.5px;
 }
 
+/* 侧栏收起 / 展开切换按钮（桌面端） */
+.adm-side-toggle {
+    /* 绝对定位：展开时贴在品牌行右侧、与 Logo 垂直居中，收起时落到 Logo 下方。
+       不参与品牌行排版，收起瞬间不会被挤动，也就不会出现「按钮乱飞」 */
+    position: absolute;
+    top: 26px;
+    right: 18px;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    border: 1px solid var(--adm-border);
+    background: rgba(148, 163, 184, 0.06);
+    color: var(--adm-text-dim);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    transition: background .15s, color .15s, border-color .15s;
+}
+
+.adm-side-toggle:hover {
+    background: rgba(91, 140, 255, 0.16);
+    border-color: rgba(91, 140, 255, 0.45);
+    color: #fff;
+}
+
 .adm-nav {
     flex: 1;
     overflow-y: auto;
@@ -66,7 +99,9 @@
     display: flex;
     align-items: center;
     gap: 11px;
-    padding: 9px 12px;
+    /* 展开态：10px(.adm-nav 内边距) + 15px = 图标左边缘落在 25px。
+       收起态的居中方式见下方「收起后的图标条」 */
+    padding: 9px 15px;
     border-radius: 10px;
     color: var(--adm-text-dim);
     cursor: pointer;
@@ -104,7 +139,7 @@
 }
 
 .adm-side-foot {
-    padding: 12px 12px 16px;
+    padding: 12px 10px 16px;   /* 与 .adm-nav 一致，底部图标和导航图标落在同一条竖线上 */
     border-top: 1px solid var(--adm-border-soft);
     display: flex;
     flex-direction: column;
@@ -115,7 +150,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 12px;
+    padding: 8px 15px;         /* 同 .adm-nav-item：收起后图标恰好居中 */
     border-radius: 9px;
     color: var(--adm-text-dim);
     font-size: 13px;
@@ -200,29 +235,111 @@
     padding: 16px 20px 26px;
 }
 
-/* 折叠态（窄屏 / 手动收起） */
-.adm-shell.collapsed .adm-side {
+/* 折叠态（桌面端手动收起）：侧栏收成 68px 图标条。
+ * 标记挂在 <html> 上（与主题同一套路），可在首屏脚本里提前恢复，刷新时不闪一下。
+ *
+ * .adm-side 上没有 width 过渡，宽度是瞬时切换的：主区只重排一次，不会逐帧重排出现抖动。
+ * 图标在展开态靠左对齐、收起态居中，切换瞬间会有一次约 8px 的「归位」，
+ * 因为是瞬时的，看起来是对齐而不是滑动。 */
+html.adm-side-collapsed .adm-side {
     width: 68px;
     flex-basis: 68px;
 }
 
-.adm-shell.collapsed .adm-brand-text,
-.adm-shell.collapsed .adm-nav-count,
-.adm-shell.collapsed .adm-foot-link span {
+/* 品牌区保持横向排布、左内边距不变：Logo 原地不动，只在下方腾出切换按钮的位置 */
+html.adm-side-collapsed .adm-brand {
+    padding-bottom: 48px;
+}
+
+/* 切换按钮从品牌行右侧移到 Logo 正下方（两处都对准图标条中线 x=34） */
+html.adm-side-collapsed .adm-side-toggle {
+    top: 68px;
+    right: 22px;
+}
+
+html.adm-side-collapsed .adm-brand-text,
+html.adm-side-collapsed .adm-nav-item > span,
+html.adm-side-collapsed .adm-nav-count,
+html.adm-side-collapsed .adm-foot-link span {
     display: none;
 }
 
-.adm-shell.collapsed .adm-nav-item,
-.adm-shell.collapsed .adm-foot-link {
-    justify-content: center;
-    padding-left: 0;
-    padding-right: 0;
+/* 收起后的图标条（仅桌面端）：
+ * 1) 隐藏导航滚动条 —— 否则它会占掉右侧约 8px，把导航项挤窄并整体推偏左，
+ *    结果图标本身在 68px 里，但「当前项」的高亮方框却明显偏左，看起来就是「没居中」；
+ * 2) 导航项 / 底部入口收成 40×40 方框（与 40×40 的品牌 Logo 同宽）并在栏内水平居中，
+ *    图标与高亮底色一起落在 x=34 的中线上。
+ * 只在 min-width:901px 生效，窄屏抽屉保持展开态排版。 */
+@media (min-width: 901px) {
+    html.adm-side-collapsed .adm-nav {
+        padding: 12px 0;
+        scrollbar-width: none;              /* Firefox */
+    }
+
+    html.adm-side-collapsed .adm-nav::-webkit-scrollbar {
+        width: 0;
+        height: 0;
+        display: none;                      /* Chrome / Edge / Safari */
+    }
+
+    html.adm-side-collapsed .adm-side-foot {
+        padding: 12px 0 16px;
+    }
+
+    html.adm-side-collapsed .adm-nav-item,
+    html.adm-side-collapsed .adm-foot-link {
+        width: 40px;
+        align-self: center;                 /* 在 68px 图标条内水平居中 */
+        justify-content: center;
+        gap: 0;                             /* 文字已隐藏，去掉间距避免图标被推偏 */
+    }
+
+    html.adm-side-collapsed .adm-nav-item {
+        padding: 9px 0;
+    }
+
+    html.adm-side-collapsed .adm-foot-link {
+        padding: 8px 0;
+    }
 }
 
 @media (max-width: 900px) {
     .adm-menu-btn {
         display: inline-grid;
         place-items: center;
+    }
+
+    /* 窄屏改用顶部汉堡按钮唤出抽屉，隐藏侧栏内的收起按钮 */
+    .adm-side-toggle {
+        display: none;
+    }
+
+    /* 抽屉内始终完整展开，避免遗留的折叠态把抽屉压成 68px */
+    html.adm-side-collapsed .adm-side {
+        width: 244px;
+        flex-basis: 244px;
+    }
+
+    /* 抽屉里没有侧栏内的收起按钮：品牌区不必为它留位置、也不必额外撑高 */
+    .adm-brand {
+        padding: 20px 18px 16px;
+    }
+
+    html.adm-side-collapsed .adm-brand {
+        padding-bottom: 16px;
+    }
+
+    html.adm-side-collapsed .adm-brand-text,
+    html.adm-side-collapsed .adm-foot-link span {
+        display: flex;
+    }
+
+    html.adm-side-collapsed .adm-nav-item > span {
+        display: inline;
+    }
+
+    html.adm-side-collapsed .adm-nav-count {
+        display: inline-block;
     }
 
     .adm-side {

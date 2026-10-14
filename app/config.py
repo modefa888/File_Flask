@@ -224,6 +224,12 @@ EXEC_DELETE_PATTERNS = [(p, r) for _g, _n, _d, _items in EXEC_RULE_GROUPS
 AUTH_USERNAME = _env_str("AUTH_USERNAME", "admin")
 AUTH_PASSWORD = _env_str("AUTH_PASSWORD", "admin123")
 
+# ===== 前端新用户注册（自助注册）开关 =====
+# 默认开启：协作者没有账号时可自行注册后再通过邀请链接加入协作；
+# 设为 False（或后台「系统设置」临时关闭）后，登录页不再显示「注册新账号」入口、
+# /register 直接返回「已关闭」，只能由管理员在后台「用户管理」里手动建号。
+ALLOW_REGISTER = _env_bool("ALLOW_REGISTER", True)
+
 # ===== 运行时数据（保存在应用目录下）=====
 # 源码运行时放到项目根目录的 data/；打包为可执行文件后放到可执行文件旁的 data/，
 # 避免写入解压用的临时目录（_MEIPASS）导致数据随进程退出而丢失。

@@ -48,9 +48,11 @@
             </div>
             <button type="submit" class="btn btn-primary btn-login">登 录</button>
         </form>
+        {% if allow_register %}
         <div class="reg-link">
             没有账号？<a href="{{ url_for('auth.register', next=request.args.get('next', '')) }}">注册新账号</a>
         </div>
+        {% endif %}
     </div>
 </body>
 </html>

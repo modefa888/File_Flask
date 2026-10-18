@@ -142,14 +142,17 @@
                     // 阻止浏览器默认的 10s 步进，统一为 5s
                     e.preventDefault();
                     e.stopPropagation();
-                    const dur = isFinite(video.duration) ? video.duration : Infinity;
-                    if (e.key === 'ArrowRight') {
-                        video.currentTime = Math.min(dur, video.currentTime + SEEK_STEP);
-                        showSeekTip('快进 5 秒', 'bi-chevron-double-right');
+                    // 转码播放时不能直接改 currentTime（fMP4 流不支持 Range 定位），
+                    // 由 _bindVideoPlayer 暴露的 _vpSeekBy 换算成 -ss 重新起流
+                    if (typeof body._vpSeekBy === 'function') {
+                        body._vpSeekBy(e.key === 'ArrowRight' ? SEEK_STEP : -SEEK_STEP);
                     } else {
-                        video.currentTime = Math.max(0, video.currentTime - SEEK_STEP);
-                        showSeekTip('后退 5 秒', 'bi-chevron-double-left');
+                        const dur = isFinite(video.duration) ? video.duration : Infinity;
+                        if (e.key === 'ArrowRight') video.currentTime = Math.min(dur, video.currentTime + SEEK_STEP);
+                        else video.currentTime = Math.max(0, video.currentTime - SEEK_STEP);
                     }
+                    showSeekTip(e.key === 'ArrowRight' ? '快进 5 秒' : '后退 5 秒',
+                        e.key === 'ArrowRight' ? 'bi-chevron-double-right' : 'bi-chevron-double-left');
                 };
                 // 捕获阶段拦截，确保先于默认行为执行
                 document.addEventListener('keydown', videoKeyHandler, true);
@@ -220,10 +223,7 @@
                             <div class="video-poster" data-abs="${_escapeHtml(absPath)}" style="background-image:url('/api/thumbnail?path=${encodeURIComponent(absPath)}');background-color:#0b0f14;">
                                 <div class="vpp-name">${_escapeHtml(absPath.split('/').pop() || '')}</div>
                             </div>
-                            <video autoplay playsinline style="width:100%;height:100%;">
-                                <source src="${data.stream_url}"${data.content_type ? ` type="${data.content_type}"` : ''}>
-                                您的浏览器不支持视频播放
-                            </video>
+                            <video autoplay playsinline preload="auto" style="width:100%;height:100%;">您的浏览器不支持视频播放</video>
                             <div class="video-seek-tip" style="position:absolute;bottom:92px;left:50%;transform:translate(-50%,8px);background:rgba(0,0,0,0.72);color:#fff;padding:8px 16px;border-radius:8px;font-size:0.85rem;font-weight:600;z-index:20;pointer-events:none;opacity:0;transition:opacity .2s ease,transform .2s ease;display:flex;align-items:center;gap:6px;white-space:nowrap;"></div>
                             <button class="vp-panel-toggle" title="收起播放列表"><i class="bi bi-chevron-right"></i></button>
                             <div class="video-tip" style="position:absolute;bottom:72px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:#fff;padding:4px 10px;border-radius:6px;font-size:0.72rem;z-index:10;opacity:0;transition:opacity .3s ease;pointer-events:none;">
@@ -268,7 +268,7 @@
                             <div class="vp-list"><div class="vp-empty"><i class="bi bi-hourglass-split"></i>正在加载列表…</div></div>
                         </div>`;
                         bindVideoKeys();
-                        _videoExtraCleanup = _bindVideoPlayer(body, showSeekTip);
+                        _videoExtraCleanup = _bindVideoPlayer(body, showSeekTip, absPath);
                         _vpCurrentVideo = absPath;
                         _buildVideoPlaylist(absPath, body);
                         // 海报封面层：仅首次加载（视频未播放过）时显示封面；
@@ -383,10 +383,89 @@
         const _vpvSave = () => { try { localStorage.setItem('ide.videoPlayer', JSON.stringify(_vpvStore)); } catch (_) {} };
         let _vpPlayMode = _vpvStore.mode || 'order';   // 播放模式：order 顺序 / loop 循环 / shuffle 随机（与 _vpvStore.mode 同步）
 
-        function _bindVideoPlayer(body, showSeekTip) {
+        // 浏览器无法直接解码的容器（AVI / FLV / RMVB 等）：不给原生播放器试错的机会，
+        // 直接走服务端转码，避免「点了没反应 / 一直转圈 / 只有声音没有画面」
+        const _VP_TRANSCODE_FIRST = new Set(['avi', 'flv', 'wmv', 'rmvb', 'rm', 'mpg', 'mpeg', 'ts', 'vob', 'asf', '3gp', 'ogv']);
+
+        function _bindVideoPlayer(body, showSeekTip, startPath) {
             const video = body.querySelector('video');
             const stage = body.querySelector('.video-stage');
             if (!video || !stage) return null;
+
+            // ===== 播放源状态：直连（/api/stream，支持 Range）/ 转码（/api/stream_transcode，边转边播）=====
+            let curPath = startPath || _vpCurrentVideo || '';
+            let transMode = false;    // 当前是否使用转码流
+            let transStart = 0;       // 转码流 -ss 起播偏移（currentTime 从 0 计，显示要加回）
+            let transDur = 0;         // 视频真实总时长（fMP4 流拿不到 duration）
+            const extOf = p => (String(p || '').split('.').pop() || '').toLowerCase();
+            const streamUrlOf = p => '/api/stream?path=' + encodeURIComponent(p);
+            const transUrlOf = (p, ss) => '/api/stream_transcode?path=' + encodeURIComponent(p) + '&ss=' + encodeURIComponent(String(ss || 0));
+
+            // 拉取真实总时长：转码流 duration 为 Infinity，进度条/拖拽都靠它换算
+            const fetchTransDuration = p => {
+                fetch('/api/video_duration?path=' + encodeURIComponent(p))
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d && d.duration && curPath === p) { transDur = d.duration; updateProgress(); }
+                    })
+                    .catch(() => { /* 拿不到时长时进度条退化为未知，不影响播放 */ });
+            };
+
+            // 切换到转码流（ss 为绝对起播秒数）
+            const startTranscode = (p, ss, autoplay, silent) => {
+                const first = !transMode;
+                transMode = true;
+                curPath = p;
+                transStart = Math.max(0, +ss || 0);
+                const rate = video.playbackRate || 1;   // load() 会把倍速重置为 1，换源后手动还原
+                video.src = transUrlOf(p, transStart);
+                video.load();
+                video.playbackRate = rate;
+                if (autoplay) video.play().catch(() => {});
+                if (!transDur) fetchTransDuration(p);
+                if (first && !silent && showSeekTip) {
+                    showSeekTip('该视频浏览器无法直接解码，已切换服务器转码播放', 'bi-cpu');
+                }
+                updateProgress();
+            };
+
+            // 加载某个视频（初始化 / 播放列表切集共用）
+            const loadSource = (p, opts) => {
+                opts = opts || {};
+                if (!p) return;
+                curPath = p;
+                transMode = false;
+                transStart = 0;
+                transDur = 0;
+                if (_VP_TRANSCODE_FIRST.has(extOf(p))) {
+                    startTranscode(p, 0, opts.autoplay !== false);
+                    return;
+                }
+                video.src = streamUrlOf(p);
+                video.load();
+                if (opts.autoplay !== false) video.play().catch(() => {});
+                updateProgress();
+            };
+
+            // 直连源解码失败 / 出不了画面 → 自动切转码
+            const fallbackToTranscode = () => {
+                if (transMode) return;
+                startTranscode(curPath, 0, !video.paused);
+            };
+            video.addEventListener('error', () => {
+                if (transMode) {
+                    if (showSeekTip) showSeekTip('视频加载失败，请确认文件可读', 'bi-exclamation-circle');
+                } else {
+                    fallbackToTranscode();
+                }
+            });
+            // 症状二：有声音/有时长但 videoWidth 为 0（HEVC、10bit H.264 等解不出画面）
+            const checkDecodable = () => {
+                if (transMode || video.readyState < 2 || video.videoWidth !== 0) return;
+                startTranscode(curPath, 0, !video.paused);
+            };
+            video.addEventListener('loadeddata', checkDecodable);
+            video.addEventListener('playing', checkDecodable);
 
             const $ = sel => body.querySelector(sel);
             const playBtn = $('.vpc-play'), muteBtn = $('.vpc-mute'), volRange = $('.vpc-vol-range');
@@ -415,15 +494,16 @@
             video.addEventListener('pause', setPlayIcon);
             setPlayIcon();
 
-            // 进度条 + 时间显示
+            // 进度条 + 时间显示（转码模式用「真实总时长 + ss 偏移」换算）
             const updateProgress = () => {
-                const dur = video.duration || 0;
-                const pct = dur ? video.currentTime / dur * 100 : 0;
+                const dur = transMode ? transDur : (video.duration || 0);
+                const cur = transMode ? (transStart + (video.currentTime || 0)) : video.currentTime;
+                const pct = dur ? cur / dur * 100 : 0;
                 played.style.width = pct + '%';
                 knob.style.left = pct + '%';
-                timeEl.textContent = `${fmt(video.currentTime)} / ${fmt(dur)}`;
+                timeEl.textContent = `${fmt(cur)} / ${fmt(dur)}`;
                 if (video.buffered.length && dur) {
-                    const end = video.buffered.end(video.buffered.length - 1);
+                    const end = video.buffered.end(video.buffered.length - 1) + (transMode ? transStart : 0);
                     buffered.style.width = Math.min(100, end / dur * 100) + '%';
                 }
             };
@@ -431,14 +511,33 @@
             video.addEventListener('progress', updateProgress);
             video.addEventListener('loadedmetadata', updateProgress);
 
+            // 定位到绝对秒数：转码流不支持 Range，只能带 -ss 重新起流
+            const seekAbs = sec => {
+                if (transMode) {
+                    let t = Math.max(0, +sec || 0);
+                    if (transDur) t = Math.min(transDur, t);
+                    startTranscode(curPath, t, !video.paused, true);
+                } else {
+                    const dur = isFinite(video.duration) ? video.duration : 0;
+                    video.currentTime = Math.max(0, dur ? Math.min(dur, sec) : sec);
+                    updateProgress();
+                }
+            };
+            const seekBy = delta => {
+                const cur = transMode ? (transStart + (video.currentTime || 0)) : (video.currentTime || 0);
+                seekAbs(cur + delta);
+            };
+            body._vpSeekTo = seekAbs;
+            body._vpSeekBy = seekBy;
+
             // 进度条点击/拖拽跳转
             let dragging = false;
             const seekTo = clientX => {
-                if (!isFinite(video.duration)) return;
+                const dur = transMode ? transDur : video.duration;
+                if (!isFinite(dur) || !dur) return;
                 const rect = progress.getBoundingClientRect();
                 const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-                video.currentTime = ratio * video.duration;
-                updateProgress();
+                seekAbs(ratio * dur);
             };
             const onDragMove = e => { if (dragging) seekTo(e.clientX); };
             progress.addEventListener('pointerdown', e => {
@@ -617,12 +716,19 @@
             };
             document.addEventListener('keydown', keyHandler, true);
 
+            // 暴露给播放列表切集：由播放器自己决定走直连还是转码
+            body._vpLoadVideo = loadSource;
+            loadSource(curPath, { autoplay: true });
+
             // 清理函数：解除本视频相关的全局监听（元素本身随 innerHTML 重建自动回收）
             return () => {
                 document.removeEventListener('keydown', keyHandler, true);
                 document.removeEventListener('fullscreenchange', applyRotate);
                 window.removeEventListener('resize', applyRotate);
                 clearTimeout(idleTimer);
+                body._vpLoadVideo = null;
+                body._vpSeekTo = null;
+                body._vpSeekBy = null;
             };
         }
 
@@ -659,9 +765,14 @@
                         posterEl.classList.remove('hide');
                         delete posterEl.dataset.played; // 新视频重新允许首帧前显示封面
                     }
-                    video.src = data.stream_url;
-                    video.load();
-                    video.play().catch(() => {});
+                    // 交给播放器自己选源：AVI/FLV 等直接走转码，MP4/WebM 先直连（失败自动转码）
+                    if (typeof body._vpLoadVideo === 'function') {
+                        body._vpLoadVideo(newPath, { autoplay: true });
+                    } else {
+                        video.src = data.stream_url;
+                        video.load();
+                        video.play().catch(() => {});
+                    }
                     const info = body.querySelector('.video-info');
                     if (info) info.textContent = data.size_str || '';
                     // 同步弹窗标题与路径栏

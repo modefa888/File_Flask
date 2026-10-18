@@ -1125,8 +1125,12 @@
       items.push({ label: "重做", sc: "Ctrl+Y", disabled: !cm, act: () => { cm.redo(); cm.focus(); } });
       items.push({ divider: true });
       items.push({ label: "剪切", sc: "Ctrl+X", disabled: !hasSel, act: () => { copyText(cm.getSelection()); cm.replaceSelection(""); cm.focus(); } });
-      items.push({ label: "复制", sc: "Ctrl+C", disabled: !selText, act: () => copyText(selText) });
-      items.push({ label: "粘贴", sc: "Ctrl+V", disabled: !cm, act: () => pasteIntoEditor(tab) });
+      items.push({ label: "复制", sc: "Ctrl+C",
+        disabled: !selText && !(tab.isSshTerm && typeof tab.sshHasSel === "function" && tab.sshHasSel()),
+        act: () => (tab.isSshTerm && typeof tab.sshCopy === "function") ? tab.sshCopy() : copyText(selText) });
+      items.push({ label: "粘贴", sc: "Ctrl+V",
+        disabled: !cm && !(tab.isSshTerm && typeof tab.sshPasteFromClipboard === "function"),
+        act: () => (tab.isSshTerm && typeof tab.sshPasteFromClipboard === "function") ? tab.sshPasteFromClipboard() : pasteIntoEditor(tab) });
       items.push({ divider: true });
     } else if (selText) {
       items.push({ label: "复制", sc: "Ctrl+C", act: () => copyText(selText) });

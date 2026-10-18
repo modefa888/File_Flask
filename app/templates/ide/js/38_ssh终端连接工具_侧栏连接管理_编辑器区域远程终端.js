@@ -71,12 +71,25 @@
           '</div>' +
         '</div>' +
         '<div class="ssh-acts">' +
-          '<button data-act="open" title="连接并打开终端"><i class="bi bi-play-fill"></i></button>' +
+          (open
+            ? '<button data-act="open" title="断开并关闭终端" class="ssh-stop"><i class="bi bi-stop-fill"></i></button>'
+            : '<button data-act="open" title="连接并打开终端"><i class="bi bi-play-fill"></i></button>') +
           '<button data-act="edit" title="编辑"><i class="bi bi-pencil-square"></i></button>' +
           '<button data-act="dup" title="复制连接"><i class="bi bi-files"></i></button>' +
           '<button data-act="del" title="删除"><i class="bi bi-trash"></i></button>' +
         '</div>';
-      item.querySelector('[data-act="open"]').onclick = () => connectSsh(c);
+      item.querySelector('[data-act="open"]').onclick = () => {
+        if (!open) { connectSsh(c); return; }
+        // 已打开：按钮变成「停止」，断开会话并关闭对应终端标签
+        const tab = findTab(SSH_VIEW_PREFIX + c.id);
+        if (!tab) return;
+        if (typeof closeTab === "function") { closeTab(tab); return; }
+        try { if (typeof tab.onBeforeClose === "function") tab.onBeforeClose(); } catch (e) { /* 忽略 */ }
+        try { tab.host.remove(); } catch (e) { /* 忽略 */ }
+        const i = tabs.indexOf(tab);
+        if (i >= 0) tabs.splice(i, 1);
+        renderTabsAll();
+      };
       item.querySelector('[data-act="edit"]').onclick = () => openSshEditor(c);
       item.querySelector('[data-act="dup"]').onclick = () => openSshEditor(Object.assign({}, c, { id: "", name: c.name + " 副本" }));
       item.querySelector('[data-act="del"]').onclick = () => deleteSsh(c);
@@ -103,6 +116,19 @@
   }
   function sshSessionRestore() {
     if (!sshSessionAllowed() || !SSHC.paramiko) return;
+    // 先清掉历史遗留的「SSH 假标签」：旧版会话快照恢复出来的 ssh:<id> 空白标签
+    // （名字 / 图标都是路径，不是真正的终端），不清理会和重连出来的真标签并存
+    const stale = tabs.filter(t => t && !t.isSshTerm &&
+      /^[\u0000-\u001f]*ssh:[^/]*$/i.test(String(t.path || "")));
+    if (stale.length) {
+      stale.forEach(t => {
+        try { t.host.remove(); } catch (e) { /* 忽略 */ }
+        const i = tabs.indexOf(t);
+        if (i >= 0) tabs.splice(i, 1);
+      });
+      renderTabsAll();
+      if (typeof sessionSaveTabs === "function") sessionSaveTabs();
+    }
     let ids;
     try { ids = JSON.parse(localStorage.getItem(SSH_OPEN_KEY) || "[]"); } catch (_) { return; }
     if (!Array.isArray(ids) || !ids.length) return;
@@ -257,7 +283,7 @@
     // 本地跟踪当前输入行：中文需求回车不再丢给远端（远端会报 command not found），
     // 而是用 Ctrl+U 撤掉这一行并唤起 AI 面板。
     let lineBuf = "";
-    term.onData(d => {
+    function sendInput(d) {
       if (d.indexOf("\r") >= 0) {
         const text = (lineBuf + d.split("\r")[0]).replace(/\u007f/g, "");
         lineBuf = "";
@@ -274,7 +300,57 @@
         lineBuf = (lineBuf + d).slice(-300);
       }
       api("/api/ssh/input", { method: "POST", body: JSON.stringify({ id: sid, data: d }) });
+    }
+    term.onData(sendInput);
+
+    /* ---------- 复制 / 粘贴支持 ----------
+       xterm 默认把 Ctrl+V / Ctrl+C 当普通按键发给远端（出现 ^V / ^C）。
+       本页多为 HTTP（navigator.clipboard 不可用），所以：
+       · Ctrl+V 只拦下不让 ^V 发出去，粘贴交给浏览器原生 paste 事件 → xterm onData → 远端；
+       · Ctrl+C 只复制（有选中时），不再发 ^C；中断改由 Ctrl+Z 发送（发 \x03 给远端）。 */
+    function sshCopySel() {
+      const sel = term.getSelection();
+      if (!sel) return false;
+      if (typeof copyText === "function") copyText(sel);   // 项目统一的复制（HTTP 下有 execCommand 兜底）
+      else if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(sel).catch(() => {});
+      try { term.clearSelection(); } catch (e) { /* 忽略 */ }
+      return true;
+    }
+    function sshPaste(text) {
+      if (!text) return;
+      sendInput(text.replace(/\r\n/g, "\r").replace(/\n/g, "\r"));
+      try { term.focus(); } catch (e) { /* 忽略 */ }
+    }
+    // 右键菜单「粘贴」用：HTTPS 下读系统剪贴板；HTTP 下读不到，提示直接按 Ctrl+V
+    function sshReadClipboard() {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(sshPaste).catch(() => toast("浏览器拒绝了剪贴板读取，请直接按 Ctrl+V 粘贴", "warn"));
+      } else {
+        toast("HTTP 页面无法读取系统剪贴板，请直接按 Ctrl+V 粘贴", "info");
+      }
+    }
+    term.attachCustomKeyEventHandler(ev => {
+      if (ev.type !== "keydown") return true;
+      const ctrl = ev.ctrlKey || ev.metaKey;
+      if (ctrl && !ev.altKey && (ev.key === "c" || ev.key === "C")) {
+        sshCopySel();                                      // Ctrl+C / Ctrl+Shift+C：有选中就复制，无选中不做任何事
+        return false;                                      // 不再把 ^C 发给远端
+      }
+      if (ctrl && !ev.altKey && !ev.shiftKey && (ev.key === "z" || ev.key === "Z")) {
+        api("/api/ssh/input", { method: "POST", body: JSON.stringify({ id: sid, data: "\u0003" }) });
+        lineBuf = "";                                      // Ctrl+Z：中断远端当前命令（原 Ctrl+C 的行为）
+        return false;
+      }
+      if (ctrl && !ev.altKey && (ev.key === "v" || ev.key === "V")) {
+        return false;                                      // Ctrl+V：拦下 ^V，粘贴由浏览器原生 paste 事件完成
+      }
+      return true;
     });
+    // 挂到 tab 上：编辑器右键菜单（02_ 的 openEditorCtxMenu）识别 SSH 终端标签后，
+    // 「复制 / 粘贴」直接走终端的选区和系统剪贴板，不再需要单独的右键菜单
+    tab.sshHasSel = () => !!term.getSelection();
+    tab.sshCopy = () => sshCopySel();
+    tab.sshPasteFromClipboard = sshReadClipboard;
 
     // 终端容器尺寸变化 → 重新适配并告知远端
     const ro = new ResizeObserver(() => {

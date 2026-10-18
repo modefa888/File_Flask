@@ -191,6 +191,8 @@
         if (t.path === "\u0000cron" && typeof cronOpenView === "function") { cronOpenView(); continue; }
         // 后台任务管理面板（虚拟路径 \u0000runner）：同样直接重开
         if (t.path === "\u0000runner" && typeof openRunnerView === "function") { openRunnerView(); continue; }
+        // 旧版会话快照里可能存了 "ssh:<id>"（不带 \u0000 前缀的 SSH 终端假标签）：跳过不恢复
+        if (/^[\u0000-\u001f]*ssh:[^/]*$/i.test(String(t.path || ""))) continue;
         if (t.path.indexOf("\u0001") >= 0) continue;
         // 其它内部虚拟视图（\u0000 前缀，如未识别的工具视图）：不是真实文件，直接跳过。
         // 否则 openFile 会去后端读一个不存在的路径，刷新后冒出「路径不存在」的错误标签
@@ -1344,7 +1346,8 @@
   async function openFile(path, name, forceGroup, forceText) {
     // SSH 终端的虚拟路径（\u0000ssh:<连接 id>）不是文件：误走 openFile 会生成一个
     // 图标是私有区字形（显示成方框）、名字是路径的假标签。这里直接拦下。
-    if (String(path || "").indexOf("\u0000ssh:") === 0) {
+    const rawP = String(path || "").replace(/[\u0000-\u001f\u007f]/g, "");
+    if (rawP.indexOf("ssh:") === 0 && rawP.indexOf("/") < 0) {
       toast("这是 SSH 终端标签，请在左侧「终端连接」里打开对应会话", "info");
       return null;
     }
@@ -1780,7 +1783,11 @@
     groupBundles.forEach((b, gid) => b.el.classList.toggle("active-group", gid === tab.group));
     // 切换显示后重绘，修正隐藏期间创建/变更导致的尺寸测量偏差
     scheduleRefresh(tab);
-    renderBreadcrumbs(tab.displayPath || tab.path); updateStatus();
+    // SSH 终端：面包屑 / 状态栏显示「SSH 终端 / 连接名」，
+    // 否则会把 \u0000ssh:<id> 原样画出来（开头的 \u0000 控制字符显示成一个方框）
+    if (String(tab.path || "").indexOf("\u0000ssh:") === 0) renderBreadcrumbs("SSH 终端/" + (tab.name || ""));
+    else renderBreadcrumbs(tab.displayPath || tab.path);
+    updateStatus();
     refreshTreeDirty(); ffOnTabChange();
     revealInTree(tab.path);          // 树列表跟随当前打开的文件高亮
     scrollTabIntoView(tab);

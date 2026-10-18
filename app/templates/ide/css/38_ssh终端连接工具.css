@@ -3,25 +3,33 @@
 .ssh-tools .g-btn.block { flex: 1; }
 .ssh-list { padding: 4px 8px 12px; }
 .ssh-item {
+  position: relative;
   display: flex; align-items: center; gap: 8px;
   padding: 9px 10px; margin-bottom: 6px; border-radius: 7px;
   background: var(--bg-elev, #23252b); border: 1px solid transparent;
 }
 .ssh-item:hover { border-color: var(--border, #333); }
 .ssh-item.open { border-color: var(--accent, #4da3ff); background: var(--bg-elev2, #2a2d35); }
-.ssh-main { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; cursor: pointer; }
-.ssh-main > i { font-size: 17px; color: var(--accent, #4da3ff); }
+.ssh-main { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; cursor: pointer; padding-right: 6px; }
+.ssh-main > i { font-size: 17px; color: var(--accent, #4da3ff); flex: none; }
 .ssh-meta { min-width: 0; }
-.ssh-name { font-size: 13px; color: var(--fg, #ddd); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ssh-sub { font-size: 11px; color: var(--fg-dim, #9aa); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ssh-acts { display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
-.ssh-item:hover .ssh-acts { opacity: 1; }
+.ssh-name { font-size: 13px; color: var(--fg, #ddd); word-break: break-word; overflow-wrap: anywhere; }
+.ssh-sub { font-size: 11px; color: var(--fg-dim, #9aa); word-break: break-word; overflow-wrap: anywhere; }
+/* 操作按钮悬浮时覆盖显示，平时不占布局宽度，避免把文字挤成一字一行 */
+.ssh-acts {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  display: none; gap: 2px; padding: 2px 4px; border-radius: 7px;
+  background: inherit; box-shadow: 0 0 0 1px var(--border, #333);
+}
+.ssh-item:hover .ssh-acts { display: flex; }
 .ssh-acts button {
   width: 26px; height: 26px; border: none; border-radius: 6px; cursor: pointer;
   background: transparent; color: var(--fg-dim, #9aa); font-size: 13px;
 }
 .ssh-acts button:hover { background: var(--bg-elev3, #353842); color: var(--fg, #ddd); }
 .ssh-acts [data-act="open"]:hover { color: #4ec98a; }
+.ssh-acts button.ssh-stop { color: #4ec98a; }
+.ssh-acts button.ssh-stop:hover { color: #ff6b6b; }
 .ssh-acts [data-act="del"]:hover { color: #ff6b6b; }
 
 /* 编辑器区终端 */

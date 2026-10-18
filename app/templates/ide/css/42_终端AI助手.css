@@ -1,0 +1,321 @@
+/* ============================================================================
+   终端 AI 助手（44_）：输入框 AI 开关 + 建议卡片 + 输出解读卡片
+   —— 卡片直接追加在 .term-body（<pre>）里，必须自己把 white-space 改回 normal，
+      否则标题、按钮之间的换行会变成大段空白。
+   ============================================================================ */
+
+/* ---------- 输入框左侧的 AI 开关 ---------- */
+.term-input-row .tai-toggle {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 8px; border-radius: 10px; cursor: pointer;
+  border: 1px solid #3a3a3a; background: transparent; color: #8b949e;
+  font-family: inherit; font-size: 11px; line-height: 1;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.term-input-row .tai-toggle:hover { color: #e6edf3; border-color: #4b6a86; }
+.term-input-row .tai-toggle.on {
+  color: #79c0ff; border-color: #2f6f9f; background: rgba(56, 139, 253, .16);
+}
+.term-input-row .tai-toggle .bi { font-size: 12.5px; }
+
+/* ---------- 用户那一行（✦ 查看当前ip） ---------- */
+:is(.term-body, .tai-pop) .tai-user {
+  white-space: normal; margin: 10px 0 4px;
+  display: flex; align-items: flex-start; gap: 6px;
+  color: #9ecbff; font-weight: 600;
+}
+:is(.term-body, .tai-pop) .tai-user .tai-user-ic { color: #58a6ff; font-size: 12px; margin-top: 2px; }
+:is(.term-body, .tai-pop) .tai-user .tai-user-tx { white-space: pre-wrap; word-break: break-word; }
+
+/* ---------- 卡片外壳 ---------- */
+:is(.term-body, .tai-pop) .tai-card {
+  white-space: normal; margin: 6px 0 12px; padding: 9px 11px 10px;
+  border: 1px solid #2b4a63; border-left: 3px solid #3d7eb8;
+  border-radius: 8px; background: rgba(28, 52, 78, .5);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 12px; line-height: 1.7; color: #d7dfe7;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .22);
+  max-width: 980px;
+}
+:is(.term-body, .tai-pop) .tai-card.tai-ana { border-left-color: #4f9d69; background: rgba(30, 58, 44, .42); }
+:is(.term-body, .tai-pop) .tai-card.tai-bad { border-color: #6b3a3a; border-left-color: #b3564f; background: rgba(72, 34, 34, .42); }
+:is(.term-body, .tai-pop) .tai-card.tai-wait { border-left-color: #5a6b7d; }
+
+:is(.term-body, .tai-pop) .tai-hd { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+:is(.term-body, .tai-pop) .tai-hd .tai-ic { flex: none; display: inline-flex; color: #58a6ff; font-size: 14px; }
+:is(.term-body, .tai-pop) .tai-hd .tai-ic.bad { color: #f08a80; }
+:is(.term-body, .tai-pop) .tai-hd .tai-tt { font-weight: 600; color: #eaf2fa; }
+:is(.term-body, .tai-pop) .tai-sp { flex: 1 1 auto; }
+
+/* 风险徽标 */
+:is(.term-body, .tai-pop) .tai-risk {
+  flex: none; display: inline-flex; align-items: center; gap: 3px;
+  padding: 0 7px; border-radius: 10px; font-size: 11px;
+  border: 1px solid transparent; white-space: nowrap;
+}
+:is(.term-body, .tai-pop) .tai-risk.low { color: #7ee2a8; background: rgba(46, 160, 90, .16); border-color: rgba(126, 226, 168, .32); }
+:is(.term-body, .tai-pop) .tai-risk.mid { color: #ffd68a; background: rgba(196, 148, 45, .16); border-color: rgba(255, 214, 138, .32); }
+:is(.term-body, .tai-pop) .tai-risk.high { color: #ff9a92; background: rgba(200, 70, 60, .18); border-color: rgba(255, 154, 146, .34); }
+:is(.term-body, .tai-pop) .tai-risk .bi { font-size: 12px; }
+
+/* 右上角小按钮（开启新会话 / 停止） */
+:is(.term-body, .tai-pop) .tai-mini {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 8px; border-radius: 10px; cursor: pointer;
+  border: 1px solid #33506a; background: transparent; color: #8fb6d6;
+  font-family: inherit; font-size: 11px; line-height: 1;
+}
+:is(.term-body, .tai-pop) .tai-mini:hover { color: #cfe6fb; border-color: #4b7398; background: rgba(88, 166, 255, .1); }
+:is(.term-body, .tai-pop) .tai-mini.tai-stop { color: #d9a3a0; border-color: #58393a; }
+:is(.term-body, .tai-pop) .tai-mini.tai-stop:hover { color: #ffb8b3; border-color: #7d4a4a; background: rgba(200, 70, 60, .14); }
+
+/* 说明 / 警告 */
+:is(.term-body, .tai-pop) .tai-note {
+  margin-top: 7px; display: flex; align-items: flex-start; gap: 5px;
+  color: #a9bccd; white-space: pre-wrap; word-break: break-word;
+}
+:is(.term-body, .tai-pop) .tai-note .bi { flex: none; margin-top: 2px; font-size: 13px; color: #7aa7cc; }
+:is(.term-body, .tai-pop) .tai-note.warn { color: #e9c07a; }
+:is(.term-body, .tai-pop) .tai-note.warn .bi { color: #e9a23b; }
+:is(.term-body, .tai-pop) .tai-explain { margin-top: 7px; color: #bccbd8; white-space: pre-wrap; word-break: break-word; }
+
+/* 命令块 */
+:is(.term-body, .tai-pop) .tai-cmd {
+  display: flex; align-items: center; gap: 8px; margin: 9px 0 6px;
+  padding: 6px 9px; border-radius: 6px;
+  background: #101821; border: 1px solid #2b3d4f;
+}
+:is(.term-body, .tai-pop) .tai-cmd .tai-ps { flex: none; color: #6f8ea9; }
+:is(.term-body, .tai-pop) .tai-cmd code {
+  flex: 1 1 auto; min-width: 0;
+  font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+  color: #9ee493; white-space: pre-wrap; word-break: break-all;
+  background: transparent; border: 0; padding: 0;
+}
+:is(.term-body, .tai-pop) .tai-cmd .tai-copy {
+  flex: none; border: 0; background: transparent; color: #7d8a99;
+  cursor: pointer; padding: 2px 4px; border-radius: 4px; line-height: 1;
+}
+:is(.term-body, .tai-pop) .tai-cmd .tai-copy:hover { color: #e6edf3; background: rgba(255, 255, 255, .08); }
+:is(.term-body, .tai-pop) .tai-state { flex: none; font-size: 11px; color: #8592a0; white-space: nowrap; }
+:is(.term-body, .tai-pop) .tai-state.run { color: #79c0ff; }
+:is(.term-body, .tai-pop) .tai-state.ok { color: #56d364; }
+:is(.term-body, .tai-pop) .tai-state.warn { color: #e3b341; }
+:is(.term-body, .tai-pop) .tai-state.bad { color: #f85149; }
+
+/* 备选命令 */
+:is(.term-body, .tai-pop) .tai-alts {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin: 2px 0 4px; color: #7d8a99; font-size: 11px;
+}
+:is(.term-body, .tai-pop) .tai-alt {
+  max-width: 100%; padding: 1px 7px; border-radius: 4px; cursor: pointer;
+  border: 1px solid #2b3d4f; background: #101821; color: #9db4c8;
+  font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+:is(.term-body, .tai-pop) .tai-alt:hover { color: #cfe6fb; border-color: #3f5f7d; }
+
+/* 操作按钮 */
+:is(.term-body, .tai-pop) .tai-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
+:is(.term-body, .tai-pop) .tai-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 24px; padding: 0 10px; border-radius: 5px; cursor: pointer;
+  border: 1px solid #35506a; background: rgba(88, 166, 255, .08); color: #c6dced;
+  font-family: inherit; font-size: 12px; line-height: 1;
+}
+:is(.term-body, .tai-pop) .tai-btn:hover { background: rgba(88, 166, 255, .16); border-color: #4b7398; color: #eaf2fa; }
+:is(.term-body, .tai-pop) .tai-btn.primary { background: #1f6feb; border-color: #1f6feb; color: #ffffff; }
+:is(.term-body, .tai-pop) .tai-btn.primary:hover { background: #2d80ff; border-color: #2d80ff; }
+:is(.term-body, .tai-pop) .tai-btn:disabled { opacity: .5; cursor: default; }
+:is(.term-body, .tai-pop) .tai-btn .bi { font-size: 13px; }
+:is(.term-body, .tai-pop) .tai-hint { font-size: 11px; color: #7d8a99; }
+:is(.term-body, .tai-pop) .tai-hint.bad { color: #e08a84; }
+
+/* 流式状态 */
+:is(.term-body, .tai-pop) .tai-live { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #8ba3b8; }
+:is(.term-body, .tai-pop) .tai-live .bi { animation: taiSpin 1.1s linear infinite; }
+@keyframes taiSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* 解读正文（复用 aiMd 的结构，这里补终端里的排版） */
+:is(.term-body, .tai-pop) .tai-md { margin-top: 7px; color: #cfdae4; }
+:is(.term-body, .tai-pop) .tai-md > :first-child { margin-top: 0; }
+:is(.term-body, .tai-pop) .tai-md > :last-child { margin-bottom: 0; }
+:is(.term-body, .tai-pop) .tai-md p { margin: 4px 0; }
+:is(.term-body, .tai-pop) .tai-md h3, :is(.term-body, .tai-pop) .tai-md h4, :is(.term-body, .tai-pop) .tai-md h5 {
+  margin: 8px 0 4px; font-size: 12.5px; font-weight: 600; color: #eaf2fa;
+}
+:is(.term-body, .tai-pop) .tai-md ul, :is(.term-body, .tai-pop) .tai-md ol { margin: 4px 0; padding-left: 18px; }
+:is(.term-body, .tai-pop) .tai-md li { margin: 2px 0; }
+:is(.term-body, .tai-pop) .tai-md code {
+  padding: 1px 5px; border-radius: 4px; font-size: 11.5px;
+  background: #101821; border: 1px solid #2b3d4f; color: #e8c07a;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+}
+:is(.term-body, .tai-pop) .tai-md strong { color: #ffffff; font-weight: 600; }
+:is(.term-body, .tai-pop) .tai-md a { color: #79c0ff; }
+:is(.term-body, .tai-pop) .tai-md blockquote {
+  margin: 6px 0; padding: 2px 9px; color: #9fb0bf;
+  border-left: 2px solid #33506a; background: rgba(255, 255, 255, .03);
+}
+:is(.term-body, .tai-pop) .tai-md table { border-collapse: collapse; margin: 6px 0; font-size: 11.5px; }
+:is(.term-body, .tai-pop) .tai-md th, :is(.term-body, .tai-pop) .tai-md td { border: 1px solid #2b3d4f; padding: 4px 8px; }
+:is(.term-body, .tai-pop) .tai-md th { background: rgba(255, 255, 255, .04); }
+:is(.term-body, .tai-pop) .tai-err { margin-top: 6px; color: #e89b95; font-size: 11.5px; }
+
+/* ============================================================================
+   SSH 远程终端里的 AI 浮层（44_ 的 taiOpenSsh）
+   卡片样式与终端内一致（同一套 .tai-* 类，选择器里已带上 .tai-pop）
+   ============================================================================ */
+.tai-pop {
+  position: fixed; right: 28px; bottom: 28px; z-index: 9000;
+  width: 560px; max-width: calc(100vw - 32px); max-height: min(78vh, 760px);
+  display: flex; flex-direction: column;
+  background: #1f242b; color: #d7dfe7;
+  border: 1px solid #33404d; border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .55);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 12.5px; overflow: hidden;
+}
+.tai-pop-hd {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 9px 11px; background: #242b34; border-bottom: 1px solid #33404d;
+}
+.tai-pop-t { display: inline-flex; align-items: center; gap: 6px; color: #cfe3f7; min-width: 0; }
+.tai-pop-t .bi { color: #58a6ff; }
+.tai-pop-t b { font-weight: 600; }
+.tai-pop-t em {
+  font-style: normal; font-size: 11.5px; color: #8fb6d6;
+  padding: 1px 7px; border-radius: 9px; background: rgba(88, 166, 255, .12);
+  max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tai-pop-sp { flex: 1 1 auto; }
+.tai-pop-x {
+  flex: none; border: 0; background: transparent; color: #93a3b3;
+  cursor: pointer; padding: 2px 5px; border-radius: 4px; line-height: 1; font-size: 14px;
+}
+.tai-pop-x:hover { color: #ffffff; background: rgba(255, 255, 255, .1); }
+.tai-pop-bd { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 10px 11px 11px; overflow-y: auto; }
+.tai-pop-in {
+  flex: none; width: 100%; box-sizing: border-box; resize: vertical; min-height: 54px; max-height: 160px;
+  padding: 8px 10px; border-radius: 6px; outline: none;
+  background: #171c22; border: 1px solid #33404d; color: #e6edf3;
+  font-family: inherit; font-size: 12.5px; line-height: 1.6;
+}
+.tai-pop-in:focus { border-color: #3d7eb8; }
+.tai-pop-in::placeholder { color: #728294; }
+.tai-pop-tip { flex: none; margin: 5px 2px 0; font-size: 11px; color: #7d8a99; }
+.tai-pop-acts { flex: none; display: flex; justify-content: flex-end; gap: 8px; margin-top: 7px; }
+.tai-pop-out {
+  flex: 1 1 auto; min-height: 80px; overflow: auto; margin-top: 9px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.tai-pop-out:empty { display: none; }
+.tai-pop-out .tai-card { margin: 0 0 9px; max-width: none; }
+.tai-pop-out .tai-card:last-child { margin-bottom: 0; }
+
+/* Agent 模式：停靠在 SSH 终端区域里（不再是浮窗） */
+.tai-pop.tai-pop-dock {
+  position: static; inset: auto; right: auto; bottom: auto; z-index: auto;
+  width: auto; max-width: none; height: 100%; max-height: none;
+  border: 0; border-radius: 0; box-shadow: none; background: #1b1f24;
+}
+.tai-pop-dock .tai-pop-hd { background: #20262d; border-bottom-color: #2c333a; }
+.tai-pop-dock .tai-pop-bd { padding: 12px 14px 14px; }
+.tai-pop-dock .tai-pop-out .tai-card { max-width: none; }
+
+/* 浮动面板拖动：标题栏为拖动把手，双击回到右下角 */
+.tai-pop:not(.tai-pop-dock) .tai-pop-hd { cursor: move; user-select: none; }
+.tai-pop:not(.tai-pop-dock) .tai-pop-hd button { cursor: pointer; }
+.tai-pop.dragging {
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .65);
+  transition: none;
+}
+body.tai-dragging, body.tai-dragging * { user-select: none !important; }
+body.tai-dragging { cursor: grabbing; }
+
+/* ---------- 浮层头部按钮（历史记录） ---------- */
+.tai-pop-hbtn {
+  flex: none; border: 0; background: transparent; color: #93a3b3;
+  cursor: pointer; padding: 3px 6px; border-radius: 5px; line-height: 1; font-size: 14px;
+}
+.tai-pop-hbtn:hover { color: #ffffff; background: rgba(255, 255, 255, .1); }
+.tai-pop-hbtn.on { color: #79c0ff; background: rgba(56, 139, 253, .18); }
+
+/* ---------- 历史记录面板 ---------- */
+.tai-hist {
+  flex: none; margin-bottom: 9px; border: 1px solid #33404d; border-radius: 6px;
+  background: #171c22; overflow: hidden;
+}
+.tai-hist-hd {
+  display: flex; align-items: center; gap: 6px; padding: 6px 9px;
+  background: #20262d; border-bottom: 1px solid #2c333a;
+  font-size: 11.5px; color: #a9bccd;
+}
+.tai-hist-hd .bi { color: #58a6ff; }
+.tai-hist-sp { flex: 1 1 auto; }
+.tai-hist-clear {
+  border: 1px solid #4a3a3a; background: transparent; color: #d9a3a0;
+  border-radius: 4px; padding: 1px 8px; cursor: pointer; font-size: 11px; font-family: inherit;
+}
+.tai-hist-clear:hover { color: #ffb8b3; border-color: #7d4a4a; background: rgba(200, 70, 60, .14); }
+.tai-hist-list { max-height: 208px; overflow: auto; }
+.tai-hist-empty { padding: 14px 10px; text-align: center; color: #7d8a99; font-size: 11.5px; }
+.tai-hist-empty.bad { color: #e89b95; }
+.tai-hist-i { padding: 7px 9px; border-bottom: 1px solid #252c34; cursor: pointer; }
+.tai-hist-i:last-child { border-bottom: 0; }
+.tai-hist-i:hover { background: rgba(88, 166, 255, .07); }
+.tai-hist-l1 { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #8593a1; }
+.tai-hist-t { font-variant-numeric: tabular-nums; }
+.tai-hist-host {
+  max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 0 6px; border-radius: 8px; background: rgba(88, 166, 255, .12); color: #8fb6d6;
+}
+.tai-hist-ok { margin-left: auto; font-size: 10.5px; }
+.tai-hist-ok.ok { color: #56d364; }
+.tai-hist-ok.no { color: #e3b341; }
+.tai-hist-q {
+  margin: 2px 0 3px; color: #dbe6f0; font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tai-hist-l3 { display: flex; align-items: center; gap: 6px; }
+.tai-hist-l3 code {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px; color: #9ee493;
+}
+.tai-hist-use, .tai-hist-del {
+  flex: none; border: 1px solid #33404d; background: transparent; color: #8fb6d6;
+  border-radius: 4px; padding: 1px 7px; cursor: pointer; font-size: 10.5px; font-family: inherit;
+  display: inline-flex; align-items: center; gap: 3px;
+}
+.tai-hist-use:hover { color: #cfe6fb; border-color: #4b7398; background: rgba(88, 166, 255, .12); }
+.tai-hist-del { padding: 1px 5px; color: #9aa7b3; }
+.tai-hist-del:hover { color: #ff9a92; border-color: #7d4a4a; background: rgba(200, 70, 60, .14); }
+
+/* 小图标统一尺寸：避免 11~12px 时看起来像方块（高倍缩放 / 小字号下尤其明显） */
+:is(.term-body, .tai-pop) .tai-mini .bi { font-size: 12px; }
+:is(.term-body, .tai-pop) .tai-cmd .tai-copy .bi { font-size: 13px; }
+:is(.term-body, .tai-pop) .tai-alt .bi { font-size: 11.5px; }
+.tai-hist-use .bi, .tai-hist-del .bi, .tai-hist-hd .bi { font-size: 11.5px; }
+.ssh-term-ai .bi { font-size: 12.5px; }
+.tai-pop-t .bi { font-size: 14px; }
+.tai-pop-t b { font-size: 12.5px; }
+
+/* ---------- 内联 SVG 图标（不依赖 bootstrap-icons 字体） ---------- */
+.tai-svg {
+  display: inline-block; width: 14px; height: 14px; flex: none;
+  vertical-align: -2px; overflow: visible;
+}
+.tai-svg.tai-spin { animation: taiSpin 1.1s linear infinite; }
+:is(.term-body, .tai-pop) .tai-hd .tai-ic .tai-svg { width: 15px; height: 15px; }
+:is(.term-body, .tai-pop) .tai-btn .tai-svg { width: 13px; height: 13px; }
+:is(.term-body, .tai-pop) .tai-mini .tai-svg { width: 12px; height: 12px; }
+:is(.term-body, .tai-pop) .tai-risk .tai-svg { width: 12px; height: 12px; }
+:is(.term-body, .tai-pop) .tai-note .tai-svg { width: 13px; height: 13px; vertical-align: -2px; }
+:is(.term-body, .tai-pop) .tai-cmd .tai-copy .tai-svg { width: 13px; height: 13px; }
+:is(.term-body, .tai-pop) .tai-live .tai-svg { width: 12px; height: 12px; }
+.tai-user .tai-svg { width: 13px; height: 13px; color: #58a6ff; margin-top: 2px; }
+.tai-pop-hbtn .tai-svg, .tai-pop-x .tai-svg { width: 15px; height: 15px; }
+.tai-hist-hd .tai-svg { width: 12.5px; height: 12.5px; }
+.tai-hist-use .tai-svg, .tai-hist-del .tai-svg { width: 12px; height: 12px; }
+.ssh-term-ai .tai-svg { width: 13px; height: 13px; }

@@ -253,6 +253,11 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
               '<div class="sysai-mod-desc">进程资源管理器里的「AI 诊断」：把本机 CPU / 内存 / 磁盘 / 网络与高占用进程交给 AI 分析</div></div>' +
               '<div class="sysai-mod-ctl"><code>POST /api/proc/diagnose</code>' +
               '<label class="set-switch sysai-sw" data-mod="proc" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
+            '<div class="sysai-mod"><i class="bi bi-terminal"></i><div class="sysai-mod-main">' +
+              '<div class="sysai-mod-name">终端 AI 助手<span class="sysai-stat" data-stat="term"></span></div>' +
+              '<div class="sysai-mod-desc">终端里用自然语言生成命令、判断风险，并在执行后解读输出</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/term/ai/plan</code>' +
+              '<label class="set-switch sysai-sw" data-mod="term" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
           '</div>' +
         '</div>' +
 

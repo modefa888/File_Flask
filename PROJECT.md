@@ -1,6 +1,6 @@
 # PROJECT.md — 项目结构与架构说明
 
-> 本文档基于当前代码库（`app/__init__.py` 注册蓝图、`app/routes/`、`app/services/` 实际文件）梳理生成，用于快速了解工程结构、模块职责与关键数据流。当前实际注册 **22 个蓝图**（含 `ai`、`agent`、`chat_history`、`pip`），与 `README.md` 已同步。
+> 本文档基于当前代码库（`app/__init__.py` 注册蓝图、`app/routes/`、`app/services/` 实际文件）梳理生成，用于快速了解工程结构、模块职责与关键数据流。当前实际注册 **23 个蓝图**（含 `ai`、`agent`、`chat_history`、`pip`），与 `README.md` 已同步。
 
 ---
 
@@ -45,7 +45,7 @@ File_Flask/
     ├── __init__.py       # 应用工厂 create_app()
     ├── config.py         # 集中配置（端口/账号/安全规则/缓存路径/ffmpeg…）
     ├── log.py            # JSON 日志 + 每日轮转
-    ├── routes/           # 22 个蓝图（HTTP 层）
+    ├── routes/           # 23 个蓝图（HTTP 层）
     ├── services/         # 11 个业务服务（无 HTTP 依赖）
     ├── templates/        # 5 个 Jinja 模板
     └── static/           # 前端资源 + vendor 本地化依赖
@@ -58,7 +58,7 @@ File_Flask/
 `create_app()` 按顺序执行：
 
 1. **构造 Flask 实例**：模板/静态目录从 `config` 取；写入 `SECRET_KEY / DEBUG / JSON_AS_ASCII / MAX_CONTENT_LENGTH=32MB`。
-2. **`_register_blueprints(app)`**：一次性 `import` 并注册 22 个蓝图（顺序见下文第 4 节）。
+2. **`_register_blueprints(app)`**：一次性 `import` 并注册 23 个蓝图（顺序见下文第 4 节）。
 3. **`_install_request_logging(app)`**：
    - `before_request` 记录 `g._start = monotonic()` 与 `method/path`。
    - `after_request` 输出 JSON 日志，字段包含 `method / path / status / latency_ms`。
@@ -72,9 +72,9 @@ File_Flask/
 
 ---
 
-## 4. 路由层：22 个蓝图
+## 4. 路由层：23 个蓝图
 
-> 共 **22 个 Blueprint**（见 `app/__init__.py`）；与 `README.md` 已同步。
+> 共 **23 个 Blueprint**（见 `app/__init__.py`）；与 `README.md` 已同步。
 
 `app/routes/` 下每个模块暴露一个 `bp` 蓝图，均在 `create_app()` 中注册：
 
@@ -102,6 +102,7 @@ File_Flask/
 | 20 | `ide/pip.py` | `pip` | IDE 内的 Python 包管理：安装 / 卸载 / 查询 |
 | 21 | `ide/proc.py` | `proc` | 进程资源管理器：系统 CPU/内存/磁盘/网络占用、进程列表、结束进程、AI 资源诊断（`POST /api/proc/diagnose`） |
 | 22 | `ide/cron.py` | `cron` | 定时任务（参考青龙面板）：cron 计划任务的增删改查、启停、立即运行、停止、执行记录与日志 |
+| 23 | `ide/termai.py` | `termai` | 终端 AI 助手：自然语言 → 命令建议（含风险说明）、执行后流式解读输出 |
 
 ### 4.1 AI 助手（`ide/ai.py`）
 
@@ -184,6 +185,40 @@ File_Flask/
 ### 4.5 pip 包管理（`ide/pip.py`）
 
 - 供 IDE 侧边栏调用，支持安装 / 卸载 / 查询 Python 包，可指定虚拟环境。
+
+### 4.6 终端 AI 助手（`ide/termai.py`）
+
+- 交互参考腾讯云 OrcaTerm 的 AI Agent：终端里直接说人话（「查看当前ip」）→ 出「意图 + 风险等级 +
+  推荐命令 + 说明」卡片 → 点执行 → 输出流式解读。
+- 端点：
+  - `GET /api/term/ai/status` —— 是否可用（未配置接口 / 已在「设置 → 系统 AI」停用）。
+  - `POST /api/term/ai/plan` `{input, cwd, history?}` —— 非流式，返回
+    `{intent, risk(low|medium|high), reason, command, explain, alternatives, blocked, need_confirm, note}`。
+  - `POST /api/term/ai/analyze` `{question, command, stdout, stderr, exit_code, cwd, context?}` ——
+    SSE 流式解读（`data: {"delta"}` … `data: [DONE]`）。
+  - `GET /api/term/ai/history?host=&limit=` / `POST /api/term/ai/history` /
+    `DELETE /api/term/ai/history?id=|?host=|?all=1` —— 历史记录的查 / 存 / 删。
+- **本模块只建议 / 解读、不执行命令**：执行仍走 `/api/term/exec`，因此拦截与二次确认只有一条路径，
+  `check_command` 的结论（blocked / confirm）会提前并入返回体，卡片上直接显示「已拦截 / 需确认」。
+- 模型必须输出 JSON；解析失败时退化为「只给说明、不给命令」（能从代码围栏里捞出命令才用），
+  避免脏文本变成可执行命令。
+- 使用「设置 → 系统 AI」中名为 `term` 的模块（可单独停用 / 单独指定模型），调用次数计入 AI 统计。
+- 页面响应统一加 `Cache-Control: no-store`（`app/__init__.py::_after_request`），模板 / 内联脚本改动普通刷新即可生效；
+  SSH 终端标签不参与会话恢复，「终端连接」侧栏也不再在刷新后自动展开；从往返缓存恢复时会清掉悬浮框与已断开的 SSH 终端。
+- 图标：面板与 SSH 入口的图标全部用内联 SVG（`taiIco` / `TAI_SVG`），不依赖 bootstrap-icons 字体，
+  避免字体未加载 / 版本较旧 / 被缓存时显示成方框；「清空历史」用项目自带的贴按钮悬浮确认框 `uiConfirmPop`。
+- 历史记录：落 `store.db` 的 `term_ai_history` 表（`ts / host / question / command / risk / ok / exit_code`），
+  每次执行结束（成功或失败）由前端 `POST` 一条；表内最多保留 2000 条，界面按时间倒序显示最近 50 条。
+  浮层右上角时钟图标展开列表：点条目把需求回填到输入框、「填入」把命令打到终端输入行（不执行）、
+  可单条删除或一键清空。`host` 为空串表示本机内置终端，远程终端存 `user@host`。
+- 前端：`js/44_终端AI助手…js` + `css/42_终端AI助手.css`。两处终端都接入了：
+  - 底部内置终端：输入框左侧「AI」开关开启后所有输入交给 AI（命令前加 `!` 可强制直接执行），
+    关闭时按「首个词是否为中文 / 是否以 `?` 开头」自动识别；
+  - SSH 远程终端（`js/38_…js`）：右上角「AI」按钮打开**可拖动的浮动面板**；`Ctrl+Shift+I` 开关面板，
+    按住标题栏拖动、双击标题栏回到右下角默认位置（位置记在 localStorage `ide.ai.popPos`）。
+    Shell 模式下直接输入中文回车，会先用 `Ctrl+U` 撤掉远端那一行再打开面板并带上这句话
+    （判定偏保守，避开 REPL / 密码提示）。
+    命令经 `/api/ssh/input` 发到远端，按「1.8s 无新输出」判定结束并回读输出做解读。
 
 ---
 
@@ -329,5 +364,6 @@ Client ◀─响应─
 | AI 对话历史结构 | `app/services/ide/chatdb.py` + `app/routes/ide/chat_history.py` |
 | pip 安装 / 环境探测 | `app/routes/ide/pip.py` + `services/ide/envprobe.py`、`envinstall.py` |
 | 定时任务（cron） | `app/routes/ide/cron.py` + `services/ide/cronutil.py`、`crondb.py`、`cronsvc.py`；前端 `js/36_定时任务…js` + `css/36_定时任务.css` |
+| 终端 AI 助手（自然语言转命令 / 输出解读） | `app/routes/ide/termai.py`；前端 `js/44_终端AI助手…js` + `css/42_终端AI助手.css`（浅色配色在 `css/29_浅色主题.css` 末尾） |
 | 打包脚本 | `FileManager.spec` |
 | 启动参数 | `run.py` 的 `argparse` |

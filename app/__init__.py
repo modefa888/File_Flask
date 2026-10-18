@@ -56,6 +56,7 @@ def _register_blueprints(app: Flask) -> None:
     from .routes.ide.run import bp as run_bp
     from .routes.ide.port import bp as port_bp
     from .routes.ide.term import bp as term_bp
+    from .routes.ide.termai import bp as termai_bp
     from .routes.ide.env import bp as env_bp
     from .routes.ide.proc import bp as proc_bp
     from .routes.common.shares import bp as shares_bp
@@ -74,7 +75,7 @@ def _register_blueprints(app: Flask) -> None:
     from .routes.adm.admin import bp as adm_bp
     for bp in (auth_bp, pages_bp, browser_bp, zip_bp, delete_bp, archive_history_bp,
                fileops_bp, index_bp, progress_stream_bp, grep_bp, git_bp, run_bp, port_bp,
-               term_bp, env_bp, proc_bp, shares_bp, ai_bp, agent_bp, chat_history_bp, pip_bp, npm_bp,
+               term_bp, termai_bp, env_bp, proc_bp, shares_bp, ai_bp, agent_bp, chat_history_bp, pip_bp, npm_bp,
                plugins_bp, dbconn_bp, httpreq_bp, cron_bp, sshconn_bp, hints_bp, collab_bp,
                adm_bp):
         app.register_blueprint(bp)
@@ -123,6 +124,15 @@ def _install_request_logging(app: Flask) -> None:
             from .services.adm import api_registry
             api_registry.record_request(rule.rule if rule is not None else path, method,
                                         response.status_code)
+        except Exception:
+            pass
+        # 页面（HTML）禁止缓存：模板 / 内联脚本改动后普通刷新即可生效，
+        # 否则浏览器可能一直用旧页面，表现为「新功能没出现 / 图标不对」
+        try:
+            if response.mimetype == "text/html" and response.status_code < 400:
+                response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+                response.headers["Pragma"] = "no-cache"
+                response.headers["Expires"] = "0"
         except Exception:
             pass
         return response

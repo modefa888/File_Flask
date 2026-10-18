@@ -38,6 +38,7 @@ python run.py --debug             # 调试模式（代码改动自动重载）
 - **在线 IDE**（`/ide`）：CodeMirror 编辑器，多标签、语法高亮
 - **运行代码**（F5）：实时推送运行日志（SSE 流），30s 超时后自动转后台运行（Web 服务不被误杀），可配置 kill
 - **终端**：在服务器上执行命令，内置危险命令拦截与二次确认规则（见 `app/config.py` 的 `EXEC_BLOCK_PATTERNS` / `EXEC_CONFIRM_PATTERNS`）
+- **终端 AI 助手**：内置终端和 SSH 远程终端都能用中文说需求（如「查看当前ip」；SSH 里点右上角 `AI` 打开可拖动的助手面板，`Ctrl+Shift+I` 也可开关），AI 给出「风险判断 + 推荐命令 + 说明」卡片，一键执行后自动流式解读输出；危险命令照常被拦截 / 二次确认（`/api/term/ai/plan`、`/api/term/ai/analyze`）。浮层可拖动，并带历史记录列表（存 `store.db`，可回填 / 复用 / 删除 / 清空）
 - **Git 集成**：status / diff / log / stage / commit / push / pull / remote / init / .gitignore 管理
 - **运行环境面板**：探测系统 Python / Node 等运行时，支持一键安装到 `~/.local`（白名单方案，无需管理员）
 - **端口管理**：查看端口占用并杀进程
@@ -57,7 +58,7 @@ File_Flask/
 ├── FileManager.spec              # PyInstaller 打包配置
 ├── requirements.txt
 ├── app/                          # 重构后的模块化应用
-│   ├── __init__.py               # create_app()：注册 22 个蓝图、中间件、索引初始化
+│   ├── __init__.py               # create_app()：注册 23 个蓝图、中间件、索引初始化
 │   ├── config.py                 # 集中配置（端口 / 认证 / 执行权限 / 安全规则 / 缓存路径）
 │   ├── log.py                    # JSON 请求日志 + 每日轮转
 │   ├── routes/                   # 业务蓝图（22 个，按功能分 3 层）
@@ -133,7 +134,7 @@ File_Flask/
 
 ## 技术要点
 
-- **应用工厂 + 蓝图**：`create_app()` 统一装配 22 个蓝图，请求中间件记录每个 HTTP 请求的 JSON 日志（状态码、耗时）
+- **应用工厂 + 蓝图**：`create_app()` 统一装配 23 个蓝图，请求中间件记录每个 HTTP 请求的 JSON 日志（状态码、耗时）
 - **threaded=True**：Flask 开发服务器多线程处理并发请求
 - **三级缓存**：缩略图走 磁盘缓存 → 内存 LRU → 浏览器 HTTP 缓存；目录大小/列表缓存持久化在 `data/`
 - **索引后台调度**：启动时加载索引元信息，每 30s 调度一次增量扫描，首次启动 2s 后自动全量建索引

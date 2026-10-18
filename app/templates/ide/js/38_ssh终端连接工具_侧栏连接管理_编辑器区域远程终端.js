@@ -38,6 +38,11 @@
     SSHC.conns = d.connections || [];
     SSHC.paramiko = d.paramiko !== false;
     renderSshList();
+    // 首次加载完成后，恢复上次刷新前打开的 SSH 终端标签（自动重连；只做一次，手动点刷新不重复触发）
+    if (!SSHC.restored) {
+      SSHC.restored = true;
+      setTimeout(sshSessionRestore, 0);              // 等本调用栈收尾，避免和其它模块的会话恢复抢布局
+    }
   }
   function renderSshList() {
     const box = $("sshList");
@@ -80,6 +85,33 @@
   }
 
   /* ---------------- 连接 / 编辑器区终端 ---------------- */
+
+  /* ---------- 会话持久化：已打开的 SSH 终端标签 ----------
+     通用会话恢复（00_preamble 的 sessionSaveTabs）跳过了 SSH 终端（刷新后连接已断开），
+     这里单独记一份「打开的连接 id」到 localStorage；刷新后等连接列表加载完，
+     按原顺序逐个重连，还原打开状态。 */
+  const SSH_OPEN_KEY = "ide.session.sshTabs";
+  function sshSessionAllowed() {
+    return (typeof ideSettingGet !== "function") || !!ideSettingGet("restoreSession", true);
+  }
+  function sshSessionSave() {
+    if (!sshSessionAllowed()) return;
+    try {
+      const ids = tabs.filter(t => t && t.isSshTerm && t.connId).map(t => t.connId);
+      localStorage.setItem(SSH_OPEN_KEY, JSON.stringify(ids));
+    } catch (_) { /* localStorage 不可用则放弃 */ }
+  }
+  function sshSessionRestore() {
+    if (!sshSessionAllowed() || !SSHC.paramiko) return;
+    let ids;
+    try { ids = JSON.parse(localStorage.getItem(SSH_OPEN_KEY) || "[]"); } catch (_) { return; }
+    if (!Array.isArray(ids) || !ids.length) return;
+    ids.forEach(id => {
+      const c = SSHC.conns.find(x => x && x.id === id);
+      if (c) connectSsh(c);                        // 已打开的会被 connectSsh 去重，只聚焦不重复建连
+    });
+  }
+
   async function connectSsh(c) {
     const tab = findTab(SSH_VIEW_PREFIX + c.id);
     if (tab) { activate(tab); return; }            // 已打开则聚焦
@@ -92,14 +124,19 @@
     const path = SSH_VIEW_PREFIX + c.id;
     const host = document.createElement("div");
     host.className = "cm-host ssh-host";
+    // 标签名清掉控制字符（\u0000 会被浏览器画成方框），空则退回 user@host
+    let tn = String(c.name == null ? "" : c.name).replace(/[\u0000-\u001f\u007f]/g, "").trim();
+    if (!tn || /^ssh:/.test(tn)) tn = (c.user || "root") + "@" + (c.host || "远程主机");
     const tab = {
-      path: path, name: c.name || (c.user + "@" + c.host), host: host,
-      iconHtml: '<i class="bi bi-hdd-network"></i>', isSshTerm: true, connId: c.id,
+      path: path, name: tn, host: host,
+      iconHtml: '<i class="bi bi-hdd-network"></i>',
+      isSshTerm: true, connId: c.id,
     };
     tabs.push(tab);
     renderTabsAll();
     buildSshTerm(tab, c, sid);
     activate(tab);
+    sshSessionSave();
   }
 
   // 终端配色跟随界面主题（白天 / 黑夜），<html>.theme-light 由设置页切换
@@ -123,6 +160,14 @@
     bar.className = "ssh-term-bar";
     bar.innerHTML = '<span class="ssh-term-t"><i class="bi bi-hdd-network"></i> ' +
       esc(tab.name) + ' · ' + esc(c.user || "root") + '@' + esc(c.host) + ':' + esc(String(c.port || 22)) + '</span>';
+    const aiBtn = document.createElement("button");
+    aiBtn.className = "ssh-term-ai";
+    aiBtn.innerHTML = (window.TermAI && window.TermAI.icon)
+      ? window.TermAI.icon("bi-stars") + '<span>AI</span>'
+      : '<i class="bi bi-stars"></i> AI';
+    aiBtn.title = "AI 助手：用中文描述要执行的命令，判断风险并解读输出（Ctrl+Shift+I）";
+    bar.appendChild(aiBtn);
+
     const closeBtn = document.createElement("button");
     closeBtn.className = "ssh-term-x";
     closeBtn.innerHTML = '<i class="bi bi-x-lg"></i>';
@@ -149,10 +194,91 @@
     // 用真实尺寸纠正后端 PTY 大小
     api("/api/ssh/resize", { method: "POST", body: JSON.stringify({ id: sid, cols: term.cols, rows: term.rows }) });
 
-    term.onData(d => { api("/api/ssh/input", { method: "POST", body: JSON.stringify({ id: sid, data: d }) }); });
+    /* ---------- AI 助手支撑：输出回读 + 人话拦截 ---------- */
+    sess.dec = new TextDecoder();
+    // 执行 AI 给出的命令后，把远端输出收集起来交给模型解读：
+    // 首包到达后按「1.8s 无新输出」判定命令结束；一直没输出则 8s 结束；最长 20s 兜底。
+    function sshRun(cmd) {
+      return new Promise((resolve) => {
+        const cap = { text: "", done: false, idle: null, max: null };
+        const finish = () => {
+          if (cap.done) return;
+          cap.done = true;
+          clearTimeout(cap.idle);
+          clearTimeout(cap.max);
+          if (sess.capture === cap) sess.capture = null;
+          const raw = cap.text;
+          const clean = (window.TermAI && window.TermAI.stripAnsi)
+            ? window.TermAI.stripAnsi(raw) : raw;
+          resolve({ stdout: clean, stderr: "", exit_code: null });
+        };
+        cap.finish = finish;
+        sess.capture = cap;
+        cap.idle = setTimeout(finish, 8000);                 // 完全没有输出
+        cap.max = setTimeout(finish, 20000);                 // 长任务兜底
+        api("/api/ssh/input", { method: "POST", body: JSON.stringify({ id: sid, data: cmd + "\r" }) })
+          .catch(() => finish());
+      });
+    }
+
+    function aiOpts(prefill) {
+      return {
+        label: (c.user || "root") + "@" + c.host,
+        env: "远程主机 " + (c.user || "root") + "@" + c.host + ":" + (c.port || 22) + "（SSH 连接的远程 Linux 服务器）",
+        prefill: prefill || "",
+        run: sshRun,
+        paste: (cmd) => {
+          api("/api/ssh/input", { method: "POST", body: JSON.stringify({ id: sid, data: cmd }) });
+          try { term.focus(); } catch (e) { /* 忽略 */ }
+        },
+      };
+    }
+    /* ---------- AI 助手：右上角「AI」按钮打开可拖动的浮动面板 ---------- */
+    function openAi(prefill) {
+      if (!window.TermAI || typeof window.TermAI.openSsh !== "function") {
+        toast("AI 模块未加载，请刷新页面后重试", "err");
+        return;
+      }
+      const cur = $("taiPop");
+      if (cur) {                                    // 已打开：带上这句话并聚焦
+        const ta = cur.querySelector(".tai-pop-in");
+        if (ta) {
+          if (prefill) { ta.value = prefill; try { ta.setSelectionRange(prefill.length, prefill.length); } catch (e) {} }
+          ta.focus();
+        }
+        return;
+      }
+      window.TermAI.openSsh(aiOpts(prefill || ""));
+    }
+    aiBtn.onclick = () => openAi("");
+    // Ctrl+Shift+I：有面板就关，没有就打开（44_ 里的全局快捷键调用这里）
+    tab.aiToggleMode = () => { if ($("taiPop")) window.TermAI.close(); else openAi(""); };
+
+    // 本地跟踪当前输入行：中文需求回车不再丢给远端（远端会报 command not found），
+    // 而是用 Ctrl+U 撤掉这一行并唤起 AI 面板。
+    let lineBuf = "";
+    term.onData(d => {
+      if (d.indexOf("\r") >= 0) {
+        const text = (lineBuf + d.split("\r")[0]).replace(/\u007f/g, "");
+        lineBuf = "";
+        if (text.trim() && window.TermAI && window.TermAI.sshNatural(text)) {
+          api("/api/ssh/input", { method: "POST", body: JSON.stringify({ id: sid, data: "\u0015" }) });
+          setTimeout(() => openAi(text.trim()), 80);
+          return;                                        // 不把回车发给远端
+        }
+      } else if (d === "\u007f" || d === "\b") {
+        lineBuf = lineBuf.slice(0, -1);
+      } else if (d.charAt(0) === "\u001b") {
+        lineBuf = "";                                    // 方向键 / 历史命令：跟踪失效，放弃这一行
+      } else if (d >= " ") {
+        lineBuf = (lineBuf + d).slice(-300);
+      }
+      api("/api/ssh/input", { method: "POST", body: JSON.stringify({ id: sid, data: d }) });
+    });
 
     // 终端容器尺寸变化 → 重新适配并告知远端
     const ro = new ResizeObserver(() => {
+      if (termBox.style.display === "none") return;      // Agent 模式下 xterm 被隐藏，不要按 0 尺寸去 fit
       try { fit.fit(); } catch (e) { return; }
       const nc = term.cols, nr = term.rows;
       if (nc !== sess.cols || nr !== sess.rows) {
@@ -167,16 +293,29 @@
     es.onmessage = ev => {
       let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
       if (m.eof) { term.write("\r\n[33m[连接已关闭]\x1b[0m\r\n"); return; }
-      if (m.data) term.write(base64ToBytes(m.data));
+      if (!m.data) return;
+      let text = "";
+      try { text = sess.dec.decode(base64ToBytes(m.data), { stream: true }); } catch (e) { return; }
+      term.write(text);
+      const cap = sess.capture;                        // AI 执行命令后的输出回读
+      if (cap && !cap.done && text) {
+        cap.text += text;
+        if (cap.text.length > 400000) cap.text = cap.text.slice(-400000);
+        clearTimeout(cap.idle);
+        cap.idle = setTimeout(cap.finish, 1800);
+      }
     };
     es.onerror = () => { try { es.close(); } catch (e) { /* 已关闭 */ } };
 
     function doClose() {
+      try { if (sess.capture && !sess.capture.done) sess.capture.finish(); } catch (e) { /* 忽略 */ }
       try { ro.disconnect(); } catch (e) {}
       try { es.close(); } catch (e) {}
       try { term.dispose(); } catch (e) {}
       api("/api/ssh/close", { method: "POST", body: JSON.stringify({ id: sid }) });
       delete SESS[sid];
+      // 延后一拍再保存：走标签「×」关闭时，closeTab 会在 onBeforeClose 之后才把 tab 移出 tabs
+      setTimeout(sshSessionSave, 0);
     }
     closeBtn.onclick = doClose;
     tab.onBeforeClose = doClose;          // 点标签栏「×」关闭时由 00_preamble 的 closeTab 回调

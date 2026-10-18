@@ -14,6 +14,7 @@
     ai_conversations / ai_messages / ai_prefs    AI 对话历史（原独立库 .file_manager_ai_chat.db）
     ai_undo_snapshots                           AI 文件改动快照（原独立库 .file_manager_ai_undo.db）
     ai_usage / ai_calls                        系统 AI 调用计数与明细
+    term_ai_history                            终端 AI 助手历史（需求 / 命令 / 执行结果）
     cron_tasks / cron_runs / cron_cfg           定时任务（任务 / 执行历史 / 模块设置）
     store_meta       通用键值（含「旧 JSON / 旧库是否已导入」标记）
 
@@ -232,6 +233,21 @@ CREATE TABLE IF NOT EXISTS ai_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_calls_mod ON ai_calls(module, id);
 CREATE INDEX IF NOT EXISTS idx_ai_calls_day ON ai_calls(module, day);
+
+-- 终端 AI 助手历史：每条 = 一次「自然语言需求 → 推荐命令（→ 执行结果）」
+-- host 为空串表示本机内置终端；远程终端存 user@host（如 ubuntu@124.221.62.101）
+CREATE TABLE IF NOT EXISTS term_ai_history (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts        TEXT NOT NULL DEFAULT '',   -- 时间（YYYY-MM-DD HH:MM:SS）
+    host      TEXT DEFAULT '',
+    question  TEXT DEFAULT '',
+    command   TEXT DEFAULT '',
+    risk      TEXT DEFAULT '',
+    ok        INTEGER DEFAULT 0,          -- 1 = 执行成功
+    exit_code INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_term_ai_hist ON term_ai_history(id DESC);
+CREATE INDEX IF NOT EXISTS idx_term_ai_hist_host ON term_ai_history(host, id DESC);
 
 -- AI 对话历史（原独立库 data/.file_manager_ai_chat.db，表结构保持一致以便直接搬运）
 -- root：对话所属的项目根目录（IDE 的 ROOT）。空串 = 还没绑定项目（旧数据），

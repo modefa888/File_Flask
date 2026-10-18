@@ -140,6 +140,7 @@
         const _tProj = termProjName(d.cwd);
         termAppendTo(s, "内置终端（命令模式）· " + _tProj + "\n" +
         "支持 git / npm / ls 等命令；cd 会保持目录；Ctrl+C 终止当前命令，Ctrl+L 清屏。\n" +
+        "AI 助手：直接用中文描述需求（如「查看当前ip」）回车，由 AI 生成命令并解读输出（输入框左侧 ✦ 可切换 AI 模式）。\n" +
         "（不支持 vim、top 等需要 TTY 的全屏程序）\n" +
         (d.scope ? "操作范围：" + termProjName(d.scope) + "（仅允许在此目录下执行文件操作，越界路径会被拦截）\n" : "") +
         "安全策略：危险命令自动拦截，高风险命令执行前二次确认（终端菜单 → 命令安全策略）。\n\n", "term-dim");
@@ -204,12 +205,12 @@
         termAppendHtml('<span class="term-err">⛔ 已拦截：' + esc(v.reason) + "</span>\n");
         termAppend("（规则可在 config.py 的 EXEC_BLOCK_PATTERNS 中调整；终端菜单 → 命令安全策略）\n", "term-dim");
         toast("已拦截危险命令：" + v.reason, "err");
-        return;
+        return { blocked: true, reason: v.reason };
       }
       if (v.level === "confirm") {
         const ok = await uiConfirm("执行高风险命令",
           "命令：\n" + line + "\n\n风险：" + v.reason + "\n\n确定要继续执行吗？", "仍然执行", true);
-        if (!ok) { termAppend("（已取消执行）\n", "term-dim"); return; }
+        if (!ok) { termAppend("（已取消执行）\n", "term-dim"); return { cancelled: true }; }
         force = true;
       }
     } catch (_) { /* 校验接口异常时不阻断，仍有服务端强制校验兜底 */ }
@@ -226,12 +227,12 @@
       if (d.blocked) {                       // 服务端兜底拦截
         termAppendHtml('<span class="term-err">⛔ 已拦截：' + esc(d.reason || d.error) + "</span>\n");
         toast("已拦截危险命令：" + (d.reason || ""), "err");
-        return;
+        return { blocked: true, reason: d.reason || d.error };
       }
       if (d.need_confirm) {
         termAppend("（该命令需要确认后才能执行，已取消）\n", "term-dim");
         toast("已取消执行", "warn");
-        return;
+        return { cancelled: true };
       }
       if (d.error && String(d.error).indexOf("会话") >= 0) { /* 会话失效：提示重建 */ }
       if (d.stdout) { termAppendAnsi(d.stdout, T); termAppend("\n", "", T); }
@@ -243,6 +244,7 @@
       if (d.error) termAppend("✘ " + d.error + "\n", "term-err", T);
       else if (d.exit_code) termAppend("（退出码 " + d.exit_code + " · 用时 " + d.duration + "s）\n", "term-dim", T);
       if (d.cwd) { T.cwd = d.cwd; termPrompt(); }
+      return d;                               // 供终端 AI 助手解读输出（普通调用方忽略返回值）
     } catch (e) {
       termAppend("✘ " + (e.message || e) + "\n", "term-err", T);
     } finally {

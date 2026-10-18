@@ -131,6 +131,7 @@
   function sessionIsRestorable(t) {
     if (!t || !t.path) return false;
     if (t.pluginView) return false;   // 插件自定义视图：不参与会话恢复（由插件激活时自行打开）
+    if (t.isSshTerm) return false;    // SSH 终端：刷新后连接已断开，恢复出来只是空壳
     if (t.diff || t.allDiff) return false;
     if (t.path.indexOf("\u0001") >= 0) return false;   // 内部 key：差异 / 比较视图
     return true;
@@ -154,7 +155,8 @@
     if (!ideSettingGet("restoreSession", true)) return;
     try {
       const panel = localStorage.getItem("ide.session.panel");
-      if (panel && typeof showPanel === "function") showPanel(panel);
+      // 「终端连接」是工具面板，刷新后自动弹出来很打扰（连接本身也已断开），直接忽略。
+      if (panel && panel !== "sshconn" && typeof showPanel === "function") showPanel(panel);
       if (panel === "search" && typeof window.sessionRestoreSearch === "function") window.sessionRestoreSearch();
       // 数据库连接面板：连接列表是懒加载的（点侧栏图标才拉取），会话恢复时要主动补一次，否则刷新后左栏空白
       if (panel === "dbconn" && typeof loadDbConns === "function") loadDbConns();
@@ -1329,8 +1331,25 @@
     });
     return (s.startsWith("/") ? "/" : "") + parts.join("/");
   }
+  // 标签名里混进 \u0000 之类的不可见字符时，浏览器会把它画成一个方框（看起来像坏图标）。
+  // 这里统一清掉控制字符；清完为空则退回文件名。
+  function cleanTabName(name, path) {
+    let s = String(name == null ? "" : name).replace(/[\u0000-\u001f\u007f]/g, "").trim();
+    if (!s) {
+      const p2 = String(path || "").replace(/[\u0000-\u001f\u007f]/g, "");
+      s = /^ssh:/.test(p2) ? "SSH 终端" : baseName(p2);
+    }
+    return s;
+  }
   async function openFile(path, name, forceGroup, forceText) {
+    // SSH 终端的虚拟路径（\u0000ssh:<连接 id>）不是文件：误走 openFile 会生成一个
+    // 图标是私有区字形（显示成方框）、名字是路径的假标签。这里直接拦下。
+    if (String(path || "").indexOf("\u0000ssh:") === 0) {
+      toast("这是 SSH 终端标签，请在左侧「终端连接」里打开对应会话", "info");
+      return null;
+    }
     path = canonPath(path);
+    name = cleanTabName(name, path);
     // forceGroup 指定目标编辑组（拆分编辑器用）；不指定时全局查找已有标签并聚焦
     let tab = forceGroup == null ? findTab(path) : tabs.find(t => t.path === path && t.group === forceGroup);
     // 播放器全局唯一：已存在视频标签页时（正在播放另一个视频），复用该标签页切换到新视频，
@@ -1504,9 +1523,13 @@
     el.className = "tab" + (tab.dirty ? " dirty" : "") + (tab.isDbConn ? " tab-db" : "");
     // 差异标签的 name 带 "@提交哈希" 后缀（如 ide.html@895cd54），直接匹配取不到类型图标，
     // 用 relPath 的真实文件名来取图标；大小 1.4em 由 .t-ic 规则统一控制
-    const iconName = (tab.diff && tab.relPath) ? baseName(tab.relPath) : tab.name;
-    const ic = tab.iconHtml || iconFor(iconName, false);   // 汇总标签页可自带图标
-    el.innerHTML = '<span class="t-ic">' + ic + '</span><span class="t-nm">' + esc(tab.name) + '</span><span class="t-dot"></span><span class="t-close"><i class="bi bi-x"></i></span>';
+    const tabName = cleanTabName(tab.name, tab.path);
+    const iconName = (tab.diff && tab.relPath) ? baseName(tab.relPath) : tabName;
+    const isSshTab = String(tab.path || "").indexOf("\u0000ssh:") === 0;
+    const ic = tab.iconHtml || (isSshTab
+      ? '<i class="bi bi-hdd-network"></i>'      // SSH 会话：统一用服务器图标，不交给文件类型推断
+      : iconFor(iconName, false));                 // 汇总标签页可自带图标
+    el.innerHTML = '<span class="t-ic">' + ic + '</span><span class="t-nm">' + esc(tabName) + '</span><span class="t-dot"></span><span class="t-close"><i class="bi bi-x"></i></span>';
     el.addEventListener("click", (e) => { e.stopPropagation(); if (e.target.closest(".t-close")) closeTab(tab); else activate(tab); });
     setupTabDrag(el, tab);
     const bundle = groupBundles.get(tab.group);

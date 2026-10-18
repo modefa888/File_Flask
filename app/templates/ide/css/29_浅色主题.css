@@ -1781,3 +1781,101 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .collab-diff-body .cm-attribute { color: #986801; }
 :where(html.theme-light) .collab-diff-body .cm-error { color: #ca1243; }
 
+/* ---------- 终端 AI 助手（42） ---------- */
+:where(html.theme-light) .term-input-row .tai-toggle { border-color: #cecece; color: #6b6b6b; }
+:where(html.theme-light) .term-input-row .tai-toggle:hover { color: #000000; border-color: #a8a8a8; }
+:where(html.theme-light) .term-input-row .tai-toggle.on { color: #005fb8; border-color: #9cc4e8; background: #e8f1fb; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-user { color: #0b5c9a; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-user .tai-user-ic { color: #005fb8; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-card {
+  border-color: #d3e2f0; border-left-color: #3d7eb8; background: #f4f8fd; color: #2b3440;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+}
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-card.tai-ana { border-color: #d3e8da; border-left-color: #3f9d63; background: #f3faf5; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-card.tai-bad { border-color: #f0d3d1; border-left-color: #c0392b; background: #fdf5f4; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-hd .tai-ic { color: #005fb8; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-hd .tai-ic.bad { color: #c0392b; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-hd .tai-tt { color: #1f2328; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-risk.low { color: #1a7f37; background: #e3f5e8; border-color: #b7e0c3; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-risk.mid { color: #8a5a00; background: #fbf3d9; border-color: #e8d9a8; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-risk.high { color: #c0392b; background: #fbe0e0; border-color: #eeb7b3; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-mini { border-color: #c9d9e8; color: #2f6291; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-mini:hover { color: #0b5c9a; border-color: #9cc4e8; background: #e8f1fb; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-mini.tai-stop { color: #a03528; border-color: #e5c1bd; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-mini.tai-stop:hover { color: #c0392b; border-color: #d9a19b; background: #fbe9e7; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-note { color: #4a5866; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-note .bi { color: #3d7eb8; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-note.warn { color: #8a5a00; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-note.warn .bi { color: #b3781a; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-explain { color: #3c4753; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-cmd { background: #ffffff; border-color: #d9dee4; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-cmd .tai-ps { color: #7a8896; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-cmd code { color: #16794a; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-cmd .tai-copy { color: #6b6b6b; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-cmd .tai-copy:hover { color: #000000; background: #eef1f4; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-state { color: #6b6b6b; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-state.run { color: #005fb8; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-state.ok { color: #1a7f37; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-state.warn { color: #8a5a00; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-state.bad { color: #c0392b; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-alts { color: #7a8896; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-alt { background: #ffffff; border-color: #d9dee4; color: #45576a; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-alt:hover { color: #0b5c9a; border-color: #9cc4e8; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-btn { border-color: #c9d9e8; background: #eef5fc; color: #24506f; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-btn:hover { background: #e0eefa; border-color: #9cc4e8; color: #0b5c9a; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-btn.primary { background: #0066cc; border-color: #0066cc; color: #ffffff; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-btn.primary:hover { background: #005fb8; border-color: #005fb8; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-hint { color: #7a8896; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-hint.bad { color: #c0392b; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-live { color: #6b7d8d; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-md { color: #2b3440; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-md h3,
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-md h4,
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-md h5 { color: #1f2328; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-md code { background: #f0f2f5; border-color: #dcdcdc; color: #a05a00; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-md strong { color: #1f2328; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-md a { color: #005fb8; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-md blockquote { color: #5a6a78; border-left-color: #c4d4e0; background: rgba(0, 0, 0, .03); }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-md th,
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-md td { border-color: #dcdcdc; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-md th { background: #f0f0f0; }
+:where(html.theme-light) :is(.term-body, .tai-pop) .tai-err { color: #c0392b; }
+
+/* SSH 终端 AI 浮层（42、44） */
+:where(html.theme-light) .tai-pop { background: #ffffff; color: #2b3440; border-color: #d9dee4; box-shadow: 0 18px 44px rgba(0, 0, 0, .18); }
+:where(html.theme-light) .tai-pop-hd { background: #f5f7fa; border-bottom-color: #e2e6ea; }
+:where(html.theme-light) .tai-pop-t { color: #24506f; }
+:where(html.theme-light) .tai-pop-t em { color: #0b5c9a; background: #e8f1fb; }
+:where(html.theme-light) .tai-pop-x { color: #6b6b6b; }
+:where(html.theme-light) .tai-pop-x:hover { color: #000000; background: #e8e8e8; }
+:where(html.theme-light) .tai-pop-in { background: #ffffff; border-color: #d9dee4; color: #1f2328; }
+:where(html.theme-light) .tai-pop-in:focus { border-color: #0066cc; }
+:where(html.theme-light) .tai-pop-in::placeholder { color: #9aa4ae; }
+:where(html.theme-light) .tai-pop-tip { color: #7a8896; }
+/* SSH 终端 AI 入口 + 可拖动面板（38、42、44） */
+:where(html.theme-light) .ssh-term-ai {
+  border-color: #9cc4e8; background: #e8f1fb; color: #0b5c9a;
+}
+:where(html.theme-light) .ssh-term-ai:hover { background: #dbe9f8; color: #005fb8; border-color: #7fb0dc; }
+:where(html.theme-light) .tai-pop-hd { cursor: move; }
+/* 终端 AI 历史记录（42） */
+:where(html.theme-light) .tai-pop-hbtn { color: #6b7d8d; }
+:where(html.theme-light) .tai-pop-hbtn:hover { color: #000000; background: #e8e8e8; }
+:where(html.theme-light) .tai-pop-hbtn.on { color: #005fb8; background: #e8f1fb; }
+:where(html.theme-light) .tai-hist { background: #ffffff; border-color: #d9dee4; }
+:where(html.theme-light) .tai-hist-hd { background: #f5f7fa; border-bottom-color: #e2e6ea; color: #3c4753; }
+:where(html.theme-light) .tai-hist-hd .bi { color: #005fb8; }
+:where(html.theme-light) .tai-hist-clear { color: #a03528; border-color: #e5c1bd; }
+:where(html.theme-light) .tai-hist-clear:hover { color: #c0392b; background: #fbe9e7; border-color: #d9a19b; }
+:where(html.theme-light) .tai-hist-empty { color: #7a8896; }
+:where(html.theme-light) .tai-hist-empty.bad { color: #c0392b; }
+:where(html.theme-light) .tai-hist-i { border-bottom-color: #eef1f4; }
+:where(html.theme-light) .tai-hist-i:hover { background: #f3f8fe; }
+:where(html.theme-light) .tai-hist-l1 { color: #6b7d8d; }
+:where(html.theme-light) .tai-hist-host { background: #e8f1fb; color: #0b5c9a; }
+:where(html.theme-light) .tai-hist-q { color: #1f2328; }
+:where(html.theme-light) .tai-hist-l3 code { color: #16794a; }
+:where(html.theme-light) .tai-hist-use,
+:where(html.theme-light) .tai-hist-del { border-color: #d9dee4; color: #2f6291; }
+:where(html.theme-light) .tai-hist-use:hover { color: #0b5c9a; border-color: #9cc4e8; background: #eef5fc; }
+:where(html.theme-light) .tai-hist-del:hover { color: #c0392b; border-color: #d9a19b; background: #fbe9e7; }

@@ -115,6 +115,17 @@ html.theme-light .ssh-motd-acts button:hover { background: #eef1f4; color: #1f23
 .ssh-list .ph.warn { color: #e0a458; }
 .ssh-list .ph code { background: #1e1e1e; padding: 1px 5px; border-radius: 4px; color: #ddd; }
 
+/* 常用命令区块 */
+.ssh-cmd-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 12px 4px; font-size: 12px; color: #9aa;
+  border-top: 1px solid #333; margin-top: 4px;
+}
+.ssh-cmd-head span { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #cfcfcf; }
+.ssh-cmd-head button { margin-left: auto; }
+.ssh-cmds { padding: 2px 8px 12px; max-height: 42%; overflow: auto; }
+.ssh-cmd .ssh-main > i { color: #7fbf7f; }
+
 /* AI 助手入口（44_ 的可拖动浮层）：终端标题栏右侧、关闭按钮左边 */
 .ssh-term-ai {
   margin-left: auto; height: 22px; padding: 0 9px; border-radius: 11px; cursor: pointer;

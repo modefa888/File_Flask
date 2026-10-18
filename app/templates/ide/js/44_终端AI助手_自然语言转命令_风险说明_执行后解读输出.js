@@ -358,6 +358,12 @@ function taiBuildPlanCard(plan, question, ctx) {
     acts.appendChild(taiBtn("", "bi-pencil-square", "仅填入输入框", () => {
       if (ctx.fill) ctx.fill(cmd);
     }));
+    acts.appendChild(taiBtn("", "bi-star-plus", "加入常用", () => {   // 存进侧栏「常用命令」，点击即可在 SSH 终端执行
+      const name = String(plan.intent || question || "").trim();      // 名称优先用 AI 生成的意图标题
+      const r = (typeof window.sshCmdsAdd === "function") ? window.sshCmdsAdd(name, cmd) : null;
+      toast(!r ? "常用命令模块不可用（请刷新页面）"
+               : (r.added ? "已加入常用命令：" + (name || cmd) : "该命令已在常用命令里"), r ? "ok" : "warn");
+    }));
   }
   if (plan.blocked) {
     const tip = document.createElement("span");

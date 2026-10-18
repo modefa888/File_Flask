@@ -217,6 +217,7 @@
     try { fit.fit(); } catch (e) { /* 容器未布局时忽略 */ }
 
     const sess = SESS[sid] = { term, fit, es: null, cols: term.cols, rows: term.rows, tab: tab, alive: true };
+    tab.sshSid = sid;                              // 侧栏「常用命令」通过 tab 找到当前会话
     // 用真实尺寸纠正后端 PTY 大小
     api("/api/ssh/resize", { method: "POST", body: JSON.stringify({ id: sid, cols: term.cols, rows: term.rows }) });
 
@@ -642,10 +643,134 @@
     loadSshConns();
   }
 
+  /* ---------------- 常用命令：保存管理 + 一键发送到当前终端 ----------------
+     命令保存在本机 localStorage；点击列表中的命令 → 发送到当前激活的 SSH
+     终端并执行；悬浮按钮可「仅粘贴」（不回车）/ 编辑 / 删除。 */
+  const SSH_CMDS_KEY = "ide.session.sshCmds";
+  function sshCmdsLoad() {
+    try { const a = JSON.parse(localStorage.getItem(SSH_CMDS_KEY) || "[]"); return Array.isArray(a) ? a : []; }
+    catch (_) { return []; }
+  }
+  function sshCmdsSave(list) {
+    try { localStorage.setItem(SSH_CMDS_KEY, JSON.stringify(list)); } catch (_) { /* 忽略 */ }
+  }
+  function activeSshSid() {
+    try {
+      if (typeof active !== "undefined" && active && active.isSshTerm &&
+          active.sshSid && SESS[active.sshSid] && SESS[active.sshSid].alive) return active.sshSid;
+    } catch (e) { /* 忽略 */ }
+    const keys = Object.keys(SESS);                  // 兜底：任意一个还活着的 SSH 会话
+    return keys.length ? keys[0] : "";
+  }
+  function sshCmdSend(m, exec) {
+    const cmdText = String(m.cmd || "").trim();
+    if (!cmdText) return;
+    const sid = activeSshSid();
+    if (!sid) { toast("请先连接并打开一个 SSH 终端", "warn"); return; }
+    api("/api/ssh/input", { method: "POST", body: JSON.stringify({ id: sid, data: cmdText + (exec ? "\r" : "") }) });
+    const s = SESS[sid];
+    try { if (s && s.term) s.term.focus(); } catch (e) { /* 忽略 */ }
+    toast((exec ? "已在当前终端执行：" : "已粘贴到当前终端：") + (m.name || cmdText), "ok");
+  }
+  function renderSshCmds() {
+    const box = $("sshCmds");
+    if (!box) return;
+    const list = sshCmdsLoad();
+    if (!list.length) {
+      box.innerHTML = '<div class="ph">还没有常用命令。点上方 <b>+</b> 添加（如 df -h、docker ps），点击即可在当前 SSH 终端执行。</div>';
+      return;
+    }
+    box.innerHTML = "";
+    list.forEach(m => {
+      const item = document.createElement("div");
+      item.className = "ssh-item ssh-cmd";
+      item.innerHTML =
+        '<div class="ssh-main">' +
+          '<i class="bi bi-terminal"></i>' +
+          '<div class="ssh-meta">' +
+            '<div class="ssh-name">' + esc(m.name || m.cmd) + '</div>' +
+            (m.name ? '<div class="ssh-sub">' + esc(m.cmd) + '</div>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="ssh-acts">' +
+          '<button data-act="paste" title="仅粘贴到终端，不执行"><i class="bi bi-clipboard"></i></button>' +
+          '<button data-act="edit" title="编辑"><i class="bi bi-pencil-square"></i></button>' +
+          '<button data-act="del" title="删除"><i class="bi bi-trash"></i></button>' +
+        '</div>';
+      item.querySelector(".ssh-main").onclick = () => sshCmdSend(m, true);   // 点击 = 发送并执行
+      item.querySelector('[data-act="paste"]').onclick = e => { e.stopPropagation(); sshCmdSend(m, false); };
+      item.querySelector('[data-act="edit"]').onclick = e => { e.stopPropagation(); openSshCmdEditor(m); };
+      item.querySelector('[data-act="del"]').onclick = async e => {
+        e.stopPropagation();
+        const ok = await uiConfirm("删除常用命令", "确定删除「" + (m.name || m.cmd) + "」吗？", "删除", true);
+        if (!ok) return;
+        sshCmdsSave(sshCmdsLoad().filter(x => x.id !== m.id));
+        renderSshCmds();
+        toast("已删除常用命令", "ok");
+      };
+      box.appendChild(item);
+    });
+  }
+  function openSshCmdEditor(item) {
+    const isEdit = !!(item && item.id);
+    const ov = $("modalOverlay");
+    ov.innerHTML =
+      '<div class="ssh-modal">' +
+        '<div class="ssh-modal-head"><i class="bi bi-terminal"></i><span>' + (isEdit ? "编辑常用命令" : "新建常用命令") + '</span>' +
+          '<button class="ssh-modal-x" title="关闭"><i class="bi bi-x-lg"></i></button></div>' +
+        '<div class="ssh-form">' +
+          row("名称", '<input class="ssh-in" id="sshCmdName" spellcheck="false" placeholder="可选，默认显示命令本身" value="' + escAttr(item && item.name || "") + '">') +
+          '<div class="ssh-row"><span class="ssh-lb">命令</span>' +
+            '<textarea class="ssh-in ssh-key" id="sshCmdText" spellcheck="false" placeholder="如：df -h">' + esc(item && item.cmd || "") + '</textarea></div>' +
+        '</div>' +
+        '<div class="ssh-tip"><i class="bi bi-info-circle"></i> 命令保存在本机浏览器；点击列表中的命令会在当前打开的 SSH 终端里执行。</div>' +
+        '<div class="ssh-modal-acts"><span class="ssh-sp"></span>' +
+          '<button class="g-btn outline" id="sshCmdCancel">取消</button>' +
+          '<button class="g-btn" id="sshCmdSave"><i class="bi bi-check-lg"></i> ' + (isEdit ? "保存" : "添加") + '</button></div>' +
+      '</div>';
+    ov.classList.add("show");
+    const close = () => { ov.classList.remove("show"); ov.innerHTML = ""; };
+    ov.querySelector(".ssh-modal-x").onclick = close;
+    ov.querySelector("#sshCmdCancel").onclick = close;
+    ov.querySelector("#sshCmdSave").onclick = () => {
+      const cmdText = ov.querySelector("#sshCmdText").value.replace(/\r?\n/g, " ").trim();
+      if (!cmdText) { toast("请填写命令", "warn"); return; }
+      const name = ov.querySelector("#sshCmdName").value.trim();
+      const list = sshCmdsLoad();
+      if (isEdit) {
+        const it = list.find(x => x.id === item.id);
+        if (it) { it.name = name; it.cmd = cmdText; }
+      } else {
+        list.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: name, cmd: cmdText });
+      }
+      sshCmdsSave(list);
+      close();
+      renderSshCmds();
+      toast(isEdit ? "已保存常用命令" : "已添加常用命令", "ok");
+    };
+  }
+
+  // 暴露给其它模块（如 44_ 终端 AI 助手的命令卡片「加入常用」按钮）：
+  // 添加一条常用命令，已存在相同命令时去重不重复添加，返回 { added: bool }
+  window.sshCmdsAdd = function (name, cmdText) {
+    const c = String(cmdText || "").replace(/\r?\n/g, " ").trim();
+    if (!c) return null;
+    const list = sshCmdsLoad();
+    const added = !list.some(x => x.cmd === c);
+    if (added) {
+      list.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: String(name || "").trim(), cmd: c });
+      sshCmdsSave(list);
+    }
+    renderSshCmds();
+    return { added: added };
+  };
+
   /* ---------------- 初始化 ---------------- */
   (function init() {
     const mk = $("sshNew"); if (mk) mk.onclick = () => openSshEditor(null);
     const rf = $("sshRefresh"); if (rf) rf.onclick = () => loadSshConns();
+    const cn = $("sshCmdNew"); if (cn) cn.onclick = () => openSshCmdEditor(null);
+    renderSshCmds();
     // 界面主题切换（黑夜 / 白天）时，实时刷新已打开远程终端的配色
     new MutationObserver(() => {
       const th = sshTermTheme();

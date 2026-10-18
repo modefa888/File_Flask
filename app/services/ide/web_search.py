@@ -107,8 +107,8 @@ def _parse_bing(html_text, max_results):
     return out
 
 
-def _bing_search(query, max_results, timeout=15):
-    """Bing 网页搜索（标准库实现，最多重试 3 次）。"""
+def _bing_search(query, max_results, timeout=6, attempts=2):
+    """Bing 网页搜索（标准库实现，默认 2 次尝试、单次 6 秒超时）。"""
     params = {
         "q": query,
         "count": str(max(10, min(max_results * 2, 30))),
@@ -117,7 +117,7 @@ def _bing_search(query, max_results, timeout=15):
     }
     url = _BING_URL + "?" + urllib.parse.urlencode(params)
     last = "未知错误"
-    for i in range(3):
+    for i in range(attempts):
         try:
             req = urllib.request.Request(url, headers=_BING_HEADERS)
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -133,8 +133,8 @@ def _bing_search(query, max_results, timeout=15):
                 last += "（%s）" % (e.reason or "")
         except Exception as e:  # noqa: BLE001
             last = "%s: %s" % (type(e).__name__, e)
-        if i < 2:
-            time.sleep(1.5 * (i + 1))
+        if i < attempts - 1:
+            time.sleep(1)
     raise RuntimeError(last)
 
 
@@ -142,7 +142,7 @@ def _ddg_search(query, max_results):
     """DuckDuckGo 兜底（部分环境可用）。"""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")            # 旧包会提示已改名，这里静默
-        with DDGS(timeout=12) as ddgs:
+        with DDGS(timeout=8) as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
     out = []
     for r in results:
@@ -157,8 +157,11 @@ def _ddg_search(query, max_results):
     return out
 
 
-def search_web(query: str, max_results: int = 5):
-    """执行联网搜索，返回结果列表。"""
+def search_web(query: str, max_results: int = 5, deadline: float = 12.0):
+    """执行联网搜索，返回结果列表。
+
+    deadline：总时间预算（秒）。搜索是同步调用，嵌入生成命令这类请求里时，
+    必须给整个搜索阶段设上限，否则网络不通时会把上层请求拖到超时。"""
     q = str(query or "").strip()
     if not q:
         return []
@@ -166,10 +169,14 @@ def search_web(query: str, max_results: int = 5):
         max_results = max(1, min(int(max_results or 5), 10))
     except (TypeError, ValueError):
         max_results = 5
+    t0 = time.monotonic()
+    left = lambda: deadline - (time.monotonic() - t0)  # noqa: E731
 
     errors = []
+    if left() < 2:
+        return [{"error": "联网搜索超时（预算 %.0f 秒已用完）" % deadline}]
     try:                                              # ① Bing 网页搜索（主要来源）
-        out = _bing_search(q, max_results)
+        out = _bing_search(q, max_results, timeout=max(3, min(6, left())))
         if out:
             return out
         errors.append("Bing：未返回结果")
@@ -177,7 +184,7 @@ def search_web(query: str, max_results: int = 5):
         _log.warning("Bing 搜索失败：%s", e)
         errors.append("Bing：%s" % e)
 
-    if _HAS_DDG:                                      # ② DuckDuckGo 兜底
+    if _HAS_DDG and left() >= 3:                      # ② DuckDuckGo 兜底（预算够才试）
         try:
             out = _ddg_search(q, max_results)
             if out:

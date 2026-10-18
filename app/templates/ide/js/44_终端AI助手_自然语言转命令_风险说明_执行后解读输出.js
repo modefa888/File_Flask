@@ -111,10 +111,12 @@ const TAI_SVG = {
   spin: '<path d="M13 8a5 5 0 11-1.6-3.7"/><path d="M13 2.6V5h-2.4"/>',
   terminal: '<rect x="1.8" y="2.6" width="12.4" height="10.7" rx="1.6"/><path d="M4.4 6.4l2.1 2.1-2.1 2.1M8.6 10.8h3"/>',
   network: '<rect x="2.2" y="2.2" width="11.6" height="4.4" rx="1.2"/><rect x="2.2" y="9.4" width="11.6" height="4.4" rx="1.2"/><path d="M4.8 4.4h.01M4.8 11.6h.01"/>',
+  globe: '<circle cx="8" cy="8" r="6"/><path d="M2 8h12"/><path d="M8 2c2.3 2.4 2.3 9.6 0 12M8 2c-2.3 2.4-2.3 9.6 0 12"/>',
   dot: '<circle cx="8" cy="8" r="2.8"/>',
 };
 const TAI_ICON_MAP = {
   "bi-stars": "star", "bi-magic": "star", "bi-play-fill": "play", "bi-stop-fill": "stop",
+  "bi-globe": "globe", "bi-globe2": "globe",
   "bi-pencil-square": "pencil", "bi-clipboard": "copy", "bi-plus-lg": "plus", "bi-x-lg": "x",
   "bi-gear": "gear", "bi-info-circle": "info", "bi-exclamation-triangle": "warn",
   "bi-exclamation-octagon": "warn", "bi-shield-check": "shield", "bi-lightbulb": "bulb",
@@ -507,6 +509,7 @@ async function taiAskInner(raw) {
     const d = await taiPost("/api/term/ai/plan", {
       input: text,
       cwd: S.cwd || (typeof ROOT !== "undefined" ? ROOT : "") || "",
+      web_search: (localStorage.getItem("ide.termAi.webSearch") !== "0"),
       history: (S.aiHist || []).slice(-2).map(x => ({ q: x.q, cmd: x.cmd })),
     });
     wait.remove();
@@ -707,6 +710,8 @@ function taiOpenSsh(o) {
       '<span class="tai-pop-t">' + taiIco("bi-stars") + '<b>' + (o.mount ? "Agent" : "AI 助手") + '</b>' +
         (o.label ? '<em>' + esc(o.label) + '</em>' : '') + '</span>' +
       '<span class="tai-pop-sp"></span>' +
+      '<button type="button" class="tai-pop-hbtn tai-web-btn" title="联网搜索（安装 / 下载类需求会先搜索官方地址，避免生成错误 URL）">' +
+        taiIco("bi-globe") + '</button>' +
       '<button type="button" class="tai-pop-hbtn tai-hist-btn" title="历史记录（保存在数据库）">' +
         '' + taiIco("bi-clock-history") + '</button>' +
       '<button type="button" class="tai-pop-x" title="' + (o.mount ? "切回 Shell" : "关闭（Esc）") + '">' +
@@ -741,6 +746,17 @@ function taiOpenSsh(o) {
   const state = { el: pop, out: out, ta: ta, hist: [], host: o.host || o.label || "" };
   taiPopState = state;
   let histOpen = false;
+
+  /* 联网开关：默认开启。安装 / 下载类需求会先搜索，把官方地址喂给模型，避免编造 URL */
+  const webBtn = pop.querySelector(".tai-web-btn");
+  const webOn = () => localStorage.getItem("ide.termAi.webSearch") !== "0";
+  const webSync = () => webBtn.classList.toggle("on", webOn());
+  webSync();
+  webBtn.addEventListener("click", () => {
+    localStorage.setItem("ide.termAi.webSearch", webOn() ? "0" : "1");
+    webSync();
+    toast(webOn() ? "已开启联网：生成命令前会先搜索官方地址" : "已关闭联网", "ok");
+  });
 
   const closeSelf = () => {
     if (o.mount && typeof o.onClose === "function") { o.onClose(); return; }
@@ -949,6 +965,7 @@ function taiOpenSsh(o) {
       const d = await taiPost("/api/term/ai/plan", {
         input: text,
         env: o.env || "",
+        web_search: (localStorage.getItem("ide.termAi.webSearch") !== "0"),
         history: state.hist.slice(-2).map(x => ({ q: x.q, cmd: x.cmd })),
       });
       wait.remove();

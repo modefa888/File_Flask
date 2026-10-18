@@ -31,11 +31,12 @@ from flask import Blueprint, Response, jsonify, request
 from ...log import get_logger
 from ...services.common.safety import check_command
 from ...services.common.store_db import store_conn, store_tx
+from ...services.ide.web_search import search_web, format_results
 
 _log = get_logger()
 bp = Blueprint("termai", __name__)
 
-_PLAN_TIMEOUT = 60                  # 生成命令建议的超时（慢模型首字可能十几秒）
+_PLAN_TIMEOUT = 90                  # 生成命令建议的超时（联网搜索最多占 12 秒，剩下的给模型）
 _LIVE_TIMEOUT = 180                 # 流式解读的读超时
 _MAX_INPUT = 800                    # 用户自然语言输入上限
 _MAX_CMD = 500                      # 生成的命令上限
@@ -58,7 +59,10 @@ _PLAN_SYS = (
     "会改文件、装包、启停服务为 medium；删除数据、改权限、改系统配置、rm -rf、dd、mkfs、关机重启为 high。\n"
     "2. 优先只读方案；用户没有明确要求时不要加 sudo，不要用重定向直接改系统文件。\n"
     "3. 命令必须能在 bash 中一次跑通，不要出现占位符（如 <路径>）；信息不足时按当前目录与常见默认值推断。\n"
-    "4. 绝不输出命令的执行结果，只输出命令本身。"
+    "4. 绝不输出命令的执行结果，只输出命令本身。\n"
+    "5. 联网：如果消息里带 [联网搜索结果]，命令中出现的下载地址 / 仓库地址 / 软件源 / 版本号"
+    "必须优先采用搜索结果里来自官方站点（.org / .com 官网、官方 GitHub、官方文档）的信息，"
+    "严禁凭记忆编造 URL；搜索结果与你的记忆冲突时以搜索结果为准；没有搜索结果时才用保守的通用做法。"
 )
 
 _LIVE_SYS = (
@@ -388,9 +392,23 @@ def api_term_ai_plan():
         env_desc = extra_env + (("；工作目录：" + cwd) if cwd else "")
     else:
         env_desc = _env_brief(cwd)
+
+    # 联网搜索：涉及安装 / 下载 / 配置的请求先搜一下，把官方地址喂给模型，避免编造 URL
+    web_on = bool(data.get("web_search", True))
+    web_ctx = ""
+    if web_on and re.search(r"安装|部署|下载|更新|升级|配置|搭建|install|setup|download|deploy|update|upgrade|https?://|git |clone|pip |npm |apt |yum |dnf |curl |wget ", text, re.I):
+        try:
+            results = search_web(text, max_results=4)
+            bad = (not results) or (len(results) == 1 and results[0].get("error"))
+            if not bad:
+                web_ctx = "[联网搜索结果]\n" + format_results(results, max_chars=1800) + "\n\n"
+                _log.info("终端 AI 联网：query=%s", text[:80])
+        except Exception as e:  # noqa: BLE001 - 搜索失败不阻塞生成
+            _log.warning("终端 AI 联网搜索失败：%s", e)
+
     messages = [
         {"role": "system", "content": _PLAN_SYS},
-        {"role": "user", "content": "[当前环境] " + env_desc + "\n" + ctx + "[用户需求] " + text},
+        {"role": "user", "content": "[当前环境] " + env_desc + "\n" + ctx + web_ctx + "[用户需求] " + text},
     ]
     t0 = time.time()
     content, call_err = _post_json(provider, model, messages, _PLAN_TIMEOUT)

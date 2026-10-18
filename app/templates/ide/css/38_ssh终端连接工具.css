@@ -50,6 +50,39 @@
 .ssh-term-box .xterm { height: 100%; }
 .ssh-term-box .xterm-viewport { background-color: transparent !important; }
 
+/* 首次连接：MOTD 中文说明卡片 */
+.ssh-motd {
+  flex: none; margin: 8px 10px 0;
+  border: 1px solid #3a3d44; border-radius: 8px; background: #23252b; overflow: hidden;
+  font-size: 12px; color: #d4d4d4;
+}
+.ssh-motd-head { display: flex; align-items: center; gap: 7px; padding: 7px 10px; }
+.ssh-motd-head > i { color: #4da3ff; }
+.ssh-motd-host { color: #9aa; font-size: 11px; }
+.ssh-motd-acts { margin-left: auto; display: flex; gap: 2px; }
+.ssh-motd-acts button {
+  background: none; border: 0; color: #9aa; cursor: pointer;
+  padding: 2px 5px; border-radius: 5px; font-size: 12px;
+}
+.ssh-motd-acts button:hover { background: #353842; color: #ddd; }
+.ssh-motd-body {
+  padding: 0 12px 10px; line-height: 1.75;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 220px; overflow: auto;
+}
+.ssh-motd-body b { color: #fff; font-weight: 600; }
+.ssh-motd-body code {
+  background: #353842; border-radius: 4px; padding: 1px 5px;
+  font-family: Menlo, Consolas, monospace; font-size: 11px;
+}
+.ssh-motd.folded .ssh-motd-body { display: none; }
+html.theme-light .ssh-motd { background: #fafbfc; border-color: #d0d0d0; color: #1f2328; }
+html.theme-light .ssh-motd-body b { color: #111; }
+html.theme-light .ssh-motd-body code { background: #eef1f4; }
+html.theme-light .ssh-motd-host,
+html.theme-light .ssh-motd-acts button { color: #7a7f87; }
+html.theme-light .ssh-motd-acts button:hover { background: #eef1f4; color: #1f2328; }
+
 /* 新建 / 编辑 弹窗 */
 .ssh-modal {
   width: 440px; max-width: 92vw; background: #252526; border: 1px solid #3a3d44;

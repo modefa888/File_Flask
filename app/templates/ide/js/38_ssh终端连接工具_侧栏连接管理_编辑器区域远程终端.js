@@ -366,13 +366,146 @@
 
     const es = new EventSource("/api/ssh/stream/" + sid);
     sess.es = es;
+
+    /* ---------- 首次连接：首屏欢迎信息（MOTD）→ 中文说明卡片 ----------
+       收集登录后的第一段输出，出现 shell 提示符（行尾 $ / #）或停顿 5 秒后，
+       用本地规则解析 MOTD 生成中文说明（不走 AI，秒出）。 */
+    let motdRaw = "", motdDone = false, motdTimer = null;
+    function motdStrip(s) {
+      if (window.TermAI && window.TermAI.stripAnsi) return window.TermAI.stripAnsi(s);
+      return String(s).replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "");
+    }
+    function motdShowCard() {
+      let card = wrap.querySelector(".ssh-motd");
+      if (card) return card;
+      card = document.createElement("div");
+      card.className = "ssh-motd";
+      card.innerHTML =
+        '<div class="ssh-motd-head"><i class="bi bi-translate"></i><span>连接信息 · 中文说明</span>' +
+          '<span class="ssh-motd-host">' + esc((c.user || "root") + "@" + c.host) + '</span>' +
+          '<span class="ssh-motd-acts">' +
+            '<button data-m="tgl" title="收起 / 展开"><i class="bi bi-chevron-up"></i></button>' +
+            '<button data-m="x" title="关闭"><i class="bi bi-x-lg"></i></button>' +
+          '</span></div>' +
+        '<div class="ssh-motd-body"><span class="ssh-motd-txt"></span></div>';
+      wrap.insertBefore(card, termBox);
+      const body = card.querySelector(".ssh-motd-body");
+      card.querySelector('[data-m="tgl"]').onclick = () => {
+        const hid = body.style.display === "none";
+        body.style.display = hid ? "" : "none";
+        card.classList.toggle("folded", !hid);
+      };
+      card.querySelector('[data-m="x"]').onclick = () => card.remove();
+      return card;
+    }
+    /* 本地规则解析 MOTD（Ubuntu / Debian 风格欢迎信息），返回中文说明行数组 */
+    function motdParse(s) {
+      const lines = [];
+      const g1 = re => { const m = s.match(re); return m ? m[1].trim() : ""; };
+      // 系统版本（Welcome to Ubuntu 24.04.4 LTS (GNU/Linux ...) / Debian GNU/Linux ...）
+      const sys = g1(/Welcome to ((?:Ubuntu|Debian|CentOS|AlmaLinux|Rocky|Fedora)[^\r\n]*)/i);
+      if (sys) lines.push("**系统版本**：" + sys + "。");
+      // 资源概览：直接从 System load: 字段行开始截取（标题与字段之间可能有空行，不能锚定标题）
+      const si = s.match(/System\s+load\s*:[\s\S]*?(?=\n\s*\n|$)/);
+      if (si) {
+        const gb = re => { const m = si[0].match(re); return m ? m[1].trim() : ""; };
+        const bits = [];
+        const load = gb(/System load:\s*([0-9.]+)/);
+        const procs = gb(/Processes:\s*(\d+)/);
+        const disk = gb(/Usage of \/\s*:\s*([^\n]+)/);
+        const mem = gb(/Memory usage:\s*([^\n]+)/);
+        const swap = gb(/Swap usage:\s*([^\n]+)/);
+        const users = gb(/Users logged in:\s*([^\n]+)/);
+        const ip = gb(/IPv4 address for [^\s:]+:\s*([^\n]+)/);
+        if (load) bits.push("负载 " + load);
+        if (procs) bits.push("进程 " + procs + " 个");
+        if (disk) {
+          const dm = disk.match(/([0-9.]+%)\s*of\s*([0-9.]+\s*\S+)/);
+          bits.push(dm ? "根分区已用 " + dm[1] + "（共 " + dm[2].trim() + "）" : "根分区 " + disk);
+        }
+        if (mem) bits.push("内存占用 " + mem);
+        if (swap && !/^0%/.test(swap)) bits.push("Swap 已用 " + swap);
+        if (users) bits.push(users + " 个用户在线");
+        if (ip) bits.push("内网地址 " + ip);
+        const zmb = s.match(/There\s+(?:is|are)\s+(\d+)\s+zombie\s+process/i);
+        if (zmb && zmb[1] !== "0") bits.push("⚠️ 有 " + zmb[1] + " 个僵尸进程");
+        if (bits.length) lines.push("**资源概览**：" + bits.join("，") + "。");
+      }
+      // 可更新软件包
+      const upd = s.match(/(\d+)\s+updates?\s+can\s+be\s+applied\s+immediately/i);
+      if (upd) {
+        const sec = s.match(/(\d+)\s+of\s+these\s+updates\s+are\s+(?:standard\s+)?security\s+updates/i);
+        lines.push("**可更新软件包**：⚠️ 共 **" + upd[1] + "** 个待安装更新" +
+          (sec ? "，其中 **" + sec[1] + "** 个为安全更新" : "") +
+          "，可运行 `apt list --upgradable` 查看，`apt upgrade` 安装。");
+      }
+      // ESM 扩展安全维护
+      if (/Expanded\s+Security\s+Maintenance[\s\S]{0,160}?is\s+not\s+enabled/i.test(s)) {
+        lines.push("**安全维护（ESM）**：⚠️ 扩展安全维护未启用，无法获取额外安全更新，可运行 `sudo pro status` 或访问 ubuntu.com/esm 了解开通方式。");
+      }
+      // 新版本可用
+      const rel = s.match(/New\s+release:\s*([^\s]+)\s+available/i);
+      if (rel) lines.push("**版本升级**：⚠️ 检测到新版本 **" + rel[1] + "** 可用，如需升级请运行 `do-release-upgrade`。");
+      // 上次登录（服务器时间是英文格式，这里解析后按北京时间显示）
+      const ll = s.match(/Last\s+login:\s*([^\r\n]+)/i);
+      if (ll) {
+        const lm = ll[1].match(/^(.*?\d{4})\s+from\s+(\S+)/);
+        const from = lm ? lm[2] : "";
+        const raw = (lm ? lm[1] : ll[1]).trim();
+        // "Mon Oct 19 00:03:40 2026" → 手工解析，避免 Date 直接 parse 把 CST 当美国时区
+        const MM = { Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
+                     Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12" };
+        let when = raw;
+        const dm = raw.match(/^(\w{3})\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2})(?::(\d{2}))?\s+(\d{4})/);
+        if (dm && MM[dm[2]]) {
+          let h = +dm[4], min = +dm[5], sec = dm[6] ? +dm[6] : 0;
+          const tz = (ll[1].match(/\b(UTC|GMT)\b/) || [])[1];      // 标注为 UTC/GMT 的换算到东八区
+          if (tz) { h = (h + 8) % 24; }
+          const pad = n => String(n).padStart(2, "0");
+          when = dm[7] + "-" + MM[dm[2]] + "-" + pad(+dm[3]) + " " +
+                 pad(h) + ":" + pad(min) + ":" + pad(sec) + "（北京时间）";
+        }
+        lines.push("**上次登录**：" + when + (from ? "，来自 " + from : "") + "。");
+      }
+      return lines;
+    }
+    function motdFinish() {
+      if (motdDone) return;
+      motdDone = true;
+      clearTimeout(motdTimer);
+      const clean = motdStrip(motdRaw).replace(/\u0000/g, "").trim();
+      if (clean.length < 60) return;                   // 没什么欢迎信息，不做说明
+      const rows = motdParse(clean);
+      if (!rows.length) return;                        // 没解析出任何已知字段就不弹卡片
+      const txt = motdShowCard().querySelector(".ssh-motd-txt");
+      // 最小渲染：**粗体**、`代码`、⚠️ 原样
+      txt.innerHTML = esc(rows.join("\n"))
+        .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
+        .replace(/`([^`\n]+)`/g, "<code>$1</code>");
+    }
+    function motdFeed(text) {
+      if (motdDone || !text) return;
+      motdRaw += text;
+      if (motdRaw.length > 20000) { motdFinish(); return; }
+      const clean = motdStrip(motdRaw).trim();
+      // 行尾出现 $ / # 视为已到 shell 提示符，欢迎信息结束
+      if (clean.length > 60 && /[$#]\s*$/.test(clean)) { motdFinish(); return; }
+      clearTimeout(motdTimer);
+      motdTimer = setTimeout(motdFinish, 5000);        // 输出停顿 5 秒也视为结束
+    }
     es.onmessage = ev => {
       let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
-      if (m.eof) { term.write("\r\n[33m[连接已关闭]\x1b[0m\r\n"); return; }
+      if (m.eof) {                                     // 远端主动断开（服务器关闭连接 / exit 退出等）
+        sess.alive = false;
+        term.write("\r\n[33m[连接已关闭]\x1b[0m\r\n");
+        toast((tab.name || "SSH") + " 连接已断开", "warn");
+        return;
+      }
       if (!m.data) return;
       let text = "";
       try { text = sess.dec.decode(base64ToBytes(m.data), { stream: true }); } catch (e) { return; }
       term.write(text);
+      motdFeed(text);                                  // 首屏输出 → 中文说明
       const cap = sess.capture;                        // AI 执行命令后的输出回读
       if (cap && !cap.done && text) {
         cap.text += text;
@@ -381,9 +514,17 @@
         cap.idle = setTimeout(cap.finish, 1800);
       }
     };
-    es.onerror = () => { try { es.close(); } catch (e) { /* 已关闭 */ } };
+    es.onerror = () => {                                 // SSE 意外断开（网络掉线 / 后端重启等）
+      try { es.close(); } catch (e) { /* 已关闭 */ }
+      if (sess.alive) {
+        sess.alive = false;
+        term.write("\r\n\x1b[33m[连接已断开]\x1b[0m\r\n");
+        toast((tab.name || "SSH") + " 连接已断开", "warn");
+      }
+    };
 
     function doClose() {
+      sess.alive = false;                                // 主动关闭：不再触发「连接已断开」提示
       try { if (sess.capture && !sess.capture.done) sess.capture.finish(); } catch (e) { /* 忽略 */ }
       try { ro.disconnect(); } catch (e) {}
       try { es.close(); } catch (e) {}

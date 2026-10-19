@@ -240,8 +240,11 @@ def api_media_collection():
             continue
         if cmn or cmx:
             cat_filters[cat] = (cmn, cmx)
+    # 按具体扩展名过滤（如 webm,mp4），仅当扩展名属于目标分类时才生效
+    ext_filter = (request.args.get("ext", "") or "").strip().lower()
     return jsonify(_query_media_collection(media_type, keyword, page, page_size,
-                                           min_size, max_size, cat_filters))
+                                           min_size, max_size, cat_filters,
+                                           ext_filter=ext_filter or None))
 
 
 @bp.route("/api/index/build", methods=["POST"])

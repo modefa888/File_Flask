@@ -1,7 +1,7 @@
         // ========== 媒体集合面板（视频/音频/图片，基于索引聚合） ==========
         let _mediaPanelRef = null;
         let _mediaCollapsedBtn = null;
-        const _mediaState = { type: 'all', keyword: '', page: 1, page_size: 20, min_size: 0, max_size: 0, total: 0, total_pages: 0, loading: false };
+        const _mediaState = { type: 'all', keyword: '', exts: [], page: 1, page_size: 20, min_size: 0, max_size: 0, total: 0, total_pages: 0, loading: false };
         const _MEDIA_TYPE_META = {
             video: { label: '视频', icon: 'bi-file-play', color: '#dc2626' },
             audio: { label: '音频', icon: 'bi-file-music', color: '#7c3aed' },
@@ -159,6 +159,7 @@
             // 每次重新打开都重置查询状态，避免上次的分类/页码残留
             _mediaState.type = 'all';
             _mediaState.keyword = '';
+            _mediaState.exts = [];
             _mediaState.page = 1;
             _mediaState.page_size = 20;
             _mediaState.min_size = 0;
@@ -182,6 +183,23 @@
                         <button class="media-tab" data-type="video"><i class="bi bi-film"></i> 视频</button>
                         <button class="media-tab" data-type="audio"><i class="bi bi-music-note"></i> 音频</button>
                         <button class="media-tab" data-type="image"><i class="bi bi-image"></i> 图片</button>
+                    </div>
+                    <div class="media-ext-filter-wrap" id="mediaExtFilterWrap" style="display:none;">
+                        <button class="btn btn-outline-secondary btn-sm media-ext-filter-btn" id="mediaExtFilterBtn" type="button" title="按格式过滤">全部格式 <i class="bi bi-chevron-down"></i></button>
+                        <div class="media-ext-filter-pop" id="mediaExtFilterPop">
+                            <label class="media-ext-item"><input type="checkbox" value="webm" data-role="ext"> <span>WEBM</span></label>
+                            <label class="media-ext-item"><input type="checkbox" value="mp4" data-role="ext"> <span>MP4</span></label>
+                            <label class="media-ext-item"><input type="checkbox" value="mkv" data-role="ext"> <span>MKV</span></label>
+                            <label class="media-ext-item"><input type="checkbox" value="avi" data-role="ext"> <span>AVI</span></label>
+                            <label class="media-ext-item"><input type="checkbox" value="mov" data-role="ext"> <span>MOV</span></label>
+                            <label class="media-ext-item"><input type="checkbox" value="wmv" data-role="ext"> <span>WMV</span></label>
+                            <label class="media-ext-item"><input type="checkbox" value="flv" data-role="ext"> <span>FLV</span></label>
+                            <label class="media-ext-item"><input type="checkbox" value="m4v" data-role="ext"> <span>M4V</span></label>
+                            <label class="media-ext-item"><input type="checkbox" value="rmvb" data-role="ext"> <span>RMVB</span></label>
+                            <label class="media-ext-item"><input type="checkbox" value="mpg" data-role="ext"> <span>MPG</span></label>
+                            <label class="media-ext-item"><input type="checkbox" value="mpeg" data-role="ext"> <span>MPEG</span></label>
+                            <label class="media-ext-item"><input type="checkbox" value="3gp" data-role="ext"> <span>3GP</span></label>
+                        </div>
                     </div>
                     <button class="btn btn-outline-secondary btn-sm media-settings-btn" id="mediaSettingsBtn" type="button" title="按分类设置大小过滤"><i class="bi bi-sliders"></i> 过滤设置</button>
                     <div class="input-group input-group-sm media-search">
@@ -256,8 +274,31 @@
                 btn.classList.add('active');
                 _mediaState.type = btn.dataset.type;
                 _mediaState.page = 1;
+                _mediaState.exts = [];
+                _updateMediaExtFilterOptions();
                 _updateMediaFilterBadge();
                 _loadMediaCollection(true);
+            });
+            // 格式多选下拉：点击按钮展开/收起，点击外部收起，勾选后即时过滤
+            const extFilterBtn = overlay.querySelector('#mediaExtFilterBtn');
+            const extFilterPop = overlay.querySelector('#mediaExtFilterPop');
+            extFilterBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                extFilterPop.classList.toggle('show');
+            });
+            extFilterPop.addEventListener('click', (e) => {
+                if (e.target.tagName === 'INPUT' && e.target.type === 'checkbox' && e.target.dataset.role === 'ext') {
+                    const checked = Array.from(extFilterPop.querySelectorAll('input[data-role="ext"]:checked')).map(i => i.value);
+                    _mediaState.exts = checked;
+                    _updateMediaExtFilterBtnText();
+                    _mediaState.page = 1;
+                    _loadMediaCollection(true);
+                }
+            });
+            document.addEventListener('click', (e) => {
+                if (extFilterPop.classList.contains('show') && !extFilterBtn.contains(e.target) && !extFilterPop.contains(e.target)) {
+                    extFilterPop.classList.remove('show');
+                }
             });
             overlay.querySelector('#mediaPrevBtn').addEventListener('click', () => _gotoMediaPage(_mediaState.page - 1));
             overlay.querySelector('#mediaNextBtn').addEventListener('click', () => _gotoMediaPage(_mediaState.page + 1));
@@ -285,6 +326,7 @@
                 if (e.target === overlay) _confirmCloseMediaCollection();
             });
             _updateMediaFilterBadge();
+            _updateMediaExtFilterOptions();
             _loadMediaCollection(true);
         }
 
@@ -348,6 +390,33 @@
             return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
 
+        // 视频分类下显示格式过滤多选下拉框，其它分类隐藏；切回时重置为「全部格式」
+        function _updateMediaExtFilterOptions() {
+            const wrap = document.getElementById('mediaExtFilterWrap');
+            const pop = document.getElementById('mediaExtFilterPop');
+            if (!wrap || !pop) return;
+            const isVideo = _mediaState.type === 'video';
+            wrap.style.display = isVideo ? '' : 'none';
+            if (!isVideo) {
+                pop.querySelectorAll('input[data-role="ext"]').forEach(i => { i.checked = false; });
+                _updateMediaExtFilterBtnText();
+                return;
+            }
+            pop.querySelectorAll('input[data-role="ext"]').forEach(i => {
+                i.checked = _mediaState.exts.includes(i.value);
+            });
+            _updateMediaExtFilterBtnText();
+        }
+
+        function _updateMediaExtFilterBtnText() {
+            const btn = document.getElementById('mediaExtFilterBtn');
+            if (!btn) return;
+            const arr = _mediaState.exts || [];
+            const label = arr.length === 0 ? '全部格式' :
+                (arr.length === 1 ? arr[0].toUpperCase() : `已选 ${arr.length} 种格式`);
+            btn.innerHTML = label + ' <i class="bi bi-chevron-down"></i>';
+        }
+
         function _gotoMediaPage(target) {
             const p = Math.max(1, Math.min(target, _mediaState.total_pages || 1));
             if (p === _mediaState.page && p === target) return;
@@ -376,6 +445,7 @@
                 min_size: _mediaState.min_size || 0,
                 max_size: _mediaState.max_size || 0,
             });
+            if ((_mediaState.exts || []).length) params.set('ext', _mediaState.exts.join(','));
             // 「全部」视图：带上视频/音频/图片各自的区间，列表与统计都按分类规则合并
             const catParam = _mediaCatFilterParam();
             if (catParam) params.set('filters', catParam);

@@ -892,11 +892,12 @@ _MEDIA_EXT_CAT = {e: cat for cat, exts in _MEDIA_EXTS.items() for e in exts}
 
 
 def _query_media_collection(media_type="all", keyword="", page=1, page_size=48,
-                            min_size=0, max_size=0, cat_filters=None):
+                            min_size=0, max_size=0, cat_filters=None, ext_filter=None):
     """按类型聚合索引中的媒体文件（视频/音频/图片），按大小倒序分页返回。
     标准分页：page 从 1 开始，返回 items / total / page / page_size / total_pages / has_more。
     min_size / max_size 为字节数，0 表示该侧不限，用于手动过滤掉过小/过大的文件。
     cat_filters: {类别: (min, max)}，分类各自的大小区间（0 表示该侧不限）。
+    ext_filter: 扩展名列表/逗号分隔字符串，如 ['webm','mp4'] 或 'webm,mp4'，用于在分类内按具体格式过滤。
     用于「全部」视图：视频只看 ≥1MB、图片只看 ≥0.1MB 等，各分类按自己的规则过滤后合并统计；
     没设置区间的类别保持全部保留。
     SQL 始终使用 LIMIT ? OFFSET ?，绝不会一次性返回全部数据。
@@ -908,6 +909,16 @@ def _query_media_collection(media_type="all", keyword="", page=1, page_size=48,
     if not exts:
         return {"items": [], "total": 0, "page": page, "page_size": page_size,
                 "total_pages": 0, "has_more": False}
+
+    # 如果指定了具体格式，先把候选扩展名限制到这些格式（确保安全性）
+    if ext_filter:
+        if isinstance(ext_filter, str):
+            efs = [e.strip().lstrip(".").lower() for e in ext_filter.split(",") if e.strip()]
+        else:
+            efs = [str(e).strip().lstrip(".").lower() for e in ext_filter if str(e).strip()]
+        efs = [e for e in efs if e in exts]
+        if efs:
+            exts = efs
 
     placeholders = ",".join("?" * len(exts))
     where = f"ext IN ({placeholders})"

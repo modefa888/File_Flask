@@ -1,6 +1,6 @@
   // ---------- 媒体集合：图片 / 视频 / 音频（基于本地索引聚合） ----------
   var _md = {
-    type: "all", keyword: "", page: 0, size: 30,
+    type: "all", keyword: "", exts: [], page: 0, size: 30,
     total: 0, pages: 0, loading: false, items: [], token: 0,
     min_size: 0, max_size: 0, lastSig: ""
   };
@@ -110,6 +110,7 @@
     if (mb) mb.innerHTML = "";   // 同时清掉上一次留下的结果面板与提示
     _md.type = "all";
     _md.keyword = "";
+    _md.exts = [];
     var kw = document.getElementById("mdKeyword");
     if (kw) kw.value = "";
     Array.prototype.forEach.call(document.querySelectorAll("#mdTabs .md-tab"), function (b) {
@@ -131,7 +132,8 @@
   function mdCondKey() {
     mdApplyFilter();
     return _md.type + "|" + _md.keyword + "|" + _md.size +
-      "|" + mdCatFilterParam() + "|" + _md.min_size + "|" + _md.max_size;
+      "|" + mdCatFilterParam() + "|" + _md.min_size + "|" + _md.max_size +
+      "|" + (_md.exts || []).join(",");
   }
 
   // 切回某个分类时，恢复上次浏览的页码
@@ -148,7 +150,8 @@
     var catParam = mdCatFilterParam();
     // condKey = 不含页码的条件；sig = 条件 + 页码，任一变化都会得到不同的键
     var condKey = _md.type + "|" + _md.keyword + "|" + _md.size +
-      "|" + catParam + "|" + _md.min_size + "|" + _md.max_size;
+      "|" + catParam + "|" + _md.min_size + "|" + _md.max_size +
+      "|" + (_md.exts || []).join(",");
     var sig = condKey + "|" + page;
 
     // 命中缓存：直接渲染，切分类 / 切回来都不再发请求
@@ -175,6 +178,7 @@
       "&page=" + page + "&page_size=" + _md.size;
     // 「全部」视图：带上各分类自己的区间，列表与统计都按分类规则合并
     if (catParam) params += "&filters=" + encodeURIComponent(catParam);
+    if ((_md.exts || []).length) params += "&ext=" + encodeURIComponent(_md.exts.join(","));
     params += "&min_size=" + (_md.min_size || 0) + "&max_size=" + (_md.max_size || 0);
     fetchTimeout("/api/media/collection?" + params, 25000)
       .then(function (r) { return r.json(); })
@@ -341,6 +345,25 @@
     mdLoad(1);
   }
 
+  function mdUpdateExtFilter() {
+    var wrap = document.getElementById("mdExtFilterWrap");
+    var pop = document.getElementById("mdExtFilterPop");
+    var btn = document.getElementById("mdExtFilterBtn");
+    if (!wrap || !pop || !btn) return;
+    var isVideo = _md.type === "video";
+    wrap.style.display = isVideo ? "" : "none";
+    if (!isVideo) {
+      pop.querySelectorAll('input[data-role="ext"]').forEach(function (i) { i.checked = false; });
+      btn.textContent = "格式";
+      return;
+    }
+    pop.querySelectorAll('input[data-role="ext"]').forEach(function (i) {
+      i.checked = (_md.exts || []).indexOf(i.value) >= 0;
+    });
+    var n = (_md.exts || []).length;
+    btn.textContent = n === 0 ? "格式" : (n === 1 ? _md.exts[0].toUpperCase() : "已选 " + n + " 种");
+  }
+
   Array.prototype.forEach.call(document.querySelectorAll("#mdTabs .md-tab"), function (b) {
     b.addEventListener("click", function () {
       if (b.classList.contains("on")) return;
@@ -348,10 +371,37 @@
         x.classList.toggle("on", x === b);
       });
       _md.type = b.getAttribute("data-type");
+      _md.exts = [];
+      mdUpdateExtFilter();
       mdUpdateFilterBadge();
       mdLoad(mdRememberedPage());   // 回到该分类上次浏览的页码
     });
   });
+
+  // 移动端格式多选下拉
+  (function () {
+    var wrap = document.getElementById("mdExtFilterWrap");
+    var btn = document.getElementById("mdExtFilterBtn");
+    var pop = document.getElementById("mdExtFilterPop");
+    if (!wrap || !btn || !pop) return;
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      pop.classList.toggle("show");
+    });
+    pop.addEventListener("click", function (e) {
+      var inp = e.target.closest && e.target.closest('input[data-role="ext"]');
+      if (!inp) return;
+      var checked = Array.from(pop.querySelectorAll('input[data-role="ext"]:checked')).map(function (i) { return i.value; });
+      _md.exts = checked;
+      mdUpdateExtFilter();
+      mdLoad(1);
+    });
+    document.addEventListener("click", function (e) {
+      if (pop.classList.contains("show") && !wrap.contains(e.target)) {
+        pop.classList.remove("show");
+      }
+    });
+  })();
 
   // 搜索浮层：点顶栏 🔍 从底部弹出，输入后回车或点「搜索」执行
   function mdOpenSearch() {

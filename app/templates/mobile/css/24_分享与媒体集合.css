@@ -202,6 +202,30 @@
     background: rgba(31,111,235,.13); color: var(--primary); font-weight: 600;
     box-shadow: inset 0 0 0 1px rgba(31,111,235,.38);
   }
+  .md-ext-filter-wrap {
+    position: relative; flex: none;
+  }
+  .md-ext-filter-btn {
+    border: 1px solid var(--border); border-radius: 999px;
+    background: #fff; color: var(--text); font-size: 11px; font-weight: 500;
+    padding: 4px 10px; min-width: 54px;
+    text-align: center; white-space: nowrap;
+  }
+  .md-ext-filter-pop {
+    position: absolute; top: calc(100% + 5px); right: 0;
+    min-width: 120px; max-height: 260px; overflow-y: auto;
+    background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 10px 24px rgba(15,23,42,.18); padding: 8px;
+    display: none; flex-direction: column; gap: 3px; z-index: 100;
+  }
+  .md-ext-filter-pop.show { display: flex; }
+  .md-ext-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 8px; border-radius: 6px; font-size: 12px; color: var(--text);
+    white-space: nowrap;
+  }
+  .md-ext-item:active { background: #f1f5f9; }
+  .md-ext-item input[type="checkbox"] { margin: 0; }
   .md-stat {
     flex: none; font-size: 11.5px; color: var(--sub);
     white-space: nowrap; font-variant-numeric: tabular-nums;

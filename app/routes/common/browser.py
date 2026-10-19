@@ -1,6 +1,7 @@
 """浏览/预览/缩略图/视频流转发路由。"""
 import os
 import sys
+import re
 import json
 import time
 import threading
@@ -16,7 +17,7 @@ from ...config import (
     _AUDIO_EXTS,
     _PREVIEW_MAX_BYTES, _TEXT_PREVIEW_MAX_BYTES,
     _THUMB_CACHE_DIR, _TEXT_FILENAMES, _DOTFILE_TEXT_STEMS, _STORAGE_DIR,
-    FFMPEG_BIN,
+    FFMPEG_BIN, FFPROBE_BIN,
 )
 from ...log import get_logger
 from ...services.common.filecore import (
@@ -1308,6 +1309,19 @@ def _parse_ss(v):
     return None
 
 
+def _probe_audio_codec(path):
+    """用 ffprobe 探测文件主音频流编码；返回 (has_audio, codec_name) 或 (False, None)。"""
+    try:
+        out = subprocess.run(
+            [FFPROBE_BIN, "-v", "error", "-select_streams", "a:0", "-show_entries",
+             "stream=codec_name", "-of", "default=nw=1:nk=1", path],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10, check=False
+        ).stdout.decode("utf-8", "ignore").strip().lower()
+        return (bool(out), out.splitlines()[0] if out else None)
+    except Exception:
+        return (False, None)
+
+
 @bp.route("/api/stream_transcode")
 def api_stream_transcode():
     target_path = _get_file_path_from_request(request)
@@ -1320,22 +1334,53 @@ def api_stream_transcode():
     if ss is None:
         return jsonify({"error": "ss 参数非法"}), 400
 
+    has_audio, audio_codec = _probe_audio_codec(target_path)
+    # 浏览器对 MP4 里的音频兼容性：aac / mp3 可直接透传；其它需要转码成 aac
+    if not has_audio:
+        audio_args = ["-an"]
+    elif audio_codec in ("aac", "mp3"):
+        audio_args = ["-c:a", "copy"]
+    else:
+        audio_args = [
+            "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+            "-af", "aresample=async=1:min_hard_comp=0.100000:first_pts=0",
+        ]
+
     cmd = [
         FFMPEG_BIN, "-hide_banner", "-loglevel", "error",
+        # 修复部分 AVI 时间戳/索引异常，忽略可恢复的错误
+        "-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err",
         "-ss", ss, "-i", target_path,
         # 视频：H.264 兼容 8bit，1280 内缩放 + veryfast 控制转码延迟与 CPU 占用
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
-        "-pix_fmt", "yuv420p", "-vf", "scale='min(iw,1280)':-2",
-        # 音频：AAC 立体声（浏览器全支持）
-        "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-vf", "scale='min(iw,1280)':-2,format=yuv420p",
+    ] + audio_args + [
         # fMP4 分片输出：边转边播，无需等整体转完
-        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-movflags", "+faststart+frag_keyframe+empty_moov+default_base_moof",
         "-f", "mp4", "pipe:1",
     ]
 
     def generate():
         with _TRANCODE_SEM:                 # 并发上限，超出的排队等待
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stderr_chunks = []
+
+            def _drain_stderr():
+                try:
+                    while True:
+                        chunk = proc.stderr.read(16 * 1024)
+                        if not chunk:
+                            break
+                        stderr_chunks.append(chunk)
+                except Exception:
+                    pass
+                finally:
+                    stderr_closed.set()
+
+            stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+            stderr_thread.start()
+
             try:
                 while True:
                     chunk = proc.stdout.read(64 * 1024)
@@ -1354,6 +1399,16 @@ def api_stream_transcode():
                         proc.stdout.close()
                 except Exception:
                     pass
+                stderr_thread.join(timeout=3.0)
+                try:
+                    if proc.stderr:
+                        proc.stderr.close()
+                except Exception:
+                    pass
+                stderr = b"".join(stderr_chunks).decode("utf-8", "ignore").strip()
+                if stderr or (proc.returncode is not None and proc.returncode != 0):
+                    _log.warning("stream_transcode ffmpeg error for %s (code=%s): %s",
+                                 target_path, proc.returncode, stderr or "unknown")
 
     resp = FlaskResponse(generate(), mimetype="video/mp4")
     resp.headers["Cache-Control"] = "no-store"   # 转码结果不缓存（带 ss 定位，且不可 Range）

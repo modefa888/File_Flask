@@ -6,6 +6,15 @@
   .statusbar .sb-item { display: flex; align-items: center; gap: 5px; cursor: default; }
   .statusbar .sb-item:hover { background: rgba(255,255,255,.1); }
   .statusbar .sb-right { margin-left: auto; display: flex; gap: 16px; }
+  /* 当前文件 / 文件夹绝对路径：占状态栏中部，路径过长时省略；图标按文件类型显示 */
+  .statusbar .sb-root { flex: 0 1 auto; min-width: 0; max-width: 46vw; }
+  .statusbar .sb-root .sb-root-ic { flex: none; display: inline-flex; align-items: center; }
+  .statusbar .sb-root .sb-root-ic .bi { font-size: 13px; }
+  /* 与资源管理器一致的 seti 文件图标：去掉为行内文件名设计的下沉偏移 */
+  .statusbar .sb-root .sb-root-ic .seti-ic { font-size: 1.2em; transform: none; }
+  .statusbar .sb-root .sb-root-txt {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
 
   /* 右键菜单 */
   .ctx-menu {

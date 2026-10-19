@@ -17,6 +17,7 @@ import base64
 import json
 import os
 import queue  # noqa: F401  （备用，当前用 deque 管理输出缓冲）
+import re
 import socket
 import threading
 import time
@@ -207,6 +208,43 @@ def _ssh_err(e):
     return msg or "未知错误"
 
 
+_PROBE_CMD = (
+    'echo "@@SYS@@"; if [ -r /etc/os-release ]; then . /etc/os-release; printf "%s\\n" "$PRETTY_NAME"; '
+    'else uname -sr; fi; '
+    'echo "@@LOAD@@"; cut -d" " -f1-3 /proc/loadavg 2>/dev/null; '
+    'echo "@@MEM@@"; free -m 2>/dev/null | awk \'NR==2{print $2, $3, $7}\'; '
+    'echo "@@DISK@@"; df -h / 2>/dev/null | awk \'NR==2{print $2, $3, $5}\'; '
+    'echo "@@UP@@"; cut -d" " -f1 /proc/uptime 2>/dev/null; '
+    'echo "@@USERS@@"; who 2>/dev/null | wc -l; '
+    'echo "@@HOME@@"; printf "%s\\n" "$HOME"; '
+    'echo "@@PWD@@"; pwd'
+)
+
+
+def _remote_probe(client):
+    """用独立 exec 通道采集远端目录与系统信息（失败返回空 dict，不影响终端连接）。
+
+    返回值键：sys（内核/发行版）、load、mem（MB：总量 已用 可用）、disk（总量 已用 使用率）、
+    up（开机秒数）、users（登录用户数）、home、pwd。
+    """
+    try:
+        _in, out, _err = client.exec_command(_PROBE_CMD, timeout=6)
+        text = (out.read(8192) or b"").decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        return {}
+    info, cur = {}, None
+    for line in text.splitlines():
+        s = line.strip()
+        m = re.match(r"^@@([A-Z]+)@@$", s)
+        if m:
+            cur = m.group(1).lower()
+            info.setdefault(cur, "")
+            continue
+        if cur and s:
+            info[cur] = (info[cur] + " " + s).strip() if info[cur] else s
+    return info
+
+
 def _connect(conn):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -348,6 +386,19 @@ def api_ssh_open():
         client.close()
         return _fail("开启 shell 失败：" + str(e))
     chan.settimeout(_READ_TIMEOUT)
+    # 远端环境探测放在交互 shell 建立之后：exec 不会抢在 shell 前面建立会话，
+    # 避免某些服务器的 PAM/MOTD 只对第一个会话输出而导致欢迎信息消失。
+    probe = _remote_probe(client)
+    home = probe.get("home", "")
+    remote_cwd = probe.get("pwd", "")
+    sysinfo = {
+        "kernel": probe.get("sys", ""),
+        "load": probe.get("load", ""),
+        "mem": probe.get("mem", ""),
+        "disk": probe.get("disk", ""),
+        "uptime": probe.get("up", ""),
+        "users": probe.get("users", ""),
+    }
     _cleanup()
     sid = uuid.uuid4().hex[:16]
     sess = _Sess(sid, client, chan, cols, rows, conn.get("host"), conn.get("user"))
@@ -355,7 +406,8 @@ def api_ssh_open():
         _SESSIONS[sid] = sess
     threading.Thread(target=_pump, args=(sess,), daemon=True).start()
     _log.info("SSH 会话已建立：%s@%s id=%s", conn.get("user"), conn.get("host"), sid)
-    return jsonify({"ok": True, "id": sid, "host": conn.get("host"), "user": conn.get("user")})
+    return jsonify({"ok": True, "id": sid, "host": conn.get("host"), "user": conn.get("user"),
+                    "home": home, "cwd": remote_cwd or home, "sysinfo": sysinfo})
 
 
 @bp.route("/api/ssh/stream/<sid>")

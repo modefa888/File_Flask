@@ -17,6 +17,9 @@
             runSteps: [],                      // 本轮工具步骤（落库用，刷新后能回放）
             runTodos: [],                      // 本轮任务清单（落库用）
             stepMap: {},                       // call_id → 步骤数据
+            providers: [],                     // /api/ai/config 返回的接口列表
+            provId: '',                        // 当前选中的接口 id
+            model: '',                         // 当前选中的模型
         };
 
         function _aiFmEsc(s) {
@@ -222,6 +225,112 @@
             if (t) t.textContent = _aiFmStepsTitle(_aiFm.runSteps);
         }
 
+        // ---------- 权限选择（只读 / 目录内写 / 完全） ----------
+        const _AI_FM_PERMS = [
+            { v: 'readonly', n: '只读', d: '只能读取文件、列目录，不做任何改动' },
+            { v: 'workspace', n: '目录内写', d: '可新建 / 修改当前目录内的文件' },
+            { v: 'full', n: '完全', d: '可读写任意路径，并执行命令' },
+        ];
+
+        function _aiFmRenderPerm() {
+            if (!['readonly', 'workspace', 'full'].includes(_aiFm.perm)) _aiFm.perm = 'workspace';
+            const nameEl = document.getElementById('aiFmPermName');
+            const pop = document.getElementById('aiFmPermPop');
+            if (nameEl) {
+                const cur = _AI_FM_PERMS.filter(function (p) { return p.v === _aiFm.perm; })[0];
+                nameEl.textContent = cur ? cur.n : '只读';
+            }
+            if (!pop) return;
+            pop.innerHTML = '';
+            _AI_FM_PERMS.forEach(function (p) {
+                const o = document.createElement('div');
+                o.className = 'aifm-perm-opt' + (p.v === _aiFm.perm ? ' on' : '');
+                o.innerHTML = '<i class="bi bi-check2"></i><div class="aifm-perm-txt"><b></b><span></span></div>';
+                o.querySelector('b').textContent = p.n;
+                o.querySelector('span').textContent = p.d;
+                o.addEventListener('click', function () {
+                    _aiFm.perm = p.v;
+                    localStorage.setItem('fmAI_perm', p.v);
+                    pop.classList.remove('open');
+                    _aiFmRenderPerm();
+                });
+                pop.appendChild(o);
+            });
+        }
+
+        // ---------- 模型选择（与 IDE 的 AI 面板同一套配置） ----------
+        async function _aiFmLoadModels() {
+            try {
+                const r = await fetch('/api/ai/config');
+                const d = await r.json().catch(function () { return {}; });
+                _aiFm.providers = Array.isArray(d.providers) ? d.providers : [];
+                const act = d.active || {};
+                const sProv = localStorage.getItem('fmAI_prov') || '';
+                const sModel = localStorage.getItem('fmAI_model') || '';
+                const prov = _aiFm.providers.find(function (p) { return p.id === sProv; }) ||
+                    _aiFm.providers.find(function (p) { return p.id === act.provider; }) ||
+                    _aiFm.providers[0] || null;
+                let model = '';
+                if (prov) {
+                    const models = prov.models || [];
+                    // 本面板上次选的 > 全局 active > 该接口第一个模型
+                    const want = prov.id === sProv ? sModel : (prov.id === act.provider ? act.model : '');
+                    model = models.indexOf(want) >= 0 ? want : (models[0] || '');
+                }
+                _aiFm.provId = prov ? prov.id : '';
+                _aiFm.model = model;
+                _aiFmRenderModel();
+            } catch (e) {
+                const nameEl = document.getElementById('aiFmModelName');
+                if (nameEl) nameEl.textContent = '未配置接口';
+            }
+        }
+
+        function _aiFmRenderModel() {
+            const nameEl = document.getElementById('aiFmModelName');
+            const btn = document.getElementById('aiFmModelBtn');
+            const pop = document.getElementById('aiFmModelPop');
+            if (!nameEl || !pop) return;
+            const provs = _aiFm.providers || [];
+            if (!provs.length) {
+                nameEl.textContent = '未配置接口';
+                if (btn) btn.title = '先到 IDE「设置 → AI 助手」添加接口';
+                pop.innerHTML = '<div class="aifm-model-g">还没有配置 AI 接口，请到 IDE「设置 → AI 助手」添加</div>';
+                return;
+            }
+            const cur = provs.filter(function (p) { return p.id === _aiFm.provId; })[0];
+            nameEl.textContent = _aiFm.model || '未选择模型';
+            if (btn) btn.title = (cur ? cur.name + ' · ' : '') + (_aiFm.model || '');
+            pop.innerHTML = '';
+            provs.forEach(function (p) {
+                const g = document.createElement('div');
+                g.className = 'aifm-model-g';
+                g.textContent = p.name || p.id;
+                pop.appendChild(g);
+                (p.models || []).forEach(function (m) {
+                    const o = document.createElement('div');
+                    o.className = 'aifm-model-opt' + (p.id === _aiFm.provId && m === _aiFm.model ? ' on' : '');
+                    o.innerHTML = '<i class="bi bi-check2"></i><span></span>';
+                    o.querySelector('span').textContent = m;
+                    o.title = m;
+                    o.addEventListener('click', function () {
+                        _aiFm.provId = p.id;
+                        _aiFm.model = m;
+                        localStorage.setItem('fmAI_prov', p.id);
+                        localStorage.setItem('fmAI_model', m);
+                        // 与 IDE 面板一致：同时写回全局默认选择
+                        fetch('/api/ai/config', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ active: { provider: p.id, model: m } }),
+                        }).catch(function () { /* 忽略 */ });
+                        pop.classList.remove('open');
+                        _aiFmRenderModel();
+                    });
+                    pop.appendChild(o);
+                });
+            });
+        }
+
         function _aiFmBuild() {
             if (_aiFm.built) return;
             _aiFm.built = true;
@@ -232,11 +341,6 @@
                 <div class="aifm-head">
                     <span class="aifm-title"><i class="bi bi-robot"></i> AI 文件管理</span>
                     <span class="aifm-scope" id="aiFmScope" title="AI 工作目录">--</span>
-                    <select class="aifm-perm" id="aiFmPerm" title="AI 操作权限">
-                        <option value="readonly">只读</option>
-                        <option value="workspace">目录内写</option>
-                        <option value="full">完全</option>
-                    </select>
                     <button class="aifm-hbtn ms-auto" id="aiFmHistBtn" title="历史对话"><i class="bi bi-clock-history"></i></button>
                     <button class="aifm-hbtn" id="aiFmNewBtn" title="新会话（清空对话）"><i class="bi bi-plus-circle"></i></button>
                     <button class="aifm-hbtn" id="aiFmCloseBtn" title="关闭（任务仍在后台继续）"><i class="bi bi-x-lg"></i></button>
@@ -244,9 +348,23 @@
                 </div>
                 <div class="aifm-body" id="aiFmBody"></div>
                 <div class="aifm-foot">
-                    <div class="aifm-input-wrap">
-                        <textarea id="aiFmInput" rows="1" placeholder="让 AI 整理这个目录，如：把这些图片按日期归类到子文件夹"></textarea>
-                        <button class="aifm-send" id="aiFmSendBtn" title="发送"><i class="bi bi-send"></i></button>
+                    <div class="aifm-input-box">
+                        <textarea id="aiFmInput" rows="1" placeholder="输入消息…  例如：把这些图片按日期归类到子文件夹"></textarea>
+                        <div class="aifm-input-bar">
+                            <div class="aifm-perm-row">
+                                <button type="button" class="aifm-perm-btn" id="aiFmPermBtn" title="AI 操作权限">
+                                    <i class="bi bi-shield-lock"></i><span id="aiFmPermName">只读</span><i class="bi bi-chevron-down"></i>
+                                </button>
+                                <div class="aifm-perm-pop" id="aiFmPermPop"></div>
+                            </div>
+                            <div class="aifm-model-row">
+                                <button type="button" class="aifm-model-btn" id="aiFmModelBtn" title="选择接口 / 模型">
+                                    <i class="bi bi-cpu"></i><span id="aiFmModelName">加载模型…</span><i class="bi bi-chevron-down"></i>
+                                </button>
+                                <div class="aifm-model-pop" id="aiFmModelPop"></div>
+                            </div>
+                            <button class="aifm-send" id="aiFmSendBtn" title="发送"><i class="bi bi-send"></i></button>
+                        </div>
                     </div>
                     <div class="aifm-note">AI 以当前目录为工作区；写文件 / 执行命令按权限确认后才会执行</div>
                 </div>`;
@@ -292,12 +410,17 @@
                 });
             }
 
-            const permSel = drawer.querySelector('#aiFmPerm');
-            permSel.value = ['readonly', 'workspace', 'full'].includes(_aiFm.perm) ? _aiFm.perm : 'workspace';
-            permSel.addEventListener('change', function () {
-                _aiFm.perm = permSel.value;
-                localStorage.setItem('fmAI_perm', _aiFm.perm);
-            });
+            const permBtn = drawer.querySelector('#aiFmPermBtn');
+            if (permBtn) {
+                permBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    const pop = document.getElementById('aiFmPermPop');
+                    if (!pop) return;
+                    pop.classList.toggle('open');
+                    if (pop.classList.contains('open')) _aiFmRenderPerm();
+                });
+            }
+            _aiFmRenderPerm();
 
             drawer.querySelector('#aiFmCloseBtn').addEventListener('click', _aiFmToggle);
             drawer.querySelector('#aiFmNewBtn').addEventListener('click', _aiFmNewSession);
@@ -305,12 +428,28 @@
                 e.stopPropagation();
                 _aiFmHistToggle();
             });
-            // 点空白处收起历史列表
+            // 模型下拉
+            const modelBtn = drawer.querySelector('#aiFmModelBtn');
+            if (modelBtn) {
+                modelBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    const pop = document.getElementById('aiFmModelPop');
+                    if (!pop) return;
+                    pop.classList.toggle('open');
+                    if (pop.classList.contains('open')) _aiFmRenderModel();
+                });
+            }
+            // 点空白处收起历史列表 / 模型下拉
             document.addEventListener('click', function (e) {
                 const box = document.getElementById('aiFmHist');
-                if (!box || !box.classList.contains('open')) return;
-                if (box.contains(e.target) || e.target.closest('#aiFmHistBtn')) return;
-                box.classList.remove('open');
+                if (box && box.classList.contains('open') &&
+                    !box.contains(e.target) && !e.target.closest('#aiFmHistBtn')) box.classList.remove('open');
+                const pop = document.getElementById('aiFmModelPop');
+                if (pop && pop.classList.contains('open') &&
+                    !pop.contains(e.target) && !e.target.closest('#aiFmModelBtn')) pop.classList.remove('open');
+                const pp = document.getElementById('aiFmPermPop');
+                if (pp && pp.classList.contains('open') &&
+                    !pp.contains(e.target) && !e.target.closest('#aiFmPermBtn')) pp.classList.remove('open');
             });
 
             const input = drawer.querySelector('#aiFmInput');
@@ -325,6 +464,7 @@
             });
 
             _aiFmWelcome();
+            _aiFmLoadModels();          // 首次构建就拉一次接口 / 模型列表
         }
 
         // 统一的「正在干活」提示：没有新内容输出时始终有个气泡转圈，
@@ -388,6 +528,7 @@
             if (_aiFm.open) {
                 const scope = document.getElementById('aiFmScope');
                 if (scope) { scope.textContent = currentPath || '--'; scope.title = currentPath || ''; }
+                _aiFmLoadModels();     // 每次打开都刷新一下可用模型（设置里可能刚加过接口）
                 // 换了目录（且没在跑任务）：清空重来，并载入该目录上次的对话
                 if (!_aiFm.running && _aiFm.sessionPath !== (currentPath || '')) {
                     _aiFm.history = []; _aiFm.session = ''; _aiFm.savedMids = null;
@@ -639,6 +780,8 @@
                         repo: currentPath, messages: _aiFm.history, perm: _aiFm.perm,
                         auto_run: 'ask', web_search: false, image_tool: false,
                         session_id: _aiFm.session,
+                        provider_id: _aiFm.provId || '',   // 面板里选的接口 / 模型
+                        model: _aiFm.model || '',
                     }),
                 });
                 const d = await r.json().catch(function () { return {}; });

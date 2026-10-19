@@ -31,6 +31,59 @@
     return out;
   }
 
+  /* ---------- 远端当前目录：从 shell 提示符里解析 ----------
+     远端 bash / zsh 的默认提示符形如 root@host:~#  或  user@host:/var/log$。
+     每次收到输出就看末尾是不是新提示符，是则取路径更新状态栏；~ 用后端
+     返回的 home 展开成绝对路径。识别不到（自定义 PS1 等）就保持上一次的值。 */
+  function stripAnsiLite(s) {
+    return String(s)
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")          // OSC（标题 / 超链接等）
+      .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")                    // CSI（颜色 / 光标）
+      .replace(/\x1b[()][A-Za-z0-9]/g, "")                          // 字符集切换
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "");    // 其余控制字符
+  }
+  /* 连接时后端探测到的系统信息 → 「中文说明」行（服务器没有 MOTD 输出时的兜底） */
+  function sysInfoRows(s) {
+    if (!s) return [];
+    const rows = [];
+    const g = k => String(s[k] == null ? "" : s[k]).trim();
+    if (g("kernel")) rows.push("**系统版本**：" + g("kernel") + "。");
+    const bits = [];
+    if (g("load")) bits.push("负载 " + g("load"));
+    const mem = g("mem").split(/\s+/);
+    if (mem.length >= 3) bits.push("内存已用 " + mem[1] + "/" + mem[0] + " MB（可用 " + mem[2] + " MB）");
+    const disk = g("disk").split(/\s+/);
+    if (disk.length >= 3) bits.push("根分区已用 " + disk[2] + "（共 " + disk[0] + "）");
+    const up = parseFloat(g("uptime"));
+    if (up > 0) {
+      const d = Math.floor(up / 86400), h = Math.floor((up % 86400) / 3600);
+      bits.push("已运行 " + (d > 0 ? d + " 天 " : "") + h + " 小时");
+    }
+    const users = g("users");
+    if (/^\d+$/.test(users) && users !== "0") bits.push("登录用户 " + users + " 个");
+    if (bits.length) rows.push("**资源概览**：" + bits.join("，") + "。");
+    return rows;
+  }
+  function expandRemoteTilde(p, home) {
+    if (p === "~") return home || "~";
+    if (p.indexOf("~/") === 0) return (home || "~") + p.slice(1);
+    return p;
+  }
+  function sshTrackCwd(sess, text) {
+    if (!sess || !text) return;
+    const clean = stripAnsiLite(text);
+    if (!clean) return;
+    sess.cwdBuf = ((sess.cwdBuf || "") + clean).slice(-600);         // 只留尾巴，避免长输出攒内存
+    if (sess.cwdBuf.indexOf("@") < 0) return;
+    const m = sess.cwdBuf.match(/(?:^|[\r\n])[^\r\n@]{0,80}@[^\s:\r\n]{1,64}:([~/][^\s#$]{0,255})[#$]\s*$/);
+    if (!m) return;                                                  // 末尾不是提示符（命令正在跑）
+    const p = expandRemoteTilde(m[1].trim(), sess.home);
+    if (!p || p.charAt(0) !== "/" || p === sess.cwd) return;
+    sess.cwd = p;
+    if (sess.tab) sess.tab.sshCwd = p;
+    if (active === sess.tab) renderStatusRoot(sess.tab);             // 只有当前激活的终端才刷新状态栏
+  }
+
   /* ---------------- 侧栏列表 ---------------- */
   async function loadSshConns() {
     const d = await api("/api/ssh/list", { method: "GET" });
@@ -38,7 +91,7 @@
     SSHC.conns = d.connections || [];
     SSHC.paramiko = d.paramiko !== false;
     renderSshList();
-    // 首次加载完成后，恢复上次刷新前打开的 SSH 终端标签（自动重连；只做一次，手动点刷新不重复触发）
+    // 首次加载完成后，按上次记录恢复「未连接」的 SSH 占位标签（点击后才建连）
     if (!SSHC.restored) {
       SSHC.restored = true;
       setTimeout(sshSessionRestore, 0);              // 等本调用栈收尾，避免和其它模块的会话恢复抢布局
@@ -57,7 +110,9 @@
     }
     box.innerHTML = "";
     SSHC.conns.forEach(c => {
-      const open = !!findTab(SSH_VIEW_PREFIX + c.id);
+      const tab0 = findTab(SSH_VIEW_PREFIX + c.id);
+      const open = !!tab0;                                  // 标签存在（可能是刷新后保留的未连接占位）
+      const online = !!(tab0 && tab0.sshSid && SESS[tab0.sshSid]);
       const item = document.createElement("div");
       item.className = "ssh-item" + (open ? " open" : "");
       item.dataset.id = c.id;
@@ -71,17 +126,17 @@
           '</div>' +
         '</div>' +
         '<div class="ssh-acts">' +
-          (open
+          (online
             ? '<button data-act="open" title="断开并关闭终端" class="ssh-stop"><i class="bi bi-stop-fill"></i></button>'
-            : '<button data-act="open" title="连接并打开终端"><i class="bi bi-play-fill"></i></button>') +
+            : '<button data-act="open" title="' + (open ? "连接（标签已保留，当前未连接）" : "连接并打开终端") + '"><i class="bi bi-play-fill"></i></button>') +
           '<button data-act="edit" title="编辑"><i class="bi bi-pencil-square"></i></button>' +
           '<button data-act="dup" title="复制连接"><i class="bi bi-files"></i></button>' +
           '<button data-act="del" title="删除"><i class="bi bi-trash"></i></button>' +
         '</div>';
       item.querySelector('[data-act="open"]').onclick = () => {
-        if (!open) { connectSsh(c); return; }
-        // 已打开：按钮变成「停止」，断开会话并关闭对应终端标签
-        const tab = findTab(SSH_VIEW_PREFIX + c.id);
+        if (!online) { connectSsh(c); return; }    // 未连接（没有标签，或只剩占位标签）→ 建连
+        // 已连接：按钮是「停止」，断开会话并关闭对应终端标签
+        const tab = tab0;
         if (!tab) return;
         if (typeof closeTab === "function") { closeTab(tab); return; }
         try { if (typeof tab.onBeforeClose === "function") tab.onBeforeClose(); } catch (e) { /* 忽略 */ }
@@ -99,10 +154,10 @@
 
   /* ---------------- 连接 / 编辑器区终端 ---------------- */
 
-  /* ---------- 会话持久化：已打开的 SSH 终端标签 ----------
-     通用会话恢复（00_preamble 的 sessionSaveTabs）跳过了 SSH 终端（刷新后连接已断开），
-     这里单独记一份「打开的连接 id」到 localStorage；刷新后等连接列表加载完，
-     按原顺序逐个重连，还原打开状态。 */
+  /* ---------- 会话持久化：刷新后保留 SSH 标签，但不自动连接 ----------
+     通用会话恢复（00_preamble 的 sessionSaveTabs）跳过了 SSH 终端，这里单独记
+     一份「打开的连接 id」；刷新后按原顺序恢复成「未连接」的占位标签，等用户点击
+     标签或「连接」按钮时才真正建连——避免刷新时在不知情的情况下占用服务器资源。 */
   const SSH_OPEN_KEY = "ide.session.sshTabs";
   function sshSessionAllowed() {
     return (typeof ideSettingGet !== "function") || !!ideSettingGet("restoreSession", true);
@@ -114,40 +169,52 @@
       localStorage.setItem(SSH_OPEN_KEY, JSON.stringify(ids));
     } catch (_) { /* localStorage 不可用则放弃 */ }
   }
-  function sshSessionRestore() {
-    if (!sshSessionAllowed() || !SSHC.paramiko) return;
-    // 先清掉历史遗留的「SSH 假标签」：旧版会话快照恢复出来的 ssh:<id> 空白标签
-    // （名字 / 图标都是路径，不是真正的终端），不清理会和重连出来的真标签并存
+  function sshCleanStaleTabs() {
+    if (!SSHC.paramiko) return;
+    // 旧版会话快照恢复出来的 ssh:<id> 空白标签（名字 / 图标都是路径，不是真正的终端），
+    // 混在标签栏里会误导，这里统一清掉
     const stale = tabs.filter(t => t && !t.isSshTerm &&
       /^[\u0000-\u001f]*ssh:[^/]*$/i.test(String(t.path || "")));
-    if (stale.length) {
-      stale.forEach(t => {
-        try { t.host.remove(); } catch (e) { /* 忽略 */ }
-        const i = tabs.indexOf(t);
-        if (i >= 0) tabs.splice(i, 1);
-      });
-      renderTabsAll();
-      if (typeof sessionSaveTabs === "function") sessionSaveTabs();
-    }
+    if (!stale.length) return;
+    stale.forEach(t => {
+      try { t.host.remove(); } catch (e) { /* 忽略 */ }
+      const i = tabs.indexOf(t);
+      if (i >= 0) tabs.splice(i, 1);
+    });
+    renderTabsAll();
+    if (typeof sessionSaveTabs === "function") sessionSaveTabs();
+  }
+  function sshSessionRestore() {
+    if (!sshSessionAllowed() || !SSHC.paramiko) return;
+    sshCleanStaleTabs();
     let ids;
     try { ids = JSON.parse(localStorage.getItem(SSH_OPEN_KEY) || "[]"); } catch (_) { return; }
     if (!Array.isArray(ids) || !ids.length) return;
     ids.forEach(id => {
       const c = SSHC.conns.find(x => x && x.id === id);
-      if (c) connectSsh(c);                        // 已打开的会被 connectSsh 去重，只聚焦不重复建连
+      if (c) openSshPlaceholderTab(c);             // 只恢复标签，不建连
     });
   }
 
   async function connectSsh(c) {
     const tab = findTab(SSH_VIEW_PREFIX + c.id);
-    if (tab) { activate(tab); return; }            // 已打开则聚焦
+    if (tab && tab.sshSid && SESS[tab.sshSid]) { activate(tab); return; }   // 已连接：聚焦
     toast("正在连接 " + (c.user || "root") + "@" + c.host + " …", "info");
     const r = await api("/api/ssh/open", { method: "POST", body: JSON.stringify({ id: c.id }) });
     if (r.error) { toast("连接失败：" + r.error, "err"); return; }
-    openSshTermTab(c, r.id);
+    if (tab) {                                     // 复用刷新后保留的占位标签
+      tab.onActivate = null;
+      tab.sshPlaceholder = false;
+      tab.host.innerHTML = "";
+      buildSshTerm(tab, c, r.id, r.home, r.cwd, r.sysinfo);
+      activate(tab);
+    } else {
+      openSshTermTab(c, r.id, r.home, r.cwd, r.sysinfo);
+    }
+    sshSessionSave();
   }
 
-  function openSshTermTab(c, sid) {
+  function openSshTermTab(c, sid, home, cwd, sysinfo) {
     const path = SSH_VIEW_PREFIX + c.id;
     const host = document.createElement("div");
     host.className = "cm-host ssh-host";
@@ -164,9 +231,72 @@
     tabs.push(tab);
     renderTabsAll();
     renderSshList();    // 侧栏该项立即转为「已打开」（绿色停止按钮 + 高亮）
-    buildSshTerm(tab, c, sid);
+    buildSshTerm(tab, c, sid, home, cwd, sysinfo);
     activate(tab);
     sshSessionSave();
+  }
+
+  /* ---------- 刷新后恢复的占位标签：只显示连接信息，点击才建连 ---------- */
+  function openSshPlaceholderTab(c) {
+    const path = SSH_VIEW_PREFIX + c.id;
+    if (findTab(path)) return;                     // 已存在（真实终端或占位）不重复建
+    const host = document.createElement("div");
+    host.className = "cm-host ssh-host";
+    let tn = String(c.name == null ? "" : c.name).replace(/[\u0000-\u001f\u007f]/g, "").trim();
+    if (!tn || /^ssh:/.test(tn)) tn = (c.user || "root") + "@" + (c.host || "远程主机");
+    const tab = {
+      path: path, name: tn, host: host,
+      iconHtml: '<i class="bi bi-hdd-network"></i>',
+      isSshTerm: true, connId: c.id, sshPlaceholder: true,
+      // 与真实终端一致：mountHost 按 group 找容器
+      group: (typeof curGroup === "number" && curGroup >= 0) ? curGroup : 0,
+    };
+    tab.onBeforeClose = () => { setTimeout(sshSessionSave, 0); };   // 关闭后同步持久化记录
+    tabs.push(tab);
+    renderTabsAll();
+    buildSshPlaceholder(tab, c);
+    renderSshList();                                // 侧栏显示为「已打开（未连接）」
+  }
+
+  function buildSshPlaceholder(tab, c) {
+    const wrap = document.createElement("div");
+    wrap.className = "ssh-term-wrap";
+    const bar = document.createElement("div");
+    bar.className = "ssh-term-bar";
+    bar.innerHTML = '<span class="ssh-term-t"><i class="bi bi-hdd-network"></i> ' +
+      esc(tab.name) + ' · ' + esc(c.user || "root") + '@' + esc(c.host) + ':' + esc(String(c.port || 22)) + '</span>';
+    const st = document.createElement("span");
+    st.className = "ssh-term-st";
+    st.textContent = "未连接";
+    bar.appendChild(st);
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "ssh-term-x";
+    closeBtn.innerHTML = '<i class="bi bi-x-lg"></i>';
+    closeBtn.title = "关闭标签";
+    closeBtn.onclick = () => { if (typeof closeTab === "function") closeTab(tab); };
+    bar.appendChild(closeBtn);
+
+    const body = document.createElement("div");
+    body.className = "ssh-offline";
+    body.innerHTML = '<i class="bi bi-plug"></i>' +
+      '<div class="ssh-offline-t">上次打开的 SSH 标签已保留</div>' +
+      '<div class="ssh-offline-s">刷新后不会自动连接；点击下方按钮或本标签即可连接</div>';
+    const btn = document.createElement("button");
+    btn.className = "g-btn";
+    btn.innerHTML = '<i class="bi bi-play-fill"></i> 连接 ' + esc((c.user || "root") + "@" + c.host);
+    body.appendChild(btn);
+
+    wrap.appendChild(bar);
+    wrap.appendChild(body);
+    tab.host.appendChild(wrap);
+
+    const go = () => {
+      if (tab.sshBusy) return;
+      tab.sshBusy = true;
+      Promise.resolve(connectSsh(c)).finally(() => { tab.sshBusy = false; });
+    };
+    btn.onclick = go;
+    tab.onActivate = go;                           // 点标签本身也会触发连接
   }
 
   // 终端配色跟随界面主题（白天 / 黑夜），<html>.theme-light 由设置页切换
@@ -183,7 +313,7 @@
           selectionBackground: "#264f78", black: "#1e1e1e", brightBlack: "#666" };
   }
 
-  function buildSshTerm(tab, c, sid) {
+  function buildSshTerm(tab, c, sid, home, cwd, sysinfo) {
     const wrap = document.createElement("div");
     wrap.className = "ssh-term-wrap";
     const bar = document.createElement("div");
@@ -211,6 +341,11 @@
 
     const termBox = document.createElement("div");
     termBox.className = "ssh-term-box";
+    // fit 插件按 parent 的 height 算行数，且不扣除 parent 自身的 padding；
+    // 这里再套一层无内边距的容器，让 fit 拿到真实可用高度，避免最后一行被裁掉
+    const termInner = document.createElement("div");
+    termInner.className = "ssh-term-inner";
+    termBox.appendChild(termInner);
     wrap.appendChild(bar);
     wrap.appendChild(termBox);
     tab.host.appendChild(wrap);
@@ -222,13 +357,59 @@
     });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
-    term.open(termBox);
+    term.open(termInner);
     try { fit.fit(); } catch (e) { /* 容器未布局时忽略 */ }
 
-    const sess = SESS[sid] = { term, fit, es: null, cols: term.cols, rows: term.rows, tab: tab, alive: true };
+    const sess = SESS[sid] = { term, fit, es: null, cols: term.cols, rows: term.rows, tab: tab, alive: true,
+      home: home || "", cwd: cwd || home || "", cwdBuf: "",
+      sysinfo: sysinfo || null };                    // 远端 home / 当前目录 / 系统信息（状态栏、说明卡用）
     tab.sshSid = sid;                              // 侧栏「常用命令」通过 tab 找到当前会话
+    tab.sshCwd = sess.cwd;
+    if (active === tab) renderStatusRoot(tab);
     // 用真实尺寸纠正后端 PTY 大小
     api("/api/ssh/resize", { method: "POST", body: JSON.stringify({ id: sid, cols: term.cols, rows: term.rows }) });
+
+    /* ---------- 断线重连：点击「已断开」状态徽标 ----------
+       远端 exit / 网络掉线 / 后端重启都会把会话置为断开；此时徽标可点击，
+       点一下就在同一标签内销毁旧会话并重新建连（标签位置、侧栏状态都不变）。 */
+    let reconnecting = false;
+    function setDead() {
+      st.className = "ssh-term-st bad";
+      st.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 已断开';
+      st.title = "点击重新连接";
+    }
+    st.onclick = () => { if (!reconnecting && !sess.alive) doReconnect(); };
+    async function doReconnect() {
+      if (reconnecting || sess.alive) return;
+      reconnecting = true;
+      st.className = "ssh-term-st";
+      st.textContent = "连接中…";
+      st.title = "";
+      const r = await api("/api/ssh/open", { method: "POST", body: JSON.stringify({ id: c.id }) });
+      if (r.error) {                                  // 失败：保留旧画面，徽标仍可再次点击重试
+        setDead();
+        toast("重新连接失败：" + r.error, "err");
+        reconnecting = false;
+        return;
+      }
+      // 等待期间标签可能已被关闭：丢弃刚建立的新会话，避免留下后台 PTY 和野会话
+      if (typeof tabs !== "undefined" && tabs.indexOf(tab) < 0) {
+        api("/api/ssh/close", { method: "POST", body: JSON.stringify({ id: r.id }) });
+        reconnecting = false;
+        return;
+      }
+      // 新会话已就绪，释放旧会话的全部资源（输出收集 / 尺寸监听 / SSE / 后端 PTY / 终端实例）
+      try { if (sess.capture && !sess.capture.done) sess.capture.finish(); } catch (e) { /* 忽略 */ }
+      try { ro.disconnect(); } catch (e) { /* 忽略 */ }
+      try { es.close(); } catch (e) { /* 忽略 */ }
+      try { term.dispose(); } catch (e) { /* 忽略 */ }
+      api("/api/ssh/close", { method: "POST", body: JSON.stringify({ id: sid }) });
+      delete SESS[sid];
+      reconnecting = false;
+      tab.host.innerHTML = "";                        // 清掉旧终端与 MOTD 卡片，随后在同一标签内重建
+      buildSshTerm(tab, c, r.id, r.home, r.cwd, r.sysinfo);
+      toast("已重新连接 " + (c.user || "root") + "@" + c.host, "ok");
+    }
 
     /* ---------- AI 助手支撑：输出回读 + 人话拦截 ---------- */
     sess.dec = new TextDecoder();
@@ -378,7 +559,7 @@
       }
     }
     const ro = new ResizeObserver(() => {
-      if (termBox.style.display === "none") return;      // Agent 模式下 xterm 被隐藏，不要按 0 尺寸去 fit
+      if (!termInner.clientHeight) return;               // 标签未激活 / Agent 模式隐藏时尺寸为 0，不要按 0 去 fit
       syncFit();
       // 浏览器缩放（非整数像素比）下字模测量有半行偏差，布局稳定后再校正一次
       clearTimeout(sess._fitT);
@@ -502,9 +683,14 @@
       motdDone = true;
       clearTimeout(motdTimer);
       const clean = motdStrip(motdRaw).replace(/\u0000/g, "").trim();
-      if (clean.length < 60) return;                   // 没什么欢迎信息，不做说明
-      const rows = motdParse(clean);
-      if (!rows.length) return;                        // 没解析出任何已知字段就不弹卡片
+      let rows = clean.length >= 60 ? motdParse(clean) : [];
+      // 服务器没输出 MOTD（只打印 Last login 或完全静默）时，用连接时探测到的
+      // 系统信息补齐，保证「连接信息 · 中文说明」卡片始终有内容
+      if (rows.length < 2 && sess.sysinfo) {
+        const extra = sysInfoRows(sess.sysinfo);
+        if (extra.length) rows = extra.concat(rows);
+      }
+      if (!rows.length) return;                        // 什么信息都没拿到就不弹卡片
       const txt = motdShowCard().querySelector(".ssh-motd-txt");
       // 最小渲染：**粗体**、`代码`、⚠️ 原样
       txt.innerHTML = esc(rows.join("\n"))
@@ -526,7 +712,7 @@
       let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
       if (m.eof) {                                     // 远端主动断开（服务器关闭连接 / exit 退出等）
         sess.alive = false;
-        st.className = "ssh-term-st bad"; st.textContent = "已断开";
+        setDead();                                     // 徽标转为可点击的「已断开」，点击重连
         try { if (sess.capture && !sess.capture.done) sess.capture.finish(); } catch (e) { /* 忽略 */ }
         term.write("\r\n[33m[连接已关闭]\x1b[0m\r\n");
         toast((tab.name || "SSH") + " 连接已断开", "warn");
@@ -541,6 +727,7 @@
       try { text = sess.dec.decode(base64ToBytes(m.data), { stream: true }); } catch (e) { return; }
       term.write(text);
       motdFeed(text);                                  // 首屏输出 → 中文说明
+      sshTrackCwd(sess, text);                         // 提示符变化 → 状态栏显示远端当前目录
       const cap = sess.capture;                        // AI 执行命令后的输出回读
       if (cap && !cap.done && text) {
         const ti = cap.tok ? text.indexOf(cap.tok) : -1;
@@ -559,7 +746,7 @@
       try { es.close(); } catch (e) { /* 已关闭 */ }
       if (sess.alive) {
         sess.alive = false;
-        st.className = "ssh-term-st bad"; st.textContent = "已断开";
+        setDead();                                     // 徽标转为可点击的「已断开」，点击重连
         term.write("\r\n\x1b[33m[连接已断开]\x1b[0m\r\n");
         toast((tab.name || "SSH") + " 连接已断开", "warn");
       }
@@ -603,8 +790,11 @@
               '<option value="key"' + (c.auth === "key" ? " selected" : "") + '>私钥</option>' +
             '</select></div>' +
           '<div class="ssh-row ssh-pwd-row"><span class="ssh-lb">密码</span>' +
-            '<input class="ssh-in" id="sshPwd" type="password" spellcheck="false" placeholder="' +
-              (isEdit && c.hasPassword ? "留空表示不修改（已保存 " + (c.hasPassword ? "●" : "") + "）" : "登录密码") + '"></div>' +
+            '<div class="ssh-pwd-wrap">' +
+              '<input class="ssh-in" id="sshPwd" type="password" spellcheck="false" placeholder="' +
+                (isEdit && c.hasPassword ? "留空表示不修改（已保存 " + (c.hasPassword ? "●" : "") + "）" : "登录密码") + '">' +
+              '<button type="button" class="ssh-eye" data-eye="sshPwd" title="查看密码" aria-label="查看密码"><i class="bi bi-eye"></i></button>' +
+            '</div></div>' +
           '<div class="ssh-row ssh-key-row" style="display:none"><span class="ssh-lb">私钥</span>' +
             '<textarea class="ssh-in ssh-key" id="sshKey" spellcheck="false" placeholder="粘贴私钥内容（-----BEGIN ... PRIVATE KEY-----）">' + esc(c.key || "") + '</textarea></div>' +
           '<div class="ssh-row ssh-keypass-row" style="display:none"><span class="ssh-lb">私钥口令</span>' +
@@ -614,6 +804,7 @@
         '<div class="ssh-tip"><i class="bi bi-info-circle"></i> 密码 / 私钥经传输层加密后落库；编辑时留空表示沿用已保存的值。</div>' +
         '<div class="ssh-modal-acts">' +
           '<button class="g-btn outline" id="sshTest"><i class="bi bi-plug"></i> 测试连接</button>' +
+          '<span class="ssh-test-msg" id="sshTestMsg"></span>' +   /* 测试结果提示：成功 / 失败 */
           '<span class="ssh-sp"></span>' +
           '<button class="g-btn outline" id="sshCancel">取消</button>' +
           '<button class="g-btn" id="sshSave"><i class="bi bi-check-lg"></i> ' + (isEdit ? "保存" : "创建") + '</button>' +
@@ -633,11 +824,31 @@
     };
     authSel.onchange = syncAuth; syncAuth();
 
+    // 密码框后的 👁：点击切换明文 / 密文（只影响显示，提交的仍是输入框里的原值）
+    ov.querySelectorAll(".ssh-eye").forEach(eye => {
+      eye.onclick = () => {
+        const inp = ov.querySelector("#" + eye.dataset.eye);
+        if (!inp) return;
+        const show = inp.type === "password";
+        inp.type = show ? "text" : "password";
+        eye.classList.toggle("on", show);
+        eye.title = show ? "隐藏密码" : "查看密码";
+        eye.setAttribute("aria-label", eye.title);
+        eye.innerHTML = '<i class="bi ' + (show ? "bi-eye-slash" : "bi-eye") + '"></i>';
+        try { inp.focus(); } catch (e) { /* 忽略 */ }
+      };
+    });
+
     const closeModal = () => { ov.classList.remove("show"); ov.innerHTML = ""; };
     ov.querySelector(".ssh-modal-x").onclick = closeModal;
     ov.querySelector("#sshCancel").onclick = closeModal;
     ov.querySelector("#sshTest").onclick = () => testSsh(ov, () => toast("连接测试成功", "ok"));
     ov.querySelector("#sshSave").onclick = () => saveSsh(ov, closeModal);
+    // 改了任意输入就清掉上一次的测试结果，避免旧提示与实际配置不符
+    ov.querySelector(".ssh-form").addEventListener("input", () => {
+      const m = ov.querySelector("#sshTestMsg");
+      if (m) { m.className = "ssh-test-msg"; m.textContent = ""; }
+    });
   }
   function row(label, ctrl) {
     return '<div class="ssh-row"><span class="ssh-lb">' + label + '</span>' + ctrl + '</div>';
@@ -670,12 +881,44 @@
   }
   async function testSsh(ov, ok) {
     const body = collect(ov);
-    if (!body.host) { toast("请填写主机地址", "warn"); return; }
-    if (body.auth === "key" && !body.key) { toast("请填写私钥", "warn"); return; }
-    if (body.auth === "password" && !body.password) { toast("请填写密码", "warn"); return; }
+    const btn = ov.querySelector("#sshTest");
+    const msg = ov.querySelector("#sshTestMsg");
+    const clearMsg = () => {
+      if (!msg) return;
+      msg.className = "ssh-test-msg";
+      msg.removeAttribute("title");
+      msg.textContent = "";
+    };
+    const showMsg = (kind, text) => {
+      if (!msg) return;
+      msg.className = "ssh-test-msg show " + kind;
+      msg.title = text;                                  // 文案过长被省略时可悬停看全文
+      msg.innerHTML = '<i class="bi ' + (kind === "ok" ? "bi-check-circle-fill" : "bi-x-circle-fill") + '"></i><span></span>';
+      msg.querySelector("span").textContent = text;
+    };
+    if (!body.host) { clearMsg(); toast("请填写主机地址", "warn"); return; }
+    if (body.auth === "key" && !body.key) { clearMsg(); toast("请填写私钥", "warn"); return; }
+    if (body.auth === "password" && !body.password) { clearMsg(); toast("请填写密码", "warn"); return; }
+    if (!btn || btn.disabled) return;                    // 测试中：忽略重复点击
+    clearMsg();
+    btn.disabled = true;
+    btn.classList.add("loading");
+    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> 测试中…';
+    const t0 = Date.now();
     const d = await api("/api/ssh/test", { method: "POST", body: JSON.stringify(body) });
-    if (d.ok) { if (ok) ok(); }
-    else toast("连接失败：" + (d.error || "未知错误"), "err");
+    // 本机 / 局域网连接往往几十毫秒就返回，补足一小段动效时间，避免「闪一下」看不出来
+    const gap = 450 - (Date.now() - t0);
+    if (d.ok && gap > 0) await new Promise(r => setTimeout(r, gap));
+    btn.disabled = false;
+    btn.classList.remove("loading");
+    btn.innerHTML = '<i class="bi bi-plug"></i> 测试连接';
+    if (d.ok) {
+      showMsg("ok", "连接成功");
+      if (ok) ok();
+    } else {
+      showMsg("err", "连接失败：" + (d.error || "未知错误"));
+      toast("连接失败：" + (d.error || "未知错误"), "err");
+    }
   }
   async function deleteSsh(c) {
     const ok = await uiConfirm("删除 SSH 连接", "确定删除「" + c.name + "」吗？此操作不可撤销。", "删除", true);

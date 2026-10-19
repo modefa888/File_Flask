@@ -49,15 +49,38 @@
   background: rgba(224,164,88,.14); color: #e0a458; border: 1px solid rgba(224,164,88,.42);
 }
 .ssh-term-st.ok { background: rgba(78,201,138,.12); color: #4ec98a; border-color: rgba(78,201,138,.42); }
-.ssh-term-st.bad { background: rgba(255,107,107,.12); color: #ff6b6b; border-color: rgba(255,107,107,.42); }
+/* 已断开：可点击重连（同一标签内重建会话） */
+.ssh-term-st.bad {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: rgba(255,107,107,.12); color: #ff6b6b; border-color: rgba(255,107,107,.42);
+  cursor: pointer; user-select: none;
+}
+.ssh-term-st.bad:hover { background: rgba(255,107,107,.26); border-color: #ff6b6b; }
+.ssh-term-st.bad:active { transform: scale(.96); }
 .ssh-term-x {
   margin-left: 0; width: 26px; height: 24px; border: none; border-radius: 5px; cursor: pointer;
   background: transparent; color: #aaa; font-size: 13px;
 }
 .ssh-term-x:hover { background: #3a3d44; color: #fff; }
 .ssh-term-box { flex: 1; min-height: 0; padding: 6px 8px 12px; overflow: hidden; }
+/* fit 插件用 parent 的高度算行数且不扣 parent 的 padding，
+   所以内边距留在 .ssh-term-box，xterm 挂在这层无内边距的容器里，
+   保证「中文说明」等卡片展开 / 收起时行数取整正确，最后一行不被裁掉 */
+.ssh-term-inner { width: 100%; height: 100%; }
 .ssh-term-box .xterm { height: 100%; }
 .ssh-term-box .xterm-viewport { background-color: transparent !important; }
+
+/* 刷新后恢复的 SSH 占位标签：未连接，点击标签或按钮才建连 */
+.ssh-offline {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 10px;
+  background: #1e1e1e; color: #cfcfcf; padding: 20px; text-align: center;
+}
+.ssh-offline > .bi { font-size: 34px; color: #4da3ff; }
+.ssh-offline-t { font-size: 13px; }
+.ssh-offline-s { font-size: 12px; color: #9aa; line-height: 1.6; }
+html.theme-light .ssh-offline { background: #ffffff; color: #333333; }
+html.theme-light .ssh-offline-s { color: #7a7f87; }
 
 /* 首次连接：MOTD 中文说明卡片 */
 .ssh-motd {
@@ -115,11 +138,43 @@ html.theme-light .ssh-motd-acts button:hover { background: #eef1f4; color: #1f23
 }
 .ssh-in:focus { outline: none; border-color: #4da3ff; }
 .ssh-key { height: 70px; padding: 7px 9px; resize: vertical; font-family: Menlo, Consolas, monospace; font-size: 12px; line-height: 1.4; }
+/* 密码框内的 👁：绝对定位在输入框右端，不额外占一行宽度 */
+.ssh-pwd-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
+.ssh-pwd-wrap .ssh-in { width: 100%; padding-right: 32px; }   /* 给眼睛留出内边距，避免文字压到图标 */
+.ssh-pwd-row input::-ms-reveal,
+.ssh-pwd-row input::-ms-clear { display: none; }   /* 隐藏 Edge 自带的密码眼睛，避免与自定义按钮重复 */
+.ssh-eye {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 24px; padding: 0; border: none; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: #9aa; font-size: 13px; cursor: pointer;
+}
+.ssh-eye:hover { color: #ddd; background: rgba(255,255,255,.08); }
+.ssh-eye.on { color: #4da3ff; }
 .ssh-port { max-width: 90px; }
 .ssh-tip { padding: 0 14px 10px; font-size: 11px; color: #8a8a8a; display: flex; gap: 5px; align-items: flex-start; }
 .ssh-tip i { margin-top: 1px; }
 .ssh-modal-acts { display: flex; align-items: center; gap: 8px; padding: 10px 14px 14px; }
 .ssh-sp { flex: 1; }
+
+/* 「测试连接」：测试中的旋转动效 + 按钮后的结果提示（成功绿 / 失败红） */
+#sshTest { flex: none; }
+#sshTest > i { display: inline-block; }
+#sshTest.loading { cursor: progress; opacity: .85; }
+#sshTest.loading > i { animation: ssh-spin .85s linear infinite; }
+@keyframes ssh-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.ssh-test-msg {
+  display: none; align-items: center; gap: 5px;
+  flex: 0 1 auto; min-width: 0; max-width: 200px;
+  font-size: 12px; line-height: 1.5;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ssh-test-msg.show { display: inline-flex; animation: ssh-msg-in .18s ease-out; }
+.ssh-test-msg > i { flex: none; }
+.ssh-test-msg > span { overflow: hidden; text-overflow: ellipsis; }
+.ssh-test-msg.ok { color: #4ec98a; }
+.ssh-test-msg.err { color: #ff6b6b; }
+@keyframes ssh-msg-in { from { opacity: 0; transform: translateX(-5px); } to { opacity: 1; transform: none; } }
 .ssh-list .ph { padding: 18px 12px; color: #8a8a8a; font-size: 12px; line-height: 1.7; }
 .ssh-list .ph.warn { color: #e0a458; }
 .ssh-list .ph code { background: #1e1e1e; padding: 1px 5px; border-radius: 4px; color: #ddd; }

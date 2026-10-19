@@ -925,7 +925,10 @@
     const name = f.name || baseName(f.path);
     const dir = f.path.indexOf("/") >= 0 ? f.path.substring(0, f.path.lastIndexOf("/")) : "";
     const row = document.createElement("div");
-    row.className = "git-commit-file";
+    // 按状态着色：删除=红+删除线，新增=绿，修改=黄（与资源管理器 / 更改列表保持一致）
+    const stc = String(f.status || "").charAt(0).toUpperCase();
+    row.className = "git-commit-file" +
+      (stc === "D" ? " st-D" : stc === "A" ? " st-A" : stc === "M" ? " st-M" : "");
     row.style.paddingLeft = (34 + (depth || 0) * 12) + "px";
     row.title = f.path + "（" + f.status + "）— 点击查看该提交中的差异/源码";
     row.innerHTML = '<span class="ic">' + iconFor(name, false) + '</span>' +

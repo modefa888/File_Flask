@@ -202,6 +202,11 @@
   .git-commit-file .gcf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-commit-file .gcf-dir { color: #7d7d7d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-commit-file .gf-st { margin-left: auto; font-size: 11px; color: #e2c08a; flex: none; }
+  /* 提交内文件清单按状态着色：删除 = 红名 + 删除线（与「更改」列表一致） */
+  .git-commit-file.st-D .gcf-name { color: #e06c75; text-decoration: line-through; }
+  .git-commit-file.st-D .gf-st { color: #e06c75; }
+  .git-commit-file.st-A .gcf-name { color: #98c379; }
+  .git-commit-file.st-M .gcf-name { color: #e2c08a; }
   .git-commit-file .gcf-msg { padding: 6px 12px 6px 34px; color: #777; font-size: 12px; }
   /* 图形区块的工具栏 */
   .git-graph .git-sec-head .g-auto {

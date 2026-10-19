@@ -244,16 +244,16 @@ function taiPasteToTerm(o, cmd) {
 }
 
 /* 记录到 store.db 的 term_ai_history（失败不影响主流程）。
-   标题优先用 AI 生成的意图标题（与卡片标题一致，如「在远程 Linux 服务器上安装 nvm」），
-   模型没返回 intent 时退回用户的原始输入 */
+   question 存用户的原始输入（填回输入框用），title 存 AI 生成的意图标题（列表展示用） */
 function taiSaveHist(host, question, plan, res) {
   const failed = !!(res && (res.blocked || res.cancelled || res.error));
-  const title = String((plan && plan.intent) || "").trim() || String(question || "").trim();
+  const title = String((plan && plan.intent) || "").trim();
   try {
     fetch("/api/term/ai/history", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        host: host || "", question: title,
+        host: host || "", question: question || "",
+        title: title,
         command: (plan && plan.command) || "",
         risk: (plan && plan.risk) || "",
         ok: failed ? 0 : 1,
@@ -291,7 +291,7 @@ function taiBuildPlanCard(plan, question, ctx) {
   if (plan.reason) {
     const n = document.createElement("div");
     n.className = "tai-note";
-    n.innerHTML = '' + taiIco("bi-info-circle") + '<span></span>';
+    n.innerHTML = '' + taiIco("bi-info-circle", "tai-note-ic") + '<span></span>';
     taiSetText(n.querySelector("span"), plan.reason);
     card.appendChild(n);
   }
@@ -795,7 +795,7 @@ function taiOpenSsh(o) {
     items.forEach(it => {
       const row = document.createElement("div");
       row.className = "tai-hist-i";
-      row.title = "点击把这条需求填回输入框" + (it.question ? "\n" + it.question : "");
+      row.title = "点击把这条需求填回输入框" + (it.question ? "\n原始输入：" + it.question : "");
 
       const l1 = document.createElement("div");
       l1.className = "tai-hist-l1";
@@ -824,7 +824,7 @@ function taiOpenSsh(o) {
 
       const q = document.createElement("div");
       q.className = "tai-hist-q";
-      q.textContent = it.question || "（无描述）";
+      q.textContent = it.title || it.question || "（无描述）";   // 优先显示 AI 标题
       row.appendChild(q);
 
       const l3 = document.createElement("div");

@@ -279,7 +279,7 @@ def api_term_ai_history_list():
     except (TypeError, ValueError):
         limit = 50
     limit = max(1, min(limit, 200))
-    sql = ("SELECT id, ts, host, question, command, risk, ok, exit_code FROM term_ai_history ")
+    sql = ("SELECT id, ts, host, title, question, command, risk, ok, exit_code FROM term_ai_history ")
     args = ()
     if host:
         sql += "WHERE host=? ORDER BY id DESC LIMIT ?"
@@ -304,6 +304,7 @@ def api_term_ai_history_save():
     """保存一条历史（前端在执行完 / 执行失败后调用）。"""
     data = request.get_json(silent=True) or {}
     question = str(data.get("question") or "").strip()[:800]
+    title = str(data.get("title") or "").strip()[:200]      # AI 生成的意图标题
     command = str(data.get("command") or "").strip()[:_MAX_CMD]
     if not question and not command:
         return jsonify({"error": "question / command 至少给一个"}), 400
@@ -318,8 +319,9 @@ def api_term_ai_history_save():
     try:
         with store_tx() as conn:
             cur = conn.execute(
-                "INSERT INTO term_ai_history (ts, host, question, command, risk, ok, exit_code) "
-                "VALUES (?,?,?,?,?,?,?)", (ts, host, question, command, risk, ok, exit_code))
+                "INSERT INTO term_ai_history (ts, host, title, question, command, risk, ok, exit_code) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (ts, host, title, question, command, risk, ok, exit_code))
             hid = cur.lastrowid
             n = conn.execute("SELECT COUNT(*) AS n FROM term_ai_history").fetchone()["n"]
             if n > _HIST_KEEP:                              # 只留最近 N 条

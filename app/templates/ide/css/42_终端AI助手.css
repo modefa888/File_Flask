@@ -312,6 +312,8 @@ body.tai-dragging { cursor: grabbing; }
 :is(.term-body, .tai-pop) .tai-mini .tai-svg { width: 12px; height: 12px; }
 :is(.term-body, .tai-pop) .tai-risk .tai-svg { width: 12px; height: 12px; }
 :is(.term-body, .tai-pop) .tai-note .tai-svg { width: 13px; height: 13px; vertical-align: -2px; }
+/* 说明行（plan.reason）前的信息/感叹图标用红色，更醒目 */
+:is(.term-body, .tai-pop) .tai-note .tai-note-ic { color: #f0524a; }
 :is(.term-body, .tai-pop) .tai-cmd .tai-copy .tai-svg { width: 13px; height: 13px; }
 :is(.term-body, .tai-pop) .tai-live .tai-svg { width: 12px; height: 12px; }
 .tai-user .tai-svg { width: 13px; height: 13px; color: #58a6ff; margin-top: 2px; }

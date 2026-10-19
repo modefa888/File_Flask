@@ -240,7 +240,8 @@ CREATE TABLE IF NOT EXISTS term_ai_history (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     ts        TEXT NOT NULL DEFAULT '',   -- 时间（YYYY-MM-DD HH:MM:SS）
     host      TEXT DEFAULT '',
-    question  TEXT DEFAULT '',
+    title     TEXT DEFAULT '',            -- AI 生成的意图标题（如「在远程服务器上安装 nvm」）
+    question  TEXT DEFAULT '',            -- 用户的原始输入
     command   TEXT DEFAULT '',
     risk      TEXT DEFAULT '',
     ok        INTEGER DEFAULT 0,          -- 1 = 执行成功
@@ -501,6 +502,8 @@ def _migrate_ai_columns(conn):
         ("cron_tasks", "post_hook", "TEXT DEFAULT ''"),
         ("cron_tasks", "notify", "INTEGER NOT NULL DEFAULT 1"),
         ("cron_runs", "attempt", "INTEGER NOT NULL DEFAULT 0"),
+        # 终端 AI 历史：AI 标题列（老库补列）
+        ("term_ai_history", "title", "TEXT DEFAULT ''"),
     ):
         try:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}

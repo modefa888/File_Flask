@@ -743,7 +743,8 @@ def _remote_op(verb, timeout):
         return _fail(err, 500)
     out = ((proc.stdout or "") + (proc.stderr or "")).strip()
     if proc.returncode != 0:
-        _push_hist_finish(hid, False, out)
+        # 输出为空时至少记下返回码，避免记录里只有一句干巴巴的「失败」
+        _push_hist_finish(hid, False, out or f"git 进程异常退出（返回码 {proc.returncode}，无输出）")
         # 对常见错误给出更直接的提示
         lowered = out.lower()
         if "does not appear to be a git repository" in lowered or "could not resolve" in lowered:
@@ -816,9 +817,17 @@ def _push_commit_list(root, branch, has_upstream):
 
 
 def _push_hist_start(repo, branch, commits):
-    """push 开始时先落一条「推送中」记录（含提交明细），返回记录 id；失败返回 None 不影响主流程。"""
+    """push 开始时先落一条「推送中」记录（含提交明细），返回记录 id；失败返回 None 不影响主流程。
+
+    顺带清理遗留的僵尸记录：服务重启 / 进程被杀会让旧记录永远停在「推送中」，
+    超过 30 分钟仍是 running 的一律标记为失败。
+    """
     try:
         with store_tx() as conn:
+            conn.execute(
+                "UPDATE git_push_history SET ok=0, status='fail', "
+                "detail=CASE WHEN detail='' OR detail IS NULL THEN '推送中断（服务重启或进程被杀）' ELSE detail END "
+                "WHERE status='running' AND ts <= datetime('now', 'localtime', '-30 minutes')")
             cur = conn.execute(
                 "INSERT INTO git_push_history (ts, repo, branch, ok, status, commits, detail) "
                 "VALUES (?,?,?,?,?,?,?)",

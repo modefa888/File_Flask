@@ -283,6 +283,7 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ph-br { color: #8a3aa0; background: #f3e9f7; }
 :where(html.theme-light) .ph-ok.ok { color: #1a7f37; }
 :where(html.theme-light) .ph-ok.no { color: #c62828; }
+:where(html.theme-light) .ph-ok.warn { color: #9a6700; }
 :where(html.theme-light) .ph-run { color: #005fb8; }
 :where(html.theme-light) .ph-i.running { border-color: #b3cbe8; background: #eef4fb; }
 :where(html.theme-light) .ph-detail { color: #667080; }
@@ -292,6 +293,7 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ph-cmt-s .ph-cmt-ok.ok { color: #1a7f37; }
 :where(html.theme-light) .ph-cmt-s .ph-cmt-ok.no { color: #c62828; }
 :where(html.theme-light) .ph-cmt-s .ph-cmt-ok.run { color: #005fb8; }
+:where(html.theme-light) .ph-cmt-s .ph-cmt-ok.warn { color: #9a6700; }
 :where(html.theme-light) .ph-cmt-st { color: #1a7f37; }
 :where(html.theme-light) .ph-cmt-m { color: #8892a0; }
 :where(html.theme-light) .ph-empty { color: #8892a0; }

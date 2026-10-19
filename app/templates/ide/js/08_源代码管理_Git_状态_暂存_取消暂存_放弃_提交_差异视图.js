@@ -465,6 +465,8 @@
         list.innerHTML = "";
         items.forEach(it => {
           const running = (it.status === "running");       // 推送进行中（开始时先落库，结束后回写）
+          // 服务重启 / 进程结束留下的「中断」记录（并非真的推送失败）：用黄色区分，避免误以为要重推
+          const interrupted = !running && !it.ok && /推送中断/.test(String(it.detail || ""));
           const row = document.createElement("div");
           row.className = "ph-i" + (running ? " running" : "");
           row.innerHTML =
@@ -474,7 +476,9 @@
               '<span class="ph-sp"></span>' +
               (running
                 ? '<span class="ph-run"><i class="spin">⟳</i> 推送中</span>'
-                : '<span class="ph-ok ' + (it.ok ? "ok" : "no") + '">' + (it.ok ? "✓ 成功" : "✕ 失败") + '</span>') +
+                : interrupted
+                  ? '<span class="ph-ok warn">⚠ 中断</span>'
+                  : '<span class="ph-ok ' + (it.ok ? "ok" : "no") + '">' + (it.ok ? "✓ 成功" : "✕ 失败") + '</span>') +
             '</div>';
           row.querySelector(".ph-ts").textContent = String(it.ts || "").slice(5, 16);
           if (it.branch) row.querySelector(".ph-br").textContent = it.branch;
@@ -490,8 +494,8 @@
             cd.innerHTML =
               '<div class="ph-cmt-s"><i class="bi bi-file-earmark-text"></i><span></span>' +
                 // 每个提交后面也标出它所属这次推送的结果，避免只看到记录头而不知道哪个没成功
-                '<span class="ph-cmt-ok ' + (running ? "run" : (it.ok ? "ok" : "no")) + '">' +
-                  (running ? "推送中" : (it.ok ? "✓ 已推送" : "✕ 未推送")) +
+                '<span class="ph-cmt-ok ' + (running ? "run" : (it.ok ? "ok" : (interrupted ? "warn" : "no"))) + '">' +
+                  (running ? "推送中" : (it.ok ? "✓ 已推送" : (interrupted ? "⚠ 未确认" : "✕ 未推送"))) +
                 '</span></div>' +
               (c.st ? '<div class="ph-cmt-st"></div>' : '') +
               '<div class="ph-cmt-m"></div>';

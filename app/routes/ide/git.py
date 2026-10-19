@@ -837,6 +837,7 @@ def api_git_push():
 
 
 _PUSH_HIST_KEEP = 2000                   # 推送记录最多保留条数（超出从旧到新删）
+_ACTIVE_PUSH = set()                     # 本进程正在执行的推送记录 id（用来识别僵尸 running）
 
 
 def _push_commit_list(root, branch, has_upstream):
@@ -888,7 +889,9 @@ def _push_hist_start(repo, branch, commits):
                 "VALUES (?,?,?,?,?,?,?)",
                 (time.strftime("%Y-%m-%d %H:%M:%S"), repo, branch or "", 0, "running",
                  json.dumps(commits or [], ensure_ascii=False)[:8000], ""))
-            return cur.lastrowid
+            hid = cur.lastrowid
+        _ACTIVE_PUSH.add(hid)
+        return hid
     except Exception as e:                                  # noqa: BLE001
         _log.warning("保存推送记录失败：%s", e)
         return None
@@ -898,6 +901,7 @@ def _push_hist_finish(hid, ok, detail):
     """push 结束后把记录回写为成功 / 失败。"""
     if not hid:
         return
+    _ACTIVE_PUSH.discard(hid)
     try:
         with store_tx() as conn:
             conn.execute("UPDATE git_push_history SET ok=?, status=?, detail=? WHERE id=?",
@@ -916,6 +920,23 @@ def api_git_push_history_list():
     except (TypeError, ValueError):
         limit = 100
     limit = max(1, min(limit, 500))
+    # 清理僵尸「推送中」：本进程没有在执行、且已超过推送超时（120s）的记录，
+    # 一定是服务重启 / 进程被杀留下的。直接标成「推送中断」，否则会一直显示“推送中”，
+    # 让人误以为还没推成功、需要重新推送。
+    try:
+        with store_tx() as conn:
+            rows = conn.execute(
+                "SELECT id FROM git_push_history WHERE status='running' "
+                "AND ts <= datetime('now', 'localtime', '-150 seconds')").fetchall()
+            for r in rows:
+                if r["id"] in _ACTIVE_PUSH:
+                    continue
+                conn.execute(
+                    "UPDATE git_push_history SET ok=0, status='fail', "
+                    "detail=CASE WHEN detail='' OR detail IS NULL THEN ? ELSE detail END WHERE id=?",
+                    ("推送中断（服务重启或进程结束）；若远程仓库已有这些提交，可忽略此记录", r["id"]))
+    except Exception as e:                                  # noqa: BLE001
+        _log.warning("清理僵尸推送记录失败：%s", e)
     sql = "SELECT id, ts, repo, branch, ok, status, commits, detail FROM git_push_history "
     args = ()
     if repo:

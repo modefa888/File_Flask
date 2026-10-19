@@ -32,8 +32,9 @@
 .ssh-acts button.ssh-stop:hover { color: #ff6b6b; }
 .ssh-acts [data-act="del"]:hover { color: #ff6b6b; }
 
-/* 编辑器区终端 */
-.ssh-host { display: flex; }
+/* 编辑器区终端
+   注意：不要给 .ssh-host 写 display（会盖过 .cm-host{display:none}，导致非激活标签叠在一起）；
+   显隐统一由 .cm-host / .cm-host.active 控制，内部布局交给 .ssh-term-wrap */
 .ssh-term-wrap { display: flex; flex-direction: column; width: 100%; height: 100%; background: #1e1e1e; }
 .ssh-term-bar {
   display: flex; align-items: center; gap: 8px; padding: 5px 10px;
@@ -41,12 +42,20 @@
 }
 .ssh-term-t { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ssh-term-t > i { color: #4da3ff; }
+/* 连接状态徽标：连接中…（黄）/ 已连接（绿）/ 已断开（红）；
+   紧跟在 AI 按钮后面（推到最右的是 AI 按钮的 margin-left:auto），三者成组靠右 */
+.ssh-term-st {
+  flex: none; padding: 1px 8px; border-radius: 9px; font-size: 11px; line-height: 1.5;
+  background: rgba(224,164,88,.14); color: #e0a458; border: 1px solid rgba(224,164,88,.42);
+}
+.ssh-term-st.ok { background: rgba(78,201,138,.12); color: #4ec98a; border-color: rgba(78,201,138,.42); }
+.ssh-term-st.bad { background: rgba(255,107,107,.12); color: #ff6b6b; border-color: rgba(255,107,107,.42); }
 .ssh-term-x {
-  margin-left: auto; width: 26px; height: 24px; border: none; border-radius: 5px; cursor: pointer;
+  margin-left: 0; width: 26px; height: 24px; border: none; border-radius: 5px; cursor: pointer;
   background: transparent; color: #aaa; font-size: 13px;
 }
 .ssh-term-x:hover { background: #3a3d44; color: #fff; }
-.ssh-term-box { flex: 1; min-height: 0; padding: 6px 8px; overflow: hidden; }
+.ssh-term-box { flex: 1; min-height: 0; padding: 6px 8px 12px; overflow: hidden; }
 .ssh-term-box .xterm { height: 100%; }
 .ssh-term-box .xterm-viewport { background-color: transparent !important; }
 

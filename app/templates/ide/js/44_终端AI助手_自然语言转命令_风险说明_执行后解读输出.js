@@ -243,14 +243,17 @@ function taiPasteToTerm(o, cmd) {
   } catch (_) { /* 忽略 */ }
 }
 
-/* 记录到 store.db 的 term_ai_history（失败不影响主流程） */
+/* 记录到 store.db 的 term_ai_history（失败不影响主流程）。
+   标题优先用 AI 生成的意图标题（与卡片标题一致，如「在远程 Linux 服务器上安装 nvm」），
+   模型没返回 intent 时退回用户的原始输入 */
 function taiSaveHist(host, question, plan, res) {
   const failed = !!(res && (res.blocked || res.cancelled || res.error));
+  const title = String((plan && plan.intent) || "").trim() || String(question || "").trim();
   try {
     fetch("/api/term/ai/history", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        host: host || "", question: question || "",
+        host: host || "", question: title,
         command: (plan && plan.command) || "",
         risk: (plan && plan.risk) || "",
         ok: failed ? 0 : 1,
@@ -792,7 +795,7 @@ function taiOpenSsh(o) {
     items.forEach(it => {
       const row = document.createElement("div");
       row.className = "tai-hist-i";
-      row.title = "点击把这条需求填回输入框";
+      row.title = "点击把这条需求填回输入框" + (it.question ? "\n" + it.question : "");
 
       const l1 = document.createElement("div");
       l1.className = "tai-hist-l1";

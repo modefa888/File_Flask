@@ -141,8 +141,9 @@
   async function connectSsh(c) {
     const tab = findTab(SSH_VIEW_PREFIX + c.id);
     if (tab) { activate(tab); return; }            // 已打开则聚焦
+    toast("正在连接 " + (c.user || "root") + "@" + c.host + " …", "info");
     const r = await api("/api/ssh/open", { method: "POST", body: JSON.stringify({ id: c.id }) });
-    if (r.error) { toast(r.error, "err"); return; }
+    if (r.error) { toast("连接失败：" + r.error, "err"); return; }
     openSshTermTab(c, r.id);
   }
 
@@ -157,9 +158,12 @@
       path: path, name: tn, host: host,
       iconHtml: '<i class="bi bi-hdd-network"></i>',
       isSshTerm: true, connId: c.id,
+      // 必须带编辑组：mountHost 按 group 找容器，缺了 host 永远挂不进编辑区（页面一片空白）
+      group: (typeof curGroup === "number" && curGroup >= 0) ? curGroup : 0,
     };
     tabs.push(tab);
     renderTabsAll();
+    renderSshList();    // 侧栏该项立即转为「已打开」（绿色停止按钮 + 高亮）
     buildSshTerm(tab, c, sid);
     activate(tab);
     sshSessionSave();
@@ -194,6 +198,11 @@
     aiBtn.title = "AI 助手：用中文描述要执行的命令，判断风险并解读输出（Ctrl+Shift+I）";
     bar.appendChild(aiBtn);
 
+    const st = document.createElement("span");        // 连接状态徽标：连接中… / 已连接 / 已断开
+    st.className = "ssh-term-st";
+    st.textContent = "连接中…";
+    bar.appendChild(st);
+
     const closeBtn = document.createElement("button");
     closeBtn.className = "ssh-term-x";
     closeBtn.innerHTML = '<i class="bi bi-x-lg"></i>';
@@ -227,7 +236,7 @@
     // 首包到达后按「1.8s 无新输出」判定命令结束；一直没输出则 8s 结束；最长 20s 兜底。
     function sshRun(cmd) {
       return new Promise((resolve) => {
-        const cap = { text: "", done: false, idle: null, max: null };
+        const cap = { text: "", done: false, idle: null, max: null, tok: "" };
         const finish = () => {
           if (cap.done) return;
           cap.done = true;
@@ -240,10 +249,16 @@
           resolve({ stdout: clean, stderr: "", exit_code: null });
         };
         cap.finish = finish;
+        // 哨兵：命令真正执行完（无论成败）shell 才打印它，收到后才把完整输出交给 AI 解读。
+        // 字面量拆成两段 '__TP''DONE_xx__'，避免「回显已输入命令」里含完整哨兵被当成结束标记
+        const rand = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        cap.tok = "__TPDONE_" + rand + "__";
         sess.capture = cap;
-        cap.idle = setTimeout(finish, 8000);                 // 完全没有输出
-        cap.max = setTimeout(finish, 20000);                 // 长任务兜底
-        api("/api/ssh/input", { method: "POST", body: JSON.stringify({ id: sid, data: cmd + "\r" }) })
+        cap.idle = setTimeout(finish, 20000);                 // 迟迟没有任何输出（如等待交互输入）
+        cap.max = setTimeout(finish, 300000);                 // 兜底：tail -f / top 这类永不结束的命令
+        // (cmd) 子 shell 包一层：命令结束（无论成败）后接着打印哨兵；cd 等副作用也不影响本次判定
+        const wrapped = "(" + cmd + "); printf '%s\\n' '__TP''DONE_" + rand + "__'";
+        api("/api/ssh/input", { method: "POST", body: JSON.stringify({ id: sid, data: wrapped + "\r" }) })
           .catch(() => finish());
       });
     }
@@ -354,14 +369,20 @@
     tab.sshPasteFromClipboard = sshReadClipboard;
 
     // 终端容器尺寸变化 → 重新适配并告知远端
-    const ro = new ResizeObserver(() => {
-      if (termBox.style.display === "none") return;      // Agent 模式下 xterm 被隐藏，不要按 0 尺寸去 fit
+    function syncFit() {
       try { fit.fit(); } catch (e) { return; }
       const nc = term.cols, nr = term.rows;
       if (nc !== sess.cols || nr !== sess.rows) {
         sess.cols = nc; sess.rows = nr;
         api("/api/ssh/resize", { method: "POST", body: JSON.stringify({ id: sid, cols: nc, rows: nr }) });
       }
+    }
+    const ro = new ResizeObserver(() => {
+      if (termBox.style.display === "none") return;      // Agent 模式下 xterm 被隐藏，不要按 0 尺寸去 fit
+      syncFit();
+      // 浏览器缩放（非整数像素比）下字模测量有半行偏差，布局稳定后再校正一次
+      clearTimeout(sess._fitT);
+      sess._fitT = setTimeout(syncFit, 250);
     });
     ro.observe(termBox);
 
@@ -391,10 +412,16 @@
         '<div class="ssh-motd-body"><span class="ssh-motd-txt"></span></div>';
       wrap.insertBefore(card, termBox);
       const body = card.querySelector(".ssh-motd-body");
-      card.querySelector('[data-m="tgl"]').onclick = () => {
+      const toggleFold = () => {
         const hid = body.style.display === "none";
         body.style.display = hid ? "" : "none";
         card.classList.toggle("folded", !hid);
+      };
+      card.querySelector('[data-m="tgl"]').onclick = toggleFold;
+      // 点标题栏任意位置（按钮除外）也能展开 / 收起
+      card.querySelector(".ssh-motd-head").onclick = (e) => {
+        if (e.target.closest("button")) return;
+        toggleFold();
       };
       card.querySelector('[data-m="x"]').onclick = () => card.remove();
       return card;
@@ -494,31 +521,45 @@
       clearTimeout(motdTimer);
       motdTimer = setTimeout(motdFinish, 5000);        // 输出停顿 5 秒也视为结束
     }
+    sess.st = st;                                    // 状态徽标：收首包 / 断开时更新
     es.onmessage = ev => {
       let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
       if (m.eof) {                                     // 远端主动断开（服务器关闭连接 / exit 退出等）
         sess.alive = false;
+        st.className = "ssh-term-st bad"; st.textContent = "已断开";
+        try { if (sess.capture && !sess.capture.done) sess.capture.finish(); } catch (e) { /* 忽略 */ }
         term.write("\r\n[33m[连接已关闭]\x1b[0m\r\n");
         toast((tab.name || "SSH") + " 连接已断开", "warn");
         return;
       }
       if (!m.data) return;
+      if (!sess.up) {                                  // 收到首包：SSH 登录成功，状态转「已连接」
+        sess.up = true;
+        st.className = "ssh-term-st ok"; st.textContent = "已连接";
+      }
       let text = "";
       try { text = sess.dec.decode(base64ToBytes(m.data), { stream: true }); } catch (e) { return; }
       term.write(text);
       motdFeed(text);                                  // 首屏输出 → 中文说明
       const cap = sess.capture;                        // AI 执行命令后的输出回读
       if (cap && !cap.done && text) {
-        cap.text += text;
-        if (cap.text.length > 400000) cap.text = cap.text.slice(-400000);
-        clearTimeout(cap.idle);
-        cap.idle = setTimeout(cap.finish, 1800);
+        const ti = cap.tok ? text.indexOf(cap.tok) : -1;
+        if (ti >= 0) {                                 // 命令完整结束：截掉哨兵及之后的内容再解读
+          cap.text += text.slice(0, ti);
+          cap.finish();
+        } else {
+          cap.text += text;
+          if (cap.text.length > 400000) cap.text = cap.text.slice(-400000);
+          clearTimeout(cap.idle);
+          cap.idle = setTimeout(cap.finish, 30000);    // 30s 无新输出才视为结束（长下载/编译不误判）
+        }
       }
     };
     es.onerror = () => {                                 // SSE 意外断开（网络掉线 / 后端重启等）
       try { es.close(); } catch (e) { /* 已关闭 */ }
       if (sess.alive) {
         sess.alive = false;
+        st.className = "ssh-term-st bad"; st.textContent = "已断开";
         term.write("\r\n\x1b[33m[连接已断开]\x1b[0m\r\n");
         toast((tab.name || "SSH") + " 连接已断开", "warn");
       }
@@ -534,6 +575,8 @@
       delete SESS[sid];
       // 延后一拍再保存：走标签「×」关闭时，closeTab 会在 onBeforeClose 之后才把 tab 移出 tabs
       setTimeout(sshSessionSave, 0);
+      // 延后一拍刷新侧栏：等 closeTab 把 tab 移出 tabs 后，该项才正确回到「未打开」状态
+      setTimeout(renderSshList, 0);
     }
     closeBtn.onclick = doClose;
     tab.onBeforeClose = doClose;          // 点标签栏「×」关闭时由 00_preamble 的 closeTab 回调

@@ -267,6 +267,8 @@ CREATE INDEX IF NOT EXISTS idx_git_push_hist ON git_push_history(id DESC);
 -- root：对话所属的项目根目录（IDE 的 ROOT）。空串 = 还没绑定项目（旧数据），
 -- 首次进入某个项目时由 chatdb.adopt_unassigned() 一次性划归该项目，
 -- 这样「打开另一个项目」看到的是各自独立的对话列表。
+-- app：对话来自哪个界面（ide = IDE 的 AI 助手 / files = 文件管理的 AI 面板），
+-- 两边的会话列表互相隔离，不会串台。
 CREATE TABLE IF NOT EXISTS ai_conversations (
     id         TEXT PRIMARY KEY,
     user_id    TEXT NOT NULL,
@@ -274,7 +276,8 @@ CREATE TABLE IF NOT EXISTS ai_conversations (
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     extra      TEXT DEFAULT '',
-    root       TEXT DEFAULT ''
+    root       TEXT DEFAULT '',
+    app        TEXT DEFAULT 'ide'
 );
 CREATE TABLE IF NOT EXISTS ai_messages (
     conv_id   TEXT NOT NULL,
@@ -506,6 +509,7 @@ def _migrate_ai_columns(conn):
         ("ai_usage", "tokens_in", "INTEGER DEFAULT 0"),
         ("ai_usage", "tokens_out", "INTEGER DEFAULT 0"),
         ("ai_conversations", "root", "TEXT DEFAULT ''"),
+        ("ai_conversations", "app", "TEXT DEFAULT 'ide'"),
         ("ai_prefs", "cur_roots", "TEXT DEFAULT '{}'"),
         # 定时任务扩展：失败重试 / 任务依赖 / 前后置钩子 / 失败通知 / 重试次序
         ("cron_tasks", "max_retries", "INTEGER NOT NULL DEFAULT 0"),

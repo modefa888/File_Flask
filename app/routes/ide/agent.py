@@ -13,8 +13,9 @@ POST /api/ai/agent/approve   {run_id, call_id, allow, always, global}       批�
 SSE 事件（data: {json}\\n\\n）：
     {"type":"run","run_id":"..."}                       本次运行 id（确认时回传）
     {"type":"delta","text":"..."}                       模型输出（流式）
-    {"type":"step","call_id","tool","args"}             开始调用工具
-    {"type":"ask","call_id","tool","args","reason"}     需要用户确认（如执行命令）
+    {"type":"step","call_id","tool","args","risk","risk_reason"}   开始调用工具
+        risk = danger 表示移动 / 修改 / 删除类操作（前端标红），normal 为普通操作
+    {"type":"ask","call_id","tool","args","reason","risk","risk_reason"}   需要用户确认（如执行命令）
     {"type":"result","call_id","tool","ok","summary","detail","ms"}   工具结果
     {"type":"todos","todos":[{"content","status"}...]}                任务清单更新（todo_write）
     {"type":"error","error":"..."}
@@ -177,6 +178,51 @@ _TOOLS = [
 _READ_TOOLS = {"list_dir", "read_file", "search_files", "web_search", "code_intel"}
 _WRITE_TOOLS = {"write_file", "edit_file"}
 _TOOL_NAMES = {t["function"]["name"] for t in _TOOLS}
+
+# 「移动 / 修改 / 删除」类命令：前端把这些步骤和确认卡片标红，提醒用户谨慎操作
+_RISK_CMD_RE = re.compile(
+    r"\b(rm|rmdir|unlink|shred|truncate|mv|rename|ren)\b"
+    r"|\bsed\b[^\n]*\s-\w*i"
+    r"|\bperl\b[^\n]*\s-\w*i"
+    r"|\b(chmod|chown|chgrp|chattr)\b"
+    r"|\b(dd|tee)\b"
+    r"|\bgit\s+(clean|reset\s+--hard|checkout\s+--)\b"
+    r"|\b(docker|kubectl)\s+(rm|rmi|delete|prune)\b",
+    re.I,
+)
+_RISK_REDIRECT_RE = re.compile(r"(?<![0-9&<>])>(?![>&])\s*(?!/dev/null)\S")
+
+
+def _risk_of(name, args, root=""):
+    """判断一次工具调用是否属于「移动 / 修改 / 删除」这类破坏性操作。
+
+    返回 (level, reason)：level 为 "danger"（前端标红）或 "normal"。
+    删除 / 移动类命令交给 safety 的规则判定（与「需要确认」同一套口径），
+    其余改内容 / 改权限 / 输出重定向等再按正则兜底识别。
+    """
+    args = args or {}
+    if name == "edit_file":                      # 改已有文件：必然覆盖原内容
+        return "danger", "修改已有文件内容"
+    if name in _WRITE_TOOLS:                     # 写文件：覆盖已存在的文件才算破坏性
+        try:
+            path = _resolve(args.get("path"), root)
+        except Exception:                        # noqa: BLE001
+            path = ""
+        if path and os.path.isfile(path):
+            return "danger", "覆盖已存在的文件：%s" % os.path.basename(path)
+        return "normal", ""
+    if name != "run_command":
+        return "normal", ""
+    cmd = str(args.get("command") or "")
+    is_del, del_reason = is_delete_command(cmd)
+    if is_del:
+        return "danger", del_reason
+    m = _RISK_CMD_RE.search(cmd)
+    if m:
+        return "danger", "包含移动 / 修改 / 删除类命令：%s" % m.group(0).strip()
+    if _RISK_REDIRECT_RE.search(cmd):
+        return "danger", "包含输出重定向：可能覆盖已有文件"
+    return "normal", ""
 
 # 不同模型对工具的命名差异（Claude 风格 / 各类开源权重），统一映射到本项目的工具名
 _TOOL_ALIASES = {
@@ -1439,13 +1485,17 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
                                       "function": {"name": c["name"], "arguments": c["args_raw"]}}
                                      for c in tool_calls]})
         done = {}                        # call_id -> (ok, summary, detail, model_text, ms, denied)
+        risk_of_call = {}                # call_id -> (risk, risk_reason)，供后续 ask 事件复用
         parallel, serial = [], []
         # ① 逐个发 step 事件 + 权限判定（需要确认的稍后仍按顺序处理）
         for c in tool_calls:
             name, args = c["name"], c["args"]
             if name == "todo_write":
                 todo_seen = True
-            yield _sse({"type": "step", "call_id": c["id"], "tool": name, "args": args})
+            risk, risk_reason = _risk_of(name, args, root)
+            risk_of_call[c["id"]] = (risk, risk_reason)
+            yield _sse({"type": "step", "call_id": c["id"], "tool": name, "args": args,
+                        "risk": risk, "risk_reason": risk_reason})
             allowed, refuse, need_ask, ask_reason = _gate(perm, name, args, root, auto_run, web_auto)
             if not allowed:
                 done[c["id"]] = (False, refuse, "", "调用被拒绝：%s" % refuse, 0, True)
@@ -1504,8 +1554,9 @@ def _run_agent(run_id, provider, model, root, perm, msgs, skills=None, extra_pro
                     # cmd 供「全局允许」把这条命令写进命令安全的白名单（approve 接口读取）
                     _PENDING[key] = {"ev": ev, "box": box, "tool": name,
                                      "cmd": str(args.get("command") or "")}
+                risk, risk_reason = risk_of_call.get(c["id"], ("normal", ""))
                 yield _sse({"type": "ask", "call_id": c["id"], "tool": name, "args": args,
-                            "reason": job["ask"]})
+                            "reason": job["ask"], "risk": risk, "risk_reason": risk_reason})
                 answered = ev.wait(timeout=_ASK_TIMEOUT)
                 with _PENDING_LOCK:
                     _PENDING.pop(key, None)

@@ -49,6 +49,12 @@ def _clean_meta(meta):
     return clean
 
 
+def _norm_app(app):
+    """对话所属界面：ide（IDE 的 AI 助手，默认）/ files（文件管理的 AI 面板）。"""
+    a = str(app or "").strip().lower()
+    return a if a in ("ide", "files") else "ide"
+
+
 def _norm_root(root):
     """项目根目录规范化：去空白与尾部斜杠（IDE 的 ROOT 已去尾斜杠，这里再兜一次）。
 
@@ -58,8 +64,11 @@ def _norm_root(root):
     return r.rstrip("/") if len(r) > 1 else r
 
 
-def list_conversations(user_id, root=""):
-    """返回【该项目】的会话列表（不含消息），按「最后一条消息的时间」倒序。
+def list_conversations(user_id, root="", app="ide"):
+    """返回【该项目 + 该界面】的会话列表（不含消息），按「最后一条消息的时间」倒序。
+
+    app 用来区分对话来源（IDE 助手 / 文件管理面板），两边列表互不可见；
+    老库没有该列时按 'ide' 处理，历史数据行为不变。
 
     时间口径说明：列表显示 / 排序都用【最后一条消息的入库时间】，而不是
     ai_conversations.updated_at —— 后者在切换会话、回撤改动、仅改 extra 等
@@ -74,8 +83,9 @@ def list_conversations(user_id, root=""):
             "          WHERE m.conv_id=c.id AND m.user_id=c.user_id), c.updated_at) AS last_at, "
             "c.extra, "
             "(SELECT COUNT(*) FROM ai_messages m WHERE m.conv_id=c.id) AS cnt "
-            "FROM ai_conversations c WHERE c.user_id=? AND c.root=? ORDER BY last_at DESC",
-            (user_id, _norm_root(root)),
+            "FROM ai_conversations c "
+            "WHERE c.user_id=? AND c.root=? AND COALESCE(c.app, 'ide')=? ORDER BY last_at DESC",
+            (user_id, _norm_root(root), _norm_app(app)),
         ).fetchall()
         return [{
             "id": r[0], "title": r[1], "created_at": r[2], "updated_at": r[3],
@@ -180,15 +190,17 @@ def get_conversation(user_id, conv_id):
         conn.close()
 
 
-def upsert_conversation(user_id, conv_id, title, extra, msgs, deleted=None, root=""):
+def upsert_conversation(user_id, conv_id, title, extra, msgs, deleted=None, root="", app="ide"):
     """新建 / 更新会话：插入缺失的新消息，可选删除消息，更新标题与 extra。
 
     root 为会话所属项目根目录：新建时写入；已存在的会话若还没归属（空串）
     则顺手补上，避免旧会话一直游离在项目之外。
+    app 为对话来源界面（ide / files），只在新建时写入，更新时保持原值。
     返回 {id, saved_mids:[...], deleted:[...]}。
     """
     now = time.time()
     key = _norm_root(root)
+    src = _norm_app(app)
     saved = []
     deleted_out = []
     conn = _conn()
@@ -206,10 +218,10 @@ def upsert_conversation(user_id, conv_id, title, extra, msgs, deleted=None, root
             )
         else:
             conn.execute(
-                "INSERT INTO ai_conversations(id, user_id, title, created_at, updated_at, extra, root) "
-                "VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO ai_conversations(id, user_id, title, created_at, updated_at, extra, root, app) "
+                "VALUES(?,?,?,?,?,?,?,?)",
                 (conv_id, user_id, title or "", now, now,
-                 json.dumps(extra or {}, ensure_ascii=False), key),
+                 json.dumps(extra or {}, ensure_ascii=False), key, src),
             )
         # 删除指定消息
         if deleted:
@@ -224,12 +236,24 @@ def upsert_conversation(user_id, conv_id, title, extra, msgs, deleted=None, root
             mid = str(m.get("mid") or "")
             if not mid:
                 continue
-            meta_json = json.dumps(_clean_meta(m.get("meta")), ensure_ascii=False)
+            meta_clean = _clean_meta(m.get("meta"))
+            meta_json = json.dumps(meta_clean, ensure_ascii=False)
             existing = conn.execute(
-                "SELECT 1 FROM ai_messages WHERE conv_id=? AND mid=?",
+                "SELECT meta FROM ai_messages WHERE conv_id=? AND mid=?",
                 (conv_id, mid),
             ).fetchone()
             if existing:
+                # 同一 mid 再次落库：正文以本次为准，但 steps / todos / changes 这类
+                # 「附件信息」若本次没带，就保留库里已有的，避免把后端存好的步骤覆盖掉。
+                try:
+                    old_meta = json.loads(existing[0]) if existing[0] else {}
+                except (ValueError, TypeError):
+                    old_meta = {}
+                if isinstance(old_meta, dict):
+                    for k in ("steps", "todos", "changes", "files"):
+                        if not meta_clean.get(k) and old_meta.get(k):
+                            meta_clean[k] = old_meta[k]
+                    meta_json = json.dumps(meta_clean, ensure_ascii=False)
                 conn.execute(
                     "UPDATE ai_messages SET text=?, images=?, reasoning=?, meta=? "
                     "WHERE conv_id=? AND mid=?",

@@ -51,7 +51,14 @@
                     showToast('错误', '服务器返回数据异常', 'danger');
                     return;
                 }
+                const _prevPath = currentPath;
                 currentPath = data.current_path_abs || '';
+                if (_prevPath !== currentPath) {
+                    // 通知其它模块（AI 文件管理面板等）：工作目录已切换
+                    try {
+                        document.dispatchEvent(new CustomEvent('fm:pathchange', { detail: { path: currentPath } }));
+                    } catch (e) { /* 忽略 */ }
+                }
                 if (_fromFallback) {
                     showToast('提示', '原路径不存在，已自动切换到上级目录：' + currentPath, 'warning');
                 }

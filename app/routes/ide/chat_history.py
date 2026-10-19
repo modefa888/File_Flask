@@ -9,6 +9,7 @@ POST /api/ai/cur                     设置当前会话 {id, root}
 
 对话按【项目根目录】隔离：请求统一用 root 参数（查询串或 JSON 体）指定项目，
 前端传 IDE 的 ROOT。不同项目各自的对话列表、当前会话互不影响。
+另按 app 参数隔离来源界面：ide（默认，IDE 的 AI 助手）/ files（文件管理的 AI 面板）。
 鉴权复用 auth.py 的 session（仅登录用户可访问，before_request 已拦截）。
 用户隔离：所有查询都绑定 session["username"]。
 """
@@ -34,11 +35,24 @@ def _root(data=None) -> str:
     return request.args.get("root") or ""
 
 
+def _app(data=None) -> str:
+    """对话来源界面：ide（默认，IDE 的 AI 助手）/ files（文件管理的 AI 面板）。
+
+    两边会话列表互相隔离，避免文件管理的整理对话混进 IDE 的对话历史。
+    """
+    if isinstance(data, dict) and data.get("app") is not None:
+        raw = str(data.get("app") or "")
+    else:
+        raw = request.args.get("app") or ""
+    raw = raw.strip().lower()
+    return raw if raw in ("ide", "files") else "ide"
+
+
 @bp.route("/api/ai/sessions", methods=["GET"])
 def api_sessions_list():
     uid = _uid()
     root = _root()
-    sessions = chatdb.list_conversations(uid, root)
+    sessions = chatdb.list_conversations(uid, root, _app())
     cur = chatdb.get_current(uid, root)
     # 当前会话若已不存在（或属于别的项目）则回退到该项目最新一条
     if cur and not any(s["id"] == cur for s in sessions):
@@ -74,7 +88,8 @@ def api_session_save():
         deleted = []
     deleted = [str(x) for x in deleted if x]
     try:
-        res = chatdb.upsert_conversation(uid, conv_id, title, extra, msgs, deleted, _root(data))
+        res = chatdb.upsert_conversation(uid, conv_id, title, extra, msgs, deleted,
+                                         _root(data), _app(data))
     except Exception as e:  # 数据库异常不应 500 崩溃
         _log.warning("保存 AI 会话失败: %s", e)
         return jsonify({"error": "保存失败：" + str(e)}), 500

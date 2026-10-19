@@ -488,7 +488,11 @@
             const cd = document.createElement("div");
             cd.className = "ph-cmt";
             cd.innerHTML =
-              '<div class="ph-cmt-s"><i class="bi bi-file-earmark-text"></i><span></span></div>' +
+              '<div class="ph-cmt-s"><i class="bi bi-file-earmark-text"></i><span></span>' +
+                // 每个提交后面也标出它所属这次推送的结果，避免只看到记录头而不知道哪个没成功
+                '<span class="ph-cmt-ok ' + (running ? "run" : (it.ok ? "ok" : "no")) + '">' +
+                  (running ? "推送中" : (it.ok ? "✓ 已推送" : "✕ 未推送")) +
+                '</span></div>' +
               (c.st ? '<div class="ph-cmt-st"></div>' : '') +
               '<div class="ph-cmt-m"></div>';
             cd.querySelector(".ph-cmt-s span").textContent = c.s || "(无提交说明)";

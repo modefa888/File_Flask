@@ -289,6 +289,9 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ph-cmt { background: #fbfbfc; border-color: #e6e8eb; }
 :where(html.theme-light) .ph-cmt-s { color: #333; }
 :where(html.theme-light) .ph-cmt-s .bi { color: #c98a00; }
+:where(html.theme-light) .ph-cmt-s .ph-cmt-ok.ok { color: #1a7f37; }
+:where(html.theme-light) .ph-cmt-s .ph-cmt-ok.no { color: #c62828; }
+:where(html.theme-light) .ph-cmt-s .ph-cmt-ok.run { color: #005fb8; }
 :where(html.theme-light) .ph-cmt-st { color: #1a7f37; }
 :where(html.theme-light) .ph-cmt-m { color: #8892a0; }
 :where(html.theme-light) .ph-empty { color: #8892a0; }

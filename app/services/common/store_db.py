@@ -257,6 +257,8 @@ CREATE TABLE IF NOT EXISTS git_push_history (
     repo     TEXT DEFAULT '',            -- 仓库绝对路径
     branch   TEXT DEFAULT '',            -- 推送的分支
     ok       INTEGER DEFAULT 0,          -- 1 = 推送成功
+    status   TEXT DEFAULT '',            -- running = 推送中；ok / fail = 已结束
+    commits  TEXT DEFAULT '',            -- 本次推送的提交明细（JSON 数组）
     detail   TEXT DEFAULT ''             -- git 输出 / 错误摘要
 );
 CREATE INDEX IF NOT EXISTS idx_git_push_hist ON git_push_history(id DESC);
@@ -515,6 +517,9 @@ def _migrate_ai_columns(conn):
         ("cron_runs", "attempt", "INTEGER NOT NULL DEFAULT 0"),
         # 终端 AI 历史：AI 标题列（老库补列）
         ("term_ai_history", "title", "TEXT DEFAULT ''"),
+        # Git 推送记录：状态列（表建了还没重启过的库补列）
+        ("git_push_history", "status", "TEXT DEFAULT ''"),
+        ("git_push_history", "commits", "TEXT DEFAULT ''"),
     ):
         try:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}

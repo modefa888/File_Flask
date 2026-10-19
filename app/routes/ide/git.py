@@ -8,6 +8,7 @@ POST /api/git/discard    {repo, files[]}        放弃更改（仅已跟踪文�
 POST /api/git/commit     {repo, message, all}   提交
 POST /api/git/init       {repo}                 初始化仓库
 """
+import json
 import os
 import re
 import shutil
@@ -730,15 +731,19 @@ def _remote_op(verb, timeout):
     else:  # pull
         args += [auth_url]
 
+    # push 开始先落一条「推送中」记录（含本次要推送的提交明细），结束后回写结果
+    push_commits = []
+    if verb == "push":
+        push_commits = _push_commit_list(root, branch, has_upstream)
+    hid = _push_hist_start(root, branch, push_commits) if verb == "push" else None
+
     proc, err = _git(root, args, timeout=timeout)
     if err:
-        if verb == "push":
-            _push_hist(root, branch, False, str(err))
+        _push_hist_finish(hid, False, str(err))
         return _fail(err, 500)
     out = ((proc.stdout or "") + (proc.stderr or "")).strip()
     if proc.returncode != 0:
-        if verb == "push":
-            _push_hist(root, branch, False, out)
+        _push_hist_finish(hid, False, out)
         # 对常见错误给出更直接的提示
         lowered = out.lower()
         if "does not appear to be a git repository" in lowered or "could not resolve" in lowered:
@@ -756,8 +761,7 @@ def _remote_op(verb, timeout):
                 "output": out
             }), 400
         return jsonify({"ok": False, "error": out or f"{verb} 失败", "output": out}), 500
-    if verb == "push":
-        _push_hist(root, branch, True, out)
+    _push_hist_finish(hid, True, out)
     return jsonify({"ok": True, "output": out})
 
 
@@ -779,21 +783,64 @@ def api_git_push():
 _PUSH_HIST_KEEP = 2000                   # 推送记录最多保留条数（超出从旧到新删）
 
 
-def _push_hist(repo, branch, ok, detail):
-    """把一次 push（发布）写入 store.db 的 git_push_history；失败不影响主流程。"""
+def _push_commit_list(root, branch, has_upstream):
+    """本次推送将包含的提交明细（最多 20 条），用于推送记录里展示提交说明 / 文件变更统计。
+
+    有上游：上游旧位置..HEAD 之间的提交；首次发布（无上游）：本地尚不在任何远程上的提交。
+    """
+    try:
+        if has_upstream and branch:
+            proc_old, _ = _git(root, ["rev-parse", f"{branch}@{{upstream}}"])
+            old_sha = (proc_old.stdout.strip() if proc_old and proc_old.returncode == 0 else "")
+            if not old_sha:
+                return []
+            spec = [f"{old_sha}..HEAD"]
+        else:
+            spec = ["--branches", "--not", "--remotes"]
+        proc, _ = _git(root, ["log", "-n", "20", "--date=iso",
+                              "--pretty=format:%h%x1f%an%x1f%ad%x1f%s",
+                              "--shortstat"] + spec)
+        if not proc or proc.returncode != 0:
+            return []
+        out, cur = [], None
+        for ln in (proc.stdout or "").splitlines():
+            if "\x1f" in ln:
+                h, a, d, s = (ln.split("\x1f") + ["", "", "", ""])[:4]
+                cur = {"h": h.strip(), "a": a.strip(), "d": d.strip(), "s": s.strip(), "st": ""}
+                out.append(cur)
+            elif cur is not None and "changed" in ln:
+                cur["st"] = ln.strip()
+        return out
+    except Exception:                                       # noqa: BLE001
+        return []
+
+
+def _push_hist_start(repo, branch, commits):
+    """push 开始时先落一条「推送中」记录（含提交明细），返回记录 id；失败返回 None 不影响主流程。"""
     try:
         with store_tx() as conn:
-            conn.execute(
-                "INSERT INTO git_push_history (ts, repo, branch, ok, detail) VALUES (?,?,?,?,?)",
-                (time.strftime("%Y-%m-%d %H:%M:%S"), repo, branch or "", 1 if ok else 0,
-                 (detail or "").strip()[:600]))
-            n = conn.execute("SELECT COUNT(*) AS n FROM git_push_history").fetchone()["n"]
-            if n > _PUSH_HIST_KEEP:
-                conn.execute("DELETE FROM git_push_history WHERE id IN "
-                             "(SELECT id FROM git_push_history ORDER BY id ASC LIMIT ?)",
-                             (n - _PUSH_HIST_KEEP,))
+            cur = conn.execute(
+                "INSERT INTO git_push_history (ts, repo, branch, ok, status, commits, detail) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (time.strftime("%Y-%m-%d %H:%M:%S"), repo, branch or "", 0, "running",
+                 json.dumps(commits or [], ensure_ascii=False)[:8000], ""))
+            return cur.lastrowid
     except Exception as e:                                  # noqa: BLE001
         _log.warning("保存推送记录失败：%s", e)
+        return None
+
+
+def _push_hist_finish(hid, ok, detail):
+    """push 结束后把记录回写为成功 / 失败。"""
+    if not hid:
+        return
+    try:
+        with store_tx() as conn:
+            conn.execute("UPDATE git_push_history SET ok=?, status=?, detail=? WHERE id=?",
+                         (1 if ok else 0, "ok" if ok else "fail",
+                          (detail or "").strip()[:600], hid))
+    except Exception as e:                                  # noqa: BLE001
+        _log.warning("更新推送记录失败：%s", e)
 
 
 @bp.route("/api/git/push/history", methods=["GET"])
@@ -805,7 +852,7 @@ def api_git_push_history_list():
     except (TypeError, ValueError):
         limit = 100
     limit = max(1, min(limit, 500))
-    sql = "SELECT id, ts, repo, branch, ok, detail FROM git_push_history "
+    sql = "SELECT id, ts, repo, branch, ok, status, commits, detail FROM git_push_history "
     args = ()
     if repo:
         sql += "WHERE repo=? "

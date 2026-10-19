@@ -420,6 +420,17 @@
     ov.classList.add("show");
     const list = $("pushHistList");
 
+    /* git 统计行转中文："5 files changed, 189 insertions(+), 2 deletions(-)"
+       → "已更改 5 个文件，189 行插入(+)，2 行删除(-)" */
+    function phStatZh(st) {
+      const m = String(st || "").match(/(\d+)\s+files? changed(?:,\s*(\d+)\s+insertions?\(\+\))?(?:,\s*(\d+)\s+deletions?\(-\))?/);
+      if (!m) return st || "";
+      let s = "已更改 " + m[1] + " 个文件";
+      if (m[2]) s += "，" + m[2] + " 行插入(+)";
+      if (m[3]) s += "，" + m[3] + " 行删除(-)";
+      return s;
+    }
+
     async function load() {
       try {
         const r = await fetch("/api/git/push/history?repo=" + encodeURIComponent(gitState.repo) + "&limit=100");
@@ -432,20 +443,47 @@
         }
         list.innerHTML = "";
         items.forEach(it => {
+          const running = (it.status === "running");       // 推送进行中（开始时先落库，结束后回写）
           const row = document.createElement("div");
-          row.className = "ph-i";
+          row.className = "ph-i" + (running ? " running" : "");
           row.innerHTML =
             '<div class="ph-l1">' +
               '<span class="ph-ts"></span>' +
               (it.branch ? '<span class="ph-br"></span>' : '') +
               '<span class="ph-sp"></span>' +
-              '<span class="ph-ok ' + (it.ok ? "ok" : "no") + '">' + (it.ok ? "✓ 成功" : "✕ 失败") + '</span>' +
-            '</div>' +
-            '<div class="ph-detail"></div>';
+              (running
+                ? '<span class="ph-run"><i class="spin">⟳</i> 推送中</span>'
+                : '<span class="ph-ok ' + (it.ok ? "ok" : "no") + '">' + (it.ok ? "✓ 成功" : "✕ 失败") + '</span>') +
+            '</div>';
           row.querySelector(".ph-ts").textContent = String(it.ts || "").slice(5, 16);
           if (it.branch) row.querySelector(".ph-br").textContent = it.branch;
-          row.querySelector(".ph-detail").textContent = it.detail || "—";
           list.appendChild(row);
+
+          // 本次推送的提交明细（样式对齐图形区的提交悬浮卡）
+          let cmts = [];
+          try { cmts = JSON.parse(it.commits || "[]"); } catch (_) { cmts = []; }
+          (Array.isArray(cmts) ? cmts : []).forEach(c => {
+            if (!c || (!c.s && !c.h)) return;
+            const cd = document.createElement("div");
+            cd.className = "ph-cmt";
+            cd.innerHTML =
+              '<div class="ph-cmt-s"><i class="bi bi-file-earmark-text"></i><span></span></div>' +
+              (c.st ? '<div class="ph-cmt-st"></div>' : '') +
+              '<div class="ph-cmt-m"></div>';
+            cd.querySelector(".ph-cmt-s span").textContent = c.s || "(无提交说明)";
+            if (c.st) cd.querySelector(".ph-cmt-st").textContent = phStatZh(c.st);
+            const meta = [];
+            if (c.a) meta.push(c.a);
+            if (c.d) meta.push(String(c.d).slice(0, 16));
+            if (c.h) meta.push(c.h);
+            cd.querySelector(".ph-cmt-m").textContent = meta.join(" · ");
+            row.appendChild(cd);
+          });
+
+          const dt = document.createElement("div");
+          dt.className = "ph-detail";
+          dt.textContent = running ? "正在推送到远程仓库，结束后这里会显示结果…" : (it.detail || "—");
+          row.appendChild(dt);
         });
       } catch (e) {
         list.innerHTML = '<div class="ph-empty">读取推送记录失败：' + esc(String(e.message || e)) + '</div>';
@@ -453,7 +491,16 @@
     }
     load();
 
-    $("phClose").onclick = () => ov.classList.remove("show");
+    // 实时刷新：推送开始 / 结束时广播事件；另加轮询兜底（其他页面发起的推送也能看到）
+    const onHistChanged = () => { if (list.isConnected) load(); };
+    window.addEventListener("git-push-hist-changed", onHistChanged);
+    const poll = setInterval(onHistChanged, 2500);
+    const closeAll = () => {
+      clearInterval(poll);
+      window.removeEventListener("git-push-hist-changed", onHistChanged);
+      ov.classList.remove("show");
+    };
+    $("phClose").onclick = closeAll;
     $("phClear").onclick = async () => {
       const msg = "确定清空当前仓库的全部推送记录吗？删除后不可恢复。";
       let ask;
@@ -678,6 +725,10 @@
   function remoteOp(verb, label, done) {
     if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
     toast(label + "中…");
+    const notifyHist = (phase) => {
+      if (verb === "push") window.dispatchEvent(new CustomEvent("git-push-hist-changed", { detail: { phase } }));
+    };
+    notifyHist("start");
     fetch("/api/git/" + verb, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ repo: gitState.repo }),
@@ -686,10 +737,14 @@
       .then(d => {
         if (d.error) throw new Error(d.error);
         toast(label + "完成", "ok");
+        notifyHist("end");
         if (verb === "pull") refreshTree(ROOT); else loadGitStatus();
         if (done) done(d);
       })
-      .catch(e => toast(label + "失败：" + String(e.message || e).replace(/\s+/g, " ").slice(0, 120), "err"));
+      .catch(e => {
+        notifyHist("end");
+        toast(label + "失败：" + String(e.message || e).replace(/\s+/g, " ").slice(0, 120), "err");
+      });
   }
 
   function gitGraphSection() {

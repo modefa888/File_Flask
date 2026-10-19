@@ -79,6 +79,13 @@
   .git-sec-head:hover { background: #2a2d2e; }
   .git-sec-head > .bi { font-size: 12px; color: #9aa0a6; }
   .git-sec-head .git-cnt { margin-left: auto; color: #9d9d9d; font-size: 12px; }
+  /* 更改分组：显示 / 隐藏缓存与构建产物（未跟踪文件过多时切换，选择会记住） */
+  .git-sec-head .git-showall {
+    background: transparent; border: none; color: #9d9d9d; cursor: pointer;
+    padding: 2px 5px; font-size: 13px; border-radius: 4px; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .git-sec-head .git-showall:hover { background: #3a3d41; color: #fff; }
   /* 分组右侧的批量操作按钮：加大到易点击尺寸 */
   .git-sec-head .git-acts button {
     padding: 3px 6px; font-size: 15px; line-height: 1.1; border-radius: 4px; flex: none;
@@ -213,6 +220,9 @@
     .git-graph .git-sec-head .g-auto { display: none; }
   }
   .git-graph .git-acts button.on { color: #4fc1ff; }
+  /* 图形区底部：滚动懒加载提示 */
+  .git-graph .git-graph-more { padding: 10px 8px; text-align: center; font-size: 11.5px; color: #7d7d7d; }
+  html.theme-light .git-graph .git-graph-more { color: #8a8a8a; }
   /* 提交悬停信息卡（模拟 VS Code 图形视图悬停详情） */
   .git-hover-card {
     position: fixed; z-index: 9000; max-width: 460px; padding: 10px 12px;

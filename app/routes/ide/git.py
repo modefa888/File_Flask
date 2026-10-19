@@ -286,9 +286,13 @@ def api_git_status():
         if y not in (" ", "?"):
             changed.append({"path": f["path"], "status": y})
     info = _parse_branch(branch_line)
-    # 未跟踪项里过滤掉缓存/构建产物，避免 .venv、__pycache__、dist 之类淹没有效改动
-    show_untracked = [u for u in untracked if not _noisy(u["path"])]
-    hidden = len(untracked) - len(show_untracked)
+    # 未跟踪项默认全部返回；传 show_all=0 时才过滤缓存/构建产物（面板上可切换）
+    show_all = (request.args.get("show_all", "1") or "1").lower() not in ("0", "false", "no")
+    if show_all:
+        show_untracked, hidden = untracked, 0
+    else:
+        show_untracked = [u for u in untracked if not _noisy(u["path"])]
+        hidden = len(untracked) - len(show_untracked)
     return jsonify({
         "ok": True, "is_repo": True, "repo": root,
         "branch": info["branch"], "upstream": info["upstream"],
@@ -522,12 +526,16 @@ def api_git_discard():
 
 @bp.route("/api/git/log")
 def api_git_log():
-    """最近提交（源代码管理“图形”区块）。"""
+    """提交历史（源代码管理“图形”区块）。limit / skip 支持前端滚动懒加载。"""
     repo = request.args.get("path", "")
     try:
-        limit = max(1, min(100, int(request.args.get("limit", 30))))
+        limit = max(1, min(200, int(request.args.get("limit", 30))))
     except (TypeError, ValueError):
         limit = 30
+    try:
+        skip = max(0, int(request.args.get("skip", 0)))
+    except (TypeError, ValueError):
+        skip = 0
     root, err = _repo_root(repo)
     if err:
         return jsonify({"ok": False, "error": err, "is_repo": False, "commits": []})
@@ -535,8 +543,8 @@ def api_git_log():
         return jsonify({"ok": True, "is_repo": False, "repo": os.path.abspath(repo), "commits": []})
     # %x1f 作为字段分隔符，避免提交信息中含逗号时解析出错；%d 为 ref 装饰（分支/标签）
     fmt = "%h%x1f%s%x1f%an%x1f%ad%x1f%d"
-    proc, err = _git(root, ["log", f"-{limit}", "--date=format:%Y-%m-%d %H:%M",
-                            f"--pretty=format:{fmt}"])
+    proc, err = _git(root, ["log", f"-{limit}", f"--skip={skip}",
+                            "--date=format:%Y-%m-%d %H:%M", f"--pretty=format:{fmt}"])
     if err:
         return jsonify({"ok": False, "is_repo": True, "repo": root, "error": err, "commits": []})
     commits = []
@@ -549,7 +557,8 @@ def api_git_log():
                     refs = [r.strip() for r in parts[4].strip().strip("()").split(",") if r.strip()]
                 commits.append({"hash": parts[0], "subject": parts[1],
                                 "author": parts[2], "date": parts[3], "refs": refs})
-    return jsonify({"ok": True, "is_repo": True, "repo": root, "commits": commits})
+    return jsonify({"ok": True, "is_repo": True, "repo": root, "commits": commits,
+                    "has_more": len(commits) >= limit})
 
 
 @bp.route("/api/git/show")

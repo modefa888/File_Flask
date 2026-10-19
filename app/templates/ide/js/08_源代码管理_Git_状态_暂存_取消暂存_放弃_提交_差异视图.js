@@ -4,7 +4,10 @@
   const gitState = { isRepo: false, repo: "", branch: "", last: null };
   // 视图模式从全局设置 JSON 恢复（设置页 → 文件 可改），切换时写回永久保存
   let gitViewMode = ideSettingGet("gitViewMode", "list") === "tree" ? "tree" : "list";
-  let gitGraph = [];             // 最近提交（图形区块）
+  let gitGraph = [];             // 提交历史（图形区块，滚动懒加载时不断追加）
+  let gitGraphHasMore = false;   // 是否还有更早的提交未加载
+  let gitGraphLoading = false;   // 懒加载请求进行中
+  const GIT_LOG_PAGE = 30;       // 每次加载的提交条数
 
   function gitPost(url, body, okMsg) {
     return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
@@ -158,8 +161,21 @@
     wrap.className = "git-sec changes-sec";
     const head = document.createElement("div");
     head.className = "git-sec-head";
+    const cntTxt = sec.files.length + (sec.hidden ? "（另隐藏 " + sec.hidden + "）" : "");
     head.innerHTML = '<i class="bi bi-chevron-down git-sec-tw"></i><span class="git-sec-title">' + sec.title +
-      '</span><span class="git-acts"></span><span class="git-cnt">' + sec.files.length + '</span>';
+      '</span><span class="git-acts"></span>' +
+      (sec.staged ? "" :
+        '<button class="git-showall" title="' +
+          (gitShowAll ? "隐藏缓存 / 构建产物，只显示有效改动" : "显示全部文件（含缓存 / 构建产物）") +
+        '"><i class="bi ' + (gitShowAll ? "bi-eye-slash" : "bi-eye") + '"></i></button>') +
+      '<span class="git-cnt">' + cntTxt + '</span>';
+    const showAllBtn = head.querySelector(".git-showall");
+    if (showAllBtn) showAllBtn.onclick = (e) => {
+      e.stopPropagation();                     // 不要触发展开 / 折叠分组
+      gitShowAll = !gitShowAll;
+      try { localStorage.setItem(GIT_SHOW_ALL_KEY, gitShowAll ? "1" : "0"); } catch (_) { /* 忽略 */ }
+      loadGitStatus();
+    };
     const body = document.createElement("div");
     if (gitViewMode === "tree") {
       body.appendChild(renderGitTree(gitTreeFrom(sec.files), 0, sec));
@@ -291,6 +307,11 @@
   /* 提交悬停信息卡：作者 / 相对时间 / 完整信息 / 变更统计 / 哈希（模拟 VS Code 图形视图） */
   let gitCard = null, gitCardShow = null, gitCardHide = null;
   const gitStatsCache = {};
+  // 未跟踪文件是否全部显示（默认「全部」；部分仓库的缓存/构建产物很多，可切换隐藏）
+  const GIT_SHOW_ALL_KEY = "ide.git.showAllFiles";
+  let gitShowAll = (() => {
+    try { return localStorage.getItem(GIT_SHOW_ALL_KEY) !== "0"; } catch (_) { return true; }
+  })();
 
   function gitRelTime(s) {
     const t = new Date(String(s).replace(" ", "T"));
@@ -747,6 +768,85 @@
       });
   }
 
+  /* 单条提交记录（图形区块）。i：在 gitGraph 中的序号，total：当前已加载总数 */
+  function gitCommitItem(c, i, total) {
+    const refs = (c.refs || [])
+      .map(r => r.replace(/^HEAD -> /, ""))
+      .filter(r => r && r !== "HEAD")
+      .slice(0, 2);
+    const item = document.createElement("div");
+    // first/head：首行时间线从圆心开始且加粗；last：末行时间线在圆心结束
+    item.className = "git-commit-item" +
+      (i === 0 ? " first head" : "") + (i === total - 1 ? " last" : "");
+    const row = document.createElement("div");
+    row.className = "git-commit-row";
+    row.innerHTML = '<span class="gc-node"></span>' +
+      '<span class="gc-sub">' + esc(c.subject) + '</span>' +
+      '<span class="gc-author">' + esc(c.author) + '</span>' +
+      refs.map(r => '<span class="gc-ref' + (r.startsWith("tag:") ? " tag" : "") + '">' +
+        (r.startsWith("tag:") ? "" : '<i class="bi bi-diagram-2-fill"></i>') +
+        esc(r.replace(/^tag: /, "")) + '</span>').join("") +
+      '<span class="gc-acts"><button title="复制提交哈希"><i class="bi bi-copy"></i></button></span>';
+    row.querySelector(".gc-acts button").onclick = (e) => {
+      e.stopPropagation();
+      copyText((gitStatsCache[c.hash] && gitStatsCache[c.hash].full) || c.hash);
+      toast("已复制提交哈希", "ok");
+    };
+    const files = document.createElement("div");
+    files.className = "git-commit-files";
+    files.style.display = "none";
+    let loaded = false;
+    row.onclick = () => {
+      const show = files.style.display === "none";
+      files.style.display = show ? "" : "none";
+      if (show && !loaded) { loaded = true; loadCommitFiles(c.hash, files); }
+    };
+    item.appendChild(row);
+    item.appendChild(files);
+    attachCommitHover(row, c);
+    return item;
+  }
+
+  /* 懒加载：滚动接近底部时取更早的一批提交并追加（每批 GIT_LOG_PAGE 条） */
+  function loadMoreCommits(body, cntEl, moreEl) {
+    if (gitGraphLoading || !gitGraphHasMore) return;
+    gitGraphLoading = true;
+    if (moreEl) { moreEl.textContent = "正在加载更多提交…"; moreEl.style.display = ""; }
+    const url = "/api/git/log?path=" + encodeURIComponent(gitState.repo || ROOT) +
+      "&limit=" + GIT_LOG_PAGE + "&skip=" + gitGraph.length;
+    fetch(url)
+      .then(r => r.json())
+      .then(d => {
+        if (d && d.error) throw new Error(d.error);
+        const list = (d && d.commits) || [];
+        gitGraphHasMore = !!(d && d.has_more) && list.length > 0;
+        // 追加前去掉旧的末条标记（时间线只在真正的最底部收口）
+        body.querySelectorAll(".git-commit-item.last").forEach(el => el.classList.remove("last"));
+        const start = gitGraph.length;
+        list.forEach((c, k) => {
+          gitGraph.push(c);
+          const el = gitCommitItem(c, start + k, start + list.length);
+          if (moreEl) body.insertBefore(el, moreEl); else body.appendChild(el);
+        });
+        if (cntEl) cntEl.textContent = gitGraph.length;
+        if (moreEl) {
+          moreEl.textContent = gitGraphHasMore ? "" : "已加载全部提交";
+          moreEl.style.display = moreEl.textContent ? "" : "none";
+        }
+      })
+      .catch(() => {
+        if (moreEl) { moreEl.textContent = "加载更多失败，滚动可重试"; moreEl.style.display = ""; }
+      })
+      .finally(() => {
+        gitGraphLoading = false;
+        // 面板还没被填满时继续取下一批（没有滚动条就触发不了 scroll）
+        if (gitGraphHasMore && body.clientHeight &&
+            body.scrollHeight <= body.clientHeight + 10) {
+          loadMoreCommits(body, cntEl, moreEl);
+        }
+      });
+  }
+
   function gitGraphSection() {
     const wrap = document.createElement("div");
     wrap.className = "git-sec git-graph";
@@ -779,44 +879,21 @@
       e.textContent = "没有任何源代码管理历史记录项。";
       body.appendChild(e);
     } else {
-      gitGraph.forEach((c, i) => {
-        const refs = (c.refs || [])
-          .map(r => r.replace(/^HEAD -> /, ""))
-          .filter(r => r && r !== "HEAD")
-          .slice(0, 2);
-        const item = document.createElement("div");
-        // first/head：首行时间线从圆心开始且加粗；last：末行时间线在圆心结束
-        item.className = "git-commit-item" +
-          (i === 0 ? " first head" : "") + (i === gitGraph.length - 1 ? " last" : "");
-        const row = document.createElement("div");
-        row.className = "git-commit-row";
-        row.innerHTML = '<span class="gc-node"></span>' +
-          '<span class="gc-sub">' + esc(c.subject) + '</span>' +
-          '<span class="gc-author">' + esc(c.author) + '</span>' +
-          refs.map(r => '<span class="gc-ref' + (r.startsWith("tag:") ? " tag" : "") + '">' +
-            (r.startsWith("tag:") ? "" : '<i class="bi bi-diagram-2-fill"></i>') +
-            esc(r.replace(/^tag: /, "")) + '</span>').join("") +
-          '<span class="gc-acts"><button title="复制提交哈希"><i class="bi bi-copy"></i></button></span>';
-        row.querySelector(".gc-acts button").onclick = (e) => {
-          e.stopPropagation();
-          copyText((gitStatsCache[c.hash] && gitStatsCache[c.hash].full) || c.hash);
-          toast("已复制提交哈希", "ok");
-        };
-        const files = document.createElement("div");
-        files.className = "git-commit-files";
-        files.style.display = "none";
-        let loaded = false;
-        row.onclick = () => {
-          const show = files.style.display === "none";
-          files.style.display = show ? "" : "none";
-          if (show && !loaded) { loaded = true; loadCommitFiles(c.hash, files); }
-        };
-        item.appendChild(row);
-        item.appendChild(files);
-        attachCommitHover(row, c);
-        body.appendChild(item);
-      });
+      gitGraph.forEach((c, i) => body.appendChild(gitCommitItem(c, i, gitGraph.length)));
     }
+    // 底部提示 + 滚动懒加载：接近底部时自动取更早的提交
+    const more = document.createElement("div");
+    more.className = "git-graph-more";
+    more.textContent = gitGraph.length && !gitGraphHasMore ? "已加载全部提交" : "";
+    more.style.display = more.textContent ? "" : "none";
+    body.appendChild(more);
+    const cntEl = head.querySelector(".git-cnt");
+    body.addEventListener("scroll", () => {
+      if (gitGraphLoading || !gitGraphHasMore) return;
+      if (body.scrollTop + body.clientHeight >= body.scrollHeight - 60) {
+        loadMoreCommits(body, cntEl, more);
+      }
+    });
     const setCollapsed = (collapsed) => {
       body.style.display = collapsed ? "none" : "";
       // 折叠时收成一行并贴到面板最底部（与 Trae 一致）；展开时占满剩余空间
@@ -833,6 +910,13 @@
     } catch (e) {}
     wrap.appendChild(head);
     wrap.appendChild(body);
+    // 首屏不足一屏时继续取下一批（否则没有滚动条，滚不到底部就触发不了懒加载）
+    setTimeout(() => {
+      if (gitGraphHasMore && !gitGraphLoading && body.clientHeight &&
+          body.scrollHeight <= body.clientHeight + 10) {
+        loadMoreCommits(body, cntEl, more);
+      }
+    }, 0);
     return wrap;
   }
 
@@ -923,7 +1007,8 @@
     box.innerHTML = "";
     const sections = [
       { title: "已暂存的更改", files: d.staged || [], staged: true },
-      { title: "更改", files: (d.changed || []).concat(d.untracked || []), staged: false },
+      { title: "更改", files: (d.changed || []).concat(d.untracked || []), staged: false,
+        hidden: d.hidden_untracked || 0 },
     ];
     const total = sections.reduce((s, x) => s + x.files.length, 0);
     if (total) {
@@ -981,12 +1066,15 @@
   function loadGitStatus(showToast) {
     // 状态与提交历史并行拉取，一次渲染，避免闪烁
     return Promise.all([
-      fetch("/api/git/status?path=" + encodeURIComponent(ROOT)).then(r => r.json()),
-      fetch("/api/git/log?path=" + encodeURIComponent(ROOT) + "&limit=30")
+      fetch("/api/git/status?path=" + encodeURIComponent(ROOT) + "&show_all=" + (gitShowAll ? "1" : "0"))
+        .then(r => r.json()),
+      fetch("/api/git/log?path=" + encodeURIComponent(ROOT) + "&limit=" + GIT_LOG_PAGE + "&skip=0")
         .then(r => r.json()).catch(() => ({ commits: [] })),
     ])
       .then(([d, lg]) => {
         gitGraph = (lg && lg.commits) || [];
+        gitGraphHasMore = !!(lg && lg.has_more);     // 首批就满一页 → 说明还有更早的提交
+        gitGraphLoading = false;
         gitState.last = d;
         gitState.isRepo = !!d.is_repo;
         gitState.repo = d.repo || ROOT;

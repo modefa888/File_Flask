@@ -256,6 +256,7 @@
       { label: "以列表形式查看", on: gitCommitFileMode === "list", act: () => { gitCommitFileMode = "list"; ideSettingSet("gitCommitFileMode", "list"); reloadCommitLists(); } },
       { label: "以树形式查看", on: gitCommitFileMode === "tree", act: () => { gitCommitFileMode = "tree"; ideSettingSet("gitCommitFileMode", "tree"); reloadCommitLists(); } },
       { label: "设置远程仓库", act: () => setGitRemote() },
+      { label: "发布推送记录", act: () => showPushHistory() },
     ];
     menu.innerHTML = "";
     items.forEach(it => {
@@ -401,6 +402,77 @@
       .then(r => r.json())
       .then(d => { if (d.error) throw new Error(d.error); toast(d.message || "已设置远程仓库", "ok"); loadGitStatus(); })
       .catch(e => toast("设置失败：" + (e.message || e), "err"));
+  }
+
+  /* 发布推送记录弹窗：列出本仓库历次 push 的时间 / 分支 / 结果 / 输出摘要 */
+  async function showPushHistory() {
+    if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
+    const ov = $("modalOverlay");
+    ov.innerHTML =
+      '<div class="ide-modal">' +
+        '<div class="m-title"><i class="bi bi-cloud-upload"></i><span>发布推送记录</span></div>' +
+        '<div class="m-body"><div id="pushHistList" class="ph-list"><div class="ph-empty">加载中…</div></div></div>' +
+        '<div class="m-foot">' +
+          '<button class="m-cancel" id="phClear">清空记录</button>' +
+          '<button class="m-ok" id="phClose">关闭</button>' +
+        '</div>' +
+      '</div>';
+    ov.classList.add("show");
+    const list = $("pushHistList");
+
+    async function load() {
+      try {
+        const r = await fetch("/api/git/push/history?repo=" + encodeURIComponent(gitState.repo) + "&limit=100");
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        const items = d.items || [];
+        if (!items.length) {
+          list.innerHTML = '<div class="ph-empty">还没有推送记录<br>点工具栏「发布分支 / 推送」后会自动记录在这里</div>';
+          return;
+        }
+        list.innerHTML = "";
+        items.forEach(it => {
+          const row = document.createElement("div");
+          row.className = "ph-i";
+          row.innerHTML =
+            '<div class="ph-l1">' +
+              '<span class="ph-ts"></span>' +
+              (it.branch ? '<span class="ph-br"></span>' : '') +
+              '<span class="ph-sp"></span>' +
+              '<span class="ph-ok ' + (it.ok ? "ok" : "no") + '">' + (it.ok ? "✓ 成功" : "✕ 失败") + '</span>' +
+            '</div>' +
+            '<div class="ph-detail"></div>';
+          row.querySelector(".ph-ts").textContent = String(it.ts || "").slice(5, 16);
+          if (it.branch) row.querySelector(".ph-br").textContent = it.branch;
+          row.querySelector(".ph-detail").textContent = it.detail || "—";
+          list.appendChild(row);
+        });
+      } catch (e) {
+        list.innerHTML = '<div class="ph-empty">读取推送记录失败：' + esc(String(e.message || e)) + '</div>';
+      }
+    }
+    load();
+
+    $("phClose").onclick = () => ov.classList.remove("show");
+    $("phClear").onclick = async () => {
+      const msg = "确定清空当前仓库的全部推送记录吗？删除后不可恢复。";
+      let ask;
+      if (typeof uiConfirmPop === "function") {
+        ask = uiConfirmPop($("phClear"), { title: "清空推送记录", msg: msg, okText: "清空", danger: true });
+      } else if (typeof uiConfirm === "function") {
+        ask = uiConfirm("清空推送记录", msg, "清空", true);
+      } else {
+        ask = Promise.resolve(window.confirm(msg));
+      }
+      if (!(await ask)) return;
+      try {
+        await fetch("/api/git/push/history?repo=" + encodeURIComponent(gitState.repo), { method: "DELETE" });
+        toast("已清空推送记录", "ok");
+        load();
+      } catch (e) {
+        toast("清空失败：" + String(e.message || e), "err");
+      }
+    };
   }
 
   /* 设置远程仓库弹窗：输入地址 + 测试连接 + 默认分支信息 */

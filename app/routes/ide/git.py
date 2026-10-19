@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from flask import Blueprint, request, jsonify
@@ -713,6 +714,7 @@ def _remote_op(verb, timeout):
     auth_url = _auth_remote_url(origin_url, creds)
 
     args = [verb]
+    branch = ""
     if verb == "fetch":
         args += ["--prune", auth_url]
     elif verb == "push":
@@ -730,9 +732,13 @@ def _remote_op(verb, timeout):
 
     proc, err = _git(root, args, timeout=timeout)
     if err:
+        if verb == "push":
+            _push_hist(root, branch, False, str(err))
         return _fail(err, 500)
     out = ((proc.stdout or "") + (proc.stderr or "")).strip()
     if proc.returncode != 0:
+        if verb == "push":
+            _push_hist(root, branch, False, out)
         # 对常见错误给出更直接的提示
         lowered = out.lower()
         if "does not appear to be a git repository" in lowered or "could not resolve" in lowered:
@@ -750,6 +756,8 @@ def _remote_op(verb, timeout):
                 "output": out
             }), 400
         return jsonify({"ok": False, "error": out or f"{verb} 失败", "output": out}), 500
+    if verb == "push":
+        _push_hist(root, branch, True, out)
     return jsonify({"ok": True, "output": out})
 
 
@@ -766,6 +774,76 @@ def api_git_pull():
 @bp.route("/api/git/push", methods=["POST"])
 def api_git_push():
     return _remote_op("push", 120)
+
+
+_PUSH_HIST_KEEP = 2000                   # 推送记录最多保留条数（超出从旧到新删）
+
+
+def _push_hist(repo, branch, ok, detail):
+    """把一次 push（发布）写入 store.db 的 git_push_history；失败不影响主流程。"""
+    try:
+        with store_tx() as conn:
+            conn.execute(
+                "INSERT INTO git_push_history (ts, repo, branch, ok, detail) VALUES (?,?,?,?,?)",
+                (time.strftime("%Y-%m-%d %H:%M:%S"), repo, branch or "", 1 if ok else 0,
+                 (detail or "").strip()[:600]))
+            n = conn.execute("SELECT COUNT(*) AS n FROM git_push_history").fetchone()["n"]
+            if n > _PUSH_HIST_KEEP:
+                conn.execute("DELETE FROM git_push_history WHERE id IN "
+                             "(SELECT id FROM git_push_history ORDER BY id ASC LIMIT ?)",
+                             (n - _PUSH_HIST_KEEP,))
+    except Exception as e:                                  # noqa: BLE001
+        _log.warning("保存推送记录失败：%s", e)
+
+
+@bp.route("/api/git/push/history", methods=["GET"])
+def api_git_push_history_list():
+    """推送记录（按时间倒序）。`?repo=` 只看该仓库，省略则返回全部；`?limit=` 默认 100。"""
+    repo = str(request.args.get("repo") or "").strip()
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 500))
+    sql = "SELECT id, ts, repo, branch, ok, detail FROM git_push_history "
+    args = ()
+    if repo:
+        sql += "WHERE repo=? "
+        args = (repo,)
+    sql += "ORDER BY id DESC LIMIT ?"
+    args += (limit,)
+    try:
+        conn = store_conn()
+        try:
+            rows = conn.execute(sql, args).fetchall()
+        finally:
+            conn.close()
+    except Exception as e:                                  # noqa: BLE001
+        _log.warning("读取推送记录失败：%s", e)
+        return jsonify({"error": "读取推送记录失败：%s" % e}), 500
+    return jsonify({"items": [dict(r) for r in rows], "total": len(rows)})
+
+
+@bp.route("/api/git/push/history", methods=["DELETE"])
+def api_git_push_history_delete():
+    """清空推送记录：`?id=N` 删一条；`?repo=` 清该仓库；`?all=1` 全清。"""
+    hid = request.args.get("id", type=int)
+    repo = str(request.args.get("repo") or "").strip()
+    all_flag = str(request.args.get("all") or "").lower() in ("1", "true", "yes")
+    if not (hid or repo or all_flag):
+        return jsonify({"error": "缺少 id / repo / all 参数"}), 400
+    try:
+        with store_tx() as conn:
+            if hid:
+                conn.execute("DELETE FROM git_push_history WHERE id=?", (hid,))
+            elif repo:
+                conn.execute("DELETE FROM git_push_history WHERE repo=?", (repo,))
+            else:
+                conn.execute("DELETE FROM git_push_history")
+    except Exception as e:                                  # noqa: BLE001
+        _log.warning("删除推送记录失败：%s", e)
+        return jsonify({"error": "删除失败：%s" % e}), 500
+    return jsonify({"ok": True})
 
 
 @bp.route("/api/git/remote", methods=["GET", "POST"])

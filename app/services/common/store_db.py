@@ -250,6 +250,17 @@ CREATE TABLE IF NOT EXISTS term_ai_history (
 CREATE INDEX IF NOT EXISTS idx_term_ai_hist ON term_ai_history(id DESC);
 CREATE INDEX IF NOT EXISTS idx_term_ai_hist_host ON term_ai_history(host, id DESC);
 
+-- Git 发布（push）记录：源代码管理面板「更多 → 发布推送记录」查看
+CREATE TABLE IF NOT EXISTS git_push_history (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts       TEXT NOT NULL DEFAULT '',   -- 时间（YYYY-MM-DD HH:MM:SS）
+    repo     TEXT DEFAULT '',            -- 仓库绝对路径
+    branch   TEXT DEFAULT '',            -- 推送的分支
+    ok       INTEGER DEFAULT 0,          -- 1 = 推送成功
+    detail   TEXT DEFAULT ''             -- git 输出 / 错误摘要
+);
+CREATE INDEX IF NOT EXISTS idx_git_push_hist ON git_push_history(id DESC);
+
 -- AI 对话历史（原独立库 data/.file_manager_ai_chat.db，表结构保持一致以便直接搬运）
 -- root：对话所属的项目根目录（IDE 的 ROOT）。空串 = 还没绑定项目（旧数据），
 -- 首次进入某个项目时由 chatdb.adopt_unassigned() 一次性划归该项目，

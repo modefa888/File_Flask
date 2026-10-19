@@ -277,6 +277,15 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .gr-creds-btn { border-color: #cecece; color: #005fb8; }
 :where(html.theme-light) .gr-creds-btn:hover { background: #e3f0fb; border-color: #8ab4d8; }
 
+/* ---------- 发布推送记录弹窗（18） ---------- */
+:where(html.theme-light) .ph-i { background: #f6f7f9; border-color: #e2e5e9; }
+:where(html.theme-light) .ph-ts { color: #0b62a4; }
+:where(html.theme-light) .ph-br { color: #8a3aa0; background: #f3e9f7; }
+:where(html.theme-light) .ph-ok.ok { color: #1a7f37; }
+:where(html.theme-light) .ph-ok.no { color: #c62828; }
+:where(html.theme-light) .ph-detail { color: #667080; }
+:where(html.theme-light) .ph-empty { color: #8892a0; }
+
 /* ---------- 时间线 / 保存确认（19） ---------- */
 :where(html.theme-light) .tl-item:hover { background: #e8e8e8; }
 :where(html.theme-light) .tl-sub { color: #1f2328; }

@@ -107,16 +107,28 @@ async function handleUserAction(el, btn) {
         ADM.toast('角色已更新', 'ok');
         await refreshUsers(el);
     } else if (act === 'pwd') {
+        // 修改自己账号的密码：需先输入当前（旧）密码；重置他人密码则无需旧密码
+        var isSelf = (name === ADM.user);
+        var fields =
+            (isSelf ? ADM.fieldHtml({ name: 'old_password', label: '当前密码', type: 'password', placeholder: '请输入现在的密码' }) : '') +
+            ADM.fieldHtml({ name: 'password', label: '新密码', type: 'password', placeholder: '至少 6 位' }) +
+            ADM.fieldHtml({ name: 'confirm', label: '确认新密码', type: 'password', placeholder: '再输入一次新密码',
+                hint: '成功后该账号的旧登录状态将全部失效' });
         await ADM.modal({
-            title: '重置密码 · ' + name,
+            title: (isSelf ? '修改密码' : '重置密码') + ' · ' + name,
             icon: 'bi-key',
-            html: ADM.fieldHtml({ name: 'password', label: '新密码', type: 'password', placeholder: '至少 6 位', hint: '重置后请告知该用户，旧密码立即失效' }),
-            okText: '重置密码',
+            html: fields,
+            okText: isSelf ? '确认修改' : '重置密码',
             onOk: async function (box) {
                 var v = ADM.readForm(box);
+                if (isSelf && !v.old_password) throw new Error('请输入当前密码');
                 if (!v.password || v.password.length < 6) throw new Error('密码至少 6 位');
-                await ADM.api('/api/adm/users/update', { method: 'POST', body: { username: name, password: v.password } });
-                ADM.toast('密码已重置', 'ok');
+                if (v.password !== v.confirm) throw new Error('两次输入的新密码不一致');
+                if (v.old_password && v.password === v.old_password) throw new Error('新密码不能与当前密码相同');
+                var body = { username: name, password: v.password, confirm: v.confirm };
+                if (isSelf) body.old_password = v.old_password;
+                await ADM.api('/api/adm/users/update', { method: 'POST', body: body });
+                ADM.toast(isSelf ? '密码已修改，旧登录状态已失效' : '密码已重置，该用户旧登录状态已失效', 'ok');
                 return true;
             }
         });

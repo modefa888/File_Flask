@@ -32,7 +32,9 @@ POST /api/adm/pages/update     编辑页面登记 {path, desc?|access?|disabled?
 其余功能（分享 / 定时任务 / 后台任务 / 插件 / 数据库连接 / SSH / 通知 / AI 用量 /
 文件说明 / 操作历史）直接复用各业务模块已有的 `/api/...` 接口，后台页只做聚合展示。
 """
-from flask import Blueprint, jsonify, make_response, redirect, render_template, request
+from flask import (
+    Blueprint, jsonify, make_response, redirect, render_template, request, session,
+)
 
 from ...log import get_logger
 from ...services.adm import overview, users_admin
@@ -148,6 +150,7 @@ def api_users_create():
 @bp.route("/api/adm/users/update", methods=["POST"])
 def api_users_update():
     from ..common.auth import current_username
+    from ...services.common.users import verify_user, get_password_version
     data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip()
     if not username:
@@ -160,9 +163,30 @@ def api_users_update():
         if err:
             return _fail(err)
     if data.get("password"):
-        err = users_admin.set_password(username, data.get("password"))
+        new_password = data.get("password") or ""
+        confirm = data.get("confirm") or ""
+        if confirm and confirm != new_password:
+            return _fail("两次输入的新密码不一致")
+        # 修改自己账号的密码：必须先验证当前（旧）密码；重置他人密码由管理员权限兜底
+        if username == current_username():
+            old_password = data.get("old_password") or ""
+            if not old_password:
+                return _fail("请输入当前密码")
+            if not verify_user(username, old_password):
+                return _fail("当前密码不正确")
+            if new_password == old_password:
+                return _fail("新密码不能与当前密码相同")
+        # 新密码不能与该账号正在使用的密码相同（重置他人时同样校验）
+        if verify_user(username, new_password):
+            return _fail("新密码不能与该账号的当前密码相同")
+        err = users_admin.set_password(username, new_password)
         if err:
             return _fail(err)
+        # 密码版本 +1：该账号在其它设备 / 浏览器上的旧登录会话自动失效
+        # （auth._require_login 每次请求核对会话里的 pw_ver）。
+        # 改的是自己时，顺手刷新当前会话的版本号，避免自己也被踢出。
+        if username == current_username():
+            session["pw_ver"] = get_password_version(username)
     return _ok()
 
 

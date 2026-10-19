@@ -6,7 +6,10 @@ from flask import (
 
 from ... import config
 from ...log import get_logger
-from ...services.common.users import create_user, verify_user, user_exists, is_banned
+from ...services.common.users import (
+    create_user, verify_user, user_exists, is_banned,
+    must_change_password, change_own_password, get_password_version,
+)
 from ...services.common.auth_settings import registration_open
 
 
@@ -55,6 +58,15 @@ _MEMBER_ALLOW_API = {
     ("/api/shared/files", "HEAD"),  # HEAD 与 GET 等同（如探测文件大小）
     ("/api/collab/rooms", "GET"),   # 协作房间列表（成员查看自己所在会话）
 }
+
+
+# 改密页路由（首次运行必须修改初始密码时强制跳转到这里）
+CHANGE_PW_PATH = "/change-password"
+
+# 「初始密码未修改」期间额外放行的路径：
+#   /change-password 改密页本身；/logout 允许退出（否则会被锁在改密页里）；
+#   /login 允许换账号重新登录。静态资源同样放行，保证页面样式能加载。
+_FORCE_PW_PASS_PATHS = (CHANGE_PW_PATH, "/logout", "/login")
 
 
 # 无需登录即可访问的路径（前缀）
@@ -123,6 +135,20 @@ def _require_login():
     仅当接口未登记（未同步 / 未知路由）时，才回退到代码默认级别 access_level()。
     注：权限表里的「默认快照」（source='default'）仅供查看，不参与鉴权。
     """
+    # 密码版本校验：改密 / 后台重置后，该账号在其它设备上的旧登录会话自动失效。
+    # 老会话没有 pw_ver 字段（升级前的登录），不参与校验，保持兼容。
+    if is_logged_in() and session.get("pw_ver") is not None:
+        if get_password_version(current_username()) != session["pw_ver"]:
+            session.clear()
+            return _need_login()
+
+    # 首次运行的初始密码未修改：除改密页 / 登出 / 登录 / 静态资源外一律拦下，
+    # 不允许带着默认口令使用系统里的任何功能。
+    if is_logged_in() and session.get("must_change_pw"):
+        path = request.path
+        if not (path in _FORCE_PW_PASS_PATHS or path.startswith("/static")):
+            return _force_change_password()
+
     from ...services.adm import api_registry
     rule = getattr(request, "url_rule", None)
     rule_str = rule.rule if rule is not None else request.path
@@ -168,6 +194,13 @@ def _need_login():
     return redirect(url_for("auth.login"))
 
 
+def _force_change_password():
+    """初始密码未修改：API 返回 403 JSON，页面请求跳转到改密页。"""
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "请先修改初始密码后再使用", "password_change_required": True}), 403
+    return redirect(url_for("auth.change_password"))
+
+
 def _member_denied():
     """协作者（member）越权：API 返回 403 JSON，页面回到受限协作页。"""
     _log.warning("协作者越权访问已拦截: %s %s", request.method, request.path)
@@ -208,7 +241,14 @@ def login():
             session["logged_in"] = True
             session["username"] = user["username"]
             session["role"] = user["role"]
+            session["pw_ver"] = int(user.get("pw_ver", 0))
             _log.info("登录成功: %s (role=%s)", user["username"], user["role"])
+            # 首次运行：管理员用的还是初始（默认）密码，必须先改一次才能进入系统
+            if user["role"] == "admin" and must_change_password(user["username"]):
+                session["must_change_pw"] = True
+                session["pw_change_next"] = _safe_next()   # 改完密再回到原本要去的页面
+                _log.info("初始密码未修改，跳转强制改密页: %s", user["username"])
+                return redirect(url_for("auth.change_password"))
             return redirect(_safe_next() or url_for("pages.index"))
         elif user_exists(username) and is_banned(username):
             # 账号存在且被封禁：给出明确提示，避免用户反复试密码
@@ -253,9 +293,46 @@ def register():
                 session["logged_in"] = True
                 session["username"] = username.strip()
                 session["role"] = "member"
+                session["pw_ver"] = get_password_version(username.strip())
                 _log.info("注册并登录: %s", username)
                 return redirect(nxt or url_for("pages.index"))
     return render_template("register.html", error=error, username=username, next=nxt)
+
+
+@bp.route(CHANGE_PW_PATH, methods=["GET", "POST"])
+def change_password():
+    """修改当前账号密码。
+
+    项目首次运行时管理员登录后会被强制跳转到这里（session.must_change_pw），
+    改密成功前无法访问其它任何页面 / 接口；也作为已登录用户主动改密的入口。
+    """
+    if not is_logged_in():
+        return redirect(url_for("auth.login"))
+    error = None
+    forced = bool(session.get("must_change_pw"))
+    if request.method == "POST":
+        old_pw = request.form.get("old_password") or ""
+        new_pw = request.form.get("new_password") or ""
+        confirm = request.form.get("confirm") or ""
+        if new_pw != confirm:
+            error = "两次输入的新密码不一致"
+        else:
+            err = change_own_password(current_username(), old_pw, new_pw)
+            if err:
+                error = err
+            else:
+                session.pop("must_change_pw", None)
+                # 改密后 pw_ver 已 +1：同步刷新本会话的版本号，当前登录保持有效；
+                # 该账号其它设备 / 其它浏览器上的旧会话会在下次请求时自动失效。
+                session["pw_ver"] = get_password_version(current_username())
+                # 只对站内相对地址回跳，挡掉 http://evil.com 与协议相对地址（开放重定向）
+                nxt = (session.pop("pw_change_next", "") or "").strip()
+                if not (nxt.startswith("/") and not nxt.startswith("//")):
+                    nxt = ""
+                _log.info("密码修改成功: %s", current_username())
+                return redirect(nxt or url_for("pages.index"))
+    return render_template("change_password.html", error=error,
+                           username=current_username(), forced=forced)
 
 
 @bp.route("/logout")

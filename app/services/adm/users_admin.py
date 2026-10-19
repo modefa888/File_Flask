@@ -95,17 +95,18 @@ def set_role(username, role):
 
 
 def set_password(username, password):
-    """重置密码；成功返回 None，失败返回错误信息。"""
-    from werkzeug.security import generate_password_hash
+    """重置密码；成功返回 None，失败返回错误信息。
+
+    走 users.set_password_hash：改密后一并清除「首次登录必须改密」标记，
+    避免管理员在后台改过密码后，登录时仍被要求再改一次。
+    """
+    from ..common.users import set_password_hash
     username = (username or "").strip()
     if len(password or "") < _MIN_PASSWORD_LEN:
         return "密码至少 %d 位" % _MIN_PASSWORD_LEN
-    _ensure_table()
-    with store_tx() as conn:
-        cur = conn.execute("UPDATE users SET pw_hash=? WHERE username=?",
-                           (generate_password_hash(password), username))
-        if cur.rowcount == 0:
-            return "用户不存在"
+    err = set_password_hash(username, password)
+    if err:
+        return err
     _log.info("后台重置用户密码：%s", username)
     return None
 

@@ -1151,44 +1151,13 @@
     syncTreeToggleBtn();
   }
 
-  // 状态栏路径：普通文件标签显示当前文件的绝对路径；SSH 终端标签显示远端 shell 的当前目录
-  // （超长时省略，悬停看全文）
-  function renderStatusRoot(tab) {
+  // 状态栏：显示当前打开的文件夹绝对路径（超长时省略，悬停看全文）
+  function renderStatusRoot() {
     const el = $("sbRoot");
     if (!el) return;
     const txt = el.querySelector(".sb-root-txt");
-    let ic = el.querySelector(".sb-root-ic");
-    if (!ic) {                        // 兼容旧模板结构：把固定 <i> 换成可动态更新的图标容器
-      const oldI = el.querySelector("i");
-      ic = document.createElement("span");
-      ic.className = "sb-root-ic";
-      if (oldI) oldI.replaceWith(ic); else el.insertBefore(ic, el.firstChild);
-    }
-    const isSsh = !!(tab && tab.isSshTerm);
-    const raw = String((tab && tab.path) || "");
-    // 真实文件标签：绝对路径、无自定义显示名（displayPath 是虚拟视图用的）、不是控制字符内部 key
-    const isFile = !!(tab && !isSsh && !tab.displayPath && raw.charAt(0) === "/" &&
-      !/[\u0000-\u001f]/.test(raw));
-    let p, iconHtml, tip;
-    if (isSsh) {
-      p = tab.sshCwd || "";
-      iconHtml = '<i class="bi bi-hdd-network"></i>';
-      tip = p ? "远程服务器当前目录：" + p : "正在识别远程服务器的当前目录…";
-    } else if (isFile) {
-      p = raw;
-      // 用与标签栏 / 资源管理器完全相同的图标（视频=胶片、图片=图片、代码=代码…），
-      // 状态栏看一眼就知道当前是什么类型的文件
-      try { iconHtml = iconFor(baseName(p), false); }
-      catch (e) { iconHtml = '<i class="bi bi-file-earmark-text"></i>'; }
-      tip = "当前文件：" + p;
-    } else {
-      p = ROOT || "未打开文件夹";
-      iconHtml = '<i class="bi bi-folder2-open"></i>';
-      tip = ROOT ? "当前打开的文件夹：" + ROOT : "当前没有打开文件夹";
-    }
-    if (txt) txt.textContent = p || "—";
-    if (ic) ic.innerHTML = iconHtml;
-    el.title = tip;
+    if (txt) txt.textContent = ROOT || "未打开文件夹";
+    el.title = ROOT ? "当前打开的文件夹：" + ROOT : "当前没有打开文件夹";
   }
 
   async function initTree() {
@@ -1588,7 +1557,7 @@
   window.IDE_SYNC_VIDEO_TAB = function (tab, path, name) {
     tab.path = path; tab.name = name; tab.dirty = false; tab.big = false; tab.cm = null;
     if (tab.el) renderTab(tab);   // 重绘标签节点（带新文件名与图标）
-    if (active === tab) { renderBreadcrumbs(tab.displayPath || tab.path); updateStatus(); renderStatusRoot(tab); revealInTree(tab.path); }
+    if (active === tab) { renderBreadcrumbs(tab.displayPath || tab.path); updateStatus(); revealInTree(tab.path); }
     sessionSaveTabs();
   };
   function renderTabsAll() {
@@ -1829,7 +1798,6 @@
     if (String(tab.path || "").indexOf("\u0000ssh:") === 0) renderBreadcrumbs("SSH 终端/" + (tab.name || ""));
     else renderBreadcrumbs(tab.displayPath || tab.path);
     updateStatus();
-    renderStatusRoot(tab);            // 状态栏路径跟随标签（SSH 终端 → 远端当前目录）
     refreshTreeDirty(); ffOnTabChange();
     revealInTree(tab.path);          // 树列表跟随当前打开的文件高亮
     scrollTabIntoView(tab);
@@ -1837,9 +1805,6 @@
     if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏高亮跟随当前标签
     if (typeof apiSyncOpenMarks === "function") apiSyncOpenMarks();   // API 调试侧栏高亮跟随当前标签
     if (typeof runnerViewOnActivate === "function") runnerViewOnActivate();   // 后台任务轮询跟随当前标签
-    if (typeof tab.onActivate === "function") {       // 自定义标签激活钩子（SSH 占位标签：点标签即建连）
-      try { tab.onActivate(); } catch (e) { console.error(e); }
-    }
   }
   async function closeTab(tab) {
     const i = tabs.indexOf(tab);
@@ -1858,7 +1823,7 @@
       const rest = tabs.filter(t => t.group === g);
       const next = rest[rest.length - 1] || tabs[tabs.length - 1] || null;
       if (next) activate(next);
-      else { active = null; groupActive.delete(g); curGroup = 0; $("breadcrumbs").innerHTML = ""; updateStatus(); renderStatusRoot(null); ffClose(); }
+      else { active = null; groupActive.delete(g); curGroup = 0; $("breadcrumbs").innerHTML = ""; updateStatus(); ffClose(); }
     }
     sessionSaveTabs();
   }

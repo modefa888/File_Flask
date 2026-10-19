@@ -38,6 +38,11 @@ var ADM = window.ADM = {
                 data = { raw: text };
             }
         }
+        // 首次运行的初始密码未修改：后端一律 403，直接跳到改密页
+        if (res.status === 403 && data && data.password_change_required) {
+            location.href = '/change-password';
+            throw new Error('请先修改初始密码');
+        }
         if (!res.ok) {
             var msg = (data && (data.error || data.message)) || ('请求失败（HTTP ' + res.status + '）');
             throw new Error(msg);

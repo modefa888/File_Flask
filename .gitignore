@@ -5,6 +5,7 @@ webstorm 快捷方式.sh
 .env
 # Python
 __pycache__/
+
 *.py[cod]
 .venv/
 venv/

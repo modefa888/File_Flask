@@ -146,11 +146,40 @@
     if (tab.host.querySelector(".gitignore-toolbar")) return;
     const tb = document.createElement("div");
     tb.className = "gitignore-toolbar";
-    tb.innerHTML = '<button title="选择项目中的文件/文件夹，自动插入到 .gitignore"><i class="bi bi-folder-plus"></i>添加忽略路径</button>';
-    const btn = tb.querySelector("button");
-    btn.addEventListener("mousedown", (e) => e.preventDefault());
-    btn.addEventListener("click", () => showGitignorePicker(tab));
+    tb.innerHTML = '<button title="选择项目中的文件/文件夹，自动插入到 .gitignore"><i class="bi bi-folder-plus"></i>添加忽略路径</button>' +
+      '<button title="把已被 .gitignore 忽略、但仍被 Git 跟踪的文件移出索引（本地文件保留）；提交并推送后才会从仓库删除"><i class="bi bi-box-arrow-up"></i>移出已忽略文件</button>';
+    const [addBtn, cleanBtn] = tb.querySelectorAll("button");
+    addBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    addBtn.addEventListener("click", () => showGitignorePicker(tab));
+    cleanBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    cleanBtn.addEventListener("click", () => untrackIgnoredFiles(tab, []));
     tab.host.appendChild(tb);
+  }
+
+  /* 把「已被 .gitignore 忽略、但仍被 Git 跟踪」的文件移出索引（本地文件保留）。
+     .gitignore 只对未跟踪文件生效：已提交过的文件必须 `git rm --cached` 再提交 / 推送，
+     远端仓库里才会真正删除。patterns 传本次新增规则时只清理这些规则命中的文件。 */
+  async function untrackIgnoredFiles(tab, patterns) {
+    if (!tab || !tab.cm) return;
+    if (tab.dirty) {
+      await saveTab(tab);
+      if (tab.dirty) { toast("请先保存 .gitignore 再清理", "warn"); return; }
+    }
+    const repo = (typeof gitState !== "undefined" && gitState.repo) ? gitState.repo : ROOT;
+    try {
+      const d = await fetch("/api/git/untrack-ignored", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo: repo, patterns: patterns || [] })
+      }).then(r => r.json());
+      if (d.error) { toast("移出索引失败：" + d.error, "err"); return; }
+      const n = (d.removed || []).length;
+      if (!n) { toast("没有需要移出的已忽略文件", "info"); return; }
+      toast("已把 " + n + " 个已忽略文件移出 Git 索引（本地保留），请提交并推送", "ok");
+      if (typeof loadGitStatus === "function") loadGitStatus();
+      if (typeof loadGitignoreRules === "function") loadGitignoreRules();
+    } catch (e) {
+      toast("移出索引失败：" + (e.message || e), "err");
+    }
   }
 
   /* requirements.txt：检测当前独立 venv 中哪些包已安装，在编辑器内显示并支持一键安装 */
@@ -671,13 +700,14 @@
   }
   async function showGitignorePicker(tab) {
     const selected = new Set();
-    const existingRules = parseGitignoreRules(tab.cm ? tab.cm.getValue() : "");
+    const baseText = tab.cm ? tab.cm.getValue() : "";
+    const existingRules = parseGitignoreRules(baseText);
     const tree = document.createElement("div");
     tree.className = "gi-tree";
     const loading = document.createElement("div");
     loading.className = "gi-empty"; loading.textContent = "加载中…";
     tree.appendChild(loading);
-    const html = '<div class="gi-picker"><div class="gi-tree"></div><div style="color:#9d9d9d;font-size:12px;">勾选文件或文件夹，点击「插入」后自动写入相对路径；文件夹会自动补 / 后缀。</div></div>';
+    const html = '<div class="gi-picker"><div class="gi-tree"></div><div style="color:#9d9d9d;font-size:12px;">勾选 / 取消勾选会实时写入下方 .gitignore（已存在的规则不会重复添加）；点「插入」保存，点「取消」还原。</div></div>';
     const modal = uiModal({
       title: "选择要忽略的文件/文件夹", icon: "bi-folder-plus", html, wide: true,
       okText: "插入", cancelText: "取消"
@@ -685,23 +715,52 @@
     const body = document.querySelector("#modalOverlay .ide-modal .m-body");
     if (!body) return;
     body.querySelector(".gi-tree").replaceWith(tree);
-    await renderGiTree(tree, ROOT, 0, selected, existingRules);
-    const res = await modal;
-    if (!res) return;
-    if (!selected.size) { toast("未选择任何文件/文件夹", "warn"); return; }
-    const rules = Array.from(selected).sort();
-    const keep = new Set(rules);
-    for (const r of rules) {
-      if (!keep.has(r)) continue;
-      for (const other of rules) {
-        if (r !== other && other.startsWith(r)) keep.delete(other);
+    // 勾选变化时实时更新 .gitignore：以打开弹窗时的内容为基线重新拼装，
+    // 这样勾选 / 取消勾选都幂等，既不会重复追加，也不会打乱用户原有规则。
+    const norm = r => String(r || "").replace(/^\/+/, "").replace(/\/+$/, "");
+    // 本次真正需要新增的规则（去掉已有规则覆盖的、以及被父目录覆盖的子项）
+    const computeAdditions = () => {
+      const isCovered = (rule) => {
+        const n = norm(rule);
+        return existingRules.some(r => r === n || giRuleMatches(r, n, baseName(n)));
+      };
+      const add = Array.from(selected).filter(r => !isCovered(r)).sort();
+      return add.filter(r => {
+        const n = norm(r);
+        return !add.some(o => o !== r && n.startsWith(norm(o) + "/"));
+      });
+    };
+    const syncPreview = () => {
+      if (!tab.cm) return;
+      const keep = computeAdditions();
+      let text = baseText;
+      if (keep.length) {
+        text = text.replace(/\s+$/, "");
+        text += (text ? "\n" : "") + keep.join("\n") + "\n";
       }
+      tab.cm.setValue(text);
+    };
+    await renderGiTree(tree, ROOT, 0, selected, existingRules, syncPreview);
+    const res = await modal;
+    if (!res) {                                     // 取消：还原打开弹窗前的 .gitignore 内容
+      if (tab.cm) {
+        tab.cm.setValue(baseText);
+        if (tab.original === baseText) {
+          tab.dirty = false;
+          if (tab.el) tab.el.classList.remove("dirty");
+        }
+      }
+      return;
     }
-    insertAtCursor(tab.cm, Array.from(keep).join("\n") + "\n");
-    // 点击「插入」后走标准保存流程：弹「确认保存修改」，确认即落盘并刷新文件树忽略状态
+    const keep = computeAdditions();
+    if (!selected.size) { toast("未选择任何文件/文件夹", "warn"); return; }
+    // 规则已在预览阶段写入编辑器，这里只走标准保存流程（弹「确认保存修改」，落盘并刷新忽略状态）
     await saveTab(tab);
+    // 新增规则若命中了「已提交到仓库」的文件，自动移出索引（本地保留）：
+    // 否则 .gitignore 对已跟踪文件不生效，GitHub 上也不会消失
+    if (keep.length && !tab.dirty) await untrackIgnoredFiles(tab, keep);
   }
-  async function renderGiTree(container, path, depth, selected, existingRules) {
+  async function renderGiTree(container, path, depth, selected, existingRules, onChange) {
     try {
       const d = await apiFiles(path, true);
       const items = (d.items || [])
@@ -745,6 +804,7 @@
 
         const update = () => {
           if (cb.checked) selected.add(rule); else selected.delete(rule);
+          if (onChange) onChange();                  // 实时写入 .gitignore 预览
         };
         cb.addEventListener("change", (e) => { e.stopPropagation(); update(); });
         row.addEventListener("click", (e) => {
@@ -756,7 +816,7 @@
             body.style.display = "none";
             row._body = body;
             row.after(body);
-            renderGiTree(body, path + "/" + it.name, depth + 1, selected, existingRules);
+            renderGiTree(body, path + "/" + it.name, depth + 1, selected, existingRules, onChange);
           }
           const open = body.style.display === "none";
           body.style.display = open ? "" : "none";

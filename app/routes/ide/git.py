@@ -8,6 +8,7 @@ POST /api/git/discard    {repo, files[]}        放弃更改（仅已跟踪文�
 POST /api/git/commit     {repo, message, all}   提交
 POST /api/git/init       {repo}                 初始化仓库
 """
+import fnmatch
 import json
 import os
 import re
@@ -559,6 +560,51 @@ def api_git_log():
                                 "author": parts[2], "date": parts[3], "refs": refs})
     return jsonify({"ok": True, "is_repo": True, "repo": root, "commits": commits,
                     "has_more": len(commits) >= limit})
+
+
+def _rule_hit(rel, pattern):
+    """判断相对路径是否命中一条 .gitignore 规则（够用即可：* 通配 / 目录 / 全路径）。"""
+    p = str(pattern or "").strip().lstrip("/").rstrip("/")
+    if not p:
+        return False
+    name = rel.rsplit("/", 1)[-1]
+    if "/" not in p:                       # *.mp4、logs 这类：匹配文件名或该目录下的内容
+        return fnmatch.fnmatchcase(name, p) or fnmatch.fnmatchcase(rel, p) or rel.startswith(p + "/")
+    return fnmatch.fnmatchcase(rel, p) or rel.startswith(p + "/")
+
+
+@bp.route("/api/git/untrack-ignored", methods=["POST"])
+def api_git_untrack_ignored():
+    """把「已被 .gitignore 忽略但仍被 Git 跟踪」的文件移出索引（本地文件保留）。
+
+    .gitignore 只对未跟踪文件生效，已提交过的文件需要 `git rm --cached` 才会从仓库移除；
+    这个接口就是替用户做这一步，提交并推送后文件才会从远端消失。
+    patterns 可选：只处理被这些新规则命中的文件（避免误伤原有规则下的文件）。
+    """
+    data = request.get_json(silent=True) or {}
+    root, err = _repo_root(data.get("repo") or "")
+    if err:
+        return _fail(err)
+    if not root:
+        return _fail("不是 Git 仓库")
+    patterns = [str(p).strip() for p in (data.get("patterns") or []) if str(p).strip()]
+    proc, err = _git(root, ["ls-files", "-ci", "--exclude-standard", "-z"])
+    if err:
+        return _fail(err, 500)
+    if proc.returncode != 0:
+        return _fail((proc.stderr or "").strip() or "读取已跟踪文件失败", 500)
+    files = [f for f in (proc.stdout or "").split("\0") if f]
+    if patterns:
+        files = [f for f in files if any(_rule_hit(f, p) for p in patterns)]
+    if not files:
+        return jsonify({"ok": True, "removed": []})
+    proc2, err = _git(root, ["rm", "--cached", "--quiet", "--"] + files)
+    if err:
+        return _fail(err, 500)
+    if proc2.returncode != 0:
+        return _fail((proc2.stderr or "").strip() or "移出索引失败", 500)
+    _log.info("git rm --cached：移出 %d 个已被忽略的文件", len(files))
+    return jsonify({"ok": True, "removed": files})
 
 
 @bp.route("/api/git/show")

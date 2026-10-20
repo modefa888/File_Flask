@@ -43,6 +43,10 @@ _MAX_CMD = 500                      # 生成的命令上限
 _MAX_STDOUT = 6000                  # 回填给模型的输出上限（头尾各取一部分）
 _MAX_CONTEXT = 1500                 # 上一轮上下文上限
 _RETRY_STATUS = {429, 500, 502, 503, 504, 520, 522, 524}
+_SESSION_TIMEOUT = 240              # 会话复盘的读超时（记录较长，给足时间）
+_MAX_SESSION_RAW = 400_000          # 前端传来的原始会话文本上限
+_SESSION_BUDGET = 18000             # 压缩后喂给模型的字符上限（约 8~9k token）
+_MAX_LINE = 400                     # 单行上限（个别输出会一行几万字符，直接砍掉尾巴）
 
 _PLAN_SYS = (
     "你是嵌入在 Web IDE 终端里的 Linux 运维助手。用户用一句自然语言描述他想在这台机器上做的事，"
@@ -74,6 +78,19 @@ _LIVE_SYS = (
     "4. 使用 Markdown（短标题、无序列表、行内代码），不要用代码块包住整段回答；"
     "不要复述原始输出，不要编造输出里没有的信息；\n"
     "5. 总长不超过 200 字。"
+)
+
+_SESSION_SYS = (
+    "你是 Linux 运维专家，正在复盘一段 Web 终端里的完整会话记录（用户在终端里输入的命令，"
+    "以及系统回显）。请通读整段记录后输出一份中文复盘，用 Markdown，结构固定为：\n"
+    "**会话概览**：一句话说明这次会话做了什么、是否顺利（不超过 60 字）；\n"
+    "**执行的命令**：按顺序列出关键命令，每条后面用半句话标注结果（成功 / 报错 / 未完成）；\n"
+    "**发现的问题**：列出记录中真实出现的报错、警告与异常，引用原始关键字；没有就写「无明显异常」；\n"
+    "**风险提示**：涉及装包、改配置、删文件、改权限、防火墙、对外开放端口等操作时说明风险与影响，"
+    "纯只读查询不必展开；\n"
+    "**建议下一步**：2~4 条可执行的检查或修复，用行内代码表示。\n"
+    "要求：只依据记录内容做判断，不要编造记录里没有的输出；记录若出现「…（省略 N 行）…」表示"
+    "中间被压缩，结论要据此说明依据可能不全；总长不超过 700 字；不要用代码块包住整段回答。"
 )
 
 
@@ -121,6 +138,92 @@ def _trim_mid(text: str, limit: int) -> str:
     head = int(limit * 0.35)
     tail = limit - head
     return s[:head] + "\n…（中间省略 %d 字符）…\n" % (len(s) - limit) + s[-tail:]
+
+
+_ANSI_RE = re.compile(
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"          # OSC（标题 / 超链接）
+    r"|\x1b\[[0-9;?]*[ -/]*[@-~]"                  # CSI（颜色 / 光标）
+    r"|\x1b[()][A-Za-z0-9]"                        # 字符集切换
+    r"|[\u0000-\u0008\u000b\u000c\u000e-\u001f]")  # 其余控制字符
+
+# 报错 / 警告关键词：压缩长会话时这些行必须留下，模型才有判断依据
+_ERR_LINE_RE = re.compile(
+    r"(error|fail(?:ed|ure|s)?|denied|not found|no such file|command not found|cannot|"
+    r"could ?not|refused|timeout|timed out|killed|segmentation|panic|fatal|"
+    r"permission denied|EACCES|ENOENT|Traceback|No space left)", re.I)
+_WARN_LINE_RE = re.compile(r"(warn|deprecated|unable|missing|skipped|insecure|conflict)", re.I)
+
+# 命令行：提示符形如 root@host:~# cmd / [root@host ~]# cmd / user@host:/tmp$ cmd
+_PROMPT_CMD_RE = re.compile(
+    r"(?:^|\s)(?:\[[^\]\n]{1,80}\]|[^\s@\[\]]{1,40}@[^\s:\]]{1,64}:[^\s#$]{0,200})[#$]\s+(\S.*)$")
+
+
+def _strip_ansi(text: str) -> str:
+    """去掉终端控制序列（前端取的是 xterm 渲染后的文本，正常已无颜色，这里兜底）。"""
+    return _ANSI_RE.sub("", str(text or ""))
+
+
+def _prompt_command(line: str) -> str:
+    """从一行里取出「提示符后面的命令」，不是命令行则返回空串。"""
+    m = _PROMPT_CMD_RE.search(str(line or ""))
+    return m.group(1).strip() if m else ""
+
+
+def _condense_session(text: str, budget: int = _SESSION_BUDGET) -> str:
+    """把整段终端会话压到预算内，同时保证命令与报错不被裁掉。
+
+    会话动辄几百上千行、几 MB，直接塞给模型既费 token 也会把关键信息淹没。
+    压缩规则：短会话原样保留；长会话留下所有「命令行 + 紧随其后几行」、所有含错误
+    关键词的行、开头登录信息与结尾当前状态，中间省略处标出「省略 N 行」，
+    让模型知道上下文不完整。
+    """
+    s = _strip_ansi(text)[:_MAX_SESSION_RAW]
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+
+    lines = []
+    blank = 0
+    for raw in s.split("\n"):
+        ln = raw[:_MAX_LINE].rstrip()
+        if ln.strip():
+            blank = 0
+            lines.append(ln)
+        else:
+            blank += 1
+            if blank <= 1:                       # 连续空行只留一个
+                lines.append("")
+
+    size = sum(len(x) + 1 for x in lines)
+    if size <= budget:
+        return "\n".join(lines)
+
+    n = len(lines)
+    keep = set()
+    for i, ln in enumerate(lines):
+        if _prompt_command(ln):
+            # 命令本身 + 紧随其后的输出（表头 / 结果通常就在前几行）
+            for j in range(i, min(n, i + 8)):
+                keep.add(j)
+        if _ERR_LINE_RE.search(ln):
+            for j in range(max(0, i - 1), min(n, i + 2)):
+                keep.add(j)
+        elif _WARN_LINE_RE.search(ln):
+            keep.add(i)
+    for j in range(0, min(n, 15)):               # 开头：登录信息 / 系统版本
+        keep.add(j)
+    for j in range(max(0, n - 80), n):           # 结尾：当前状态与最后的报错
+        keep.add(j)
+
+    picked, prev = [], -2
+    for i in range(n):
+        if i in keep:
+            if prev >= 0 and i - prev > 1:
+                picked.append("…（省略 %d 行）…" % (i - prev - 1))
+            picked.append(lines[i])
+            prev = i
+    body = "\n".join(picked)
+    if len(body) > budget:                       # 关键行本身就超预算：保留头尾
+        body = _trim_mid(body, budget)
+    return body
 
 
 def _json_block(text: str):
@@ -576,3 +679,137 @@ def api_term_ai_analyze():
 
     return Response(gen(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ---------------------------------------------------------------- 整段会话复盘
+def _stream_reply(provider, model, messages, req_label, module="term",
+                  read_timeout=_LIVE_TIMEOUT):
+    """通用 SSE 流式回复：逐字推送 delta，结束（成功或失败）后记录一次调用统计。
+
+    与 /analyze 里那条手写流一致的行为：限流 / 5xx 自动重试一次、
+    出错时推 {"error"} 而不是直接断流，最后统一补 data: [DONE]。
+    """
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+
+    def gen():
+        text_parts = []
+        t0 = time.time()
+        err_msg = ""
+        attempt = 0
+        while True:
+            body = json.dumps({"model": model, "messages": messages, "stream": True,
+                               "temperature": 0.3}).encode("utf-8")
+            req = urllib.request.Request(url, data=body, method="POST", headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + provider["api_key"],
+                "Accept": "text/event-stream",
+            })
+            try:
+                resp = _ai()._open_stream(req, url, read_timeout=read_timeout)
+            except urllib.error.HTTPError as e:
+                try:
+                    detail = e.read().decode("utf-8", "replace")[:300]
+                except OSError:
+                    detail = ""
+                if e.code in _RETRY_STATUS and attempt < 1:
+                    attempt += 1
+                    yield _ai()._sse({"type": "retry",
+                                      "reason": "接口限流/暂不可用（HTTP %d），正在重试" % e.code})
+                    time.sleep(2)
+                    continue
+                err_msg = "接口返回 %s：%s" % (e.code, detail or e.reason)
+                yield _ai()._sse({"error": err_msg})
+                break
+            except (socket.timeout, TimeoutError):
+                err_msg = "连接 AI 接口超时，可稍后重试"
+                yield _ai()._sse({"error": err_msg})
+                break
+            except (urllib.error.URLError, OSError) as e:
+                err_msg = "无法连接 AI 接口：%s" % e
+                yield _ai()._sse({"error": err_msg})
+                break
+
+            try:
+                for raw in resp:
+                    line = raw.strip()
+                    if not line.startswith(b"data:"):
+                        continue
+                    chunk = line[5:].strip()
+                    if chunk == b"[DONE]":
+                        break
+                    try:
+                        obj = json.loads(chunk.decode("utf-8", "replace"))
+                    except ValueError:
+                        continue
+                    if isinstance(obj.get("error"), (str, dict)):
+                        err_msg = str(obj["error"])
+                        yield _ai()._sse({"error": err_msg})
+                        continue
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    piece = ((choices[0] or {}).get("delta") or {}).get("content") or ""
+                    if piece:
+                        text_parts.append(piece)
+                        yield _ai()._sse({"delta": piece})
+            except (socket.timeout, TimeoutError) as e:
+                err_msg = err_msg or ("读取超时：%s" % e)
+            except (OSError, urllib.error.URLError) as e:
+                err_msg = err_msg or ("连接中断：%s" % e)
+            finally:
+                try:
+                    resp.close()
+                except OSError:
+                    pass
+            break
+
+        out = "".join(text_parts)
+        _ai()._log_ai_call(module, not err_msg, int((time.time() - t0) * 1000), err_msg, model,
+                           _ai()._estimate_msgs(messages), _ai()._estimate_tokens(out), True,
+                           req=req_label, resp=out)
+        yield b"data: [DONE]\n\n"
+
+    return Response(gen(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@bp.route("/api/term/ai/session", methods=["POST"])
+def api_term_ai_session():
+    """当前终端会话的所有命令与系统回显 → SSE 流式复盘。
+
+    与 /analyze 的区别：那里是「一条命令的输出」，这里是「整场会话」，
+    因此先做压缩（保留命令与报错）再交给模型，并明确告知可能被截断。
+    """
+    data = request.get_json(silent=True) or {}
+    transcript = str(data.get("transcript") or "")
+    if not transcript.strip():
+        return jsonify({"error": "当前会话还没有输出，先执行几条命令再分析"}), 400
+
+    cfg = _ai()._load_cfg()
+    provider, model, err = _ai()._sys_pick(cfg, "term")
+    if err:
+        return _ai()._sys_err_response(err, need_config=not cfg.get("providers"))
+
+    host = str(data.get("host") or "").strip()[:120]
+    env_desc = str(data.get("env") or "").strip()[:300]
+    question = str(data.get("question") or "").strip()[:_MAX_INPUT]
+
+    raw_lines = transcript.count("\n") + 1
+    condensed = _condense_session(transcript)
+    parts = [
+        "[会话来源] " + (env_desc or host or "本机终端"),
+        "[会话规模] 原始 %d 行 / %d 字符；下面是压缩后的记录（命令与报错优先保留）"
+        % (raw_lines, len(transcript)),
+    ]
+    if question:
+        parts.append("[用户关注点] " + question)
+    parts.append("[会话记录]\n" + condensed)
+
+    messages = [{"role": "system", "content": _SESSION_SYS},
+                {"role": "user", "content": "\n\n".join(parts)}]
+    _log.info("终端 AI 会话复盘：host=%s 行=%d 压缩后=%d 字符",
+              host or "-", raw_lines, len(condensed))
+    return _stream_reply(provider, model, messages,
+                         req_label="[会话复盘] " + (host or "本机") + ("；" + question if question else ""),
+                         read_timeout=_SESSION_TIMEOUT)

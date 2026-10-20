@@ -205,7 +205,10 @@
 .tai-pop-in:focus { border-color: #3d7eb8; }
 .tai-pop-in::placeholder { color: #728294; }
 .tai-pop-tip { flex: none; margin: 5px 2px 0; font-size: 11px; color: #7d8a99; }
-.tai-pop-acts { flex: none; display: flex; justify-content: flex-end; gap: 8px; margin-top: 7px; }
+.tai-pop-acts { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 7px; }
+/* 「分析本次会话」放左侧，和右侧的主操作「生成命令」分开，避免误点 */
+.tai-pop-acts .tai-pop-ana { margin-right: auto; }
+.tai-pop-acts .tai-pop-ana:disabled { opacity: .55; cursor: default; }
 .tai-pop-out {
   flex: 1 1 auto; min-height: 80px; overflow: auto; margin-top: 9px;
   display: flex; flex-direction: column; gap: 2px;

@@ -853,7 +853,10 @@
   .tab.dirty .t-dot { display: inline-block; }
   /* 关闭按钮：未选中标签默认不可见，划过才显示；选中标签始终显示（仿 VSCode）。
      用 visibility 而不是 display：关闭按钮的宽度始终占位，悬浮时标签不会因按钮出现而变宽抖动 */
-  .tab .t-close { visibility: hidden; display: flex; align-items: center; color: #969696; border-radius: 4px; padding: 0 2px; }
+  /* 热区比图标本身大一圈（4px padding）：× 只有 13px，鼠标稍偏一点就点不中 */
+  .tab .t-close { visibility: hidden; display: flex; align-items: center; justify-content: center;
+                  color: #969696; border-radius: 4px; padding: 4px; margin: -4px 0; flex: none; }
+  .tab .t-close .bi { font-size: 12px; line-height: 1; }
   .tab:hover .t-close, .tab.active .t-close { visibility: visible; }
   .tab .t-close:hover { background: #4a4a4a; color: #fff; }
 

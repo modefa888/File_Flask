@@ -22,6 +22,15 @@
   background: inherit; box-shadow: 0 0 0 1px var(--border, #333);
 }
 .ssh-item:hover .ssh-acts { display: flex; }
+/* 已打开的连接：不悬停也常显第一个按钮，「播放（未连接）/ 停止（已连接）」一眼可见；
+   编辑 / 复制 / 删除仍然只在悬停时出现，避免挤占文字宽度。
+   常显时去掉操作条自身的底色和描边，只留一个干净的图标；悬停恢复整块操作区 */
+.ssh-item.open > .ssh-acts { display: flex; background: none; box-shadow: none; padding: 0; }
+.ssh-item.open > .ssh-acts button:not([data-act="open"]) { display: none; }
+.ssh-item.open:hover > .ssh-acts {
+  background: inherit; box-shadow: 0 0 0 1px var(--border, #333); padding: 2px 4px;
+}
+.ssh-item.open:hover > .ssh-acts button { display: block; }
 .ssh-acts button {
   width: 26px; height: 26px; border: none; border-radius: 6px; cursor: pointer;
   background: transparent; color: var(--fg-dim, #9aa); font-size: 13px;

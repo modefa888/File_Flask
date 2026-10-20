@@ -113,6 +113,8 @@ const TAI_SVG = {
   network: '<rect x="2.2" y="2.2" width="11.6" height="4.4" rx="1.2"/><rect x="2.2" y="9.4" width="11.6" height="4.4" rx="1.2"/><path d="M4.8 4.4h.01M4.8 11.6h.01"/>',
   globe: '<circle cx="8" cy="8" r="6"/><path d="M2 8h12"/><path d="M8 2c2.3 2.4 2.3 9.6 0 12M8 2c-2.3 2.4-2.3 9.6 0 12"/>',
   dot: '<circle cx="8" cy="8" r="2.8"/>',
+  session: '<rect x="2.6" y="1.9" width="10.8" height="12.2" rx="1.5"/>' +
+        '<path d="M5 5.3h6M5 7.9h6M5 10.5h3.6"/>',
 };
 const TAI_ICON_MAP = {
   "bi-stars": "star", "bi-magic": "star", "bi-play-fill": "play", "bi-stop-fill": "stop",
@@ -122,6 +124,7 @@ const TAI_ICON_MAP = {
   "bi-exclamation-octagon": "warn", "bi-shield-check": "shield", "bi-lightbulb": "bulb",
   "bi-arrow-repeat": "spin", "bi-arrow-return-left": "enter", "bi-trash3": "trash",
   "bi-terminal": "terminal", "bi-clock-history": "clock", "bi-hdd-network": "network",
+  "bi-clipboard-data": "session", "bi-journal-text": "session", "bi-list-ul": "session",
 };
 
 function taiIco(name, cls) {
@@ -420,18 +423,22 @@ async function taiRunPlan(card, plan, question, ctx) {
   if (ctx.onDone) await ctx.onDone(res);
 }
 
-/* ---------- 解读卡片（共用） ---------- */
-function taiAnalyzeCard(mount, payload, scroll) {
+/* ---------- 解读 / 复盘卡片（共用） ----------
+   opt = { url, title, icon, live, onEnd }：默认是「单条命令的输出解读」；
+   会话复盘复用它，只换端点 / 标题 / 图标。 */
+function taiAnalyzeCard(mount, payload, scroll, opt) {
   if (!mount) return;
+  opt = opt || {};
   const card = document.createElement("div");
   card.className = "tai-card tai-ana";
   card.innerHTML =
-    '<div class="tai-hd"><span class="tai-ic">' + taiIco("bi-lightbulb") + '</span>' +
-      '<span class="tai-tt">输出解读</span><span class="tai-sp"></span>' +
-      '<span class="tai-live">' + taiIco("bi-arrow-repeat", "tai-spin") + ' 分析中…</span>' +
-      '<button type="button" class="tai-mini tai-stop" title="停止解读">' + taiIco("bi-stop-fill") + '停止</button>' +
+    '<div class="tai-hd"><span class="tai-ic">' + taiIco(opt.icon || "bi-lightbulb") + '</span>' +
+      '<span class="tai-tt"></span><span class="tai-sp"></span>' +
+      '<span class="tai-live">' + taiIco("bi-arrow-repeat", "tai-spin") + ' ' + (opt.live || "分析中…") + '</span>' +
+      '<button type="button" class="tai-mini tai-stop" title="停止生成">' + taiIco("bi-stop-fill") + '停止</button>' +
     '</div>' +
     '<div class="tai-md"></div>';
+  taiSetText(card.querySelector(".tai-tt"), opt.title || "输出解读");
   mount.appendChild(card);
   const md = card.querySelector(".tai-md");
   const live = card.querySelector(".tai-live");
@@ -447,7 +454,7 @@ function taiAnalyzeCard(mount, payload, scroll) {
   const bump = () => { if (scroll) scroll(); };
   bump();
 
-  taiStream("/api/term/ai/analyze", payload, ac.signal, (delta) => {
+  taiStream(opt.url || "/api/term/ai/analyze", payload, ac.signal, (delta) => {
     acc += delta;
     md.innerHTML = taiMd(acc);
     bump();
@@ -476,6 +483,7 @@ function taiAnalyzeCard(mount, payload, scroll) {
       tip.textContent = "（没有拿到解读内容）";
       md.appendChild(tip);
     }
+    if (typeof opt.onEnd === "function") { try { opt.onEnd(); } catch (_) { /* 忽略 */ } }
     bump();
   });
 }
@@ -738,6 +746,10 @@ function taiOpenSsh(o) {
       '<div class="tai-pop-tip">Enter 生成命令 · Shift+Enter 换行 · ' +
         (o.mount ? 'Esc 切回 Shell' : 'Esc 关闭') + '（先点「生成命令」再决定是否执行）</div>' +
       '<div class="tai-pop-acts">' +
+        (typeof o.transcript === "function"
+          ? '<button type="button" class="tai-btn tai-pop-ana" title="把当前终端里已执行过的命令与系统回显整体交给 AI 复盘">' +
+              taiIco("bi-clipboard-data") + '<span>分析本次会话</span></button>'
+          : '') +
         '<button type="button" class="tai-btn primary tai-pop-gen">' + taiIco("bi-stars") + '<span>生成命令</span></button>' +
       '</div>' +
       '<div class="tai-pop-out"></div>' +
@@ -995,6 +1007,39 @@ function taiOpenSsh(o) {
       genBtn.disabled = false;
       ta.focus();
     }
+  }
+
+  /* ---------- 一键分析本次会话 ----------
+     把当前终端 buffer 里的全部内容（用户执行过的命令 + 系统回显）一次性交给
+     后端复盘：做了什么、哪条失败、有无风险、下一步怎么查。服务端会先把长会话
+     压缩（保留命令与报错）再喂给模型，避免超长记录把上下文撑爆。 */
+  const anaBtn = pop.querySelector(".tai-pop-ana");
+  if (anaBtn) anaBtn.addEventListener("click", analyseSession);
+
+  function analyseSession() {
+    if (anaBtn.disabled) return;
+    if (TAI.busy) { toast("上一条指令还在处理，请稍候", "warn"); return; }
+    let text = "";
+    try { text = String(o.transcript() || ""); } catch (_) { text = ""; }
+    if (!text.trim()) { toast("当前终端还没有输出，先执行几条命令再来分析", "warn"); return; }
+    if (histOpen) { histOpen = false; histWrap.hidden = true; histBtn.classList.remove("on"); }
+    const lines = text.split("\n").length;
+    anaBtn.disabled = true;
+    out.appendChild(taiUserLineEl("分析本次会话：共 " + lines + " 行，约 " +
+      Math.max(1, Math.round(text.length / 1000)) + "k 字符"));
+    out.scrollTop = out.scrollHeight;
+    taiAnalyzeCard(out, {
+      transcript: text,
+      host: state.host || "",
+      env: o.env || "",
+      question: ta.value.trim(),        // 输入框里已写的疑问，一并作为关注点
+    }, () => { out.scrollTop = out.scrollHeight; }, {
+      url: "/api/term/ai/session",
+      title: "会话复盘",
+      icon: "bi-clipboard-data",
+      live: "通读会话…",
+      onEnd: () => { anaBtn.disabled = false; },
+    });
   }
 
   return {

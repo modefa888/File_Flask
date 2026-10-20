@@ -196,6 +196,11 @@ File_Flask/
     `{intent, risk(low|medium|high), reason, command, explain, alternatives, blocked, need_confirm, note}`。
   - `POST /api/term/ai/analyze` `{question, command, stdout, stderr, exit_code, cwd, context?}` ——
     SSE 流式解读（`data: {"delta"}` … `data: [DONE]`）。
+  - `POST /api/term/ai/session` `{transcript, host?, env?, question?}` —— 整场会话复盘（SSE）。
+    AI 浮层的「分析本次会话」把 SSH 终端 xterm 缓冲区（scrollback + 当前屏）里的全部命令与
+    系统回显一次性上传；服务端先压缩（保留所有命令行、报错 / 警告行、开头与结尾，中间标注
+    `…（省略 N 行）…`，预算 18000 字符）再交给模型，输出「会话概览 / 执行的命令 / 发现的问题 /
+    风险提示 / 建议下一步」。前端回读见 `38_…js` 的 `sshTranscript()`。
   - `GET /api/term/ai/history?host=&limit=` / `POST /api/term/ai/history` /
     `DELETE /api/term/ai/history?id=|?host=|?all=1` —— 历史记录的查 / 存 / 删。
 - **本模块只建议 / 解读、不执行命令**：执行仍走 `/api/term/exec`，因此拦截与二次确认只有一条路径，
@@ -204,7 +209,12 @@ File_Flask/
   避免脏文本变成可执行命令。
 - 使用「设置 → 系统 AI」中名为 `term` 的模块（可单独停用 / 单独指定模型），调用次数计入 AI 统计。
 - 页面响应统一加 `Cache-Control: no-store`（`app/__init__.py::_after_request`），模板 / 内联脚本改动普通刷新即可生效；
-  SSH 终端标签不参与会话恢复，「终端连接」侧栏也不再在刷新后自动展开；从往返缓存恢复时会清掉悬浮框与已断开的 SSH 终端。
+  SSH 终端标签不参与通用会话恢复，「终端连接」侧栏也不再在刷新后自动展开；从往返缓存恢复时会清掉悬浮框与已断开的 SSH 终端。
+  侧栏连接项的「播放 / 停止」按钮由 `tab.sshSid` + `SESS[sid].alive` 决定，只在该项被打开时常显
+  （其余编辑 / 复制 / 删除仍悬停才出现）；建立会话后必须再渲染一次侧栏，否则按钮会停在「播放」。
+  SSH 自己按 `localStorage["ide.session.sshTabs"]` 恢复成「未连接」的占位标签（不自动建连），
+  恢复后若编辑区没有任何激活标签就自动激活第一个 —— 否则 `.cm-host` 一直是 `display:none`，
+  表现为「标签栏在、下面一片空白」。
 - 图标：面板与 SSH 入口的图标全部用内联 SVG（`taiIco` / `TAI_SVG`），不依赖 bootstrap-icons 字体，
   避免字体未加载 / 版本较旧 / 被缓存时显示成方框；「清空历史」用项目自带的贴按钮悬浮确认框 `uiConfirmPop`。
 - 历史记录：落 `store.db` 的 `term_ai_history` 表（`ts / host / question / command / risk / ok / exit_code`），
@@ -219,6 +229,14 @@ File_Flask/
     Shell 模式下直接输入中文回车，会先用 `Ctrl+U` 撤掉远端那一行再打开面板并带上这句话
     （判定偏保守，避开 REPL / 密码提示）。
     命令经 `/api/ssh/input` 发到远端，按「1.8s 无新输出」判定结束并回读输出做解读。
+  - 一键分析本次会话：SSH 的 AI 浮层左下「分析本次会话」按钮 —— 从 xterm 缓冲区取整场
+    会话（命令 + 回显），POST 到 `/api/term/ai/session` 流式输出复盘卡片（复用
+    `taiAnalyzeCard`，只换端点 / 标题）。输入框里已写的问题会作为「用户关注点」一并带上；
+    生成期间按钮置灰，停止 / 结束自动恢复。
+    登录后服务器自动喷的欢迎信息（MOTD / 系统信息 / 可升级包 / Last login）不计入分析：
+    `markSessionBody()` 在 MOTD 结束（提示符出现或停顿 5 秒）时用 `term.registerMarker(0)`
+    锚住提示符行，`sshTranscript()` 从 `bodyMark.line` 开始回读；marker 随 buffer 滚动
+    自动前移，被 scrollback 挤出（`isDisposed`）说明欢迎信息早已滚掉，直接从 0 读。
 
 ---
 

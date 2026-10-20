@@ -190,10 +190,22 @@
     let ids;
     try { ids = JSON.parse(localStorage.getItem(SSH_OPEN_KEY) || "[]"); } catch (_) { return; }
     if (!Array.isArray(ids) || !ids.length) return;
+    let first = null;
     ids.forEach(id => {
       const c = SSHC.conns.find(x => x && x.id === id);
-      if (c) openSshPlaceholderTab(c);             // 只恢复标签，不建连
+      if (!c) return;
+      // 单个连接数据异常不应拖垮整轮恢复
+      try {
+        const t = openSshPlaceholderTab(c);        // 只恢复标签，不建连
+        if (!first) first = t;
+      } catch (e) { console.warn("SSH 标签恢复失败", id, e); }
     });
+    // 占位标签的 host 只有 activate 才会加 .active（.cm-host 默认 display:none），
+    // 没有激活就只剩一条标签栏、编辑区一片空白。已有其它标签被激活时不抢焦点。
+    if (!active) {
+      const t = first || tabs[tabs.length - 1];
+      if (t) activate(t);
+    }
   }
 
   async function connectSsh(c) {
@@ -239,7 +251,8 @@
   /* ---------- 刷新后恢复的占位标签：只显示连接信息，点击才建连 ---------- */
   function openSshPlaceholderTab(c) {
     const path = SSH_VIEW_PREFIX + c.id;
-    if (findTab(path)) return;                     // 已存在（真实终端或占位）不重复建
+    const exist = findTab(path);
+    if (exist) return exist;                        // 已存在（真实终端或占位）不重复建
     const host = document.createElement("div");
     host.className = "cm-host ssh-host";
     let tn = String(c.name == null ? "" : c.name).replace(/[\u0000-\u001f\u007f]/g, "").trim();
@@ -256,6 +269,7 @@
     renderTabsAll();
     buildSshPlaceholder(tab, c);
     renderSshList();                                // 侧栏显示为「已打开（未连接）」
+    return tab;                                     // 调用方（会话恢复）可拿到它做兜底激活
   }
 
   function buildSshPlaceholder(tab, c) {
@@ -365,6 +379,9 @@
       sysinfo: sysinfo || null };                    // 远端 home / 当前目录 / 系统信息（状态栏、说明卡用）
     tab.sshSid = sid;                              // 侧栏「常用命令」通过 tab 找到当前会话
     tab.sshCwd = sess.cwd;
+    // 侧栏按钮跟着会话状态走：openSshTermTab 里的 renderSshList 早于本函数执行，
+    // 那时 tab.sshSid 还没赋值，会一直停在「播放」；这里补一次渲染，切成「停止」。
+    renderSshList();
     if (active === tab) renderStatusRoot(tab);
     // 用真实尺寸纠正后端 PTY 大小
     api("/api/ssh/resize", { method: "POST", body: JSON.stringify({ id: sid, cols: term.cols, rows: term.rows }) });
@@ -444,12 +461,51 @@
       });
     }
 
+    /* ---------- 会话正文起点：跳过登录欢迎信息 ----------
+       连上 SSH 后服务器会自动喷一段 MOTD（系统信息 / 可升级包 / 安全公告 / Last login），
+       这不是用户的操作，不该出现在「分析本次会话」里。MOTD 结束时用 xterm 的 marker
+       锚住当前提示符行，回读从该行开始；marker 会随 buffer 滚动自动跟随，若已被
+       scrollback 挤出（isDisposed）说明欢迎信息早已滚掉，直接从 0 读即可。 */
+    let bodyMark = null;
+    function markSessionBody() {
+      if (bodyMark && !bodyMark.isDisposed) return;
+      try { bodyMark = term.registerMarker(0); } catch (e) { bodyMark = null; }
+    }
+
+    /* ---------- 整场会话回读（供「分析本次会话」） ----------
+       xterm 的 buffer = scrollback（5000 行）+ 当前屏幕，正好是本场会话的全部内容；
+       translateToString(true) 去掉行尾补白。从 bodyMark（欢迎信息结束处）之后开始读，
+       登录欢迎信息不参与分析。极长会话只保留尾部（最新的状态最有价值），总长限制 400k 字符，
+       服务端还会按「命令 + 报错」再做一次压缩。 */
+    function sshTranscript() {
+      try {
+        const buf = term.buffer.active;
+        const total = buf.length;
+        if (!total) return "";
+        let start = 0;
+        if (bodyMark && !bodyMark.isDisposed) {
+          start = Math.max(0, Math.min(bodyMark.line, total - 1));
+        }
+        const rows = [];
+        for (let i = start; i < total; i++) {
+          const line = buf.getLine(i);
+          rows.push(line ? line.translateToString(true) : "");
+        }
+        while (rows.length && !rows[rows.length - 1].trim()) rows.pop();   // 光标下方是空行
+        let text = rows.join("\n");
+        if (text.length > 400000) text = text.slice(text.length - 400000);
+        return text;
+      } catch (e) { return ""; }
+    }
+    tab.sshTranscript = sshTranscript;          // 其它模块（如 AI 面板 / 内置终端）也能复用
+
     function aiOpts(prefill) {
       return {
         label: (c.user || "root") + "@" + c.host,
         env: "远程主机 " + (c.user || "root") + "@" + c.host + ":" + (c.port || 22) + "（SSH 连接的远程 Linux 服务器）",
         prefill: prefill || "",
         run: sshRun,
+        transcript: sshTranscript,
         paste: (cmd) => {
           api("/api/ssh/input", { method: "POST", body: JSON.stringify({ id: sid, data: cmd }) });
           try { term.focus(); } catch (e) { /* 忽略 */ }
@@ -481,6 +537,7 @@
     // 而是用 Ctrl+U 撤掉这一行并唤起 AI 面板。
     let lineBuf = "";
     function sendInput(d) {
+      if (d && motdDone) markSessionBody();            // 兜底：用户已开始输入，正文起点就在眼前
       if (d.indexOf("\r") >= 0) {
         const text = (lineBuf + d.split("\r")[0]).replace(/\u007f/g, "");
         lineBuf = "";
@@ -682,6 +739,9 @@
       if (motdDone) return;
       motdDone = true;
       clearTimeout(motdTimer);
+      // 欢迎信息到此结束，之后才是会话正文。xterm 的 write 是异步解析的，这里给一点
+      // 时间让最后一批数据落进 buffer，再锚定提示符行（write 回调里也会再兜一次）。
+      setTimeout(markSessionBody, 120);
       const clean = motdStrip(motdRaw).replace(/\u0000/g, "").trim();
       let rows = clean.length >= 60 ? motdParse(clean) : [];
       // 服务器没输出 MOTD（只打印 Last login 或完全静默）时，用连接时探测到的
@@ -719,13 +779,15 @@
         return;
       }
       if (!m.data) return;
+      if (!sess.alive) return;                         // 已主动关闭（term 已 dispose），别再往终端写
       if (!sess.up) {                                  // 收到首包：SSH 登录成功，状态转「已连接」
         sess.up = true;
         st.className = "ssh-term-st ok"; st.textContent = "已连接";
       }
       let text = "";
       try { text = sess.dec.decode(base64ToBytes(m.data), { stream: true }); } catch (e) { return; }
-      term.write(text);
+      // write 是异步解析：回调里 buffer 已更新，此时再锚定正文起点才落在提示符行
+      term.write(text, () => { if (motdDone) markSessionBody(); });
       motdFeed(text);                                  // 首屏输出 → 中文说明
       sshTrackCwd(sess, text);                         // 提示符变化 → 状态栏显示远端当前目录
       const cap = sess.capture;                        // AI 执行命令后的输出回读
@@ -765,7 +827,9 @@
       // 延后一拍刷新侧栏：等 closeTab 把 tab 移出 tabs 后，该项才正确回到「未打开」状态
       setTimeout(renderSshList, 0);
     }
-    closeBtn.onclick = doClose;
+    // 顶栏「×」= 断开并关闭标签：走 closeTab 才会真正移除标签（onBeforeClose 再触发 doClose），
+    // 只调 doClose 的话连接断了、标签却还留在标签栏，看起来像「关不掉」
+    closeBtn.onclick = () => { if (typeof closeTab === "function") closeTab(tab); else doClose(); };
     tab.onBeforeClose = doClose;          // 点标签栏「×」关闭时由 00_preamble 的 closeTab 回调
   }
 

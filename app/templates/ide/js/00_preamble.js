@@ -1543,7 +1543,12 @@
       ? '<i class="bi bi-hdd-network"></i>'      // SSH 会话：统一用服务器图标，不交给文件类型推断
       : iconFor(iconName, false));                 // 汇总标签页可自带图标
     el.innerHTML = '<span class="t-ic">' + ic + '</span><span class="t-nm">' + esc(tabName) + '</span><span class="t-dot"></span><span class="t-close"><i class="bi bi-x"></i></span>';
-    el.addEventListener("click", (e) => { e.stopPropagation(); if (e.target.closest(".t-close")) closeTab(tab); else activate(tab); });
+    // closeTab 是 async：出错时别静默吞掉（表现为「点 × 没反应」），打到控制台便于排查
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (e.target.closest(".t-close")) Promise.resolve(closeTab(tab)).catch(err => console.error("关闭标签失败", err));
+      else activate(tab);
+    });
     setupTabDrag(el, tab);
     const bundle = groupBundles.get(tab.group);
     if (bundle) bundle.tabbar.appendChild(el);

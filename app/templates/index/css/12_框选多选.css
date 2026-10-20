@@ -1,0 +1,36 @@
+        /* ===== 框选多选：空白处按住拖动，绘制半透明选择框 ===== */
+        .fm-marquee-box {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 0;
+            height: 0;
+            display: none;
+            z-index: 1100;
+            pointer-events: none;
+            border: 1px solid #2f80ed;
+            border-radius: 2px;
+            background: rgba(47, 128, 237, 0.16);
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+        }
+
+        /* 按住空白起：禁止选中页面文字（不影响焦点转移） */
+        body.fm-marquee-hold,
+        body.fm-marquee-hold * {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* 拖动期间：十字光标、不出现卡片悬浮位移与悬浮大图预览 */
+
+        body.fm-marquee-on .table-container {
+            cursor: crosshair;
+        }
+
+        body.fm-marquee-on .icon-hover-preview {
+            display: none !important;
+        }
+
+        body.fm-marquee-on .icon-item:hover {
+            transform: none;
+        }

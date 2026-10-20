@@ -14,6 +14,8 @@
 
         function _showHoverPreview(card, path, name, sizeStr, mtime) {
             clearTimeout(_hoverHideTimer);
+            // 框选拖动经过卡片时不弹预览（见 51_框选多选）
+            if (document.body.classList.contains('fm-marquee-hold')) return;
             // 无路径（非图片/视频文件）不请求缩略图，避免产生 /api/thumbnail?path= 的无效请求
             if (!path) return;
             // 若缩略图已缓存，立即显示

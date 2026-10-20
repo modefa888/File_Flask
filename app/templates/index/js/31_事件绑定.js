@@ -123,6 +123,8 @@
                 el.addEventListener('dblclick', (e) => {
                     // 双击文件/文件夹行由行级处理器选中该行；此处仅处理表格/网格真正的空白区域
                     if (e.target.closest('button, a, input, select, .dropdown-menu, tr[data-path], .icon-item, .tree-line')) return;
+                    // 刚结束一次框选拖动：这是拖动的尾巴，不切换多选模式
+                    if (window._fmMarqueeDraggedAt && Date.now() - window._fmMarqueeDraggedAt < 400) return;
                     toggleSelectMode();
                     showToast('提示', selectMode ? '已开启多选模式，再次双击空白处可退出' : '已退出多选模式', selectMode ? 'info' : 'success');
                 });

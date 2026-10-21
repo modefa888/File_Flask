@@ -440,6 +440,7 @@
       '</div>';
     ov.classList.add("show");
     const list = $("pushHistList");
+    let lastSig = "";                 // 上次渲染的数据签名：没变化就不重建 DOM
 
     /* git 统计行转中文："5 files changed, 189 insertions(+), 2 deletions(-)"
        → "已更改 5 个文件，189 行插入(+)，2 行删除(-)" */
@@ -458,6 +459,12 @@
         const d = await r.json();
         if (d.error) throw new Error(d.error);
         const items = d.items || [];
+        /* 数据没变化就跳过重绘：轮询每 2.5s 重建整个列表会让「推送中」的旋转图标
+           反复从 0 度开始，多条记录一起转时看起来就是一堆图标在乱转。 */
+        const sig = JSON.stringify(items.map(x => [x.id, x.status, x.ok, x.detail || ""]));
+        if (sig === lastSig) return;
+        lastSig = sig;
+
         if (!items.length) {
           list.innerHTML = '<div class="ph-empty">还没有推送记录<br>点工具栏「发布分支 / 推送」后会自动记录在这里</div>';
           return;
@@ -475,7 +482,7 @@
               (it.branch ? '<span class="ph-br"></span>' : '') +
               '<span class="ph-sp"></span>' +
               (running
-                ? '<span class="ph-run"><i class="spin">⟳</i> 推送中</span>'
+                ? '<span class="ph-run"><i class="spin"></i> 推送中</span>'
                 : interrupted
                   ? '<span class="ph-ok warn">⚠ 中断</span>'
                   : '<span class="ph-ok ' + (it.ok ? "ok" : "no") + '">' + (it.ok ? "✓ 成功" : "✕ 失败") + '</span>') +
@@ -751,8 +758,14 @@
     loadCreds();
   }
 
+  let gitRemoteBusy = "";           // 正在执行的远程操作，防止连点堆出多条「推送中」
   function remoteOp(verb, label, done) {
     if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
+    if (gitRemoteBusy) {
+      toast("正在执行 " + gitRemoteBusy + "，请等待完成后再试", "warn");
+      return;
+    }
+    gitRemoteBusy = verb;
     toast(label + "中…");
     const notifyHist = (phase) => {
       if (verb === "push") window.dispatchEvent(new CustomEvent("git-push-hist-changed", { detail: { phase } }));
@@ -773,7 +786,8 @@
       .catch(e => {
         notifyHist("end");
         toast(label + "失败：" + String(e.message || e).replace(/\s+/g, " ").slice(0, 120), "err");
-      });
+      })
+      .finally(() => { gitRemoteBusy = ""; });
   }
 
   /* 单条提交记录（图形区块）。i：在 gitGraph 中的序号，total：当前已加载总数 */

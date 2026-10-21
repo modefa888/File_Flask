@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import time
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -154,6 +155,60 @@ def _git(cwd, args, timeout=_TIMEOUT):
 
 def _fail(msg, code=400):
     return jsonify({"error": msg}), code
+
+
+_RE_SCP = re.compile(r"^[\w.\-]+@([\w.\-]+):")
+
+
+def _remote_endpoint(url):
+    """从 remote URL 解析 (host, port)；解析不出返回 (None, None)。"""
+    url = (url or "").strip()
+    m = _RE_SCP.match(url)                      # git@github.com:owner/repo.git
+    if m:
+        return m.group(1), 22
+    try:
+        parts = urlsplit(url)
+    except Exception:
+        return None, None
+    if not parts.hostname:
+        return None, None
+    if parts.scheme in ("http", "https"):
+        return parts.hostname, parts.port or (443 if parts.scheme == "https" else 80)
+    if parts.scheme in ("ssh", "git+ssh", "ssh+git"):
+        return parts.hostname, parts.port or 22
+    if parts.scheme == "git":
+        return parts.hostname, parts.port or 9418
+    return None, None
+
+
+def _probe_remote(url, timeout=4.0):
+    """推送 / 拉取前快速探测远端端口。
+
+    网络被墙 / DNS 解析到不可达 IP 时，git 自己会卡到超时，期间用户反复点推送
+    就会堆出一堆「推送中」记录。这里先用 4 秒探第一个解析地址，不通立刻报错。
+    """
+    host, port = _remote_endpoint(url)
+    if not host:
+        return True, ""
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as e:
+        return False, "无法解析远端域名 %s：%s" % (host, e)
+    v4 = [i for i in infos if i[0] == socket.AF_INET]
+    candidates = v4 or infos
+    if not candidates:
+        return False, "无法解析远端域名 %s" % host
+    family, socktype, proto, _canon, addr = candidates[0]
+    ip = addr[0] if isinstance(addr, tuple) else str(addr)
+    try:
+        with socket.socket(family, socktype, proto) as s:
+            s.settimeout(timeout)
+            s.connect(addr)
+        return True, ""
+    except OSError as e:
+        return False, ("无法连接 %s:%s（%s，%.0f 秒内未建立连接）：%s。"
+                       "请检查服务器的网络 / DNS / 代理设置。"
+                       % (host, port, ip, timeout, e))
 
 
 def _repo_root(path):
@@ -769,6 +824,12 @@ def _remote_op(verb, timeout):
     origin_url = proc_url.stdout.strip()
     auth_url = _auth_remote_url(origin_url, creds)
 
+    # 先探一下远端端口：网络不通时立刻失败，避免 git 卡满 120s、
+    # 用户反复点推送堆出一堆「推送中」记录
+    reachable, why = _probe_remote(origin_url)
+    if not reachable:
+        return jsonify({"ok": False, "error": why, "output": ""}), 400
+
     args = [verb]
     branch = ""
     if verb == "fetch":
@@ -792,7 +853,9 @@ def _remote_op(verb, timeout):
         push_commits = _push_commit_list(root, branch, has_upstream)
     hid = _push_hist_start(root, branch, push_commits) if verb == "push" else None
 
-    proc, err = _git(root, args, timeout=timeout)
+    # 低速断开：连接建立后 20 秒内几乎没有数据（<1KB/s）就主动断，避免半死不活地挂着
+    proc, err = _git(root, ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=20"] + args,
+                     timeout=timeout)
     if err:
         _push_hist_finish(hid, False, str(err))
         return _fail(err, 500)
@@ -823,21 +886,41 @@ def _remote_op(verb, timeout):
 
 @bp.route("/api/git/fetch", methods=["POST"])
 def api_git_fetch():
-    return _remote_op("fetch", 120)
+    return _remote_op("fetch", 60)
 
 
 @bp.route("/api/git/pull", methods=["POST"])
 def api_git_pull():
-    return _remote_op("pull", 120)
+    return _remote_op("pull", 60)
 
 
 @bp.route("/api/git/push", methods=["POST"])
 def api_git_push():
-    return _remote_op("push", 120)
+    return _remote_op("push", 60)
 
 
 _PUSH_HIST_KEEP = 2000                   # 推送记录最多保留条数（超出从旧到新删）
 _ACTIVE_PUSH = set()                     # 本进程正在执行的推送记录 id（用来识别僵尸 running）
+
+
+def _cleanup_orphan_pushes():
+    """进程启动时把上次运行遗留的「推送中」全部标记为中断。
+
+    本进程刚启动，不可能有正在执行的推送；这些记录只会让人误以为还在推、
+    或者让推送记录面板里一直有旋转图标。
+    """
+    try:
+        with store_tx() as conn:
+            conn.execute(
+                "UPDATE git_push_history SET ok=0, status='fail', "
+                "detail=CASE WHEN detail='' OR detail IS NULL THEN ? ELSE detail END "
+                "WHERE status='running'",
+                ("推送中断（服务重启或进程结束）；若远程仓库已有这些提交，可忽略此记录",))
+    except Exception as e:                                  # noqa: BLE001
+        _log.warning("清理遗留推送记录失败：%s", e)
+
+
+_cleanup_orphan_pushes()
 
 
 def _push_commit_list(root, branch, has_upstream):
@@ -925,9 +1008,14 @@ def api_git_push_history_list():
     # 让人误以为还没推成功、需要重新推送。
     try:
         with store_tx() as conn:
-            rows = conn.execute(
-                "SELECT id FROM git_push_history WHERE status='running' "
-                "AND ts <= datetime('now', 'localtime', '-150 seconds')").fetchall()
+            if _ACTIVE_PUSH:
+                rows = conn.execute(
+                    "SELECT id FROM git_push_history WHERE status='running' "
+                    "AND ts <= datetime('now', 'localtime', '-150 seconds')").fetchall()
+            else:
+                # 本进程没有任何推送在执行：所有 running 都是上次运行留下的
+                rows = conn.execute(
+                    "SELECT id FROM git_push_history WHERE status='running'").fetchall()
             for r in rows:
                 if r["id"] in _ACTIVE_PUSH:
                     continue

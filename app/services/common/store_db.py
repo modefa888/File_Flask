@@ -263,6 +263,26 @@ CREATE TABLE IF NOT EXISTS git_push_history (
 );
 CREATE INDEX IF NOT EXISTS idx_git_push_hist ON git_push_history(id DESC);
 
+-- 上传记录（每次分片上传合并完成后一行，文件管理顶栏「上传记录」抽屉查看）
+-- rel：保留目录结构时的相对路径；name：落地文件名（同名冲突时可能是 xxx-1.txt）
+CREATE TABLE IF NOT EXISTS upload_history (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts      TEXT NOT NULL DEFAULT '',   -- 时间（YYYY-MM-DD HH:MM:SS）
+    name    TEXT DEFAULT '',            -- 落地文件名
+    rel     TEXT DEFAULT '',            -- 相对路径
+    dir     TEXT DEFAULT '',            -- 目标目录
+    path    TEXT DEFAULT '',            -- 完整落地路径
+    size    INTEGER DEFAULT 0,          -- 字节数
+    cost_ms INTEGER DEFAULT 0,          -- 上传耗时（毫秒）
+    ok      INTEGER DEFAULT 1,          -- 1 = 成功
+    error   TEXT DEFAULT '',            -- 失败原因
+    user    TEXT DEFAULT '',            -- 上传者
+    ip      TEXT DEFAULT '',            -- 来源 IP
+    missing INTEGER DEFAULT 0           -- 1 = 文件已不在原位置（点记录跳转时校验出来）
+);
+CREATE INDEX IF NOT EXISTS idx_upload_hist ON upload_history(id DESC);
+CREATE INDEX IF NOT EXISTS idx_upload_hist_ts ON upload_history(ts);
+
 -- AI 对话历史（原独立库 data/.file_manager_ai_chat.db，表结构保持一致以便直接搬运）
 -- root：对话所属的项目根目录（IDE 的 ROOT）。空串 = 还没绑定项目（旧数据），
 -- 首次进入某个项目时由 chatdb.adopt_unassigned() 一次性划归该项目，
@@ -524,6 +544,8 @@ def _migrate_ai_columns(conn):
         # Git 推送记录：状态列（表建了还没重启过的库补列）
         ("git_push_history", "status", "TEXT DEFAULT ''"),
         ("git_push_history", "commits", "TEXT DEFAULT ''"),
+        # 上传记录：文件已不在原位置的标记（老库补列）
+        ("upload_history", "missing", "INTEGER DEFAULT 0"),
     ):
         try:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}

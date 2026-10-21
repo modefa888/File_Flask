@@ -1,0 +1,40 @@
+/* ========== 后台任务弹窗：实时删除进度表 ========== */
+
+.zip-prog-list {
+    margin-top: 10px;
+    max-height: 160px;
+    overflow: auto;
+    padding: 4px;
+    border: 1px solid #eef2f7;
+    border-radius: 8px;
+    background: #fbfcfe;
+}
+
+.zip-prog-list[hidden] { display: none; }
+
+.zpl-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 6px;
+    border-radius: 5px;
+    font-size: .75rem;
+    color: #475569;
+}
+
+.zpl-row i {
+    flex: none;
+    font-size: .7rem;
+    color: #9aa4b2;
+}
+
+.zpl-row span {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* 最新删的那一条置顶高亮 */
+.zpl-row:first-child { background: #eef4ff; color: #1d4ed8; }
+.zpl-row:first-child i { color: #1d4ed8; }

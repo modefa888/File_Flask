@@ -4,8 +4,16 @@
             const count = paths.length;
             let dirItems = [];
             let fileItems_ = [];
+            // 列表项里的 path 是相对路径，按「当前目录 + 相对路径」还原绝对路径再匹配
+            const _base = (currentPath || '').replace(/[\\/]+$/, '');
+            const _absOf = (f) => {
+                if (f.abs_path) return f.abs_path;
+                const rel = String(f.path || '');
+                if (!rel) return '';
+                return /^([A-Za-z]:[\\/]|[\\/])/.test(rel) ? rel : (_base ? _base + '/' + rel : rel);
+            };
             for (const p of paths) {
-                const item = fileItems.find(f => (f.abs_path || '') === p);
+                const item = fileItems.find(f => _absOf(f) === p);
                 if (item && item.is_dir) {
                     dirItems.push(item);
                 } else {
@@ -14,12 +22,12 @@
             }
             let confirmMsg = '';
             if (dirItems.length > 0) {
-                let msg = '[Warning] 以下项目包含文件夹，删除后所有子文件将移入回收站（5秒内可撤销）:\n\n';
+                let msg = '以下文件夹会连同所有子文件一起移入回收站（5 秒内可撤销）：\n\n';
                 for (const d of dirItems) {
-                    msg += '[Folder] ' + d.name + (d.size > 0 ? ' (' + formatSize(d.size) + ')' : '') + '\n';
+                    msg += '· ' + d.name + (d.size > 0 ? '（' + formatSize(d.size) + '）' : '') + '\n';
                 }
-                if (fileItems_.length > 0) msg += '\n[File] 另 ' + fileItems_.length + ' 个文件\n';
-                msg += '\n可点击「撤销」恢复，或等待 5 秒后过期。继续？';
+                if (fileItems_.length > 0) msg += '\n另 ' + fileItems_.length + ' 个文件\n';
+                msg += '\n删除后可在 5 秒内点「撤销」恢复，继续？';
                 confirmMsg = msg;
             } else {
                 confirmMsg = count === 1

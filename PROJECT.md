@@ -269,7 +269,39 @@ File_Flask/
 
 `app/templates/`：
 
-- `index.html`（≈411KB）—— 桌面端主界面：文件浏览、预览、IDE、Git、AI 助手、Agent 等所有功能前端
+- `index/index.html` —— 桌面端主界面入口，只做 include 拼接；正文在 `index/partials/body.html`，
+  逻辑与样式按模块拆在 `index/js/*.js`、`index/css/*.css`（文件浏览、预览、上传、AI 助手等）
+  - `index/js/52_拖拽上传.js` + `index/css/13_拖拽上传.css`：把本地**文件或文件夹**拖进文件列表
+    （`.file-table`）→ 只加入「上传列表」对话框（文件名 / 大小 / 上传状态 / 操作，可逐个移除、
+    可再点「上传文件 / 上传文件夹」追加），点 **开始上传** 才真正写入。拖拽提示遮罩全程
+    `pointer-events:none`，否则卡片压住鼠标会反复 dragenter/dragleave 导致提示框抖动。
+    文件夹用 `webkitGetAsEntry` 递归展开（`readEntries` 必须循环读到空，否则大文件夹漏文件），
+    按原目录结构上传；成功后用 `localAddItem` 本地插入顶层条目（不整目录重载）。
+    **断点续传（分片上传）**：每个文件按 4MB 切片，上传前先查 `/api/files/upload_status`
+    拿到「已接收分片」，只传缺失分片，最后 `/api/files/upload_merge` 合并；中途失败 / 刷新页面后
+    重新「开始上传」都从断点继续，已传分片不重传。分片按 `(相对路径|大小|修改时间)` 的 sha1
+    落到 `.upload_tmp/<hash>/<index>`，临时目录 3 天后由 `/api/files/upload_chunk` 偶发清理，
+    合并成功后立即删除。并发 3 文件、每片失败重试 3 次；单文件 >25MB 标红跳过，同名文件自动 `-1/-2`。
+    IDE 的普通上传仍走老的 `POST /api/files/upload`（一次性，不带分片）。
+    上传前先 `POST /api/files/upload_check` 做同名检测，命中则在对话框内弹出「文件冲突确认」
+    （列出 本地大小 → 线上大小），选「覆盖」则 merge 带 `overwrite=1` 直接覆盖，选「跳过」则
+    这些文件标灰跳过、其余照常传。对话框顶部还有一条统计信息：空闲显示 上传大小 / 共耗时 /
+    平均上传速度 / 成功数，上传中显示 总进度 / 正在上传(x/y) / 实时速度 / 已用时 / 预计剩余
+    （上传期间由 400ms 定时器刷新，不依赖分片回调）。统计在添加文件 / 重开对话框时保留，
+    只有「开始上传」和「清空列表」才重置。
+    每次 merge 的结果（文件名 / 大小 / 目标目录 / 耗时 / 状态 / 上传者）写入 store.db 的
+    `upload_history` 表（最近 3000 条），文件管理顶栏「上传记录」按钮打开右侧抽屉查看
+    （`53_上传记录面板.js` + `14_上传记录面板.css`，支持拖动左边缘调宽、双击复位、搜索、
+    状态筛选、分页、自定义二次确认框清空）；点记录行会让左侧文件管理跳到文件所在目录并高亮，
+    抽屉保持打开，跳转后确认文件已不在原位置则该行标为「已删除」（回写 `upload_history.missing`，
+    接口 `POST /api/files/upload_records/missing`），文件又出现时自动取消标记；分片中断等
+    走不到 merge 的失败由前端 `POST /api/files/upload_record_fail` 补记。
+  - 删除（文件 / 文件夹）：右键菜单「删除」「删除文件夹」都走后台任务
+    `POST /api/delete/start`（`22_删除.js` + `08_后台任务系统…js`），弹窗显示进度条 +
+    已删文件数 + 当前文件 + 字节数，删除任务额外显示「实时删除进度表」（最近搬进回收站的
+    条目，最新在上，`15_删除进度表.css`）；目录删除在文件数 ≤20000 时逐文件 move 以便上报
+    进度，更大目录整体 rename 秒移。`delete.py` 的进度快照带 `recent` 字段，SSE
+    `/api/progress/stream` 与 `/api/delete/progress` 同步返回。
 - `mobile.html`（≈306KB）—— 移动端 `/m`
 - `ide.html`（≈517KB）—— 独立在线 IDE `/ide`
 - `login.html` —— 登录页

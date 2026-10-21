@@ -54,7 +54,21 @@ def _task_bump(task, files=0, bytes_=0):
         task["done_bytes"] += bytes_
 
 
-def _copy_file_progress(src, dst, task):
+# 文件数不超过这个值时逐文件搬进回收站（能给出实时进度表），超过则整体秒移
+_PER_FILE_LIMIT = 20000
+
+
+def _record(task, rel):
+    """记下正在处理的条目，并追加到「最近删除」进度表（前端悬浮框展示）"""
+    with _TASKS_LOCK:
+        task["current"] = rel
+        recent = task.setdefault("recent", [])
+        recent.append(rel)
+        if len(recent) > 200:
+            del recent[:-200]
+
+
+def _copy_file_progress(src, dst, task, rel=""):
     """跨设备复制单个文件，按字节实时上报进度"""
     try:
         size = os.path.getsize(src)
@@ -62,7 +76,7 @@ def _copy_file_progress(src, dst, task):
         size = 0
     with _TASKS_LOCK:
         base_bytes = task["done_bytes"]
-        task["current"] = os.path.basename(src)
+    _record(task, rel or os.path.basename(src))
     copied = 0
     with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
         while True:
@@ -107,18 +121,20 @@ def _fit_dst_path(dst_dir, name):
     return os.path.join(dst_dir, f"{short}-{tag}{ext}")
 
 
-def _move_tree_progress(src, dst, task):
+def _move_tree_progress(src, dst, task, rel=""):
     """递归移动目录/文件到回收站，逐文件上报进度（同盘 rename 秒移，跨盘复制计时）"""
+    name = rel or os.path.basename(src)
     if os.path.isdir(src) and not os.path.islink(src):
         os.makedirs(dst, exist_ok=True)
-        for name in os.listdir(src):
+        for child in os.listdir(src):
             try:
-                _move_tree_progress(os.path.join(src, name), _fit_dst_path(dst, name), task)
+                _move_tree_progress(os.path.join(src, child), _fit_dst_path(dst, child), task,
+                                    (name + "/" + child) if name else child)
             except Exception as e:
                 # 单个条目失败不中断整个目录的删除
                 with _TASKS_LOCK:
                     if len(task["errors"]) < 20:
-                        task["errors"].append(f"{name}: {e}")
+                        task["errors"].append(f"{child}: {e}")
         try:
             os.rmdir(src)
         except OSError:
@@ -128,8 +144,7 @@ def _move_tree_progress(src, dst, task):
         size = os.path.getsize(src)
     except OSError:
         size = 0
-    with _TASKS_LOCK:
-        task["current"] = os.path.basename(src)
+    _record(task, name)
     try:
         os.rename(src, dst)
         _task_bump(task, 1, size)
@@ -144,7 +159,7 @@ def _move_tree_progress(src, dst, task):
             return
         except OSError:
             pass
-    _copy_file_progress(src, dst, task)
+    _copy_file_progress(src, dst, task, name)
 
 
 def _delete_worker(task_id, valid_paths):
@@ -170,12 +185,19 @@ def _delete_worker(task_id, valid_paths):
                 except OSError:
                     file_size = 0
                 pf, pb = _count_tree(target_path)
-                try:
-                    os.rename(target_path, trash_path)  # 同盘整体秒移
-                    _task_bump(task, pf, pb)
-                except OSError:
-                    # 跨设备或整体移动失败：逐文件移动并上报进度
-                    _move_tree_progress(target_path, trash_path, task)
+                top = os.path.basename(target_path) or target_path
+                if is_dir and pf <= _PER_FILE_LIMIT:
+                    # 逐文件搬进回收站：让前端能显示实时删除进度表
+                    # （同盘每个文件都只是一次 rename，几万个文件也很快）
+                    _move_tree_progress(target_path, trash_path, task, top)
+                else:
+                    try:
+                        os.rename(target_path, trash_path)  # 同盘整体秒移
+                        _task_bump(task, pf, pb)
+                        _record(task, top)
+                    except OSError:
+                        # 跨设备或整体移动失败：逐文件移动并上报进度
+                        _move_tree_progress(target_path, trash_path, task, top)
                 deleted.append(rel_path)
                 deleted_abs.append(target_path)
                 _invalidate_list_cache(os.path.dirname(target_path))
@@ -259,6 +281,7 @@ def api_delete_start():
         "done_files": 0,
         "done_bytes": 0,
         "current": "",
+        "recent": [],
         "errors": [],
         "started_at": time.time(),
     }
@@ -294,6 +317,8 @@ def api_delete_progress():
     return jsonify({
         "status": snap["status"],
         "current": snap.get("current", ""),
+        # 最近删除的条目（最新的在后），前端悬浮框里当进度表显示
+        "recent": snap.get("recent", [])[-40:],
         "done_files": done_files,
         "total_files": total_files,
         "done_bytes": done_bytes,

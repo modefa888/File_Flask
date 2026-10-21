@@ -55,6 +55,8 @@ def _snapshot(task_id):
     return {
         "status": snap["status"],
         "current": snap.get("current", ""),
+        # 删除任务：最近搬进回收站的条目（前端「实时删除进度表」）
+        "recent": (snap.get("recent") or [])[-40:],
         "done_files": done_files,
         "total_files": total_files,
         "done_bytes": done_bytes,
@@ -77,7 +79,8 @@ def _gen(task_id):
                     {"error": "任务不存在或已过期"}, ensure_ascii=False) + "\n\n"
             return
         sig = (snap["status"], snap["percent"], snap["done_files"],
-               snap["done_bytes"], snap["current"], len(snap["errors"]))
+               snap["done_bytes"], snap["current"], len(snap["errors"]),
+               len(snap.get("recent") or []))
         if sig != last_sig or snap["status"] != "running":
             yield "data: " + json.dumps(snap, ensure_ascii=False) + "\n\n"
             last_sig = sig

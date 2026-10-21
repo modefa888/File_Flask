@@ -1,4 +1,48 @@
         /* ===== 电脑版顶部工具栏：地址栏 + 操作按钮 + 筛选控件 单行显示 ===== */
+
+        /* 顶栏右侧纯图标按钮（回收站 / 收藏夹 / 媒体 / 分享 / 上传记录 / 刷新 / 退出）：
+           正方形、图标居中、无边框（悬停才出底），文字说明走 title 悬浮提示 */
+        .navbar .btn-icon-only {
+            width: 32px;
+            min-width: 32px;
+            padding-left: 0;
+            padding-right: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            border: 0;
+            background: transparent;
+            color: #475467;
+            border-radius: 8px;
+            box-shadow: none;
+        }
+
+        .navbar .btn-icon-only > i {
+            font-size: 0.95rem;
+        }
+
+        .navbar .btn-icon-only:hover,
+        .navbar .btn-icon-only:focus-visible {
+            background: #eef2f7;
+            color: #1f2328;
+            border: 0;
+            box-shadow: none;
+        }
+
+        /* 面板打开时（active）给个浅蓝底，不然无边框看不出当前状态 */
+        .navbar .btn-icon-only.active {
+            background: #e7eefc;
+            color: #1d4ed8;
+            border: 0;
+            box-shadow: none;
+        }
+
+        .navbar .btn-icon-only:focus-visible {
+            outline: 2px solid rgba(47, 111, 235, .45);
+            outline-offset: 1px;
+        }
+
         .topbar-row>[class^="col-"] {
             min-width: 0;
         }

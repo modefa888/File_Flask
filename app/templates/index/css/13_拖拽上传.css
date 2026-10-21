@@ -1,0 +1,429 @@
+        /* ============ 拖拽提示（松手前）============
+           pointer-events 全部 none 是关键：遮罩/卡片一旦吃鼠标事件，
+           鼠标刚好压在卡片上就会不断 dragleave → dragenter，提示框疯狂闪烁抖动。 */
+        .fm-drop-mask {
+            position: fixed;
+            inset: 0;
+            z-index: 3000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(13, 110, 253, .08);
+            pointer-events: none;
+        }
+        .fm-drop-mask.on { display: flex; }
+        .fm-drop-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 460px;                 /* 固定宽高：文案变化不会改变尺寸，杜绝居中式抖动 */
+            padding: 18px 22px;
+            border: 2px dashed #0d6efd;
+            border-radius: 14px;
+            background: #fff;
+            box-shadow: 0 14px 44px rgba(0, 0, 0, .16);
+            pointer-events: none;
+        }
+        .fm-drop-card > i { flex: none; font-size: 28px; line-height: 1; color: #0d6efd; }
+        .fm-drop-texts { min-width: 0; }
+        .fm-drop-title { font-size: 15px; font-weight: 600; color: #1f2328; white-space: nowrap; }
+        .fm-drop-sub {
+            margin-top: 4px;
+            font-size: 12px;
+            color: #6b7280;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* ============ 上传列表对话框（参考宝塔：先看列表，点「开始上传」才传）============ */
+        .fm-up-mask {
+            position: fixed;
+            inset: 0;
+            z-index: 3000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, .45);
+        }
+        .fm-up-mask.on { display: flex; }
+        .fm-up-dialog {
+            position: relative;            /* 冲突确认层相对它做绝对定位 */
+            display: flex;
+            flex-direction: column;
+            width: 760px;
+            max-width: 94vw;
+            max-height: 86vh;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 18px 60px rgba(0, 0, 0, .3);
+            overflow: hidden;
+        }
+
+        .fm-up-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 18px;
+            border-bottom: 1px solid #eef0f3;
+        }
+        .fm-up-title {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 15px;
+            font-weight: 600;
+            color: #1f2328;
+        }
+        .fm-up-tip { flex: none; font-size: 12px; color: #9aa1a9; }
+        .fm-up-x {
+            margin-left: auto;
+            flex: none;
+            width: 28px; height: 28px;
+            border: none; border-radius: 6px;
+            background: transparent;
+            color: #8b949e;
+            font-size: 20px; line-height: 1;
+            cursor: pointer;
+        }
+        .fm-up-x:hover { background: #f1f3f5; color: #1f2328; }
+
+        .fm-up-tools {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            border-bottom: 1px solid #f2f4f7;
+        }
+        .fm-up-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            height: 30px;
+            padding: 0 12px;
+            border: 1px solid #d8dee5;
+            border-radius: 6px;
+            background: #fff;
+            color: #344054;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .fm-up-btn:hover:not(:disabled) { border-color: #0d6efd; color: #0d6efd; }
+        .fm-up-btn:disabled { opacity: .55; cursor: not-allowed; }
+        .fm-up-clear { margin-left: auto; }
+
+        /* 统计信息条（参考宝塔：绿底一条，显示大小 / 耗时 / 速度 / 成功数） */
+        .fm-up-stat {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px 22px;
+            margin: 10px 18px 0;
+            padding: 8px 14px;
+            border: 1px solid #d8efd9;
+            border-radius: 6px;
+            background: #f2faf5;
+            font-size: 12px;
+            color: #4b5563;
+        }
+        /* 没有任何上传记录时不占位（就一条空白绿条很难看） */
+        .fm-up-stat:empty { display: none; }
+        .fm-up-stat > span { white-space: nowrap; }
+        .fm-up-stat b {
+            font-weight: 600;
+            color: #1a7f37;
+            font-variant-numeric: tabular-nums;
+        }
+        .fm-up-stat b.fm-up-bad { color: #d1242f; }
+        .fm-up-stat em {
+            font-style: normal;
+            font-size: 11px;
+            color: #8b949e;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .fm-up-body {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 240px;
+            overflow: hidden;
+        }
+        .fm-up-thead,
+        .fm-up-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 92px 108px 62px;
+            align-items: center;
+            gap: 10px;
+            padding: 0 18px;
+        }
+        .fm-up-thead {
+            height: 38px;
+            background: #fafbfc;
+            border-bottom: 1px solid #eef0f3;
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .fm-up-list {
+            flex: 1;
+            max-height: 46vh;
+            overflow: auto;
+        }
+        .fm-up-row {
+            height: 40px;
+            border-bottom: 1px solid #f5f6f8;
+            font-size: 13px;
+        }
+        .fm-up-row:hover { background: #fafbfc; }
+        /* 成功行淡绿背景（参考宝塔），跳过的行保持灰白 */
+        .fm-up-row[data-state="done"] { background: #f6fdf8; }
+        .fm-up-row[data-state="done"]:hover { background: #eefaf2; }
+        .fm-up-row[data-state="skip"] { background: #fbfbfc; }
+        .fm-up-name {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+            color: #1f2328;
+        }
+        /* 固定尺寸：图标字体未就绪 / 某个 glyph 缺失时也照样占位，
+           否则各行文字起点会像「有的行缩进、有的行顶格」一样错位 */
+        .fm-up-name > i {
+            flex: none;
+            width: 14px;
+            height: 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            line-height: 1;
+            color: #9aa1a9;
+        }
+        .fm-up-name > b {
+            min-width: 0;
+            font-weight: 400;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .fm-up-size { color: #8b949e; font-variant-numeric: tabular-nums; }
+        .fm-up-state { color: #8b949e; font-size: 12px; min-width: 0; }
+        /* 上传中：状态列换成「单文件进度条 + 百分比」 */
+        .fm-up-row[data-state="up"] .fm-up-state {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .fm-up-mini {
+            display: block;
+            flex: 1;
+            min-width: 32px;
+            height: 6px;
+            border-radius: 999px;
+            background: #e5e7eb;
+            overflow: hidden;
+        }
+        .fm-up-mini > b {
+            display: block;
+            height: 100%;
+            width: 0;
+            background: #0d6efd;
+            transition: width .12s linear;
+        }
+        .fm-up-state > em {
+            flex: none;
+            font-style: normal;
+            font-size: 11px;
+            color: #0d6efd;
+            font-variant-numeric: tabular-nums;
+        }
+        .fm-up-op { text-align: right; }
+        .fm-up-del {
+            border: none;
+            background: none;
+            padding: 0;
+            color: #0d6efd;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .fm-up-del:hover:not(:disabled) { text-decoration: underline; }
+        .fm-up-del:disabled { color: #c3cad1; cursor: not-allowed; }
+
+        .fm-up-row[data-state="up"] .fm-up-state { color: #0d6efd; }
+        .fm-up-row[data-state="done"] .fm-up-state,
+        .fm-up-row[data-state="done"] .fm-up-name > i { color: #1a7f37; }
+        .fm-up-row[data-state="fail"] .fm-up-state,
+        .fm-up-row[data-state="fail"] .fm-up-name > i { color: #d1242f; }
+        .fm-up-row[data-state="skip"] .fm-up-state,
+        .fm-up-row[data-state="skip"] .fm-up-name > i { color: #8b949e; }
+
+        .fm-up-more {
+            padding: 10px 18px;
+            font-size: 12px;
+            color: #8b949e;
+        }
+
+        .fm-up-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            flex: 1;
+            padding: 40px 0;
+            color: #9aa1a9;
+            font-size: 13px;
+            text-align: center;
+        }
+        .fm-up-empty > span { font-size: 12px; color: #b0b7bf; }
+
+        .fm-up-foot {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 18px;
+            border-top: 1px solid #eef0f3;
+        }
+        /* 左侧吃掉剩余宽度，把「开始上传」顶到最右边 */
+        .fm-up-progress {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            min-width: 0;
+        }
+        .fm-up-bar {
+            display: none;
+            flex: 1;
+            height: 6px;
+            border-radius: 999px;
+            background: #e5e7eb;
+            overflow: hidden;
+        }
+        .fm-up-bar.on { display: block; }
+        .fm-up-bar > i {
+            display: block;
+            height: 100%;
+            width: 0;
+            background: #0d6efd;
+            transition: width .15s linear;
+        }
+        .fm-up-pct {
+            flex: none;
+            min-width: 36px;
+            text-align: right;
+            font-size: 12px;
+            color: #6b7280;
+            font-variant-numeric: tabular-nums;
+        }
+        .fm-up-start {
+            flex: none;
+            height: 34px;
+            padding: 0 22px;
+            border: none;
+            border-radius: 6px;
+            background: #22a06b;
+            color: #fff;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .fm-up-start:hover:not(:disabled) { background: #1c8b5c; }
+        .fm-up-start:disabled { background: #c3cad1; cursor: not-allowed; }
+
+        /* ============ 文件冲突确认（叠在上传对话框内部）============ */
+        .fm-up-cf-mask {
+            position: absolute;
+            inset: 0;
+            z-index: 5;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(31, 35, 40, .3);
+        }
+        .fm-up-cf-mask.on { display: flex; }
+        .fm-up-cf {
+            display: flex;
+            flex-direction: column;
+            width: 560px;
+            max-width: 88%;
+            max-height: 82%;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 16px 44px rgba(0, 0, 0, .22);
+            overflow: hidden;
+        }
+        .fm-up-cf-head {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid #eef0f3;
+        }
+        .fm-up-cf-title { font-size: 14px; font-weight: 600; color: #1f2328; }
+        .fm-up-cf-body { padding: 14px 16px 6px; overflow: auto; }
+        .fm-up-cf-tip {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 12px;
+            font-size: 13px;
+            color: #6b7280;
+        }
+        .fm-up-cf-tip > i { flex: none; font-size: 15px; color: #d97706; }
+        .fm-up-cf-scroll {
+            max-height: 220px;
+            overflow: auto;
+            border: 1px solid #eef0f3;
+            border-radius: 6px;
+        }
+        .fm-up-cf-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .fm-up-cf-table th {
+            position: sticky;
+            top: 0;
+            padding: 8px 12px;
+            background: #fafbfc;
+            border-bottom: 1px solid #eef0f3;
+            color: #6b7280;
+            font-weight: 500;
+            text-align: left;
+        }
+        .fm-up-cf-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #f5f6f8;
+            color: #1f2328;
+            max-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .fm-up-cf-table td:last-child {
+            width: 168px;
+            max-width: none;
+            color: #6b7280;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+        .fm-up-cf-foot {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 12px 16px;
+            border-top: 1px solid #eef0f3;
+        }
+        .fm-up-cf-foot button {
+            height: 32px;
+            padding: 0 20px;
+            border: 1px solid #d8dee5;
+            border-radius: 6px;
+            background: #f5f6f8;
+            color: #344054;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .fm-up-cf-foot button:hover { border-color: #c3cad1; }
+        .fm-up-cf-cover {
+            background: #22a06b;
+            border-color: #22a06b;
+            color: #fff;
+        }
+        .fm-up-cf-cover:hover { background: #1c8b5c; border-color: #1c8b5c; }

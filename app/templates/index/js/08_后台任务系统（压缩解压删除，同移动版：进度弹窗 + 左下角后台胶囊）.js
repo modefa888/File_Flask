@@ -30,6 +30,7 @@
               <div style="height:10px;background:#e2e8f0;border-radius:6px;overflow:hidden;"><div id="zipProgBar" style="height:100%;width:0%;background:linear-gradient(90deg,#2563eb,#1d4ed8);transition:width .3s;"></div></div>
               <div style="font-size:0.78rem;color:#718096;margin-top:8px;display:flex;justify-content:space-between;"><span id="zipProgBytes"></span><span id="zipProgPct">0%</span></div>
               <div style="font-size:0.75rem;color:#94a3b8;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" id="zipProgCur"></div>
+              <div id="zipProgList" class="zip-prog-list" hidden></div>
             </div>
           </div>`;
             document.body.appendChild(_bgOverlay);
@@ -40,6 +41,31 @@
             return _bgOverlay;
         }
 
+        let _bgListKey = '';
+
+        // 删除任务专用：实时删除进度表（最近搬进回收站的条目，最新的在最上面）
+        function _bgRenderList(d) {
+            const box = document.getElementById('zipProgList');
+            if (!box) return;
+            const t = _bgTasks[_activeBgTask];
+            const kind = t ? t.kind : '';
+            const items = (kind === 'del' && d && d.recent && d.recent.length) ? d.recent : null;
+            if (!items) {
+                if (!box.hidden) { box.hidden = true; box.innerHTML = ''; }
+                _bgListKey = '';
+                return;
+            }
+            const key = items.length + '|' + items[items.length - 1];
+            if (key === _bgListKey) return;          // SSE 每 0.3s 推一次，内容没变就不重建
+            _bgListKey = key;
+            box.hidden = false;
+            box.innerHTML = items.slice(-40).reverse().map(function (n) {
+                return '<div class="zpl-row"><i class="bi bi-file-earmark-x"></i><span title="' +
+                    _escAttr(n) + '">' + _escHtml(n) + '</span></div>';
+            }).join('');
+            box.scrollTop = 0;
+        }
+
         function _bgUpdateModal(d) {
             document.getElementById('zipProgBar').style.width = (d.percent || 0) + '%';
             document.getElementById('zipProgPct').textContent = (d.percent || 0).toFixed(0) + '%';
@@ -47,10 +73,12 @@
             document.getElementById('zipProgCur').textContent = d.current || '';
             document.getElementById('zipProgBytes').textContent = (d.done_bytes != null)
                 ? (_bgFmt(d.done_bytes) + (d.total_bytes ? ' / ' + _bgFmt(d.total_bytes) : '')) : '';
+            _bgRenderList(d);
         }
 
         function _bgOpenModal(key) {
             _activeBgTask = key;
+            _bgListKey = '';       // 换任务了，进度表重新建
             const t = _bgTasks[key];
             const ov = _bgEnsureOverlay();
             document.getElementById('zipProgTitle').textContent = (t && t.title) || '处理中…';

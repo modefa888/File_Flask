@@ -1,0 +1,381 @@
+/* ========== 上传记录侧边抽屉（文件管理顶栏「上传记录」） ========== */
+
+#upRecDrawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 780px;
+    max-width: 96vw;
+    display: flex;
+    flex-direction: column;
+    background: #f5f7fa;
+    border-left: 1px solid #e3e6ea;
+    box-shadow: -8px 0 28px rgba(30, 35, 50, .14);
+    z-index: 1052;
+    color: #1f2328;
+    font-size: 13px;
+    line-height: 1.55;
+    transform: translateX(105%);
+    transition: transform .22s ease;
+}
+
+#upRecDrawer.open { transform: translateX(0); }
+#upRecDrawer.resizing { transition: none; }
+
+/* ---------- 左边缘拖动条 ---------- */
+#upRecDrawer .upr-resizer {
+    position: absolute;
+    left: -4px;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    z-index: 20;
+    touch-action: none;
+}
+
+#upRecDrawer .upr-resizer::after {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 42px;
+    border-radius: 2px;
+    background: #dfe3e9;
+    opacity: 0;
+    transition: opacity .15s, background .15s;
+}
+
+#upRecDrawer .upr-resizer:hover::after,
+#upRecDrawer.resizing .upr-resizer::after {
+    opacity: 1;
+    background: #2f6feb;
+}
+
+/* ---------- 头部 ---------- */
+#upRecDrawer .upr-head {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 14px;
+    background: #fff;
+    border-bottom: 1px solid #eceff3;
+}
+
+#upRecDrawer .upr-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 14.5px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+#upRecDrawer .upr-title i { color: #2f6feb; }
+
+#upRecDrawer .upr-sub {
+    font-size: 11.5px;
+    color: #98a2b3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#upRecDrawer .upr-hbtns {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+#upRecDrawer .upr-hbtn {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #e3e7ec;
+    border-radius: 8px;
+    background: #fff;
+    color: #475467;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .15s;
+}
+
+#upRecDrawer .upr-hbtn:hover {
+    border-color: #2f6feb;
+    color: #2f6feb;
+    background: #f5f8ff;
+}
+
+#upRecDrawer .upr-hbtn:disabled { opacity: .5; cursor: not-allowed; }
+
+#upRecDrawer .upr-hbtn.upr-danger:hover {
+    border-color: #d1242f;
+    color: #d1242f;
+    background: #fff5f5;
+}
+
+/* ---------- 主体（滚动区） ---------- */
+#upRecDrawer .upr-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px 14px 16px;
+}
+
+/* ---------- 汇总卡片 ---------- */
+#upRecDrawer .upr-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+#upRecDrawer .upr-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 9px 12px;
+    background: #fff;
+    border: 1px solid #e9edf2;
+    border-radius: 9px;
+}
+
+#upRecDrawer .upr-stat span {
+    font-size: 11.5px;
+    color: #8b949e;
+    white-space: nowrap;
+}
+
+#upRecDrawer .upr-stat b {
+    font-size: 18px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: #1f2328;
+    white-space: nowrap;
+}
+
+#upRecDrawer .upr-stat.ok b { color: #1a7f37; }
+#upRecDrawer .upr-stat.fail b { color: #d1242f; }
+
+/* ---------- 列表卡片 ---------- */
+#upRecDrawer .upr-list {
+    background: #fff;
+    border: 1px solid #e9edf2;
+    border-radius: 9px;
+    overflow: hidden;
+}
+
+#upRecDrawer .upr-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 11px;
+    border-bottom: 1px solid #f0f3f6;
+}
+
+#upRecDrawer .upr-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 9px;
+    flex: 1;
+    min-width: 0;
+    max-width: 260px;
+    border: 1px solid #e3e7ec;
+    border-radius: 7px;
+    background: #fafbfc;
+}
+
+#upRecDrawer .upr-search i { color: #98a2b3; font-size: 12px; }
+
+#upRecDrawer .upr-search input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    font-size: 12.5px;
+    color: #1f2328;
+}
+
+#upRecDrawer .upr-tools select {
+    height: 30px;
+    padding: 0 6px;
+    border: 1px solid #e3e7ec;
+    border-radius: 7px;
+    background: #fafbfc;
+    color: #475467;
+    font-size: 12.5px;
+    outline: none;
+}
+
+#upRecDrawer .upr-count {
+    margin-left: auto;
+    font-size: 11.5px;
+    color: #98a2b3;
+    white-space: nowrap;
+}
+
+/* ---------- 表格 ---------- */
+#upRecDrawer .upr-tblwrap { overflow: auto; }
+
+#upRecDrawer table {
+    width: 100%;
+    min-width: 620px;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    table-layout: fixed;
+}
+
+#upRecDrawer thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 8px 11px;
+    text-align: left;
+    white-space: nowrap;
+    background: #fafbfc;
+    border-bottom: 1px solid #eef1f5;
+    color: #6b7280;
+    font-size: 11.5px;
+    font-weight: 500;
+}
+
+#upRecDrawer tbody td {
+    padding: 8px 11px;
+    border-bottom: 1px solid #f3f5f8;
+    vertical-align: middle;
+    overflow: hidden;
+}
+
+#upRecDrawer tbody tr:hover { background: #fafcff; }
+
+/* 记录行可点击：跳到左侧文件管理并高亮该文件 */
+#upRecDrawer tbody tr[data-dir] { cursor: pointer; }
+#upRecDrawer tbody tr[data-dir]:hover .upr-fn { color: #2f6feb; text-decoration: underline; }
+#upRecDrawer tbody tr.bad { background: #fffafa; }
+#upRecDrawer tbody tr.bad:hover { background: #fff5f5; }
+
+#upRecDrawer tbody tr:last-child td { border-bottom: 0; }
+
+#upRecDrawer .upr-ts {
+    color: #6b7280;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+#upRecDrawer .upr-fn {
+    font-weight: 500;
+    color: #1f2328;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#upRecDrawer .upr-fp {
+    font-size: 11px;
+    color: #98a2b3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+}
+
+#upRecDrawer .upr-num {
+    color: #475467;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+#upRecDrawer .upr-user {
+    color: #6b7280;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#upRecDrawer .upr-tag {
+    display: inline-flex;
+    align-items: center;
+    height: 19px;
+    padding: 0 7px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+#upRecDrawer .upr-tag.ok { background: #e9f7ee; color: #1a7f37; }
+#upRecDrawer .upr-tag.fail { background: #fdecec; color: #d1242f; cursor: help; }
+#upRecDrawer .upr-tag.gone { background: #f1f3f5; color: #98a2b3; cursor: help; }
+
+/* 文件已不在原位置：整行置灰 + 文件名加删除线 */
+#upRecDrawer tbody tr.gone { background: #fcfcfd; }
+#upRecDrawer tbody tr.gone .upr-fn { color: #98a2b3; text-decoration: line-through; }
+#upRecDrawer tbody tr.gone .upr-fp { opacity: .6; }
+
+/* ---------- 空态 ---------- */
+#upRecDrawer .upr-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 56px 0;
+    color: #b0b8c1;
+}
+
+#upRecDrawer .upr-empty[hidden] { display: none; }
+#upRecDrawer .upr-empty i { font-size: 36px; }
+#upRecDrawer .upr-empty p { margin: 0; font-size: 12.5px; }
+
+/* ---------- 分页 ---------- */
+#upRecDrawer .upr-pager {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 8px 11px;
+    border-top: 1px solid #f0f3f6;
+}
+
+#upRecDrawer .upr-pager button {
+    height: 28px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid #e3e7ec;
+    border-radius: 7px;
+    background: #fff;
+    color: #475467;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+#upRecDrawer .upr-pager button:hover:not(:disabled) {
+    border-color: #2f6feb;
+    color: #2f6feb;
+}
+
+#upRecDrawer .upr-pager button:disabled { opacity: .45; cursor: not-allowed; }
+
+#upRecDrawer .upr-pageinfo {
+    font-size: 11.5px;
+    color: #6b7280;
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 720px) {
+    #upRecDrawer { width: 100vw; max-width: 100vw; }
+    #upRecDrawer .upr-stats { grid-template-columns: repeat(2, 1fr); }
+    #upRecDrawer .upr-sub { display: none; }
+    #upRecDrawer .upr-search { max-width: none; }
+}

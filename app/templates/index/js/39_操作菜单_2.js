@@ -53,6 +53,9 @@
                 items.push({ icon: 'bi bi-plus-square', label: '复制到...', action: 'copy-to', cls: '' });
                 items.push({ divider: true });
                 items.push({ icon: 'bi bi-trash3', label: '删除', action: 'delete', cls: 'danger' });
+            } else {
+                items.push({ divider: true });
+                items.push({ icon: 'bi bi-trash3', label: '删除文件夹', action: 'delete', cls: 'danger' });
             }
 
             items.forEach(item => {

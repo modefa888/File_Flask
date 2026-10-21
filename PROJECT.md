@@ -103,6 +103,7 @@ File_Flask/
 | 21 | `ide/proc.py` | `proc` | 进程资源管理器：系统 CPU/内存/磁盘/网络占用、进程列表、结束进程、AI 资源诊断（`POST /api/proc/diagnose`） |
 | 22 | `ide/cron.py` | `cron` | 定时任务（参考青龙面板）：cron 计划任务的增删改查、启停、立即运行、停止、执行记录与日志 |
 | 23 | `ide/termai.py` | `termai` | 终端 AI 助手：自然语言 → 命令建议（含风险说明）、执行后流式解读输出 |
+| 24 | `adm/update.py` | `update` | 在线更新：后台管理 SPA 模块（`/admin#update`），GitHub 检查更新、拉取代码、装依赖、重启 |
 
 ### 4.1 AI 助手（`ide/ai.py`）
 
@@ -258,6 +259,7 @@ File_Flask/
 | `services/ide/chatdb.py` | AI 对话历史 SQLite 存储层（`conversations` + `messages` 双表，按 `user_id` 隔离） |
 | `services/ide/agentrun.py` | AI 后台运行管理：把 Agent / 对话执行从 HTTP 请求解耦，事件入内存缓冲，支持刷新后按 run_id 重连（回放 + 实时续传） |
 | `services/ide/agent/` | Agent 智能体的工具实现与权限门控 |
+| `services/adm/updater.py` | 在线更新：GitHub 检查（API / git 双通道）、fetch + 合并、依赖安装、四种重启方式 |
 | `services/ide/cronutil.py` | cron 表达式解析 / 匹配 / 推算下次运行时间 |
 | `services/ide/crondb.py` | 定时任务与执行历史的 SQLite 存储层 |
 | `services/ide/cronsvc.py` | 定时任务调度线程 + 执行器（日志落盘 / 超时 / 停止 / 清理） |
@@ -415,5 +417,6 @@ Client ◀─响应─
 | pip 安装 / 环境探测 | `app/routes/ide/pip.py` + `services/ide/envprobe.py`、`envinstall.py` |
 | 定时任务（cron） | `app/routes/ide/cron.py` + `services/ide/cronutil.py`、`crondb.py`、`cronsvc.py`；前端 `js/36_定时任务…js` + `css/36_定时任务.css` |
 | 终端 AI 助手（自然语言转命令 / 输出解读） | `app/routes/ide/termai.py`；前端 `js/44_终端AI助手…js` + `css/42_终端AI助手.css`（浅色配色在 `css/29_浅色主题.css` 末尾） |
+| 在线更新（检查 / 拉取 / 重启） | `app/routes/adm/update.py` + `services/adm/updater.py` + `templates/adm/js/17_在线更新.js`（配置存 store_meta 的 `update_cfg`） |
 | 打包脚本 | `FileManager.spec` |
 | 启动参数 | `run.py` 的 `argparse` |

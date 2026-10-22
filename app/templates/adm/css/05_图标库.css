@@ -846,7 +846,22 @@ html[data-theme="light"] .ic-cchip {
     display: flex;
     align-items: center;
     gap: 10px;
+    min-height: 40px;          /* 预览区常驻，解析过程中页面不会上下跳 */
     margin-top: 10px;
+}
+
+.ic-svg-tip {
+    min-height: 16px;
+    font-size: 11.5px;
+    color: #8b95ac;
+}
+
+.ic-svg-tip.ok {
+    color: #34d399;
+}
+
+.ic-svg-tip.bad {
+    color: #f87171;
 }
 
 .ic-svg-prev .ai-ic {
@@ -985,4 +1000,20 @@ html[data-theme="light"] .ic-rule-card .ic-rule-sub {
 
 html[data-theme="light"] .ic-rule-card .ic-rule-note {
     color: #8b95ac;
+}
+
+/* 搜索结果里的来源角标（Seti / Bi / 阿里 / AI） */
+.ic-pick-src {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    font-size: 9px;
+    line-height: 1;
+    color: #8b95ac;
+    opacity: .85;
+    pointer-events: none;
+}
+
+.ic-pick {
+    position: relative;
 }

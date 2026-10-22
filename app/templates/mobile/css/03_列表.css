@@ -34,3 +34,29 @@
     width: 36px; height: 36px; border-radius: 8px; cursor: pointer; flex: 0 0 auto;
   }
   .more:active { background: #eef1f5; }
+
+  /* 后台自定义规则里的图标（AI 图标 / 阿里图标）——移动端轻量支持，未命中仍走 emoji + 扩展名徽标 */
+  .thumb .ai-ic,
+  .thumb .iconfont {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15em;
+    line-height: 1;
+  }
+
+  .thumb .ai-ic {
+    width: 1em;
+    height: 1em;
+  }
+
+  .thumb .ai-ic svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .list.grid .thumb .ai-ic,
+  .list.grid .thumb .iconfont {
+    font-size: 1em;
+  }

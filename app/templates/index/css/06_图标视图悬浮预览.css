@@ -3397,3 +3397,39 @@
         .cm-preview-pane {
             position: relative;
         }
+
+/* 收藏列表：统一图标垂直居中 */
+.fav-row .fav-ico {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 收藏行图标：和文字垂直居中（.seti-ic 默认带 1.4em + 下沉偏移，是给行内文字用的，这里要抹平） */
+.fav-row .fav-ico {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.fav-row .fav-ico .seti-ic {
+    font-size: 1.05rem;
+    transform: none;
+    vertical-align: middle;
+}
+
+.fav-row .fav-ico .bi {
+    font-size: 1rem;
+    line-height: 1;
+}
+
+/* 回收站缩略图：统一图标同样抹平字体自带的下沉偏移 */
+.delhist-item .dh-thumb .seti-ic.dh-thumb-icon {
+    font-size: 1.4rem;
+    transform: none;
+    vertical-align: middle;
+}

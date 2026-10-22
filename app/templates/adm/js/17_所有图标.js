@@ -31,6 +31,10 @@ ADM.modules.push({
         var SVG_NAME = "";       // 手动粘贴时的图标名
         var SVG_KEEP = false;    // 手动粘贴：保留原色
         var SVG_PREVIEW = "";    // 清洗后的预览 SVG
+        var SVG_TIP = "";        // 预览状态文字（解析中 / 已识别 / 错误）
+        var SVG_TIP_CLS = "";    // 状态文字样式：ok / bad
+        var svgTimer = null;     // 自动预览防抖
+        var svgSeq = 0;          // 只认最后一次请求的结果
 
         /* 兜底图标：Seti 没收录的类型，文件管理器（index/js/04_工具.js 的 FILE_ICON_MAP）
            会用这些 Bootstrap 图标 + 配色补齐，这里一并列出来，方便对照「这个后缀显示成什么」。 */
@@ -462,7 +466,7 @@ ADM.modules.push({
                                     '<button class="adm-btn sm ghost" type="button" data-pick="ai">AI 图标</button>' +
                                 '</div>' +
                                 '<input class="adm-input" id="icrPickSearch" type="search" ' +
-                                    'placeholder="搜索图标…" spellcheck="false">' +
+                                    'placeholder="搜索图标（文件 / Bi / 阿里 / AI 一起搜）" spellcheck="false">' +
                             '</div>' +
                             '<div class="ic-picker-grid" id="icrPickGrid"></div>' +
                         '</div>' +
@@ -552,8 +556,46 @@ ADM.modules.push({
                     var pickSearch = box.querySelector('#icrPickSearch');
                     var PS = { tab: 'seti', q: '', limit: 240 };
 
+                    /* 全库索引：搜索时跨 文件图标 / Bootstrap / 阿里 / AI 一起找，懒建一次后复用 */
+                    var PICK_ALL = null;
+                    function pickAll() {
+                        if (PICK_ALL) return PICK_ALL;
+                        var out = [];
+                        AI_LIST.forEach(function (it) {
+                            out.push({
+                                key: 'ai:' + it.id, label: it.name, svg: it.svg, glyph: '',
+                                color: it.keepColor ? '' : '#519aba', src: 'AI'
+                            });
+                        });
+                        aliClasses().forEach(function (c) {
+                            out.push({ key: 'ali:' + c, label: c, glyph: 'ali ' + c, color: '', src: '阿里' });
+                        });
+                        FILE_ITEMS.forEach(function (it) {
+                            if (it.tag !== 'Seti') return;
+                            out.push({ key: it.key, label: it.label, glyph: it.glyph, color: it.color, src: 'Seti' });
+                        });
+                        BI.forEach(function (n) {
+                            out.push({ key: 'bi-' + n, label: n, glyph: 'bi bi-' + n, color: '', src: 'Bi' });
+                        });
+                        PICK_ALL = out;
+                        return out;
+                    }
                     function pickItems() {
                         var list;
+                        var q0 = (PS.q || '').toLowerCase();
+                        if (q0) {
+                            // 有搜索词：不分页签，全部图标库一起搜，完全匹配 / 前缀匹配排前面
+                            var all = pickAll().filter(function (it) {
+                                return (it.key + ' ' + it.label).toLowerCase().indexOf(q0) !== -1;
+                            });
+                            all.sort(function (a, b) {
+                                var al = String(a.label).toLowerCase(), bl = String(b.label).toLowerCase();
+                                var as = al === q0 ? 0 : (al.indexOf(q0) === 0 ? 1 : 2);
+                                var bs = bl === q0 ? 0 : (bl.indexOf(q0) === 0 ? 1 : 2);
+                                return as - bs;
+                            });
+                            return all;
+                        }
                         if (PS.tab === 'ai') {          // AI 生成的图标：内联 SVG 预览
                             list = AI_LIST.map(function (it) {
                                 // 带上默认色，选中后「颜色」框会自动填上（不然规则存成无色，列表里看是灰的）；
@@ -593,7 +635,9 @@ ADM.modules.push({
                             return '<button class="ic-pick" type="button" data-key="' + ADM.esc(it.key) +
                                 '" data-color="' + ADM.esc(it.color || '') + '" title="' + ADM.esc(it.key) + '">' +
                                 '<span class="ic-pick-g">' + g + '</span>' +
-                                '<span class="ic-pick-t">' + ADM.esc(it.label) + '</span></button>';
+                                '<span class="ic-pick-t">' + ADM.esc(it.label) + '</span>' +
+                                (it.src && PS.q ? '<span class="ic-pick-src">' + it.src + '</span>' : '') +
+                                '</button>';
                         }).join('') : '<div class="ic-empty">' +
                             (PS.q ? '没有匹配的图标'
                                 : PS.tab === 'ai' ? '还没有 AI 图标：先到上面「AI 图标」页生成并保存。'
@@ -604,7 +648,9 @@ ADM.modules.push({
                                 ' 个，输入关键字继续缩小范围</div>';
                         }
                         box.querySelectorAll('[data-pick]').forEach(function (b) {
-                            b.className = 'adm-btn sm ' + (b.dataset.pick === PS.tab ? 'primary' : 'ghost');
+                            // 有搜索词时结果是跨全部图标库的，页签就不高亮了
+                            var on = !PS.q && b.dataset.pick === PS.tab;
+                            b.className = 'adm-btn sm ' + (on ? 'primary' : 'ghost');
                         });
                         pickGrid.querySelectorAll('[data-key]').forEach(function (b) {
                             b.addEventListener('click', function () {
@@ -651,6 +697,20 @@ ADM.modules.push({
                         });
                     });
                     if (LINKS.length) loadAllAli();   // 预取，切到阿里页签时不用等
+
+                    /* 上面填「匹配值」，下面图标自动搜索：输入 apk → 立刻列出所有名字/类名带 apk 的图标 */
+                    var valInp = box.querySelector('#icrValue');
+                    if (valInp) {
+                        valInp.addEventListener('input', function () {
+                            var v = valInp.value.trim().replace(/^\.+/, '');
+                            PS.q = v;
+                            PS.limit = 240;
+                            if (pickSearch) pickSearch.value = v;      // 和选择器里的搜索框保持同步
+                            if (!v) { paintPicker(); return; }
+                            if (picker.style.display === 'none') togglePicker(true);   // 自动展开
+                            else paintPicker();
+                        });
+                    }
                     var pickTimer = null;
                     if (pickSearch) {
                         pickSearch.addEventListener('input', function () {
@@ -1005,12 +1065,51 @@ ADM.modules.push({
                 return null;
             }
         }
-        async function svgPastePreview() {
-            var svg = await svgClean();
-            if (!svg) return;
-            SVG_PREVIEW = svg;
-            paint();
-            ADM.toast("SVG 可用，可以保存了", "ok");
+        /* 只更新预览区，不整块重绘 —— 否则输入框会失焦、光标乱跳 */
+        function svgPrevSet(html, tip, cls) {
+            var box = el.querySelector("#icAi");
+            if (!box) return;
+            var pv = box.querySelector("#icSvgPrev");
+            var tp = box.querySelector("#icSvgTip");
+            if (pv) pv.innerHTML = html || "";
+            if (tp) {
+                tp.textContent = tip || "";
+                tp.className = "ic-svg-tip" + (cls ? " " + cls : "");
+            }
+        }
+        function scheduleSvgPreview() {
+            clearTimeout(svgTimer);
+            if (!(SVG_CODE || "").trim()) {
+                SVG_PREVIEW = ""; SVG_TIP = ""; SVG_TIP_CLS = "";
+                svgPrevSet("", "", "");
+                return;
+            }
+            svgPrevSet("", "解析中…", "");
+            svgTimer = setTimeout(svgAutoPreview, 500);
+        }
+        async function svgAutoPreview() {
+            var code = (SVG_CODE || "").trim();
+            if (!code) return;
+            var seq = ++svgSeq;
+            var d;
+            try {
+                d = await ADM.api("/api/adm/icons/ai/svg", {
+                    method: "POST", body: { svg: code, keepColor: !!SVG_KEEP }
+                });
+            } catch (e) {
+                if (seq !== svgSeq) return;                 // 输入又变了，丢弃这次结果
+                SVG_PREVIEW = ""; SVG_TIP_CLS = "bad";
+                var msg = (e && e.message) || String(e);
+                if (/404|405|Not Found/i.test(msg)) msg = "接口未就绪：重启一次服务后再试";
+                SVG_TIP = msg;
+                svgPrevSet("", msg, "bad");
+                return;
+            }
+            if (seq !== svgSeq) return;
+            SVG_PREVIEW = d.svg || "";
+            SVG_TIP = "已识别，" + SVG_PREVIEW.length + " 字符，可以直接保存";
+            SVG_TIP_CLS = "ok";
+            svgPrevSet('<span class="ai-ic" style="color:#519aba">' + SVG_PREVIEW + "</span>", SVG_TIP, "ok");
         }
         async function svgPasteSave() {
             var svg = await svgClean();
@@ -1023,6 +1122,7 @@ ADM.modules.push({
                 var r = await ADM.api("/api/adm/icons/ai/save", { method: "POST", body: { icons: icons } });
                 AI_LIST = r.icons || icons;
                 SVG_CODE = ""; SVG_NAME = ""; SVG_PREVIEW = "";
+                SVG_TIP = ""; SVG_TIP_CLS = "";
                 ADM.toast("已保存「" + name + "」", "ok");
                 paint();
             } catch (e) {
@@ -1037,13 +1137,14 @@ ADM.modules.push({
             if (keep) keep.onchange = function () { AI_KEEP = keep.checked; };
             // 手动粘贴 SVG：输入内容记在模块变量里，切标签页回来不丢
             var sc = box.querySelector('#icSvgCode');
-            if (sc) sc.oninput = function () { SVG_CODE = sc.value; };
+            if (sc) {
+                sc.oninput = function () { SVG_CODE = sc.value; scheduleSvgPreview(); };
+                sc.onpaste = function () { setTimeout(scheduleSvgPreview, 0); };   // 粘贴后立刻触发
+            }
             var sn = box.querySelector('#icSvgName');
             if (sn) sn.oninput = function () { SVG_NAME = sn.value; };
             var sk = box.querySelector('#icSvgKeep');
-            if (sk) sk.onchange = function () { SVG_KEEP = sk.checked; };
-            var spb = box.querySelector('#icSvgPrevBtn');
-            if (spb) spb.onclick = svgPastePreview;
+            if (sk) sk.onchange = function () { SVG_KEEP = sk.checked; scheduleSvgPreview(); };
             var ssb = box.querySelector('#icSvgSaveBtn');
             if (ssb) ssb.onclick = svgPasteSave;
             // 风格 / 数量：就地切换高亮，不重绘（否则已输入的描述会丢）
@@ -1131,13 +1232,16 @@ ADM.modules.push({
                     '<label class="ic-ai-keep"><input type="checkbox" id="icSvgKeep"' +
                         (SVG_KEEP ? ' checked' : '') + '> 保留原色</label>' +
                     '<span class="adm-spacer"></span>' +
-                    '<button class="adm-btn ghost" type="button" id="icSvgPrevBtn">预览</button>' +
                     '<button class="adm-btn primary" type="button" id="icSvgSaveBtn">保存到图标库</button>' +
                 '</div>' +
-                (SVG_PREVIEW
-                    ? '<div class="ic-svg-prev"><span class="ai-ic" style="color:#519aba">' + SVG_PREVIEW +
-                      '</span><span class="adm-hint">预览（已清洗，' + SVG_PREVIEW.length + ' 字符）</span></div>'
-                    : '') +
+                // 粘贴即自动预览（防抖 500ms），不需要点按钮
+                '<div class="ic-svg-prev" id="icSvgPrev">' +
+                    (SVG_PREVIEW
+                        ? '<span class="ai-ic" style="color:#519aba">' + SVG_PREVIEW + '</span>'
+                        : '') +
+                '</div>' +
+                '<div class="ic-svg-tip' + (SVG_TIP_CLS ? ' ' + SVG_TIP_CLS : '') + '" id="icSvgTip">' +
+                    ADM.esc(SVG_TIP) + '</div>' +
                 '</div>';
             if (AI_DRAFT.length) {
                 h += '<div class="ic-ai-draft">' +

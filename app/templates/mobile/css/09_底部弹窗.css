@@ -61,3 +61,15 @@
   .sheet-new-grp { margin-left: auto; flex: none; border: none; background: rgba(31,111,235,.12); color: var(--primary);
     font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 16px; cursor: pointer; }
   .sheet-new-grp:active { background: rgba(31,111,235,.28); }
+
+  /* 收藏夹行内图标：垂直居中（兼容自定义规则 / AI 图标） */
+  .fav-row .ico {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .fav-row .ico .ai-ic {
+    width: 1.15em;
+    height: 1.15em;
+  }

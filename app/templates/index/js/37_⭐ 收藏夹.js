@@ -1,4 +1,12 @@
         // ========== ⭐ 收藏夹 ==========
+        /* 收藏 / 回收站条目统一用文件管理器的图标（Seti / 自定义规则 / AI 图标），目录仍是文件夹图标 */
+        function _favIconHtml(f, name, cls) {
+            const n = String(name || '');
+            const dot = n.lastIndexOf('.');
+            const ext = dot > 0 ? n.slice(dot + 1).toLowerCase() : '';
+            return fileIconHtml({ is_dir: !!f.is_dir, name: n, ext: ext }, cls || '');
+        }
+
         let _favs = [];              // 收藏条目 {path, name, added, group?, is_dir}
         let _favGroupOrder = [];     // 分组展示顺序（"__ungrouped__" 占位「其他」）
         let _favActiveTab = '__all__';
@@ -361,7 +369,7 @@
             }
             list.forEach(f => {
                 const name = f.name || _favBasename(f.path);
-                const ico = f.is_dir ? '📁' : '📄';
+                const ico = _favIconHtml(f, name);   // 和文件列表同一套图标
                 html += `<div class="fav-row" data-path="${_escAttr(f.path)}" title="${_escAttr(f.path)}">
                 <span class="fav-ico">${ico}</span>
                 <span class="fav-name">${_escapeHtml(name)}</span>
@@ -581,10 +589,9 @@
                         const timeStr = _formatTimeAgo(item.deleted_at);
                         const sizeStr = item.size > 0 ? formatSize(item.size) : (item.is_dir ? '目录' : '0 B');
                         const exists = item.exists !== false;
-                        const icon = _trashIconClass(item);
-                        // 小封面：图片/视频走后端缩略图，其余或加载失败时回落类型图标
+                        // 小封面：图片/视频走后端缩略图，其余或加载失败时回落类型图标（统一图标，和文件列表一致）
                         const canThumb = exists && _trashCanThumb(item.name, item.is_dir);
-                        const thumbInner = `<i class="bi ${icon} dh-thumb-icon${item.is_dir ? ' dir' : ''}"></i>`
+                        const thumbInner = _favIconHtml(item, item.name, 'dh-thumb-icon')
                             + (canThumb ? `<img loading="lazy" alt="" src="/api/trash/thumb?id=${encodeURIComponent(item.id)}" onerror="this.remove()">` : '');
                         html += `
                         <div class="delhist-item${exists ? '' : ' lost'}">

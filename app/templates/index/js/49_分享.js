@@ -2,6 +2,13 @@
         const _SHARE_EXPIRE_TEXT = { '1h': '1 小时', '1d': '1 天', '7d': '7 天', '30d': '30 天', forever: '永久有效' };
         let _sharePanelRef = null;
 
+        /* 取扩展名，给统一图标用 */
+        function _extOf(name) {
+            const n = String(name || '');
+            const dot = n.lastIndexOf('.');
+            return dot > 0 ? n.slice(dot + 1).toLowerCase() : '';
+        }
+
         function _shareStateText(state) {
             if (state === 'expired') return '已过期';
             if (state === 'exhausted') return '次数已用完';
@@ -79,7 +86,7 @@
                         <button class="sd-close" title="关闭"><i class="bi bi-x-lg"></i></button>
                     </div>
                     <div class="sd-file">
-                        <i class="bi bi-file-earmark"></i>
+                        ${fileIconHtml({ is_dir: false, name: fileName, ext: _extOf(fileName) }, "sd-file-ic")}
                         <span class="sd-file-name">${_escHtml(fileName)}</span>
                         ${rec ? `<span class="sd-state ${rec.state}">${_shareStateText(rec.state)}</span>` : ''}
                     </div>
@@ -269,7 +276,7 @@
                 const limit = it.max_views ? ` / ${it.max_views}` : '';
                 return `
                 <div class="share-item ${it.state}" data-id="${it.id}">
-                    <div class="shi-icon"><i class="bi bi-file-earmark"></i></div>
+                    <div class="shi-icon">${fileIconHtml({ is_dir: !!it.is_dir, name: it.name || '', ext: _extOf(it.name) }, "shi-ic")}</div>
                     <div class="shi-info">
                         <div class="shi-name" title="${_escHtml(it.abs_path || '')}">${_escHtml(it.name || '')}</div>
                         <div class="shi-link" title="${_escHtml(it.full_url || '')}">${_escHtml(it.full_url || '')}</div>

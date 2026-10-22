@@ -140,7 +140,7 @@
       var row = document.createElement("div");
       row.className = "fav-row";
       row.title = f.path;
-      row.innerHTML = '<span class="ico">' + iconFor(f) + '</span><span class="fav-name">' + esc(f.name || f.path) + '</span>' +
+      row.innerHTML = '<span class="ico">' + iconHtmlFor(f) + '</span><span class="fav-name">' + esc(f.name || f.path) + '</span>' +
         '<span class="fav-time">' + esc(fmtAdded(f.added)) + '</span>' +
         '<button class="fav-mini" data-a="grp" title="移动到其他分组">🏷️</button>' +
         '<button class="fav-mini" data-a="del" title="取消收藏">💔</button>';

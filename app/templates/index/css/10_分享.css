@@ -498,3 +498,14 @@
         height: 28px;
     }
 }
+
+/* 分享面板 / 分享弹层：改用文件管理器的统一图标（Seti / 自定义规则 / AI 图标） */
+.share-item .shi-icon {
+    font-size: 18px;
+}
+
+.share-dialog .sd-file .sd-file-ic {
+    display: inline-flex;
+    align-items: center;
+    font-size: 16px;
+}

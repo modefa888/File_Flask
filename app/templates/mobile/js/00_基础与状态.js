@@ -64,6 +64,62 @@
     if (TEXT_EXT.indexOf(ext) >= 0) return "📄";
     return "📄";
   }
+  /* ---------------- 后台「自定义图标规则 / AI 图标」——移动端轻量支持 ----------------
+     只渲染移动端不用额外字体就能画的：ai:（内联 SVG）、ali:（注入阿里图标库 CSS）。
+     Seti 图标键 / Bootstrap 类名需要额外字体文件，移动端不引入，未命中时继续用原来的 emoji + 扩展名徽标。 */
+  var MOB_RULES = { ext: {}, name: {} };
+  var MOB_AI = {};
+  var _mobRulesState = 0;              // 0 未开始 / 1 加载中 / 2 已完成
+  var _mobIconfontDone = {};
+
+  function _mobIconfont(url) {
+    if (!url || _mobIconfontDone[url]) return;
+    _mobIconfontDone[url] = 1;
+    var l = document.createElement("link");
+    l.rel = "stylesheet";
+    l.href = url;
+    document.head.appendChild(l);
+  }
+
+  function loadIconRules() {
+    if (_mobRulesState) return Promise.resolve(false);
+    _mobRulesState = 1;
+    return fetch("/api/icons/custom").then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (d) {
+      _mobRulesState = 2;
+      if (!d || !d.ok) return false;
+      MOB_AI = d.ai || {};
+      (d.iconfont || []).forEach(_mobIconfont);
+      (d.rules || []).forEach(function (r) {
+        var key = String(r.value || "").toLowerCase();
+        if (!key) return;
+        if (r.match === "name") MOB_RULES.name[key] = r;
+        else MOB_RULES.ext[key] = r;
+      });
+      return true;
+    }).catch(function () { _mobRulesState = 2; return false; });
+  }
+
+  // 规则里的图标 → HTML；渲染不了（Seti / bi-）返回空串，交给 emoji + 徽标兜底
+  function mobRuleIcon(item) {
+    var rule = MOB_RULES.name[String(item.name || "").toLowerCase()] || MOB_RULES.ext[extOf(item.name)];
+    if (!rule) return "";
+    var icon = String(rule.icon || "");
+    var color = rule.color || "";
+    if (icon.indexOf("ai:") === 0) {
+      var ai = MOB_AI[icon.slice(3)];
+      if (!ai || !ai.svg) return "";
+      var c = ai.keep ? "" : (color || "#519aba");
+      return '<span class="ai-ic"' + (c ? ' style="color:' + c + '"' : "") + ">" + ai.svg + "</span>";
+    }
+    if (icon.indexOf("ali:") === 0) {
+      return '<i class="iconfont ' + icon.slice(4) + '"' +
+        (color ? ' style="color:' + color + '"' : "") + "></i>";
+    }
+    return "";
+  }
+
   // 常见文本/代码格式的彩色扩展名徽标：[标签, 背景色, 文字色]
   var EXT_BADGE = {
     js: ["JS", "#f7df1e", "#3b3300"], mjs: ["JS", "#f7df1e", "#3b3300"], cjs: ["JS", "#f7df1e", "#3b3300"],
@@ -102,6 +158,8 @@
   // 优先返回彩色徽标 HTML；未命中返回 emoji（与 iconFor 一致）
   function iconHtmlFor(item) {
     if (isDir(item)) return iconFor(item);
+    var ruled = mobRuleIcon(item);      // 后台自定义规则 / AI 图标优先，渲染不了再走 emoji + 徽标
+    if (ruled) return ruled;
     var ext = extOf(item.name);
     var hit = EXT_BADGE[ext] || FILENAME_BADGE[String(item.name || "").toLowerCase()];
     if (!hit) return iconFor(item);
@@ -148,3 +206,10 @@
     var ext = extOf(item.name);
     return MOBILE_IMG_EXT.indexOf(ext) >= 0 || VIDEO_EXT.indexOf(ext) >= 0;
   }
+
+  // 首屏拉一次图标规则；拿到后如果列表已经画出来了，重画一次让自定义图标生效
+  loadIconRules().then(function (ok) {
+    if (!ok) return;
+    var listEl = document.getElementById("list");
+    if (listEl && listEl.children.length && typeof renderList === "function") renderList();
+  });

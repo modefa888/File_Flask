@@ -62,7 +62,6 @@
                 </div>
             </div>
             <div class="search-collapsed" id="searchCollapsedBtn" style="display:none;" title="展开搜索结果"><i class="bi bi-search"></i><span class="collapsed-badge" id="searchCollapsedBadge">0</span></div>
-            <div class="search-collapsed-tip" id="searchCollapsedTip">点击展开搜索结果</div>
         `;
 
             const rootVal = systemInfo.root || currentPath || '/';

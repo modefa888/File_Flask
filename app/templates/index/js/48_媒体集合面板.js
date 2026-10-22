@@ -251,6 +251,42 @@
             container.appendChild(collapsed);
             _mediaCollapsedBtn = collapsed;
 
+            // 右下角迷你播放条（.preview-collapsed）可见时，把「眼睛」入口收进播放条里
+            // （作为播放条最左侧的一个小按钮）；没有播放条时才退回独立悬浮球。
+            function _syncMediaEntry() {
+                if (!_mediaCollapsedBtn) return;
+                const panelHidden = !_mediaPanelRef || _mediaPanelRef.style.display === 'none';
+                if (!panelHidden) return;   // 面板展开中，无需处理
+                const cap = document.querySelector('.preview-collapsed');
+                const capVisible = !!(cap && cap.style.display !== 'none' && (cap.offsetWidth || cap.offsetHeight));
+                if (capVisible) {
+                    let eye = cap.querySelector('.pcc-media-eye');
+                    if (!eye) {
+                        eye = document.createElement('button');
+                        eye.className = 'pcc-btn pcc-media-eye';
+                        eye.title = '媒体集合';
+                        eye.innerHTML = '<i class="bi bi-collection-play"></i>';
+                        eye.addEventListener('click', (e) => {
+                            e.stopPropagation();   // 别触发播放条自身的「点击展开预览」
+                            _expandMediaCollection();
+                        });
+                        const row = cap.querySelector('.pcc-row');
+                        if (row) row.insertBefore(eye, row.firstChild);
+                    }
+                }
+                // 播放条可见 → 隐藏悬浮球；播放条没了 → 显示悬浮球
+                const want = capVisible ? 'none' : 'flex';
+                if (_mediaCollapsedBtn.style.display !== want) {
+                    _mediaCollapsedBtn.style.display = want;
+                }
+            }
+            const _entryMo = new MutationObserver(_syncMediaEntry);
+            _entryMo.observe(document.body, {
+                childList: true, subtree: true,
+                attributes: true, attributeFilter: ['style', 'class'],
+            });
+            collapsed._syncMediaEntry = _syncMediaEntry;
+
             overlay.querySelector('#mediaCloseBtn').addEventListener('click', _confirmCloseMediaCollection);
             overlay.querySelector('#mediaMinBtn').addEventListener('click', _collapseMediaCollection);
             overlay.querySelector('#mediaRefreshBtn').addEventListener('click', () => _loadMediaCollection(true));
@@ -349,7 +385,7 @@
         async function _confirmCloseMediaCollection() {
             const result = await showChoiceModal({
                 title: '<i class="bi bi-x-square"></i> 关闭媒体集合',
-                message: '请选择关闭方式：<br>· <strong>收起</strong>：折叠为右上角悬浮按钮，之后可随时展开继续浏览<br>· <strong>彻底关闭</strong>：直接移除面板，并清空当前的分类与页码',
+                message: '请选择关闭方式：<br>· <strong>收起</strong>：折叠为右下角悬浮入口（有播放条时收进播放条内），之后可随时展开继续浏览<br>· <strong>彻底关闭</strong>：直接移除面板，并清空当前的分类与页码',
                 actions: [
                     { value: 'collapse', text: '收起', cls: 'btn-ok', icon: 'bi-arrows-angle-contract' },
                     { value: 'close', text: '彻底关闭', cls: 'btn-confirm', icon: 'bi-x-lg' },
@@ -359,7 +395,7 @@
             else if (result === 'close') closeMediaCollection();
         }
 
-        // 收起 / 展开悬浮框（收起后只留右上角圆形按钮，跳转目录后依然能一键展开）
+        // 收起 / 展开悬浮框（收起后入口在右下角：优先收进迷你播放条，没有播放条时用悬浮球）
         function _collapseMediaCollection() {
             _closeMediaCardMenu();
             if (_mediaPanelRef) _mediaPanelRef.style.display = 'none';
@@ -370,6 +406,9 @@
                     const n = _mediaState.total || 0;
                     badge.textContent = n > 9999 ? '9999+' : String(n);
                     badge.classList.toggle('empty', n <= 0);
+                }
+                if (typeof _mediaCollapsedBtn._syncMediaEntry === 'function') {
+                    _mediaCollapsedBtn._syncMediaEntry();
                 }
             }
         }

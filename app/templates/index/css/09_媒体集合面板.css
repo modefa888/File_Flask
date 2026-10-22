@@ -858,11 +858,12 @@
     font-size: 0.9rem;
 }
 
-/* ---------- 收起后的角落悬浮按钮（参考搜索的收起） ---------- */
+/* ---------- 收起后的角落悬浮按钮（优先收进右下角迷你播放条，无播放条时用此默认位置） ---------- */
 .media-collapsed {
     position: fixed;
-    top: 72px;
-    right: 88px;
+    top: auto;
+    bottom: 6px;
+    right: 24px;
     z-index: 9999;
     width: 52px;
     height: 52px;

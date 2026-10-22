@@ -1,0 +1,35 @@
+        /* ===== 悬浮球拖动（全盘搜索 / 媒体集合收起球）：按住拖走悬浮，双击回原位 ===== */
+
+        /* 可拖动按钮：禁用触摸滚动干扰与选中 */
+        .tb-draggable {
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            cursor: grab;
+        }
+
+        /* 已拖出悬浮状态：固定定位 + 投影，与页面元素区分 */
+        .tb-drag-float {
+            position: fixed !important;
+            z-index: 9999;
+            box-shadow: 0 4px 14px rgba(15, 23, 42, .22) !important;
+            /* 球自带 transition: all .3s，不关掉拖动会「跟手慢半拍」 */
+            transition: none !important;
+        }
+
+        /* 拖动进行中：放大一点 + 抓手光标 + 重投影 */
+        .tb-dragging {
+            position: fixed !important;
+            z-index: 3000;
+            cursor: grabbing !important;
+            transform: scale(1.08);
+            box-shadow: 0 10px 28px rgba(15, 23, 42, .32) !important;
+            transition: none !important;
+            opacity: .96;
+        }
+
+        /* 拖动时整页禁止选中文本 */
+        body.tb-drag-active {
+            -webkit-user-select: none;
+            user-select: none;
+        }

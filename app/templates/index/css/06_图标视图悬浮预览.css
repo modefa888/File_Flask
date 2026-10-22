@@ -2207,27 +2207,6 @@
             display: none;
         }
 
-        .search-collapsed-tip {
-            position: fixed;
-            top: 134px;
-            right: 18px;
-            z-index: 9998;
-            background: #1e293b;
-            color: #e2e8f0;
-            font-size: 0.7rem;
-            padding: 4px 10px;
-            border-radius: 6px;
-            white-space: nowrap;
-            opacity: 0;
-            transition: opacity 0.3s;
-            pointer-events: none;
-        }
-
-        .search-collapsed:hover+.search-collapsed-tip,
-        .search-collapsed-tip:hover {
-            opacity: 1;
-        }
-
         /* 索引详情面板 */
         .index-detail-overlay {
             position: fixed;

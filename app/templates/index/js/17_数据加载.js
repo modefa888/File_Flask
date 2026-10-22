@@ -102,6 +102,7 @@
                 }
                 localStorage.setItem(STORAGE_KEY, currentPath);
                 applyFiltersAndSort();
+                _startSizePoll(currentPath);   // 有目录还在后台算大小 → 轮询原地补上，不整页刷新
                 document.getElementById('selectAll').checked = false;
                 document.getElementById('selectAll').indeterminate = false;
             } catch (e) {
@@ -162,4 +163,44 @@
             if (path === currentPath && _isNavigating) return;
             _abortPendingFetch();
             loadFiles(path || '');
+        }
+
+        /* ========== 目录大小后台补齐（原地更新，不重新请求 /api/files） ==========
+           后端列表请求只给「缓存/索引里已有」的目录大小，几百万行的子树（分区根等）
+           一次求和要好几秒，会先返回 size_pending，然后在后台线程算完写缓存。
+           这里轮询 /api/size-status，把算好的大小补进 fileItems 再重绘 ——
+           全程不阻塞打开目录，也不会像重新 loadFiles 那样整页闪一下。 */
+        let _sizePollTimer = null, _sizePollPath = '';
+        function _stopSizePoll() {
+            if (_sizePollTimer) { clearInterval(_sizePollTimer); _sizePollTimer = null; }
+            _sizePollPath = '';
+        }
+        function _startSizePoll(dir) {
+            _stopSizePoll();
+            const pendingNow = fileItems.some(it => it.is_dir && it.size_pending);
+            if (!pendingNow || !dir) return;
+            _sizePollPath = dir;
+            let tries = 0;
+            _sizePollTimer = setInterval(async () => {
+                if (_sizePollPath !== dir) { _stopSizePoll(); return; }
+                if (dir !== currentPath) { _stopSizePoll(); return; }        // 已切到别的目录
+                if (++tries > 45) { _stopSizePoll(); return; }               // 最多轮询约 90s，之后放弃
+                try {
+                    const resp = await fetch(`/api/size-status?path=${encodeURIComponent(dir)}`);
+                    const d = await resp.json();
+                    if (!d || d.error || _sizePollPath !== dir || dir !== currentPath) return;
+                    let changed = false;
+                    fileItems.forEach(it => {
+                        if (!it.is_dir || !it.size_pending) return;
+                        if (d.sizes && Object.prototype.hasOwnProperty.call(d.sizes, it.name)) {
+                            it.size = d.sizes[it.name];
+                            it.size_str = formatSize(it.size);
+                            it.size_pending = false;
+                            changed = true;
+                        }
+                    });
+                    if (changed) { applyFiltersAndSort(); _recomputeStats(); }
+                    if (!d.pending || !d.pending.length) _stopSizePoll();     // 全部算完
+                } catch (e) { /* 网络抖动忽略，下轮再试 */ }
+            }, 2000);
         }

@@ -142,9 +142,10 @@
     var silent = sameDir || !!(opts && opts.silent);
     if (!silent) showLoading(true);
     try {
+      // counts=1：移动端列表要显示「📁N · 📄N」子项徽标，桌面端用不到（默认不算，省掉每个子目录的 scandir）
       var url = path
-        ? "/api/files?path=" + encodeURIComponent(path) + "&limit=0&offset=0"
-        : "/api/files?limit=0&offset=0";
+        ? "/api/files?path=" + encodeURIComponent(path) + "&limit=0&offset=0&counts=1"
+        : "/api/files?limit=0&offset=0&counts=1";
       if (state.showHidden) url += "&hidden=1";   // 显示隐藏文件（后端 list_directory 过滤点开头条目）
       var resp = await fetchTimeout(url, 15000);
       if (!resp.ok) throw new Error("HTTP " + resp.status);

@@ -1565,6 +1565,14 @@
     if (active === tab) { renderBreadcrumbs(tab.displayPath || tab.path); updateStatus(); revealInTree(tab.path); }
     sessionSaveTabs();
   };
+  /* 没有打开任何标签页时，把面包屑栏（含底部那条分隔线）整条藏起来 ——
+     否则欢迎页上方会留一条空横线，像是标签栏没画完。有标签（含设置 / 后台任务等
+     虚拟标签）时照常显示，内容由 renderBreadcrumbs 填。 */
+  function syncCrumbsBar() {
+    const bar = document.querySelector(".editorarea .breadcrumbs");
+    if (bar) bar.classList.toggle("hidden", !tabs.length);
+  }
+  syncCrumbsBar();   // 首屏（此时还没恢复任何标签页）先把空面包屑栏藏掉
   function renderTabsAll() {
     rebuildGroups();
     // 标签栏是 tabs 的唯一投影：先清空再按顺序重建，
@@ -1573,6 +1581,7 @@
     tabs.forEach(t => { t.el = null; renderTab(t); mountHost(t); });
     if (typeof apiSyncOpenMarks === "function") apiSyncOpenMarks();   // 标签栏重建后刷新 API 已打开标记
     if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏「已打开」高亮跟随标签
+    syncCrumbsBar();                                                  // 空标签页时藏掉面包屑那条线
   }
   /* ---------- 动态编辑组：组按「行」排布，每行内可并排多个组 ----------
      向右拆分：与源组同行、插在其右侧；向下拆分：在源组所在行的下方新起一行 */

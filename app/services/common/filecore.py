@@ -1,5 +1,6 @@
 """文件系统核心：路径、大小、目录列表与缓存。"""
 import os
+import stat
 import sys
 import json
 import time
@@ -22,6 +23,10 @@ _DIR_SIZE_DIRTY = {}
 _LIST_DIRTY = {}
 # 列表缓存是否被整体清空（伪文件系统清理时）
 _LIST_CLEAR_ALL = False
+# 子项计数缓存：dir_path -> (mtime, n_dirs, n_files)，目录未变就不重复 scandir
+_DIR_COUNT_CACHE = {}
+# 列表请求里单个目录「索引求和」的预算（毫秒）：超出就先返回"待计算"，后台再补
+_INDEX_SIZE_BUDGET_MS = 120
 
 
 def _migrate_legacy_caches():
@@ -355,15 +360,21 @@ def _get_index_conn_cached():
     return conn
 
 
-def _get_dir_size_from_index(dir_path):
-    """从索引中递归计算目录大小。返回 None 表示目录不在索引中（需降级到 du）。"""
+def _get_dir_size_from_index(dir_path, budget_ms=0, force=False):
+    """从索引中递归计算目录大小。返回 None 表示目录不在索引中 / 超出时间预算（需后台再算）。
+
+    budget_ms > 0 时给 SQLite 注册 progress handler：查询超过预算就主动中断并返回 None。
+    这一步很关键 —— 大目录（如 /media 下的分区根，子树几百万行）子树求和要 3~10 秒，
+    目录列表请求里绝不能等它，否则一次刷新要卡十几秒（8 个子目录 × 数秒）。
+    """
     path_norm = os.path.normpath(dir_path).replace("\\", "/")
     # 短 TTL 缓存：子树求和即使走索引也要聚合大量行（大目录可达数百毫秒），
     # 短时间内重复浏览同一目录不重复求和
     now = time.monotonic()
-    hit = _INDEX_SIZE_CACHE.get(path_norm)
-    if hit and (now - hit[1]) < _INDEX_SIZE_TTL:
-        return hit[0]
+    if not force:
+        hit = _INDEX_SIZE_CACHE.get(path_norm)
+        if hit and (now - hit[1]) < _INDEX_SIZE_TTL:
+            return hit[0]
     try:
         conn = _get_index_conn_cached()
         # 先检查目录是否存在于索引
@@ -374,17 +385,28 @@ def _get_dir_size_from_index(dir_path):
         if not dir_row:
             return None  # 目录不在索引中，需 du
         # 查该目录下所有文件大小总和
-        row = conn.execute(
-            "SELECT COALESCE(SUM(size), 0) FROM index_files WHERE is_dir = 0 AND (abs_path = ? OR abs_path LIKE ?)",
-            (path_norm, path_norm.rstrip("/") + "/%")
-        ).fetchone()
+        try:
+            if budget_ms:
+                t0 = time.monotonic()
+                limit = budget_ms / 1000.0
+                conn.set_progress_handler(lambda: 1 if (time.monotonic() - t0) > limit else 0, 2000)
+            row = conn.execute(
+                "SELECT COALESCE(SUM(size), 0) FROM index_files WHERE is_dir = 0 AND (abs_path = ? OR abs_path LIKE ?)",
+                (path_norm, path_norm.rstrip("/") + "/%")
+            ).fetchone()
+        finally:
+            if budget_ms:
+                try:
+                    conn.set_progress_handler(None, 0)
+                except Exception:
+                    pass
         size = int(row[0] or 0)
         if len(_INDEX_SIZE_CACHE) > 4096:
             _INDEX_SIZE_CACHE.clear()
-        _INDEX_SIZE_CACHE[path_norm] = (size, now)
+        _INDEX_SIZE_CACHE[path_norm] = (size, time.monotonic())
         return size
     except Exception:
-        pass
+        pass          # 含被 progress handler 中断（sqlite3.OperationalError: interrupted）
     return None
 
 
@@ -397,10 +419,17 @@ _INDEX_SIZE_TTL = 60.0
 _SIZE_PENDING_LOCK = threading.Lock()
 _SIZE_PENDING = set()   # 正在后台计算的目录绝对路径
 _SIZE_SEM = threading.Semaphore(8)   # 限制并发 du 数量，避免多目录同时 du 打爆磁盘 IO
+_INDEX_SEM = threading.Semaphore(3)  # 限制并发「索引子树求和」数量（百万行级别的聚合，别同时开太多）
 
 
-def get_dir_size_cached(dir_path):
-    """只查缓存与索引，绝不触发 du。返回 None 表示暂时未知。"""
+def get_dir_size_cached(dir_path, budget_ms=0):
+    """只查缓存与索引，绝不触发 du。返回 None 表示暂时未知。
+
+    budget_ms：索引求和的时间预算（0 = 不限）。列表请求必须传，避免大目录把整个
+    目录加载拖死；超预算返回 None，由 _ensure_dir_size_async 在后台算完再补。
+    索引算出的结果会写进持久化的大小缓存（store.db），所以同一目录几秒后 / 服务重启后
+    再打开都是秒回，不用再算一遍。
+    """
     if _in_pseudo_fs(dir_path):
         return 0
     try:
@@ -410,14 +439,25 @@ def get_dir_size_cached(dir_path):
     cached = _DIR_SIZE_CACHE.get(dir_path)
     if _dir_size_cache_hit(cached, current_mtime):
         return cached.get("size", 0)
-    return _get_dir_size_from_index(dir_path)
+    size = _get_dir_size_from_index(dir_path, budget_ms=budget_ms)
+    if size is not None:
+        _set_dir_size(dir_path, {"size": size, "dir_mtime": current_mtime, "ts": time.time()})
+        _save_cache()          # 行级 upsert 写 store.db，后续请求（含重启后）直接命中
+    return size
 
 
 def _bg_compute_dir_size(dir_path):
-    """后台线程：du 计算目录大小并写入缓存，不阻塞任何请求"""
+    """后台线程：算目录大小并写入缓存，不阻塞任何请求。
+
+    先走索引（SQLite 子树求和，不用遍历磁盘），索引里没有这个目录才退回 du。
+    对分区根这类超大目录，索引求和虽然要几秒，但仍远快于 du（几万~几百万个文件）。
+    """
     try:
-        with _SIZE_SEM:  # 限制并发 du，避免大量子目录同时 du 打爆磁盘 IO 导致请求超时
-            size = _get_dir_size_unix(dir_path, timeout=60)
+        with _INDEX_SEM:      # 限制并发索引求和，避免多个大目录同时扫同一张表
+            size = _get_dir_size_from_index(dir_path, force=True)
+        if size is None:
+            with _SIZE_SEM:   # 限制并发 du，避免大量子目录同时 du 打爆磁盘 IO 导致请求超时
+                size = _get_dir_size_unix(dir_path, timeout=60)
         if size is not None:
             try:
                 mtime = os.stat(dir_path).st_mtime
@@ -447,10 +487,44 @@ def _ensure_dir_size_async(dir_path):
     return True
 
 
-def get_file_info(file_path, base_path, compute_size=True):
+def _dir_child_counts(dir_path, dir_mtime):
+    """统计某目录下一级的子目录 / 文件数量（只 scandir 一层，不递归）。
+
+    带内存缓存（按目录 mtime 判断）：目录没变就不再扫第二遍 —— 大目录 / 网络挂载
+    每扫一次都可能几十毫秒到几秒，而列表刷新一次就要扫所有子目录。
+    """
+    hit = _DIR_COUNT_CACHE.get(dir_path)
+    if hit and abs(hit[0] - dir_mtime) < 0.1:
+        return {"n_dirs": hit[1], "n_files": hit[2]}
+    n_dirs = n_files = 0
     try:
-        stat = os.stat(file_path)
-        is_dir = os.path.isdir(file_path)
+        with os.scandir(dir_path) as it:
+            for e in it:
+                try:
+                    if e.is_dir(follow_symlinks=False):
+                        n_dirs += 1
+                    else:
+                        n_files += 1
+                except OSError:
+                    pass
+    except (OSError, PermissionError):
+        return {}                      # 无权限等情况：不带计数字段，前端不显示徽标
+    if len(_DIR_COUNT_CACHE) > 4096:
+        _DIR_COUNT_CACHE.clear()
+    _DIR_COUNT_CACHE[dir_path] = (dir_mtime, n_dirs, n_files)
+    return {"n_dirs": n_dirs, "n_files": n_files}
+
+
+def get_file_info(file_path, base_path, compute_size=True, compute_counts=False, size_budget_ms=0):
+    """单个条目的信息。
+
+    compute_counts：是否统计下一级子项数量（桌面文件管理器用不到，移动端列表视图要用；
+    统计需要 scandir 每个子目录，目录多 / 网络挂载时会明显拖慢列表，所以默认关闭）。
+    size_budget_ms：目录大小的索引求和预算（0 = 不限），列表请求里必须限定。
+    """
+    try:
+        st = os.stat(file_path)                    # 只 stat 一次，is_dir 直接从 mode 判断
+        is_dir = stat.S_ISDIR(st.st_mode)          # （原来 os.path.isdir 会再 stat 一次）
         ext = os.path.splitext(file_path)[1].lower()
         if ext.startswith("."):
             ext = ext[1:]
@@ -458,17 +532,15 @@ def get_file_info(file_path, base_path, compute_size=True):
         rel_path = os.path.relpath(file_path, base_path) if base_path else file_path
         if rel_path == ".":
             rel_path = ""
-        # 文件大小：文件直接用 stat，目录优先查索引（索引命中则毫秒级），查不到才 du。
-        # 注意：compute_size=False 时跳过目录 du 遍历（避免在目录列表时阻塞数分钟）。
+        # 文件大小：文件直接用 stat，目录优先查缓存/索引（走预算），查不到才交给后台算。
         unknown_size = False
         size_pending = False
         if not is_dir:
-            file_size = stat.st_size
+            file_size = st.st_size
         else:
             if not compute_size:
-                # 浏览列表：只查缓存/索引（毫秒级），绝不同步 du。
-                # 命中则直接给大小；未命中标记"待计算"，交由前端轮询、后端异步 du，保持列表秒开。
-                file_size = get_dir_size_cached(file_path)
+                # 浏览列表：只查缓存/索引，超预算就放弃（标记"待计算"），绝不同步 du。
+                file_size = get_dir_size_cached(file_path, budget_ms=size_budget_ms)
                 if file_size is None:
                     unknown_size = True
                     size_pending = True
@@ -485,34 +557,19 @@ def get_file_info(file_path, base_path, compute_size=True):
             "size_str": "" if unknown_size else format_size(file_size),
             "size_pending": size_pending,
             "type": file_type,
-            "mtime": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+            "mtime": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
             "ext": ext,
         }
         # 创建时间：优先 st_birthtime（真创建时间），Linux 无该字段时用 st_ctime（inode 变更时间）近似
         try:
-            _birth = getattr(stat, "st_birthtime", None)
+            _birth = getattr(st, "st_birthtime", None)
             info["ctime"] = datetime.fromtimestamp(
-                _birth if _birth else stat.st_ctime
+                _birth if _birth else st.st_ctime
             ).strftime("%Y-%m-%d %H:%M:%S")
         except (OSError, ValueError, OverflowError):
             pass
-        if is_dir:
-            # 下一级子项数量（文件夹/文件）：scandir 仅统计条目，无递归，开销极小
-            try:
-                n_dirs = n_files = 0
-                with os.scandir(file_path) as it:
-                    for e in it:
-                        try:
-                            if e.is_dir(follow_symlinks=False):
-                                n_dirs += 1
-                            else:
-                                n_files += 1
-                        except OSError:
-                            pass
-                info["n_dirs"] = n_dirs
-                info["n_files"] = n_files
-            except (OSError, PermissionError):
-                pass   # 无权限等情况：不带计数字段，前端不显示徽标
+        if is_dir and compute_counts:
+            info.update(_dir_child_counts(file_path, st.st_mtime))
         return info
     except (OSError, PermissionError):
         return None
@@ -523,7 +580,7 @@ def _list_cache_key(path, show_hidden):
     return path + "\x00" + ("1" if show_hidden else "0")
 
 
-def list_directory(path, get_sizes=False, show_hidden=False):
+def list_directory(path, get_sizes=False, show_hidden=False, counts=False, size_budget_ms=1500):
     """带缓存的目录列表：目录 mtime 未变则秒回。
 
     get_sizes 控制是否对每个目录条目计算大小。
@@ -531,6 +588,10 @@ def list_directory(path, get_sizes=False, show_hidden=False):
     - get_sizes=False（默认）：目录大小走缓存 / 索引，未命中则标"大小未知"（快，用于列表加载）。
 
     show_hidden 控制是否列出以点开头的隐藏文件（.gitignore、.env 等）。
+    counts 控制是否附带下一级子项数量（n_dirs / n_files，需要 scandir 每个子目录）。
+    size_budget_ms 是整次列表「查索引求目录大小」的总预算：分摊到每个子目录，
+    某个目录超时就先标"待计算"，由后台线程算完写缓存（前端轮询 /api/size-status 补）。
+    这样即使某几个目录有几百万行的子树，列表也不会被拖成十几秒。
     """
     try:
         dir_mtime = os.stat(path).st_mtime
@@ -550,11 +611,17 @@ def list_directory(path, get_sizes=False, show_hidden=False):
         entries = os.listdir(path)
     except (OSError, PermissionError):
         return items
+    deadline = (time.monotonic() + size_budget_ms / 1000.0) if size_budget_ms else None
     for entry in entries:
         if entry.startswith(".") and not show_hidden:
             continue
         full_path = os.path.join(path, entry)
-        info = get_file_info(full_path, path, compute_size=get_sizes)
+        budget = 0
+        if deadline:
+            left_ms = (deadline - time.monotonic()) * 1000.0
+            budget = int(max(1, min(_INDEX_SIZE_BUDGET_MS, left_ms)))
+        info = get_file_info(full_path, path, compute_size=get_sizes,
+                             compute_counts=counts, size_budget_ms=budget)
         if info:
             items.append(info)
     items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))

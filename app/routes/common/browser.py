@@ -384,9 +384,12 @@ def api_size_status():
     if not os.path.isdir(target_path):
         return jsonify({"error": "路径不存在"}), 400
     show_hidden = request.args.get("hidden", "0") == "1"
-    items = list_directory(target_path, get_sizes=False, show_hidden=show_hidden)
+    items = list_directory(target_path, get_sizes=False, show_hidden=show_hidden, size_budget_ms=300)
     # 直接查全局后台计算集合，避免依赖列表缓存快照
     target_abs = os.path.abspath(target_path)
+    for it in items:                       # 快照里仍待计算的目录：确保后台真的在算（幂等）
+        if it.get("is_dir") and it.get("size_pending"):
+            _ensure_dir_size_async(os.path.join(target_abs, it["name"]))
     with _SIZE_PENDING_LOCK:
         pending = [os.path.basename(p) for p in _SIZE_PENDING
                    if os.path.dirname(os.path.abspath(p)) == target_abs]
@@ -435,9 +438,15 @@ def api_files():
         offset = 0
 
     show_hidden = request.args.get("hidden", "0") == "1"
+    # 子项计数（n_dirs / n_files）要对每个子目录 scandir 一次，桌面端用不到：
+    # 默认不算，移动端列表视图按需传 counts=1。
+    counts = request.args.get("counts", "0") == "1"
     # 目录列表：浏览时不同步计算目录大小（避免挂载盘 du 拖慢请求，已缓存/索引命中的仍带回）。
-    # 未命中缓存的目录标记为 size_pending，下面启动后台 du，前端轮询 /api/size-status 异步补全。
-    items = list_directory(target_path, get_sizes=False, show_hidden=show_hidden)
+    # 查索引求子树大小也设总预算（1.2s）：分区根这类几百万行的子树一次求和要数秒，
+    # 不能让一次列表请求等它 —— 超预算的先标 size_pending，下面起后台线程算完写缓存，
+    # 前端轮询 /api/size-status 原地补上（不再整页刷新）。
+    items = list_directory(target_path, get_sizes=False, show_hidden=show_hidden,
+                           counts=counts, size_budget_ms=1200)
     target_abs_dir = abs_path = os.path.abspath(target_path)
     for it in items:
         if it.get("is_dir") and it.get("size_pending"):

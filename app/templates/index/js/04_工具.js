@@ -132,6 +132,46 @@
                 .catch(() => { _setiLoading = false; });
         }
 
+        /* ---------- 自定义图标规则（后台「所有图标 → 自定义」里配置） ----------
+           规则：{match: 'ext'|'name', value, icon, color}；文件名优先于扩展名。
+           命中就覆盖 Seti / 兜底图标，未命中照旧。 */
+        let CUSTOM_ICONS = { ext: {}, name: {} };
+        function _loadCustomIcons() {
+            fetch("/api/icons/custom")
+                .then(r => r.ok ? r.json() : null)
+                .then(d => {
+                    if (!d || !d.rules) return;
+                    const exts = {}, names = {};
+                    d.rules.forEach(function (r) {
+                        if (!r || !r.value || !r.icon) return;
+                        if (r.match === "name") names[r.value] = r; else exts[r.value] = r;
+                    });
+                    CUSTOM_ICONS = { ext: exts, name: names };
+                    if (typeof applyFiltersAndSort === "function" && fileItems.length) applyFiltersAndSort();
+                })
+                .catch(function () { /* 未登录 / 接口不可用：忽略，用内置图标 */ });
+        }
+        function customRuleFor(item) {
+            if (!item) return null;
+            const lower = String(item.name || "").toLowerCase();
+            return CUSTOM_ICONS.name[lower] || CUSTOM_ICONS.ext[fileExtOf(item)] || null;
+        }
+        // 规则里的图标：bi-xxx = Bootstrap 图标；其余当作 Seti 图标键
+        function ruleGlyphHtml(rule, extraClass) {
+            const cls = extraClass ? " " + extraClass : "";
+            const icon = String(rule.icon || "");
+            const color = rule.color || "";
+            if (icon.indexOf("bi-") === 0) {
+                return `<i class="bi ${icon}${cls}"${color ? ` style="color:${color}"` : ""}></i>`;
+            }
+            const def = SETI && SETI.defs ? SETI.defs[icon] : null;
+            if (def && def.fontCharacter) {
+                const code = String(def.fontCharacter).replace(/\\+/g, "");
+                return `<span class="seti-ic${cls}" style="color:${color || def.fontColor || "#9da8ab"}">&#x${code};</span>`;
+            }
+            return "";   // Seti 数据还没到：先退回内置图标，数据到位后会重绘
+        }
+
         // 取扩展名（列表项自带 ext，没有就从文件名里切）
         function fileExtOf(item) {
             let ext = String((item && item.ext) || '').toLowerCase();
@@ -168,11 +208,18 @@
         function fileIconHtml(item, extraClass) {
             const cls = extraClass ? " " + extraClass : "";
             if (item && item.is_dir) return `<i class="bi bi-folder-fill text-warning${cls}"></i>`;
-            if (item && SETI) {
-                const def = setiIconDef(item.name, fileExtOf(item));
-                if (def && def.fontCharacter) {
-                    const code = String(def.fontCharacter).replace(/\\+/g, "");
-                    return `<span class="seti-ic${cls}" style="color:${def.fontColor || "#9da8ab"}">&#x${code};</span>`;
+            if (item) {
+                const rule = customRuleFor(item);    // 后台自定义规则优先级最高
+                if (rule) {
+                    const h = ruleGlyphHtml(rule, extraClass);
+                    if (h) return h;
+                }
+                if (SETI) {
+                    const def = setiIconDef(item.name, fileExtOf(item));
+                    if (def && def.fontCharacter) {
+                        const code = String(def.fontCharacter).replace(/\\+/g, "");
+                        return `<span class="seti-ic${cls}" style="color:${def.fontColor || "#9da8ab"}">&#x${code};</span>`;
+                    }
                 }
             }
             const fb = fileIconFallback(item);
@@ -182,7 +229,8 @@
         function getFileIcon(item) {
             return fileIconHtml(item, "file-icon");
         }
-        _loadSetiIcons();   // 启动就去取图标数据（几十 KB），到位后自动按 seti 重绘一次
+        _loadSetiIcons();     // 启动就去取图标数据（几十 KB），到位后自动按 seti 重绘一次
+        _loadCustomIcons();   // 后台配置的自定义图标规则（未登录 / 无规则时静默忽略）
 
         function getTypeBadge(item) {
             if (item.is_dir) return `<span class="file-type-badge dir">📁 目录</span>`;

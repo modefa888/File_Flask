@@ -57,6 +57,7 @@ _MEMBER_ALLOW_API = {
     ("/api/shared/files", "GET"),   # 被分享的文件清单 / 分享范围内目录（只读、限定范围）
     ("/api/shared/files", "HEAD"),  # HEAD 与 GET 等同（如探测文件大小）
     ("/api/collab/rooms", "GET"),   # 协作房间列表（成员查看自己所在会话）
+    ("/api/icons/custom", "GET"),   # 自定义图标规则（只读，纯展示用，不含敏感信息）
 }
 
 

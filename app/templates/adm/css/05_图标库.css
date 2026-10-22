@@ -1,0 +1,374 @@
+/* 后台管理：所有图标（Seti 文件图标 + Bootstrap 图标库）
+ * Seti 字体与 IDE / 桌面文件管理器共用 /static/vendor/seti/，所以这里显示的字形
+ * 和那两个页面里看到的完全一致。 */
+
+@font-face {
+    font-family: "seti";
+    src: url("/static/vendor/seti/seti.woff") format("woff");
+    font-display: block;
+}
+
+/* Seti 字形：em 盒偏上，做一点等比下沉，和旁边的 Bootstrap 图标视觉中心对齐 */
+.ic-seti {
+    font-family: "seti";
+    font-style: normal;
+    font-weight: normal;
+    font-size: 26px;
+    line-height: 1;
+    display: inline-block;
+    transform: translateY(.05em);
+}
+
+/* ---------------- 工具行 ---------------- */
+.ic-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.ic-tabs {
+    display: flex;
+    gap: 6px;
+}
+
+.ic-toolbar .adm-input {
+    width: 260px;
+    padding: 5px 10px;
+    font-size: 12.5px;
+    margin-left: auto;
+}
+
+/* ---------------- 图标网格 ---------------- */
+.ic-grid {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+    max-height: 58vh;
+    overflow: auto;
+    padding-right: 4px;
+}
+
+.ic-cell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+    padding: 10px 6px 8px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .02);
+    color: var(--adm-text);
+    font-family: inherit;
+    cursor: pointer;
+    transition: background .12s, border-color .12s, transform .12s;
+}
+
+.ic-cell:hover {
+    background: rgba(91, 140, 255, .12);
+    border-color: var(--adm-brand);
+    transform: translateY(-1px);
+}
+
+/* 已配置自定义规则的类型：右上角一个小圆点 + 琥珀色描边，方便一眼看出哪些被改过 */
+.ic-cell.custom {
+    border-color: rgba(251, 191, 36, .55);
+}
+
+.ic-cell.custom::after {
+    content: "";
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--adm-warn);
+}
+
+/* 图标统一占一个固定高度，保证所有格子等高、不因字形大小参差而抖动 */
+.ic-glyph {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    font-size: 24px;
+    line-height: 1;
+    color: var(--adm-brand);
+}
+
+.ic-name {
+    max-width: 100%;
+    font-size: 11.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ic-sub {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+    font-size: 10.5px;
+    color: var(--adm-text-mute);
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.ic-tag {
+    padding: 0 5px;
+    border-radius: 5px;
+    font-size: 9.5px;
+    background: rgba(91, 140, 255, .16);
+    color: var(--adm-brand);
+}
+
+.ic-tag.fallback {
+    background: rgba(251, 191, 36, .16);
+    color: var(--adm-warn);
+}
+
+.ic-empty {
+    grid-column: 1 / -1;
+    padding: 30px;
+    text-align: center;
+    color: var(--adm-text-mute);
+    font-size: 12.5px;
+}
+
+/* ---------------- 浅色主题 ---------------- */
+html[data-theme="light"] .ic-cell {
+    background: #ffffff;
+}
+
+html[data-theme="light"] .ic-cell:hover {
+    background: #eef3ff;
+}
+
+/* ---------------- 自定义规则 ---------------- */
+.ic-rule-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.ic-rule-head .adm-spacer {
+    flex: 1;
+}
+
+.ic-rules {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 52vh;
+    overflow: auto;
+    padding-right: 4px;
+}
+
+.ic-rule {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .02);
+}
+
+.ic-rule:hover {
+    border-color: var(--adm-border);
+    background: rgba(91, 140, 255, .08);
+}
+
+.ic-rule-ic {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 30px;
+    flex: none;
+    font-size: 20px;
+    line-height: 1;
+}
+
+.ic-rule-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.ic-rule-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ic-rule-sub {
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--adm-text-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ic-rule-sub code {
+    color: var(--adm-text-dim);
+}
+
+/* 规则弹窗：字段之间留点空隙 + 预览行 */
+.ic-form .adm-field + .adm-field {
+    margin-top: 10px;
+}
+
+.ic-preview {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+    padding: 10px 12px;
+    border: 1px dashed var(--adm-border);
+    border-radius: 10px;
+    font-size: 22px;
+    line-height: 1;
+}
+
+.ic-preview .adm-hint {
+    font-size: 12px;
+}
+
+html[data-theme="light"] .ic-rule {
+    background: #ffffff;
+}
+
+html[data-theme="light"] .ic-rule:hover {
+    background: #eef3ff;
+}
+
+/* ---------------- 图标选择器（规则弹窗内） ---------------- */
+.ic-icon-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ic-icon-row .adm-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.ic-icon-row .adm-btn {
+    flex: none;
+    white-space: nowrap;
+}
+
+.ic-picker {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid var(--adm-border);
+    border-radius: 10px;
+    background: rgba(13, 19, 36, .55);
+}
+
+.ic-picker-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.ic-picker-head .adm-input {
+    flex: 1;
+    min-width: 140px;
+    padding: 4px 9px;
+    font-size: 12.5px;
+}
+
+.ic-picker-grid {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+    max-height: 240px;
+    overflow: auto;
+    padding-right: 4px;
+}
+
+.ic-pick {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    padding: 6px 4px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--adm-text);
+    font-family: inherit;
+    cursor: pointer;
+    transition: background .12s, border-color .12s;
+}
+
+.ic-pick:hover {
+    background: rgba(91, 140, 255, .12);
+    border-color: var(--adm-brand);
+}
+
+.ic-pick-g {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    font-size: 19px;
+    line-height: 1;
+    color: var(--adm-brand);
+}
+
+.ic-pick-g .ic-seti {
+    font-size: 20px;
+    transform: none;
+}
+
+.ic-pick-t {
+    max-width: 100%;
+    font-size: 10.5px;
+    color: var(--adm-text-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+html[data-theme="light"] .ic-picker {
+    background: #f7f9fd;
+}
+
+.ic-pick-more {
+    grid-column: 1 / -1;
+    padding: 4px;
+    text-align: center;
+    font-size: 11px;
+    color: var(--adm-text-mute);
+}
+
+/* 每个图标标签页的「适用范围」说明行 */
+.ic-scope {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: -2px 0 8px;
+    line-height: 1.6;
+}
+
+.ic-scope i {
+    color: var(--adm-brand);
+}

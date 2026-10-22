@@ -32,6 +32,9 @@ POST /api/adm/pages/update     编辑页面登记 {path, desc?|access?|disabled?
 其余功能（分享 / 定时任务 / 后台任务 / 插件 / 数据库连接 / SSH / 通知 / AI 用量 /
 文件说明 / 操作历史）直接复用各业务模块已有的 `/api/...` 接口，后台页只做聚合展示。
 """
+import json
+import re
+
 from flask import (
     Blueprint, jsonify, make_response, redirect, render_template, request, session,
 )
@@ -390,3 +393,89 @@ def api_pages_update():
     if err:
         return _fail(err)
     return _ok()
+
+
+# --------------------------------------------------------------------------- 自定义文件图标
+# 规则存 store_meta（key = icons.custom），JSON 数组：
+#   [{"match": "ext"|"name", "value": "py", "icon": "_python" | "bi-filetype-doc",
+#     "color": "#519aba", "note": "说明"}]
+# 桌面端文件管理器（index/js/04_工具.js）与 IDE 文件树（ide/js/00_preamble.js）
+# 启动时各拉一次，命中规则的条目就用自定义图标覆盖内置图标。
+_ICONS_META_KEY = "icons.custom"
+_ICONS_MAX_RULES = 200
+# 匹配值允许中文文件名（如「说明.doc」），只挡掉空白与路径分隔符
+_ICONS_VALUE_RE = re.compile(r"^[^\s/\\:*?\"<>|]{1,64}$")
+# 图标只接受字母 / 数字 / _ - （bi-xxx 或 Seti 图标键）
+_ICONS_ICON_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_ICONS_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+
+def _custom_icons_load():
+    from ...services.common.store_db import get_meta
+    try:
+        raw = get_meta(_ICONS_META_KEY, "") or ""
+        data = json.loads(raw) if raw else []
+    except Exception:
+        data = []
+    return data if isinstance(data, list) else []
+
+
+def _custom_icons_clean(rules):
+    """校验并规整规则。返回 (规则列表, 错误信息)；错误信息为空表示通过。"""
+    out, seen = [], {}
+    for i, r in enumerate(rules if isinstance(rules, list) else []):
+        if not isinstance(r, dict):
+            continue
+        n = i + 1
+        match = "name" if str(r.get("match") or "").strip() == "name" else "ext"
+        value = str(r.get("value") or "").strip().lower()
+        if match == "ext":
+            value = value.lstrip(".")
+        if not _ICONS_VALUE_RE.match(value):
+            return None, "第 %d 条：匹配值不能为空，也不能含空格或 / \\ : * ? \" < > |（最长 64 字）" % n
+        icon = re.sub(r"^bi\s+", "", str(r.get("icon") or "").strip())   # 允许直接粘贴 "bi bi-xxx"
+        if not _ICONS_ICON_RE.match(icon):
+            return None, "第 %d 条：图标填 Seti 图标键（如 _python）或 Bootstrap 类名（如 bi-filetype-doc）" % n
+        color = str(r.get("color") or "").strip()
+        if color and not _ICONS_COLOR_RE.match(color):
+            return None, "第 %d 条：颜色要写成 #RRGGBB" % n
+        key = match + "|" + value
+        if key in seen:
+            return None, "第 %d 条：匹配「%s」和前面重复了" % (n, value)
+        seen[key] = 1
+        out.append({
+            "match": match,
+            "value": value,
+            "icon": icon,
+            "color": color.lower(),
+            "note": str(r.get("note") or "").strip()[:60],
+        })
+        if len(out) >= _ICONS_MAX_RULES:
+            break
+    return out, ""
+
+
+@bp.route("/api/icons/custom")
+def api_icons_custom():
+    """自定义图标规则（只读；文件管理器与 IDE 渲染图标时读取）。"""
+    return jsonify({"ok": True, "rules": _custom_icons_load()})
+
+
+@bp.route("/api/adm/icons/custom", methods=["POST"])
+def api_adm_icons_custom_save():
+    """保存整份自定义图标规则（新增 / 修改 / 删除都走这里落库）。
+
+    body: {rules: [{match, value, icon, color?, note?}]}
+    """
+    from ...services.common.store_db import set_meta
+    data = request.get_json(silent=True) or {}
+    rules, err = _custom_icons_clean(data.get("rules"))
+    if err:
+        return _fail(err)
+    try:
+        set_meta(_ICONS_META_KEY, json.dumps(rules, ensure_ascii=False))
+    except Exception as e:
+        _log.warning("保存自定义图标失败：%s", e)
+        return _fail("保存失败：%s" % e, 500)
+    _log.info("POST /api/adm/icons/custom rules=%d", len(rules))
+    return _ok(rules=rules)

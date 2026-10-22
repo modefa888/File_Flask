@@ -486,6 +486,37 @@
       try { refreshTree(); } catch (e) {}
     }
   }).catch(() => {});
+  /* 后台「所有图标 → 自定义」配置的图标规则：命中就用规则里的图标覆盖 Seti / Bootstrap 内置图标。
+     {match:'ext'|'name', value, icon, color}；icon 可以是 bi-xxx，也可以是 Seti 图标键（如 _markdown）。
+     文件名规则优先于扩展名规则。 */
+  const CUSTOM_ICONS = { names: {}, exts: {} };
+  function _customIconHtml(ov) {
+    const icon = String((ov && ov.icon) || "");
+    const color = (ov && ov.color) || "";
+    if (!icon) return "";
+    if (icon.indexOf("bi-") === 0) return _si(icon, color || "#9da8ab");
+    const def = SETI && SETI.defs ? SETI.defs[icon] : null;
+    if (def && def.fontCharacter) {
+      const code = String(def.fontCharacter).replace(/\\+/g, "");
+      return '<span class="seti-ic" style="color:' + (color || def.fontColor || "#9da8ab") + '">&#x' + code + ";</span>";
+    }
+    return "";     // Seti 数据未就绪：先按内置图标渲染，SETI 到位后会整体重绘
+  }
+  fetch("/api/icons/custom").then(r => r.ok ? r.json() : Promise.reject(new Error("http " + r.status))).then(d => {
+    (d && d.rules || []).forEach(r => {
+      if (!r || !r.value || !r.icon) return;
+      if (r.match === "name") CUSTOM_ICONS.names[r.value] = r;
+      else CUSTOM_ICONS.exts[r.value] = r;
+    });
+    // 规则到位：文件树 / 标签栏重绘一次（首屏可能已经用内置图标画过了）
+    if (typeof refreshTree === "function" && typeof ROOT !== "undefined" && ROOT &&
+        explorerPanel.querySelector(".tree-children")) {
+      try { refreshTree(); } catch (e) {}
+    }
+    if (typeof renderTabsAll === "function" && typeof tabs !== "undefined" && tabs.length) {
+      try { renderTabsAll(); } catch (e) {}
+    }
+  }).catch(() => {});
   const SETI_LANG = {   // 常见扩展名 → 语言 ID（vs-seti 主题按 languageId 映射）
     py: "python", pyw: "python", ipy: "python",
     js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript",
@@ -547,6 +578,12 @@
     if (isDir) return _si("bi-folder2", "#c09553");
     const lower = name.toLowerCase();
     const ext = getExt(lower);
+    // 后台「所有图标 → 自定义」配置的规则优先（文件名 > 扩展名）
+    const _ov = CUSTOM_ICONS.names[lower] || CUSTOM_ICONS.exts[ext];
+    if (_ov) {
+      const _h = _customIconHtml(_ov);
+      if (_h) return _h;
+    }
     const setiExt = SHEET_ICON_ALIAS[ext] || ext;   // 表格格式统一取官方表格图标
     if (SETI) {
       let def = SETI.defs[SETI.names[lower]] || SETI.defs[SETI_NAME_ALIAS[lower]] || SETI.defs[SETI.exts[setiExt]];

@@ -406,7 +406,7 @@ _ICONS_MAX_RULES = 200
 # 匹配值允许中文文件名（如「说明.doc」），只挡掉空白与路径分隔符
 _ICONS_VALUE_RE = re.compile(r"^[^\s/\\:*?\"<>|]{1,64}$")
 # 图标只接受字母 / 数字 / _ - （bi-xxx 或 Seti 图标键）
-_ICONS_ICON_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_ICONS_ICON_RE = re.compile(r"^(ali:|ai:)?[A-Za-z0-9_-]{1,64}$")   # 也允许 ali:icon-xxx / ai:ai_xxx
 _ICONS_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
@@ -435,7 +435,7 @@ def _custom_icons_clean(rules):
             return None, "第 %d 条：匹配值不能为空，也不能含空格或 / \\ : * ? \" < > |（最长 64 字）" % n
         icon = re.sub(r"^bi\s+", "", str(r.get("icon") or "").strip())   # 允许直接粘贴 "bi bi-xxx"
         if not _ICONS_ICON_RE.match(icon):
-            return None, "第 %d 条：图标填 Seti 图标键（如 _python）或 Bootstrap 类名（如 bi-filetype-doc）" % n
+            return None, "第 %d 条：图标填 Seti 图标键（如 _python）、Bootstrap 类名（如 bi-filetype-doc）、阿里图标（ali:icon-folder）或 AI 图标（ai:ai_xxx）" % n
         color = str(r.get("color") or "").strip()
         if color and not _ICONS_COLOR_RE.match(color):
             return None, "第 %d 条：颜色要写成 #RRGGBB" % n
@@ -457,8 +457,14 @@ def _custom_icons_clean(rules):
 
 @bp.route("/api/icons/custom")
 def api_icons_custom():
-    """自定义图标规则（只读；文件管理器与 IDE 渲染图标时读取）。"""
-    return jsonify({"ok": True, "rules": _custom_icons_load()})
+    """自定义图标规则 + 阿里图标库 + 规则里用到的 AI 图标 SVG（只读）。"""
+    rules = _custom_icons_load()
+    return jsonify({
+        "ok": True,
+        "rules": rules,
+        "iconfont": _iconfont_load(),
+        "ai": _ai_svg_map_for_rules(rules),      # 只下发被规则引用到的那几个，避免拖大响应
+    })
 
 
 @bp.route("/api/adm/icons/custom", methods=["POST"])
@@ -479,3 +485,404 @@ def api_adm_icons_custom_save():
         return _fail("保存失败：%s" % e, 500)
     _log.info("POST /api/adm/icons/custom rules=%d", len(rules))
     return _ok(rules=rules)
+
+
+# --------------------------------------------------------------------------- 阿里图标库（iconfont）
+# 配置存 store_meta（key = icons.iconfont）：[{"name": "我的图标库", "url": "https://at.alicdn.com/t/c/font_xxx.css"}]
+# 只允许阿里图标库 CDN：注入的 CSS 会作用到页面里，限制来源避免被塞进任意样式。
+_ICONFONT_META_KEY = "icons.iconfont"
+_ICONFONT_MAX = 10
+
+
+def _iconfont_url_ok(url: str) -> bool:
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(url)
+    except Exception:
+        return False
+    if u.scheme not in ("http", "https"):
+        return False
+    host = (u.hostname or "").lower()
+    return host == "at.alicdn.com" or host.endswith(".alicdn.com")
+
+
+def _iconfont_load():
+    from ...services.common.store_db import get_meta
+    try:
+        raw = get_meta(_ICONFONT_META_KEY, "") or ""
+        data = json.loads(raw) if raw else []
+    except Exception:
+        data = []
+    return [x for x in data if isinstance(x, dict) and x.get("url")] if isinstance(data, list) else []
+
+
+def _iconfont_clean(links):
+    """校验图标库列表。返回 (列表, 错误信息)。"""
+    out, seen = [], set()
+    for i, l in enumerate(links if isinstance(links, list) else []):
+        if not isinstance(l, dict):
+            continue
+        url = str(l.get("url") or "").strip()
+        if url.startswith("//"):
+            url = "https:" + url
+        if not _iconfont_url_ok(url):
+            return None, "第 %d 个地址不对：只支持阿里图标库 CDN（https://at.alicdn.com/…css）" % (i + 1)
+        if url in seen:
+            continue
+        seen.add(url)
+        name = str(l.get("name") or "").strip()[:40] or ("图标库 %d" % (len(out) + 1))
+        out.append({"name": name, "url": url})
+        if len(out) >= _ICONFONT_MAX:
+            break
+    return out, ""
+
+
+@bp.route("/api/icons/iconfont/css")
+def api_icons_iconfont_css():
+    """代理读取阿里图标库的 CSS，返回其中的图标类名（浏览器直连 CDN 会被 CORS 挡住）。"""
+    import urllib.request
+    url = (request.args.get("url") or "").strip()
+    if url.startswith("//"):
+        url = "https:" + url
+    if not _iconfont_url_ok(url):
+        return _fail("只允许阿里图标库 CDN 地址（at.alicdn.com）")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            raw = resp.read(512 * 1024).decode("utf-8", "replace")
+    except Exception as e:
+        return _fail("拉取失败：%s" % e, 502)
+    classes = sorted({m for m in re.findall(r"\.([A-Za-z0-9_-]+)::?before", raw)})
+    # 去掉 .iconfont 这类容器类，只留下真正对应字形的类名
+    keep = [c for c in classes if re.search(r"\." + re.escape(c) + r"::?before\s*\{[^}]*content\s*:", raw)]
+    return jsonify({"ok": True, "classes": keep or classes})
+
+
+@bp.route("/api/adm/icons/iconfont", methods=["POST"])
+def api_adm_icons_iconfont_save():
+    """保存阿里图标库列表。body: {links: [{name, url}]}"""
+    from ...services.common.store_db import set_meta
+    data = request.get_json(silent=True) or {}
+    links, err = _iconfont_clean(data.get("links"))
+    if err:
+        return _fail(err)
+    try:
+        set_meta(_ICONFONT_META_KEY, json.dumps(links, ensure_ascii=False))
+    except Exception as e:
+        _log.warning("保存阿里图标库失败：%s", e)
+        return _fail("保存失败：%s" % e, 500)
+    _log.info("POST /api/adm/icons/iconfont links=%d", len(links))
+    return _ok(links=links)
+
+
+# --------------------------------------------------------------------------- AI 生成图标
+# 用项目里已配置的 AI（chat 模块）把文字描述转成 24×24 单色 SVG 图标，存 store_meta（key = icons.ai）。
+# 规则里用 ai:<id> 引用；/api/icons/custom 只下发「规则实际用到」的那几个 SVG，避免拖大响应。
+_AI_ICON_META_KEY = "icons.ai"
+_AI_ICON_MAX = 200
+_AI_ICON_TIMEOUT = 120
+_AI_ICON_STYLES = {
+    "seti": (
+        "Seti 图标主题风格：参照 VS Code 官方 Seti 文件图标的观感 —— 24×24 网格、干净克制的线条与简洁色块、"
+        "造型扁平不立体，配色使用 Seti 常见的低饱和蓝 / 青 / 紫 / 黄（如 #519aba、#4ec9b0、#c586c0、#dcdcaa），"
+        "整体像和 IDE 里那套文件图标出自同一套设计"
+    ),
+    "line": "常规线性：2px 均匀描边、圆角端点、不填充，简洁现代",
+    "thin": "纤巧线性：1.5px 细线描边，轻盈精致，细节克制",
+    "detail": "详细线性：1.5px 描边，可含内部结构细节（如键盘按键、桌面小图标）",
+    "hairline": "极细微线：1px 极细描边，极简几何，留白多",
+    "fill": "面性（实心）：纯色块填充、无描边，块面干净",
+    "round": "简约圆形：以圆角图形为主体，柔和不尖锐",
+    "minimal": "极简：只保留最能识别的 1~2 个几何形状",
+    "doodle": "涂鸦风：随性手绘涂鸦，线条活泼、略有倾斜",
+    "hand": "手绘风：略带手写笔触，圆润可爱",
+    "sketch": "描画风：草稿式速写线条，轻快有手账感",
+    "pixel": "像素风：8bit 方块像素，直角、无圆角",
+}
+_AI_ICON_SYS = (
+    "你是专业的图标设计师。请根据描述生成 24x24 的**单色 SVG 图标**。"
+    "只输出一个 JSON 数组，不要任何解释、不要 Markdown 代码围栏。"
+    '每个元素形如 {"name":"简短中文名","svg":"<svg ...></svg>"}。'
+    "硬性要求："
+    "1) svg 必须带 viewBox=\"0 0 24 24\"，不要写 width / height；"
+    "2) 不要 <script>、<foreignObject>、<image>、外链 href，不要事件属性；"
+    "3) 颜色一律用 currentColor（fill=\"currentColor\" 或 stroke=\"currentColor\"）；"
+    "4) 颜色 / 描边一律写成元素属性（fill / stroke / stroke-width），不要 <style>、CSS 类或 <use> 引用；"
+    "5) 图形居中、四周留 2px 边距，缩到 16px 仍能辨认；每个图标至少有一个 path / rect / circle。"
+)
+# 危险内容：脚本/样式块整段删、危险标签删、"on*" 事件属性删、外链 href 删
+_AI_ICON_SYS_KEEP = (
+    "你是专业的图标设计师。请根据描述生成 24x24 的**彩色 SVG 图标**（可以有多种颜色）。"
+    "只输出一个 JSON 数组，不要任何解释、不要 Markdown 代码围栏。"
+    '每个元素形如 {"name":"简短中文名","svg":"<svg ...></svg>"}。'
+    "硬性要求："
+    "1) svg 必须带 viewBox=\"0 0 24 24\"，不要写 width / height；"
+    "2) 不要 <script>、<foreignObject>、<image>、外链 href，不要事件属性；"
+    "3) 颜色必须写成具体的十六进制色值（如 #2f81f7、#e91e63），**不要用 currentColor**；"
+    "4) 配色贴近描述物体的常见颜色；颜色 / 描边一律写在元素属性上，不要 <style>、CSS 类或 <use> 引用；"
+    "5) 图形居中、四周留 2px 边距，缩到 16px 仍能辨认；每个图标至少有一个 path / rect / circle。"
+)
+# 可绘制元素：清洗后一个都没有，说明是空壳（例如只剩被删掉的 <use>/<defs>），当作无效
+_SVG_DRAWABLE = re.compile(r"<\s*(path|rect|circle|ellipse|polygon|polyline|line|text|tspan|g)\b", re.I)
+_SVG_STRIP_BLOCKS = re.compile(
+    r"<\s*(script|style|foreignObject|iframe)\b[\s\S]*?<\s*/\s*\1\s*>", re.I)
+_SVG_STRIP_TAGS = re.compile(
+    r"<\s*/?\s*(script|style|foreignObject|iframe|image|use|animate|animateTransform|set)\b[^>]*>", re.I)
+_SVG_STRIP_ATTRS = re.compile(
+    r"\son\w+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)", re.I)
+
+
+def _ai_icon_svg_clean(svg, keep_color=False):
+    """清洗模型返回的 SVG：只留 <svg>…</svg>，去掉脚本 / 外链 / 事件，限制体积。
+
+    keep_color=True（「保留原色」）时不动配色；否则没写颜色的图形会补成 currentColor，
+    让规则里的「颜色」和浅色 / 深色主题都能生效。
+    """
+    s = str(svg or "").strip()
+    s = re.sub(r"```[a-zA-Z]*", "", s).strip()
+    m = re.search(r"<svg\b[\s\S]*?</svg>", s, re.I)
+    if not m:
+        return ""
+    s = m.group(0)
+    s = _SVG_STRIP_BLOCKS.sub("", s)      # <script>…</script> 连内容一起删
+    s = _SVG_STRIP_TAGS.sub("", s)
+    s = _SVG_STRIP_ATTRS.sub("", s)
+    s = re.sub(r"\s(?:xlink:)?href\s*=\s*([\"'])(?!#)[^\"']*\1", "", s, flags=re.I)   # 只保留 # 内部引用
+    if re.search(r"javascript:|<\s*script|on\w+\s*=", s, re.I):
+        return ""                          # 还有残留：直接丢弃，宁可让模型重画
+    if len(s) > 20000:
+        return ""
+    if not _SVG_DRAWABLE.search(s):
+        return ""          # 没有任何可绘制元素（只剩 defs/空壳）
+    # 全是 fill="none" 又完全没有描边 —— 画出来是透明的，等于白图标
+    _fills = re.findall(r"fill\s*=\s*([\"'])([^\"']*)\1", s, re.I)
+    _has_stroke = bool(re.search(r"stroke\s*=\s*([\"'])(?!(?:none|transparent)\1)", s, re.I))
+    if _fills and not _has_stroke and all(v.strip().lower() in ("none", "transparent") for _q, v in _fills):
+        return ""
+    # 只去掉根 <svg> 上的固定宽高（由页面按字号缩放），内部元素的 width/height 必须保留
+    mo = re.match(r"<svg\b[^>]*>", s, re.I)
+    if mo:
+        head = re.sub(r"\s(width|height)\s*=\s*([\"'])[^\"']*\2", "", mo.group(0), flags=re.I)
+        s = head + s[mo.end():]
+    if "viewBox" not in s:
+        s = s.replace("<svg", '<svg viewBox="0 0 24 24"', 1)
+    # 模型没写任何颜色时，让图形继承外层 color —— 否则 SVG 默认黑色，规则里的「颜色」和浅色主题都不生效
+    if (not keep_color) and "currentcolor" not in s.lower() and not re.search(r"#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\(", s):
+        mo2 = re.match(r"<svg\b[^>]*>", s, re.I)
+        if mo2:
+            head = mo2.group(0)
+            low = head.lower()
+            if "fill=" not in low and "stroke=" not in low:
+                # 描边型图标补 stroke，实心型补 fill —— 两者都指向外层 color
+                is_stroke = bool(re.search(r"stroke-(width|linecap|linejoin)\s*=", s, re.I))
+                add = ' stroke="currentColor" fill="none"' if is_stroke else ' fill="currentColor"'
+                tail = "/>" if head.endswith("/>") else ">"
+                s = head[:-len(tail)] + add + tail + s[mo2.end():]
+    return s
+
+
+def _ai_icon_parse(text, want, keep_color=False):
+    """从模型输出里解析出图标：优先按 JSON 数组，兜底直接抓 <svg>。"""
+    s = re.sub(r"```[a-zA-Z]*", "", str(text or "")).strip()
+    out = []
+    m = re.search(r"\[[\s\S]*\]", s)
+    if m:
+        try:
+            arr = json.loads(m.group(0))
+        except Exception:
+            arr = None
+        if isinstance(arr, list):
+            for it in arr:
+                if not isinstance(it, dict):
+                    continue
+                svg = _ai_icon_svg_clean(it.get("svg"), keep_color)
+                if svg:
+                    out.append({"name": str(it.get("name") or "").strip()[:20], "svg": svg})
+                if len(out) >= want:
+                    break
+    if not out:                                  # 模型没按 JSON 输出：直接抓 SVG 片段
+        cands = re.findall(r"<svg\b[\s\S]*?</svg>", s, re.I)
+        cands.sort(key=len, reverse=True)         # 最完整的排在前面（避免抓到残缺片段）
+        for svg in cands[:max(want * 3, 6)]:
+            c = _ai_icon_svg_clean(svg, keep_color)
+            if c:
+                out.append({"name": "", "svg": c})
+            if len(out) >= want:
+                break
+    return out
+
+
+def _ai_icons_load():
+    from ...services.common.store_db import get_meta
+    try:
+        raw = get_meta(_AI_ICON_META_KEY, "") or ""
+        data = json.loads(raw) if raw else []
+    except Exception:
+        data = []
+    if not isinstance(data, list):
+        return []
+    return [x for x in data if isinstance(x, dict) and x.get("id") and x.get("svg")]
+
+
+def _ai_icons_clean_list(icons):
+    """校验并规整要保存的图标列表。返回 (列表, 错误信息)。"""
+    import time as _t
+    out, seen = [], set()
+    for i, it in enumerate(icons if isinstance(icons, list) else []):
+        if not isinstance(it, dict):
+            continue
+        keep = bool(it.get("keepColor"))
+        svg = _ai_icon_svg_clean(it.get("svg"), keep)
+        if not svg:
+            return None, "第 %d 个图标不是有效的 SVG（可能含脚本，或体积过大）" % (i + 1)
+        iid = str(it.get("id") or "").strip()
+        if not re.match(r"^ai_[A-Za-z0-9]{4,24}$", iid):
+            iid = "ai_%s" % format(abs(hash(svg + str(_t.time()))) % (1 << 40), "x")
+        if iid in seen:
+            continue
+        seen.add(iid)
+        out.append({
+            "id": iid,
+            "name": str(it.get("name") or "").strip()[:20] or "AI 图标",
+            "prompt": str(it.get("prompt") or "").strip()[:200],
+            "style": str(it.get("style") or "line")[:20],
+            "svg": svg,
+            "keepColor": keep,
+            "created_at": int(it.get("created_at") or _t.time()),
+        })
+        if len(out) >= _AI_ICON_MAX:
+            break
+    return out, ""
+
+
+def _ai_svg_map_for_rules(rules):
+    """只把规则里引用到的 AI 图标 SVG 下发，没用到的不下。"""
+    need = {str(r.get("icon") or "")[3:] for r in rules
+            if str(r.get("icon") or "").startswith("ai:")}
+    need.discard("")
+    if not need:
+        return {}
+    # 读取时再洗一遍：老图标（早先存的黑色 / 无 currentColor）也能跟着规则颜色走，不用重新生成；
+    # keep=True 的（生成时选了「保留原色」）不动配色，渲染端也不会再用规则颜色覆盖。
+    out = {}
+    for x in _ai_icons_load():
+        if x["id"] in need:
+            keep = bool(x.get("keepColor"))
+            out[x["id"]] = {"svg": _ai_icon_svg_clean(x["svg"], keep) or x["svg"], "keep": keep}
+    return out
+
+
+@bp.route("/api/adm/icons/ai")
+def api_adm_icons_ai_list():
+    """AI 图标库（管理员用：管理页要全量）。"""
+    return jsonify({"ok": True, "icons": _ai_icons_load()})
+
+
+@bp.route("/api/adm/icons/ai/generate", methods=["POST"])
+def api_adm_icons_ai_generate():
+    """AI 生成图标：body {prompt, style?, count?}，返回未落库的候选图标。"""
+    import urllib.request
+    import urllib.error
+    from ..ide.ai import _load_cfg, _sys_pick
+    data = request.get_json(silent=True) or {}
+    prompt = str(data.get("prompt") or "").strip()
+    if not prompt:
+        return _fail("请先填写图标描述")
+    style = str(data.get("style") or "line")
+    style_desc = _AI_ICON_STYLES.get(style, _AI_ICON_STYLES["line"])
+    keep_color = bool(data.get("keepColor"))
+    try:
+        want = max(1, min(4, int(data.get("count") or 4)))
+    except (TypeError, ValueError):
+        want = 4
+
+    cfg = _load_cfg()
+    provider, model, err = _sys_pick(cfg, "chat")
+    if err:
+        return _fail("AI 还没配置好：%s（在 AI 设置里配一个可用模型即可）" % err, 400)
+
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+
+    def _ask(sys_prompt, extra=""):
+        """调一次模型，返回 choices[0].message.content。"""
+        msg = "图标描述：%s\n风格：%s\n数量：%d 个" % (prompt[:200], style_desc, want)
+        if extra:
+            msg += "\n" + extra
+        payload = json.dumps({
+            "model": model, "stream": False, "temperature": 0.8,
+            "messages": [{"role": "system", "content": sys_prompt},
+                         {"role": "user", "content": msg}],
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=payload, method="POST", headers={
+            "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+        resp = urllib.request.urlopen(req, timeout=_AI_ICON_TIMEOUT)
+        obj = json.loads(resp.read().decode("utf-8", "replace"))
+        return (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
+
+    sys_prompt = _AI_ICON_SYS_KEEP if keep_color else _AI_ICON_SYS
+    icons = []
+    # 最多试两次：第一次出来的若是空壳 / 全透明（常见于模型用 <style> 上色），
+    # 第二次明确要求把颜色写进属性、不要引用外部定义。
+    for attempt in (1, 2):
+        extra = "" if attempt == 1 else (
+            "上一次的回答里没有能显示出来的图形。这次务必：颜色直接写成 fill / stroke 属性，"
+            "不要用 <style> 或 CSS 类；不要用 <use> / <image> 引用外部内容；"
+            "每个图标至少包含一个 path / rect / circle。")
+        try:
+            text = _ask(sys_prompt, extra)
+        except urllib.error.HTTPError as e:
+            return _fail("生成失败：接口返回 %s" % e.code, 502)
+        except Exception as e:
+            return _fail("生成失败：%s" % e, 502)
+        try:
+            _log.info("AI 图标原始输出(第 %d 次, %d 字): %s",
+                      attempt, len(text), re.sub(r"\s+", " ", text)[:400])
+        except Exception:
+            pass
+        icons = _ai_icon_parse(text, want, keep_color)
+        if icons:
+            break
+
+    for _it in icons:
+        _it["keepColor"] = keep_color
+    if not icons:
+        return _fail("模型没返回能画出来的 SVG（空壳或全透明），换个描述 / 风格，或换一个更强的模型再试", 502)
+    _log.info("POST /api/adm/icons/ai/generate prompt=%s style=%s got=%d", prompt[:40], style, len(icons))
+    return _ok(icons=icons)
+
+
+@bp.route("/api/adm/icons/ai/svg", methods=["POST"])
+def api_adm_icons_ai_svg():
+    """校验 / 清洗一段「手动粘贴」进来的 SVG（不落库），前端用来预览。
+
+    body {svg, keepColor?} -> {ok, svg}
+    """
+    data = request.get_json(silent=True) or {}
+    raw = str(data.get("svg") or "")
+    if not raw.strip():
+        return _fail("请先粘贴 SVG 代码")
+    if len(raw) > 60000:
+        return _fail("SVG 太大了（超过 60KB），建议简化后再粘贴")
+    svg = _ai_icon_svg_clean(raw, bool(data.get("keepColor")))
+    if not svg:
+        return _fail("这段内容不是可用的 SVG：需要有 <svg>…</svg>，并且至少包含一个图形元素"
+                     "（path / rect / circle…）；只靠 <style>、<use> 或外链图片的会被清掉")
+    return _ok(svg=svg)
+
+
+@bp.route("/api/adm/icons/ai/save", methods=["POST"])
+def api_adm_icons_ai_save():
+    """保存 AI 图标库（整表替换，新增 / 删除都走这里）。body {icons: [...]}"""
+    from ...services.common.store_db import set_meta
+    data = request.get_json(silent=True) or {}
+    icons, err = _ai_icons_clean_list(data.get("icons"))
+    if err:
+        return _fail(err)
+    try:
+        set_meta(_AI_ICON_META_KEY, json.dumps(icons, ensure_ascii=False))
+    except Exception as e:
+        _log.warning("保存 AI 图标失败：%s", e)
+        return _fail("保存失败：%s" % e, 500)
+    _log.info("POST /api/adm/icons/ai/save total=%d", len(icons))
+    return _ok(icons=icons)

@@ -136,11 +136,26 @@
            规则：{match: 'ext'|'name', value, icon, color}；文件名优先于扩展名。
            命中就覆盖 Seti / 兜底图标，未命中照旧。 */
         let CUSTOM_ICONS = { ext: {}, name: {} };
+        let AI_SVG = {};      // 后台 AI 生成图标：id -> 内联 SVG（只含规则用到的）
+        const AI_ICON_COLOR = "#519aba";   // 规则没写颜色时 AI 图标的默认色（SVG 用 currentColor 上色）
+        // 阿里图标库：把后台配置的 CSS 注入页面（图标字形要靠它），每份只注入一次
+        function _injectIconfont(l) {
+            if (!l || !l.url) return;
+            if (document.querySelector('link[data-ali-icon="' + l.url + '"]')) return;
+            const lk = document.createElement("link");
+            lk.rel = "stylesheet";
+            lk.href = l.url;
+            lk.setAttribute("data-ali-icon", l.url);
+            document.head.appendChild(lk);
+        }
         function _loadCustomIcons() {
             fetch("/api/icons/custom")
                 .then(r => r.ok ? r.json() : null)
                 .then(d => {
-                    if (!d || !d.rules) return;
+                    if (!d) return;
+                    (d.iconfont || []).forEach(_injectIconfont);
+                    AI_SVG = d.ai || {};        // AI 图标的 SVG 内容随规则一起下发
+                    if (!d.rules) return;
                     const exts = {}, names = {};
                     d.rules.forEach(function (r) {
                         if (!r || !r.value || !r.icon) return;
@@ -161,6 +176,17 @@
             const cls = extraClass ? " " + extraClass : "";
             const icon = String(rule.icon || "");
             const color = rule.color || "";
+            if (icon.indexOf("ai:") === 0) {    // 后台 AI 生成的图标：ai:ai_xxx（内联 SVG）
+                const e = AI_SVG[icon.slice(3)];
+                if (!e || !e.svg) return "";
+                // keep=true（生成时选了「保留原色」）用 SVG 自己的配色；否则显式给颜色，
+                // 不给就会继承正文灰色，看着像「没有颜色」
+                const c = e.keep ? "" : (color || AI_ICON_COLOR);
+                return `<span class="ai-ic${cls}"${c ? ` style="color:${c}"` : ""}>${e.svg}</span>`;
+            }
+            if (icon.indexOf("ali:") === 0) {   // 阿里图标库：ali:icon-xxx
+                return `<i class="iconfont ${icon.slice(4)}${cls}"${color ? ` style="color:${color}"` : ""}></i>`;
+            }
             if (icon.indexOf("bi-") === 0) {
                 return `<i class="bi ${icon}${cls}"${color ? ` style="color:${color}"` : ""}></i>`;
             }

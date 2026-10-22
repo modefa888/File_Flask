@@ -490,10 +490,24 @@
      {match:'ext'|'name', value, icon, color}；icon 可以是 bi-xxx，也可以是 Seti 图标键（如 _markdown）。
      文件名规则优先于扩展名规则。 */
   const CUSTOM_ICONS = { names: {}, exts: {} };
+  let CUSTOM_AI = {};        // AI 生成图标：id -> 内联 SVG（只含规则用到的）
   function _customIconHtml(ov) {
     const icon = String((ov && ov.icon) || "");
     const color = (ov && ov.color) || "";
     if (!icon) return "";
+    // 后台 AI 生成的图标：ai:ai_xxx（内联 SVG，随字号缩放）
+    // keep=true（生成时选了「保留原色」）用 SVG 自带配色；否则没给颜色就用默认蓝，避免继承正文灰
+    if (icon.indexOf("ai:") === 0) {
+      const e = CUSTOM_AI[icon.slice(3)];
+      if (!e || !e.svg) return "";
+      const c = e.keep ? "" : (color || "#519aba");
+      return '<span class="ai-ic"' + (c ? ' style="color:' + c + '"' : '') + '>' + e.svg + "</span>";
+    }
+    // 阿里图标库：ali:icon-xxx（字形由注入的 iconfont CSS 提供）
+    if (icon.indexOf("ali:") === 0) {
+      return '<i class="iconfont ' + icon.slice(4) + '"' +
+        (color ? ' style="color:' + color + '"' : '') + '></i>';
+    }
     if (icon.indexOf("bi-") === 0) return _si(icon, color || "#9da8ab");
     const def = SETI && SETI.defs ? SETI.defs[icon] : null;
     if (def && def.fontCharacter) {
@@ -503,6 +517,17 @@
     return "";     // Seti 数据未就绪：先按内置图标渲染，SETI 到位后会整体重绘
   }
   fetch("/api/icons/custom").then(r => r.ok ? r.json() : Promise.reject(new Error("http " + r.status))).then(d => {
+    // 阿里图标库：把后台配置的 CSS 注入页面（ali: 图标靠它显示字形）
+    (d && d.iconfont || []).forEach(l => {
+      if (!l || !l.url) return;
+      if (document.querySelector('link[data-ali-icon="' + l.url + '"]')) return;
+      const lk = document.createElement("link");
+      lk.rel = "stylesheet";
+      lk.href = l.url;
+      lk.setAttribute("data-ali-icon", l.url);
+      document.head.appendChild(lk);
+    });
+    CUSTOM_AI = (d && d.ai) || {};   // AI 图标的 SVG 内容（只下发规则引用到的）
     (d && d.rules || []).forEach(r => {
       if (!r || !r.value || !r.icon) return;
       if (r.match === "name") CUSTOM_ICONS.names[r.value] = r;

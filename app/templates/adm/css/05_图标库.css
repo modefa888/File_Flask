@@ -31,6 +31,7 @@
 .ic-tabs {
     display: flex;
     gap: 6px;
+    flex-wrap: wrap;
 }
 
 .ic-toolbar .adm-input {
@@ -371,4 +372,617 @@ html[data-theme="light"] .ic-picker {
 
 .ic-scope i {
     color: var(--adm-brand);
+}
+
+/* ---------------- 阿里图标库（iconfont） ---------------- */
+.ic-libs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.ic-lib {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .02);
+}
+
+.ic-lib:hover {
+    border-color: var(--adm-border);
+}
+
+.ic-lib-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.ic-lib-name {
+    font-size: 13px;
+}
+
+.ic-lib-url {
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--adm-text-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+html[data-theme="light"] .ic-lib {
+    background: #ffffff;
+}
+
+/* ---------------- AI 生成图标 ---------------- */
+.ai-ic {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1em;
+    height: 1em;
+    line-height: 1;
+    color: var(--adm-brand);
+}
+
+.ai-ic svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.ic-ai-form {
+    border: 1px solid var(--adm-border);
+    border-radius: 10px;
+    padding: 10px;
+    background: rgba(13, 19, 36, .45);
+}
+
+.ic-ai-form {
+    box-sizing: border-box;
+    overflow: visible;
+}
+
+.ic-ai-form .adm-textarea {
+    width: 100%;
+    box-sizing: border-box;   /* 不加会把表单撑宽，右侧「生成」按钮被挤出可视区 */
+    min-height: 56px;
+    resize: vertical;
+}
+
+.ic-ai-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.ic-ai-row .adm-select {
+    width: auto;
+    min-width: 84px;
+    padding: 4px 8px;
+    font-size: 12.5px;
+}
+
+.ic-ai-row .adm-spacer {
+    flex: 1;
+}
+
+html[data-theme="light"] .ic-ai-form {
+    background: #f7f9fd;
+}
+
+/* 风格 / 数量用标签按钮：不用下拉，展开时不会盖住下面的生成结果 */
+.ic-ai-label {
+    font-size: 12px;
+    color: #8f9bb3;
+    margin: 10px 0 4px;
+}
+
+/* 风格选择：仿 iconfont「AI 创作」的方块卡片（上图下文，选中描边高亮） */
+.ic-ai-styles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 8px;
+    margin: 4px 0 2px;
+}
+
+.ic-style-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 6px 8px;
+    border: 1.5px solid transparent;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .04);
+    color: #c8d2e6;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+}
+
+.ic-style-card:hover {
+    background: rgba(91, 140, 255, .10);
+    color: #ffffff;
+}
+
+.ic-style-card.on {
+    border-color: var(--adm-brand);
+    background: rgba(91, 140, 255, .14);
+    color: #dce8ff;
+}
+
+.ic-style-thumb {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, .06);
+}
+
+.ic-style-thumb svg {
+    width: 26px;
+    height: 26px;
+    display: block;
+}
+
+.ic-style-name {
+    font-size: 11.5px;
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+html[data-theme="light"] .ic-style-card {
+    background: #f2f4f8;
+    color: #4a4a4a;
+}
+
+html[data-theme="light"] .ic-style-card:hover {
+    background: #e9eefb;
+    color: #1f2328;
+}
+
+html[data-theme="light"] .ic-style-card.on {
+    background: #eef3ff;
+    color: #1f2d45;
+}
+
+html[data-theme="light"] .ic-style-thumb {
+    background: #ffffff;
+}
+
+.ic-style {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--adm-border);
+    background: transparent;
+    color: #c8d2e6;
+    font-size: 12px;
+    line-height: 1.5;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+}
+
+.ic-style:hover {
+    border-color: var(--adm-brand);
+    color: #ffffff;
+}
+
+.ic-style.on {
+    background: rgba(91, 140, 255, .18);
+    border-color: var(--adm-brand);
+    color: #dce8ff;
+}
+
+.ic-ai-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.ic-ai-actions .adm-btn {
+    flex: 0 0 auto;
+}
+
+.ic-ai-gen {
+    min-width: 108px;
+    justify-content: center;
+}
+
+.ic-ai-draft {
+    margin-top: 14px;
+    padding: 10px 12px 12px;
+    border: 1px dashed var(--adm-border);
+    border-radius: 10px;
+}
+
+.ic-ai-draft .ic-ai-label {
+    margin-top: 0;
+}
+
+html[data-theme="light"] .ic-style {
+    color: #4a4a4a;
+}
+
+html[data-theme="light"] .ic-style.on {
+    color: #1f2d45;
+    background: rgba(59, 130, 246, .14);
+}
+
+html[data-theme="light"] .ic-ai-label {
+    color: #6b7280;
+}
+
+/* ---------------- 自定义规则里的颜色选择器 ---------------- */
+.ic-color-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ic-color-row .adm-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.ic-color-pick {
+    flex: none;
+    width: 44px;
+    height: 34px;
+    padding: 2px;
+    border-radius: 8px;
+    border: 1px solid var(--adm-border);
+    background: transparent;
+    cursor: pointer;
+}
+
+.ic-color-pick::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.ic-color-pick::-webkit-color-swatch {
+    border: none;
+    border-radius: 5px;
+}
+
+.ic-color-pick::-moz-color-swatch {
+    border: none;
+    border-radius: 5px;
+}
+
+.ic-color-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.ic-cchip {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, .28);
+    cursor: pointer;
+    transition: transform .1s, box-shadow .15s;
+}
+
+.ic-cchip:hover {
+    transform: scale(1.14);
+    box-shadow: 0 0 0 2px rgba(91, 140, 255, .35);
+}
+
+.ic-cchip-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent !important;
+    border: 1px dashed var(--adm-border);
+    color: #9aa0a6;
+    font-size: 12px;
+    line-height: 1;
+}
+
+/* AI 生成：保留原色开关（放在生成按钮左边） */
+.ic-ai-keep {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-right: auto;
+    font-size: 12px;
+    color: #9aa4b8;
+    cursor: pointer;
+    user-select: none;
+}
+
+.ic-ai-keep input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    flex: none;
+    accent-color: var(--adm-brand);
+    cursor: pointer;
+}
+
+html[data-theme="light"] .ic-ai-keep {
+    color: #5a6b85;
+}
+
+html[data-theme="light"] .ic-cchip {
+    border-color: rgba(0, 0, 0, .18);
+}
+
+/* 风格按钮上的效果预览小图标（纯展示） */
+.ic-style-demo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    flex: none;
+    color: inherit;
+}
+
+.ic-style-demo svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* 图标内容为空（空壳 SVG）时的占位，避免卡片里一片空白 */
+.ic-ai-empty {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.2em;
+    height: 1.2em;
+    border: 1px dashed #8b95ac;
+    border-radius: 4px;
+    color: #8b95ac;
+    font-size: 12px;
+    line-height: 1;
+    cursor: help;
+}
+
+/* ---------------- 生成中：按钮右上角动态点 + 圆环 loading ---------------- */
+.ic-ai-gen {
+    position: relative;   /* 动态点定位的基准 */
+}
+
+.ic-ai-gen.busy::after {
+    content: "";
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #22d3ee;
+    animation: icAiPulse 1.2s ease-out infinite;
+}
+
+.ic-ai-spin {
+    width: 12px;
+    height: 12px;
+    flex: none;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, .35);
+    border-top-color: #ffffff;
+    animation: icAiSpin .8s linear infinite;
+}
+
+/* 页签上的「还在生成」呼吸点：切到别的标签也能看到 */
+.adm-btn[data-busy="1"] {
+    position: relative;
+}
+
+.adm-btn[data-busy="1"]::after {
+    content: "";
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #22d3ee;
+    animation: icAiPulse 1.2s ease-out infinite;
+}
+
+@keyframes icAiPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(34, 211, 238, .75);
+    }
+
+    70% {
+        box-shadow: 0 0 0 8px rgba(34, 211, 238, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
+    }
+}
+
+@keyframes icAiSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ---------------- 手动粘贴 SVG ---------------- */
+.ic-svg-paste {
+    margin-top: 14px;
+    padding: 10px 12px 12px;
+    border: 1px dashed var(--adm-border);
+    border-radius: 10px;
+}
+
+.ic-svg-paste .adm-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 64px;
+    resize: vertical;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.ic-svg-prev {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.ic-svg-prev .ai-ic {
+    font-size: 30px;
+    width: 1em;
+    height: 1em;
+}
+
+/* ---------------- 自定义规则：卡片网格 + 拖拽排序 ---------------- */
+.ic-rules-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(186px, 1fr));
+    gap: 10px;
+    align-items: stretch;
+}
+
+.ic-rule-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 14px 10px 8px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .02);
+    cursor: grab;
+    transition: background .12s, border-color .12s, transform .12s, box-shadow .12s;
+}
+
+.ic-rule-card:hover {
+    border-color: var(--adm-brand);
+    background: rgba(91, 140, 255, .08);
+    transform: translateY(-1px);
+}
+
+.ic-rule-card.dragging {
+    opacity: .45;
+    cursor: grabbing;
+}
+
+.ic-rule-card.over {
+    border-color: var(--adm-brand);
+    box-shadow: 0 0 0 2px rgba(91, 140, 255, .25);
+}
+
+.ic-rule-grip {
+    position: absolute;
+    top: 5px;
+    right: 7px;
+    color: #7c879e;
+    font-size: 13px;
+    line-height: 1;
+}
+
+.ic-rule-card .ic-rule-ic {
+    width: 46px;
+    height: 46px;
+    font-size: 30px;
+}
+
+.ic-rule-card .ic-rule-name {
+    max-width: 100%;
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ic-rule-card .ic-rule-sub {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 11px;
+    color: #8b95ac;
+}
+
+.ic-rule-color {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.ic-rule-color i {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, .35);
+}
+
+.ic-rule-card .ic-rule-note {
+    max-width: 100%;
+    font-size: 11px;
+    color: #6b7893;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ic-rule-acts {
+    display: flex;
+    gap: 2px;
+    margin-top: 4px;
+    opacity: .7;
+    transition: opacity .12s;
+}
+
+.ic-rule-card:hover .ic-rule-acts {
+    opacity: 1;
+}
+
+.ic-rule-acts .adm-btn {
+    padding: 2px 6px;
+    font-size: 11px;
+}
+
+html[data-theme="light"] .ic-rule-card {
+    background: #ffffff;
+}
+
+html[data-theme="light"] .ic-rule-card:hover {
+    background: #f5f8ff;
+}
+
+html[data-theme="light"] .ic-rule-grip {
+    color: #9aa4b8;
+}
+
+html[data-theme="light"] .ic-rule-card .ic-rule-sub {
+    color: #6b7893;
+}
+
+html[data-theme="light"] .ic-rule-card .ic-rule-note {
+    color: #8b95ac;
 }

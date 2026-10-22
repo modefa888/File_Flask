@@ -13,9 +13,11 @@ api_registry 在同步路由时已把非 /api、非 /ws、非 /static 的路由�
 因此页面模块与接口模块 / 权限模块共用同一份权威数据：在这里改说明 / 访问级别 /
 停用，与在接口模块里改的是同一行，鉴权口径完全一致（auth._require_login 按行判定）。
 """
+import json
 import time
 
 from ...log import get_logger
+from ..common.store_db import get_meta, set_meta, store_tx
 from . import api_registry
 
 _log = get_logger()
@@ -104,6 +106,55 @@ def _merge_rows(rows):
     return [merged[rule] for rule in order]
 
 
+_HIDDEN_KEY = "pages.hidden"     # 从页面清单里手动移除的路径（不影响鉴权，只是不在这里显示）
+
+
+def _hidden_paths():
+    try:
+        raw = get_meta(_HIDDEN_KEY, "") or ""
+        data = json.loads(raw) if raw else []
+    except Exception:
+        data = []
+    return [str(x) for x in data] if isinstance(data, list) else []
+
+
+def hidden_paths():
+    return _hidden_paths()
+
+
+def set_hidden(rule, hidden=True):
+    """把某个路径加入 / 移出「页面清单」。
+
+    注意：只影响页面模块的展示，接口登记表里的行还在，鉴权照旧。
+    代码里新增的页面不会被自动隐藏，误操作在本页「恢复」即可。
+    """
+    rule = (rule or "").strip()
+    if not rule:
+        return "缺少页面路径"
+    cur = [x for x in _hidden_paths() if x != rule]
+    if hidden:
+        cur.append(rule)
+    try:
+        set_meta(_HIDDEN_KEY, json.dumps(sorted(set(cur)), ensure_ascii=False))
+    except Exception as e:
+        _log.warning("保存页面隐藏列表失败：%s", e)
+        return "保存失败：%s" % e
+    _log.info("%s页面清单：%s", "移除" if hidden else "恢复", rule)
+    return ""
+
+
+def restore_hidden():
+    """恢复全部被移除的页面，返回恢复条数。"""
+    n = len(_hidden_paths())
+    try:
+        set_meta(_HIDDEN_KEY, "[]")
+    except Exception as e:
+        _log.warning("恢复页面清单失败：%s", e)
+        return 0
+    _log.info("已恢复 %d 条被移除的页面", n)
+    return n
+
+
 def list_pages():
     """全部页面：接口登记表里 kind='页面' 的行，叠加页面语义后返回。"""
     api_registry.ensure_synced()
@@ -152,6 +203,9 @@ def list_pages():
         gi = GROUP_ORDER.index(x["group"]) if x["group"] in GROUP_ORDER else len(GROUP_ORDER)
         return (x["orphan"], gi, x["group"], 1 if x["type"] != "页面" else 0, x["path"])
 
+    _hidden = set(_hidden_paths())
+    if _hidden:
+        out = [x for x in out if x["path"] not in _hidden]
     out.sort(key=sort_key)
     return out
 
@@ -183,6 +237,7 @@ def summary():
                   for k in api_registry.ACCESS_ORDER]
     return {
         "total": len(live),
+        "hidden": len(_hidden_paths()),
         "orphan": len(pages) - len(live),
         "disabled": sum(1 for p in live if p["disabled"]),
         "overridden": sum(1 for p in live if p["overridden"]),
@@ -224,3 +279,48 @@ def update_page(rule, desc=None, access=None, disabled=None):
         return err
     _log.info("页面已更新：%s（%s）", rule, "、".join(methods))
     return None
+
+
+def delete_orphan(rule):
+    """删除一条「已失效」的页面登记（代码里已经没有这个路由了）。
+
+    在用的页面不允许删（删了会丢人工配置），恢复默认请用「编辑」把说明 / 级别清空。
+    返回错误信息，空串表示成功。
+    """
+    rule = (rule or "").strip()
+    if not rule:
+        return "缺少页面路径"
+    try:
+        with store_tx() as conn:
+            row = conn.execute(
+                "SELECT orphan FROM api_interface WHERE rule=?", (rule,)).fetchone()
+            if not row:
+                return "这条页面登记已经不存在了（可能刚被清理过）"
+            if not int(row["orphan"] or 0):
+                return "该页面仍存在于代码中，不能删除；如需恢复默认配置，用「编辑」把说明 / 级别清空"
+            conn.execute("DELETE FROM api_permission WHERE rule=?", (rule,))
+            conn.execute("DELETE FROM api_interface WHERE rule=?", (rule,))
+    except Exception as e:
+        _log.warning("删除失效页面失败：%s", e)
+        return "删除失败：%s" % e
+    api_registry.invalidate()
+    _log.info("已删除失效页面登记：%s", rule)
+    return ""
+
+
+def cleanup_orphans():
+    """清理全部「已失效」页面登记（只清 kind='页面'，不动接口 / 通道 / 静态资源）。"""
+    try:
+        with store_tx() as conn:
+            conn.execute(
+                "DELETE FROM api_permission WHERE EXISTS ("
+                "SELECT 1 FROM api_interface i WHERE i.orphan=1 AND i.kind='页面' "
+                "AND i.rule=api_permission.rule AND i.method=api_permission.method)")
+            n = conn.execute(
+                "DELETE FROM api_interface WHERE orphan=1 AND kind='页面'").rowcount
+    except Exception as e:
+        _log.warning("清理失效页面失败：%s", e)
+        return 0
+    api_registry.invalidate()
+    _log.info("已清理失效页面登记：%d 条", n or 0)
+    return int(n or 0)

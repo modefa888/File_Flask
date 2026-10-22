@@ -32,7 +32,7 @@ ADM.modules.push({
             host.innerHTML = ADM.table(pageCols(), rows(), {
                 key: 'pages',
                 empty: '没有符合条件的页面',
-                actionsWidth: 300,
+                actionsWidth: 340,
                 detailTitle: function (r) { return r.name + '  ' + r.path; },
                 onRender: function (h) { bindPageRowActions(h, refresh); }
             });
@@ -84,13 +84,26 @@ ADM.modules.push({
                 '<option value="member">协作者</option>' +
                 '<option value="admin">仅管理员</option>' +
                 '</select>' +
+                (sum.hidden
+                    ? '<button class="adm-btn sm ghost" id="pageRestoreBtn" type="button" ' +
+                      'title="把从页面清单移除的页面全部加回来">' +
+                      '<i class="bi bi-arrow-counterclockwise"></i> 恢复已移除 ' + sum.hidden + '</button>'
+                    : '') +
+                (sum.orphan
+                    ? '<button class="adm-btn sm danger" id="pageCleanupBtn" type="button" ' +
+                      'title="删除代码里已经不存在的页面登记（不影响在用页面）">' +
+                      '<i class="bi bi-trash3"></i> 清理失效 ' + sum.orphan + '</button>'
+                    : '') +
                 '<button class="adm-btn sm ghost" id="pageSyncBtn" type="button"><i class="bi bi-arrow-repeat"></i> 同步页面</button>') +
                 '<div id="pageTableHost"></div>' +
                 '<div class="adm-hint" style="margin-top:10px">' +
                 '「打开」在新标签页预览该页面（带路径参数或非 HTML 资源的页面不提供）；' +
                 '「编辑」可改用途说明与访问级别（留空恢复默认）；「停用」后所有角色都无法访问该页面（返回 403）。' +
                 '登录页、注册入口、后台页面、静态资源与协作通道为受保护页面，不允许停用或改级别。' +
-                '<b>同步页面</b>会从代码路由刷新登记表：新增页面自动登记、已移除的标记为「已失效」。' +
+                '<b>同步页面</b>会从代码路由刷新登记表：新增页面自动登记、已移除的标记为「已失效」；' +
+                '失效行可以直接「删除」，或用上方「清理失效」一次性清掉。' +
+                '「移除」只是把某个页面从这份清单里藏起来（比如 /admin/update 这种不是页面的接口），' +
+                '不影响它的访问控制，顶部「恢复已移除」可加回来。' +
                 '<b>点击表头</b>可按该列排序；点击任意一行可查看完整信息。' +
                 '</div></div>';
 
@@ -103,6 +116,34 @@ ADM.modules.push({
             }
             var syncBtn = el.querySelector('#pageSyncBtn');
             if (syncBtn) syncBtn.addEventListener('click', function () { doPageSync(syncBtn, refresh); });
+            var restoreBtn = el.querySelector('#pageRestoreBtn');
+            if (restoreBtn) restoreBtn.addEventListener('click', async function () {
+                var ok = await ADM.confirm('恢复已移除的页面',
+                    '把之前从清单里移除的 <b>' + (sum.hidden || 0) + '</b> 个页面全部加回来？', '恢复');
+                if (!ok) return;
+                try {
+                    var r = await ADM.api('/api/adm/pages/restore', { method: 'POST', body: {} });
+                    ADM.toast('已恢复 ' + (r.restored || 0) + ' 个页面', 'ok');
+                    refresh();
+                } catch (e) {
+                    ADM.toast((e && e.message) || String(e), 'err');
+                }
+            });
+            var cleanBtn = el.querySelector('#pageCleanupBtn');
+            if (cleanBtn) cleanBtn.addEventListener('click', async function () {
+                var ok = await ADM.confirm('清理失效页面',
+                    '代码中已不存在的页面登记共 <b>' + (sum.orphan || 0) + '</b> 条，全部删除？<br>' +
+                    '<span class="adm-hint">只删这些失效记录和它们的权限记录，不影响接口 / 通道 / 静态资源。</span>',
+                    '全部删除');
+                if (!ok) return;
+                try {
+                    var r = await ADM.api('/api/adm/pages/cleanup', { method: 'POST', body: {} });
+                    ADM.toast('已清理 ' + (r.removed || 0) + ' 条失效登记', 'ok');
+                    refresh();
+                } catch (e) {
+                    ADM.toast((e && e.message) || String(e), 'err');
+                }
+            });
             var stats = el.querySelector('#pageGroupStats');
             if (stats) stats.querySelectorAll('[data-group]').forEach(function (b) {
                 b.addEventListener('click', function () {
@@ -175,8 +216,14 @@ function pageReqCell(r) {
 
 /* 页面「操作」列：打开预览 / 编辑（说明 + 访问级别）/ 停用启用 */
 function pageActionCell(r) {
-    if (r.orphan) return '<span class="adm-hint" title="代码中已无此路由">已失效</span>';
-    var p = ADM.esc(r.path);
+    var p0 = ADM.esc(r.path);
+    if (r.orphan) {
+        // 已失效：代码里没有这个路由了，只保留一条登记记录，可以直接删掉
+        return '<div class="adm-btn-row"><span class="adm-hint" title="代码中已无此路由">已失效</span>' +
+            '<button class="adm-btn sm danger" data-pact="del" data-path="' + p0 + '" ' +
+            'title="删除这条失效登记（只删记录，不影响任何在用页面）">删除</button></div>';
+    }
+    var p = p0;
     var open = r.href
         ? '<a class="adm-btn sm ghost" href="' + ADM.esc(r.href) + '" target="_blank" rel="noopener" title="在新标签页打开该页面"><i class="bi bi-box-arrow-up-right"></i> 打开</a>'
         : '<span class="adm-hint" title="该页面带路径参数或为资源，无法直接打开"><i class="bi bi-dash"></i></span>';
@@ -186,12 +233,17 @@ function pageActionCell(r) {
         '" data-desc="' + ADM.esc(r.desc || '') + '">编辑</button>';
     if (r.can_manage === false) {
         return '<div class="adm-btn-row">' + open + edit +
-            '<span class="adm-hint" title="受保护页面：不允许停用或改级别">受保护</span></div>';
+            '<span class="adm-hint" title="受保护页面：不允许停用或改级别">受保护</span>' +
+            '<button class="adm-btn sm ghost" data-pact="hide" data-path="' + p +
+            '" title="从页面清单移除（不改鉴权，可随时恢复）"><i class="bi bi-eye-slash"></i></button></div>';
     }
     var toggle = r.disabled
         ? '<button class="adm-btn sm" data-pact="enable" data-path="' + p + '">启用</button>'
         : '<button class="adm-btn sm warn" data-pact="disable" data-path="' + p + '">停用</button>';
-    return '<div class="adm-btn-row">' + open + edit + toggle + '</div>';
+    // 移除：只是在页面清单里隐藏（鉴权照旧，随时可在上方「恢复」）
+    var hide = '<button class="adm-btn sm ghost" data-pact="hide" data-path="' + p +
+        '" title="从页面清单移除（不改鉴权，可随时恢复）"><i class="bi bi-eye-slash"></i></button>';
+    return '<div class="adm-btn-row">' + open + edit + toggle + hide + '</div>';
 }
 
 /* ---------- 行内按钮事件 ---------- */
@@ -204,6 +256,40 @@ function bindPageRowActions(host, refresh) {
     });
     host.querySelectorAll('[data-pact="enable"]').forEach(function (b) {
         b.addEventListener('click', function () { togglePageDisabled(b, false, refresh); });
+    });
+    host.querySelectorAll('[data-pact="hide"]').forEach(function (b) {
+        b.addEventListener('click', async function () {
+            var p = b.dataset.path;
+            var ok = await ADM.confirm('从页面清单移除',
+                '把「' + ADM.esc(p) + '」从页面清单里移除？<br>' +
+                '<span class="adm-hint">只是不在这里显示，接口登记与访问控制都不变；' +
+                '顶部「恢复已移除」可以随时加回来。</span>', '移除');
+            if (!ok) return;
+            try {
+                await ADM.api('/api/adm/pages/hide', { method: 'POST', body: { path: p, hidden: true } });
+                ADM.toast('已移除：' + p, 'ok');
+                refresh();
+            } catch (e) {
+                ADM.toast((e && e.message) || String(e), 'err');
+            }
+        });
+    });
+    host.querySelectorAll('[data-pact="del"]').forEach(function (b) {
+        b.addEventListener('click', async function () {
+            var p = b.dataset.path;
+            var ok = await ADM.confirm('删除已失效页面',
+                '「' + ADM.esc(p) + '」在代码里已经不存在了，删除这条登记？<br>' +
+                '<span class="adm-hint">只删登记与它的权限记录，不影响任何在用的页面。</span>',
+                '删除');
+            if (!ok) return;
+            try {
+                await ADM.api('/api/adm/pages/delete', { method: 'POST', body: { path: p } });
+                ADM.toast('已删除登记：' + p, 'ok');
+                refresh();
+            } catch (e) {
+                ADM.toast((e && e.message) || String(e), 'err');
+            }
+        });
     });
 }
 

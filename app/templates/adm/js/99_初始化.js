@@ -115,6 +115,27 @@
         resizeTimer = setTimeout(function () { ADM.refitTables(document); }, 120);
     });
 
+    /* 侧栏底部「设置」：默认收起，点一下在按钮上方弹出 桌面端 / IDE / 退出登录 */
+    var footMore = document.getElementById('admFootMore');
+    var footPop = document.getElementById('admFootPop');
+    if (footMore && footPop) {
+        function setFootPop(open) {
+            footPop.hidden = !open;
+            footMore.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+        footMore.addEventListener('click', function (e) {
+            e.stopPropagation();
+            setFootPop(footPop.hidden);      // 展开 <-> 收起
+        });
+        document.addEventListener('click', function (e) {
+            if (footPop.hidden) return;
+            if (!footPop.contains(e.target) && !footMore.contains(e.target)) setFootPop(false);
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && !footPop.hidden) setFootPop(false);
+        });
+    }
+
     /* 初始模块优先级：#hash 直达 > 上次打开的模块（localStorage，刷新自动恢复） > 概览 */
     var initial = (location.hash || '').replace('#', '');
     if (!ADM.modules.some(function (m) { return m.id === initial; })) {

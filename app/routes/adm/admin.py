@@ -372,6 +372,45 @@ def api_pages_summary():
     return jsonify(page_registry.summary())
 
 
+@bp.route("/api/adm/pages/hide", methods=["POST"])
+def api_pages_hide():
+    """从页面清单里移除 / 恢复某个页面。body: {path, hidden?}
+
+    只影响页面模块的展示，不动接口登记与鉴权；恢复用 hidden=false 或 /pages/restore。
+    """
+    from ...services.adm import page_registry
+    data = request.get_json(silent=True) or {}
+    err = page_registry.set_hidden(data.get("path"), bool(data.get("hidden", True)))
+    if err:
+        return _fail(err)
+    return _ok({"hidden": page_registry.hidden_paths()})
+
+
+@bp.route("/api/adm/pages/restore", methods=["POST"])
+def api_pages_restore():
+    """恢复全部被移除的页面。"""
+    from ...services.adm import page_registry
+    return _ok({"restored": page_registry.restore_hidden()})
+
+
+@bp.route("/api/adm/pages/delete", methods=["POST"])
+def api_pages_delete():
+    """删除一条「已失效」页面登记（代码中已无此路由）。body: {path}"""
+    from ...services.adm import page_registry
+    data = request.get_json(silent=True) or {}
+    err = page_registry.delete_orphan(data.get("path"))
+    if err:
+        return _fail(err)
+    return _ok()
+
+
+@bp.route("/api/adm/pages/cleanup", methods=["POST"])
+def api_pages_cleanup():
+    """清理全部「已失效」页面登记，只动页面行，不碰接口 / 通道。"""
+    from ...services.adm import page_registry
+    return _ok({"removed": page_registry.cleanup_orphans()})
+
+
 @bp.route("/api/adm/pages/update", methods=["POST"])
 def api_pages_update():
     """编辑页面登记：说明 / 访问级别 / 停用启用。

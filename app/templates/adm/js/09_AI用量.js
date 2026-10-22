@@ -10,6 +10,22 @@ ADM.modules.push({
     }
 });
 
+/* 后端 ai_usage.last_at 是 "YYYY-MM-DD HH:MM:SS" 字符串：
+   列表里显示相对时间（刚刚 / N 分钟前 / N 小时前 / N 天前），悬停看完整时间。 */
+function aiAgoText(s) {
+    var str = String(s || "");
+    if (!str) return "-";
+    var d = new Date(str.replace(" ", "T"));
+    if (isNaN(d.getTime())) return ADM.esc(str);
+    var diff = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (diff < 0) diff = 0;
+    if (diff < 60) return "刚刚";
+    if (diff < 3600) return Math.floor(diff / 60) + " 分钟前";
+    if (diff < 86400) return Math.floor(diff / 3600) + " 小时前";
+    if (diff < 86400 * 30) return Math.floor(diff / 86400) + " 天前";
+    return ADM.esc(str.slice(0, 10));
+}
+
 async function refreshAiUsage(el) {
     /* 顶部统计（与列表同源，取一次全量汇总；失败不阻塞列表） */
     var sum = {};
@@ -26,6 +42,12 @@ async function refreshAiUsage(el) {
         { label: '成功', render: function (r) { return '<span style="color:#6ee7b7">' + r.ok + '</span>'; } },
         { label: '失败', render: function (r) { return r.fail ? '<span style="color:#fca5a5">' + r.fail + '</span>' : '0'; } },
         { label: 'Token', render: function (r) { return '入 ' + r.tokens_in + ' / 出 ' + r.tokens_out; } },
+        {
+            label: '最新使用', render: function (r) {
+                if (!r.last_at) return '-';
+                return '<span title="' + ADM.esc(r.last_at) + '">' + aiAgoText(r.last_at) + '</span>';
+            }
+        },
         { label: '最近耗时', render: function (r) { return r.last_ms ? r.last_ms + ' ms' : '-'; } },
         { label: '最近错误', render: function (r) { return ADM.esc(r.last_error || '-'); } },
         {

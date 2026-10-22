@@ -8,6 +8,7 @@
     .menubar { gap: 8px; }
     .menubar span { padding: 3px 6px; }
     .titlebar .tb-title { display: none; }
+    .titlebar .tb-clock { display: none; }                  /* 窄屏优先让出空间给菜单与操作按钮 */
     .editorarea .breadcrumbs { padding: 0 8px; }
     .titlebar .tb-actions .tb-ai span { display: none; }   /* 窄屏只留图标 */
   }

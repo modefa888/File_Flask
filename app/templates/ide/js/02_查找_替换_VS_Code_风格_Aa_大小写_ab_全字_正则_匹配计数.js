@@ -1016,6 +1016,30 @@
     closeDrop(); openDrop(sp.dataset.menu, sp);
   });
 
+  /* ---------- 标题栏「当前时间」----------
+     右上角显示 时:分:秒，每秒刷新，悬停给出完整日期与星期。
+     用 setTimeout 对齐到整秒边界（setInterval 会累积漂移，秒数看起来会跳格）；
+     标签页在后台被浏览器节流后切回来，靠 visibilitychange 立即补一次。 */
+  (function initTitleClock() {
+    const box = $("tbClock"), txt = $("tbClockText");
+    if (!box || !txt) return;
+    const p2 = n => String(n).padStart(2, "0");
+    const WEEK = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+    let timer = null;
+    function tick() {
+      const d = new Date();
+      txt.textContent = p2(d.getHours()) + ":" + p2(d.getMinutes()) + ":" + p2(d.getSeconds());
+      box.title = "当前时间：" + d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()) +
+                  " " + WEEK[d.getDay()];
+      timer = setTimeout(tick, 1000 - (Date.now() % 1000));   // 对齐到整秒
+    }
+    tick();
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) return;
+      clearTimeout(timer); tick();                            // 从后台切回：先补一次，避免停在旧时间
+    });
+  })();
+
   /* ---------- 编辑器组操作菜单（标签栏右上角 ⋯，仿 VS Code） ---------- */
   /* 拆分编辑器：把当前组的活动文件复制到一个新的编辑组（同 VS Code，最多 4 组）
      dir = "right" 向右拆分（默认，Ctrl+\）；dir = "down" 向下拆分（Alt+\ 或 Alt+点拆分按钮） */

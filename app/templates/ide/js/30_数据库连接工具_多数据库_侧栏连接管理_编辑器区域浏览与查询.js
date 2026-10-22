@@ -89,6 +89,43 @@
     renderDbConns();
   }
 
+  /* ---------- 自动分组：同一类型的连接归到同一组 ----------
+     组的顺序跟「新建连接」的类型表（DBC.kinds）一致，类型表里没登记的自定义类型排在最后；
+     组内保持后端返回的顺序（最近添加的在上面由后端决定）。组头可点击折叠，状态记在 localStorage。 */
+  var DBC_GROUP_KEY = "ide.dbconn.groupCollapsed";
+  var DBC_GROUP_COLLAPSED = (function () {
+    try { return JSON.parse(localStorage.getItem(DBC_GROUP_KEY) || "{}") || {}; } catch (e) { return {}; }
+  })();
+  function dbcGroupSave() {
+    try { localStorage.setItem(DBC_GROUP_KEY, JSON.stringify(DBC_GROUP_COLLAPSED)); } catch (e) { /* 忽略 */ }
+  }
+  function dbcGroups() {
+    var order = [], map = {};
+    function slot(kind) {
+      if (!map[kind]) { map[kind] = []; order.push(kind); }
+      return map[kind];
+    }
+    DBC.kinds.forEach(function (k) { slot(k.kind); });   // 先按类型表占位（没有连接的空组后面过滤掉）
+    DBC.conns.forEach(function (c) { slot(c.kind || "sqlite").push(c); });
+    return order.filter(function (kind) { return map[kind].length; })
+      .map(function (kind) { return { kind: kind, list: map[kind] }; });
+  }
+  function dbcItemHtml(c) {
+    var k = dbcKind(c.kind);
+    return '<div class="dbc-item" data-id="' + escAttr(c.id) + '" title="' + escAttr(dbcSub(c)) + '">' +
+      '<i class="bi ' + escAttr(k.icon || "bi-database") + ' dbc-ico"></i>' +
+      '<div class="dbc-main">' +
+        '<div class="dbc-name">' + esc(c.name) + '</div>' +
+        '<div class="dbc-sub">' + esc(k.label) + ' · ' + esc(dbcSub(c)) + '</div>' +
+      '</div>' +
+      (dbcCanNewDb(c.kind)
+        ? '<button class="dbc-act dbc-newdb" title="新建数据库"><i class="bi bi-database-add"></i></button>'
+        : "") +
+      '<button class="dbc-act dbc-edit" title="编辑"><i class="bi bi-pencil"></i></button>' +
+      '<button class="dbc-act dbc-del" title="删除"><i class="bi bi-trash"></i></button>' +
+    '</div>';
+  }
+
   function renderDbConns() {
     var box = $("dbcList");
     if (!box) return;
@@ -96,21 +133,26 @@
       box.innerHTML = '<div class="ph">还没有连接。<br>点上方「新建连接」，可连接 SQLite / MySQL / PostgreSQL。</div>';
       return;
     }
-    box.innerHTML = DBC.conns.map(function (c) {
-      var k = dbcKind(c.kind);
-      return '<div class="dbc-item" data-id="' + escAttr(c.id) + '" title="' + escAttr(dbcSub(c)) + '">' +
-        '<i class="bi ' + escAttr(k.icon || "bi-database") + ' dbc-ico"></i>' +
-        '<div class="dbc-main">' +
-          '<div class="dbc-name">' + esc(c.name) + '</div>' +
-          '<div class="dbc-sub">' + esc(k.label) + ' · ' + esc(dbcSub(c)) + '</div>' +
+    box.innerHTML = dbcGroups().map(function (g) {
+      var k = dbcKind(g.kind), collapsed = !!DBC_GROUP_COLLAPSED[g.kind];
+      return '<div class="dbc-group' + (collapsed ? " collapsed" : "") + '" data-kind="' + escAttr(g.kind) + '">' +
+        '<div class="dbc-group-h" title="' + escAttr(k.label + " · " + g.list.length + " 个连接（点击折叠 / 展开）") + '">' +
+          '<i class="bi bi-caret-down-fill dbc-group-caret"></i>' +
+          '<i class="bi ' + escAttr(k.icon || "bi-database") + ' dbc-group-ico"></i>' +
+          '<span class="dbc-group-t">' + esc(k.label) + '</span>' +
+          '<span class="dbc-group-n">' + g.list.length + '</span>' +
         '</div>' +
-        (dbcCanNewDb(c.kind)
-          ? '<button class="dbc-act dbc-newdb" title="新建数据库"><i class="bi bi-database-add"></i></button>'
-          : "") +
-        '<button class="dbc-act dbc-edit" title="编辑"><i class="bi bi-pencil"></i></button>' +
-        '<button class="dbc-act dbc-del" title="删除"><i class="bi bi-trash"></i></button>' +
+        '<div class="dbc-group-body">' + g.list.map(dbcItemHtml).join("") + '</div>' +
       '</div>';
     }).join("");
+    // 组头：折叠 / 展开（记住每种类型的状态，刷新后保持）
+    box.querySelectorAll(".dbc-group-h").forEach(function (h) {
+      h.onclick = function () {
+        var grp = h.parentNode;
+        DBC_GROUP_COLLAPSED[grp.dataset.kind] = grp.classList.toggle("collapsed");
+        dbcGroupSave();
+      };
+    });
     box.querySelectorAll(".dbc-item").forEach(function (it) {
       var c = dbcFind(it.dataset.id);
       if (!c) return;

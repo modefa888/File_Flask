@@ -97,7 +97,24 @@
       setTimeout(sshSessionRestore, 0);              // 等本调用栈收尾，避免和其它模块的会话恢复抢布局
     }
   }
+  /* ---------- 活动栏角标：当前「已连接」的 SSH 会话数 ----------
+     与侧栏卡片上那个「停止 / 播放」按钮同源（SESS 里 alive 的会话），
+     连接、断开、关闭标签都会重算，不会出现角标和侧栏状态对不上。 */
+  function sshBadgeSync() {
+    const el = $("actSshBadge");
+    if (!el) return;
+    const n = Object.keys(SESS).filter(sid => SESS[sid] && SESS[sid].alive).length;
+    el.textContent = n > 99 ? "99+" : String(n);
+    el.style.display = n > 0 ? "" : "none";          // 没有连接就不显示角标
+    const act = el.closest ? el.closest(".act") : null;
+    if (act) {                                       // 悬停提示补上数量，原始标题只记一次
+      if (!act.dataset.baseTitle) act.dataset.baseTitle = act.title || "";
+      act.title = n ? act.dataset.baseTitle + "（已连接 " + n + " 个）" : act.dataset.baseTitle;
+    }
+  }
+
   function renderSshList() {
+    sshBadgeSync();
     const box = $("sshList");
     if (!box) return;
     if (!SSHC.paramiko) {
@@ -394,6 +411,7 @@
       st.className = "ssh-term-st bad";
       st.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 已断开';
       st.title = "点击重新连接";
+      sshBadgeSync();                                  // 远端断开 / 网络掉线：活动栏已连接数减一
     }
     st.onclick = () => { if (!reconnecting && !sess.alive) doReconnect(); };
     async function doReconnect() {
@@ -822,6 +840,7 @@
       try { term.dispose(); } catch (e) {}
       api("/api/ssh/close", { method: "POST", body: JSON.stringify({ id: sid }) });
       delete SESS[sid];
+      sshBadgeSync();                                  // 主动关闭：活动栏角标立即同步
       // 延后一拍再保存：走标签「×」关闭时，closeTab 会在 onBeforeClose 之后才把 tab 移出 tabs
       setTimeout(sshSessionSave, 0);
       // 延后一拍刷新侧栏：等 closeTab 把 tab 移出 tabs 后，该项才正确回到「未打开」状态

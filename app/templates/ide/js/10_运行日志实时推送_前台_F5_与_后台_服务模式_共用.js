@@ -42,8 +42,8 @@
   }
 
   // 确保某任务的日志标签存在并选中（不存在则创建）。auto=true 表示刷新后自动恢复，
-  // 此时不强行打开已被用户关闭的底部面板。
-  function ensureLogTab(t, auto) {
+  // 此时不强行打开已被用户关闭的底部面板；quiet=true 表示只建标签、完全不碰底部面板。
+  function ensureLogTab(t, auto, quiet) {
     let L = LOGS[t.id];
     if (!L) {
       // replay：这个标签是「回看一个早就结束的任务」建立的历史视图（刷新后恢复时常见）。
@@ -67,11 +67,11 @@
     }
     if (t.target) L.target = t.target;                  // 供启动按钮判断「这个文件是否在跑」
     if (t.running === true) L.replay = false;           // 中途发现它其实在跑 → 之后结束要正常提示
-    selectLogTab(t.id, auto);
+    selectLogTab(t.id, auto, quiet);
     return L;
   }
 
-  function selectLogTab(id, auto) {
+  function selectLogTab(id, auto, quiet) {
     currentLogId = id;
     // 记住"正在看哪个任务的日志"，刷新后据此把输出面板接回来
     try { localStorage.setItem("ide.run.lastLog", id); } catch (e) { /* 隐私模式等，忽略 */ }
@@ -91,7 +91,10 @@
     }
     body.scrollTop = body.scrollHeight;
     if (typeof opFindRescan === "function") opFindRescan();   // 切换日志标签：缓冲重绘后让命中有黄底 / 红字
-    if (auto) autoShowBottom("log"); else toggleBottom(true, "log");   // 刷新自动恢复时不打扰已关闭的面板
+    // quiet：在「后台任务」面板点启动 / 重启时用 —— 只选中标签，不弹底部面板（输出看那里的实时日志）
+    if (quiet) { /* 不动底部面板 */ }
+    else if (auto) autoShowBottom("log");    // 刷新自动恢复时不打扰已关闭的面板
+    else toggleBottom(true, "log");
     bpKillMode();                                      // 切换日志标签时刷新右侧按钮状态
   }
 
@@ -337,7 +340,10 @@
   window.restoreFgOnLoad = restoreFgOnLoad;
 
   // F5 前台运行：输出走「输出」面板（会结束的脚本，打印完就退出）
-  function startRunStream(d, target, mode, argsStr) {
+  // opts.quiet=true：启动后不自动弹出底部面板（在「后台任务」面板点启动 / 重启时用，
+  // 输出看该面板右侧的实时日志；底部面板本来开着就照常写进去，只是不再抢着弹出来）。
+  function startRunStream(d, target, mode, argsStr, opts) {
+    const quiet = !!(opts && opts.quiet);
     RUNBG.id = d.id; RUNBG.offset = 0;
     RUNBG.name = baseName(target); RUNBG.target = target;
     RUNBG.mode = mode; RUNBG.timeout = d.timeout || 0; RUNBG.args = argsStr || "";
@@ -345,7 +351,7 @@
     closeLogTabsForTarget(target, d.id);               // 同一文件的旧日志标签先关掉，避免堆积
     syncRunButtons();                                  // 启动按钮变成 ⏸
     if (mode === "fg") {
-      toggleBottom(true, "output");
+      if (!quiet) toggleBottom(true, "output");
       opLine("$ " + d.command + "    （工作目录：" + d.cwd + "）", "op-cmd");
       opLine("  pid " + d.pid + " · 超时提醒 " + (d.timeout || 0) + "s（到点只提醒，不会自动转后台或终止；可点右上「↓」手动转后台）", "op-dim");
       bpKillMode();
@@ -354,7 +360,7 @@
     }
     // 后台运行：生成「任务名」日志标签并实时推送
     RUNBG.id = d.id; RUNBG.name = baseName(target);
-    ensureLogTab({ id: d.id, name: baseName(target), target: target });
+    ensureLogTab({ id: d.id, name: baseName(target), target: target }, false, quiet);
     logPush(d.id, "▶ 后台运行：" + baseName(target) + "（pid " + d.pid + "）· 点右上 ⊘ 可终止", "op-cmd");
     bpKillMode();
     streamLog(d.id);

@@ -357,7 +357,7 @@ function rvBuild() {
       case "attach":  attachTask(t); break;                 // 底部输出面板查看（可转后台）
       case "pause":   pauseTaskById(t); break;
       case "resume":  resumeTaskById(t); break;
-      case "restart": restartTaskById(t); break;
+      case "restart": restartTaskById(t, true); break;   // quiet：不弹底部面板，日志看右侧实时日志
       case "stop":    stopTaskById(t); break;
       case "remove":  removeTaskById(t); break;
       case "open":    if (t.ports && t.ports.length) window.open(portUrl(t.ports[0]), "_blank"); break;
@@ -377,6 +377,15 @@ function rvSelHoldIn(sel) {
     const el = n && n.nodeType === 1 ? n : (n ? n.parentNode : null);
     return !!(el && box.contains(el));
   } catch (_) { return false; }
+}
+
+/* 启动 / 重启后（新任务 id 会变）：选中它并接上右侧实时日志。
+   启动不再自动弹出底部面板，输出就看这里；面板没开着时什么都不做。 */
+function rvFollowTask(id) {
+  if (!id || !runnerViewOpen()) return;
+  RUNVIEW.sel = String(id);
+  rvPaint();
+  rvTick();
 }
 
 /* ---------- 绘制 ---------- */
@@ -456,7 +465,7 @@ function rvActsHtml(t) {
          '<button class="rv-btn v-re" data-act="restart" title="重启（先停止再启动）"><i class="bi bi-arrow-clockwise"></i> 重启</button>' +
          '<button class="rv-btn v-stop" data-act="stop" title="停止（终止进程）"><i class="bi bi-stop-fill"></i> 停止</button>';
   } else {
-    h += '<button class="rv-btn v-go" data-act="restart" title="用原文件与参数重新启动"><i class="bi bi-play-fill"></i> 启动</button>' +
+    h += '<button class="rv-btn v-go" data-act="restart" title="用原文件与参数重新启动（日志在本面板实时显示，不会弹出底部面板）"><i class="bi bi-play-fill"></i> 启动</button>' +
          '<button class="rv-btn v-del" data-act="remove" title="移除这条记录（连同日志文件）"><i class="bi bi-trash"></i> 移除</button>';
   }
   if (t.running && (t.ports || []).filter(p => p > 0).length) {

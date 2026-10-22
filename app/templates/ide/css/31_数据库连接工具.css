@@ -37,6 +37,24 @@
   .dbc-act:hover { background: #3a3d41; color: #ffffff; }
   .dbc-del:hover { color: #e06c75; }
 
+  /* ---------- 自动分组：同一类型（MySQL / PostgreSQL / SQLite / Redis / MongoDB）归到一组 ---------- */
+  .dbc-group { margin-bottom: 6px; }
+  .dbc-group-h {
+    display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 5px;
+    font-size: 11.5px; color: #b9b9b9; cursor: pointer; user-select: none;
+  }
+  .dbc-group-h:hover { background: #2a2d2e; color: #ffffff; }
+  .dbc-group-caret { flex: none; font-size: 9px; color: #8a8a8a; transition: transform .12s ease; }
+  .dbc-group.collapsed .dbc-group-caret { transform: rotate(-90deg); }   /* 折叠时三角朝右 */
+  .dbc-group-ico { flex: none; font-size: 13px; color: #4ec9b0; }
+  .dbc-group-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dbc-group-n {
+    flex: none; min-width: 15px; height: 15px; line-height: 15px; padding: 0 5px; border-radius: 8px;
+    background: #3a3d41; color: #cfcfcf; font-size: 10px; text-align: center;
+  }
+  .dbc-group-body { padding-left: 6px; }                                  /* 组内连接缩进，形成层级 */
+  .dbc-group.collapsed .dbc-group-body { display: none; }
+
   /* ---------- 新建 / 编辑弹窗 ---------- */
   .dbc-modal { width: 520px; }
   .dbc-modal .dbc-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }

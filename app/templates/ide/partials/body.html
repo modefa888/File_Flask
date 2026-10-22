@@ -2,6 +2,7 @@
     <div class="traffic"><span class="r"></span><span class="y"></span><span class="g"></span></div>
     <div class="menubar" id="menubar"><span data-menu="file">文件</span><span data-menu="edit">编辑</span><span data-menu="sel">选择</span><span data-menu="view">查看</span><span data-menu="goto">转到</span><span data-menu="run">运行</span><span data-menu="term">终端</span><span data-menu="help">帮助</span></div>
     <div class="tb-title" id="tbTitle">在线项目 IDE</div>
+    <div class="tb-clock" id="tbClock" title="当前时间"><i class="bi bi-clock"></i><span id="tbClockText">--:--:--</span></div>
     <div class="tb-actions">
       <button id="tbNavBack" title="后退 (Alt+←)"><i class="bi bi-arrow-left"></i></button>
       <button id="tbNavFwd" title="前进 (Alt+→)"><i class="bi bi-arrow-right"></i></button>
@@ -29,7 +30,7 @@
       <div class="act" data-panel="dbconn" title="数据库（连接 SQLite / MySQL / PostgreSQL 并浏览管理）"><i class="bi bi-database"></i></div>
       <div class="act" data-panel="api" title="API 调试（HTTP 请求客户端，仿 Postman）"><i class="bi bi-send"></i></div>
       <div class="act" data-panel="cron" title="定时任务（cron 计划任务，参考青龙面板）"><i class="bi bi-alarm"></i><span class="runner-badge" id="actCronBadge" style="display:none">0</span></div>
-      <div class="act" data-panel="sshconn" title="终端连接工具（SSH 远程主机，仿 Xshell）"><i class="bi bi-hdd-network"></i></div>
+      <div class="act" data-panel="sshconn" title="终端连接工具（SSH 远程主机，仿 Xshell）"><i class="bi bi-hdd-network"></i><span class="runner-badge ssh-badge" id="actSshBadge" style="display:none">0</span></div>
       <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
       {# 底部两个图标：进程资源管理器在设置之上，设置永远在最底下。
          act-spacer 让「组内第一个」吸收上方全部空白，把整组顶到活动栏最底部（若两个都写 margin-top:auto，

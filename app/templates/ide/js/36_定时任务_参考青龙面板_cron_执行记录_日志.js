@@ -44,7 +44,7 @@
       const d = await r.json();
       if (d.error) throw new Error(d.error);
       CRON.tasks = d.tasks || [];
-      cronSetBadge(d.running || 0);
+      cronSetBadge(CRON.tasks.length, d.running || 0);
       renderCronList();
       // 编辑区大页也开着时：只刷新统计与表格，保留详情里的日志与滚动位置
       if (typeof cronViewPaintHead === "function" && $("cvTbody")) {
@@ -55,12 +55,29 @@
       if (hint && !(opts && opts.silent)) hint.textContent = "读取定时任务失败：" + (e.message || e);
     }
   }
-  function cronSetBadge(n) {
+  /* ---------- 活动栏角标：定时任务数量 ----------
+     以前只显示「执行中」的个数，没任务在跑时角标整个消失，看不出到底存了几个任务；
+     现在固定显示任务总数，悬停提示再给出「共 N 个 · M 个执行中」。 */
+  function cronSetBadge(total, running) {
     const el = $("actCronBadge");
     if (!el) return;
+    const list = CRON.tasks || [];
+    const n = (total == null) ? list.length : total;
+    const run = (running == null) ? list.filter(x => x.running).length : running;
     if (n > 0) { el.textContent = n > 99 ? "99+" : n; el.style.display = ""; }
     else el.style.display = "none";
+    const act = el.closest ? el.closest(".act") : null;
+    if (act) {                                       // 悬停提示补上数量，原始标题只记一次
+      if (!act.dataset.baseTitle) act.dataset.baseTitle = act.title || "";
+      act.title = n
+        ? act.dataset.baseTitle + "（共 " + n + " 个" + (run > 0 ? " · " + run + " 个执行中" : "") + "）"
+        : act.dataset.baseTitle;
+    }
   }
+  /* 编辑区「定时任务管理面板」刷新时同步角标。
+     注：以前只有调用处没有这个定义，抛出的 ReferenceError 会被外层 catch 静默吞掉，
+     表现为大页里增删任务后角标不更新。 */
+  function cronUpdateBadge() { cronSetBadge(); }
   function renderCronList() {
     const box = $("cronList");
     if (!box) return;
@@ -141,7 +158,7 @@
     if (CRON.runTask && CRON.runTask.id === t.id) cronCloseModal();
     CRON.tasks = CRON.tasks.filter(x => x.id !== t.id);
     renderCronList();
-    cronSetBadge((CRON.tasks || []).filter(x => x.running).length);
+    cronSetBadge();                                  // 任务少了一个：角标重算
     if (!CRON.tasks.length) renderCronList();
     toast("已删除：" + t.name, "ok");
   }

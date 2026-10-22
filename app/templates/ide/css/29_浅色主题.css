@@ -32,6 +32,8 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .titlebar { background: #e8e8e8; }
 :where(html.theme-light) .menubar { color: #3b3b3b; }
 :where(html.theme-light) .titlebar .tb-title { color: #6b6b6b; }
+:where(html.theme-light) .titlebar .tb-clock { color: #6b6b6b; }
+:where(html.theme-light) .titlebar .tb-clock:hover { color: #000000; }
 :where(html.theme-light) .titlebar .tb-sep { background: #c8c8c8; }
 :where(html.theme-light) .titlebar .tb-actions button { color: #3b3b3b; }
 :where(html.theme-light) .titlebar .tb-actions button:hover { background: #d4d4d4; }
@@ -1204,6 +1206,9 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .dbc-name { color: #1f2328; }
 :where(html.theme-light) .dbc-sub { color: #6b6b6b; }
 :where(html.theme-light) .dbc-act { color: #5a5a5a; }
+:where(html.theme-light) .dbc-group-h { color: #5a5a5a; }
+:where(html.theme-light) .dbc-group-h:hover { background: #f0f2f4; color: #1f2328; }
+:where(html.theme-light) .dbc-group-n { background: #e6e6e6; color: #4a4a4a; }
 :where(html.theme-light) .dbc-act:hover { background: #e4e6e8; color: #1f2328; }
 :where(html.theme-light) .dbc-in { background: #ffffff; color: #1f2328; border-color: #cecece; }
 :where(html.theme-light) .dbc-in:focus { border-color: #0098ff; }

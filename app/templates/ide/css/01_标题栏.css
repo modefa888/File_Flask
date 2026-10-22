@@ -12,6 +12,14 @@
   .menubar span { cursor: default; }
   .titlebar .tb-title { margin: 0 auto; color: #9aa0a6; font-size: 12px; max-width: 50%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .titlebar .tb-actions { display: flex; gap: 8px; flex: none; align-items: center; }
+  /* 标题栏右上角当前时间：等宽数字，随秒刷新（不换行、不被压缩） */
+  .titlebar .tb-clock {
+    flex: none; display: inline-flex; align-items: center; gap: 5px; margin-right: 2px;
+    color: #9aa0a6; font-size: 12px; font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, Menlo, Consolas, monospace; cursor: default;
+  }
+  .titlebar .tb-clock i { font-size: 12px; }
+  .titlebar .tb-clock:hover { color: #ffffff; }
   .titlebar .tb-sep { width: 1px; height: 16px; background: #3c3c3c; margin: 0 2px; }
   .titlebar .tb-actions button:disabled { opacity: .35; cursor: default; }
   .titlebar .tb-actions button {

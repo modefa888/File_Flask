@@ -12,6 +12,8 @@
     font-size: 10px; font-weight: 700; text-align: center;
   }
   .activitybar .act .runner-badge.git-badge { background: #c9514d; color: #fff; }
+  /* SSH 已连接会话数：蓝色，与「后台任务」的绿色运行数、Git 的红色更改数区分 */
+  .activitybar .act .runner-badge.ssh-badge { background: #2f81f7; color: #fff; }
   .runner-head { display: flex; gap: 6px; margin-bottom: 8px; }
   .runner-head .g-btn { margin: 0; }
   .runner-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

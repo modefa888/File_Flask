@@ -279,7 +279,8 @@
       bind("view", () => attachTask(t));
       bind("pause", () => pauseTaskById(t));
       bind("resume", () => resumeTaskById(t));
-      bind("restart", () => restartTaskById(t));
+      // 正开着「后台任务」面板（右侧有实时日志）时启动不再弹底部面板，避免打断
+      bind("restart", () => restartTaskById(t, typeof runnerViewActive === "function" && runnerViewActive()));
       bind("stop", () => stopTaskById(t));
       bind("remove", () => removeTaskById(t));
       bind("info", (ev) => showTaskInfo(t, ev.currentTarget));   // 查看详细信息悬浮框
@@ -333,8 +334,10 @@
   }
   /* ---------- 启动 / 重启：沿用原文件、工作目录与参数重新拉起 ----------
      以入口文件绝对路径为唯一键：运行中的会先被停止（后端等旧进程真正退出再启动，避免端口没释放），
-     新任务继承运行历史并替换旧卡片 —— 同一文件在列表里始终只有一张卡片，不再越点越多。 */
-  async function restartTaskById(t) {
+     新任务继承运行历史并替换旧卡片 —— 同一文件在列表里始终只有一张卡片，不再越点越多。
+     quiet=true（任务列表 / 「后台任务」面板里点启动）：启动后不自动弹出底部面板，
+     输出看「后台任务」面板右侧的实时日志；想用底部面板可再点「日志」。 */
+  async function restartTaskById(t, quiet) {
     if (t.running) {
       const proj = taskProject(t);
       const ok = await uiConfirm("重启任务",
@@ -345,9 +348,12 @@
     try {
       const d = await runAct("/api/run/restart", t.id);
       if (d.error) throw new Error(d.error);
-      startRunStream(d, d.target || t.target, d.mode || "bg", "");   // 新任务自动接上日志并持续推送
+      // 新任务自动接上日志并持续推送（quiet 时只建标签，不弹底部面板）
+      startRunStream(d, d.target || t.target, d.mode || "bg", "", { quiet: !!quiet });
       toast((t.running ? "已重启：" : "已启动：") + t.name, "ok");
-      loadRunnerList({ silent: true });
+      loadRunnerList({ silent: true }).then(() => {
+        if (typeof rvFollowTask === "function") rvFollowTask(d.id);   // 面板里选中新任务并接上实时日志
+      });
     } catch (e) {
       toast("启动失败：" + (e.message || e), "err");
     }

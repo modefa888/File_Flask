@@ -13,11 +13,8 @@
                 const isDir = item.is_dir;
                 const ext = (item.ext || '').toLowerCase();
                 const previewable = isDir ? false : _canPreviewPath(absPath);
-                const iconClass = isDir ? 'bi bi-folder-fill text-warning tree-icon' : (function () {
-                    const icons = { 'pdf': 'bi-filetype-pdf text-danger', 'jpg': 'bi-file-image text-success', 'jpeg': 'bi-file-image text-success', 'png': 'bi-file-image text-success', 'gif': 'bi-file-image text-success', 'svg': 'bi-file-image text-success', 'mp4': 'bi-file-play text-primary', 'avi': 'bi-file-play text-primary', 'mov': 'bi-file-play text-primary', 'mkv': 'bi-file-play text-primary', 'mp3': 'bi-file-music text-primary', 'wav': 'bi-file-music text-primary', 'zip': 'bi-file-zip text-secondary', 'rar': 'bi-file-zip text-secondary', '7z': 'bi-file-zip text-secondary', 'py': 'bi-file-code text-info', 'js': 'bi-file-code text-warning', 'html': 'bi-file-code text-danger', 'css': 'bi-file-code text-info', 'json': 'bi-file-code text-secondary', 'txt': 'bi-file-text text-secondary', 'md': 'bi-file-text text-secondary' };
-                    const cls = icons[ext] || 'bi-file-earmark';
-                    return `bi ${cls} tree-icon`;
-                })();
+                // 与 IDE 文件树同一套 seti 图标（未加载/未命中时回退彩色 Bootstrap 图标）
+                const iconHtml = fileIconHtml(item, "tree-icon");
                 const sizeStr = item.size_str || '';
                 const metaText = item.is_dir ? sizeStr : sizeStr;
                 const lineClass = `tree-line${isSelected ? ' selected' : ''}`;
@@ -29,7 +26,7 @@
                 <div class="${lineClass}" data-path="${absPath}">
                     <input class="form-check-input item-checkbox tree-checkbox" type="checkbox" name="files" value="${absPath}" data-path="${absPath}" ${isSelected ? 'checked' : ''} />
                     <span class="${toggleClass}">▶</span>
-                    <i class="${iconClass}"></i>
+                    ${iconHtml}
                     ${nameTag}
                     ${metaText ? `<span class="tree-meta">${metaText}</span>` : ''}
                     ${moreBtn}
@@ -99,14 +96,14 @@
                     const isDir = item.is_dir;
                     const ext = (item.ext || '').toLowerCase();
                     const previewable = isDir ? false : _canPreviewPath(absPath);
-                    const iconClass = isDir ? 'bi bi-folder-fill text-warning tree-icon' : 'bi bi-file-earmark tree-icon';
+                    const iconHtml = fileIconHtml({ is_dir: isDir, ext: ext, name: item.name }, "tree-icon");
                     const sizeStr = item.size_str || '';
                     const nameTag = previewable ? `<span class="tree-name clickable" data-path="${childAbsPath}" data-ext="${ext}">${item.name}</span>` : `<span class="tree-name">${item.name}</span>`;
                     html += `
                     <div class="tree-line" data-path="${childAbsPath}">
                         <input class="form-check-input item-checkbox tree-checkbox" type="checkbox" name="files" value="${childAbsPath}" data-path="${childAbsPath}" />
                         <span class="tree-toggle${isDir ? '' : ' leaf'}">▶</span>
-                        <i class="${iconClass}"></i>
+                        ${iconHtml}
                         ${nameTag}
                         ${sizeStr ? `<span class="tree-meta">${sizeStr}</span>` : ''}
                         <button class="tree-more" data-action-path="${childAbsPath}" data-is-dir="${item.is_dir}" title="更多操作"><i class="bi bi-three-dots"></i></button>

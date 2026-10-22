@@ -7,6 +7,24 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
 
+        /* ===== 文件图标：Seti 官方图标字体（与 IDE 资源管理器同一套，资源在 /static/vendor/seti/） ===== */
+        @font-face {
+            font-family: "seti";
+            src: url("/static/vendor/seti/seti.woff") format("woff");
+            font-display: block;
+        }
+        .seti-ic {
+            font-family: "seti"; font-style: normal; font-weight: normal;
+            font-size: 1.4em; line-height: 1; display: inline-block;
+            vertical-align: baseline; transform: translateY(.11em);   /* 字形偏上，做等比下沉对齐文件名 */
+        }
+        /* 列表 / 搜索结果的行内图标：与原来的 .file-icon 尺寸对齐 */
+        .file-icon.seti-ic, .search-ic.seti-ic { font-size: 1.15rem; margin-right: 6px; }
+        /* 树型视图：沿用 .tree-icon 的小字号 */
+        .tree-line .tree-icon.seti-ic { font-size: 1rem; margin-right: 2px; }
+        /* 图标视图：不要按 1.4 倍放大，跟随 .thumb-icon 的字号（小 / 中 / 大尺寸各有值） */
+        .icon-thumb .thumb-icon .seti-ic { font-size: 1em; transform: none; }
+
         .navbar-brand {
             font-weight: 600;
         }

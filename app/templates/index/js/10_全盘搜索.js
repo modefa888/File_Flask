@@ -274,7 +274,7 @@
                 }
                 html += `<tr class="search-row" data-abs-path="${_escAttr(absPath)}" data-parent-path="${_escAttr(parentPath)}">
                 <td><input type="checkbox" class="search-checkbox search-item-cb" data-path="${_escAttr(absPath)}"/></td>
-                <td><i class="${_getSearchIconClass(item)}"></i> <span class="search-name" title="${_escAttr(displayName)}">${_escHtml(displayName)}</span></td>
+                <td>${_getSearchIconHtml(item)} <span class="search-name" title="${_escAttr(displayName)}">${_escHtml(displayName)}</span></td>
                 <td><span class="search-path" data-full-path="${_escAttr(displayPath)}" title="点击复制路径">${_escHtml(displayPath)}</span></td>
                 <td class="text-end search-size">${_escHtml(sizeStr)}</td>
                 <td><span class="${badgeClass}">${_escHtml(typeText)}</span></td>
@@ -400,11 +400,8 @@
             return item.is_dir ? '📁' : '📄';
         }
 
-        function _getSearchIconClass(item) {
-            if (item.is_dir) return 'bi bi-folder-fill text-warning';
-            const ext = (item.ext || '').toLowerCase();
-            const icons = { 'pdf': 'bi-filetype-pdf text-danger', 'jpg': 'bi-file-image text-success', 'jpeg': 'bi-file-image text-success', 'png': 'bi-file-image text-success', 'gif': 'bi-file-image text-success', 'svg': 'bi-file-image text-success', 'mp4': 'bi-file-play text-primary', 'avi': 'bi-file-play text-primary', 'mov': 'bi-file-play text-primary', 'mkv': 'bi-file-play text-primary', 'mp3': 'bi-file-music text-primary', 'wav': 'bi-file-music text-primary', 'zip': 'bi-file-zip text-secondary', 'rar': 'bi-file-zip text-secondary', '7z': 'bi-file-zip text-secondary', 'py': 'bi-file-code text-info', 'js': 'bi-file-code text-warning', 'html': 'bi-file-code text-danger', 'css': 'bi-file-code text-info', 'json': 'bi-file-code text-secondary', 'txt': 'bi-file-text text-secondary', 'md': 'bi-file-text text-secondary' };
-            return `bi ${icons[ext] || 'bi-file-earmark'}`;
+        function _getSearchIconHtml(item) {
+            return fileIconHtml(item, "search-ic");   // 与 IDE 文件树 / 列表 / 图标 / 树型视图同一套 seti 图标
         }
 
         function _escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }

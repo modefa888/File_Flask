@@ -260,14 +260,20 @@ def dashboard():
 
 # --------------------------------------------------------------------------- 配置快照
 def _rule_groups():
-    """命令安全规则分组（只读展示）：名称 / 说明 / 各级别条数。"""
+    """命令安全规则分组（只读展示）：名称 / 说明 / 各级别条数 + 明文规则明细。
+
+    明细里带着正则原文（pattern），前端只做展示，不会执行；
+    规则本身仍写在 app/config.py 的 EXEC_RULE_GROUPS，改完要重启服务。
+    """
     out = []
     for gid, name, desc, items in getattr(config, "EXEC_RULE_GROUPS", []):
         levels = {"blocked": 0, "confirm": 0, "delete": 0}
-        for _pat, _reason, lv in items:
+        rows = []
+        for pat, reason, lv in items:
             levels[lv] = levels.get(lv, 0) + 1
+            rows.append({"pattern": str(pat), "reason": str(reason), "level": lv})
         out.append({"id": gid, "name": name, "desc": desc,
-                    "total": len(items), **levels})
+                    "total": len(items), "items": rows, **levels})
     return out
 
 

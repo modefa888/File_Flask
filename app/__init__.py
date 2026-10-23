@@ -25,7 +25,11 @@ def create_app(test_config=None) -> Flask:
         DEBUG=config.DEBUG,
         JSON_AS_ASCII=False,
         MAX_CONTENT_LENGTH=32 * 1024 * 1024,   # 32MB 请求体上限
+        # 后台 / IDE 的页面把 CSS / JS 都内联进模板：模板一改就要能立刻生效，
+        # 否则进程不重启时会一直渲染启动时缓存的旧模板（表现为「改了前端没变化」）。
+        TEMPLATES_AUTO_RELOAD=True,
     )
+    app.jinja_env.auto_reload = True      # 只按 mtime 重编译改动过的模板，其余仍走缓存
     if test_config:
         app.config.update(test_config)
 
@@ -125,6 +129,13 @@ def _install_request_logging(app: Flask) -> None:
             from .services.adm import api_registry
             api_registry.record_request(rule.rule if rule is not None else path, method,
                                         response.status_code)
+        except Exception:
+            pass
+        # 操作审计日志：所有写操作（POST/PUT/PATCH/DELETE）落 op_log，后台「操作历史」可查
+        try:
+            from .services.common import oplog
+            oplog.record_from_request(request, response.status_code, method, path,
+                                      response=response)
         except Exception:
             pass
         # 页面（HTML）禁止缓存：模板 / 内联脚本改动后普通刷新即可生效，

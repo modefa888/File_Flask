@@ -609,15 +609,19 @@ ADM.modules.push({
             var reset = false;
             if (S.local && S.local.dirty) {
                 var files = (S.local.dirty_files || []).join('、');
-                if (!confirm('服务器上有未提交的本地改动：\n' + files +
-                    '\n\n继续更新可能失败。是否继续？')) return;
+                var goDirty = await ADM.confirm('服务器有未提交的本地改动',
+                    '以下文件有本地改动：<br><code>' + ADM.esc(files) + '</code><br>' +
+                    '<span class="adm-hint">继续更新可能失败，确定继续？</span>', '继续更新');
+                if (!goDirty) return;
             }
             if (S.cfg && S.cfg.hard_reset) {
-                reset = confirm('已开启「允许强制覆盖」。\n\n' +
-                    '点「确定」= 丢弃本地未提交改动（git reset --hard）后更新；\n' +
-                    '点「取消」= 先尝试安全的快进合并。');
+                reset = !!(await ADM.confirm('强制覆盖模式已开启',
+                    '点「确定」= 丢弃本地未提交改动（<code>git reset --hard</code>）后再更新；<br>' +
+                    '点「取消」= 先尝试安全的快进合并。', '丢弃并更新'));
             }
-            if (!confirm('开始更新？过程中服务可能短暂不可用。')) return;
+            var go = await ADM.confirm('开始更新',
+                '将从远端拉取代码并重启服务，过程中服务可能短暂不可用。', '开始更新');
+            if (!go) return;
             setBusy(true);
             q('uRunLog').innerHTML = '<span class="ln dim">正在启动更新任务…</span>';
             try {
@@ -635,7 +639,10 @@ ADM.modules.push({
         }
 
         async function restartOnly() {
-            if (!confirm('只重启服务（不拉取代码）？')) return;
+            var okRestart = await ADM.confirm('重启服务',
+                '只重启服务，不拉取代码。<br>' +
+                '<span class="adm-hint">重启期间服务会短暂不可用（几秒到十几秒）。</span>', '立即重启');
+            if (!okRestart) return;
             setBusy(true);
             try {
                 var res = await ADM.api('/api/adm/update/restart', { method: 'POST', body: {} });

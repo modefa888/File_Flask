@@ -353,6 +353,27 @@ def api_permissions():
     return jsonify(api_registry.permission_view())
 
 
+# --------------------------------------------------------------------------- 操作审计日志
+@bp.route("/api/adm/oplogs")
+def api_oplogs():
+    """全站写操作日志（谁 / 时间 / 模块 / 动作 / 目标 / 结果 / IP），支持关键字搜索与分页。"""
+    from ...services.common import oplog
+    try:
+        page = max(int(request.args.get("page", 1)), 1)
+        size = min(max(int(request.args.get("page_size", 50)), 1), 200)
+    except (TypeError, ValueError):
+        page, size = 1, 50
+    items, total = oplog.list_logs((request.args.get("q") or "").strip(), page, size)
+    return jsonify({"items": items, "total": total, "stats": oplog.stats()})
+
+
+@bp.route("/api/adm/oplogs/clear", methods=["POST"])
+def api_oplogs_clear():
+    """清空操作日志。"""
+    from ...services.common import oplog
+    return _ok({"removed": oplog.clear()})
+
+
 # --------------------------------------------------------------------------- 页面模块
 @bp.route("/api/adm/pages")
 def api_pages():

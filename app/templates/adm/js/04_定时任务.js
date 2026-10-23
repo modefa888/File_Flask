@@ -107,6 +107,10 @@ async function handleCronAction(el, btn) {
         await refreshCron(el);
         setTimeout(function () { openCronRuns(id, btn.dataset.name, el); }, 600);
     } else if (act === 'stop') {
+        var okStop = await ADM.confirm('停止任务',
+            '确认停止正在运行的任务「' + ADM.esc(btn.dataset.name) + '」？<br>' +
+            '<span class="adm-hint">会中断这次执行，已产生的输出不受影响。</span>', '停止');
+        if (!okStop) return;
         await ADM.api('/api/cron/stop', { method: 'POST', body: { id: id } });
         ADM.toast('已停止', 'ok');
         await refreshCron(el);

@@ -1110,3 +1110,387 @@
     border-color: var(--adm-brand);
     background: var(--adm-brand);
 }
+
+/* ---------------- 命令安全规则：分组展开 / 明细 ----------------
+   系统设置页「命令安全规则」Tab：每个分组一行，点标题展开看每条规则的说明与正则 */
+.adm-rule-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.adm-rule-toolbar .adm-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.adm-rule-card {
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 10px;
+    margin-bottom: 8px;
+    background: rgba(255, 255, 255, .02);
+    overflow: hidden;
+}
+
+.adm-rule-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.adm-rule-head:hover {
+    background: rgba(148, 163, 184, .10);
+}
+
+.adm-rule-caret {
+    flex: none;
+    font-size: 11px;
+    color: var(--adm-text-mute);
+    transition: transform .12s;
+}
+
+.adm-rule-card.open .adm-rule-caret {
+    transform: rotate(90deg);
+}
+
+.adm-rule-name {
+    flex: none;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.adm-rule-desc {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--adm-text-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.adm-rule-counts {
+    flex: none;
+    display: flex;
+    gap: 6px;
+}
+
+.adm-rule-body {
+    padding: 2px 12px 8px;
+}
+
+/* 三列用 grid 固定：级别 / 说明 / 正则 在每一行都严格对齐（flex 会被长短文字带偏） */
+/* 明细表头：与下面每一行共用同一套列宽，一眼看出三列 */
+.adm-rule-cols {
+    display: grid;
+    grid-template-columns: 88px 230px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 2px 0 6px;
+    border-bottom: 1px solid var(--adm-border-soft);
+    font-size: 11.5px;
+    line-height: 18px;
+    color: var(--adm-text-mute);
+}
+
+@media (max-width: 1080px) {
+    .adm-rule-cols {
+        grid-template-columns: 88px minmax(0, 1fr);
+    }
+
+    .adm-rule-cols span:last-child {
+        display: none;
+    }
+}
+
+.adm-rule-item {
+    display: grid;
+    grid-template-columns: 88px 230px minmax(0, 1fr);
+    align-items: center;      /* 徽标 / 说明 / 正则 垂直居中对齐，不再出现徽标偏低 */
+    gap: 10px;
+    padding: 7px 0;
+    border-top: 1px dashed var(--adm-border-soft);
+}
+
+.adm-rule-item:first-child {
+    border-top: 0;
+}
+
+.adm-rule-lv {
+    display: flex;
+    align-items: center;
+}
+
+.adm-rule-reason {
+    font-size: 12.5px;
+    line-height: 18px;        /* 与正则块同高，三列基线一致 */
+    color: var(--adm-text);
+}
+
+.adm-rule-pat {
+    display: block;
+    min-width: 0;
+    padding: 0 7px;
+    border-radius: 6px;
+    background: rgba(148, 163, 184, .12);
+    font-size: 11.5px;
+    line-height: 18px;        /* 与说明列同高 */
+    color: var(--adm-text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (max-width: 1080px) {
+    .adm-rule-item {
+        grid-template-columns: 88px minmax(0, 1fr);
+    }
+
+    .adm-rule-pat {
+        grid-column: 2;
+    }
+}
+
+html[data-theme="light"] .adm-rule-card {
+    background: #ffffff;
+}
+
+html[data-theme="light"] .adm-rule-pat {
+    background: #f1f4f9;
+    color: #475569;
+}
+
+/* ---------------- 操作日志：详情行 + 请求参数键值列表 ----------------
+   一整串 JSON 挤在窄弹窗里很难读，这里拆成「键 → 值」逐行展示 */
+/* 详情里的每一行：标签列固定宽度，所有行的值左边缘对齐（不再各写各的 style） */
+.adm-op-line {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+    padding: 3px 0;
+}
+
+.adm-op-line-k {
+    color: var(--adm-text-mute);
+}
+
+.adm-op-line-v {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.adm-op-params {
+    background: rgba(148, 163, 184, .10);
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 9px;
+    overflow: hidden;                   /* 圆角裁剪内部滚动区 */
+}
+
+/* 卡片顶栏：左边条数，右边「原文 / 结构化」切换 */
+.adm-op-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--adm-border-soft);
+    background: rgba(148, 163, 184, .08);
+}
+
+.adm-op-bar-hint {
+    font-size: 11.5px;
+    color: var(--adm-text-mute);
+}
+
+.adm-op-switch {
+    padding: 1px 9px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--adm-text-dim);
+    font-size: 11.5px;
+    line-height: 1.7;
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+}
+
+.adm-op-switch:hover {
+    color: var(--adm-brand);
+    border-color: var(--adm-brand);
+}
+
+/* 默认收起：顶栏整条可点，箭头指右；展开后箭头转 90°，内容区才出现 */
+.adm-op-bar {
+    cursor: pointer;
+    user-select: none;
+}
+
+.adm-op-caret {
+    display: inline-block;
+    margin-right: 5px;
+    font-size: 10px;
+    opacity: .6;
+    transition: transform .15s;
+}
+
+.adm-op-params:not(.collapsed) .adm-op-caret {
+    transform: rotate(90deg);
+}
+
+.adm-op-params.collapsed .adm-op-body,
+.adm-op-params.collapsed .adm-op-raw {
+    display: none;
+}
+
+.adm-op-params.collapsed .adm-op-bar {
+    border-bottom-color: transparent;
+}
+
+.adm-op-params.collapsed .adm-op-bar:hover .adm-op-bar-hint {
+    color: var(--adm-brand);
+}
+
+/* 参数列表：最高 240px，超出的部分在这里滚动（自定义滚动条，始终可见） */
+.adm-op-body {
+    padding: 6px 10px;
+    max-height: 240px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;                                  /* Firefox */
+    scrollbar-color: rgba(148, 163, 184, .55) transparent;
+}
+
+.adm-op-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.adm-op-body::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, .45);
+    border-radius: 8px;
+}
+
+.adm-op-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, .78);
+}
+
+.adm-op-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* 「原文 / 结构化」两块内容二选一 */
+.adm-op-params.raw .adm-op-body {
+    display: none;
+}
+
+.adm-op-params.raw .adm-op-raw {
+    display: block;
+}
+
+.adm-op-param {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 4px 0;
+    border-top: 1px dashed var(--adm-border-soft);
+    font-size: 12px;
+}
+
+.adm-op-param:first-child {
+    border-top: 0;
+}
+
+.adm-op-param.sub .adm-op-key {
+    color: var(--adm-text-dim);
+}
+
+.adm-op-key {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    color: var(--adm-text-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    box-sizing: border-box;
+}
+
+.adm-op-v {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.adm-op-val {
+    display: inline-block;
+    max-width: 100%;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    color: var(--adm-text);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.adm-op-chip {
+    display: inline-block;
+    padding: 0 6px;
+    margin: 1px 4px 1px 0;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, .18);
+    font-size: 11px;
+    color: var(--adm-text-dim);
+}
+
+/* 原文视图：默认隐藏，切到「原文」时替换参数列表（同样限高 + 自定义滚动条） */
+.adm-op-raw {
+    display: none;
+    margin: 0;
+    padding: 8px 10px;
+    max-height: 240px;
+    overflow: auto;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--adm-text-dim);
+    white-space: pre-wrap;
+    word-break: break-all;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, .55) transparent;
+}
+
+.adm-op-raw::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.adm-op-raw::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, .45);
+    border-radius: 8px;
+}
+
+.adm-op-raw::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, .78);
+}
+
+/* 带参数列表的详情弹窗加宽（同时要覆盖 max-width，否则还是被 520px 卡住） */
+.adm-modal:has(.adm-op-params) {
+    width: min(760px, 94vw);
+    max-width: 760px;
+}
+
+html[data-theme="light"] .adm-op-params {
+    background: #f4f6fb;
+}
+
+html[data-theme="light"] .adm-op-bar {
+    background: #edf1f8;
+}

@@ -112,6 +112,10 @@ async function handleRunnerAction(el, btn) {
             ADM.toast(e.message, 'err');
         }
     } else if (act === 'stop') {
+        var okStopR = await ADM.confirm('停止任务',
+            '确认停止「' + ADM.esc(btn.dataset.name || '') + '」这个正在运行的任务？<br>' +
+            '<span class="adm-hint">会向进程发送终止信号，正在写的文件可能只写了一半。</span>', '停止');
+        if (!okStopR) return;
         await ADM.api('/api/run/stop', { method: 'POST', body: { id: id } });
         ADM.toast('已发送停止信号', 'ok');
         await refreshRunner(el);

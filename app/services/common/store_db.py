@@ -140,6 +140,23 @@ CREATE TABLE IF NOT EXISTS notify_history (
     ts  INTEGER DEFAULT 0,
     rec TEXT DEFAULT '{}'
 );
+-- 操作审计日志（后台「操作历史 → 操作日志」）：所有写操作一行
+CREATE TABLE IF NOT EXISTS op_log (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts     TEXT NOT NULL DEFAULT '',
+    user   TEXT DEFAULT '',
+    module TEXT DEFAULT '',
+    action TEXT DEFAULT '',
+    target TEXT DEFAULT '',
+    detail TEXT DEFAULT '',
+    ip     TEXT DEFAULT '',
+    result TEXT DEFAULT '',
+    rule   TEXT DEFAULT '',      -- 接口路径（如 /api/adm/users/delete）
+    method TEXT DEFAULT '',      -- 请求方法 POST / DELETE …
+    op     TEXT DEFAULT '',      -- 动作归类：新增 / 修改 / 删除 / 清空 …
+    resp   TEXT DEFAULT ''       -- 接口返回内容摘要（JSON 压缩后，便于对照请求参数）
+);
+CREATE INDEX IF NOT EXISTS idx_op_log_ts ON op_log(ts DESC);
 -- 运行环境自定义配置（一行一项：kind=overrides 解释器路径 / kind=env 环境变量）
 CREATE TABLE IF NOT EXISTS env_cfg (
     kind  TEXT NOT NULL,
@@ -499,6 +516,20 @@ def store_tx():
             conn.close()
 
 
+def _migrate_oplog_columns(conn):
+    """老库补上 op_log 后加的 rule / method / op / resp 列（新库建表时已包含）。"""
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(op_log)")}
+    except Exception:
+        return
+    for name in ("rule", "method", "op", "resp"):
+        if name not in cols:
+            try:
+                conn.execute("ALTER TABLE op_log ADD COLUMN %s TEXT DEFAULT ''" % name)
+            except Exception as e:
+                _log.warning("补充 op_log.%s 失败：%s", name, e)
+
+
 def init_store_db():
     """幂等建表（模块导入时执行一次）。"""
     with _lock:
@@ -506,6 +537,7 @@ def init_store_db():
         try:
             conn.executescript(_SCHEMA)
             _migrate_ai_columns(conn)          # 老库补上后加的 tokens / model 列
+            _migrate_oplog_columns(conn)       # 老库补上 op_log 的 rule / method / op 列
             conn.commit()
         finally:
             conn.close()

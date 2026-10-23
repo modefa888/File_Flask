@@ -191,6 +191,17 @@
         if (t.path === "\u0000cron" && typeof cronOpenView === "function") { cronOpenView(); continue; }
         // 后台任务管理面板（虚拟路径 \u0000runner）：同样直接重开
         if (t.path === "\u0000runner" && typeof openRunnerView === "function") { openRunnerView(); continue; }
+        // 文件夹管理器可视化查看（虚拟路径 \u0000fm）：直接重开，当前目录由模块自己记在 localStorage
+        if (t.path === "\u0000fm" && typeof openFolderManagerView === "function") { openFolderManagerView(); continue; }
+        // 远程文件管理器（虚拟路径 \u0000sshfm:<连接id>）：按 id 找回 SSH 连接后重开
+        if (typeof FM_SSHFM_PREFIX === "string" && t.path.indexOf(FM_SSHFM_PREFIX) === 0 && typeof openSshFileManagerById === "function") { openSshFileManagerById(t.path.slice(FM_SSHFM_PREFIX.length)); continue; }
+        // 远程文件查看器（虚拟路径 \u0000sshfile:<连接id>:<绝对路径>）：同样按 id 找回连接后重开
+        if (typeof FM_SSHFILE_PREFIX === "string" && t.path.indexOf(FM_SSHFILE_PREFIX) === 0) {
+          const _fmRest = t.path.slice(FM_SSHFILE_PREFIX.length);
+          const _fmI = _fmRest.indexOf(":");
+          if (_fmI > 0 && typeof openSshFileRestored === "function") openSshFileRestored(_fmRest.slice(0, _fmI), _fmRest.slice(_fmI + 1));
+          continue;
+        }
         // 旧版会话快照里可能存了 "ssh:<id>"（不带 \u0000 前缀的 SSH 终端假标签）：跳过不恢复
         if (/^[\u0000-\u001f]*ssh:[^/]*$/i.test(String(t.path || ""))) continue;
         if (t.path.indexOf("\u0001") >= 0) continue;
@@ -1881,6 +1892,7 @@
     if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏高亮跟随当前标签
     if (typeof apiSyncOpenMarks === "function") apiSyncOpenMarks();   // API 调试侧栏高亮跟随当前标签
     if (typeof runnerViewOnActivate === "function") runnerViewOnActivate();   // 后台任务轮询跟随当前标签
+    if (active && typeof active.onFmActivate === "function") active.onFmActivate();   // 文件夹管理器：切回时刷新目录
   }
   async function closeTab(tab) {
     const i = tabs.indexOf(tab);

@@ -740,15 +740,22 @@
       pop.innerHTML =
         '<div class="upc-t"><i class="bi ' + (opts.danger ? "bi-exclamation-triangle" : "bi-question-circle") + '"></i><span>' + esc(opts.title || "确认操作") + '</span></div>' +
         '<div class="upc-m">' + esc(opts.msg || "") + '</div>' +
-        '<div class="upc-f"><button class="upc-no">取消</button><button class="upc-ok">' + esc(opts.okText || "确定") + '</button></div>';
+        '<div class="upc-f"><button class="upc-no">取消</button><button class="upc-ok"' + (opts.okDisabled ? " disabled" : "") + '>' + esc(opts.okText || "确定") + '</button></div>';
       document.body.appendChild(pop);
       const r = anchor.getBoundingClientRect();
       const pw = pop.offsetWidth, ph = pop.offsetHeight;
-      let left = Math.max(6, Math.min(r.left, window.innerWidth - pw - 8));
-      let top = r.bottom + 6;
-      if (top + ph > window.innerHeight - 6) top = r.top - ph - 6;
+      let left, top;
+      if (opts.at) {
+        // 指定视口坐标锚点（例如从右键菜单旁弹出），同样做视口内收拢
+        left = Math.max(6, Math.min(opts.at.left, window.innerWidth - pw - 8));
+        top = Math.max(6, Math.min(opts.at.top, window.innerHeight - ph - 6));
+      } else {
+        left = Math.max(6, Math.min(r.left, window.innerWidth - pw - 8));
+        top = r.bottom + 6;
+        if (top + ph > window.innerHeight - 6) top = r.top - ph - 6;
+      }
       pop.style.left = left + "px";
-      pop.style.top = Math.max(6, top) + "px";
+      pop.style.top = top + "px";
       const done = (v) => {
         pop.remove();
         document.removeEventListener("mousedown", onDoc, true);
@@ -760,7 +767,7 @@
       document.addEventListener("mousedown", onDoc, true);
       document.addEventListener("keydown", onKey, true);
       pop.querySelector(".upc-no").onclick = () => done(false);
-      pop.querySelector(".upc-ok").onclick = () => done(true);
+      pop.querySelector(".upc-ok").onclick = () => { if (!opts.okDisabled) done(true); };
     });
   }
 
@@ -1259,8 +1266,8 @@
   document.addEventListener("contextmenu", () => closeDrop(), true);   // 在别处右键时收起菜单
 
   /* ---------- 侧边栏面板切换 ---------- */
-  const panels = { explorer: "explorerPanel", search: "searchPanel", git: "gitPanel", run: "runPanel", runner: "runnerPanel", env: "envPanel", ext: "extPanel", dbconn: "dbconnPanel", api: "apiPanel", cron: "cronPanel" };
-  const titles = { explorer: "资源管理器", search: "搜索", git: "源代码管理", run: "运行和调试", runner: "后台任务", env: "运行环境", ext: "扩展", dbconn: "数据库", api: "API 调试", cron: "定时任务" };
+  const panels = { explorer: "explorerPanel", search: "searchPanel", git: "gitPanel", run: "runPanel", runner: "runnerPanel", env: "envPanel", ext: "extPanel", dbconn: "dbconnPanel", api: "apiPanel", cron: "cronPanel", fm: "fmPanel" };
+  const titles = { explorer: "资源管理器", search: "搜索", git: "源代码管理", run: "运行和调试", runner: "后台任务", env: "运行环境", ext: "扩展", dbconn: "数据库", api: "API 调试", cron: "定时任务", fm: "文件夹管理器" };
   function showPanel(name) {
     // 未知面板（例如会话恢复时插件面板尚未注册、或插件已被卸载）回退到资源管理器，
     // 否则下面的循环会把所有面板隐藏却没有目标可显示，导致侧栏空白。
@@ -1291,6 +1298,7 @@
     if (name === "dbconn" && typeof loadDbConns === "function") loadDbConns();
     if (name === "api" && typeof loadApiReqs === "function") loadApiReqs();
     if (name === "cron" && typeof loadCron === "function") loadCron().then(cronTick);
+    if (name === "fm" && typeof fmLoadRemoteList === "function") fmLoadRemoteList();
   }
   document.getElementById("activitybar").addEventListener("click", (e) => {
     const a = e.target.closest(".act[data-panel]"); if (!a) return;

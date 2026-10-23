@@ -1905,3 +1905,55 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .tai-hist-del { border-color: #d9dee4; color: #2f6291; }
 :where(html.theme-light) .tai-hist-use:hover { color: #0b5c9a; border-color: #9cc4e8; background: #eef5fc; }
 :where(html.theme-light) .tai-hist-del:hover { color: #c0392b; border-color: #d9a19b; background: #fbe9e7; }
+
+/* ---- 45_文件夹管理器可视化查看 ---- */
+:where(html.theme-light) .fm-view-host,
+:where(html.theme-light) .sshfile-host { background: #ffffff; }
+:where(html.theme-light) .fmv { color: #1f2328; }
+:where(html.theme-light) .fmv .g-ico { color: #5a6572; }
+:where(html.theme-light) .fmv .g-ico:hover { color: #1f2328; }
+:where(html.theme-light) .fmv-tools,
+:where(html.theme-light) .rfv-tools { border-bottom-color: #e4e8ec; }
+:where(html.theme-light) .rfv-tools { color: #6b7d8d; }
+:where(html.theme-light) .rfv-host,
+:where(html.theme-light) .fmv-host,
+:where(html.theme-light) .rfv-tools .bi-hdd-network { color: #b26a00; }
+:where(html.theme-light) .fmv-host { background: #fdf1df; }
+:where(html.theme-light) .fmv-path { border-color: #d5dae0; background: #f6f8fa; color: #1f2328; }
+:where(html.theme-light) .fmv-path:focus { border-color: #3b7dd8; }
+:where(html.theme-light) .fmv-crumbs { border-bottom-color: #e4e8ec; color: #6b7d8d; }
+:where(html.theme-light) .fmv-crumb:hover { background: #eef1f4; color: #1f2328; }
+:where(html.theme-light) .fmv-ph { color: #8a95a1; }
+:where(html.theme-light) .fmv .fmv-cell:hover { background: #f3f6f9; }
+:where(html.theme-light) .fmv .fmv-cell.sel { background: #e8f1fb; border-color: #9cc4e8; }
+:where(html.theme-light) .fmv .fmv-row.fmv-item:hover { background: #f3f6f9; }
+:where(html.theme-light) .fmv .fmv-row.fmv-item.sel { background: #e8f1fb; }
+:where(html.theme-light) .fmv-row.fmv-head { background: #fafbfc; border-bottom-color: #e4e8ec; color: #8a95a1; }
+:where(html.theme-light) .fmv-cell .fmv-thumb { background: #f3f6f9; }
+:where(html.theme-light) .fmv-cell .fmv-sub,
+:where(html.theme-light) .fmv-row .c-sz,
+:where(html.theme-light) .fmv-row .c-mt,
+:where(html.theme-light) .fmv-row .c-ty,
+:where(html.theme-light) .rfv-info,
+:where(html.theme-light) .fmv-status,
+:where(html.theme-light) .fmv-rhd,
+:where(html.theme-light) .fmv-rph { color: #8a95a1; }
+:where(html.theme-light) .fmv-status { border-top-color: #e4e8ec; }
+:where(html.theme-light) .rfv-tools .g-ico { color: #5a6572; }
+:where(html.theme-light) .rfv-tools .g-ico:hover { color: #1f2328; }
+:where(html.theme-light) .rfv-bin { color: #8a95a1; }
+:where(html.theme-light) .fmv-drop { background: rgba(232, 244, 255, .8); border-color: #3b7dd8; color: #1f5c9e; }
+:where(html.theme-light) .fmv-up { background: #ffffff; border-color: #d5dae0; box-shadow: 0 12px 40px rgba(0,0,0,.15); }
+:where(html.theme-light) .fmv-up-title { color: #1f2328; }
+:where(html.theme-light) .fmv-up-hd { border-bottom-color: #e4e8ec; }
+:where(html.theme-light) .fmv-up-head { background: #ffffff; border-bottom-color: #e4e8ec; color: #8a95a1; }
+:where(html.theme-light) .fmv-up-row { border-bottom-color: #f0f2f5; }
+:where(html.theme-light) .fmv-up-row .u-sz { color: #8a95a1; }
+:where(html.theme-light) .fmv-up-ft { border-top-color: #e4e8ec; color: #8a95a1; }
+:where(html.theme-light) .fmv-up-prog { background: #e8ecef; }
+:where(html.theme-light) .fmv-up-x { color: #5a6572; }
+:where(html.theme-light) .fm-ctx { background: #ffffff; border-color: #d5dae0; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+:where(html.theme-light) .fm-ctx-i { color: #1f2328; }
+:where(html.theme-light) .fm-ctx-i:hover { background: #e8f1fb; color: #1f2328; }
+:where(html.theme-light) .fm-ctx-i.danger { color: #c0392b; }
+:where(html.theme-light) .fm-ctx-i.danger:hover { background: #fbe9e7; color: #c0392b; }

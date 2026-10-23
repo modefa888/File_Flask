@@ -104,6 +104,7 @@ File_Flask/
 | 22 | `ide/cron.py` | `cron` | 定时任务（参考青龙面板）：cron 计划任务的增删改查、启停、立即运行、停止、执行记录与日志 |
 | 23 | `ide/termai.py` | `termai` | 终端 AI 助手：自然语言 → 命令建议（含风险说明）、执行后流式解读输出 |
 | 24 | `adm/update.py` | `update` | 在线更新：后台管理 SPA 模块（`/admin#update`），GitHub 检查更新、拉取代码、装依赖、重启 |
+| 25 | `ide/sshfile.py` | `sshfile` | SSH 远程文件管理（paramiko SFTP）：`/api/ssh/fs/*` 列目录 / 读写 / 建删改 / 上传 / 下载 / 缩略图；SFTP 客户端按连接缓存（15 分钟 TTL），复用 sshconn 的连接存储与凭据解密 |
 
 ### 4.1 AI 助手（`ide/ai.py`）
 

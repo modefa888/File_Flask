@@ -31,6 +31,7 @@
       <div class="act" data-panel="api" title="API 调试（HTTP 请求客户端，仿 Postman）"><i class="bi bi-send"></i></div>
       <div class="act" data-panel="cron" title="定时任务（cron 计划任务，参考青龙面板）"><i class="bi bi-alarm"></i><span class="runner-badge" id="actCronBadge" style="display:none">0</span></div>
       <div class="act" data-panel="sshconn" title="终端连接工具（SSH 远程主机，仿 Xshell）"><i class="bi bi-hdd-network"></i><span class="runner-badge ssh-badge" id="actSshBadge" style="display:none">0</span></div>
+      <div class="act" data-panel="fm" title="文件夹管理器（可视化浏览服务器文件系统）"><i class="bi bi-folder2-open"></i></div>
       <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
       {# 底部两个图标：进程资源管理器在设置之上，设置永远在最底下。
          act-spacer 让「组内第一个」吸收上方全部空白，把整组顶到活动栏最底部（若两个都写 margin-top:auto，
@@ -137,6 +138,14 @@
         </div>
         <div class="env-sec-head" id="envSysHead"><i class="bi bi-caret-right"></i> 系统信息</div>
         <div id="envSysBox" style="display:none"><div class="env-sys" id="envSys">展开后加载…</div></div>
+      </div>
+      <div class="side-panel" id="fmPanel">
+        <div class="fm-tools">
+          <button class="g-btn block" id="fmOpenView" title="在右侧编辑区打开本机文件夹管理器（网格 / 列表可视化浏览）"><i class="bi bi-window-stack"></i> 编辑区打开</button>
+          <button class="g-btn block outline" id="fmOpenRoot" title="在右侧编辑区打开项目根目录"><i class="bi bi-house"></i> 项目根目录</button>
+        </div>
+        <div id="fmRemoteList"><div class="fmv-rph">正在加载远程服务器列表…</div></div>
+        <div class="s-hint">可视化浏览服务器文件系统：双击文件夹进入、双击文件打开，支持路径跳转、隐藏文件、图片缩略图与下载。远程主机（SSH）还支持上传 / 新建 / 重命名 / 删除，双击远程文件可直接编辑并保存回主机。上次浏览的目录会自动记住。</div>
       </div>
       <div class="side-panel" id="extPanel"><div class="ph">扩展市场暂未开放。</div></div>
       <div class="side-panel" id="dbconnPanel">

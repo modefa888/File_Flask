@@ -1,0 +1,218 @@
+/* ==================================================================
+   文件夹管理器可视化查看（编辑器区域标签页：本机 \u0000fm / 远程 \u0000sshfm:<id>）
+   含远程文件查看器（\u0000sshfile:<id>:<path>）。
+   深色为默认配色；浅色主题覆盖统一追加在 29_浅色主题.css 末尾。
+   ================================================================== */
+.fm-view-host { background: var(--cm-bg, #1e1e1e); }
+.fmv {
+  display: flex; flex-direction: column; height: 100%; min-height: 0;
+  font-size: 13px; color: #cfd6dd; user-select: none;
+}
+.fmv .g-ico { color: #9aa4ad; }
+.fmv .g-ico:hover { color: #e8edf2; }
+.fmv .g-ico:disabled { opacity: .35; pointer-events: none; }
+
+/* ---------- 工具行 ---------- */
+.fmv-tools {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,.07);
+  flex: none;
+}
+.fmv-tools .g-ico { flex: none; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; border-radius: 5px; cursor: pointer; }
+.fmv-tools .g-ico.on { color: #67b0f8; background: rgba(103,176,248,.14); }
+.fmv-path {
+  flex: 1; min-width: 60px; height: 26px; padding: 0 8px;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+  background: rgba(255,255,255,.05); color: #dfe6ec; font-size: 12px;
+  font-family: var(--mono, monospace);
+}
+.fmv-path:focus { outline: none; border-color: #3b7dd8; }
+
+/* ---------- 面包屑 ---------- */
+.fmv-crumbs {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 2px;
+  padding: 5px 10px; border-bottom: 1px solid rgba(255,255,255,.07);
+  font-size: 12px; color: #8b949d; flex: none; user-select: none;
+}
+.fmv-crumb { cursor: pointer; padding: 2px 5px; border-radius: 4px; white-space: nowrap; }
+.fmv-crumb:hover { background: rgba(255,255,255,.08); color: #e8edf2; }
+.fmv-crumb .bi-hdd { margin-right: 3px; }
+.fmv-sep { font-size: 10px; opacity: .5; }
+.fmv-host {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px;
+  border-radius: 10px; background: rgba(226,160,74,.15); color: #e2a04a; font-size: 11px;
+}
+
+/* ---------- 内容区 ---------- */
+.fmv-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
+.fmv-ph { padding: 40px 0; text-align: center; color: #6d7880; }
+
+/* ---------- 网格视图 ---------- */
+.fmv-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px; padding: 10px;
+}
+.fmv-cell {
+  position: relative; display: flex; flex-direction: column; align-items: center;
+  padding: 10px 6px 8px; border-radius: 8px; cursor: pointer; text-align: center;
+  border: 1px solid transparent;
+}
+.fmv-cell:hover { background: rgba(255,255,255,.06); }
+.fmv-cell.sel { background: rgba(103,176,248,.14); border-color: rgba(103,176,248,.35); }
+.fmv-cell .fmv-ic { font-size: 30px; line-height: 40px; height: 40px; }
+.fmv-cell .fmv-thumb {
+  height: 40px; width: 52px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 4px; overflow: hidden; background: rgba(255,255,255,.04);
+}
+.fmv-cell .fmv-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.fmv-cell .fmv-nm {
+  margin-top: 6px; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: break-all;
+}
+.fmv-cell .fmv-sub { margin-top: 2px; font-size: 11px; color: #6d7880; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fmv-cell .fmv-acts { position: absolute; top: 4px; right: 6px; }
+
+/* ---------- 列表视图 ---------- */
+.fmv-list { padding: 4px 0; }
+.fmv-row {
+  display: grid; grid-template-columns: minmax(0,1fr) 90px 150px 90px;
+  gap: 8px; align-items: center; padding: 4px 12px; cursor: pointer;
+}
+.fmv-row.fmv-head {
+  position: sticky; top: 0; z-index: 1; cursor: default;
+  color: #6d7880; font-size: 11px; padding: 6px 12px;
+  background: #252526; border-bottom: 1px solid rgba(255,255,255,.07);
+}
+/* 行高固定：悬停时出现的 22px 操作按钮不再把行撑高（消除鼠标划过抖动） */
+.fmv-row.fmv-item { min-height: 30px; }
+.fmv-row.fmv-item:hover { background: rgba(255,255,255,.06); }
+.fmv-row.fmv-item.sel { background: rgba(103,176,248,.14); }
+.fmv-row .c-nm { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fmv-row .c-sz, .fmv-row .c-mt, .fmv-row .c-ty { color: #8b949d; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fmv-row .fmv-ic-sm { flex: none; display: inline-flex; font-size: 15px; }
+
+/* ---------- 状态栏 ---------- */
+.fmv-status {
+  flex: none; padding: 4px 10px; border-top: 1px solid rgba(255,255,255,.07);
+  color: #6d7880; font-size: 11px;
+}
+
+/* ---------- 远程文件查看器（\u0000sshfile:<cid>:<path>） ---------- */
+.sshfile-host { background: var(--cm-bg, #1e1e1e); }
+.rfv { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.rfv-tools {
+  display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.07); flex: none; font-size: 12px; color: #8b949d;
+}
+.rfv-tools .bi-hdd-network { color: #e2a04a; flex: none; }
+.rfv-host { flex: none; color: #e2a04a; }
+.rfv-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono, monospace); }
+.rfv-info { flex: none; font-size: 11px; color: #6d7880; }
+.rfv-flex { flex: 1; }
+/* split-main 的 flex:1 1 auto 会把按钮撑满整行，这里固定为内容宽度 */
+.rfv-tools .rfv-save { flex: 0 0 auto; }
+.rfv-tools .rfv-save:disabled { opacity: .45; cursor: default; }
+.rfv-tools .rfv-save:disabled:hover { background: #0d7ec4; }
+.rfv-tools .g-ico { color: #9aa4ad; text-decoration: none; }
+.rfv-tools .g-ico:hover { color: #e8edf2; }
+.rfv-cm { flex: 1; min-height: 0; }
+.rfv-cm .CodeMirror { width: 100%; height: 100%; }
+.rfv-bin {
+  height: 100%; display: flex; flex-direction: column; gap: 12px;
+  align-items: center; justify-content: center; color: #6d7880;
+}
+.rfv-bin .bi-file-earmark-binary { font-size: 42px; }
+
+/* ---------- 侧栏面板（#fmPanel） ---------- */
+.fm-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.fm-tools .g-btn.block { flex: 1 1 auto; width: auto; min-width: 0; margin-top: 0; }
+.fmv-rhd {
+  display: flex; align-items: center; gap: 5px; margin: 6px 0 6px;
+  font-size: 11px; color: #6d7880; text-transform: none;
+}
+.fmv-rhd .bi-hdd-network { color: #e2a04a; }
+.fm-remote-item { justify-content: flex-start; text-align: left; margin-bottom: 4px; gap: 6px; }
+.fm-remote-sub { margin-left: auto; font-size: 11px; opacity: .6; }
+.fmv-rph { padding: 8px 2px; font-size: 12px; color: #6d7880; }
+
+/* ---------- 拖拽上传遮罩 ---------- */
+.fmv-drop {
+  position: absolute; inset: 0; z-index: 30;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  background: rgba(23, 62, 105, .55); backdrop-filter: blur(2px);
+  border: 2px dashed #67b0f8; border-radius: 8px; margin: 8px;
+  color: #cfe6ff; font-size: 14px; pointer-events: none;
+}
+.fmv-drop .bi-cloud-arrow-up { font-size: 44px; }
+.fmv-drop .fmv-drop-t { max-width: 80%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- 上传列表对话框 ---------- */
+.fmv-upmask {
+  position: absolute; inset: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.45);
+}
+.fmv-up {
+  width: min(640px, calc(100% - 40px)); max-height: 78%;
+  display: flex; flex-direction: column;
+  background: #252526; border: 1px solid rgba(255,255,255,.12); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.5); overflow: hidden;
+}
+.fmv-up-hd { position: relative; padding: 12px 40px 10px 14px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.fmv-up-title { font-size: 13.5px; color: #e8edf2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fmv-up-title .fmv-up-path { color: #67b0f8; font-family: var(--mono, monospace); }
+.fmv-up-sub { margin-top: 3px; font-size: 11px; color: #6d7880; }
+.fmv-up-x { position: absolute; top: 10px; right: 10px; border: 0; background: transparent; color: #9aa4ad; cursor: pointer; }
+.fmv-up-x:hover { color: #fff; }
+.fmv-up-tools { display: flex; align-items: center; gap: 8px; padding: 10px 14px 4px; }
+.fmv-up-flex { flex: 1; }
+.fmv-up-list { flex: 1; min-height: 120px; overflow: auto; padding: 6px 14px; }
+.fmv-up-head, .fmv-up-row {
+  display: grid; grid-template-columns: minmax(0,1fr) 80px 76px 52px;
+  gap: 10px; align-items: center; padding: 6px 4px; font-size: 12.5px;
+}
+.fmv-up-head { color: #6d7880; font-size: 11px; border-bottom: 1px solid rgba(255,255,255,.08); position: sticky; top: 0; background: #252526; }
+.fmv-up-row { border-bottom: 1px solid rgba(255,255,255,.05); }
+.fmv-up-row .u-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fmv-up-row .u-sz { color: #8b949d; }
+.fmv-up-row .u-st.run { color: #67b0f8; }
+.fmv-up-row .u-st.ok { color: #6fcf8a; }
+.fmv-up-row .u-st.fail { color: #e07a6d; }
+.fmv-up-row .u-del { border: 0; background: transparent; color: #67b0f8; cursor: pointer; font-size: 12px; font-family: inherit; padding: 0; }
+.fmv-up-row .u-del:hover { text-decoration: underline; }
+.fmv-up-row .u-dis { color: #6d7880; }
+.fmv-up-empty { padding: 26px 0; text-align: center; color: #6d7880; font-size: 12px; }
+.fmv-up-ft {
+  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
+  padding: 10px 14px; border-top: 1px solid rgba(255,255,255,.08);
+  font-size: 12px; color: #8b949d;
+}
+.fmv-up-start:disabled { opacity: .45; cursor: default; }
+.fmv-up-prog {
+  flex: 1; height: 6px; border-radius: 3px; overflow: hidden;
+  background: rgba(255,255,255,.1);
+}
+.fmv-up-prog i {
+  display: block; height: 100%; width: 0;
+  background: linear-gradient(90deg, #3b7dd8, #67b0f8);
+  transition: width .15s linear;
+}
+
+/* ---------- 悬浮确认框：禁用态主按钮（备份还原在内容未修改时禁用） ---------- */
+.ui-pop-confirm .upc-ok:disabled { opacity: .45; cursor: default; }
+.ui-pop-confirm .upc-ok:disabled:hover { background: #0d7ec4; }
+
+/* ---------- 文件条目右键菜单 ---------- */
+.fm-ctx {
+  position: fixed; z-index: 9999; min-width: 150px; padding: 4px;
+  background: #252526; border: 1px solid rgba(255,255,255,.12); border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.4);
+}
+.fm-ctx-i {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 10px; border: 0; background: transparent; border-radius: 4px;
+  color: #cfd6dd; font-size: 12.5px; font-family: inherit; text-align: left; cursor: pointer;
+}
+.fm-ctx-i:hover { background: rgba(103,176,248,.16); color: #fff; }
+.fm-ctx-i.danger { color: #e07a6d; }
+.fm-ctx-i.danger:hover { background: rgba(224,122,109,.14); color: #ff9a8d; }

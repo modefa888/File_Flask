@@ -150,6 +150,13 @@
           '<button data-act="dup" title="复制连接"><i class="bi bi-files"></i></button>' +
           '<button data-act="del" title="删除"><i class="bi bi-trash"></i></button>' +
         '</div>';
+      if (typeof openFolderManagerView === "function") {
+        const _fmBtn = document.createElement("button");
+        _fmBtn.title = "文件管理器（可视化浏览远程主机文件）";
+        _fmBtn.innerHTML = '<i class="bi bi-folder2-open"></i>';
+        _fmBtn.onclick = (e) => { e.stopPropagation(); openFolderManagerView(c); };
+        item.querySelector(".ssh-acts").prepend(_fmBtn);
+      }
       item.querySelector('[data-act="open"]').onclick = () => {
         if (!online) { connectSsh(c); return; }    // 未连接（没有标签，或只剩占位标签）→ 建连
         // 已连接：按钮是「停止」，断开会话并关闭对应终端标签

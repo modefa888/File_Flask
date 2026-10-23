@@ -34,6 +34,29 @@ async function refreshUsers(el) {
         },
         { label: '创建时间', sortKey: 'created', render: function (r) { return ADM.dt(r.created); } },
         {
+            // 最近一次成功登录（0 = 从未登录过，比如刚建号还没用过）
+            label: '最近登录时间', sortKey: 'last_login', render: function (r) {
+                return r.last_login
+                    ? ADM.dt(r.last_login)
+                    : '<span class="adm-hint">从未登录</span>';
+            }
+        },
+        {
+            // 最近一次调用的接口：太长时用 title 悬浮看全，列宽不撑破
+            label: '最后使用接口', sortable: false, render: function (r) {
+                if (!r.last_api) return '<span class="adm-hint">-</span>';
+                return '<span class="adm-cell-mono" title="' + ADM.esc(r.last_api) + '">' +
+                    ADM.esc(r.last_api) + '</span>';
+            }
+        },
+        {
+            label: '最后使用时间', sortKey: 'last_api_at', render: function (r) {
+                return r.last_api_at
+                    ? ADM.dt(r.last_api_at)
+                    : '<span class="adm-hint">-</span>';
+            }
+        },
+        {
             label: '操作', sortable: false, render: function (r) {
                 var name = ADM.esc(r.username);
                 var self = (r.username === ADM.user);
@@ -81,7 +104,7 @@ async function refreshUsers(el) {
         },
         onRender: function (host) { bindUserEvents(host, el); }
     });
-    html += '<div class="adm-hint" style="margin-top:10px">点击表头可按该列排序（再点一次切换升 / 降序）。默认管理员账号及当前登录账号不可降级 / 删除 / 封禁，系统始终保留至少一个管理员。封禁后该账号将无法登录。</div>';
+    html += '<div class="adm-hint" style="margin-top:10px">点击表头可按该列排序（再点一次切换升 / 降序）。默认管理员账号及当前登录账号不可降级 / 删除 / 封禁，系统始终保留至少一个管理员。封禁后该账号将无法登录。「最近登录时间 / 最后使用接口 / 最后使用时间」由该账号自己的登录与接口调用自动更新（只统计成功的 API 请求），从本次升级后开始记录。</div>';
     html += '</div>';
     el.innerHTML = html;
     ADM.mountServTables(el);

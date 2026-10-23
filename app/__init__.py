@@ -138,6 +138,17 @@ def _install_request_logging(app: Flask) -> None:
                                       response=response)
         except Exception:
             pass
+        # 用户活跃度：记录「最后使用接口 / 最后使用时间」（后台用户列表展示）。
+        # 只记成功的 API 请求；users.touch_api 内部有节流，不会每个请求都写库。
+        try:
+            if path.startswith("/api/") and response.status_code < 400:
+                from .routes.common.auth import current_username
+                from .services.common import users as users_svc
+                uname = current_username()
+                if uname:
+                    users_svc.touch_api(uname, "%s %s" % (method, path))
+        except Exception:
+            pass
         # 页面（HTML）禁止缓存：模板 / 内联脚本改动后普通刷新即可生效，
         # 否则浏览器可能一直用旧页面，表现为「新功能没出现 / 图标不对」
         try:

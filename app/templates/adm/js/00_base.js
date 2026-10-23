@@ -453,6 +453,7 @@ var ADM = window.ADM = {
         skipped: '跳过原因', run_id: '运行 ID', updated_at: '更新时间', installed_at: '安装时间',
         uninstalled_at: '卸载时间', sk: '跳过', percent: '占比', group_name: '分组', added: '添加时间',
         username: '用户名', role: '角色', created: '创建时间', banned: '是否封禁',
+        last_login: '最近登录时间', last_api: '最后使用接口', last_api_at: '最后使用时间',
         host: '主机', port: '端口', user: '登录用户', auth: '认证方式', hasPassword: '有密码',
         hasKey: '有私钥', has_password: '有密码', password_masked: '密码(脱敏)', dbname: '库 / 文件',
         params: '连接参数', version: '版本', description: '描述', installed: '已安装', main: '入口文件',
@@ -471,14 +472,15 @@ var ADM = window.ADM = {
         return ADM.ROW_LABELS[k] || k;
     },
 
-    /* 时间类字段：形如 created_at / deleted_at / ts / time，以及运行记录的 start / end */
+    /* 时间类字段：形如 created_at / deleted_at / ts / time，以及运行记录的 start / end、最近登录 last_login */
     _isTimeKey: function (k) {
         if (/^(start|end)$/i.test(k)) return true;
-        return /(_at|_time|time|ts|created|deleted|opened)$/i.test(k) && !/(_str|_ms)$/i.test(k);
+        return /(_at|_time|time|ts|created|deleted|opened|_login)$/i.test(k) && !/(_str|_ms)$/i.test(k);
     },
 
     _rowVal: function (k, v) {
         if (v === null || v === undefined || v === '') return '<span class="adm-hint">-</span>';
+        if (v === 0 && ADM._isTimeKey(k)) return '<span class="adm-hint">-</span>';   // 0 = 从未发生过
         if (typeof v === 'boolean') return v ? ADM.badge('是', 'ok') : ADM.badge('否', 'mute');
         if (typeof v === 'object') {
             return '<code class="adm-rowjson">' + ADM.esc(JSON.stringify(v, null, 2)) + '</code>';

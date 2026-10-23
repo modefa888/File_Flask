@@ -44,15 +44,32 @@ def summary():
 
 
 def list_users():
-    """返回全部用户，按创建时间升序（含封禁状态）。"""
+    """返回全部用户，按创建时间升序。
+
+    除账号基础信息（角色 / 封禁）外，还带上活跃度：
+      last_login  最近一次成功登录的时间戳（0 = 从未登录）
+      last_api    最近一次调用的接口，形如 "GET /api/adm/users"
+      last_api_at 该次调用的时间戳
+    """
     _ensure_table()
     conn = store_conn()
     try:
         rows = conn.execute(
-            "SELECT username, role, created, banned FROM users ORDER BY created ASC").fetchall()
-        return [{"username": r["username"], "role": r["role"],
-                 "created": r["created"] or 0,
-                 "banned": bool(r["banned"])} for r in rows]
+            "SELECT username, role, created, banned, last_login, last_api, last_api_at "
+            "FROM users ORDER BY created ASC").fetchall()
+        out = []
+        for r in rows:
+            keys = r.keys()
+            out.append({
+                "username": r["username"],
+                "role": r["role"],
+                "created": r["created"] or 0,
+                "banned": bool(r["banned"]),
+                "last_login": int(r["last_login"] or 0) if "last_login" in keys else 0,
+                "last_api": (r["last_api"] or "") if "last_api" in keys else "",
+                "last_api_at": int(r["last_api_at"] or 0) if "last_api_at" in keys else 0,
+            })
+        return out
     finally:
         conn.close()
 

@@ -9,6 +9,7 @@ from ...log import get_logger
 from ...services.common.users import (
     create_user, verify_user, user_exists, is_banned,
     must_change_password, change_own_password, get_password_version,
+    touch_login,
 )
 from ...services.common.auth_settings import registration_open
 
@@ -244,6 +245,7 @@ def login():
             session["role"] = user["role"]
             session["pw_ver"] = int(user.get("pw_ver", 0))
             _log.info("登录成功: %s (role=%s)", user["username"], user["role"])
+            touch_login(user["username"])           # 后台用户列表的「最近登录时间」
             # 首次运行：管理员用的还是初始（默认）密码，必须先改一次才能进入系统
             if user["role"] == "admin" and must_change_password(user["username"]):
                 session["must_change_pw"] = True
@@ -296,6 +298,7 @@ def register():
                 session["role"] = "member"
                 session["pw_ver"] = get_password_version(username.strip())
                 _log.info("注册并登录: %s", username)
+                touch_login(username.strip())
                 return redirect(nxt or url_for("pages.index"))
     return render_template("register.html", error=error, username=username, next=nxt)
 

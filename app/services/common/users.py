@@ -55,7 +55,10 @@ def _ensure_table():
                     created  INTEGER NOT NULL,
                     banned   INTEGER NOT NULL DEFAULT 0,
                     must_change INTEGER NOT NULL DEFAULT 0,
-                    pw_ver   INTEGER NOT NULL DEFAULT 0
+                    pw_ver   INTEGER NOT NULL DEFAULT 0,
+                    last_login INTEGER NOT NULL DEFAULT 0,
+                    last_api TEXT NOT NULL DEFAULT '',
+                    last_api_at INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -67,6 +70,11 @@ def _ensure_table():
                 ("must_change", "INTEGER NOT NULL DEFAULT 0"),
                 # pw_ver：密码版本号，每次改密 / 重置 +1；登录会话记录版本，密码变更后旧会话全部失效
                 ("pw_ver", "INTEGER NOT NULL DEFAULT 0"),
+                # last_login：最近一次成功登录的时间戳（0 = 从未登录）
+                ("last_login", "INTEGER NOT NULL DEFAULT 0"),
+                # last_api / last_api_at：最近一次调用的接口（"GET /api/xxx"）及其时间戳
+                ("last_api", "TEXT NOT NULL DEFAULT ''"),
+                ("last_api_at", "INTEGER NOT NULL DEFAULT 0"),
             ):
                 if col in cols:
                     continue
@@ -326,3 +334,50 @@ def set_banned(username: str, banned: bool):
             return "用户不存在"
     _log.info("账号封禁状态变更：%s -> %s", username, "已封禁" if banned else "正常")
     return None
+
+
+# ------------------------------------------------------------------ 活跃度（最近登录 / 最近使用接口）
+# 后台「用户管理」列表展示用。写失败只打日志、绝不影响业务流程（登录 / 接口调用照常）。
+_API_TOUCH_GAP = 60        # 同一账号 + 同一接口，60 秒内只落库一次（避免每个请求都写库）
+_api_seen = {}             # username -> (接口, 上次写入时间戳)
+_api_seen_lock = threading.Lock()
+
+
+def touch_login(username: str):
+    """记录最近一次成功登录时间（登录 / 注册成功时调用）。"""
+    username = (username or "").strip()
+    if not username:
+        return
+    try:
+        _ensure_table()
+        with store_tx() as conn:
+            conn.execute("UPDATE users SET last_login = ? WHERE username = ?",
+                         (int(time.time()), username))
+    except Exception as e:
+        _log.warning("记录最近登录时间失败：%s", e)
+
+
+def touch_api(username: str, api: str):
+    """记录最近一次调用的接口及时间（形如 "GET /api/adm/users"）。
+
+    节流：同一账号 + 同一接口在 _API_TOUCH_GAP 秒内只写一次库；
+    一旦换了接口立刻写入，保证列表里的「最后使用接口」是最新的那一个。
+    """
+    username = (username or "").strip()
+    api = (api or "").strip()
+    if not username or not api:
+        return
+    now = int(time.time())
+    with _api_seen_lock:
+        hit = _api_seen.get(username)
+        if hit and hit[0] == api and now - hit[1] < _API_TOUCH_GAP:
+            return
+        _api_seen[username] = (api, now)
+    try:
+        _ensure_table()
+        with store_tx() as conn:
+            conn.execute(
+                "UPDATE users SET last_api = ?, last_api_at = ? WHERE username = ?",
+                (api[:200], now, username))
+    except Exception as e:
+        _log.warning("记录接口使用情况失败：%s", e)

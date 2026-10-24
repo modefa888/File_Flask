@@ -2,16 +2,51 @@
 ADM.modules.push({
     id: 'update',
     name: '在线更新',
-    subtitle: '从 GitHub 检查最新提交，拉取代码并重启服务',
+    subtitle: '支持 Git 拉取与上传 ZIP 包两种更新方式，更新后自动重启',
     icon: 'bi-cloud-arrow-down',
     async load(el) {
         var STEPS = [
             ['init', '准备'],
+            ['backup', '备份'],
             ['fetch', '拉取代码'],
             ['merge', '合并'],
             ['deps', '依赖'],
             ['restart', '重启']
         ];
+        /* ZIP 包更新没有 fetch 阶段，文案单独一套 */
+        var ZIP_STEPS = [
+            ['init', '校验压缩包'],
+            ['backup', '备份代码'],
+            ['merge', '解压覆盖'],
+            ['deps', '依赖'],
+            ['restart', '重启']
+        ];
+        /* 手动备份任务只有两步 */
+        var BACKUP_STEPS = [
+            ['init', '扫描文件'],
+            ['backup', '打包压缩']
+        ];
+        /* 恢复备份：先给当前代码做快照，再覆盖 */
+        var RESTORE_STEPS = [
+            ['init', '校验备份'],
+            ['backup', '备份当前'],
+            ['merge', '还原文件'],
+            ['deps', '依赖'],
+            ['restart', '重启']
+        ];
+        var DONE_TEXT = {
+            init: 'Git 仓库初始化完成',
+            zip: 'ZIP 包更新完成',
+            backup: '代码备份完成',
+            restore: '已恢复到所选备份'
+        };
+
+        function stepsFor(kind) {
+            if (kind === 'zip') return ZIP_STEPS;
+            if (kind === 'backup') return BACKUP_STEPS;
+            if (kind === 'restore') return RESTORE_STEPS;
+            return STEPS;
+        }
         var RESTART_TIPS = {
             exec: '默认。适合 <b>python run.py</b> 或打包后的可执行文件：用 os.execv 原地替换进程，端口基本不中断。',
             exit: '更新后直接退出进程，由 <b>systemd / supervisor / pm2</b> 自动重启拉起。服务单元必须配置了自动重启。',
@@ -23,11 +58,13 @@ ADM.modules.push({
         var S = {
             cfg: null, local: null, env: null,
             updateAvailable: false, runId: '', busy: false,
+            zipFile: null,
+            sfx: 'git',                /* 当前任务写入哪个 Tab 的进度面板 */
             poll: null, wait: null
         };
 
-        el.innerHTML = `
-<div class="upd-wrap">
+        /* 两种更新方式用 Tab 切换；各面板先拼成字符串，最后统一塞进容器 */
+        var GIT_PANEL = `
     <section class="upd-versions">
         <div class="adm-card upd-ver">
             <div class="upd-ver-head">
@@ -50,6 +87,9 @@ ADM.modules.push({
         </div>
 
         <div class="upd-actions">
+            <button class="adm-btn git" id="uBtnInit" type="button" style="display:none">
+                <i class="bi bi-git"></i> 初始化 Git 仓库
+            </button>
             <button class="adm-btn ghost" id="uBtnCfg" type="button">
                 <i class="bi bi-sliders"></i> 更新配置
             </button>
@@ -58,9 +98,6 @@ ADM.modules.push({
             </button>
             <button class="adm-btn primary" id="uBtnApply" type="button" disabled>
                 <i class="bi bi-download"></i> 立即更新
-            </button>
-            <button class="adm-btn ghost" id="uBtnRestart" type="button">
-                <i class="bi bi-arrow-clockwise"></i> 仅重启
             </button>
         </div>
     </section>
@@ -76,22 +113,73 @@ ADM.modules.push({
         <div class="upd-commit-list" id="uCommitList">
             <div class="upd-empty">检查更新后，这里会列出远端待拉取的提交。</div>
         </div>
-    </section>
+    </section>`;
 
+        var ZIP_PANEL = `
+    <section class="adm-card upd-zip-card">
+        <div class="adm-section-head">
+            <h3><i class="bi bi-file-earmark-zip"></i> 上传源码压缩包</h3>
+            <span class="adm-spacer"></span>
+            <span class="adm-hint">连不上 GitHub / 不想用 Git 时用这个</span>
+        </div>
+        <div class="upd-zip-row">
+            <input type="file" id="uZipFile" accept=".zip,application/zip" hidden>
+            <label class="adm-btn ghost upd-zip-pick" for="uZipFile">
+                <i class="bi bi-folder2-open"></i> 选择 ZIP
+            </label>
+            <span class="upd-zip-name" id="uZipName">未选择文件</span>
+            <button class="adm-btn primary" id="uBtnZip" type="button" disabled>
+                <i class="bi bi-upload"></i> 上传并更新
+            </button>
+        </div>
+        <div class="upd-tip">支持 GitHub「Download ZIP」的源码包（外层目录可有可无）。只覆盖压缩包里存在的文件，
+            自动跳过 <code>data/</code>、<code>.env</code>、虚拟环境、日志、<code>__pycache__</code>；
+            覆盖前会把当前代码整份打包备份到 <code>data/update_backup/</code>，重启方式沿用上面的配置。</div>
+    </section>`;
+
+        var BACKUP_PANEL = `
+    <section class="adm-card">
+        <div class="adm-section-head">
+            <h3><i class="bi bi-clock-history"></i> 备份记录</h3>
+            <span class="adm-spacer"></span>
+            <span class="adm-hint upd-bk-dir" id="uBkDir"></span>
+            <button class="adm-btn ghost sm" id="uBtnBkRefresh" type="button" style="margin-left:8px">
+                <i class="bi bi-arrow-repeat"></i> 刷新
+            </button>
+            <button class="adm-btn primary sm" id="uBtnBkNow" type="button" style="margin-left:8px">
+                <i class="bi bi-archive"></i> 立即备份
+            </button>
+        </div>
+        <div class="upd-bk-list" id="uBkList">
+            <div class="upd-empty">正在读取备份记录…</div>
+        </div>
+        <div class="upd-tip upd-bk-tip">备份保存在 <code>data/update_backup/</code>，包含代码与
+            <code>.env</code>，不含 data/、日志、虚拟环境。点「恢复」会把代码还原到该备份版本：
+            恢复前会先给当前代码做一份 <code>restore_*.zip</code> 快照，恢复后按配置的重启方式重启。</div>
+    </section>`;
+
+        /* 每个 Tab 各自一份「执行进度」面板：sfx 用来区分元素 ID（git / zip / bk） */
+        function progressPanel(sfx) {
+            return `
     <section class="adm-card upd-progress-card">
         <div class="adm-section-head">
             <h3><i class="bi bi-activity"></i> 执行进度</h3>
             <span class="adm-spacer"></span>
-            <span class="adm-hint" id="uRunState">空闲</span>
+            <span class="adm-hint" id="uRunState_${sfx}">空闲</span>
         </div>
-        <div class="upd-steps" id="uRunSteps"></div>
+        <div class="upd-steps" id="uRunSteps_${sfx}"></div>
         <div class="upd-bar">
-            <div class="upd-bar-in" id="uProgressBar"></div>
+            <div class="upd-bar-in" id="uProgressBar_${sfx}"></div>
         </div>
-        <div class="upd-log" id="uRunLog">等待开始…</div>
-    </section>
-</div>
+        <div class="upd-log" id="uRunLog_${sfx}">等待开始…</div>
+    </section>`;
+        }
+        /* 任务类型 → 所属 Tab 的进度面板后缀 */
+        var TAB_OF = { update: 'git', init: 'git', restart: 'git', zip: 'zip', backup: 'bk', restore: 'bk' };
+        /* 每个 Tab 回显「上次结果」时，在这些类型里取最近完成的一条 */
+        var TAB_KINDS = { git: ['update', 'init', 'restart'], zip: ['zip'], bk: ['backup', 'restore'] };
 
+        var CFG_PANEL = `
 <div class="upd-mask" id="uCfgMask"></div>
 
 <div class="adm-card upd-cfg-card" id="uCfgCard" role="dialog" aria-modal="true" aria-labelledby="uCfgTitle">
@@ -185,6 +273,15 @@ ADM.modules.push({
 
         <div class="upd-field wide">
             <label class="upd-check">
+                <input type="checkbox" id="uBackup">
+                <span><b>更新前自动备份代码</b><br>拉取 / 覆盖之前把当前源码打包成 zip 存到
+                    <code>data/update_backup/</code>（保留最近 10 份，不含 data/、日志、虚拟环境），
+                    备份失败会中止更新。也可以随时点「备份代码」手动备份。</span>
+            </label>
+        </div>
+
+        <div class="upd-field wide">
+            <label class="upd-check">
                 <input type="checkbox" id="uHardReset">
                 <span><b>允许强制覆盖本地改动</b><br>开启后可在更新时选择
                     <code>git reset --hard</code>，丢弃服务器上尚未提交的修改。请谨慎使用。</span>
@@ -204,13 +301,51 @@ ADM.modules.push({
             </button>
             <span class="adm-hint" id="uSaveHint"></span>
         </div>
-    </form>
-</div>`;
+    </form>`;
+
+        /* 「仅重启 / 备份代码」与更新方式无关，放到 Tab 行右侧，不占更新操作列 */
+        var TOP_ACTIONS = `
+        <div class="upd-top-actions">
+            <button class="adm-btn ghost sm" id="uBtnRestart" type="button">
+                <i class="bi bi-arrow-clockwise"></i> 仅重启
+            </button>
+            <button class="adm-btn ghost sm" id="uBtnBackup" type="button">
+                <i class="bi bi-archive"></i> 备份代码
+            </button>
+        </div>`;
+
+        el.innerHTML =
+            '<div class="upd-wrap">' +
+                '<div class="upd-top">' +
+                    ADM.tabs([
+                        {
+                            id: 'git', name: 'Git / GitHub 更新', icon: 'bi-github',
+                            content: '<div class="upd-pane">' + GIT_PANEL + progressPanel('git') + '</div>'
+                        },
+                        {
+                            id: 'zip', name: 'ZIP 包更新', icon: 'bi-file-earmark-zip',
+                            content: '<div class="upd-pane">' + ZIP_PANEL + progressPanel('zip') + '</div>'
+                        },
+                        {
+                            id: 'backup', name: '备份', icon: 'bi-clock-history',
+                            content: '<div class="upd-pane">' + BACKUP_PANEL + progressPanel('bk') + '</div>',
+                            onShow: function () { loadBackups(); }
+                        }
+                    ], { key: 'upd-method' }) +
+                    TOP_ACTIONS +
+                '</div>' +
+            '</div>' +
+            CFG_PANEL;
+
+        ADM.mountTables(el);
+        ADM.mountTabs(el);                 /* 两个更新方式用 Tab 切换，选中项会记住 */
 
         /* ------------------------------------------------------------ 工具 */
         /* el 是 #admView 容器本身，切模块时它不会断开；用模块根节点判断是否还在页面上 */
         var root = el.querySelector('.upd-wrap');
         function q(id) { return el.querySelector('#' + id); }
+        /* 当前 Tab 进度面板里的元素：uRunLog → uRunLog_git / uRunLog_zip / uRunLog_bk */
+        function pq(id) { return q(id + '_' + S.sfx); }
         function alive() { return !!(root && root.isConnected); }
         function toast(msg, tone) { ADM.toast(msg, tone || 'ok'); }
 
@@ -251,9 +386,16 @@ ADM.modules.push({
             q('uLocalMeta').innerHTML = bits.length ? bits.join(' · ') : (ADM.esc(local.error) || '—');
 
             var badge = q('uLocalBadge');
+            var initBtn = q('uBtnInit');
+            /* 没有 .git，或仓库是空的（上次初始化中途失败）：都还需要初始化 */
+            var needInit = !local.has_git || !local.sha;
+            if (initBtn) initBtn.style.display = needInit ? '' : 'none';
             if (!local.has_git) {
                 badge.className = 'adm-badge bad';
                 badge.textContent = '非 Git 仓库';
+            } else if (!local.sha) {
+                badge.className = 'adm-badge warn';
+                badge.textContent = '仓库为空';
             } else if (local.dirty) {
                 badge.className = 'adm-badge warn';
                 badge.textContent = '有未提交改动';
@@ -293,6 +435,7 @@ ADM.modules.push({
             q('uRestart').value = cfg.restart_mode || 'exec';
             q('uRestartCmd').value = cfg.restart_cmd || '';
             q('uInstallDeps').checked = !!cfg.install_deps;
+            q('uBackup').checked = cfg.backup_before_update !== false;
             q('uHardReset').checked = !!cfg.hard_reset;
             toggleRestartCmd();
         }
@@ -309,6 +452,7 @@ ADM.modules.push({
                 restart_mode: q('uRestart').value,
                 restart_cmd: q('uRestartCmd').value.trim(),
                 install_deps: q('uInstallDeps').checked,
+                backup_before_update: q('uBackup').checked,
                 hard_reset: q('uHardReset').checked
             };
         }
@@ -385,15 +529,17 @@ ADM.modules.push({
             renderCommits(res.commits || []);
         }
 
-        function renderLast(last) {
+        /* 渲染某个 Tab 的「上次结果」：sfx 是面板后缀（git / zip / bk） */
+        function renderLast(sfx, last) {
             if (!last) return;
             var localSha = (S.local && S.local.sha) || '';
             var ok = last.status === 'done' ||
                 (last.status === 'restarting' && last.to && last.to === localSha);
-            var log = q('uRunLog');
+            var log = q('uRunLog_' + sfx);
+            if (!log) return;
             var head = '<span class="ln"><span class="t">上次</span><span class="' +
                 (ok ? 'ok' : 'warn') + '">' +
-                (ok ? '上次更新已完成' : '上次更新状态：' + ADM.esc(last.status || '未知')) +
+                (ok ? '上次操作已完成' : '上次操作状态：' + ADM.esc(last.status || '未知')) +
                 (last.to ? '（→ ' + ADM.esc(String(last.to).slice(0, 7)) + '）' : '') +
                 ' ' + ADM.esc(fmtDate(last.finished_at)) + '</span></span>';
             var lines = (last.events || []).map(function (ev) {
@@ -402,20 +548,24 @@ ADM.modules.push({
             }).join('');
             log.innerHTML = head + lines;
             log.scrollTop = log.scrollHeight;
-            q('uRunState').textContent = ok ? '上次更新已完成' : '上次更新：' + (last.status || '未知');
+            q('uRunState_' + sfx).textContent = ok ? '上次已完成' : '上次：' + (last.status || '未知');
         }
 
-        function renderRun(run) {
+        /* 渲染某个 Tab 的实时进度 */
+        function renderRun(run, sfx) {
             if (!run) return;
+            sfx = sfx || S.sfx;
             var p = Math.max(0, Math.min(100, run.progress || 0));
-            var bar = q('uProgressBar');
+            var bar = q('uProgressBar_' + sfx);
+            if (!bar) return;
             bar.style.width = p + '%';
             bar.className = 'upd-bar-in' +
                 (run.status === 'error' ? ' error' : (run.status === 'done' ? ' done' : ''));
 
-            var order = STEPS.map(function (s) { return s[0]; });
+            var steps = stepsFor(run.kind);
+            var order = steps.map(function (s) { return s[0]; });
             var cur = order.indexOf(run.step);
-            q('uRunSteps').innerHTML = STEPS.map(function (s, i) {
+            q('uRunSteps_' + sfx).innerHTML = steps.map(function (s, i) {
                 var cls = 'upd-step';
                 if (run.status === 'done' || (cur >= 0 && i < cur)) cls += ' done';
                 else if (i === cur && run.status === 'running') cls += ' active';
@@ -428,20 +578,22 @@ ADM.modules.push({
                 error: '失败',
                 restarting: '正在重启…'
             }[run.status] || run.status;
-            q('uRunState').textContent = stateText;
+            q('uRunState_' + sfx).textContent = stateText;
 
             var lines = (run.events || []).map(function (ev) {
                 return '<span class="ln"><span class="t">' + ADM.esc(fmtTime(ev.t)) + '</span>' +
                     '<span class="' + ADM.esc(ev.level || 'info') + '">' + ADM.esc(ev.text) + '</span></span>';
             }).join('');
-            q('uRunLog').innerHTML = lines || '<span class="ln dim">等待输出…</span>';
-            q('uRunLog').scrollTop = q('uRunLog').scrollHeight;
+            var log = q('uRunLog_' + sfx);
+            log.innerHTML = lines || '<span class="ln dim">等待输出…</span>';
+            log.scrollTop = log.scrollHeight;
         }
 
         /* ------------------------------------------------------------ 轮询 */
-        function startPoll(runId) {
+        function startPoll(runId, kind) {
             stopPoll();
             S.runId = runId;
+            S.sfx = TAB_OF[kind] || S.sfx || 'git';
             S.poll = setInterval(tick, 1200);
             tick();
         }
@@ -452,11 +604,17 @@ ADM.modules.push({
             try {
                 var run = await ADM.api('/api/adm/update/status?run_id=' + encodeURIComponent(S.runId));
                 if (!alive()) { stopPoll(); return; }
-                renderRun(run);
+                renderRun(run, S.sfx);
                 if (run.status === 'done') {
                     stopPoll();
                     setBusy(false);
-                    toast('操作完成', 'ok');
+                    toast(DONE_TEXT[run.kind] || '操作完成', 'ok');
+                    if (run.kind === 'init') {
+                        refreshAfterInit();
+                    } else if (run.kind === 'zip' || run.kind === 'restore') {
+                        reloadState().catch(function () { });
+                    }
+                    if (run.kind === 'backup' || run.kind === 'restore') loadBackups();
                 } else if (run.status === 'error') {
                     stopPoll();
                     setBusy(false);
@@ -474,7 +632,7 @@ ADM.modules.push({
 
         function waitServer() {
             if (S.wait) return;
-            q('uRunState').textContent = '等待服务恢复…';
+            pq('uRunState').textContent = '等待服务恢复…';
             toast('服务正在重启，等待恢复…', 'warn');
             var tries = 0;
             S.wait = setInterval(async function () {
@@ -497,9 +655,14 @@ ADM.modules.push({
 
         function setBusy(busy) {
             S.busy = !!busy;
+            q('uBtnInit').disabled = S.busy;
             q('uBtnCheck').disabled = S.busy;
             q('uBtnRestart').disabled = S.busy;
+            q('uBtnBackup').disabled = S.busy;
+            q('uBtnBkNow').disabled = S.busy;
+            q('uBtnBkRefresh').disabled = S.busy;
             q('uBtnSave').disabled = S.busy;
+            q('uBtnZip').disabled = S.busy || !S.zipFile;
             q('uBtnApply').disabled = S.busy || !S.updateAvailable;
         }
 
@@ -604,6 +767,141 @@ ADM.modules.push({
             }
         }
 
+        /* 只重读本地状态（徽标 / 版本号 / 目录），不打断当前进度日志 */
+        async function reloadState() {
+            var st = await ADM.api('/api/adm/update?ts=' + Date.now());
+            if (!alive()) return null;
+            S.cfg = st.config;
+            S.local = st.local;
+            S.env = st.env;
+            renderLocal(st.local);
+            renderEnv(st.env);
+            return st;
+        }
+
+        /* 初始化完成后：顺手检查一次远端 */
+        async function refreshAfterInit() {
+            try {
+                var st = await reloadState();
+                if (st && st.local && st.local.has_git) checkUpdate();
+            } catch (e) {
+                /* 刷新失败不影响已完成的初始化结果 */
+            }
+        }
+
+        /* ------------------------------------------------------------ ZIP 包更新 */
+        function fmtSize(n) {
+            if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(2) + ' MB';
+            if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
+            return n + ' B';
+        }
+
+        /* 上传用 XHR：fetch 拿不到上传进度，ZIP 包一般有几 MB，有进度条体验更好 */
+        function uploadZip(fd, onProgress) {
+            return new Promise(function (resolve, reject) {
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', '/api/adm/update/zip');
+                xhr.upload.onprogress = function (ev) {
+                    if (ev.lengthComputable && onProgress) {
+                        onProgress(Math.round(ev.loaded / ev.total * 100));
+                    }
+                };
+                xhr.onload = function () {
+                    var d = null;
+                    try { d = JSON.parse(xhr.responseText || '{}'); } catch (e) { }
+                    if (xhr.status === 401) {
+                        location.href = '/login?next=/admin';
+                        return reject(new Error('登录已过期，请重新登录'));
+                    }
+                    if (xhr.status === 413) {
+                        return reject(new Error('文件超过服务器允许的上传大小（32MB）'));
+                    }
+                    if (xhr.status >= 200 && xhr.status < 300 && d && d.ok) return resolve(d);
+                    reject(new Error((d && d.error) || ('上传失败（HTTP ' + xhr.status + '）')));
+                };
+                xhr.onerror = function () { reject(new Error('网络错误，上传中断')); };
+                xhr.onabort = function () { reject(new Error('上传已取消')); };
+                xhr.send(fd);
+            });
+        }
+
+        function resetZipPick() {
+            S.zipFile = null;
+            q('uZipFile').value = '';
+            q('uZipName').textContent = '未选择文件';
+            q('uBtnZip').disabled = true;
+        }
+
+        async function zipUpdate() {
+            var f = S.zipFile;
+            if (!f) {
+                toast('请先选择一个 ZIP 压缩包', 'warn');
+                return;
+            }
+            if (!/\.zip$/i.test(f.name)) {
+                toast('只支持 .zip 压缩包', 'err');
+                return;
+            }
+            var go = await ADM.confirm('上传 ZIP 并更新',
+                '将把 <code>' + ADM.esc(f.name) + '</code> 解压后覆盖到项目目录（' +
+                ADM.esc((S.env && S.env.root) || '项目根目录') + '）。<br>' +
+                '<span class="adm-hint">覆盖前会把当前代码整份备份到 <code>data/update_backup/</code>；' +
+                'data/、.env、虚拟环境、日志不会被覆盖；更新完按配置的重启方式重启服务。</span>', '上传并更新');
+            if (!go) return;
+            setBusy(true);
+            S.sfx = 'zip';                             /* ZIP 更新写自己的进度面板 */
+            pq('uRunState').textContent = '上传中 0%';
+            pq('uRunLog').innerHTML = '<span class="ln dim">正在上传 ' + ADM.esc(f.name) + '…</span>';
+            pq('uProgressBar').style.width = '0%';
+            pq('uProgressBar').className = 'upd-bar-in';
+            var fd = new FormData();
+            fd.append('file', f);
+            try {
+                var res = await uploadZip(fd, function (pct) {
+                    if (!alive()) return;
+                    pq('uRunState').textContent = '上传中 ' + pct + '%';
+                    pq('uProgressBar').style.width = Math.round(pct * 0.2) + '%';
+                });
+                if (!alive()) return;
+                pq('uRunLog').innerHTML = '<span class="ln ok">上传完成，开始解压更新…</span>';
+                resetZipPick();
+                startPoll(res.run_id, 'zip');
+            } catch (e) {
+                if (!alive()) return;
+                setBusy(false);
+                pq('uRunState').textContent = '上传失败';
+                pq('uRunLog').innerHTML = '<span class="ln error">' + ADM.esc(e.message) + '</span>';
+                toast(e.message, 'err');
+            }
+        }
+
+        async function initRepo() {
+            if (!q('uRepo').value.trim()) {
+                toast('请先填写 GitHub 仓库地址', 'warn');
+                openCfg();
+                return;
+            }
+            var go = await ADM.confirm('初始化 Git 仓库',
+                '当前目录不是 Git 仓库（多为下载 ZIP 解压安装），将在项目目录下执行：<br>' +
+                '<code>git init</code> → 关联 <b>origin</b> → <code>git fetch</code> → 强制切换到远端分支。<br>' +
+                '<span class="adm-hint">服务器上与版本库同名的文件会被<b>远端版本覆盖</b>，手工改过的代码会丢失，' +
+                '建议先备份；data/、.env、虚拟环境、日志不在版本库内，不会被删除。</span>', '开始初始化');
+            if (!go) return;
+            setBusy(true);
+            S.sfx = 'git';
+            pq('uRunLog').innerHTML = '<span class="ln dim">正在初始化 Git 仓库…</span>';
+            try {
+                await saveConfig(true);
+                var res = await ADM.api('/api/adm/update/init', { method: 'POST', body: {} });
+                if (!alive()) return;
+                startPoll(res.run_id, 'init');
+            } catch (e) {
+                if (!alive()) return;
+                setBusy(false);
+                toast(e.message, 'err');
+            }
+        }
+
         async function applyUpdate() {
             if (!S.updateAvailable) return;
             var reset = false;
@@ -623,17 +921,131 @@ ADM.modules.push({
                 '将从远端拉取代码并重启服务，过程中服务可能短暂不可用。', '开始更新');
             if (!go) return;
             setBusy(true);
-            q('uRunLog').innerHTML = '<span class="ln dim">正在启动更新任务…</span>';
+            S.sfx = 'git';
+            pq('uRunLog').innerHTML = '<span class="ln dim">正在启动更新任务…</span>';
             try {
                 var res = await ADM.api('/api/adm/update/apply', {
                     method: 'POST',
                     body: { reset: reset }
                 });
                 if (!alive()) return;
-                startPoll(res.run_id);
+                startPoll(res.run_id, 'update');
             } catch (e) {
                 if (!alive()) return;
                 setBusy(false);
+                toast(e.message, 'err');
+            }
+        }
+
+        /* 手动备份：把当前代码打包到 data/update_backup/（更新前也会自动做一次） */
+        async function backupNow() {
+            var go = await ADM.confirm('备份当前代码',
+                '将把项目源码打包成 zip 存到 <code>data/update_backup/</code>。<br>' +
+                '<span class="adm-hint">不含 data/（运行数据、上传的文件）、logs/、虚拟环境、.git、' +
+                '__pycache__；.env 会一起备份，方便回滚。保留最近 10 份。</span>', '开始备份');
+            if (!go) return;
+            setBusy(true);
+            S.sfx = 'bk';                              /* 手动备份写备份 Tab 自己的面板 */
+            pq('uRunLog').innerHTML = '<span class="ln dim">正在打包当前代码…</span>';
+            pq('uRunState').textContent = '备份中…';
+            try {
+                var res = await ADM.api('/api/adm/update/backup', { method: 'POST', body: {} });
+                if (!alive()) return;
+                startPoll(res.run_id, 'backup');
+            } catch (e) {
+                if (!alive()) return;
+                setBusy(false);
+                toast(e.message, 'err');
+            }
+        }
+
+        /* ------------------------------------------------------------ 备份记录 */
+        function renderBackups(data) {
+            var list = (data && data.backups) || [];
+            q('uBkDir').textContent = (data && data.dir) ? '目录 ' + data.dir : '';
+            q('uBkDir').title = (data && data.dir) || '';
+            if (!list.length) {
+                q('uBkList').innerHTML =
+                    '<div class="upd-empty">还没有备份记录。执行一次更新会自动备份，也可以点「立即备份」。</div>';
+                return;
+            }
+            q('uBkList').innerHTML = list.map(function (b, i) {
+                var badge = b.tag === 'manual' ? 'info' : (b.tag === 'restore' ? 'mute' : 'warn');
+                var meta = [
+                    '<span class="adm-badge ' + badge + '">' + ADM.esc(b.label || b.tag) + '</span>',
+                    ADM.esc(fmtDate(b.ts)),
+                    ADM.esc(fmtSize(b.size)),
+                    b.files >= 0 ? (ADM.esc(String(b.files)) + ' 个文件') : '文件数未知'
+                ].join(' · ');
+                return '<div class="upd-bk">' +
+                    '<div class="upd-bk-main">' +
+                        '<div class="upd-bk-name">' + ADM.esc(b.name) +
+                            (i === 0 ? ' <span class="adm-badge ok">最新</span>' : '') + '</div>' +
+                        '<div class="upd-bk-meta">' + meta + '</div>' +
+                    '</div>' +
+                    '<div class="upd-bk-acts">' +
+                        '<button class="adm-btn ghost sm" type="button" data-bk-restore="' +
+                            ADM.esc(b.name) + '"><i class="bi bi-clock-history"></i> 恢复</button>' +
+                        '<a class="adm-btn ghost sm" href="/api/adm/update/backup/download?name=' +
+                            encodeURIComponent(b.name) + '"><i class="bi bi-download"></i> 下载</a>' +
+                        '<button class="adm-btn danger sm" type="button" data-bk-del="' +
+                            ADM.esc(b.name) + '"><i class="bi bi-trash"></i> 删除</button>' +
+                    '</div>' +
+                '</div>';
+            }).join('');
+        }
+
+        async function loadBackups() {
+            try {
+                var data = await ADM.api('/api/adm/update/backups?ts=' + Date.now());
+                if (!alive()) return;
+                renderBackups(data);
+            } catch (e) {
+                if (!alive()) return;
+                q('uBkList').innerHTML =
+                    '<div class="upd-empty">读取备份记录失败：' + ADM.esc(e.message) + '</div>';
+            }
+        }
+
+        async function restoreBackup(name) {
+            var go = await ADM.confirm('恢复到该备份',
+                '将把项目代码还原成 <code>' + ADM.esc(name) + '</code> 里的内容。<br>' +
+                '<span class="adm-hint">恢复前会自动给当前代码再做一份快照（<code>restore_*.zip</code>），' +
+                '恢复错了还能再回来；备份之后新增的文件不会被删除；完成后按配置的重启方式重启。</span>',
+                '开始恢复');
+            if (!go) return;
+            setBusy(true);
+            S.sfx = 'bk';                              /* 恢复备份写备份 Tab 自己的面板 */
+            pq('uRunState').textContent = '恢复中…';
+            pq('uRunLog').innerHTML = '<span class="ln dim">正在恢复到 ' + ADM.esc(name) + '…</span>';
+            try {
+                var res = await ADM.api('/api/adm/update/restore', {
+                    method: 'POST',
+                    body: { name: name }
+                });
+                if (!alive()) return;
+                startPoll(res.run_id, 'restore');
+            } catch (e) {
+                if (!alive()) return;
+                setBusy(false);
+                toast(e.message, 'err');
+            }
+        }
+
+        async function deleteBackup(name) {
+            var go = await ADM.confirm('删除备份',
+                '确定删除 <code>' + ADM.esc(name) + '</code> 吗？删除后无法找回。', '删除');
+            if (!go) return;
+            try {
+                await ADM.api('/api/adm/update/backup/delete', {
+                    method: 'POST',
+                    body: { name: name }
+                });
+                if (!alive()) return;
+                toast('备份已删除', 'ok');
+                loadBackups();
+            } catch (e) {
+                if (!alive()) return;
                 toast(e.message, 'err');
             }
         }
@@ -644,10 +1056,11 @@ ADM.modules.push({
                 '<span class="adm-hint">重启期间服务会短暂不可用（几秒到十几秒）。</span>', '立即重启');
             if (!okRestart) return;
             setBusy(true);
+            S.sfx = 'git';
             try {
                 var res = await ADM.api('/api/adm/update/restart', { method: 'POST', body: {} });
                 if (!alive()) return;
-                startPoll(res.run_id);
+                startPoll(res.run_id, 'restart');
             } catch (e) {
                 if (!alive()) return;
                 setBusy(false);
@@ -667,20 +1080,35 @@ ADM.modules.push({
                 renderLocal(st.local);
                 renderEnv(st.env);
                 if (st.run && st.run.status === 'running') {
-                    renderRun(st.run);
-                    startPoll(st.run.id);
+                    S.sfx = TAB_OF[st.run.kind] || 'git';
+                    renderRun(st.run, S.sfx);
+                    startPoll(st.run.id, st.run.kind);
                 } else if (st.run && st.run.status === 'restarting') {
-                    renderRun(st.run);
+                    S.sfx = TAB_OF[st.run.kind] || 'git';
+                    renderRun(st.run, S.sfx);
                     waitServer();
-                } else if (st.last) {
-                    renderLast(st.last);
+                } else {
+                    /* st.last 是 {任务类型: 上次结果}：每个 Tab 取自己类型里最近的一条回显 */
+                    var allLast = st.last || {};
+                    Object.keys(TAB_KINDS).forEach(function (sfx) {
+                        var best = null;
+                        (TAB_KINDS[sfx] || []).forEach(function (k) {
+                            var it = allLast[k];
+                            if (it && (!best || (it.finished_at || 0) > (best.finished_at || 0))) best = it;
+                        });
+                        if (best) renderLast(sfx, best);
+                    });
                 }
-                if (st.local && !st.local.has_git) {
-                    toast(st.local.error || '当前目录不是 Git 仓库', 'warn');
+                if (st.local && (!st.local.has_git || !st.local.sha)) {
+                    toast(st.local.has_git ? '本地仓库为空，请点「初始化 Git 仓库」补齐'
+                        : (st.local.error || '当前目录不是 Git 仓库'), 'warn');
+                    /* 初始化需要仓库地址：没配置过就直接把配置框弹出来 */
+                    if (!st.config.repo) openCfg();
                 } else if (st.local && !st.config.repo && !st.local.origin) {
                     /* 既没配置仓库、本地也没有 origin：不打开配置框就没法检查 */
                     openCfg();
                 }
+                loadBackups();      /* 备份 Tab 的列表（切到该 Tab 时也会再刷新一次） */
             } catch (e) {
                 if (!alive()) return;
                 toast(e.message, 'err');
@@ -697,6 +1125,14 @@ ADM.modules.push({
                 toast(err.message, 'err');
             }
         });
+        q('uBtnInit').addEventListener('click', initRepo);
+        q('uZipFile').addEventListener('change', function () {
+            var f = (this.files && this.files[0]) || null;
+            S.zipFile = f;
+            q('uZipName').textContent = f ? (f.name + ' · ' + fmtSize(f.size)) : '未选择文件';
+            q('uBtnZip').disabled = !f || S.busy;
+        });
+        q('uBtnZip').addEventListener('click', zipUpdate);
         q('uBtnCfg').addEventListener('click', openCfg);
         q('uBtnProbe').addEventListener('click', probeConn);
         q('uCfgClose').addEventListener('click', closeCfg);
@@ -705,6 +1141,16 @@ ADM.modules.push({
         q('uBtnCheck').addEventListener('click', checkUpdate);
         q('uBtnApply').addEventListener('click', applyUpdate);
         q('uBtnRestart').addEventListener('click', restartOnly);
+        q('uBtnBackup').addEventListener('click', backupNow);
+        q('uBtnBkNow').addEventListener('click', backupNow);
+        q('uBtnBkRefresh').addEventListener('click', loadBackups);
+        /* 备份记录是动态渲染的，用事件委托绑定「恢复 / 删除」 */
+        q('uBkList').addEventListener('click', function (e) {
+            var r = e.target.closest('[data-bk-restore]');
+            if (r) { restoreBackup(r.dataset.bkRestore); return; }
+            var d = e.target.closest('[data-bk-del]');
+            if (d) deleteBackup(d.dataset.bkDel);
+        });
 
         /* Esc 关闭配置框；模块被切走时移除监听，避免重复绑定 */
         function onKey(e) {

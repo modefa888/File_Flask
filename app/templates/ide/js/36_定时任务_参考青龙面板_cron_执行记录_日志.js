@@ -56,13 +56,14 @@
     }
   }
   /* ---------- 活动栏角标：定时任务数量 ----------
-     以前只显示「执行中」的个数，没任务在跑时角标整个消失，看不出到底存了几个任务；
-     现在固定显示任务总数，悬停提示再给出「共 N 个 · M 个执行中」。 */
+     只统计「已启用」的任务个数，停用的不计入；
+     悬停提示再给出「启用 N 个 / 共 M 个 · K 个执行中」。 */
   function cronSetBadge(total, running) {
     const el = $("actCronBadge");
     if (!el) return;
     const list = CRON.tasks || [];
-    const n = (total == null) ? list.length : total;
+    const n = list.filter(x => x.enabled).length;
+    const all = list.length;
     const run = (running == null) ? list.filter(x => x.running).length : running;
     if (n > 0) { el.textContent = n > 99 ? "99+" : n; el.style.display = ""; }
     else el.style.display = "none";
@@ -70,7 +71,7 @@
     if (act) {                                       // 悬停提示补上数量，原始标题只记一次
       if (!act.dataset.baseTitle) act.dataset.baseTitle = act.title || "";
       act.title = n
-        ? act.dataset.baseTitle + "（共 " + n + " 个" + (run > 0 ? " · " + run + " 个执行中" : "") + "）"
+        ? act.dataset.baseTitle + "（启用 " + n + " 个 / 共 " + all + " 个" + (run > 0 ? " · " + run + " 个执行中" : "") + "）"
         : act.dataset.baseTitle;
     }
   }

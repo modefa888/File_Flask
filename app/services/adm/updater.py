@@ -21,8 +21,23 @@
 - **安全**：所有接口仅管理员可用（由 auth 的全局鉴权接管）；GitHub Token 加密落库，
   且不会出现在任何返回体 / 命令参数里（Git 认证通过 GIT_CONFIG_* 环境变量传
   `http.extraheader`，避免 token 出现在进程命令行）。
+- **初始化仓库**（`start_init`）：从 GitHub 下载 ZIP 解压安装的目录里没有 `.git`，
+  在线更新全部功能都依赖它。该任务执行 `git init` → 关联 `origin` → `git fetch` →
+  `git checkout -f -B <branch>` 与远端对齐；被 .gitignore 覆盖的 data/、.env 等不受影响。
+  同样跑在后台线程里，前端按 `run_id` 轮询进度。
+- **ZIP 包更新**（`start_zip_update`）：管理员在页面上传源码压缩包，服务端安全解压后覆盖
+  到项目目录。完全不依赖 Git / 外网，适合「服务器连不上 GitHub」或「本来就是 ZIP 部署」
+  的场景。覆盖时跳过 data/、.env、虚拟环境、日志、__pycache__ 等运行时内容。
+- **更新前代码备份**（`_backup_project` / `start_backup`）：两种更新方式在动工作区之前
+  都会把当前代码整份打包成 `data/update_backup/pre_时间.zip`（不含 data/、logs/、
+  虚拟环境、.git；单文件 >30MB 跳过；只保留最近 10 份）。备份失败会中止更新，
+  避免出现「没备份就覆盖」；页面上也可以点「备份代码」随时手动备份。
+- **备份记录与回滚**（`list_backups` / `start_restore`）：备份 Tab 列出 data/update_backup
+  里的全部压缩包（类型 / 时间 / 大小 / 文件数），支持恢复、下载、删除。恢复时先把当前
+  代码再打一份 `restore_时间.zip` 快照再覆盖，备份之后新增的文件不删除（只在日志里提示）。
 """
 import base64
+import hashlib
 import json
 import os
 import re
@@ -34,6 +49,7 @@ import time
 import uuid
 import urllib.error
 import urllib.request
+import zipfile
 from urllib.parse import quote
 
 from ... import config
@@ -55,6 +71,7 @@ _DEFAULT_CFG = {
     "proxy": "",             # 形如 http://127.0.0.1:7890，同时用于 GitHub API 与 git
     "method": "auto",        # auto / api / git
     "install_deps": True,    # requirements.txt 有变化时自动 pip install
+    "backup_before_update": True,  # 更新前把当前代码打包备份到 data/update_backup/
     "restart_mode": "exec",  # exec / exit / command / none
     "restart_cmd": "",       # restart_mode=command 时执行
     "hard_reset": False,     # 是否允许「强制覆盖本地改动」
@@ -129,6 +146,8 @@ def save_config(patch):
         cfg["restart_cmd"] = str(patch.get("restart_cmd") or "").strip()
     if "install_deps" in patch:
         cfg["install_deps"] = bool(patch.get("install_deps"))
+    if "backup_before_update" in patch:
+        cfg["backup_before_update"] = bool(patch.get("backup_before_update"))
     if "hard_reset" in patch:
         cfg["hard_reset"] = bool(patch.get("hard_reset"))
 
@@ -299,7 +318,8 @@ def local_state():
         return out
     rc, top, err = _git(["rev-parse", "--show-toplevel"], root)
     if rc != 0:
-        out["error"] = "当前目录不是 Git 仓库（%s）" % (err or "可用 `git init` 初始化后关联到 GitHub 仓库")
+        out["error"] = ("当前目录不是 Git 仓库（%s）；可点本页「初始化 Git 仓库」自动补装"
+                        % (err or "缺少 .git 目录"))
         return out
     out["has_git"] = True
     out["root"] = top.strip() or root
@@ -722,7 +742,10 @@ def _finish(run, status, message="", error=""):
 
 
 def _save_last(run):
-    """把结果落到 store_meta：重启会清空内存缓冲，重启后仍能看到上次结果。"""
+    """把结果按任务类型分别落到 store_meta：重启会清空内存缓冲，重启后仍能看到上次结果。
+
+    存储结构为 {任务类型: 结果}，页面上 Git / ZIP / 备份三个 Tab 各自回显自己的记录。
+    """
     try:
         data = {
             "id": run.get("id"),
@@ -735,17 +758,35 @@ def _save_last(run):
             "restart_mode": (load_config().get("restart_mode") or "none"),
             "events": (run.get("events") or [])[-60:],
         }
-        set_meta(_LAST_KEY, json.dumps(data, ensure_ascii=False))
+        try:
+            raw = get_meta(_LAST_KEY)
+            all_last = json.loads(raw) if raw else {}
+        except Exception:
+            all_last = {}
+        if not isinstance(all_last, dict) or "events" in all_last:
+            all_last = {}          # 旧版是单条记录，直接按新结构重建
+        all_last[run.get("kind") or "update"] = data
+        set_meta(_LAST_KEY, json.dumps(all_last, ensure_ascii=False))
     except Exception as e:
         _log.warning("保存更新结果失败: %s", e)
 
 
-def last_result():
+def last_result(kind=None):
+    """上次执行结果。
+
+    不传 kind 返回全部（{任务类型: 结果}）；传 kind 只返回该类型的单条，
+    没有记录时返回 None。
+    """
     try:
         raw = get_meta(_LAST_KEY)
-        return json.loads(raw) if raw else None
+        data = json.loads(raw) if raw else {}
     except Exception:
-        return None
+        data = {}
+    if not isinstance(data, dict) or "events" in data:
+        data = {}                  # 旧版单条格式视为无记录
+    if kind:
+        return data.get(kind)
+    return data
 
 
 def get_run(run_id):
@@ -938,7 +979,10 @@ def _worker_update(run, cfg, reset):
             _finish(run, "done", "已是最新版本，无需更新")
             return
 
-        _emit(run, "发现新版本：%s → %s" % (local["short"] or "(空)", new_sha[:7]), "ok", 25, "merge")
+        # 确认有更新后、改动工作区之前整份备份当前代码；备份失败直接中止
+        _backup_or_raise(run, cfg, root, "pre", 25)
+
+        _emit(run, "发现新版本：%s → %s" % (local["short"] or "(空)", new_sha[:7]), "ok", 28, "merge")
         if reset:
             _emit(run, "按「强制覆盖」执行 git reset --hard…", "warn", 30)
             rc, out, err = _git(["reset", "--hard", new_sha], root)
@@ -996,6 +1040,621 @@ def _worker_restart(run, cfg):
             _finish(run, "done", "已下发重启命令")
     except Exception as e:
         _finish(run, "error", str(e), error=str(e))
+
+
+# ============================================================================ 初始化仓库
+def _remote_default_branch(cfg, url, timeout=30):
+    """读远端 HEAD 指向的默认分支（`git ls-remote --symref`）。
+
+    ZIP 解压安装的目录里没有分支信息，用它来自动对齐到 main / master，
+    省得用户还要去猜该填哪个分支名。
+    """
+    rc, out, _err = _git(["ls-remote", "--symref", url, "HEAD"], project_root(), cfg, timeout)
+    if rc != 0:
+        return ""
+    for line in (out or "").splitlines():
+        line = line.strip()
+        if not line.startswith("ref:"):
+            continue
+        parts = line.split()
+        if len(parts) >= 2 and parts[1].startswith("refs/heads/"):
+            return parts[1][len("refs/heads/"):]
+    return ""
+
+
+def _worker_init(run, cfg):
+    """把「下载 ZIP 解压」的目录变成真正的 Git 仓库，与远端分支对齐。
+
+    只覆盖版本库里存在的同名文件（checkout -f）；data/、.env、虚拟环境、
+    logs/ 等被 .gitignore 排除的内容不在远端树里，因此不受影响。
+    """
+    root = project_root()
+    try:
+        if not os.path.isdir(root):
+            raise RuntimeError("项目目录不存在：%s" % root)
+        repo, _source = _resolve_repo(cfg)
+        if not repo:
+            raise RuntimeError("请先填写 GitHub 仓库地址（如 owner/repo 或 https://github.com/owner/repo）")
+        url = _fetch_url(cfg, repo)
+        _emit(run, "项目目录：%s" % root, "dim", 5, "init")
+        _emit(run, "远端仓库：%s → %s" % (repo["slug"], url), "info")
+        branch = (cfg.get("branch") or "").strip() or _remote_default_branch(cfg, url) or "main"
+        _emit(run, "目标分支：%s" % branch, "info", 10)
+
+        rc, out, err = _git(["init", "-q"], root, cfg, 60)
+        if rc != 0:
+            raise RuntimeError("git init 失败：%s" % ((err or out).strip()[:500] or "未知错误"))
+        _emit(run, "本地仓库已就绪（%s/.git）" % root, "ok", 20, "fetch")
+
+        # origin 指向真正用于拉取的地址（可能是 SSH / 镜像，而不是 https）
+        rc, out, _err = _git(["remote", "get-url", "origin"], root, cfg, 30)
+        if rc == 0 and (out or "").strip():
+            rc, out, err = _git(["remote", "set-url", "origin", url], root, cfg, 30)
+            action = "已更新 origin 远端"
+        else:
+            rc, out, err = _git(["remote", "add", "origin", url], root, cfg, 30)
+            action = "已关联 origin 远端"
+        if rc != 0:
+            raise RuntimeError("配置 origin 远端失败：%s" % ((err or out).strip()[:500] or "未知错误"))
+        _emit(run, "%s：%s" % (action, url), "ok", 30)
+
+        _emit(run, "正在拉取远端代码…（首次拉取可能较慢）", "info", 40)
+        refspec = "+refs/heads/%s:refs/remotes/origin/%s" % (branch, branch)
+        rc, out, err = _git(["fetch", "--no-tags", url, refspec], root, cfg, 600)
+        if rc != 0:
+            detail = ((err or out).strip()[:600]) or "未知错误"
+            if "超时" in detail or "timeout" in detail.lower():
+                detail += ("。连不上 %s：可在「更新配置 → API 代理」填代理，"
+                           "或把「Git 拉取地址」改成 ssh://git@ssh.github.com:443/owner/repo.git" % url)
+            raise RuntimeError("拉取失败：%s" % detail)
+        sha, _ = _git_out(["rev-parse", "refs/remotes/origin/%s" % branch], root, cfg)
+        if not sha:
+            raise RuntimeError("拉取成功但读不到分支 %s，请检查分支名是否正确" % branch)
+        run["to"] = sha
+        _emit(run, "远端最新提交：%s" % sha[:7], "ok", 50, "merge")
+
+        tracked, _ = _git_out(
+            ["ls-tree", "-r", "--name-only", "refs/remotes/origin/%s" % branch], root, cfg, 180)
+        names = [x.strip() for x in tracked.splitlines() if x.strip()]
+        hit = [p for p in names if os.path.exists(os.path.join(root, p))]
+        if hit:
+            _emit(run, "将用远端版本覆盖 %d 个同名文件（data/、.env、虚拟环境、日志不在版本库内，不会被删除）"
+                  % len(hit), "warn")
+            for p in hit[:8]:
+                _emit(run, "  ＊ %s" % p, "dim")
+            if len(hit) > 8:
+                _emit(run, "  … 其余 %d 个文件" % (len(hit) - 8), "dim")
+
+        _emit(run, "正在切换到分支 %s…" % branch, "info", 70)
+        rc, out, err = _git(["checkout", "-f", "-B", branch, "refs/remotes/origin/%s" % branch],
+                            root, cfg, 300)
+        if rc != 0:
+            raise RuntimeError("切换分支失败：%s" % ((err or out).strip()[:600] or "未知错误"))
+        # checkout -B 的起点是 refs/remotes/... 时不会自动建立跟踪，这里补一下
+        _git(["branch", "--set-upstream-to=origin/%s" % branch, branch], root, cfg, 30)
+
+        after = local_state()
+        if not after.get("has_git"):
+            raise RuntimeError("初始化后仍无法识别为 Git 仓库：%s" % (after.get("error") or "未知错误"))
+        _emit(run, "本地版本：%s %s" % (after.get("short") or sha[:7],
+                                     (after.get("commit") or {}).get("message", "")), "ok", 100)
+        _finish(run, "done", "已初始化为 Git 仓库（%s @ %s），现在可以检查更新了"
+                % (after.get("branch") or branch, after.get("short") or sha[:7]))
+    except Exception as e:
+        _finish(run, "error", str(e), error=str(e))
+        _log.error("[初始化仓库] 失败: %s", e)
+
+
+def start_init():
+    """启动「把当前目录初始化为 Git 仓库」的后台任务：返回 (run_id, 错误信息)。"""
+    with _LOCK:
+        if has_running():
+            return "", "已有更新 / 重启任务在执行，请等待完成"
+    if not shutil.which("git"):
+        return "", "服务器未安装 Git，请先安装（apt install -y git / yum install -y git）"
+    local = local_state()
+    # 只有「已有提交」才算真正的仓库；上一次初始化中途失败的半成品仓库允许继续补齐
+    if local.get("has_git") and local.get("sha"):
+        return "", "当前目录已经是 Git 仓库（%s @ %s），无需初始化" % (
+            local.get("root"), local.get("short"))
+    cfg = _raw_config()
+    repo, _source = _resolve_repo(cfg)
+    if not repo:
+        return "", "请先在「更新配置」里填写 GitHub 仓库地址再初始化"
+    run = _new_run("init")
+    t = threading.Thread(target=_worker_init, args=(run, cfg), name="online-init", daemon=True)
+    t.start()
+    return run["id"], ""
+
+
+# ============================================================================ 代码备份
+_BACKUP_DIRNAME = "update_backup"        # 备份统一放 data/update_backup/
+_BACKUP_KEEP = 10                        # 只保留最近 10 份，避免把磁盘占满
+_BACKUP_SKIP_TOP = {".git", ".hg", ".svn", "data", "logs", ".venv", "venv", ".buildenv",
+                    "__pycache__", "node_modules", ".upload_tmp", "build", "dist"}
+_BACKUP_SKIP_NAMES = {".DS_Store", "Thumbs.db", "desktop.ini"}
+_BACKUP_SKIP_EXT = (".pyc", ".pyo", ".log", ".mp4", ".tmp", ".swp")
+_BACKUP_MAX_FILE = 30 * 1024 * 1024      # 单文件超大（多为误放的媒体文件）跳过
+
+
+def backup_dir():
+    """备份目录（绝对路径）。"""
+    return os.path.join(config.DATA_ROOT, _BACKUP_DIRNAME)
+
+
+def _prune_backups(out_dir, keep=_BACKUP_KEEP):
+    """只保留最近 keep 份备份（按修改时间排序，前缀不同也不会误删新的）。"""
+    try:
+        names = [f for f in os.listdir(out_dir) if f.endswith(".zip")]
+        names.sort(key=lambda f: os.path.getmtime(os.path.join(out_dir, f)))
+    except OSError:
+        return
+    for name in (names[:-keep] if len(names) > keep else []):
+        try:
+            os.remove(os.path.join(out_dir, name))
+        except OSError:
+            pass
+
+
+def _backup_project(root, tag="pre"):
+    """把当前项目「代码」打包到 data/update_backup/，返回 {path, files, size, skipped}。
+
+    跳过 data/（运行数据、上传的文件、store.db）、logs/、虚拟环境、.git、
+    __pycache__、node_modules、构建产物；单文件超过 30MB 的也跳过。
+    `.env` 会一起打包，方便回滚到原来的配置。
+    """
+    out_dir = backup_dir()
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as e:
+        raise RuntimeError("无法创建备份目录（%s）：%s" % (out_dir, e))
+    path = os.path.join(out_dir, "%s_%s.zip" % (tag, time.strftime("%Y%m%d_%H%M%S")))
+    files = 0
+    size = 0
+    skipped = 0
+    try:
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for dirpath, dirnames, filenames in os.walk(root):
+                depth = 0 if os.path.normpath(dirpath) == os.path.normpath(root) else \
+                    os.path.relpath(dirpath, root).count(os.sep) + 1
+                if depth == 0:
+                    dirnames[:] = [d for d in dirnames if d not in _BACKUP_SKIP_TOP]
+                else:
+                    dirnames[:] = [d for d in dirnames if d not in ("__pycache__", ".git")]
+                dirnames.sort()
+                for name in sorted(filenames):
+                    if name in _BACKUP_SKIP_NAMES or name.endswith(_BACKUP_SKIP_EXT):
+                        continue
+                    abs_path = os.path.join(dirpath, name)
+                    try:
+                        fsize = os.path.getsize(abs_path)
+                        if fsize > _BACKUP_MAX_FILE:
+                            skipped += 1
+                            continue
+                        zf.write(abs_path, os.path.relpath(abs_path, root))
+                    except OSError:
+                        skipped += 1
+                        continue
+                    files += 1
+                    size += fsize
+    except Exception as e:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise RuntimeError("备份当前代码失败：%s" % e)
+    _prune_backups(out_dir)
+    _log.info("[备份] %s：%d 个文件，%.2f MB → %s", tag, files, size / 1048576.0, path)
+    return {"path": path, "files": files, "size": size, "skipped": skipped,
+            "name": os.path.basename(path)}
+
+
+def _backup_or_raise(run, cfg, root, tag="pre", progress=6):
+    """按配置在更新前备份代码；备份失败直接抛错，避免「没备份就更新」。"""
+    if not cfg.get("backup_before_update", True):
+        _emit(run, "已关闭「更新前自动备份」，跳过备份", "warn", progress, "backup")
+        return None
+    _emit(run, "正在备份当前代码…", "info", progress, "backup")
+    info = _backup_project(root, tag)
+    _emit(run, "已备份 %d 个文件（%.2f MB）→ %s%s"
+          % (info["files"], info["size"] / 1048576.0, info["path"],
+             ("，跳过 %d 个超大 / 临时文件" % info["skipped"]) if info["skipped"] else ""),
+          "ok", progress + 2)
+    return info
+
+
+_BACKUP_LABELS = {"pre": "更新前自动", "manual": "手动备份", "restore": "恢复前自动"}
+
+
+def backup_name_ok(name):
+    """备份文件名只允许 data/update_backup 下的纯文件名，挡掉目录穿越。"""
+    name = (name or "").strip()
+    if (not name or name.startswith(".") or name != os.path.basename(name)
+            or "/" in name or "\\" in name or not name.endswith(".zip")):
+        return ""
+    return name
+
+
+def backup_path(name):
+    """备份文件的绝对路径；名字不合法返回空串。"""
+    good = backup_name_ok(name)
+    return os.path.join(backup_dir(), good) if good else ""
+
+
+def list_backups():
+    """备份记录列表（新 → 旧）：文件名 / 类型 / 大小 / 时间 / 文件数。"""
+    out = []
+    d = backup_dir()
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return out
+    for name in names:
+        if not name.endswith(".zip"):
+            continue
+        path = os.path.join(d, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        files = -1
+        try:
+            with zipfile.ZipFile(path) as zf:
+                files = len([i for i in zf.infolist() if not i.is_dir()])
+        except Exception:
+            files = -1
+        tag = name.split("_", 1)[0]
+        out.append({
+            "name": name,
+            "tag": tag,
+            "label": _BACKUP_LABELS.get(tag, tag),
+            "size": st.st_size,
+            "ts": st.st_mtime,
+            "files": files,
+            "broken": files < 0,
+        })
+    out.sort(key=lambda x: x["ts"], reverse=True)
+    return out
+
+
+def delete_backup(name):
+    """删除一份备份：成功返回空串，失败返回错误信息。"""
+    path = backup_path(name)
+    if not path:
+        return "备份文件名不合法"
+    if not os.path.isfile(path):
+        return "备份不存在（可能已被清理）"
+    try:
+        os.remove(path)
+    except OSError as e:
+        return "删除失败：%s" % e
+    _log.info("[备份] 已删除 %s", name)
+    return ""
+
+
+def _worker_restore(run, cfg, name, zip_path):
+    """把项目代码恢复到指定备份（改文件前会先给当前代码再做一份备份）。"""
+    root = project_root()
+    work = os.path.join(config.DATA_ROOT, "update_uploads", "r" + uuid.uuid4().hex[:8])
+    try:
+        if not os.path.isdir(root):
+            raise RuntimeError("项目目录不存在：%s" % root)
+        _emit(run, "项目目录：%s" % root, "dim", 5, "init")
+        _emit(run, "备份文件：%s（%.2f MB）"
+              % (name, os.path.getsize(zip_path) / 1048576.0), "info")
+        if not zipfile.is_zipfile(zip_path):
+            raise RuntimeError("备份文件已损坏（不是有效的 ZIP），无法恢复")
+
+        os.makedirs(work, exist_ok=True)
+        _emit(run, "正在解压备份…", "info", 10)
+        # 备份包是把项目根直接打包的，不需要剥外层目录；.env 也要一起还原
+        _safe_extract(zip_path, work)
+        items, skipped = _zip_plan(work, set())
+        if not items:
+            raise RuntimeError("备份包里没有任何文件，无法恢复")
+        _emit(run, "备份包内 %d 个文件%s" % (len(items),
+              ("（跳过 %d 个系统文件）" % skipped) if skipped else ""), "info", 15, "backup")
+
+        # 先给当前代码做一份备份，恢复错了还能再回来
+        _emit(run, "正在备份当前代码（恢复前快照）…", "info", 20, "backup")
+        info = _backup_project(root, "restore")
+        _emit(run, "已备份当前代码：%s（%d 个文件）" % (info["name"], info["files"]), "ok", 28)
+
+        req_before = _file_digest(os.path.join(root, "requirements.txt"))
+        copied = 0
+        rels = set()
+        for rel, abs_src in items:
+            dst = os.path.join(root, rel)
+            parent = os.path.dirname(dst)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            shutil.copy2(abs_src, dst)
+            rels.add(rel)
+            copied += 1
+        _emit(run, "已还原 %d 个文件到 %s" % (copied, name), "ok", 60, "merge")
+
+        extra = [r for r in _project_source_files(root) if r not in rels]
+        if extra:
+            _emit(run, "提示：当前目录有 %d 个文件不在这份备份里（备份之后新增的），未删除%s"
+                  % (len(extra), "：" + "、".join(extra[:6]) if extra else ""), "warn")
+
+        if local_state().get("has_git"):
+            _emit(run, "提示：当前目录是 Git 仓库，恢复后这些文件会显示为「已修改」；"
+                       "如需用 Git 方式更新，请先处理本地改动", "warn")
+
+        req_after = _file_digest(os.path.join(root, "requirements.txt"))
+        if req_before and req_before != req_after:
+            if cfg.get("install_deps"):
+                _pip_install(root, run)
+            else:
+                _emit(run, "requirements.txt 有变化，但未开启「自动安装依赖」，请手动执行 "
+                           "pip install -r requirements.txt", "warn")
+        else:
+            _emit(run, "依赖文件无变化，跳过安装", "dim", 78)
+
+        _emit(run, "准备重启服务…", "info", 90, "restart")
+        mode = _do_restart(cfg, run)
+        if mode == "manual":
+            _finish(run, "done", "已恢复到 %s；请手动重启服务使旧代码生效" % name)
+        elif mode == "command":
+            _finish(run, "done", "已恢复到 %s，已下发重启命令" % name)
+    except Exception as e:
+        _finish(run, "error", str(e), error=str(e))
+        _log.error("[恢复备份] 失败: %s", e)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _project_source_files(root):
+    """当前项目里属于「代码」的相对路径清单（与备份的排除规则一致）。"""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        depth = 0 if os.path.normpath(dirpath) == os.path.normpath(root) else \
+            os.path.relpath(dirpath, root).count(os.sep) + 1
+        if depth == 0:
+            dirnames[:] = [d for d in dirnames if d not in _BACKUP_SKIP_TOP]
+        else:
+            dirnames[:] = [d for d in dirnames if d not in ("__pycache__", ".git")]
+        for name in filenames:
+            if name in _BACKUP_SKIP_NAMES or name.endswith(_BACKUP_SKIP_EXT):
+                continue
+            out.append(os.path.relpath(os.path.join(dirpath, name), root))
+    return out
+
+
+def _worker_backup(run, _cfg):
+    """手动备份：只打包当前代码，不改动任何文件。"""
+    root = project_root()
+    try:
+        if not os.path.isdir(root):
+            raise RuntimeError("项目目录不存在：%s" % root)
+        _emit(run, "项目目录：%s" % root, "dim", 5, "init")
+        _emit(run, "正在打包当前代码…", "info", 20, "backup")
+        info = _backup_project(root, "manual")
+        _emit(run, "备份完成：%d 个文件，%.2f MB" % (info["files"], info["size"] / 1048576.0),
+              "ok", 90)
+        _emit(run, "文件位置：%s" % info["path"], "info", 100)
+        _finish(run, "done", "代码备份完成：%s" % info["name"])
+    except Exception as e:
+        _finish(run, "error", str(e), error=str(e))
+        _log.error("[备份] 失败: %s", e)
+
+
+def start_backup():
+    """启动一次代码备份（后台线程）：返回 (run_id, 错误信息)。"""
+    with _LOCK:
+        if has_running():
+            return "", "已有更新 / 备份任务在执行，请等待完成"
+    if not os.path.isdir(project_root()):
+        return "", "项目目录不存在：%s" % project_root()
+    run = _new_run("backup")
+    t = threading.Thread(target=_worker_backup, args=(run, _raw_config()),
+                         name="online-backup", daemon=True)
+    t.start()
+    return run["id"], ""
+
+
+def start_restore(name):
+    """把项目恢复到指定备份：返回 (run_id, 错误信息)。"""
+    with _LOCK:
+        if has_running():
+            return "", "已有更新 / 备份 / 恢复任务在执行，请等待完成"
+    path = backup_path(name)
+    if not path:
+        return "", "备份文件名不合法"
+    if not os.path.isfile(path):
+        return "", "备份不存在（可能已被清理）"
+    if not os.path.isdir(project_root()):
+        return "", "项目目录不存在：%s" % project_root()
+    cfg = _raw_config()
+    if (cfg.get("restart_mode") or "") == "command" and not (cfg.get("restart_cmd") or "").strip():
+        return "", "重启方式选了「自定义命令」，但没有填写命令"
+    run = _new_run("restore")
+    t = threading.Thread(target=_worker_restore,
+                         args=(run, cfg, os.path.basename(path), path),
+                         name="online-restore", daemon=True)
+    t.start()
+    return run["id"], ""
+
+
+# ============================================================================ ZIP 包更新
+_ZIP_SKIP_TOP = {".git", ".hg", ".svn", "data", "logs", ".venv", "venv", ".buildenv",
+                 "__pycache__", "build", "dist", "node_modules", ".upload_tmp"}
+_ZIP_SKIP_NAMES = {".env", ".DS_Store", "Thumbs.db", "desktop.ini"}
+_ZIP_MAX_FILES = 20000
+_ZIP_MAX_BYTES = 800 * 1024 * 1024       # 解压后总量上限，防止压缩炸弹
+
+
+def _safe_extract(zip_path, dest):
+    """解压到 dest：拦掉目录穿越（../、绝对路径）与超大解压体积。"""
+    total = 0
+    count = 0
+    with zipfile.ZipFile(zip_path) as zf:
+        for info in zf.infolist():
+            name = (info.filename or "").replace("\\", "/")
+            parts = [p for p in name.split("/") if p not in ("", ".")]
+            if name.startswith("/") or ".." in parts:
+                raise RuntimeError("压缩包内含非法路径：%s" % info.filename)
+            target = os.path.realpath(os.path.join(dest, name))
+            if target != dest and not target.startswith(dest + os.sep):
+                raise RuntimeError("压缩包内含非法路径：%s" % info.filename)
+            if not info.is_dir():
+                count += 1
+                total += int(info.file_size or 0)
+                if count > _ZIP_MAX_FILES:
+                    raise RuntimeError("压缩包内文件过多（超过 %d 个），已中止" % _ZIP_MAX_FILES)
+                if total > _ZIP_MAX_BYTES:
+                    raise RuntimeError("压缩包解压后超过 %dMB，已中止"
+                                       % (_ZIP_MAX_BYTES // 1024 // 1024))
+        zf.extractall(dest)
+
+
+def _zip_source_root(dest):
+    """GitHub 的 ZIP 会套一层 `repo-main/`；剥掉这层，返回真正的项目根。"""
+    try:
+        entries = [e for e in os.listdir(dest) if e != "__MACOSX"]
+    except OSError:
+        return dest
+    if len(entries) == 1:
+        only = os.path.join(dest, entries[0])
+        if os.path.isdir(only):
+            return only
+    return dest
+
+
+def _zip_plan(src, skip_names=None):
+    """列出压缩包里要写入项目的文件：[(相对路径, 源文件绝对路径)]，以及跳过的数量。
+
+    `skip_names` 传空集合时连 .env 一起还原（恢复备份时用）。
+    """
+    skip = _ZIP_SKIP_NAMES if skip_names is None else skip_names
+    items = []
+    skipped = 0
+    for dirpath, dirnames, filenames in os.walk(src):
+        depth = 0 if os.path.normpath(dirpath) == os.path.normpath(src) else \
+            os.path.relpath(dirpath, src).count(os.sep) + 1
+        if depth == 0:
+            dirnames[:] = [d for d in dirnames if d not in _ZIP_SKIP_TOP]
+        else:
+            dirnames[:] = [d for d in dirnames if d not in ("__pycache__", ".git")]
+        dirnames.sort()
+        for name in sorted(filenames):
+            rel = os.path.relpath(os.path.join(dirpath, name), src)
+            top = rel.split(os.sep)[0]
+            if (name in skip or name.endswith((".pyc", ".pyo"))
+                    or top in _ZIP_SKIP_TOP or rel.startswith("..")):
+                skipped += 1
+                continue
+            items.append((rel, os.path.join(dirpath, name)))
+    return items, skipped
+
+
+def _file_digest(path):
+    try:
+        with open(path, "rb") as fp:
+            return hashlib.sha1(fp.read()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _worker_zip(run, cfg, zip_path, filename):
+    """解压上传的源码包并覆盖到项目目录（不碰 data/、.env 等运行时数据）。"""
+    root = project_root()
+    work = os.path.join(config.DATA_ROOT, "update_uploads", "x" + uuid.uuid4().hex[:8])
+    try:
+        if not os.path.isdir(root):
+            raise RuntimeError("项目目录不存在：%s" % root)
+        size_mb = os.path.getsize(zip_path) / 1024.0 / 1024.0
+        _emit(run, "压缩包：%s（%.2f MB）" % (filename, size_mb), "info", 5, "init")
+        if not zipfile.is_zipfile(zip_path):
+            raise RuntimeError("上传的文件不是有效的 ZIP 压缩包")
+
+        os.makedirs(work, exist_ok=True)
+        _emit(run, "正在解压…", "info", 10)
+        _safe_extract(zip_path, work)
+        src = _zip_source_root(work)
+        if not (os.path.isdir(os.path.join(src, "app")) or os.path.isfile(os.path.join(src, "run.py"))):
+            raise RuntimeError("压缩包里没有找到项目文件（应包含 run.py / app/ 目录），"
+                               "请上传本项目的源码包，而不是运行数据")
+        _emit(run, "解压完成，正在比对文件…", "ok", 20, "merge")
+
+        items, skipped = _zip_plan(src)
+        if not items:
+            raise RuntimeError("压缩包里没有任何可更新的文件")
+        overwrite = [rel for rel, _abs in items if os.path.exists(os.path.join(root, rel))]
+        _emit(run, "共 %d 个文件：覆盖 %d 个、新增 %d 个"
+              % (len(items), len(overwrite), len(items) - len(overwrite)), "info", 30)
+        if skipped:
+            _emit(run, "跳过 %d 个运行时 / 系统文件（data/、.env、日志、__pycache__ 等）"
+                  % skipped, "dim")
+
+        # 覆盖前整份备份当前代码（失败则中止，不会出现「没备份就覆盖」）
+        _backup_or_raise(run, cfg, root, "pre", 32)
+
+        req_before = _file_digest(os.path.join(root, "requirements.txt"))
+        copied = 0
+        for rel, abs_src in items:
+            dst = os.path.join(root, rel)
+            parent = os.path.dirname(dst)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            shutil.copy2(abs_src, dst)
+            copied += 1
+            if copied % 100 == 0:
+                _emit(run, "已写入 %d/%d 个文件…" % (copied, len(items)), "dim")
+        _emit(run, "代码已更新（写入 %d 个文件）" % copied, "ok", 60, "deps")
+
+        if local_state().get("has_git"):
+            _emit(run, "提示：当前目录是 Git 仓库，ZIP 覆盖后这些文件会显示为「已修改」；"
+                       "以后改用 Git 方式更新前，请先提交 / 还原这些改动", "warn")
+
+        req_after = _file_digest(os.path.join(root, "requirements.txt"))
+        if req_before and req_before != req_after:
+            if cfg.get("install_deps"):
+                _pip_install(root, run)
+            else:
+                _emit(run, "requirements.txt 有变化，但未开启「自动安装依赖」，请手动执行 "
+                           "pip install -r requirements.txt", "warn")
+        else:
+            _emit(run, "依赖文件无变化，跳过安装", "dim", 78)
+
+        _emit(run, "准备重启服务…", "info", 90, "restart")
+        mode = _do_restart(cfg, run)
+        if mode == "manual":
+            _finish(run, "done", "ZIP 包更新完成；请手动重启服务使新代码生效")
+        elif mode == "command":
+            _finish(run, "done", "ZIP 包更新完成，已下发重启命令")
+    except Exception as e:
+        _finish(run, "error", str(e), error=str(e))
+        _log.error("[ZIP 更新] 失败: %s", e)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        try:
+            os.remove(zip_path)
+        except OSError:
+            pass
+
+
+def start_zip_update(zip_path, filename=""):
+    """启动 ZIP 包更新任务：返回 (run_id, 错误信息)。zip_path 由调用方负责清理。"""
+    with _LOCK:
+        if has_running():
+            return "", "已有更新 / 重启任务在执行，请等待完成"
+    if not os.path.isfile(zip_path):
+        return "", "上传的压缩包不存在，请重新上传"
+    if not zipfile.is_zipfile(zip_path):
+        return "", "上传的文件不是有效的 ZIP 压缩包"
+    if not os.path.isdir(project_root()):
+        return "", "项目目录不存在：%s" % project_root()
+    cfg = _raw_config()
+    if (cfg.get("restart_mode") or "") == "command" and not (cfg.get("restart_cmd") or "").strip():
+        return "", "重启方式选了「自定义命令」，但没有填写命令"
+    run = _new_run("zip")
+    t = threading.Thread(target=_worker_zip,
+                         args=(run, cfg, zip_path, filename or os.path.basename(zip_path)),
+                         name="online-zip", daemon=True)
+    t.start()
+    return run["id"], ""
 
 
 def start_update(reset=False):

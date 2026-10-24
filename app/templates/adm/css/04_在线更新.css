@@ -9,6 +9,46 @@
     gap: 14px;
 }
 
+/* 两种更新方式的 Tab 面板：卡片之间保持统一间距 */
+.upd-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+/* Tab 行右侧的全局动作（仅重启 / 备份代码）：与 Tab 标签同一行，不占更新操作列 */
+.upd-top {
+    position: relative;
+}
+
+.upd-top .adm-tabbar {
+    padding-right: 200px;      /* 给右上角两个按钮留位置 */
+}
+
+.upd-top-actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 39px;              /* 与 .adm-tab 的 10px 上下内边距对齐 */
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 1;
+}
+
+@media (max-width: 900px) {
+    .upd-top .adm-tabbar {
+        padding-right: 0;
+    }
+
+    .upd-top-actions {
+        position: static;
+        height: auto;
+        justify-content: flex-end;
+        margin: -6px 0 10px;
+    }
+}
+
 /* ---------------- 版本对比 ---------------- */
 .upd-versions {
     display: grid;
@@ -76,6 +116,62 @@
 .upd-actions .adm-btn {
     justify-content: center;
     width: 100%;
+}
+
+/* 「初始化 Git 仓库」：只在检测到非 Git 仓库时出现，用青色区分于其它动作 */
+.adm-btn.git {
+    background: rgba(34, 211, 238, .14);
+    border-color: rgba(34, 211, 238, .4);
+    color: #a5f3fc;
+}
+
+.adm-btn.git:hover {
+    background: rgba(34, 211, 238, .24);
+    border-color: rgba(34, 211, 238, .6);
+}
+
+html[data-theme="light"] .adm-btn.git {
+    background: rgba(14, 116, 144, .1);
+    border-color: rgba(14, 116, 144, .35);
+    color: #0e7490;
+}
+
+html[data-theme="light"] .adm-btn.git:hover {
+    background: rgba(14, 116, 144, .18);
+}
+
+/* ---------------- ZIP 包更新 ---------------- */
+.upd-zip-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+.upd-zip-pick {
+    cursor: pointer;
+    flex: none;
+}
+
+.upd-zip-name {
+    flex: 1 1 180px;
+    min-width: 0;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    color: var(--adm-text-dim);
+    word-break: break-all;
+}
+
+.upd-zip-row .adm-btn.primary {
+    margin-left: auto;
+}
+
+.upd-zip-card .upd-tip {
+    margin-top: 10px;
+    font-size: 11.5px;
+    color: var(--adm-text-mute);
+    line-height: 1.65;
 }
 
 /* ---------------- 区块标题 ---------------- */
@@ -163,6 +259,88 @@
     gap: 10px;
     flex-wrap: wrap;
     padding-top: 4px;
+}
+
+/* ---------------- 备份记录 ---------------- */
+.upd-bk-dir {
+    max-width: 44%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.upd-bk-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+    max-height: 420px;
+    overflow: auto;
+}
+
+.upd-bk {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 11px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 10px;
+    background: rgba(13, 19, 36, .4);
+}
+
+.upd-bk-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.upd-bk-name {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    color: var(--adm-text);
+    word-break: break-all;
+}
+
+.upd-bk-meta {
+    margin-top: 5px;
+    font-size: 11.5px;
+    color: var(--adm-text-mute);
+    line-height: 1.6;
+}
+
+.upd-bk-meta .adm-badge {
+    margin-right: 2px;
+}
+
+.upd-bk-acts {
+    display: flex;
+    gap: 6px;
+    flex: none;
+}
+
+.upd-bk-acts a.adm-btn {
+    text-decoration: none;
+}
+
+.upd-bk-tip {
+    margin-top: 12px;
+    font-size: 11.5px;
+    color: var(--adm-text-mute);
+    line-height: 1.65;
+}
+
+html[data-theme="light"] .upd-bk {
+    background: rgba(241, 245, 253, .8);
+}
+
+@media (max-width: 760px) {
+    .upd-bk {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .upd-bk-acts {
+        justify-content: flex-end;
+    }
 }
 
 /* ---------------- 提交列表 ---------------- */

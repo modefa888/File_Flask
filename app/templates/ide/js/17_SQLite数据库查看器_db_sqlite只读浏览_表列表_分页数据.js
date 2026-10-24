@@ -290,7 +290,9 @@
           }
           sqlInput.value = d.sql;
           sqlMsg.className = "dbv-sql-msg ok";
-          sqlMsg.textContent = "已生成（" + (d.model || "AI") + " · " + d.elapsed_ms + " ms）· 确认后按 Ctrl+Enter 运行";
+          var _ms = d.elapsed_ms || 0;
+          var _dur = _ms >= 1000 ? (_ms / 1000).toFixed(1) + " s" : _ms + " ms";
+          sqlMsg.textContent = "已生成（" + (d.model || "AI") + " · " + _dur + "）· 确认后按 Ctrl+Enter 运行";
           sqlInput.focus();
         })
         .catch(e => {

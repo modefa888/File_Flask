@@ -549,6 +549,7 @@
             body: JSON.stringify({ active: { provider: p.id, model: m } }) }).catch(() => {});
           aiFillModelSelect();
           pop.style.display = "none";
+          if (document.getElementById("sysAiPick")) sysAiMountSettings();   // 设置页开着：同步「跟随 AI 助手（…）」标签
         });
         pop.appendChild(o);
       });

@@ -453,6 +453,7 @@
         AI.providers = Array.isArray(d.providers) ? d.providers : [];
         AI.active = d.active || {};
         aiFillModelSelect();
+        if (document.getElementById("sysAiPick")) sysAiMountSettings();   // active 可能被后端重置：同步「跟随 AI 助手（…）」标签
         setTimeout(() => { tip.textContent = ""; }, 2500);
       } catch (e) { tip.textContent = "保存失败：" + e; }
     };

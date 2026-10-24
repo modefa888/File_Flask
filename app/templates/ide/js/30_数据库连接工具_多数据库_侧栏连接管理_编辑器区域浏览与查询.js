@@ -481,6 +481,7 @@
       '<div class="dbc">' +
         '<div class="dbc-side">' +
           '<div class="dbc-side-hd">' +
+            '<button class="dbc-mini dbc-side-toggle" title="收起表列表"><i class="bi bi-layout-sidebar-inset"></i></button>' +
             '<select class="dbc-db-sel" title="切换数据库"></select>' +
             '<button class="dbc-mini dbc-new-table" title="新建表 / 集合 / Key"><i class="bi bi-file-plus"></i></button>' +
             '<button class="dbc-mini dbc-refresh" title="刷新结构与数据"><i class="bi bi-arrow-clockwise"></i></button>' +
@@ -490,6 +491,7 @@
         "</div>" +
         '<div class="dbc-main">' +
           '<div class="dbc-bar">' +
+            '<button class="dbc-mini dbc-side-show" title="展开表列表" hidden><i class="bi bi-layout-sidebar"></i></button>' +
             '<span class="dbc-cur" title="当前表">—</span>' +
             '<button class="dbc-mini dbc-cur-edit" title="编辑表结构" hidden>' +
               '<i class="bi bi-pencil"></i></button>' +
@@ -596,6 +598,21 @@
     }
 
     function err(e) { return '<div class="dbc-empty">' + esc(e.message || e) + "</div>"; }
+
+    /* 表列表收起 / 展开：收起后主工具栏左侧出现展开按钮，状态记进连接浏览状态（刷新后还原） */
+    var sideToggle = tab.host.querySelector(".dbc-side-toggle");
+    var sideShow = tab.host.querySelector(".dbc-side-show");
+    function setSideHidden(hidden) {
+      tab.host.querySelector(".dbc").classList.toggle("dbc-side-hidden", !!hidden);
+      sideShow.hidden = !hidden;
+      sideToggle.title = hidden ? "展开表列表" : "收起表列表";
+      dbcSaveState(conn.id, { sideHidden: !!hidden });
+    }
+    sideToggle.onclick = function () {
+      setSideHidden(!tab.host.querySelector(".dbc").classList.contains("dbc-side-hidden"));
+    };
+    sideShow.onclick = function () { setSideHidden(false); };
+    if (saved.sideHidden) setSideHidden(true);
 
     function isSoftDeleted(row) {
       var sc = lastGrid.softCol, sm = lastGrid.softMode;
@@ -875,7 +892,9 @@
         sqlIn.value = d.sql || "";
         dbcSaveState(conn.id, { sql: sqlIn.value });
         sqlMsg.className = "dbc-sql-msg ok";
-        sqlMsg.textContent = "已生成（" + (d.model || "AI") + " · " + (d.elapsed_ms || 0) + " ms）· 确认后按 Ctrl+Enter 运行";
+        var _ms = d.elapsed_ms || 0;
+        var _dur = _ms >= 1000 ? (_ms / 1000).toFixed(1) + " s" : _ms + " ms";
+        sqlMsg.textContent = "已生成（" + (d.model || "AI") + " · " + _dur + "）· 确认后按 Ctrl+Enter 运行";
         sqlIn.focus();
       } catch (e) {
         sqlMsg.className = "dbc-sql-msg err";

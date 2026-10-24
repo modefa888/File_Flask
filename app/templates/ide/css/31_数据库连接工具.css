@@ -99,6 +99,9 @@
   /* 不要改 .dbc-host 的 position（会盖过 .cm-host{position:absolute;inset:0}，
      导致宿主塌成 0 高度、视图被压扁）。让 .dbc 绝对定位铺满宿主即可。 */
   .dbc { position: absolute; inset: 0; display: flex; background: #1e1e1e; }
+  /* 表列表收起 / 展开：收起后整列隐藏，主工具栏左侧出现展开按钮 */
+  .dbc.dbc-side-hidden .dbc-side { display: none; }
+  .dbc-side-show[hidden] { display: none; }
   .dbc-side {
     flex: none; width: 240px; display: flex; flex-direction: column;
     border-right: 1px solid #2e2e2f; background: #202021;

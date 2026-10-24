@@ -5,6 +5,8 @@ POST /api/ssh/fs/read      {id, path, max?}       读文本文件（默认 512KB
 POST /api/ssh/fs/write     {id, path, content}    写回文本文件（≤4MB，编辑器保存用）
 POST /api/ssh/fs/mkdir     {id, path}
 POST /api/ssh/fs/rename    {id, path, name}
+POST /api/ssh/fs/copy      {id, path, to}         复制文件 / 文件夹到目标目录（to=目标目录绝对路径）
+POST /api/ssh/fs/move      {id, path, to}         移动文件 / 文件夹到目标目录（跨文件系统自动降级为复制+删除）
 POST /api/ssh/fs/delete    {id, path}             递归删除（文件 / 目录）
 GET  /api/ssh/fs/download  ?id=&path=             流式下载（attachment）
 GET  /api/ssh/fs/raw       ?id=&path=             原始字节（内嵌图片缩略图用，≤20MB）
@@ -342,26 +344,122 @@ def fs_delete():
     if not cid or not path:
         return jsonify({"error": "缺少 id 或 path"}), 400
 
-    def _rm(sftp, p):
-        st = sftp.lstat(p)
-        if _stat.S_ISDIR(st.st_mode):
-            for name in sftp.listdir(p):
-                _rm(sftp, p.rstrip("/") + "/" + name)
-            sftp.rmdir(p)
-        else:
-            sftp.remove(p)
-
     def op(sftp):
         real = sftp.normalize(path)
         if real == "/":
             raise ValueError("拒绝删除根目录")
-        _rm(sftp, real)
+        _ssh_rm(sftp, real)
         return {"path": real}
 
     res, err = _run(cid, op)
     if err:
         return jsonify({"error": err}), 400
     _log.info("ssh fs delete: cid=%s path=%s", cid, res["path"])
+    return jsonify(res)
+
+
+def _ssh_rm(sftp, p):
+    """递归删除（fs/delete 与跨文件系统 move 共用）。"""
+    st = sftp.lstat(p)
+    if _stat.S_ISDIR(st.st_mode):
+        for name in sftp.listdir(p):
+            _ssh_rm(sftp, p.rstrip("/") + "/" + name)
+        sftp.rmdir(p)
+    else:
+        sftp.remove(p)
+
+
+def _ssh_exists(sftp, p):
+    try:
+        sftp.stat(p)
+        return True
+    except IOError:
+        return False
+
+
+def _ssh_copy(sftp, src, dst):
+    """递归复制：文件流式读写，目录逐级创建（symlink 跟随指向的目标）。"""
+    st = sftp.stat(src)
+    if _stat.S_ISDIR(st.st_mode):
+        if _ssh_exists(sftp, dst):
+            dst_st = sftp.stat(dst)
+            if not _stat.S_ISDIR(dst_st.st_mode):
+                raise ValueError("目标已存在且不是目录: " + dst)
+        else:
+            sftp.mkdir(dst)
+        for name in sftp.listdir(src):
+            _ssh_copy(sftp, src.rstrip("/") + "/" + name, dst.rstrip("/") + "/" + name)
+        return
+    with sftp.open(src, "rb") as fi, sftp.open(dst, "wb") as fo:
+        while True:
+            chunk = fi.read(64 * 1024)
+            if not chunk:
+                break
+            fo.write(chunk)
+
+
+def _ssh_check_transfer(sftp, src, dst_dir):
+    """copy / move 共用的前置校验：返回 (源绝对路径, 目标绝对路径)。"""
+    src = sftp.normalize(src)
+    dst_dir = sftp.normalize(dst_dir)
+    dst_dir_st = sftp.stat(dst_dir)          # 目标目录必须存在且是目录
+    if not _stat.S_ISDIR(dst_dir_st.st_mode):
+        raise ValueError("目标不是目录: " + dst_dir)
+    st = sftp.stat(src)
+    if _stat.S_ISDIR(st.st_mode):
+        inside = dst_dir == src or dst_dir.startswith(src.rstrip("/") + "/")
+        if inside:
+            raise ValueError("不能把文件夹移动/复制到它自身内部")
+    name = src.rstrip("/").split("/")[-1]
+    return src, dst_dir.rstrip("/") + "/" + name
+
+
+@bp.route("/api/ssh/fs/copy", methods=["POST"])
+def fs_copy():
+    data = request.get_json(silent=True) or {}
+    cid, path, to = data.get("id"), data.get("path"), (data.get("to") or "").strip()
+    if not cid or not path or not to:
+        return jsonify({"error": "缺少 id / path / to"}), 400
+
+    def op(sftp):
+        src, dst = _ssh_check_transfer(sftp, path, to)
+        if _ssh_exists(sftp, dst):
+            raise ValueError("目标已存在: " + dst)
+        _ssh_copy(sftp, src, dst)
+        return {"path": sftp.normalize(dst)}
+
+    res, err = _run(cid, op)
+    if err:
+        return jsonify({"error": err}), 400
+    _log.info("ssh fs copy: cid=%s %s -> %s", cid, path, res["path"])
+    return jsonify(res)
+
+
+@bp.route("/api/ssh/fs/move", methods=["POST"])
+def fs_move():
+    data = request.get_json(silent=True) or {}
+    cid, path, to = data.get("id"), data.get("path"), (data.get("to") or "").strip()
+    if not cid or not path or not to:
+        return jsonify({"error": "缺少 id / path / to"}), 400
+
+    def op(sftp):
+        src, dst = _ssh_check_transfer(sftp, path, to)
+        if _ssh_exists(sftp, dst):
+            raise ValueError("目标已存在: " + dst)
+        try:
+            sftp.posix_rename(src, dst)      # 同一文件系统：原子改名，瞬间完成
+        except (AttributeError, IOError):
+            try:
+                sftp.rename(src, dst)
+            except IOError:                  # 跨文件系统：复制后删源
+                _ssh_copy(sftp, src, dst)
+                _ssh_rm(sftp, src)
+        return {"path": sftp.normalize(dst)}
+
+    res, err = _run(cid, op)
+    if err:
+        return jsonify({"error": err}), 400
+    _log.info("ssh fs move: cid=%s %s -> %s", cid, path, res["path"])
     return jsonify(res)
 
 

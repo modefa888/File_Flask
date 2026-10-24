@@ -517,11 +517,12 @@ def _custom_icons_clean(rules):
 
 @bp.route("/api/icons/custom")
 def api_icons_custom():
-    """自定义图标规则 + 阿里图标库 + 规则里用到的 AI 图标 SVG（只读）。"""
+    """自定义图标规则 + 界面图标替换 + 阿里图标库 + 规则里用到的 AI 图标 SVG（只读）。"""
     rules = _custom_icons_load()
     return jsonify({
         "ok": True,
         "rules": rules,
+        "ui": _custom_ui_load(),
         "iconfont": _iconfont_load(),
         "ai": _ai_svg_map_for_rules(rules),      # 只下发被规则引用到的那几个，避免拖大响应
     })
@@ -545,6 +546,115 @@ def api_adm_icons_custom_save():
         return _fail("保存失败：%s" % e, 500)
     _log.info("POST /api/adm/icons/custom rules=%d", len(rules))
     return _ok(rules=rules)
+
+
+# --------------------------------------------------------------------------- 界面图标替换
+# 与「文件图标规则」不同：这里替换的是界面上写死的 Bootstrap 功能图标（如数据库工具页签的
+# bi-filetype-sql）。存 store_meta（key = icons.ui），JSON 数组：
+#   [{"from": "bi-filetype-sql", "to": "bi-database-fill", "color": "#c09553", "note": "说明"}]
+# 生效方式：GET /api/icons/ui.css 生成一段全局 CSS（覆盖 ::before 字形与颜色），
+# 各页面（IDE / 文件管理 / 分享 / 后台）以 <link> 引入，保存后刷新页面即生效。
+_ICONS_UI_META_KEY = "icons.ui"
+_ICONS_UI_MAX = 200
+# from / to 只接受 bi-xxx 类名（界面图标都是 Bootstrap 图标）
+_ICONS_UI_CLS_RE = re.compile(r"^bi-[a-z0-9][a-z0-9-]{0,63}$")
+
+
+def _custom_ui_load():
+    from ...services.common.store_db import get_meta
+    try:
+        raw = get_meta(_ICONS_UI_META_KEY, "") or ""
+        data = json.loads(raw) if raw else []
+    except Exception:
+        data = []
+    return data if isinstance(data, list) else []
+
+
+def _custom_ui_clean(items):
+    """校验并规整界面图标替换规则。返回 (列表, 错误信息)；错误信息为空表示通过。"""
+    out, seen = [], {}
+    for i, r in enumerate(items if isinstance(items, list) else []):
+        if not isinstance(r, dict):
+            continue
+        n = i + 1
+        frm = str(r.get("from") or "").strip().lower()
+        to = str(r.get("to") or "").strip().lower()
+        if not _ICONS_UI_CLS_RE.match(frm) or not _ICONS_UI_CLS_RE.match(to):
+            return None, "第 %d 条：图标要填 bi-xxx 类名（如 bi-filetype-sql）" % n
+        color = str(r.get("color") or "").strip()
+        if color and not _ICONS_COLOR_RE.match(color):
+            return None, "第 %d 条：颜色要写成 #RRGGBB" % n
+        if frm in seen:
+            return None, "第 %d 条：原图标「%s」和前面重复了" % (n, frm)
+        seen[frm] = 1
+        out.append({
+            "from": frm,
+            "to": to,
+            "color": color.lower(),
+            "note": str(r.get("note") or "").strip()[:60],
+        })
+        if len(out) >= _ICONS_UI_MAX:
+            break
+    return out, ""
+
+
+@bp.route("/api/adm/icons/ui", methods=["POST"])
+def api_adm_icons_ui_save():
+    """保存整份界面图标替换规则。body: {list: [{from, to, color?, note?}]}"""
+    from ...services.common.store_db import set_meta
+    data = request.get_json(silent=True) or {}
+    items, err = _custom_ui_clean(data.get("list"))
+    if err:
+        return _fail(err)
+    try:
+        set_meta(_ICONS_UI_META_KEY, json.dumps(items, ensure_ascii=False))
+    except Exception as e:
+        _log.warning("保存界面图标替换失败：%s", e)
+        return _fail("保存失败：%s" % e, 500)
+    _log.info("POST /api/adm/icons/ui items=%d", len(items))
+    return _ok(ui=items)
+
+
+_BI_CP_CACHE = None
+
+
+def _bi_codepoints():
+    """从本地 bootstrap-icons.css 抽出 类名 → 字形码位（如 bi-database → f6b0），带缓存。"""
+    global _BI_CP_CACHE
+    if _BI_CP_CACHE is not None:
+        return _BI_CP_CACHE
+    out = {}
+    try:
+        import os
+        p = os.path.join(os.path.dirname(__file__), "..", "..", "static",
+                         "vendor", "bootstrap-icons", "bootstrap-icons.css")
+        with open(os.path.normpath(p), "r", encoding="utf-8") as f:
+            css = f.read()
+        # css 里写的是 content: "\f7f5"（单反斜杠 + 码位）
+        for m in re.finditer(r"\.([a-z0-9-]+)::before\s*\{[^}]*?content:\s*\"\\([0-9a-fA-F]+)\"", css):
+            out[m.group(1)] = m.group(2)          # 只留码位（如 f7f5）
+    except Exception as e:
+        _log.warning("解析 bootstrap-icons.css 失败：%s", e)
+    _BI_CP_CACHE = out
+    return out
+
+
+@bp.route("/api/icons/ui.css")
+def api_icons_ui_css():
+    """界面图标替换的全局 CSS：把 bi-xxx 的字形 / 颜色替换成规则指定的。"""
+    cps = _bi_codepoints()
+    lines = ["/* 由「所有图标 → 界面图标」生成，请勿手改 */"]
+    for it in _custom_ui_load():
+        sel = "." + it["from"]
+        cp = cps.get(it["to"])
+        if cp:
+            lines.append('%s::before{content:"\\%s"!important;}' % (sel, cp))
+        if it.get("color"):
+            lines.append("%s{color:%s!important;}" % (sel, it["color"]))
+    resp = make_response("\n".join(lines))
+    resp.mimetype = "text/css"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 # --------------------------------------------------------------------------- 阿里图标库（iconfont）

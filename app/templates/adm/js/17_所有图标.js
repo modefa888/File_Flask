@@ -17,6 +17,7 @@ ADM.modules.push({
         var BI = [];          // 全部 bi-* 类名（不含前缀）
         var FILE_ITEMS = [];  // 文件图标列表（Seti + 兜底）
         var RULES = [];       // 自定义规则：[{match, value, icon, color, note}]
+        var UI_OV = [];       // 界面图标替换：[{from, to, color, note}]（bi-xxx → bi-yyy + 颜色）
         var API_OK = true;    // 自定义图标接口是否可用（服务没重启时会失败）
         var LINKS = [];       // 阿里图标库：[{name, url}]
         var ALI = {};         // url -> [图标类名...]（按需拉取后缓存）
@@ -189,13 +190,17 @@ ADM.modules.push({
             var titleTxt = isFile
                 ? ('点击设置图标：' + it.copy + (it.custom ? '（已自定义，可还原）' : '') +
                    (it.key ? ' · 图标键 ' + it.key : '') + (it.color ? ' · 颜色 ' + it.color : ''))
-                : ('点击复制：' + it.copy);
+                : ('点击替换此界面图标（换成别的图标 / 颜色） · 右上角角标复制类名');
+            // Bootstrap 格子：主点击 = 弹规则弹窗（图标预填），角标 = 复制类名
+            var badge = isFile ? '' :
+                ('<span class="ic-copy-badge" data-copy-badge="' + ADM.esc(it.copy) +
+                    '" title="复制类名：' + ADM.esc(it.copy) + '"><i class="bi bi-clipboard"></i></span>');
             return '<button class="ic-cell' + (it.custom ? ' custom' : '') + '" type="button" data-i="' + i +
                 '" data-copy="' + ADM.esc(it.copy) + '" title="' + ADM.esc(titleTxt) + '">' +
                 '<span class="ic-glyph">' + glyphHtml(it) + '</span>' +
                 '<span class="ic-name">' + ADM.esc(it.label) + '</span>' +
                 '<span class="ic-sub"><span class="' + tagCls + '">' + ADM.esc(it.tag) + '</span>' +
-                ADM.esc(sub) + '</span>' +
+                ADM.esc(sub) + '</span>' + badge +
                 '</button>';
         }
 
@@ -203,6 +208,12 @@ ADM.modules.push({
             var list;
             if (S.tab === 'bi') {
                 list = BI.map(function (n) {
+                    // 已配了「界面图标替换」的类名，格子上直接画替换后的图标 + 打角标
+                    var ov = UI_OV.find(function (x) { return x.from === 'bi-' + n; });
+                    if (ov) {
+                        return { label: n, copy: 'bi-' + n, glyph: 'bi ' + ov.to, color: ov.color || '',
+                                 tag: 'Bootstrap', key: 'bi-' + n, custom: true };
+                    }
                     return { label: n, copy: 'bi-' + n, glyph: 'bi bi-' + n, color: '', tag: 'Bootstrap', key: 'bi-' + n };
                 });
             } else {
@@ -504,6 +515,11 @@ ADM.modules.push({
                 onOpen: function (box, done) {
                     var prev = box.querySelector('#icrPrev');
                     var hint = box.querySelector('#icrHint');
+                    if (isNew && !cur.value) {
+                        var vInp = box.querySelector('#icrValue');
+                        vInp.focus();
+                        vInp.placeholder = '先填要替换的后缀或文件名，如 md / README.md';
+                    }
                     box.querySelector('#icrCopy').addEventListener('click', function () {
                         ADM.copy(box.querySelector('#icrValue').value.trim() || '');
                     });
@@ -771,6 +787,264 @@ ADM.modules.push({
             } catch (e) {
                 ADM.toast((e && e.message) || String(e), 'err');
             }
+        }
+
+        /* ---------- 界面图标替换 ----------
+         * 改的是界面上写死的 Bootstrap 功能图标（如数据库工具页签的 bi-filetype-sql），
+         * 不是文件类型图标（那是上面「自定义规则」管的事）。
+         * 保存后由后端 /api/icons/ui.css 生成全局 CSS，各页面刷新即生效。 */
+        async function saveUi(list) {
+            var d = await ADM.api('/api/adm/icons/ui', { method: 'POST', body: { list: list } });
+            UI_OV = d.ui || list;
+        }
+        function biGlyph(cls, color) {
+            return '<i class="bi bi-' + ADM.esc(String(cls || '').replace(/^bi-/, '')) + '"' +
+                (color ? ' style="color:' + color + '"' : '') + '></i>';
+        }
+        function paintUi() {
+            var box = el.querySelector('#icUi');
+            if (!box) return;
+            el.querySelector('#icCount').textContent = '共 ' + UI_OV.length + ' 条替换';
+            var h = '<div class="ic-rule-head">' +
+                '<span class="adm-hint">替换界面上写死的 <b>Bootstrap 功能图标</b>（如数据库工具页签的 <code>bi-filetype-sql</code>）。' +
+                '只支持换成别的 Bootstrap 图标 + 指定颜色；保存后刷新对应页面（IDE / 文件管理 / 后台）即全局生效。</span>' +
+                '<span class="adm-spacer"></span>' +
+                (UI_OV.length ? '<button class="adm-btn ghost" type="button" id="icUiResetAll">' +
+                    '<i class="bi bi-arrow-counterclockwise"></i> 全部还原</button>' : '') +
+                '<button class="adm-btn primary" type="button" id="icUiAdd">' +
+                    '<i class="bi bi-plus-lg"></i> 新建替换</button>' +
+                '</div>';
+            if (!UI_OV.length) {
+                h += '<div class="ic-empty">还没有替换规则。<br>' +
+                    '去「Bootstrap 图标」页点任意图标，或直接点「新建替换」填原图标类名（浏览器 F12 选中元素就能看到，如 bi-filetype-sql）。</div>';
+            } else {
+                h += '<div class="ic-rules">' + UI_OV.map(function (r) {
+                    return '<div class="ic-rule">' +
+                        '<span class="ic-rule-ic">' + biGlyph(r.from) + '</span>' +
+                        '<i class="bi bi-arrow-right" style="color:#7c879e"></i>' +
+                        '<span class="ic-rule-ic">' + biGlyph(r.to, r.color) + '</span>' +
+                        '<div class="ic-rule-main">' +
+                            '<div class="ic-rule-name">' + ADM.esc(r.from) + ' → ' + ADM.esc(r.to) + '</div>' +
+                            '<div class="ic-rule-sub">' + (r.color ? '颜色 ' + r.color : '沿用替换图标默认色') +
+                                (r.note ? ' · ' + ADM.esc(r.note) : '') + '</div>' +
+                        '</div>' +
+                        '<div class="ic-rule-acts">' +
+                            '<button class="adm-btn sm ghost" type="button" data-uact="edit" title="编辑"><i class="bi bi-pencil"></i></button>' +
+                            '<button class="adm-btn sm ghost" type="button" data-uact="del" title="删除"><i class="bi bi-trash"></i></button>' +
+                        '</div></div>';
+                }).join('') + '</div>';
+            }
+            box.innerHTML = h;
+            box.querySelector('#icUiAdd').addEventListener('click', function () { openUiDialog(-1); });
+            var ra = box.querySelector('#icUiResetAll');
+            if (ra) ra.addEventListener('click', async function () {
+                if (!UI_OV.length) return;
+                var ok = await ADM.confirm('全部还原',
+                    '确定清空全部 <b>' + UI_OV.length + '</b> 条界面图标替换，恢复系统默认图标吗？');
+                if (!ok) return;
+                try { await saveUi([]); ADM.toast('已全部还原', 'ok'); paint(); }
+                catch (e) { ADM.toast((e && e.message) || String(e), 'err'); }
+            });
+            box.querySelectorAll('.ic-rule').forEach(function (row, i) {
+                row.querySelector('[data-uact="edit"]').addEventListener('click', function () { openUiDialog(i); });
+                row.querySelector('[data-uact="del"]').addEventListener('click', async function () {
+                    var r = UI_OV[i];
+                    if (!r) return;
+                    var ok = await ADM.confirm('删除替换',
+                        '确定删除「' + ADM.esc(r.from) + '」的替换规则，恢复系统默认图标吗？');
+                    if (!ok) return;
+                    var list = UI_OV.slice();
+                    list.splice(i, 1);
+                    try { await saveUi(list); ADM.toast('已删除替换', 'ok'); paint(); }
+                    catch (e) { ADM.toast((e && e.message) || String(e), 'err'); }
+                });
+            });
+        }
+        function openUiDialog(idx, prefill) {
+            var isNew = idx < 0;
+            var src = isNew ? (prefill || {}) : (UI_OV[idx] || {});
+            var cur = {
+                from: src.from || '', to: src.to || '', color: src.color || '', note: src.note || ''
+            };
+            /* 该原图标已有替换规则时（编辑中，或从 Bootstrap 格子点进来但已配过），左下角给「还原默认」 */
+            var existingIdx = isNew
+                ? UI_OV.findIndex(function (x) { return x.from === cur.from; })
+                : idx;
+            var PRESETS = ['#519aba', '#2f81f7', '#4ec9b0', '#8bc34a', '#dcdcaa', '#f5a623',
+                           '#e06c75', '#e91e63', '#c586c0', '#9e9e9e'];
+            ADM.modal({
+                title: (isNew ? '新建' : '编辑') + '界面图标替换',
+                icon: 'bi-brush',
+                okText: '保存',
+                footer: (existingIdx >= 0
+                    ? '<button class="adm-btn ghost" type="button" id="icuRestore">' +
+                      '<i class="bi bi-arrow-counterclockwise"></i> 还原默认</button>'
+                    : ''),
+                html:
+                    '<div class="ic-form">' +
+                        '<div class="adm-field"><label>原图标（被替换的 bi- 类名）</label>' +
+                            '<input class="adm-input" id="icuFrom" value="' + ADM.esc(cur.from) +
+                                '" placeholder="bi-filetype-sql" spellcheck="false"></div>' +
+                        '<div class="adm-field"><label>替换为</label>' +
+                            '<div class="ic-icon-row">' +
+                                '<input class="adm-input" id="icuTo" value="' + ADM.esc(cur.to) +
+                                    '" placeholder="bi-database-fill，或点「选择图标」挑">' +
+                                '<button class="adm-btn primary" type="button" id="icuPickBtn">' +
+                                    '<i class="bi bi-grid-3x3-gap"></i> 选择图标</button>' +
+                            '</div>' +
+                            '<div class="ic-picker" id="icuPicker" style="display:none">' +
+                                '<div class="ic-picker-head">' +
+                                    '<input class="adm-input" id="icuPickSearch" type="search" ' +
+                                        'placeholder="搜索 Bootstrap 图标" spellcheck="false">' +
+                                '</div>' +
+                                '<div class="ic-picker-grid" id="icuPickGrid"></div>' +
+                            '</div></div>' +
+                        '<div class="adm-field"><label>颜色（可选）</label>' +
+                            '<div class="ic-color-row">' +
+                                '<input class="adm-input" id="icuColor" value="' + ADM.esc(cur.color) +
+                                    '" placeholder="#519aba（留空用替换图标默认色）" spellcheck="false">' +
+                                '<input class="ic-color-pick" type="color" id="icuColorPick" ' +
+                                    'value="' + ADM.esc(/^#[0-9a-fA-F]{6}$/.test(cur.color) ? cur.color : '#519aba') + '" ' +
+                                    'title="打开选色器">' +
+                            '</div>' +
+                            '<div class="ic-color-presets" id="icuColorPresets">' +
+                                PRESETS.map(function (c) {
+                                    return '<button class="ic-cchip" type="button" data-color="' + c +
+                                        '" title="' + c + '" style="background:' + c + '"></button>';
+                                }).join('') +
+                                '<button class="ic-cchip ic-cchip-clear" type="button" data-color="" ' +
+                                    'title="清空：用替换图标默认色">×</button>' +
+                            '</div></div>' +
+                        '<div class="adm-field"><label>备注（可选）</label>' +
+                            '<input class="adm-input" id="icuNote" value="' + ADM.esc(cur.note || '') +
+                                '" placeholder="例：数据库页签换成金色数据库图标"></div>' +
+                        '<div class="ic-preview">' +
+                            '<span class="adm-hint">预览</span>' +
+                            '<span id="icuPrevFrom"></span>' +
+                            '<i class="bi bi-arrow-right"></i>' +
+                            '<span id="icuPrev"></span>' +
+                            '<span class="adm-hint" id="icuHint"></span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="adm-hint" style="margin-top:10px;line-height:1.8">' +
+                        '· 原图标填界面上正在用的 <code>bi-</code> 类名（浏览器 F12 选中元素即可看到，如 <code>bi-filetype-sql</code>）；<br>' +
+                        '· 替换只对 <b>界面图标</b> 生效（页签 / 按钮 / 侧栏等处直接写着这个类名的地方），' +
+                        '与「文件图标规则」互不影响；<br>' +
+                        '· 保存后刷新对应页面即生效。' +
+                    '</div>',
+                onOpen: function (box) {
+                    /* 左下角「还原默认」：删掉该原图标的替换规则，恢复系统默认图标 */
+                    var rst = box.querySelector('#icuRestore');
+                    if (rst) rst.addEventListener('click', async function () {
+                        var target = UI_OV[existingIdx];
+                        if (!target) return;
+                        var ok = await ADM.confirm('还原默认图标',
+                            '确定删除「' + ADM.esc(target.from) + '」的替换规则，恢复系统默认图标吗？');
+                        if (!ok) return;
+                        var list = UI_OV.slice();
+                        list.splice(existingIdx, 1);
+                        try {
+                            await saveUi(list);
+                            ADM.toast('已还原为系统默认图标', 'ok');
+                            box.querySelector('[data-adm-cancel]').click();   // 关掉弹窗
+                            paint();
+                        } catch (e) {
+                            ADM.toast((e && e.message) || String(e), 'err');
+                        }
+                    });
+                    function refresh() {
+                        var from = box.querySelector('#icuFrom').value.trim();
+                        var to = box.querySelector('#icuTo').value.trim();
+                        var color = box.querySelector('#icuColor').value.trim();
+                        box.querySelector('#icuPrevFrom').innerHTML = biGlyph(from);
+                        box.querySelector('#icuPrev').innerHTML = biGlyph(to, color);
+                        box.querySelector('#icuHint').textContent =
+                            (from && to && from.toLowerCase() === to.toLowerCase()) ? '与原图标相同（通常只改颜色）' : '';
+                    }
+                    ['#icuFrom', '#icuTo', '#icuColor'].forEach(function (sel) {
+                        box.querySelector(sel).addEventListener('input', refresh);
+                    });
+                    refresh();
+                    /* 颜色：取色器 + 快选与文本框双向同步 */
+                    var colorInp = box.querySelector('#icuColor');
+                    var colorPick = box.querySelector('#icuColorPick');
+                    function syncColorPick() {
+                        var v = (colorInp.value || '').trim();
+                        if (/^#[0-9a-fA-F]{6}$/.test(v)) colorPick.value = v;
+                    }
+                    colorPick.addEventListener('input', function () {
+                        colorInp.value = colorPick.value;
+                        refresh();
+                    });
+                    syncColorPick();
+                    colorInp.addEventListener('input', syncColorPick);
+                    box.querySelectorAll('#icuColorPresets [data-color]').forEach(function (b) {
+                        b.addEventListener('click', function () {
+                            colorInp.value = b.dataset.color;
+                            syncColorPick();
+                            refresh();
+                        });
+                    });
+                    /* Bootstrap 图标选择器（只搜 bi- 库，选中回填 + 收起） */
+                    var picker = box.querySelector('#icuPicker');
+                    var pickGrid = box.querySelector('#icuPickGrid');
+                    var pickSearch = box.querySelector('#icuPickSearch');
+                    function paintPick() {
+                        var kw = (pickSearch.value || '').trim().toLowerCase();
+                        var shown = BI.filter(function (n) { return !kw || n.indexOf(kw) !== -1; }).slice(0, 240);
+                        pickGrid.innerHTML = shown.length
+                            ? shown.map(function (n) {
+                                return '<button class="ic-pick" type="button" data-bi="' + ADM.esc(n) + '">' +
+                                    '<span class="ic-pick-g"><i class="bi bi-' + ADM.esc(n) + '"></i></span>' +
+                                    '<span class="ic-pick-t">' + ADM.esc(n) + '</span></button>';
+                            }).join('')
+                            : '<div class="ic-empty">没有匹配的图标</div>';
+                        pickGrid.querySelectorAll('[data-bi]').forEach(function (b) {
+                            b.addEventListener('click', function () {
+                                box.querySelector('#icuTo').value = 'bi-' + b.dataset.bi;
+                                refresh();
+                                picker.style.display = 'none';
+                            });
+                        });
+                    }
+                    box.querySelector('#icuPickBtn').addEventListener('click', function () {
+                        var show = picker.style.display === 'none';
+                        picker.style.display = show ? '' : 'none';
+                        if (show) { paintPick(); pickSearch.focus(); }
+                    });
+                    pickSearch.addEventListener('input', function () {
+                        clearTimeout(openUiDialog._t);
+                        openUiDialog._t = setTimeout(paintPick, 150);
+                    });
+                },
+                onOk: async function (box) {
+                    var r = {
+                        from: box.querySelector('#icuFrom').value.trim().toLowerCase(),
+                        to: box.querySelector('#icuTo').value.trim().toLowerCase(),
+                        color: box.querySelector('#icuColor').value.trim(),
+                        note: box.querySelector('#icuNote').value.trim()
+                    };
+                    if (!/^bi-[a-z0-9][a-z0-9-]*$/.test(r.from)) { ADM.toast('原图标要填 bi-xxx 类名', 'warn'); return false; }
+                    if (!/^bi-[a-z0-9][a-z0-9-]*$/.test(r.to)) { ADM.toast('替换图标要填 bi-xxx 类名', 'warn'); return false; }
+                    if (r.color && !/^#[0-9a-fA-F]{6}$/.test(r.color)) { ADM.toast('颜色要写成 #RRGGBB', 'warn'); return false; }
+                    var dup = UI_OV.some(function (x, i) { return i !== idx && x.from === r.from; });
+                    if (dup) { ADM.toast('原图标「' + r.from + '」已经有一条替换了', 'warn'); return false; }
+                    var list = UI_OV.slice();
+                    if (isNew) list.push(r); else list[idx] = r;
+                    try {
+                        await saveUi(list);
+                        ADM.toast(isNew ? '已添加替换' : '已保存替换', 'ok');
+                        paint();
+                    } catch (e) {
+                        var msg = (e && e.message) || String(e);
+                        if (/404|405|Not Found/i.test(msg)) {
+                            msg = '接口未就绪：请重启一次服务后再保存';
+                        }
+                        ADM.toast(msg, 'err');
+                        return false;
+                    }
+                }
+            });
         }
 
         /* ---------- 阿里图标库（iconfont） ---------- */
@@ -1279,11 +1553,13 @@ ADM.modules.push({
             var custom = (S.tab === 'custom');
             var ali = (S.tab === 'ali');
             var ai = (S.tab === 'ai');
-            el.querySelector('#icGrid').style.display = (custom || ali || ai) ? 'none' : '';
+            var uiover = (S.tab === 'ui');
+            el.querySelector('#icGrid').style.display = (custom || ali || ai || uiover) ? 'none' : '';
             el.querySelector('#icCustom').style.display = custom ? '' : 'none';
+            el.querySelector('#icUi').style.display = uiover ? '' : 'none';
             el.querySelector('#icAli').style.display = ali ? '' : 'none';
             el.querySelector('#icAi').style.display = ai ? '' : 'none';
-            el.querySelector('#icSearch').style.display = (custom || ali || ai) ? 'none' : '';
+            el.querySelector('#icSearch').style.display = (custom || ali || ai || uiover) ? 'none' : '';
             el.querySelector('#icMore').style.display = 'none';
             el.querySelectorAll('[data-ic-tab]').forEach(function (b) {
                 b.className = 'adm-btn sm ' + (b.dataset.icTab === S.tab ? 'primary' : 'ghost');
@@ -1293,13 +1569,15 @@ ADM.modules.push({
             // 每个标签页说明自己管哪些地方，免得搞混
             var scope = el.querySelector('#icScope');
             if (scope) {
-                scope.style.display = (custom || ali || ai) ? 'none' : '';
+                scope.style.display = (custom || ali || ai || uiover) ? 'none' : '';
                 scope.innerHTML = (S.tab === 'bi')
                     ? '<i class="bi bi-info-circle"></i> 适用范围：界面通用图标（<b>标题栏 / 工具栏 / 侧栏活动栏 / 按钮 / 菜单 / 面板头</b>），' +
-                      '以及文件图标的<b>兜底</b>（Seti 未收录的后缀）—— 它不参与「文件类型识别」。'
+                      '以及文件图标的<b>兜底</b>（Seti 未收录的后缀）—— 它不参与「文件类型识别」。<br>' +
+                      '<i class="bi bi-info-circle"></i> 点任意图标 = 弹出「界面图标替换」：把界面上这个 bi- 图标换成别的图标 / 颜色；右上角角标复制类名。'
                     : '<i class="bi bi-info-circle"></i> 适用范围：<b>桌面端文件管理器</b>（列表 / 图标 / 树型 / 全盘搜索结果）与 <b>IDE</b>' +
                       '（文件树、标签页、Git 面板、快速打开、搜索结果、状态栏项目图标）；未命中的类型用 Bootstrap 图标兜底。';
             }
+            if (uiover) { paintUi(); return; }
             if (custom) { paintRules(); return; }
             if (ali) { paintAli(); return; }
             if (ai) { paintAi(); return; }
@@ -1312,10 +1590,14 @@ ADM.modules.push({
                 : '<div class="ic-empty">没有匹配的图标</div>';
             var fileTab = (S.tab === 'file');
             grid.querySelectorAll('[data-copy]').forEach(function (b) {
-                b.addEventListener('click', function () {
-                    // 文件图标格子：点一下弹出悬浮框设置图标；Bootstrap 页仍是复制类名
+                b.addEventListener('click', function (ev) {
+                    // 右上角角标：复制类名（Bootstrap 页保留原复制能力）
+                    var badge = ev.target.closest('[data-copy-badge]');
+                    if (badge) { ADM.copy(badge.dataset.copyBadge); return; }
+                    // 文件图标格子：点一下弹出「文件图标规则」悬浮框编辑 / 新建；
+                    // Bootstrap 格子：弹出「界面图标替换」——改的是界面上这个 bi- 图标本身
                     if (fileTab) openRuleForItem(shown[parseInt(b.dataset.i, 10)]);
-                    else ADM.copy(b.dataset.copy);
+                    else openUiDialog(-1, { from: b.dataset.copy });
                 });
             });
             el.querySelector('#icCount').textContent =
@@ -1345,6 +1627,7 @@ ADM.modules.push({
             FILE_ITEMS = buildFileItems();
             BI = parseBi(res[1]);
             RULES = (res[2] && res[2].rules) || [];
+            UI_OV = (res[2] && res[2].ui) || [];
             API_OK = !!res[2];      // 接口没通（多半是服务还没重启）时，自定义页给出提示
             LINKS = (res[2] && res[2].iconfont) || [];
             injectIconfont();       // 把已配置的阿里图标库 CSS 注入页面
@@ -1366,6 +1649,8 @@ ADM.modules.push({
                                 '<i class="bi bi-file-earmark"></i> 文件图标</button>' +
                             '<button class="adm-btn sm ghost" type="button" data-ic-tab="bi">' +
                                 '<i class="bi bi-bootstrap"></i> Bootstrap 图标</button>' +
+                            '<button class="adm-btn sm ghost" type="button" data-ic-tab="ui">' +
+                                '<i class="bi bi-brush"></i> 界面图标</button>' +
                             '<button class="adm-btn sm ghost" type="button" data-ic-tab="custom">' +
                                 '<i class="bi bi-palette"></i> 自定义</button>' +
                             '<button class="adm-btn sm ghost" type="button" data-ic-tab="ali">' +
@@ -1379,6 +1664,7 @@ ADM.modules.push({
                     '<div class="adm-hint ic-scope" id="icScope"></div>' +
                     '<div class="ic-grid" id="icGrid"></div>' +
                     '<div id="icCustom" style="display:none"></div>' +
+                    '<div id="icUi" style="display:none"></div>' +
                     '<div id="icAli" style="display:none"></div>' +
                     '<div id="icAi" style="display:none"></div>' +
                     '<div style="text-align:center;margin-top:10px">' +
@@ -1391,10 +1677,11 @@ ADM.modules.push({
                 '与 IDE 文件树、桌面端文件管理器是同一份数据；<br>' +
                 '· 标 <span class="ic-tag fallback">兜底</span> 的是 Seti 未收录的类型，' +
                 '由 Bootstrap 图标 + 对应配色补齐；<br>' +
-                '· 点「文件图标」里的任一图标 = 弹出悬浮框给它设置自定义图标（可「还原默认」）；' +
-                '「Bootstrap 图标」页点一下是复制类名；<br>' +
-                '· 「自定义」页可以给某个后缀 / 文件名指定图标（Seti 图标键或 Bootstrap 类名 + 颜色），' +
-                '保存后桌面端文件管理器与 IDE 文件树重开即生效。' +
+                '· 点「文件图标」里的任一图标 = 弹出悬浮框给它设置自定义图标（可「还原默认」）；<br>' +
+                '· 「Bootstrap 图标」页点一下 = 弹出「界面图标替换」：把界面上这个 bi- 图标换成别的图标 / 颜色' +
+                '（页签、按钮、侧栏等处全局生效），右上角 <i class="bi bi-clipboard"></i> 角标复制类名；<br>' +
+                '· 「界面图标」页集中管理这些替换规则；「自定义」页管的是<b>文件类型图标</b>' +
+                '（给某个后缀 / 文件名指定图标，Seti 图标键或 Bootstrap 类名 + 颜色），两者互不影响。' +
             '</div>';
 
         el.querySelectorAll('[data-ic-tab]').forEach(function (b) {

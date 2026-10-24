@@ -59,6 +59,7 @@ _MEMBER_ALLOW_API = {
     ("/api/shared/files", "HEAD"),  # HEAD 与 GET 等同（如探测文件大小）
     ("/api/collab/rooms", "GET"),   # 协作房间列表（成员查看自己所在会话）
     ("/api/icons/custom", "GET"),   # 自定义图标规则（只读，纯展示用，不含敏感信息）
+    ("/api/icons/ui.css", "GET"),   # 界面图标替换生成的全局 CSS（只读，无敏感信息）
 }
 
 

@@ -1654,6 +1654,7 @@
     tabs.forEach(t => { t.el = null; renderTab(t); mountHost(t); });
     if (typeof apiSyncOpenMarks === "function") apiSyncOpenMarks();   // 标签栏重建后刷新 API 已打开标记
     if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏「已打开」高亮跟随标签
+    if (typeof fmSyncOpenMarks === "function") fmSyncOpenMarks();     // 文件夹管理器侧栏「已打开」高亮跟随标签
     syncCrumbsBar();                                                  // 空标签页时藏掉面包屑那条线
   }
   /* ---------- 动态编辑组：组按「行」排布，每行内可并排多个组 ----------
@@ -1891,6 +1892,7 @@
     sessionSaveTabs();
     if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏高亮跟随当前标签
     if (typeof apiSyncOpenMarks === "function") apiSyncOpenMarks();   // API 调试侧栏高亮跟随当前标签
+    if (typeof fmSyncOpenMarks === "function") fmSyncOpenMarks();     // 文件夹管理器侧栏高亮跟随当前标签
     if (typeof runnerViewOnActivate === "function") runnerViewOnActivate();   // 后台任务轮询跟随当前标签
     if (active && typeof active.onFmActivate === "function") active.onFmActivate();   // 文件夹管理器：切回时刷新目录
   }

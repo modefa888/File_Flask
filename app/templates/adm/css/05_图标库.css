@@ -151,6 +151,36 @@ html[data-theme="light"] .ic-cell:hover {
 }
 
 /* ---------------- 自定义规则 ---------------- */
+/* Bootstrap 格子右上角「复制类名」角标（悬停出现） */
+.ic-copy-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    background: var(--adm-brand);
+    color: #fff;
+    font-size: 11px;
+    line-height: 1;
+    cursor: copy;
+}
+
+.ic-cell {
+    position: relative;
+}
+
+.ic-cell:hover .ic-copy-badge {
+    display: inline-flex;
+}
+
+.ic-copy-badge:hover {
+    filter: brightness(1.15);
+}
+
 .ic-rule-head {
     display: flex;
     align-items: center;

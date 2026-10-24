@@ -943,14 +943,29 @@ var ADM = window.ADM = {
 
     copy: function (text) {
         var t = String(text || '');
+        function fallback() {
+            // HTTP 非安全环境下 navigator.clipboard 不存在，用隐藏 textarea + execCommand 兜底
+            try {
+                var ta = document.createElement('textarea');
+                ta.value = t;
+                ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+                document.body.appendChild(ta);
+                ta.select();
+                var ok = document.execCommand('copy');
+                document.body.removeChild(ta);
+                ADM.toast(ok ? '已复制到剪贴板' : '复制失败，请手动选择', ok ? 'ok' : 'warn');
+            } catch (e) {
+                ADM.toast('复制失败，请手动选择', 'warn');
+            }
+        }
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(t).then(function () {
                 ADM.toast('已复制到剪贴板', 'ok');
             }, function () {
-                ADM.toast('复制失败，请手动选择', 'warn');
+                fallback();
             });
         } else {
-            ADM.toast('当前环境不支持一键复制', 'warn');
+            fallback();
         }
     },
 

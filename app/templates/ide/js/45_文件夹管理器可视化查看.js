@@ -381,6 +381,8 @@ function fmCtxMenu(tab, it, x, y, anchor) {
   } });
   if (fm.conn) {
     items.push({ ico: "bi-pencil", label: "重命名", fn: () => fmRemoteRename(tab, it) });
+    items.push({ ico: "bi-files", label: "复制到…", fn: () => fmRemoteTransfer(tab, it, "copy") });
+    items.push({ ico: "bi-box-arrow-in-right", label: "移动到…", fn: () => fmRemoteTransfer(tab, it, "move") });
     items.push({ ico: "bi-trash", label: "删除", danger: true, fn: () => fmRemoteDelete(tab, it) });
   }
   const menu = document.createElement("div");
@@ -527,6 +529,21 @@ async function fmRemoteDelete(tab, it) {
     toast("已删除", "ok");
     fmNavigate(tab, fm.path, { noPush: true });
   } catch (e) { toast("删除失败：" + (e.message || e), "err"); }
+}
+/* 复制 / 移动到指定目录（后端 /api/ssh/fs/copy、/api/ssh/fs/move，to=目标目录绝对路径） */
+async function fmRemoteTransfer(tab, it, action) {
+  const fm = tab.fm;
+  if (!fm.conn) return;
+  const label = action === "copy" ? "复制" : "移动";
+  const to = await uiPrompt(
+    label + "「" + it.name + "」到（" + (fm.conn.user || "root") + "@" + fm.conn.host + "）",
+    fm.path, "目标目录的绝对路径，如 /www/wwwroot");
+  if (to === null || !to.trim()) return;
+  try {
+    const d = await fmSshApi(action, { id: fm.conn.id, path: fmJoin(fm.path, it.name), to: to.trim() });
+    toast("已" + label + "到 " + d.path, "ok");
+    fmNavigate(tab, fm.path, { noPush: true });   // 刷新当前目录（移动后条目消失 / 复制不变）
+  } catch (e) { toast(label + "失败：" + (e.message || e), "err"); }
 }
 /* ---------- 上传列表对话框（参考桌面文件管理器：先入列表，点「开始上传」才真正上传） ---------- */
 const FM_UP_ST = { WAIT: "待上传", RUN: "上传中", OK: "已上传", FAIL: "失败" };
@@ -979,6 +996,17 @@ async function fmSshFileSave(tab) {
 }
 
 /* ---------- 侧栏「文件夹管理器」面板 ---------- */
+/* 侧栏高亮：已打开（open）/ 当前正在查看（active）的远程文件管理器连接。
+   回调来自 00_preamble 的 activate / 标签栏重建，与数据库、API 面板的做法一致。 */
+function fmSyncOpenMarks() {
+  const box = $("fmRemoteList");
+  if (!box) return;
+  box.querySelectorAll(".fm-remote-item").forEach((el) => {
+    const t = findTab(FM_SSHFM_PREFIX + el.dataset.cid);
+    el.classList.toggle("open", !!t);
+    el.classList.toggle("active", !!(t && t.host.classList.contains("active")));
+  });
+}
 async function fmLoadRemoteList() {
   const box = $("fmRemoteList");
   if (!box) return;
@@ -992,12 +1020,14 @@ async function fmLoadRemoteList() {
     conns.forEach((c) => {
       const el = document.createElement("button");
       el.className = "g-btn block outline fm-remote-item";
+      el.dataset.cid = c.id;
       el.title = "打开 " + (c.user || "root") + "@" + c.host + " 的文件管理器";
       el.innerHTML = '<i class="bi bi-folder2-open"></i> ' + esc(c.name || c.host) +
         '<span class="fm-remote-sub">' + esc((c.user || "root") + "@" + c.host) + '</span>';
       el.onclick = () => openFolderManagerView(c);
       box.appendChild(el);
     });
+    fmSyncOpenMarks();
   } catch (e) {
     box.innerHTML = '<div class="fmv-rph">连接列表加载失败：' + esc(e.message || String(e)) + '</div>';
   }

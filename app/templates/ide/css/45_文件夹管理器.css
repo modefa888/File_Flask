@@ -132,6 +132,12 @@
 }
 .fmv-rhd .bi-hdd-network { color: #e2a04a; }
 .fm-remote-item { justify-content: flex-start; text-align: left; margin-bottom: 4px; gap: 6px; }
+/* 已打开 / 当前正在查看的远程文件管理器：侧栏连接项高亮 */
+.fm-remote-item.open { border-color: #0e639c; color: #d6e9ff; background: rgba(14, 99, 156, .22); }
+.fm-remote-item.active {
+  border-color: #1a8cff; color: #ffffff; background: #094771;
+}
+.fm-remote-item.active .fm-remote-sub { opacity: .85; }
 .fm-remote-sub { margin-left: auto; font-size: 11px; opacity: .6; }
 .fmv-rph { padding: 8px 2px; font-size: 12px; color: #6d7880; }
 

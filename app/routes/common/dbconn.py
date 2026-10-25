@@ -10,6 +10,8 @@
   · 密码用 services/common/secret.py 加密后落库，返回前端时脱敏（只留前 4 位）；
   · 表名走方言引号转义，且必须来自已列出的表，避免拼接注入。
 """
+import contextlib
+import hashlib
 import json
 import os
 import random
@@ -20,6 +22,8 @@ import threading
 import time
 import uuid
 
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 from flask import Blueprint, jsonify, request
@@ -75,6 +79,19 @@ _WRITE_WORDS = ("insert", "update", "delete", "drop", "alter", "create", "trunca
                 "revoke", "replace", "rename", "attach", "detach", "vacuum", "reindex")
 
 _LOCK = threading.Lock()         # 连接测试/查询并发保护（驱动不一定线程安全）
+
+
+@contextlib.contextmanager
+def _db_guard(conf):
+    """串行保护：SQLite / MySQL / PostgreSQL 的连接对象不保证跨线程安全，仍用全局锁；
+    Redis / MongoDB 的客户端自带连接池、官方保证线程安全，进程内复用同一个客户端，
+    这里不再加锁 —— 否则两个标签页同时浏览会互相排队，越等越像「卡死」。
+    """
+    if (conf or {}).get("kind") in _NOSQL:
+        yield
+    else:
+        with _LOCK:
+            yield
 
 
 # --------------------------------------------------------------------------- 驱动
@@ -460,6 +477,126 @@ def _split_mongo_uri(uri: str):
     return _strip_mongo_credentials(raw), info
 
 
+# 远程 Atlas 每建一个 MongoClient 都要做 SRV 解析 + TLS 握手 + SCRAM 认证（1~3 秒起步），
+# 而浏览一个集合会连着发好几个请求（结构 / 行数据 / 列结构）。原来每个请求都新建再 close，
+# 时间全耗在握手和拆连接上，看起来就是「一直在加载」。这里把客户端按「连接串 + 账号 + 密码」
+# 缓存在进程内复用：pymongo 的 MongoClient 自带连接池、线程安全，官方也是建议全进程只建一个。
+_MONGO_CLIENTS = OrderedDict()   # key -> MongoClient（超过上限按最久未用淘汰）
+_MONGO_CLIENTS_MAX = 8
+_MONGO_CLIENTS_LOCK = threading.Lock()
+
+# 集合列表的短缓存：浏览时「结构 → 行数据 → 列结构」会连着问好几遍，list_collection_names
+# 每遍都是一次远程往返。20 秒内直接复用，改集合（新建 / 改名 / 删除）时主动失效。
+_MONGO_META = {}                 # "<client id>|<db>" -> (时间戳, [集合名])
+_MONGO_META_TTL = 20
+_MONGO_META_LOCK = threading.Lock()
+
+
+def _mongo_client_key(uri: str, user: str, pwd: str) -> str:
+    return hashlib.sha1(("%s\n%s\n%s" % (uri, user, pwd)).encode("utf-8")).hexdigest()
+
+
+def _mongo_meta_drop(client_id):
+    """丢掉某个客户端（以及它所有库）的集合列表缓存"""
+    head = "%d|" % client_id
+    with _MONGO_META_LOCK:
+        for k in [k for k in _MONGO_META if k.startswith(head)]:
+            _MONGO_META.pop(k, None)
+
+
+def _mongo_collections(client, dbname, force=False):
+    """集合名列表（带短缓存）。传 force=True 时强制重新取（比如刚新建完集合）。"""
+    key = "%d|%s" % (id(client), dbname)
+    if not force:
+        with _MONGO_META_LOCK:
+            hit = _MONGO_META.get(key)
+        if hit and (time.time() - hit[0]) < _MONGO_META_TTL:
+            return list(hit[1])
+    names = sorted(client[dbname].list_collection_names())
+    with _MONGO_META_LOCK:
+        _MONGO_META[key] = (time.time(), names)
+        while len(_MONGO_META) > 64:
+            _MONGO_META.pop(next(iter(_MONGO_META)), None)
+    return list(names)
+
+
+# 文档数缓存：远程库每个 count 都是一次往返。结构面板先用缓存里已有的数字立即出列表，
+# 没赶上的那几个由前端再补一次（/api/db/counts，不设短预算），避免整块面板被计数拖住。
+_MONGO_CNT = {}                  # "<client id>|<db>|<coll>" -> (时间戳, 数量)
+_MONGO_CNT_TTL = 60
+
+
+def _mongo_cnt_clear():
+    """写库之后数字会变：整片清掉，下次重新数（几十个集合并发数一遍也就一次往返的功夫）"""
+    with _MONGO_META_LOCK:
+        _MONGO_CNT.clear()
+
+
+def _mongo_count(client, dbname, name, ttl=_MONGO_CNT_TTL):
+    """单个集合的文档数（带缓存）"""
+    key = "%d|%s|%s" % (id(client), dbname, name)
+    with _MONGO_META_LOCK:
+        hit = _MONGO_CNT.get(key)
+    if hit and (time.time() - hit[0]) < ttl:
+        return hit[1]
+    n = int(client[dbname][name].estimated_document_count())
+    with _MONGO_META_LOCK:
+        _MONGO_CNT[key] = (time.time(), n)
+        while len(_MONGO_CNT) > 512:
+            _MONGO_CNT.pop(next(iter(_MONGO_CNT)), None)
+    return n
+
+
+def _mongo_count_cached(client, dbname, name):
+    """只看缓存，不发请求；没有就返回 None"""
+    with _MONGO_META_LOCK:
+        hit = _MONGO_CNT.get("%d|%s|%s" % (id(client), dbname, name))
+    if hit and (time.time() - hit[0]) < _MONGO_CNT_TTL:
+        return hit[1]
+    return None
+
+
+def _mongo_counts(client, dbname, names, budget=1.2, workers=8):
+    """批量取各集合的文档数（estimated_document_count）。
+
+    远程库上每个 count 都是一次往返：40 个集合串行就是几十秒，这也是结构面板一直转圈的原因。
+    这里先吃缓存，剩下的并发发出去；budget 秒内没回来的先当「未知」（front-end 会再补一次），
+    budget=None 表示一直等（专门给补数接口用）。
+    """
+    out = {n: None for n in names}
+    todo = []
+    for n in names:
+        v = _mongo_count_cached(client, dbname, n)
+        if v is None:
+            todo.append(n)
+        else:
+            out[n] = v
+    if not todo:
+        return out
+
+    def one(name):
+        try:
+            return name, _mongo_count(client, dbname, name)
+        except Exception:
+            return name, None
+
+    if len(todo) == 1:
+        name, n = one(todo[0])
+        out[name] = n
+        return out
+    ex = ThreadPoolExecutor(max_workers=min(workers, len(todo)), thread_name_prefix="dbc-count")
+    try:
+        futs = [ex.submit(one, n) for n in todo]
+        for f in as_completed(futs, timeout=None if budget is None else budget):
+            name, n = f.result()
+            out[name] = n
+    except Exception:                             # 超时：剩下的保持未知，别让面板一直等
+        pass
+    finally:
+        ex.shutdown(wait=False)
+    return out
+
+
 def _open_mongo(conf):
     import pymongo
     from urllib.parse import quote_plus
@@ -471,9 +608,18 @@ def _open_mongo(conf):
         port = int(conf.get("port") or 27017)
         auth = ("%s:%s@" % (quote_plus(user), quote_plus(pwd))) if user else ""
         uri = "mongodb://%s%s:%d/" % (auth, host, port)
+    key = _mongo_client_key(uri, user, pwd)
+    with _MONGO_CLIENTS_LOCK:                    # 命中缓存直接用，省掉整轮握手
+        cached = _MONGO_CLIENTS.get(key)
+        if cached is not None:
+            _MONGO_CLIENTS.move_to_end(key)
+            return cached
     opts = {"serverSelectionTimeoutMS": _CONNECT_TIMEOUT * 1000,
             "connectTimeoutMS": _CONNECT_TIMEOUT * 1000,
-            "socketTimeoutMS": _QUERY_TIMEOUT * 1000}
+            "socketTimeoutMS": _QUERY_TIMEOUT * 1000,
+            "maxPoolSize": 20,                   # 结构面板会并发查文档数，连接池给够
+            "minPoolSize": 1,                    # 留一条常驻连接，避免空闲后被回收重连
+            "appname": "FileFlask-DBTool"}
     if user or pwd:                              # 连接串里的账号密码已剥掉，这里补回去
         opts["username"] = user
         opts["password"] = pwd
@@ -481,6 +627,10 @@ def _open_mongo(conf):
     try:
         client.admin.command("ping")                 # 连不上时立刻报错
     except Exception as e:
+        try:
+            client.close()
+        except Exception:
+            pass
         msg = str(e)
         if "saslprep" in msg.lower():                # 把「哪个字符不合法」翻译出来
             for label, val in (("密码", pwd), ("用户名", user)):
@@ -491,6 +641,23 @@ def _open_mongo(conf):
                         "或 Unicode 3.2 之后新增的字符如 emoji；多为复制密码时带进来的），请重新输入"
                         % (msg, label, ord(bad)))
         raise
+    with _MONGO_CLIENTS_LOCK:
+        raced = _MONGO_CLIENTS.get(key)          # 并发下别人抢先放进去了，用它的
+        if raced is not None:
+            _MONGO_CLIENTS.move_to_end(key)
+            try:
+                client.close()
+            except Exception:
+                pass
+            return raced
+        _MONGO_CLIENTS[key] = client
+        while len(_MONGO_CLIENTS) > _MONGO_CLIENTS_MAX:
+            _old_key, dead = _MONGO_CLIENTS.popitem(last=False)
+            _mongo_meta_drop(id(dead))
+            try:
+                dead.close()
+            except Exception:
+                pass
     return client
 
 
@@ -514,7 +681,13 @@ def _open(conf, writable=False):
 
 
 def _close(conn, kind=""):
-    """所有类型统一收尾（Redis / Mongo 的 close 语义不同，但都叫 close）"""
+    """所有类型统一收尾（Redis / Mongo 的 close 语义不同，但都叫 close）
+
+    MongoDB 的客户端是进程内缓存复用的，不能在这里关 —— 一关连接池就散，
+    下次请求又得重新做 SRV + TLS + 认证，回到「每次操作都等好几秒」的老路。
+    """
+    if kind == "mongodb" or (type(conn).__module__ or "").startswith("pymongo"):
+        return                                   # 兜底：kind 传丢了也不能把缓存的客户端关掉
     try:
         conn.close()
     except Exception:
@@ -968,20 +1141,13 @@ def _nosql_schema(conn, kind, use):
     tables = []
     if dbname:
         try:
-            colls = sorted(conn[dbname].list_collection_names())
+            colls = _mongo_collections(conn, dbname)
         except Exception:
             colls = []
-        if len(colls) <= _NL_TABLES:                 # 集合不多时顺带带上文档数
-            for name in colls:
-                n = None
-                try:
-                    n = int(conn[dbname][name].estimated_document_count())
-                except Exception:
-                    pass
-                tables.append({"name": name, "schema": dbname, "kind": "collection", "rows": n})
-        else:
-            tables = [{"name": name, "schema": dbname, "kind": "collection", "rows": None}
-                      for name in colls]
+        # 集合不太多时顺带带上文档数（并发去取，别一个集合一次往返串着等）
+        counts = _mongo_counts(conn, dbname, colls) if len(colls) <= _NL_TABLES else {}
+        tables = [{"name": name, "schema": dbname, "kind": "collection", "rows": counts.get(name)}
+                  for name in colls]
     return [{"name": n, "current": n == dbname} for n in names], tables, dbname
 
 
@@ -1048,7 +1214,11 @@ def _nosql_query(conn, kind, use, table, text, limit):
     if not coll:
         raise RuntimeError("请先在左侧选择一个集合，或在 JSON 里用 collection 指定")
     dbname = use.get("dbname") or ""
-    if coll not in conn[dbname].list_collection_names():
+    try:
+        known = _mongo_collections(conn, dbname)
+    except Exception:
+        known = None                             # 取列表失败就别拦着，交给真正的查询报错
+    if known is not None and coll not in known:
         raise RuntimeError("集合不存在：%s" % coll)
     if set(spec) & {"filter", "sort", "projection", "limit", "skip"}:
         flt = spec.get("filter") or {}
@@ -1516,7 +1686,8 @@ def _table_op_mongo(use, action, table, name, data):
         else:
             raise RuntimeError("该操作不适用于 MongoDB")
     finally:
-        _close(conn, kind)
+        _mongo_meta_drop(id(conn))        # 新建 / 改名 / 删除后，集合列表缓存作废
+        _close(conn, _k)
 
 
 def _table_op_redis(use, action, table, name, data):
@@ -1555,7 +1726,7 @@ def _table_op_redis(use, action, table, name, data):
         else:
             raise RuntimeError("Redis 只支持 新建 / 重命名 / 设置过期 / 删除 key")
     finally:
-        _close(conn, kind)
+        _close(conn, _k)
 
 
 def _mongo_id(v):
@@ -1640,6 +1811,8 @@ def _log_write(cid, kind, dbname, schema, tbl, op, summary, before=None, after=N
     before/after 走 JSON；MongoDB 需要保住 ObjectId / 日期类型时，用 before_text / after_text
     直接传「扩展 JSON」文本。
     """
+    if (kind or "") == "mongodb":
+        _mongo_cnt_clear()        # 写过数据，缓存的文档数就作废了（所有写操作都会走到这里）
     rec = (uuid.uuid4().hex[:12], cid, kind or "", dbname or "", schema or "", tbl or "", op,
            summary or "",
            before_text if before_text is not None else (_json_dump(before) if before is not None else ""),
@@ -2061,7 +2234,7 @@ def _mongo_ai_context(client, use):
     if not dbname:
         return "\n".join(lines)
     try:
-        colls = sorted(client[dbname].list_collection_names())
+        colls = _mongo_collections(client, dbname)
     except Exception:
         colls = []
     lines.append("-- 集合及其采样文档：")
@@ -2110,7 +2283,7 @@ def api_db_test():
                 "params": str(data.get("uri") or data.get("params") or "").strip()}
     t0 = time.time()
     try:
-        with _LOCK:
+        with _db_guard(conf):
             conn, kind = _open(conf)
             try:
                 if kind == "sqlite":
@@ -2149,7 +2322,7 @@ def api_db_schema():
         return jsonify({"error": "连接不存在"}), 404
     use = _pick(conf, dbname)
     try:
-        with _LOCK:
+        with _db_guard(use):
             conn, kind = _open(use)
             try:
                 if kind in _NOSQL:
@@ -2165,6 +2338,35 @@ def api_db_schema():
         return jsonify({"error": "读取结构失败：%s" % e}), 500
     return jsonify({"kind": kind, "dbname": use.get("dbname") or "",
                     "databases": dbs, "tables": tables})
+
+
+@bp.route("/api/db/counts", methods=["GET"])
+def api_db_counts():
+    """补齐集合文档数：结构面板先出列表（赶不上的先空着），这里把缺的数字补上。
+
+    单独成一个接口是有意的 —— 它不受结构面板那 1.8 秒的预算限制，慢慢数完再回；
+    前端拿到后只改数字，不动列表，所以慢也不影响操作。
+    """
+    cid = str(request.args.get("conn") or "")
+    dbname = str(request.args.get("dbname") or "")
+    conf = _load_conf(cid, with_password=True)
+    if not conf:
+        return jsonify({"error": "连接不存在"}), 404
+    if (conf.get("kind") or "") != "mongodb":
+        return jsonify({"counts": {}})
+    use = _pick(conf, dbname)
+    dbn = use.get("dbname") or ""
+    try:
+        with _db_guard(use):
+            conn, kind = _open(use)
+            try:
+                colls = _mongo_collections(conn, dbn)
+                counts = _mongo_counts(conn, dbn, colls, budget=None, workers=10)
+            finally:
+                _close(conn, kind)
+    except Exception as e:
+        return jsonify({"error": "读取文档数失败：%s" % e}), 500
+    return jsonify({"dbname": dbn, "counts": counts})
 
 
 @bp.route("/api/db/table/columns", methods=["GET"])
@@ -2186,7 +2388,7 @@ def api_db_table_columns():
         return jsonify({"error": "Redis 没有列结构"}), 400
     use = _pick(conf, dbname)
     try:
-        with _LOCK:
+        with _db_guard(use):
             conn, kind = _open(use)
             try:
                 if kind == "mongodb":
@@ -2230,15 +2432,19 @@ def api_db_rows():
         return jsonify({"error": "连接不存在"}), 404
     use = _pick(conf, dbname)
     try:
-        with _LOCK:
+        with _db_guard(use):
             conn, kind = _open(use)
             try:
                 pk = []                          # 主键列（编辑行时用来定位）
                 soft_col, soft_mode = None, None
                 if kind in _NOSQL:
                     dbn = use.get("dbname") or ""
-                    if kind == "mongodb" and table not in conn[dbn].list_collection_names():
-                        return jsonify({"error": "集合不存在：%s" % table}), 404
+                    if kind == "mongodb":
+                        colls = _mongo_collections(conn, dbn)
+                        if table not in colls:        # 缓存可能正好过期（刚新建的集合），再确认一次
+                            colls = _mongo_collections(conn, dbn, force=True)
+                        if table not in colls:
+                            return jsonify({"error": "集合不存在：%s" % table}), 404
                     cols, rows, total = _nosql_rows(conn, kind, use, table, limit, offset,
                                                     include_deleted, order_col, order_dir)
                     if kind == "mongodb":
@@ -2305,7 +2511,7 @@ def api_db_query():
     t0 = time.time()
     used = table                                  # 实际查询的表 / 集合，回显给前端
     try:
-        with _LOCK:
+        with _db_guard(use):
             conn, kind = _open(use)
             try:
                 if kind in _NOSQL:
@@ -2377,7 +2583,7 @@ def api_db_row_update():
     kind = conf.get("kind") or "sqlite"
     before = before_text = None
     try:
-        with _LOCK:
+        with _db_guard(use):
             if kind == "redis":
                 conn, _k = _open(use, writable=True)
                 try:
@@ -2432,7 +2638,7 @@ def api_db_row_insert():
     before = after = after_text = None
     key = None
     try:
-        with _LOCK:
+        with _db_guard(use):
             if kind == "redis":
                 conn, _k = _open(use, writable=True)
                 try:
@@ -2500,7 +2706,7 @@ def api_db_row_fake():
         return jsonify({"error": "只有 SQLite / MySQL / PostgreSQL 能按表结构造数"}), 400
     use = _pick(conf, dbname)
     try:
-        with _LOCK:
+        with _db_guard(use):
             conn, kind = _open(use)
             try:
                 cur = conn.cursor()
@@ -2543,7 +2749,7 @@ def api_db_row_insert_many():
         return jsonify({"error": "批量新增只支持 SQLite / MySQL / PostgreSQL"}), 400
     use = _pick(conf, dbname)
     try:
-        with _LOCK:
+        with _db_guard(use):
             conn, kind = _open(use)
             try:
                 cur = conn.cursor()
@@ -2588,7 +2794,7 @@ def api_db_row_delete():
     kind = conf.get("kind") or "sqlite"
     before = before_text = None
     try:
-        with _LOCK:
+        with _db_guard(use):
             if kind == "redis":
                 conn, _k = _open(use, writable=True)
                 try:
@@ -2646,7 +2852,7 @@ def api_db_row_soft_delete():
     if kind == "redis":
         return jsonify({"error": "Redis 不支持逻辑删除（请用行详情里的真删除）"}), 400
     try:
-        with _LOCK:
+        with _db_guard(use):
             conn, _k = _open(use, writable=True)
             try:
                 cur = conn.cursor()
@@ -2758,7 +2964,7 @@ def api_db_database():
     if kind == "mysql":
         use["dbname"] = ""
     try:
-        with _LOCK:
+        with _db_guard(use):
             conn, _k = _open(use, writable=True)
             try:
                 cur = conn.cursor()
@@ -2802,7 +3008,7 @@ def api_db_table():
     use = _pick(conf, dbname)
     kind = conf.get("kind") or "sqlite"
     try:
-        with _LOCK:
+        with _db_guard(use):
             if kind == "redis":
                 _table_op_redis(use, action, table, name, data)
             elif kind == "mongodb":
@@ -2859,6 +3065,7 @@ def api_db_undo():
     except Exception as e:
         return jsonify({"error": "回撤失败：%s" % e}), 400
     _mark_undone(wid)
+    _mongo_cnt_clear()            # 回撤也改了数据，文档数缓存一并作废
     _log.info("回撤写操作：%s %s", row["op"], row["tbl"])
     return jsonify({"ok": True, "undo": {"op": row["op"], "table": row["tbl"],
                                          "summary": row["summary"]}})
@@ -2919,7 +3126,7 @@ def api_db_nl2sql():
         return jsonify({"error": msg, **extra}), code
 
     try:
-        with _LOCK:
+        with _db_guard(use):
             conn, _k = _open(use)
             try:
                 if kind == "redis":
@@ -3142,7 +3349,7 @@ def api_db_table_ai_design():
     # 上下文：改已有表 → 带上它的列结构；新建表 → 带上库里的表名，免得重名
     ctx = ""
     try:
-        with _LOCK:
+        with _db_guard(use):
             conn, _k = _open(use)
             try:
                 cur = conn.cursor()

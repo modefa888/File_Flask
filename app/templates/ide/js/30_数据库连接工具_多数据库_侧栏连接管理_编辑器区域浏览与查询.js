@@ -669,7 +669,34 @@
     }
 
     var _schemaRetry = false;
+    var _schemaSeq = 0;             // 结构面板的请求序号：补数回来时用来判断列表有没有被换掉
+
+    /* 文档数补齐：远程库上每个集合的计数都是一次往返，结构面板不等它 ——
+       先用已知数字把列表画出来，缺的在后台单独要一次（后端并发数完再回），
+       这样集合多的时候也不会卡在「加载中…」。 */
+    async function fillCounts(seq) {
+      var miss = 0;
+      tabsBox.querySelectorAll(".dbc-table").forEach(function (it) {
+        if (it.dataset.counted !== "1") miss++;
+      });
+      if (!miss) return;
+      try {
+        var d = await dbcApi("/api/db/counts?conn=" + encodeURIComponent(conn.id) +
+                             "&dbname=" + encodeURIComponent(state.db));
+        if (seq !== _schemaSeq) return;                   // 已经切到别的库 / 刷新过，丢弃这次结果
+        var map = d.counts || {};
+        tabsBox.querySelectorAll(".dbc-table").forEach(function (it) {
+          var n = map[it.dataset.name];
+          if (n === null || n === undefined) return;
+          var c = it.querySelector(".dbc-tc");
+          if (c) c.textContent = n;
+          it.dataset.counted = "1";
+        });
+      } catch (e) { /* 补不上就算了，不影响浏览 */ }
+    }
+
     async function loadSchema() {
+      var seq = ++_schemaSeq;
       tabsBox.innerHTML = '<div class="dbc-empty">加载中…</div>';
       try {
         var d = await dbcApi("/api/db/schema?conn=" + encodeURIComponent(conn.id) +
@@ -683,17 +710,19 @@
         var list = d.tables || [];
         tabsBox.innerHTML = list.length
           ? list.map(function (t) {
+              var has = !(t.rows === null || t.rows === undefined);
               return '<div class="dbc-table" data-name="' + escAttr(t.name) + '" data-schema="' +
                 escAttr(t.schema || "") + '" data-kind="' + escAttr(t.kind || "") +
-                '" title="' + escAttr(t.name) + '">' +
+                '" data-counted="' + (has ? "1" : "0") + '" title="' + escAttr(t.name) + '">' +
                 '<i class="bi ' + (String(t.kind).toLowerCase().indexOf("view") >= 0 ? "bi-eye" : "bi-table") + '"></i>' +
                 '<span class="dbc-tn">' + esc(t.name) + "</span>" +
-                '<span class="dbc-tc">' + (t.rows === null || t.rows === undefined ? "" : t.rows) + "</span>" +
+                '<span class="dbc-tc">' + (has ? t.rows : "") + "</span>" +
                 '<button class="dbc-to" title="更多操作（新建 / 表结构 / 重命名 / 清空 / 删除）"><i class="bi bi-three-dots"></i></button>' +
                 "</div>";
             }).join("")
           : '<div class="dbc-empty">' + (isRedis ? "这个库里没有 key" : (isMongo ? "这个库里没有集合" : "这个库里没有表")) +
             "<br>点左上角「＋」新建</div>";
+        if (isMongo) fillCounts(seq);
         tabsBox.querySelectorAll(".dbc-table").forEach(function (it) {
           it.onclick = function () {
             state.table = it.dataset.name;

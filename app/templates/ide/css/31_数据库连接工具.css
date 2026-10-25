@@ -30,10 +30,11 @@
     font-family: ui-monospace, Menlo, Consolas, monospace;
   }
   .dbc-act {
-    flex: none; display: none; width: 22px; height: 22px; border: none; border-radius: 4px;
+    /* 常驻占位 + visibility 显隐：用 display:none/block 悬停时按钮突然插入会挤动整行（抖动） */
+    flex: none; display: block; visibility: hidden; width: 22px; height: 22px; border: none; border-radius: 4px;
     background: transparent; color: #a0a0a0; cursor: pointer; font-size: 12px;
   }
-  .dbc-item:hover .dbc-act { display: block; }
+  .dbc-item:hover .dbc-act { visibility: visible; }
   .dbc-act:hover { background: #3a3d41; color: #ffffff; }
   .dbc-del:hover { color: #e06c75; }
 
@@ -125,12 +126,12 @@
   .dbc-tc { flex: none; font-size: 10.5px; color: #7a7a7a; }
   /* 选中的表：右侧行数用蓝色标出（与 SQLite 查看器一致） */
   .dbc-table.on .dbc-tc { color: #9fd0ff; }
-  /* 表项上的「⋯」：悬停才出现，点开表操作菜单 */
+  /* 表项上的「⋯」：悬停才出现（visibility 占位显隐，不用 display，避免插入按钮挤动行内容抖动） */
   .dbc-to {
-    flex: none; display: none; width: 20px; height: 20px; border: none; border-radius: 4px;
+    flex: none; display: block; visibility: hidden; width: 20px; height: 20px; border: none; border-radius: 4px;
     background: transparent; color: #a0a0a0; cursor: pointer; font-size: 12px; padding: 0;
   }
-  .dbc-table:hover .dbc-to { display: block; }
+  .dbc-table:hover .dbc-to { visibility: visible; }
   .dbc-to:hover { background: #3a3d41; color: #ffffff; }
   /* 「回撤」按钮上的可回撤步数 / 删除按钮的警示色 */
   .dbc-undo-n { color: #9fd0ff; }

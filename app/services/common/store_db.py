@@ -404,6 +404,11 @@ CREATE TABLE IF NOT EXISTS cron_tasks (
     pre_hook    TEXT DEFAULT '',                 -- 前置钩子（主命令前执行，失败则跳过主命令）
     post_hook   TEXT DEFAULT '',                 -- 后置钩子（主命令后执行，不影响退出码判定）
     notify      INTEGER NOT NULL DEFAULT 1,      -- 失败 / 超时时是否推送通知
+    notify_content TEXT DEFAULT 'status',        -- 通知内容：status（仅结果）/ output（结果+输出）/ output_only（仅输出）/ custom（自定义模板）
+    notify_lines   INTEGER NOT NULL DEFAULT 20,  -- 附带脚本输出时取日志末尾多少行（0 = 不限，仍受字符上限约束）
+    notify_title   TEXT DEFAULT '',              -- 任务级通知标题模板（留空 = 用全局模板）
+    notify_body    TEXT DEFAULT '',              -- 任务级通知正文模板（留空 = 用全局模板；可用 {output}）
+    notify_channels TEXT DEFAULT '',             -- 任务级通知渠道（逗号分隔：desktop,email,dingtalk,telegram,pushplus；空 = 通知设置里已启用的全部）
     created_at  REAL NOT NULL DEFAULT 0,
     updated_at  REAL NOT NULL DEFAULT 0,
     last_at     REAL NOT NULL DEFAULT 0,
@@ -570,6 +575,13 @@ def _migrate_ai_columns(conn):
         ("cron_tasks", "pre_hook", "TEXT DEFAULT ''"),
         ("cron_tasks", "post_hook", "TEXT DEFAULT ''"),
         ("cron_tasks", "notify", "INTEGER NOT NULL DEFAULT 1"),
+        # 任务级通知内容：附带脚本输出 / 自定义模板
+        ("cron_tasks", "notify_content", "TEXT DEFAULT 'status'"),
+        ("cron_tasks", "notify_lines", "INTEGER NOT NULL DEFAULT 20"),
+        ("cron_tasks", "notify_title", "TEXT DEFAULT ''"),
+        ("cron_tasks", "notify_body", "TEXT DEFAULT ''"),
+        # 任务级通知渠道（空 = 跟随「通知设置」里已启用的渠道）
+        ("cron_tasks", "notify_channels", "TEXT DEFAULT ''"),
         ("cron_runs", "attempt", "INTEGER NOT NULL DEFAULT 0"),
         # 终端 AI 历史：AI 标题列（老库补列）
         ("term_ai_history", "title", "TEXT DEFAULT ''"),

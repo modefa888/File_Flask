@@ -81,7 +81,8 @@ DEFAULT_CFG = {
         "token": "",                                # PushPlus 的 token（www.pushplus.plus）
         "topic": "",                                # 群组编码（留空 = 发给自己）
     },
-    # 通知模板：变量 {task} {event} {exit} {duration} {attempt} {run} {date} {time}
+    # 通知模板：变量 {task} {event} {exit} {duration} {attempt} {run} {date} {time} {output}
+    # {output} = 脚本输出（末尾若干行，由任务里的「通知内容」决定是否带入）
     # 标题与正文都清空时回退到 cronsvc 传入的默认文案
     "template": {
         "title": "定时任务{event} · {task}",
@@ -265,11 +266,15 @@ def _render_tpl(tpl, vars_):
     return re.sub(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", _sub, str(tpl or ""))
 
 
-def send(title, body, event="fail", source="cron", vars_=None):
+def send(title, body, event="fail", source="cron", vars_=None, tpl=None, channels=None):
     """按配置推送一次通知；返回 {"results": {渠道: {ok, detail}}}。
 
-    event: fail / timeout / retry —— 决定受哪个事件开关控制；
-    vars_: 模板变量（task / event / exit / duration / attempt / run / date / time），
+    event: fail / timeout / retry / success —— 决定受哪个事件开关控制；
+    vars_: 模板变量（task / event / exit / duration / attempt / run / date / time / output），
+    tpl:   任务级模板 {"title","body"}，非空字段优先于全局模板（留空则回退全局）；
+           tpl["raw_body"]=True 时 body 已是最终文本（如已拼好脚本输出），不再做变量渲染；
+    channels: 任务级渠道（数组或逗号串，空 = 跟随全局「通知设置」里已启用的渠道）；
+           只会在全局已启用的渠道里取交集，任务里选了但全局关掉的渠道不会发送；
     配置了通知模板时用模板渲染标题与正文，否则用调用方传入的默认文案；
     总开关未开、该事件未勾选、或该渠道未启用时对应渠道会被跳过。
     """
@@ -283,20 +288,30 @@ def send(title, body, event="fail", source="cron", vars_=None):
     if not events.get(event, True):
         results["skipped"] = "event-off"
         return results
-    # 模板渲染（模板里两个都清空时用调用方的默认文案）
-    tpl = cfg.get("template") or {}
+    # 模板渲染（任务级模板优先；两个都清空时用调用方的默认文案）
+    gtpl = cfg.get("template") or {}
+    ttpl = tpl if isinstance(tpl, dict) else {}
+    raw_body = bool(ttpl.get("raw_body"))              # 正文已渲染好（如已拼好脚本输出）
+    use_title = str(ttpl.get("title") or "").strip() or str(gtpl.get("title") or "").strip()
+    use_body = (str(ttpl.get("body") or "") if raw_body
+                else (str(ttpl.get("body") or "").strip() or str(gtpl.get("body") or "").strip()))
     vars_ = dict(vars_ or {})
     vars_.setdefault("event", _EVENT_NAMES.get(event, event))
     vars_.setdefault("date", time.strftime("%Y-%m-%d"))
     vars_.setdefault("time", time.strftime("%H:%M"))
-    if str(tpl.get("title") or "").strip():
-        title = _render_tpl(tpl["title"], vars_)
-    if str(tpl.get("body") or "").strip():
-        body = _render_tpl(tpl["body"], vars_)
-    channels = cfg.get("channels") or {}
-    for ch in _CHANNELS:
-        if not channels.get(ch):
-            continue
+    vars_.setdefault("output", "")                       # 未附带脚本输出时占位，避免模板里留着 {output}
+    if use_title:
+        title = _render_tpl(use_title, vars_)
+    if use_body:
+        body = use_body if raw_body else _render_tpl(use_body, vars_)
+    enabled = cfg.get("channels") or {}
+    targets = [ch for ch in _CHANNELS if enabled.get(ch)]
+    wanted = crondb.norm_channels(channels)                # 任务级渠道（空 = 全局已启用的全部）
+    if wanted:
+        picked = set(wanted.split(","))
+        targets = [ch for ch in targets if ch in picked]   # 取交集：全局没启用的发不出去
+        results["channels"] = wanted
+    for ch in targets:
         ok, detail = _send_one(cfg, ch, title, body)
         results["results"][ch] = {"ok": bool(ok), "detail": detail}
     try:                                                # 写进通知历史（本分区按 source 过滤展示）

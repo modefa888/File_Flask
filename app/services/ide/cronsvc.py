@@ -13,7 +13,9 @@
 说明：执行中的进程是 setsid 起的独立进程组，服务重启后无法再接管，
 启动时会把「上次还处于 running」的记录标记为 killed（中断）。
 """
+import json
 import os
+import re
 import signal
 import subprocess
 import threading
@@ -37,6 +39,19 @@ _LOG_DAYS = 0                       # 默认日志保留天数（0 = 永久保�
 _TICK = 1.0                         # 调度线程轮询间隔（秒；秒级任务需要 1s 粒度）
 _CLEANUP_EVERY = 3600.0             # 日志自动清理间隔（秒）
 _READ_MAX = 200 * 1024              # 单次最多返回多少字节日志
+_TAIL_READ = 96 * 1024              # 组装通知时最多读日志末尾多少字节
+_NOTIFY_MAX_CHARS = 3500            # 单条通知里脚本输出最多保留多少字符（超出保留末尾）
+_DRY_TIMEOUT_MAX = 120              # 试运行最长等待（秒），避免编辑弹窗里的请求无限挂起
+_DRY_OUT_CHARS = 20000              # 试运行最多回传多少字符（超出保留末尾）
+_JSON_VAR_MAX = 40                  # 通知模板最多展开多少个脚本输出的 JSON 字段
+_JSON_VAL_MAX = 500                 # 单个 JSON 字段值最多保留多少字符
+# 模板内置变量名：JSON 字段同名时跳过，避免把 {task} {event} 这些内置值顶掉
+_TPL_RESERVED = ("task", "event", "status", "exit", "duration", "attempt", "run",
+                 "date", "time", "output")
+
+# 日志里框架自己写的标记行（这些不算脚本输出，不进通知）
+_FRAME_HEAD = re.compile(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] ▶ 开始执行")
+_FRAME_TAIL = re.compile(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] (✔|✘|⏱|■)")
 
 _LOCK = threading.RLock()
 _RUNNING = {}                       # run_id -> {"proc", "task_id", "start", "log_path", "stopped"}
@@ -143,7 +158,287 @@ def _build_script(cmd, pre_hook, post_hook):
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------- 通知内容（可带脚本输出）
+def _raw_tail(log_path, limit=None):
+    """读日志末尾的脚本输出原文（不做字符截断），文件不存在 / 读失败返回空串。
+
+    只读文件末尾 _TAIL_READ 字节（日志可能很大），去掉框架自己写的开始 / 结束
+    标记与 [cron] / [钩子] 提示行，并去掉首尾空行。
+    """
+    limit = limit or _TAIL_READ
+    try:
+        size = os.path.getsize(log_path)
+        with open(log_path, "rb") as f:
+            if size > limit:
+                f.seek(size - limit)
+            data = f.read(limit)
+    except (OSError, TypeError):
+        return ""
+    if size > limit:                            # 从中间截取：丢掉第一行（可能是半行）
+        data = data.split(b"\n", 1)[-1]
+    rows, skip_cmd = [], False
+    for raw in data.decode("utf-8", "replace").splitlines():
+        s = raw.rstrip()
+        if skip_cmd:                            # 开始标记下面那行是 " $ 命令" 回显，不算输出
+            skip_cmd = False
+            if s.startswith("$ "):
+                continue
+        if _FRAME_HEAD.match(s):
+            skip_cmd = True
+            continue
+        if _FRAME_TAIL.match(s) or s.startswith("[cron]") or s.startswith("[钩子]"):
+            continue
+        rows.append(s)
+    while rows and not rows[0].strip():
+        rows.pop(0)
+    while rows and not rows[-1].strip():
+        rows.pop()
+    return "\n".join(rows)
+
+
+def _tail_output(log_path, lines=20):
+    """读取日志末尾的「脚本输出」，供通知正文使用；文件不存在 / 读失败返回空串。
+
+    lines > 0 时只保留最后 lines 行（0 = 不限行，仍受 _NOTIFY_MAX_CHARS 约束）。
+    """
+    text = _raw_tail(log_path)
+    rows = text.split("\n") if text else []
+    try:
+        n = max(0, int(lines or 0))
+    except (TypeError, ValueError):
+        n = 20
+    trimmed = False
+    if n and len(rows) > n:
+        rows = rows[-n:]
+        trimmed = True
+    text = "\n".join(rows)
+    if len(text) > _NOTIFY_MAX_CHARS:           # 太长：保留末尾（异常信息通常在最后）
+        text = text[-_NOTIFY_MAX_CHARS:]
+        trimmed = True
+    if trimmed and text:
+        text = "…（仅显示末尾部分）\n" + text
+    return text
+
+
+def _json_vars(text):
+    """脚本输出是 JSON 对象时，把顶层字段展开成模板变量（如 {order_count}）。
+
+    只接受合法标识符作键名（字母 / 下划线开头，≤40 字符）；
+    值统一转成字符串（对象 / 数组转 JSON，布尔转 true/false，null 转空串）；
+    输出前后有多余文字时，尝试截取最外层 {…} 再解析。
+    """
+    s = str(text or "").strip()
+    if not s or len(s) > 256 * 1024:
+        return {}
+    data = None
+    try:
+        data = json.loads(s)
+    except Exception:                                  # noqa: BLE001
+        i, j = s.find("{"), s.rfind("}")
+        if 0 <= i < j:
+            try:
+                data = json.loads(s[i:j + 1])
+            except Exception:                          # noqa: BLE001
+                data = None
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for k, v in data.items():
+        key = str(k).strip()
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]{0,39}$", key):
+            continue
+        if key in _TPL_RESERVED:                   # 内置变量名不参与展开
+            continue
+        if isinstance(v, (dict, list)):
+            val = json.dumps(v, ensure_ascii=False)
+        elif v is None:
+            val = ""
+        elif isinstance(v, bool):
+            val = "true" if v else "false"
+        else:
+            val = str(v)
+        if len(val) > _JSON_VAL_MAX:
+            val = val[:_JSON_VAL_MAX] + "…"
+        out[key] = val
+        if len(out) >= _JSON_VAR_MAX:
+            break
+    return out
+
+
+def _notify_preview(data, ok, code, dur, tail, fields):
+    """按编辑框里的自定义模板渲染一条通知预览（不发送），用于确认变量替换结果。
+
+    只在「自定义模板」模式下生成；模板留空时回退到「设置 → 定时任务通知」的全局模板，
+    与真实发送的口径保持一致。
+    """
+    if str(data.get("notify_content") or "") != "custom":
+        return None
+    tpl_title = str(data.get("notify_title") or "").strip()
+    tpl_body = str(data.get("notify_body") or "").strip()
+    gtpl = {}
+    try:
+        gtpl = (cronnotify.get_cfg() or {}).get("template") or {}
+    except Exception:                                  # noqa: BLE001
+        gtpl = {}
+    title_tpl = tpl_title or str(gtpl.get("title") or "").strip()
+    body_tpl = tpl_body or str(gtpl.get("body") or "").strip()
+    if not title_tpl and not body_tpl:
+        return None
+    vars_ = {"task": str(data.get("name") or "（未命名任务）"),
+             "event": "执行成功" if ok else "执行失败",
+             "status": "成功" if ok else "失败",
+             "exit": "无" if code is None else code,
+             "duration": "%.1fs" % (dur / 1000.0),
+             "run": "（试运行）", "attempt": "",
+             "date": time.strftime("%Y-%m-%d"), "time": time.strftime("%H:%M"),
+             "output": tail or ""}
+    for k, v in (fields or {}).items():
+        vars_.setdefault(k, v)
+    return {"title": cronnotify._render_tpl(title_tpl, vars_),
+            "body": cronnotify._render_tpl(body_tpl, vars_)}
+
+
+def _notify_parts(task, run_id, status, code, dur, log_path, tip=""):
+    """按任务的通知内容配置组装 (title, body, vars_, tpl)。
+
+    notify_content：
+      status      仅执行结果（默认，与旧行为一致）
+      output      执行结果 + 脚本输出末尾若干行
+      output_only 仅脚本输出（脚本没输出时回退执行结果）
+      custom      使用任务级模板 notify_title / notify_body（可引用 {output}）
+    """
+    name = task.get("name") or task.get("id") or ""
+    mode = str(task.get("notify_content") or "status").strip().lower()
+    if mode not in crondb.NOTIFY_MODES:
+        mode = "status"
+    try:
+        lines = max(0, int(task.get("notify_lines") or 0))
+    except (TypeError, ValueError):
+        lines = 20
+    tpl = {"title": str(task.get("notify_title") or ""),
+           "body": str(task.get("notify_body") or "")}
+    # custom 模式下只有模板真的引用了 {output} 才去读日志，避免白读大文件
+    need_out = mode in ("output", "output_only") or (
+        mode == "custom" and "{output}" in (tpl["title"] + tpl["body"]))
+    output = _tail_output(log_path, lines) if need_out else ""
+    if status == "success":
+        head = "任务「%s」执行成功。\n耗时：%.1fs\n时间：%s\n执行记录：%s" % (
+            name, dur / 1000.0, time.strftime("%Y-%m-%d %H:%M:%S"), run_id)
+    else:
+        head = "任务「%s」执行%s。\n退出码：%s\n耗时：%.1fs\n时间：%s\n执行记录：%s" % (
+            name, "超时被终止" if status == "timeout" else "失败",
+            "无" if code is None else code, dur / 1000.0,
+            time.strftime("%Y-%m-%d %H:%M:%S"), run_id)
+    if tip:
+        head += "\n" + tip
+    if mode == "output" and output:
+        body = head + "\n\n▶ 脚本输出（%s）：\n%s" % (
+            ("末尾 %d 行" % lines) if lines else "全部", output)
+    elif mode == "output_only":
+        body = output or head
+    else:
+        body = head
+    # 已拼好脚本输出的正文不再走模板渲染（输出里可能带 { } 花括号，避免被当成变量）
+    if mode in ("output", "output_only") and not tpl["body"]:
+        tpl["body"] = body
+        tpl["raw_body"] = True
+    title = "定时任务%s · %s" % (
+        {"success": "执行成功", "fail": "失败", "timeout": "超时"}.get(status, "已停止"), name)
+    vars_ = {"task": name, "exit": "无" if code is None else code,
+             "duration": "%.1fs" % (dur / 1000.0), "run": run_id, "attempt": "",
+             "output": output,
+             "status": {"success": "成功", "fail": "失败", "timeout": "超时",
+                        "killed": "已停止"}.get(status, status)}
+    # 自定义模板：脚本输出是 JSON 对象时，把顶层字段也做成变量（如 {order_count}）。
+    # 用未做字符截断的原文解析，避免 JSON 被「末尾 N 行 / 长度上限」切坏。
+    if mode == "custom" and log_path:
+        for k, v in _json_vars(_raw_tail(log_path)).items():
+            vars_.setdefault(k, v)                 # 内置变量优先，同名 JSON 字段不覆盖
+    return title, body, vars_, tpl
+
+
 # ---------------------------------------------------------------- 执行
+def _run_env():
+    """子进程环境：关掉缓冲 / 分页 / 交互提示，避免命令卡在等待输入。"""
+    env = dict(os.environ)
+    env.update({"PYTHONUNBUFFERED": "1", "FORCE_COLOR": "0",
+                "PAGER": "cat", "GIT_PAGER": "cat", "GIT_TERMINAL_PROMPT": "0"})
+    return env
+
+
+def dry_run(data, lines=20):
+    """试运行：用编辑框里当前的命令立刻跑一次，只返回输出给前端预览。
+
+    与正式执行的区别：不写执行记录、不计统计、不发通知；
+    超时上限 120 秒（防止编辑弹窗里的请求无限挂起），输出最多回传 2 万字符。
+    返回 {ok, exit_code, duration, timed_out, output, tail, lines, truncated} 或 {error}。
+    """
+    data = data or {}
+    if not getattr(config, "ENABLE_EXEC", True):
+        return {"error": "已禁用命令执行（config.ENABLE_EXEC = False）"}
+    cmd = str(data.get("command") or "").strip()
+    if not cmd:
+        return {"error": "执行命令为空"}
+    pre_hook = str(data.get("pre_hook") or "").strip()
+    post_hook = str(data.get("post_hook") or "").strip()
+    for label, hook in (("前置钩子", pre_hook), ("后置钩子", post_hook), ("主命令", cmd)):
+        verdict = check_command(hook)
+        if verdict.get("level") == "blocked":
+            return {"error": "已拦截危险命令（%s）：%s" % (label, verdict.get("reason"))}
+    cwd = str(data.get("cwd") or "").strip() or None
+    if cwd and not os.path.isdir(cwd):
+        return {"error": "工作目录不存在：%s" % cwd}
+    try:
+        timeout = max(0, int(data.get("timeout") or 0))
+    except (TypeError, ValueError):
+        timeout = 0
+    timeout = min(timeout, _DRY_TIMEOUT_MAX) if timeout else _DRY_TIMEOUT_MAX
+    script = _build_script(cmd, pre_hook, post_hook) if (pre_hook or post_hook) else cmd
+    started = time.time()
+    try:
+        proc = subprocess.Popen(["bash", "-lc", script], cwd=cwd,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, env=_run_env(),
+                                preexec_fn=os.setsid)
+    except OSError as e:
+        return {"error": "启动失败：%s" % e}
+    timed_out = False
+    try:
+        raw, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _kill_group(proc)
+        try:
+            raw, _ = proc.communicate(timeout=2)
+        except Exception:                              # noqa: BLE001
+            raw = b""
+    dur = int((time.time() - started) * 1000)
+    text = (raw or b"").decode("utf-8", "replace")
+    try:
+        n = max(0, min(int(lines or 0), 200))
+    except (TypeError, ValueError):
+        n = 20
+    # 通知里会带上的那几行（与 _tail_output 的口径一致：末尾 n 行 + 字符上限）
+    rows = text.replace("\r\n", "\n").split("\n")
+    while rows and not rows[-1].strip():
+        rows.pop()
+    tail_rows = rows[-n:] if n else rows
+    tail = "\n".join(tail_rows)
+    if len(tail) > _NOTIFY_MAX_CHARS:
+        tail = "…（仅显示末尾部分）\n" + tail[-_NOTIFY_MAX_CHARS:]
+    fields = _json_vars(text)                          # 输出是 JSON 对象时可直接当模板变量用
+    truncated = False
+    if len(text) > _DRY_OUT_CHARS:                     # 预览别塞爆浏览器
+        text = "…（仅显示末尾部分）\n" + text[-_DRY_OUT_CHARS:]
+        truncated = True
+    ok = (not timed_out) and proc.returncode == 0
+    return {"ok": ok,
+            "exit_code": proc.returncode, "duration": dur, "timed_out": timed_out,
+            "output": text, "tail": tail, "lines": n, "truncated": truncated,
+            "fields": fields,
+            "preview": _notify_preview(data, ok, proc.returncode, dur, tail, fields)}
+
+
 def start_run(task_id, trigger="manual"):
     """启动一次执行；返回 {"run_id": ...} 或 {"error": ...}。"""
     task = crondb.get_task(task_id)
@@ -174,14 +469,23 @@ def start_run(task_id, trigger="manual"):
     cwd = str(task.get("cwd") or "").strip() or None
     if cwd and not os.path.isdir(cwd):
         return {"error": "工作目录不存在：%s" % cwd}
-    env = dict(os.environ)
-    env.update({"PYTHONUNBUFFERED": "1", "FORCE_COLOR": "0",
-                "PAGER": "cat", "GIT_PAGER": "cat", "GIT_TERMINAL_PROMPT": "0"})
+    env = _run_env()
     started = time.time()
+    hook_note = "，含前后置钩子" if (pre_hook or post_hook) else ""
     try:
         fh = open(log_path, "wb")
     except OSError as e:
         return {"error": "创建日志文件失败：%s" % e}
+    # 先写开始标记再拉起子进程：两个 fd 各记各的偏移，先启动的话子进程输出会把标记覆盖掉，
+    # 表现为日志开头没有「开始执行」，多行命令的第二行还会混进脚本输出里（被当成通知内容）。
+    try:
+        fh.write(("\n[%s] ▶ 开始执行（%s%s）\n$ %s\n" % (
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started)),
+            "手动" if trigger == "manual" else ("重试" if trigger == "retry" else "定时"),
+            hook_note, str(cmd).replace("\r", "").replace("\n", " "))).encode("utf-8"))
+        fh.flush()
+    except OSError:
+        pass
     script = _build_script(cmd, pre_hook, post_hook) if (pre_hook or post_hook) else cmd
     try:
         proc = subprocess.Popen(["bash", "-lc", script], cwd=cwd, stdout=fh,
@@ -192,15 +496,6 @@ def start_run(task_id, trigger="manual"):
         _remove_log(log_path)
         return {"error": "启动失败：%s" % e}
     fh.close()                                     # 子进程已持有该 fd
-    hook_note = "，含前后置钩子" if (pre_hook or post_hook) else ""
-    try:
-        with open(log_path, "ab") as w:
-            w.write(("\n[%s] ▶ 开始执行（%s%s）\n$ %s\n" % (
-                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started)),
-                "手动" if trigger == "manual" else ("重试" if trigger == "retry" else "定时"),
-                hook_note, cmd)).encode("utf-8"))
-    except OSError:
-        pass
 
     # 新的一次「正式」触发：重试计数清零（重试触发本身不清）
     if trigger in ("cron", "manual"):
@@ -278,14 +573,10 @@ def _watch(run_id, task_id, proc, log_path, started):
                 _RETRIES.pop(task_id, None)
             # 执行成功：events.success 开启时也会推送并留记录（send 内部自行判断开关）
             if task.get("notify"):
-                cronnotify.send(
-                    "定时任务执行成功 · %s" % (task.get("name") or task_id),
-                    "任务「%s」执行成功。\n耗时：%.1fs\n时间：%s\n执行记录：%s" % (
-                        task.get("name") or task_id, dur / 1000.0,
-                        time.strftime("%Y-%m-%d %H:%M:%S"), run_id),
-                    event="success",
-                    vars_={"task": task.get("name") or task_id, "exit": "0",
-                           "duration": "%.1fs" % (dur / 1000.0), "run": run_id, "attempt": ""})
+                title, body, vars_, tpl = _notify_parts(
+                    task, run_id, "success", 0 if code is None else code, dur, log_path)
+                cronnotify.send(title, body, event="success", vars_=vars_, tpl=tpl,
+                                channels=task.get("notify_channels"))
         elif status in ("fail", "timeout"):
             _handle_failure(task, run_id, status, code, dur, log_path)
 
@@ -303,13 +594,6 @@ def _handle_failure(task, run_id, status, code, dur, log_path):
     except (TypeError, ValueError):
         interval = 60
     attempt = _RETRIES.get(task_id, 0)
-    title = "定时任务%s · %s" % ("超时" if status == "timeout" else "失败", name)
-    body = ("任务「%s」执行%s。\n退出码：%s\n耗时：%.1fs\n时间：%s\n执行记录：%s" % (
-        name, "超时被终止" if status == "timeout" else "失败", code, dur / 1000.0,
-        time.strftime("%Y-%m-%d %H:%M:%S"), run_id))
-    # 模板变量（通知模板见 cronnotify；{event} {date} {time} 由 send 兜底）
-    vars_ = {"task": name, "exit": "无" if code is None else code,
-             "duration": "%.1fs" % (dur / 1000.0), "run": run_id, "attempt": ""}
     # 1) 还有重试名额：安排下一次重试
     if max_retries > 0 and attempt < max_retries:
         nxt = attempt + 1
@@ -327,12 +611,17 @@ def _handle_failure(task, run_id, status, code, dur, log_path):
         except OSError:
             pass
         _log.info("定时任务将重试：%s run=%s（%s）", name, run_id, tip)
+        # 通知正文按任务配置组装（可带脚本输出），模板变量由 send 统一渲染
+        title, body, vars_, tpl = _notify_parts(task, run_id, status, code, dur, log_path, tip=tip)
         vars_["attempt"] = "第 %d/%d 次" % (nxt, max_retries)
-        cronnotify.send(title, body + "\n" + tip, event="retry", vars_=vars_)
+        cronnotify.send(title, body, event="retry", vars_=vars_, tpl=tpl,
+                        channels=task.get("notify_channels"))
         return
     # 2) 没有重试名额了（或没配重试）：推送失败 / 超时通知
     if task.get("notify"):
-        cronnotify.send(title, body, event=status, vars_=vars_)
+        title, body, vars_, tpl = _notify_parts(task, run_id, status, code, dur, log_path)
+        cronnotify.send(title, body, event=status, vars_=vars_, tpl=tpl,
+                        channels=task.get("notify_channels"))
 
 
 def _retry_fire(task_id, attempt):
@@ -391,7 +680,19 @@ def cancel_retry(task_id):
 
 def running_run_id(task_id):
     with _LOCK:
-        return _BY_TASK.get(task_id)
+        rid = _BY_TASK.get(task_id)
+        if not rid:
+            return None
+        # 保险：进程其实已经退出（_watch 还没来得及收尾）就不再算「运行中」，
+        # 避免界面 / 统计永远停在「运行中」不动。
+        rec = _RUNNING.get(rid) or {}
+        proc = rec.get("proc")
+        try:
+            if proc is not None and proc.poll() is not None:
+                return None
+        except Exception:                                  # noqa: BLE001
+            pass
+        return rid
 
 
 # ---------------------------------------------------------------- 日志

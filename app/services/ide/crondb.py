@@ -14,8 +14,41 @@ _log = get_logger()
 
 _TASK_COLS = ("id", "name", "cron", "command", "cwd", "enabled", "remark", "timeout",
               "max_retries", "retry_interval", "depends_on", "pre_hook", "post_hook",
-              "notify", "created_at", "updated_at", "last_at", "last_status", "last_ms",
+              "notify", "notify_content", "notify_lines", "notify_title", "notify_body",
+              "notify_channels",
+              "created_at", "updated_at", "last_at", "last_status", "last_ms",
               "last_exit", "run_count", "ok_count", "fail_count")
+
+# 任务级通知内容：仅结果 / 结果+脚本输出 / 仅脚本输出 / 自定义模板
+NOTIFY_MODES = ("status", "output", "output_only", "custom")
+_NOTIFY_LINES_MAX = 200
+
+# 可推送的通知渠道（与 cronnotify 的渠道一致）；任务里为空 = 跟随「通知设置」里已启用的渠道
+NOTIFY_CHANNELS = ("desktop", "email", "dingtalk", "telegram", "pushplus")
+
+
+def norm_channels(v):
+    """把渠道配置归一化成逗号串：接受数组 / 逗号串，丢弃未知渠道并去重（顺序固定）。"""
+    if isinstance(v, str):
+        items = v.split(",")
+    elif isinstance(v, (list, tuple, set)):
+        items = [str(x) for x in v]
+    else:
+        items = []
+    picked = {str(x).strip().lower() for x in items}
+    return ",".join(c for c in NOTIFY_CHANNELS if c in picked)
+
+
+def _norm_mode(v):
+    v = str(v or "").strip().lower()
+    return v if v in NOTIFY_MODES else "status"
+
+
+def _norm_lines(v):
+    try:
+        return max(0, min(int(v or 0), _NOTIFY_LINES_MAX))
+    except (TypeError, ValueError):
+        return 20
 
 
 def _task_dict(row):
@@ -24,6 +57,11 @@ def _task_dict(row):
     d = {k: row[k] for k in _TASK_COLS if k in row.keys()}
     d["enabled"] = bool(d.get("enabled"))
     d["notify"] = bool(d.get("notify"))
+    d["notify_content"] = _norm_mode(d.get("notify_content"))
+    d["notify_lines"] = _norm_lines(d.get("notify_lines"))
+    d["notify_title"] = str(d.get("notify_title") or "")
+    d["notify_body"] = str(d.get("notify_body") or "")
+    d["notify_channels"] = norm_channels(d.get("notify_channels"))
     return d
 
 
@@ -54,24 +92,30 @@ def get_task(tid):
 
 def create_task(name, cron, command, cwd="", enabled=True, remark="", timeout=0,
                 max_retries=0, retry_interval=60, depends_on="", pre_hook="", post_hook="",
-                notify=True, tid=None):
+                notify=True, tid=None, notify_content="status", notify_lines=20,
+                notify_title="", notify_body="", notify_channels=""):
     now = time.time()
     tid = str(tid) if tid else uuid.uuid4().hex[:12]
     with store_tx() as conn:
         conn.execute(
             "INSERT INTO cron_tasks (id, name, cron, command, cwd, enabled, remark, timeout,"
             " max_retries, retry_interval, depends_on, pre_hook, post_hook, notify,"
-            " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " notify_content, notify_lines, notify_title, notify_body, notify_channels,"
+            " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (tid, name, cron, command, cwd, 1 if enabled else 0, remark, int(timeout or 0),
              max(0, int(max_retries or 0)), max(1, int(retry_interval or 60)),
              str(depends_on or ""), str(pre_hook or ""), str(post_hook or ""),
-             1 if notify else 0, now, now))
+             1 if notify else 0, _norm_mode(notify_content), _norm_lines(notify_lines),
+             str(notify_title or ""), str(notify_body or ""), norm_channels(notify_channels),
+             now, now))
     return get_task(tid)
 
 
 def update_task(tid, **fields):
     allowed = ("name", "cron", "command", "cwd", "enabled", "remark", "timeout",
-               "max_retries", "retry_interval", "depends_on", "pre_hook", "post_hook", "notify")
+               "max_retries", "retry_interval", "depends_on", "pre_hook", "post_hook", "notify",
+               "notify_content", "notify_lines", "notify_title", "notify_body",
+               "notify_channels")
     sets, args = [], []
     for k in allowed:
         if k not in fields:
@@ -84,6 +128,12 @@ def update_task(tid, **fields):
             args.append(max(0, int(v or 0)))
         elif k == "retry_interval":
             args.append(max(1, int(v or 60)))
+        elif k == "notify_content":
+            args.append(_norm_mode(v))
+        elif k == "notify_lines":
+            args.append(_norm_lines(v))
+        elif k == "notify_channels":
+            args.append(norm_channels(v))
         else:
             args.append(v)
     if sets:

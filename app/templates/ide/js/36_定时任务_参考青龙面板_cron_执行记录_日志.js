@@ -6,7 +6,9 @@
      后端：/api/cron/*（services/ide/cronsvc.py 每 5s 扫描一次调度）。
      var 声明，避免 showPanel 提前调用时命中 TDZ。
      ================================================================== */
-  var CRON = { timer: null, tasks: [], editing: null, runs: [], runTask: null, logRun: null, logOffset: 0, logTimer: null };
+  var CRON = { timer: null, tasks: [], editing: null, runs: [], runTask: null, logRun: null, logOffset: 0, logTimer: null,
+               chanCfg: null, editChRaw: "", tplTarget: null, tryFields: null,
+               trySnap: null, notifyTpl: null };
 
   const CRON_PRESETS = [
     ["每分钟", "* * * * *"], ["每 5 分钟", "*/5 * * * *"], ["每 30 分钟", "*/30 * * * *"],
@@ -17,6 +19,142 @@
     running: ["执行中", "run"], success: ["成功", "ok"], fail: ["失败", "bad"],
     killed: ["已停止", "bad"], timeout: ["超时", "warn"],
   };
+  /* 任务级「通知内容」：值必须与后端 crondb.NOTIFY_MODES 一致 */
+  const CRON_TASK_NOTIFY_MODES = [
+    ["status", "仅执行结果"],
+    ["output", "执行结果 + 脚本输出"],
+    ["output_only", "仅脚本输出"],
+    ["custom", "自定义模板"],
+  ];
+  /* 任务级自定义模板可用变量（与后端 cronsvc._notify_parts 的 vars_ 对应） */
+  const CRON_TASK_NOTIFY_VARS = [
+    ["task", "任务名称", "任务名称"],
+    ["event", "事件：执行失败 / 执行超时 / 执行成功", "事件"],
+    ["status", "状态：成功 / 失败 / 超时", "状态"],
+    ["exit", "退出码", "退出码"],
+    ["duration", "耗时（如 3.2s）", "耗时"],
+    ["attempt", "重试进度（如 第 1/3 次）", "重试进度"],
+    ["run", "执行记录 ID", "执行记录 ID"],
+    ["date", "日期 YYYY-MM-DD", "日期"],
+    ["time", "时间 HH:MM", "时间"],
+    ["output", "脚本输出（末尾若干行，受「输出行数」限制）", "脚本输出"],
+  ];
+  /* 任务级「通知渠道」：值必须与后端 crondb.NOTIFY_CHANNELS 一致。
+     任务里只列「设置 → 定时任务通知」已启用的渠道，可以只发其中几个；
+     未指定（空）= 跟随通知设置里的全部已启用渠道。 */
+  const CRON_TASK_NOTIFY_CHANNELS = [
+    ["desktop", "桌面通知", "bi-bell"],
+    ["email", "邮件", "bi-envelope"],
+    ["dingtalk", "钉钉机器人", "bi-chat-dots"],
+    ["telegram", "Telegram", "bi-telegram"],
+    ["pushplus", "PushPlus", "bi-wechat"],
+  ];
+  function cronTaskChannelName(key) {
+    const hit = CRON_TASK_NOTIFY_CHANNELS.find(c => c[0] === key);
+    return hit ? hit[1] : key;
+  }
+  /* 渲染渠道 chips（CRON.chanCfg 来自 /api/cron/settings 的 notify.channels） */
+  function cronTaskChannelsRender() {
+    const box = $("cronNotifyChannels");
+    if (!box) return;
+    if (!CRON.chanCfg) {                            // 还没拿到 / 读取失败：保持原值不动
+      box.dataset.ready = "0";
+      box.innerHTML = '<span class="cd-ch-empty">渠道配置读取失败，' +
+        '<a href="javascript:void(0)" id="cronNotifyChRetry">重试</a>（保存时会保持原设置）</span>';
+      const rt = $("cronNotifyChRetry");
+      if (rt) rt.onclick = () => { box.innerHTML = '<span class="cd-ch-empty">加载中…</span>'; cronTaskChannelsLoad(); };
+      cronTaskChannelsSync();
+      return;
+    }
+    const enabled = CRON.chanCfg;
+    const avail = CRON_TASK_NOTIFY_CHANNELS.filter(c => enabled[c[0]]);
+    box.dataset.ready = "1";
+    if (!avail.length) {                            // 全局一个都没开：提示去设置里开
+      box.innerHTML = '<span class="cd-ch-empty">「设置 → 定时任务通知」里还没有启用任何渠道，' +
+        '<a href="javascript:void(0)" id="cronNotifyChGo">去开启</a></span>';
+      const go = $("cronNotifyChGo");
+      if (go) go.onclick = () => {
+        cronCloseModal();
+        if (typeof cronOpenSettings === "function") cronOpenSettings();
+      };
+      cronTaskChannelsSync();
+      return;
+    }
+    const raw = String(CRON.editChRaw || "").split(",").filter(Boolean);
+    // 任务没指定过 = 全选；指定过的只勾其中仍然启用的
+    let picked = raw.length ? raw.filter(k => enabled[k]) : avail.map(c => c[0]);
+    if (!picked.length) picked = avail.map(c => c[0]);
+    box.innerHTML = avail.map(([key, name, icon]) =>
+      '<button type="button" class="cd-chip' + (picked.indexOf(key) >= 0 ? " on" : "") + '" data-cch="' + key + '">' +
+        '<i class="bi ' + icon + '"></i>' + esc(name) + '</button>').join("");
+    box.querySelectorAll(".cd-chip").forEach(b => {
+      b.onclick = () => { b.classList.toggle("on"); cronTaskChannelsSync(); };
+    });
+    cronTaskChannelsSync();
+  }
+  function cronTaskChannelsSync() {
+    const box = $("cronNotifyChannels");
+    const hint = $("cronNotifyChHint");
+    if (!box || !hint) return;
+    const chips = [...box.querySelectorAll(".cd-chip")];
+    if (!chips.length) { hint.textContent = ""; return; }
+    const on = chips.filter(c => c.classList.contains("on")).length;
+    hint.textContent = on === chips.length
+      ? "发送到全部已启用渠道（共 " + chips.length + " 个）。"
+      : (on === 0
+        ? "一个都没勾：仍按全部已启用渠道发送；要完全不发请关掉上面的「执行后发送通知」。"
+        : "只发送到勾选的 " + on + " / " + chips.length + " 个渠道。");
+  }
+  function cronTaskChannelsLoad() {
+    if (CRON.chanCfg) cronTaskChannelsRender();     // 先用上次拿到的渲染，避免闪烁
+    // 每次都拉一遍：「设置 → 定时任务通知」里可能刚改过渠道 / 全局模板
+    fetch("/api/cron/settings").then(r => r.json()).then(d => {
+      const nf = (d && d.notify) || {};
+      // 全局模板：任务模板留空时「通知预览」要用它（与真实发送的回退逻辑一致）
+      if (nf.template && typeof nf.template === "object") CRON.notifyTpl = nf.template;
+      const ch = nf.channels;
+      if (ch && typeof ch === "object") {
+        CRON.chanCfg = ch;
+        cronTaskChannelsRender();
+      }
+    }).catch(() => { if (!CRON.chanCfg) cronTaskChannelsRender(); });
+  }
+  /* 收集当前勾选的渠道：null = 界面没就绪（保存时沿用原值），"" = 跟随通知设置 */
+  function cronTaskChannelsValue() {
+    const box = $("cronNotifyChannels");
+    if (!box || box.dataset.ready !== "1") return null;
+    const chips = [...box.querySelectorAll(".cd-chip")];
+    if (!chips.length) return null;
+    const on = chips.filter(c => c.classList.contains("on")).map(c => c.dataset.cch);
+    return (on.length === 0 || on.length === chips.length) ? "" : on.join(",");
+  }
+  /* 切换「通知内容」时，按模式显示输出行数 / 自定义模板 */
+  function cronTaskNotifySync() {
+    const sel = $("cronNotifyContent");
+    if (!sel) return;
+    const chk = $("cronNotify");
+    const on = chk ? chk.checked : true;
+    const mode = sel.value;
+    const linesEl = $("cronNotifyLines");
+    const linesWrap = linesEl && linesEl.closest ? linesEl.closest(".cd-notify-lines") : null;
+    const tplRow = $("cronNotifyTplRow");
+    const hint = $("cronNotifyHint");
+    const chEl = $("cronNotifyChannels");
+    const chWrap = chEl && chEl.closest ? chEl.closest(".cd-ch") : null;   // 渠道多选块
+    if (linesWrap) linesWrap.style.display = (on && mode !== "status") ? "" : "none";
+    if (tplRow) tplRow.style.display = (on && mode === "custom") ? "" : "none";
+    if (chWrap) chWrap.style.display = on ? "" : "none";
+    if (hint) {
+      hint.textContent = !on
+        ? "关闭后该任务不再发送任何执行通知（「设置 → 定时任务通知」里的开关仍会生效）。"
+        : (mode === "status"
+          ? "只发送任务名 + 成功 / 失败 + 退出码 + 耗时，不包含脚本输出。"
+          : (mode === "custom"
+            ? "用下面的模板决定通知内容，可用 {output} 引用脚本输出；留空则回退到全局模板。"
+            : "会把命令最后几行输出一起发到通知渠道（桌面 / 邮件 / 钉钉 / Telegram / PushPlus）。"));
+    }
+    cronTryPreview();                                // 切到 / 离开自定义模板时同步预览显隐
+  }
 
   function cronStatusInfo(s) { return CRON_STATUS[s] || [s || "-", ""]; }
   function cronFmtTime(ts) {
@@ -193,6 +331,16 @@
       const v = src[k];
       return (v !== undefined && v !== null && v !== "") ? v : d;
     };
+    // 通知内容：默认「仅执行结果」+ 开启通知（与后端默认一致）
+    const nOn = src.notify !== false && src.notify !== 0;
+    const nMode = CRON_TASK_NOTIFY_MODES.some(m => m[0] === src.notify_content) ? src.notify_content : "status";
+    const nLines = (src.notify_lines === 0 || src.notify_lines) ? src.notify_lines : 20;
+    const nTitle = src.notify_title || "";
+    const nBody = src.notify_body || "";
+    // 通知渠道：原值（逗号分隔，空 = 跟随通知设置里的全部已启用渠道）
+    CRON.editChRaw = String(src.notify_channels || "");
+    CRON.tryFields = null;                           // 本次试运行解析出的 JSON 字段
+    CRON.trySnap = null;                             // 本次试运行的输出快照（通知预览用）
     ov.innerHTML =
       '<div class="cron-dialog">' +
         '<div class="cd-head"><i class="bi bi-alarm"></i><span>' + (isNew ? "新建定时任务" : "编辑定时任务") + '</span>' +
@@ -217,6 +365,67 @@
           '</div>' +
           '<div class="cd-row"><label>备注（可选）</label>' +
             '<input id="cronRemark" placeholder="给自己看的说明" value="' + escAttr(val("remark", "")) + '"></div>' +
+          '<div class="cd-row cd-notify">' +
+            '<div class="cd-notify-head">' +
+              '<label>通知内容</label>' +
+              '<span class="cd-nh-right">' +
+                '<button type="button" class="cd-try-btn" id="cronTryRun" title="用上面的命令试跑一次（不写执行记录、不发通知），先看看脚本输出什么">' +
+                  '<i class="bi bi-play-circle"></i> 测试运行</button>' +
+                '<label class="cd-check"><input type="checkbox" id="cronNotify"' + (nOn ? " checked" : "") +
+                  '> 执行后发送通知</label>' +
+              '</span>' +
+            '</div>' +
+            '<div class="cd-notify-row">' +
+              '<select id="cronNotifyContent" class="cd-select">' +
+                CRON_TASK_NOTIFY_MODES.map(m =>
+                  '<option value="' + m[0] + '"' + (nMode === m[0] ? " selected" : "") + '>' + esc(m[1]) + '</option>'
+                ).join("") +
+              '</select>' +
+              '<span class="cd-notify-lines"' + ((nOn && nMode !== "status") ? "" : ' style="display:none"') +
+                '><label for="cronNotifyLines">末尾行数</label>' +
+                '<input id="cronNotifyLines" type="number" min="0" max="200" step="1" value="' + escAttr(nLines) +
+                  '" title="附带脚本输出时取日志末尾多少行（0 = 不限，仍受长度上限约束）"></span>' +
+            '</div>' +
+            '<div class="cd-ch">' +
+              '<div class="cd-ch-head"><span>通知渠道</span>' +
+                '<span class="cd-ch-tip">只列「设置 → 定时任务通知」里已启用的</span></div>' +
+              '<div class="cd-chips" id="cronNotifyChannels"><span class="cd-ch-empty">加载中…</span></div>' +
+              '<div class="cd-hint" id="cronNotifyChHint"></div>' +
+            '</div>' +
+            '<div class="cd-hint" id="cronNotifyHint">用「脚本输出」可把命令最后几行输出一起发到通知渠道（桌面 / 邮件 / 钉钉 / Telegram / PushPlus）。</div>' +
+            '<div class="cd-try" id="cronTryBox" style="display:none">' +
+              '<div class="cd-try-head">' +
+                '<span class="cd-try-st" id="cronTryStatus"></span>' +
+                '<span class="cd-spacer"></span>' +
+                '<button type="button" class="cd-mini ai" id="cronTryAi" title="用 AI 根据这次输出生成一版好看的通知文案（保留 {task} 等变量）">' +
+                  '<i class="bi bi-stars"></i> AI 生成文案</button>' +
+                '<button type="button" class="cd-mini" id="cronTryToTpl" title="切到「自定义模板」并把 {output} 加进正文">写进通知正文</button>' +
+                '<button type="button" class="cd-mini" id="cronTryCopy">复制输出</button>' +
+                '<button type="button" class="cd-mini" id="cronTryClear">收起</button>' +
+              '</div>' +
+              '<pre class="cd-try-out scroll-thin" id="cronTryOut"></pre>' +
+              '<div class="cd-hint" id="cronTryHint"></div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="cd-notify-tpl" id="cronNotifyTplRow"' +
+            ((nOn && nMode === "custom") ? "" : ' style="display:none"') + '>' +
+            '<div class="cd-row"><label>自定义标题（可选，留空 = 用「设置 → 定时任务通知」里的全局模板）</label>' +
+              '<input id="cronNotifyTitle" placeholder="定时任务{event} · {task}" value="' + escAttr(nTitle) + '"></div>' +
+            '<div class="cd-row"><label>自定义正文（可选，可用下方变量）</label>' +
+              '<textarea id="cronNotifyBody" rows="3" spellcheck="false" placeholder="任务「{task}」{event}。&#10;{output}">' +
+                esc(nBody) + '</textarea></div>' +
+            '<div class="cd-nvars">' + CRON_TASK_NOTIFY_VARS.map(v =>
+              '<button type="button" class="cd-nvar" data-var="{' + v[0] + '}" title="' + escAttr(v[2]) + '">{' +
+                v[0] + '}</button>').join("") + '</div>' +
+            '<div class="cd-nvars" id="cronJsonVars" style="display:none"></div>' +
+            '<div class="cd-hint" id="cronJsonHint">脚本输出是 JSON 对象时，点上面的「测试运行」会把字段变成可点变量（如 {order_count}），发送通知时自动替换。</div>' +
+            // 通知预览放在自定义标题 / 正文下面：改模板能立刻看到最终效果
+            '<div class="cd-try-prev" id="cronTryPrev" style="display:none">' +
+              '<div class="cd-try-prev-h"><i class="bi bi-send"></i> 通知预览' +
+                '<span class="cd-hint" id="cronTryPrevTitle"></span></div>' +
+              '<pre class="cd-try-out" id="cronTryPrevBody"></pre>' +
+            '</div>' +
+          '</div>' +
           '<label class="cd-check"><input type="checkbox" id="cronEnabled"' + (val("enabled", true) ? " checked" : "") +
             '> 创建后立即启用</label>' +
           '<div class="cd-err" id="cronFormErr"></div>' +
@@ -251,10 +460,267 @@
     ov.querySelector(".cd-x").onclick = cronCloseModal;
     $("cronCancel").onclick = cronCloseModal;
     $("cronSave").onclick = cronSave;
+    // 通知内容切换：按模式显示「输出行数」/「自定义模板」并同步提示文案
+    const nSel = $("cronNotifyContent"), nChk = $("cronNotify");
+    if (nSel) nSel.onchange = cronTaskNotifySync;
+    if (nChk) nChk.onchange = cronTaskNotifySync;
+    cronTaskNotifySync();
+    cronTaskChannelsLoad();                          // 渠道 chips：异步拉全局已启用渠道后渲染
+    // 试运行：跑一次脚本，输出直接显示在「通知内容」下方，便于据此写自定义模板
+    const tryBtn = $("cronTryRun");
+    if (tryBtn) tryBtn.onclick = cronTryRun;
+    const tryCopy = $("cronTryCopy");
+    if (tryCopy) tryCopy.onclick = cronTryCopy;
+    const tryTpl = $("cronTryToTpl");
+    if (tryTpl) tryTpl.onclick = cronTryToTpl;
+    const tryAi = $("cronTryAi");
+    if (tryAi) tryAi.onclick = cronTryAi;
+    const tryClear = $("cronTryClear");
+    if (tryClear) tryClear.onclick = () => { const b = $("cronTryBox"); if (b) b.style.display = "none"; };
+
+    CRON.tplTarget = null;                           // 变量按钮插入到最后聚焦的输入框
+    ["cronNotifyTitle", "cronNotifyBody"].forEach(id => {
+      const el = $(id);
+      if (!el) return;
+      el.addEventListener("focus", () => { CRON.tplTarget = el; });
+      el.addEventListener("input", cronTryPreviewSoon);   // 改模板即时刷新「通知预览」
+    });
+    ov.querySelectorAll(".cd-nvar").forEach(b => { b.onclick = () => cronInsertVar(b.dataset.var); });
     setTimeout(() => { const n = $("cronName"); if (n) n.focus(); }, 30);
   }
+  /* ---------- 试运行（只看输出，不写记录、不发通知） ---------- */
+  /* 往自定义标题 / 正文的光标处插入一个模板变量 */
+  function cronInsertVar(token) {
+    const el = CRON.tplTarget || $("cronNotifyBody");
+    if (!el) return;
+    const s = el.selectionStart == null ? el.value.length : el.selectionStart;
+    const e2 = el.selectionEnd == null ? s : el.selectionEnd;
+    el.value = el.value.slice(0, s) + token + el.value.slice(e2);
+    el.focus();
+    el.selectionStart = el.selectionEnd = s + token.length;
+  }
+  /* 脚本输出是 JSON 对象时，把顶层字段做成可点变量（发送时后端同样会展开） */
+  function cronTryRenderFields(fields) {
+    const box = $("cronJsonVars");
+    if (!box) return;
+    const keys = Object.keys(fields || {});
+    CRON.tryFields = fields || {};
+    if (!keys.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+    box.style.display = "";
+    box.innerHTML = '<span class="cd-nvars-lbl">输出字段</span>' + keys.map(k =>
+      '<button type="button" class="cd-nvar out" data-var="{' + escAttr(k) + '}" title="' +
+        escAttr(String(fields[k]).slice(0, 200)) + '">{' + esc(k) + '}</button>').join("");
+    box.querySelectorAll(".cd-nvar").forEach(b => { b.onclick = () => cronInsertVar(b.dataset.var); });
+  }
+  var cronPrevTimer = null;
+  /* 记住这次试运行的结果，供「通知预览」在本地渲染 */
+  function cronTrySnapshot(d) {
+    CRON.trySnap = {
+      ok: !!d.ok, exit: d.exit_code, dur: d.duration || 0,
+      tail: d.tail || "", fields: d.fields || {},
+    };
+  }
+  /* 按当前模板 + 最近一次试运行结果渲染通知预览：改标题/正文即时刷新，不用重跑脚本 */
+  function cronTryPreview() {
+    const box = $("cronTryPrev");
+    if (!box) return;
+    const sel = $("cronNotifyContent");
+    if (sel && sel.value !== "custom") { box.style.display = "none"; return; }
+    const snap = CRON.trySnap;
+    if (!snap) { box.style.display = "none"; return; }
+    // 还没拿到全局模板时用默认模板（与后端 DEFAULT_CFG 一致），保证预览不空着
+    const gt = CRON.notifyTpl || {
+      title: "定时任务{event} · {task}",
+      body: "任务「{task}」{event}。\n退出码：{exit}\n耗时：{duration}\n时间：{date} {time}\n执行记录：{run}",
+    };
+    const tVal = (($("cronNotifyTitle") || {}).value || "").trim();
+    const bVal = ($("cronNotifyBody") || {}).value || "";
+    const tTpl = tVal || String(gt.title || "").trim();
+    const bTpl = bVal.trim() || String(gt.body || "").trim();
+    if (!tTpl && !bTpl) { box.style.display = "none"; return; }
+    const name = (($("cronName") || {}).value || "").trim() || "（未命名任务）";
+    const now = new Date(), p2 = n => String(n).padStart(2, "0");
+    const vars = {
+      task: name,
+      event: snap.ok ? "执行成功" : "执行失败",
+      status: snap.ok ? "成功" : "失败",
+      exit: snap.exit == null ? "无" : String(snap.exit),
+      duration: (Math.max(0, snap.dur || 0) / 1000).toFixed(1) + "s",
+      run: "（试运行）", attempt: "",
+      date: now.getFullYear() + "-" + p2(now.getMonth() + 1) + "-" + p2(now.getDate()),
+      time: p2(now.getHours()) + ":" + p2(now.getMinutes()),
+      output: snap.tail,
+    };
+    Object.keys(snap.fields).forEach(k => { if (!(k in vars)) vars[k] = snap.fields[k]; });
+    const sub = s => String(s || "").replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
+      (m, k) => (k in vars ? String(vars[k]) : m));
+    box.style.display = "";
+    const h = $("cronTryPrevTitle"), b = $("cronTryPrevBody");
+    if (h) h.textContent = sub(tTpl) || "（无标题）";
+    if (b) b.textContent = sub(bTpl) || "（正文为空）";
+  }
+  function cronTryPreviewSoon() {
+    clearTimeout(cronPrevTimer);
+    cronPrevTimer = setTimeout(cronTryPreview, 250);
+  }
+  async function cronTryRun() {
+    const btn = $("cronTryRun"), box = $("cronTryBox"), out = $("cronTryOut");
+    const st = $("cronTryStatus"), hint = $("cronTryHint");
+    if (!btn || !box || !out) return;
+    const cmd = $("cronCmd").value.trim();
+    if (!cmd) { toast("请先填写执行命令", "warn"); $("cronCmd").focus(); return; }
+    // 预览口径跟「末尾行数」一致（用 output / output_only / custom 时才有意义，status 也给个预览）
+    let lines = 20;
+    const ln = $("cronNotifyLines");
+    if (ln && String(ln.value).trim() !== "") {
+      const n = parseInt(ln.value, 10);
+      lines = isNaN(n) ? 20 : Math.max(0, Math.min(n, 200));
+    }
+    box.style.display = "";
+    out.textContent = "";
+    if (hint) hint.textContent = "";
+    st.className = "cd-try-st";
+    st.textContent = "运行中…（最多等 120 秒）";
+    btn.disabled = true;
+    try {
+      const d = await cronAct("/api/cron/dry-run", {
+        command: cmd,
+        cwd: $("cronCwd").value.trim(),
+        timeout: parseInt($("cronTimeout").value, 10) || 0,
+        lines: lines,
+        name: $("cronName").value.trim(),
+        // 「自定义模板」模式下后端会顺手渲染一条通知预览（不发送）
+        notify_content: $("cronNotifyContent") ? $("cronNotifyContent").value : "status",
+        notify_title: $("cronNotifyTitle") ? $("cronNotifyTitle").value.trim() : "",
+        notify_body: $("cronNotifyBody") ? $("cronNotifyBody").value.trim() : "",
+      });
+      if (d.error) {
+        st.className = "cd-try-st bad";
+        st.textContent = "试运行失败：" + d.error;
+        return;
+      }
+      const ok = !!d.ok;
+      st.className = "cd-try-st " + (ok ? "ok" : "bad");
+      st.textContent = (d.timed_out ? "运行超时，已被终止" : (ok ? "执行成功" : "执行失败")) +
+        " · 退出码 " + (d.exit_code == null ? "-" : d.exit_code) +
+        " · 耗时 " + cronFmtDur(d.duration) +
+        (d.truncated ? " · 输出过长，只显示末尾部分" : "");
+      out.textContent = d.output || "（脚本没有任何输出）";
+      cronTryRenderFields(d.fields);
+      cronTrySnapshot(d);                          // 记下这次输出，改模板时本地即时重渲染预览
+      cronTryPreview();
+      if (hint) {
+        const tailN = d.tail ? String(d.tail).split("\n").length : 0;
+        const nf = Object.keys(d.fields || {}).length;
+        hint.textContent = !d.tail
+          ? "脚本没有输出：通知内容选「仅脚本输出」时会回退成执行结果。"
+          : "通知里会带上末尾 " + (lines ? Math.min(lines, tailN) : tailN) + " 行输出；" +
+            "想自定义文案可切到「自定义模板」，用 {output} 引用这段输出。";
+        if (nf) hint.textContent += "已解析出 " + nf + " 个输出字段，可在「自定义模板」里点选插入。";
+      }
+    } catch (e) {
+      st.className = "cd-try-st bad";
+      st.textContent = "试运行失败：" + (e && e.message ? e.message : e);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  function cronTryCopy() {
+    const out = $("cronTryOut");
+    const text = out ? out.textContent : "";
+    if (!text) { toast("还没有输出可复制", "warn"); return; }
+    const done = () => toast("已复制脚本输出", "ok");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => cronTryCopyFallback(text, done));
+    } else {
+      cronTryCopyFallback(text, done);
+    }
+  }
+  function cronTryCopyFallback(text, done) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); done(); }
+    catch (_) { toast("复制失败，请手动选中文本", "err"); }
+    ta.remove();
+  }
+  /* 把试运行结果接进自定义通知：切到「自定义模板」，按输出字段生成一段骨架 */
+  function cronTryToTpl() {
+    const sel = $("cronNotifyContent");
+    if (sel && sel.value !== "custom") sel.value = "custom";
+    if (sel) cronTaskNotifySync();
+    const bodyEl = $("cronNotifyBody");
+    if (bodyEl) {
+      if (!bodyEl.value.trim()) {
+        const keys = Object.keys(CRON.tryFields || {});
+        // 有 JSON 字段就顺手写成「order_count：{order_count}，error_count：{error_count}」
+        const line = keys.slice(0, 6).map(k => k + "：{" + k + "}").join("，");
+        bodyEl.value = "任务「{task}」{event}。" + (line ? "\n" + line : "") + "\n\n{output}";
+      } else if (bodyEl.value.indexOf("{output}") < 0) {
+        bodyEl.value = bodyEl.value.replace(/\s*$/, "") + "\n\n{output}";
+      }
+      bodyEl.focus();
+    }
+    toast("已切到「自定义模板」，改改文案即可", "ok");
+  }
+
+  /* AI 生成一版好看的自定义通知文案（需要先在「设置 → AI 助手」配好接口） */
+  async function cronTryAi() {
+    const btn = $("cronTryAi");
+    const snap = CRON.trySnap;
+    if (!snap) { toast("先点「测试运行」，让 AI 知道脚本会输出什么", "warn"); return; }
+    const cmd = $("cronCmd").value.trim();
+    if (!cmd) { toast("请先填写执行命令", "warn"); return; }
+    if (!btn || btn.disabled) return;
+    const old = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-stars"></i> 生成中…';
+    try {
+      const d = await cronAct("/api/cron/notify-ai", {
+        name: $("cronName").value.trim(),
+        command: cmd,
+        output: snap.tail || "",
+        fields: snap.fields || {},
+        ok: !!snap.ok, exit: snap.exit, duration: snap.dur,
+        channels: cronTryChannelNames(),
+      });
+      if (d.error) { toast(d.error, "err"); return; }
+      if (!d.title && !d.body) { toast("AI 没有返回可用文案，请重试", "warn"); return; }
+      const sel = $("cronNotifyContent");
+      if (sel) { sel.value = "custom"; cronTaskNotifySync(); }
+      const tEl = $("cronNotifyTitle"), bEl = $("cronNotifyBody");
+      if (tEl && d.title) tEl.value = d.title;
+      if (bEl && d.body) bEl.value = d.body;
+      cronTryPreview();                          // 直接赋值不会触发 input 事件，这里手动刷预览
+      toast("AI 文案已填好，微调后保存即可", "ok");
+    } catch (e) {
+      toast("AI 生成失败：" + (e && e.message ? e.message : e), "err");
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = old;
+    }
+  }
+  function cronTryChannelNames() {
+    const box = $("cronNotifyChannels");
+    if (!box) return "";
+    return [...box.querySelectorAll(".cd-chip.on")]
+      .map(c => c.textContent.trim()).filter(Boolean).join("、");
+  }
+
   async function cronSave() {
     const err = $("cronFormErr");
+    // 输出行数：留空用默认 20，填 0 表示不限行（仍受单条通知长度上限约束）
+    let nLines = 20;
+    const lnEl = $("cronNotifyLines");
+    if (lnEl && String(lnEl.value).trim() !== "") {
+      const n = parseInt(lnEl.value, 10);
+      nLines = isNaN(n) ? 20 : Math.max(0, Math.min(n, 200));
+    }
+    // 通知渠道：界面还没就绪（加载中 / 读取失败）时保持原值，避免误清空
+    const chVal = cronTaskChannelsValue();
+    const nChannels = chVal === null ? String(CRON.editChRaw || "") : chVal;
     const body = {
       id: CRON.editing ? CRON.editing.id : "",
       name: $("cronName").value.trim(),
@@ -264,6 +730,13 @@
       remark: $("cronRemark").value.trim(),
       timeout: parseInt($("cronTimeout").value, 10) || 0,
       enabled: $("cronEnabled").checked,
+      // 通知：是否发送 + 内容（仅结果 / 带脚本输出 / 仅输出 / 自定义模板）
+      notify: $("cronNotify") ? $("cronNotify").checked : true,
+      notify_content: $("cronNotifyContent") ? $("cronNotifyContent").value : "status",
+      notify_lines: nLines,
+      notify_title: $("cronNotifyTitle") ? $("cronNotifyTitle").value.trim() : "",
+      notify_body: $("cronNotifyBody") ? $("cronNotifyBody").value.trim() : "",
+      notify_channels: nChannels,
     };
     if (!body.name) { err.textContent = "请填写任务名称"; return; }
     if (!body.command) { err.textContent = "请填写要执行的命令"; return; }
@@ -407,20 +880,35 @@
     pull();
   }
   function cronRefreshRunRow(rid, status) {
+    const [sText, sCls] = cronStatusInfo(status);
     const row = document.querySelector('#cronRunList .cr-row[data-rid="' + rid + '"]');
-    if (!row) return;
-    const dot = row.querySelector(".cr-dot");
-    if (dot) dot.className = "cr-dot " + cronStatusInfo(status)[1];
+    if (row) {                                    // 执行结束：是圆点和文字一起更新，别只换个颜色
+      const dot = row.querySelector(".cr-dot");
+      if (dot) dot.className = "cr-dot " + sCls;
+      const sEl = row.querySelector(".cr-row-s");
+      if (sEl) sEl.textContent = sText;
+    }
+    if (CRON.logRun && CRON.logRun.id === rid) {   // 日志标题里的状态也跟着改
+      CRON.logRun.status = status;
+      const title = $("cronLogTitle");
+      if (title) {
+        title.textContent = cronFmtTime(CRON.logRun.started_at) + " · " + sText +
+          (CRON.logRun.exit_code === null || CRON.logRun.exit_code === undefined
+            ? "" : " · 退出码 " + CRON.logRun.exit_code);
+      }
+    }
     loadCron({ silent: true });
   }
 
-  function cronTick() {                             // 面板可见时每 5s 刷新状态
+  function cronTick() {                             // 面板可见时刷新状态（运行中 2s，空闲 5s）
     clearTimeout(CRON.timer);
     if (!$("cronPanel") || !$("cronPanel").classList.contains("active")) return;
+    const busy = (CRON.tasks || []).some(t => t.running);
     CRON.timer = setTimeout(async () => {
-      await loadCron({ silent: true });
+      // 出错也要续期：否则一次请求失败后侧栏就再也不刷新了
+      try { await loadCron({ silent: true }); } catch (e) { console.warn("[cron] 侧栏刷新失败", e); }
       cronTick();
-    }, 5000);
+    }, busy ? 2000 : 5000);
   }
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && $("cronModal") && $("cronModal").style.display !== "none") cronCloseModal();
@@ -436,7 +924,7 @@
      ================================================================== */
   const CRON_VIEW_PATH = "\u0000cron";
   CRON.view = { sel: {}, kw: "", filter: "all", cur: "", runs: [], logRun: null,
-                logOffset: 0, log: "", logTimer: null, timer: null };
+                logOffset: 0, log: "", logTimer: null, timer: null, dsig: "", batchN: 0 };
 
   function cronOpenView(tid) {
     let tab = findTab(CRON_VIEW_PATH);
@@ -456,21 +944,39 @@
         CRON.view.timer = CRON.view.logTimer = null;
         return true;
       };
+      // 切回本标签时立刻同步一次（否则要等一个周期才看到最新状态）
+      tab.onActivate = () => cronViewOnActivate();
       tabs.push(tab);
       renderTabsAll();
     }
     activate(tab);
-    cronViewRefresh(true).then(() => {
-      if (tid) cronViewSelect(tid);
+    // catch 兜底：首次渲染若报错也要把轮询救起来，否则界面会一直停在打开时的状态
+    cronViewRefresh(true).catch(e => console.warn("[cron] 首次加载失败", e)).then(() => {
+      try { if (tid) cronViewSelect(tid); } catch (e) { console.warn("[cron] 选中任务失败", e); }
       cronViewTick();
     });
     return tab;
   }
   function cronViewActive() { return !!findTab(CRON_VIEW_PATH) && active && active.path === CRON_VIEW_PATH; }
+  function cronViewOnActivate() {
+    // 延到下一个事件循环：DOM 刚切过来，避免和 activate 内部的渲染抢执行
+    setTimeout(() => {
+      if (!cronViewActive()) return;
+      cronViewRefresh().catch(() => {});
+      cronViewTick();
+    }, 0);
+  }
+  /* 自动刷新：运行中 1.5s 一次，空闲 5s 一次；
+     无论这一轮成功还是抛异常都必须续上，否则一次渲染报错就会让界面永久停在旧状态。 */
   function cronViewTick() {
     clearTimeout(CRON.view.timer);
     if (!cronViewActive()) return;
-    CRON.view.timer = setTimeout(() => { cronViewRefresh().then(cronViewTick); }, 5000);
+    const runs = CRON.view.runs || [];
+    const busy = (CRON.tasks || []).some(t => t.running) || runs.some(x => x.status === "running");
+    CRON.view.timer = setTimeout(async () => {
+      try { await cronViewRefresh(); } catch (e) { console.warn("[cron] 自动刷新失败", e); }
+      cronViewTick();
+    }, busy ? 1500 : 5000);
   }
 
   /* ---------- 数据 ---------- */
@@ -482,10 +988,49 @@
       CRON.tasks = d.tasks || [];
       cronUpdateBadge();
     } catch (_) { /* 保留旧数据，不打断界面 */ }
-    if (force || !$("cvTbody")) cronViewRender();
-    else { cronViewPaintHead(); cronViewPaintRows(); }
-    // 侧栏面板也停在同一页时才重建（避免无谓重绘）
-    if ($("cronPanel") && $("cronPanel").classList.contains("active")) renderCronList();
+    // 选中任务若已被删除：清掉详情
+    if (CRON.view.cur && !(CRON.tasks || []).some(t => t.id === CRON.view.cur)) {
+      CRON.view.cur = ""; CRON.view.runs = []; CRON.view.logRun = null;
+      CRON.view.log = ""; CRON.view.logOffset = 0;
+      clearTimeout(CRON.view.logTimer);
+    }
+    // 详情里的执行记录也要同步（执行中 → 成功 / 失败，否则会一直亮着「执行中」）
+    if (CRON.view.cur) await cronViewRunsQuiet();
+    try {
+      if (force || !$("cvTbody")) cronViewRender();
+      else { cronViewPaintHead(); cronViewPaintRows(); }
+      if ($("cvDetail")) cronViewPaintDetail();
+      // 侧栏面板也停在同一页时才重建（避免无谓重绘）
+      if ($("cronPanel") && $("cronPanel").classList.contains("active")) renderCronList();
+    } catch (e) {
+      console.warn("[cron] 刷新界面失败", e);      // 渲染异常不能中断轮询，见 cronViewTick
+    }
+  }
+  /* 只更新执行记录数据，不重建详情（避免日志框被反复重置滚动位置） */
+  async function cronViewRunsQuiet() {
+    const tid = CRON.view.cur;
+    if (!tid) return;
+    try {
+      const r = await fetch("/api/cron/runs?task_id=" + encodeURIComponent(tid) + "&limit=80");
+      const d = await r.json();
+      if (CRON.view.cur !== tid) return;           // 期间切了任务：丢弃
+      CRON.view.runs = d.runs || [];
+    } catch (_) { /* 网络抖动：保留旧数据 */ }
+  }
+  /* 详情区的内容指纹：任务状态 / 统计 / 执行记录状态，任一变化才重建 */
+  function cronViewDetailSig() {
+    const t = (CRON.tasks || []).find(x => x.id === CRON.view.cur);
+    if (!t) return CRON.view.cur ? "missing:" + CRON.view.cur : "";
+    const runs = CRON.view.runs || [];
+    return [t.id, t.running ? 1 : 0, t.last_status || "", t.run_count || 0,
+            t.ok_count || 0, t.fail_count || 0, (CRON.view.logRun || {}).id || "",
+            runs.map(x => x.id + ":" + x.status + ":" + (x.duration || 0)).join("|")].join("~");
+  }
+  function cronViewPaintDetail(force) {
+    const sig = cronViewDetailSig();
+    if (!force && sig === CRON.view.dsig) return;
+    CRON.view.dsig = sig;
+    cronViewRenderDetail();
   }
   function cronViewStats() {
     const list = CRON.tasks || [];
@@ -530,23 +1075,76 @@
   }
   function cronViewPaintHead() {
     const st = $("cvStats");
-    if (st) st.innerHTML = cronViewStatsHtml();
+    if (st) {
+      const html = cronViewStatsHtml();
+      if (st.innerHTML !== html) st.innerHTML = html;   // 统计没变就不动，避免每次刷新都闪一下
+    }
+    const n = Object.keys(CRON.view.sel).length;
     const old = $("cvBatch");
+    if (!n) {
+      if (old) old.remove();
+      CRON.view.batchN = 0;
+      return;
+    }
+    // 勾选数量没变就不重建批量栏（重建会让整行布局抖一下）
+    if (old && CRON.view.batchN === n) return;
     if (old) old.remove();
     const head = $("cvHead");
     if (head) head.insertAdjacentHTML("beforeend", cronViewBatchHtml());
+    CRON.view.batchN = n;
     cronViewBindBatch();
+  }
+  /* 一行内容的签名：只有这些字段真的变了才替换这一行（运行中每 1.5s 刷新也不会整表重绘） */
+  function cronViewRowSig(t) {
+    return JSON.stringify([t.id, t.running ? 1 : 0, t.enabled ? 1 : 0, t.last_status || "",
+                           t.last_at || 0, t.last_ms || 0, t.run_count || 0,
+                           (t.next && t.next[0]) || "", CRON.view.cur === t.id ? 1 : 0,
+                           t.name || "", t.remark || "", t.cron || "", t.command || ""]);
   }
   function cronViewPaintRows() {
     const tb = $("cvTbody");
     if (!tb) return;
     const list = cronViewFiltered();
-    tb.innerHTML = list.length ? list.map(cronViewRowHtml).join("")
-      : '<tr><td colspan="7" class="cv-empty">没有匹配的任务。可点右上角「新建任务」，' +
+    if (!list.length) {
+      const html = '<tr><td colspan="7" class="cv-empty">没有匹配的任务。可点右上角「新建任务」，' +
         '或在资源管理器里右键文件 →「添加定时任务…」。</td></tr>';
-    const all = $("cvAll");
-    if (all) all.checked = list.length > 0 && list.every(t => CRON.view.sel[t.id]);
-    cronViewBindRows();
+      if (tb.innerHTML !== html) tb.innerHTML = html;
+      const all0 = $("cvAll");
+      if (all0) all0.checked = false;
+      return;
+    }
+    const rows = tb.querySelectorAll("tr[data-tid]");
+    let sameShape = rows.length === list.length;
+    if (sameShape) {
+      for (let i = 0; i < list.length; i++) {
+        if (rows[i].dataset.tid !== list[i].id) { sameShape = false; break; }
+      }
+    }
+    if (!sameShape) {                                  // 行数 / 顺序变了：整表重建
+      tb.innerHTML = list.map(cronViewRowHtml).join("");
+      const fresh = tb.querySelectorAll("tr[data-tid]");
+      list.forEach((t, i) => { if (fresh[i]) fresh[i].dataset.sig = cronViewRowSig(t); });
+      const all1 = $("cvAll");
+      if (all1) all1.checked = list.length > 0 && list.every(t => CRON.view.sel[t.id]);
+      cronViewBindRows();
+      return;
+    }
+    let changed = false;
+    list.forEach((t, i) => {
+      const tr = rows[i];
+      const sig = cronViewRowSig(t);
+      if (tr.dataset.sig === sig) return;              // 这一行没变化：原样保留
+      const tmp = document.createElement("tbody");
+      tmp.innerHTML = cronViewRowHtml(t);
+      const fresh = tmp.firstElementChild;
+      if (!fresh) return;
+      fresh.dataset.sig = sig;
+      tr.replaceWith(fresh);
+      changed = true;
+    });
+    if (changed) cronViewBindRows();
+    const all2 = $("cvAll");
+    if (all2) all2.checked = list.length > 0 && list.every(t => CRON.view.sel[t.id]);
   }
   function cronViewRender() {
     const box = $("cronView");
@@ -614,6 +1212,7 @@
     if (!box) return;
     const t = (CRON.tasks || []).find(x => x.id === CRON.view.cur);
     if (!t) {
+      CRON.view.dsig = cronViewDetailSig();
       box.innerHTML = '<div class="cv-d-empty"><i class="bi bi-list-ul"></i>' +
         '<div>点击左侧任意一行，查看任务详情、执行记录与日志</div></div>';
       return;
@@ -638,6 +1237,9 @@
         cronViewKV("工作目录", t.cwd || "（默认：任务所在项目目录）", true) +
         cronViewKV("超时", t.timeout ? (t.timeout + " 秒") : "不限时") +
         cronViewKV("运行统计", "共 " + (t.run_count || 0) + " 次 · 成功 " + (t.ok_count || 0) + " · 失败 " + (t.fail_count || 0)) +
+        (t.notify_channels
+          ? cronViewKV("通知渠道", String(t.notify_channels).split(",").map(cronTaskChannelName).join(" / "))
+          : "") +
         (t.remark ? cronViewKV("备注", t.remark) : "") +
       '</div>' +
       '<div class="cv-d-sub">执行记录 <span class="cv-sub">（' + runs.length + ' 条，点一行看日志）</span>' +
@@ -662,6 +1264,7 @@
     const pre = $("cvLog");
     if (pre) pre.scrollTop = pre.scrollHeight;
     cronViewBindDetail();
+    CRON.view.dsig = cronViewDetailSig();           // 记下这一帧，避免轮询重复重建
   }
 
   /* ---------- 事件绑定 ---------- */
@@ -732,9 +1335,14 @@
 
   /* ---------- 操作 ---------- */
   function cronViewSelect(tid) {
+    const same = CRON.view.cur === tid;
     CRON.view.cur = tid;
-    CRON.view.runs = []; CRON.view.logRun = null; CRON.view.log = ""; CRON.view.logOffset = 0;
-    clearTimeout(CRON.view.logTimer);
+    if (!same) {                                 // 换任务才清空记录与日志；同一任务刷新时保留，避免闪空
+      CRON.view.runs = []; CRON.view.logRun = null;
+      CRON.view.log = ""; CRON.view.logOffset = 0;
+      CRON.view.dsig = "";
+      clearTimeout(CRON.view.logTimer);
+    }
     cronViewPaintRows();
     cronViewRenderDetail();
     cronViewLoadRuns(tid);
@@ -772,6 +1380,8 @@
             el.scrollTop = nearBottom ? el.scrollHeight : keep;
           }
           if (d.running) CRON.view.logTimer = setTimeout(pull, 1000);
+          // 这一轮结束了：立刻同步一次任务 / 执行记录状态，别等下一个轮询周期
+          else cronViewRefresh().catch(() => {});
         }).catch(() => { CRON.view.logTimer = setTimeout(pull, 1500); });
     };
     pull();
@@ -781,15 +1391,17 @@
     const d = await cronAct("/api/cron/run", { id: tid });
     if (d.error) { toast(d.error, "err"); return; }
     toast("已开始执行：" + ((t && t.name) || tid), "ok");
-    await cronViewRefresh(true);
-    cronViewSelect(tid);
+    // 局部刷新：整页重建会让搜索框失焦、滚动位置跳动；同一任务只需重拉执行记录
+    await cronViewRefresh();
+    if (CRON.view.cur === tid) cronViewLoadRuns(tid);
+    else cronViewSelect(tid);
   }
   async function cronViewStop(tid) {
     const d = await cronAct("/api/cron/stop", { id: tid });
     if (d.error) { toast(d.error, "err"); return; }
     toast("已停止", "warn");
-    await cronViewRefresh(true);
-    if (CRON.view.cur === tid) cronViewSelect(tid);
+    await cronViewRefresh();
+    if (CRON.view.cur === tid) cronViewLoadRuns(tid);
   }
   async function cronViewCopy(t) {
     if (!t) return;
@@ -799,7 +1411,7 @@
     });
     if (d.error) { toast(d.error, "err"); return; }
     toast("已复制为「" + d.task.name + "」（默认停用，改好再启用）", "ok");
-    cronViewRefresh(true);
+    cronViewRefresh();
   }
   async function cronViewDelete(t) {
     if (!t) return;
@@ -811,7 +1423,7 @@
     delete CRON.view.sel[t.id];
     if (CRON.view.cur === t.id) { CRON.view.cur = ""; CRON.view.runs = []; CRON.view.logRun = null; CRON.view.log = ""; }
     toast("已删除：" + t.name, "ok");
-    cronViewRefresh(true);
+    cronViewRefresh();
   }
   async function cronViewBatch(action) {
     const ids = Object.keys(CRON.view.sel);
@@ -839,7 +1451,7 @@
     if (action === "delete") CRON.view.sel = {};
     const label = { enable: "启用", disable: "停用", run: "运行", delete: "删除" }[action] || action;
     toast("批量" + label + "完成：" + okN + " 个成功" + (failN ? "，" + failN + " 个失败" : ""), failN ? "warn" : "ok");
-    await cronViewRefresh(true);
+    await cronViewRefresh();
     if (action === "run" && CRON.view.cur) cronViewSelect(CRON.view.cur);
   }
   async function cronViewDetailAct(act) {
@@ -1012,7 +1624,7 @@
         { tasks: tasks, settings: (data && data.settings) || {}, mode: "merge" });
       if (d.error) { toast(d.error, "err"); return; }
       toast("已导入 " + d.imported + " 个任务" + (d.skipped ? "，跳过 " + d.skipped + " 条无效数据" : ""), "ok");
-      cronViewRefresh(true);
+      cronViewRefresh();
     };
     inp.click();
   }

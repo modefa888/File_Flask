@@ -500,3 +500,76 @@
   resize: vertical;
   font-family: inherit;
 }
+
+/* ---------------------------------------------------------------
+   页内通知卡片：浏览器通知不可用（http 内网 / 未授权）时镜像桌面通知。
+   与 toast 不同：保留正文换行，多行可读，停留 12s，点击收起。
+   注意：类名不能叫 .notify-card —— 设置页的通知卡片就是那个类名。
+   --------------------------------------------------------------- */
+.ide-notify-card {
+  position: fixed;
+  right: 18px;
+  bottom: 42px;
+  width: 360px;
+  max-width: calc(100vw - 36px);
+  background: #23262d;
+  border: 1px solid #3a3f4a;
+  border-radius: 10px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, .45);
+  z-index: 10001;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+}
+.ide-notify-card.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+.ide-notify-card .nc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: #1c1f25;
+  border-bottom: 1px solid #33383f;
+}
+.ide-notify-card .nc-head i { color: #e2c08a; font-size: 13px; }
+.ide-notify-card .nc-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #e6e6e6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ide-notify-card .nc-x {
+  border: none;
+  background: transparent;
+  color: #8a8a92;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.ide-notify-card .nc-x:hover { color: #fff; }
+.ide-notify-card .nc-body {
+  margin: 0;
+  padding: 10px 12px 12px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: #c9cdd6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+:where(html.theme-light) .ide-notify-card {
+  background: #ffffff;
+  border-color: #e3e3e3;
+  box-shadow: 0 12px 36px rgba(15, 23, 42, .18);
+}
+:where(html.theme-light) .ide-notify-card .nc-head { background: #f7f8fa; border-bottom-color: #e3e3e3; }
+:where(html.theme-light) .ide-notify-card .nc-title { color: #1f2328; }
+:where(html.theme-light) .ide-notify-card .nc-body { color: #3d4450; }

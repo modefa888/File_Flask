@@ -3,7 +3,8 @@
 GET  /api/cron/tasks           任务列表（带下次运行时间、运行中状态）
 POST /api/cron/save            新建 / 更新任务 {id?, name, cron(5或6段), command, cwd, enabled,
                                remark, timeout, max_retries, retry_interval, depends_on,
-                               pre_hook, post_hook, notify}
+                               pre_hook, post_hook, notify, notify_content, notify_lines,
+                               notify_title, notify_body}
 POST /api/cron/delete          删除任务 {id}
 POST /api/cron/toggle          启用 / 停用 {id, enabled}
 POST /api/cron/run             立即运行一次 {id}
@@ -12,17 +13,23 @@ GET  /api/cron/runs            执行记录 ?task_id=&limit=
 GET  /api/cron/log             执行日志（增量）?run_id=&offset=
 POST /api/cron/clear-runs      清空某任务的执行记录 {id}
 POST /api/cron/validate        校验 cron 表达式并给出下次运行时间 {cron}
+POST /api/cron/dry-run         试运行：用编辑中的命令跑一次并返回脚本输出（不落记录、不通知）
 POST /api/cron/suggest         按文件推断命令 / 名称 / 工作目录，供「从文件新建定时任务」预填 {path}
 GET  /api/cron/monitor         实时资源监控（系统 CPU / 内存 + 运行中任务的进程占用）
 GET  /api/cron/settings        模块设置（日志清理 / 通知配置，密钥脱敏）
 POST /api/cron/settings        保存模块设置 {log_days, keep_runs, notify:{...}}
 POST /api/cron/notify-test     对指定渠道发测试通知 {channel}
+POST /api/cron/notify-ai       让 AI 根据试运行输出生成一版自定义通知文案
 GET  /api/cron/backup          导出全部任务与设置（JSON，供下载备份）
 POST /api/cron/restore         恢复备份 {tasks:[...], settings:{...}, mode:"merge"|"replace"}
 """
+import json
 import os
+import re
 import shlex
 import time
+import urllib.error
+import urllib.request
 
 from flask import Blueprint, jsonify, request
 
@@ -111,6 +118,22 @@ def api_cron_save():
     pre_hook = str(data.get("pre_hook") or "").strip()
     post_hook = str(data.get("post_hook") or "").strip()
     notify = data.get("notify", True) is not False
+    # 通知内容：status（仅结果）/ output（结果 + 脚本输出）/ output_only / custom（自定义模板）
+    notify_content = str(data.get("notify_content") or "status").strip().lower()
+    if notify_content not in crondb.NOTIFY_MODES:
+        notify_content = "status"
+    raw_lines = data.get("notify_lines")
+    if raw_lines is None or raw_lines == "":
+        notify_lines = 20                              # 没传 / 留空：默认取末尾 20 行
+    else:
+        try:
+            notify_lines = max(0, min(int(raw_lines), 200))
+        except (TypeError, ValueError):
+            notify_lines = 20
+    notify_title = str(data.get("notify_title") or "").strip()[:200]
+    notify_body = str(data.get("notify_body") or "").strip()[:2000]
+    # 通知渠道：任务可只发其中几个（空 = 跟随「通知设置」里已启用的渠道）
+    notify_channels = crondb.norm_channels(data.get("notify_channels"))
     enabled = data.get("enabled", True) is not False
     remark = str(data.get("remark") or "").strip()
     tid = str(data.get("id") or "").strip()
@@ -128,15 +151,23 @@ def api_cron_save():
     fields = dict(name=name, cron=expr, command=command, cwd=cwd, enabled=enabled,
                   remark=remark, timeout=timeout, max_retries=max_retries,
                   retry_interval=retry_interval, depends_on=",".join(depends_on),
-                  pre_hook=pre_hook, post_hook=post_hook, notify=notify)
+                  pre_hook=pre_hook, post_hook=post_hook, notify=notify,
+                  notify_content=notify_content, notify_lines=notify_lines,
+                  notify_title=notify_title, notify_body=notify_body,
+                  notify_channels=notify_channels)
     if tid:
         if not crondb.get_task(tid):
             return jsonify({"error": "任务不存在"})
         task = crondb.update_task(tid, **fields)
     else:
-        task = crondb.create_task(name, expr, command, cwd, enabled, remark, timeout,
-                                  max_retries, retry_interval, ",".join(depends_on),
-                                  pre_hook, post_hook, notify)
+        task = crondb.create_task(name, expr, command, cwd=cwd, enabled=enabled,
+                                  remark=remark, timeout=timeout,
+                                  max_retries=max_retries, retry_interval=retry_interval,
+                                  depends_on=",".join(depends_on), pre_hook=pre_hook,
+                                  post_hook=post_hook, notify=notify,
+                                  notify_content=notify_content, notify_lines=notify_lines,
+                                  notify_title=notify_title, notify_body=notify_body,
+                                  notify_channels=notify_channels)
     return jsonify({"ok": True, "task": _with_runtime(task)})
 
 
@@ -177,6 +208,21 @@ def api_cron_run():
     if res.get("error"):
         return jsonify(res)
     return jsonify({"ok": True, "run_id": res["run_id"]})
+
+
+@bp.route("/api/cron/dry-run", methods=["POST"])
+def api_cron_dry_run():
+    """试运行：用编辑中的命令跑一次并返回脚本输出（不写执行记录、不发通知）。
+
+    入参：{command, cwd, timeout, pre_hook, post_hook, lines}
+    返回：{ok, exit_code, duration, timed_out, output, tail, lines, truncated}
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        lines = int(data.get("lines") or 20)
+    except (TypeError, ValueError):
+        lines = 20
+    return jsonify(cronsvc.dry_run(data, max(0, min(lines, 200))))
 
 
 @bp.route("/api/cron/stop", methods=["POST"])
@@ -322,6 +368,164 @@ def api_cron_notify_test():
     return jsonify({"ok": True, "results": res})
 
 
+# ---------------------------------------------------------------- AI 生成通知文案
+_AI_TPL_SYS = (
+    "你是「定时任务执行通知」的文案助手。根据任务信息与脚本输出，写一版简洁、好看、"
+    "信息密度高、带 emoji 的通知文案。\n"
+    "只输出一个 JSON 对象，不要 markdown 代码块、不要任何解释：\n"
+    '{"title": "通知标题", "body": "通知正文"}\n\n'
+    "硬性要求：\n"
+    "1. 标题不超过 24 个汉字，且必须以 1 个贴切的 emoji 开头（如 📦 🚀 📊 🔔 ✅）；\n"
+    "2. 正文 2~4 行、每行不超过 42 个汉字，且**每一行都必须有 emoji**"
+    "（放在行首或关键数字前）；全篇用 2~5 个不同 emoji，不要反复用同一个；\n"
+    "3. 必须原样保留这些变量占位符，不要替换成具体值："
+    "{task} {event} {status} {exit} {duration} {date} {time} {output}；\n"
+    "4. 给了「可用输出字段」时，用字段占位符（如 {order_count}）把关键数字写进正文，"
+    "让每次执行自动填值；\n"
+    "5. 中文；不要编造输出里没有的数据；{output} 可放最后一行（完整输出），"
+    "信息已经足够时也可以不放。\n\n"
+    "emoji 选型参考：📦 订单/数量、💰 金额/销售额、⚠️ 异常/错误、⏱ 耗时、📅 日期、"
+    "🔥 热销/爆款、✅ 成功、❌ 失败、🔔 提醒、📊 统计。\n\n"
+    '示例：{"title": "📦 今日订单播报", "body": "任务「{task}」{event}。\\n'
+    '📦 订单 {order_count} 单 · ⚠️ 异常 {error_count} 条\\n'
+    '💰 销售额 ¥{sales_amount} · 🔥 热销 {hot_product}\\n'
+    '⏱ 用时 {duration} · 📅 {date} {time}"}'
+)
+
+
+def _parse_ai_tpl(text):
+    """从模型回复里取出 {"title","body"}；容忍代码块包裹与前后多余文字。"""
+    s = str(text or "").strip()
+    if not s:
+        return None
+    s = re.sub(r"^```[A-Za-z]*\s*", "", s)
+    s = re.sub(r"\s*```$", "", s).strip()
+    cands = [s]
+    i, j = s.find("{"), s.rfind("}")
+    if 0 <= i < j:
+        cands.append(s[i:j + 1])
+    for c in cands:
+        try:
+            d = json.loads(c)
+        except Exception:                              # noqa: BLE001
+            continue
+        if isinstance(d, dict):
+            title = str(d.get("title") or "").strip()
+            body = str(d.get("body") or "").strip()
+            if title or body:
+                return {"title": title[:200], "body": body[:2000]}
+    return None
+
+
+_EMOJI_RE = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F]")
+# 没带 emoji 时的兜底：按行内关键词挑一个贴切的
+_EMOJI_HINTS = (
+    (("订单", "单量", "数量", "件数"), "📦"),
+    (("金额", "销售额", "收入", "¥", "￥", "元"), "💰"),
+    (("异常", "错误", "失败", "报错", "error"), "⚠️"),
+    (("耗时", "用时", "毫秒", "秒"), "⏱"),
+    (("热销", "爆款", "热门"), "🔥"),
+    (("成功",), "✅"),
+    (("任务", "执行"), "📋"),
+    (("日期", "时间"), "📅"),
+)
+
+
+def _ensure_emoji(title, body):
+    """模型偶尔还是不写 emoji：标题补一个、正文逐行补一个语义相近的（已有就不动）。"""
+    t = str(title or "").strip()
+    if t and not _EMOJI_RE.search(t):
+        t = "🔔 " + t
+    rows = []
+    for ln in str(body or "").split("\n"):
+        s = ln.rstrip()
+        if s.strip() and not _EMOJI_RE.search(s):
+            low = s.lower()
+            icon = "🔹"
+            for keys, em in _EMOJI_HINTS:
+                if any(k in low for k in keys):
+                    icon = em
+                    break
+            s = icon + " " + s.lstrip()
+        rows.append(s)
+    return t, "\n".join(rows)
+
+
+@bp.route("/api/cron/notify-ai", methods=["POST"])
+def api_cron_notify_ai():
+    """让 AI 根据这次试运行的脚本输出，写一版好看的自定义通知文案。
+
+    入参：{name, command, output, fields, ok, exit, duration, channels}
+    返回：{ok, title, body, model} —— 文案里保留 {task} / {order_count} 这类变量占位。
+    """
+    from .ai import (_brief, _estimate_msgs, _estimate_tokens, _load_cfg, _log_ai_call,
+                     _preflight, _sys_err_response, _sys_pick)
+    cfg = _load_cfg()
+    provider, model, err = _sys_pick(cfg, "chat")
+    if err:
+        return _sys_err_response(err, need_config=not cfg.get("providers"))
+
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip() or "（未命名任务）"
+    cmd = str(data.get("command") or "").strip()
+    output = str(data.get("output") or "").strip()
+    fields = data.get("fields") if isinstance(data.get("fields"), dict) else {}
+    ok = bool(data.get("ok"))
+    code = data.get("exit")
+    channels = str(data.get("channels") or "").strip()
+    field_txt = "，".join("%s=%s" % (k, str(v)[:40]) for k, v in list(fields.items())[:20]) or "（无）"
+    user_text = ("任务名称：%s\n执行命令：%s\n本次试运行：%s（退出码 %s）\n"
+                 "可用输出字段：%s\n通知渠道：%s\n\n脚本输出：\n%s") % (
+        name, cmd[:500], "成功" if ok else "失败", "无" if code is None else code,
+        field_txt, channels or "未指定", output[:4000] or "（无输出）")
+
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    payload = json.dumps({"model": model, "stream": False, "temperature": 0.7,
+                          "messages": [{"role": "system", "content": _AI_TPL_SYS},
+                                       {"role": "user", "content": user_text}]}).encode("utf-8")
+    t0 = time.time()
+    tin = tout = 0
+    est = False
+    text = ""
+
+    def _fail(msg, resp=""):
+        _log_ai_call("cron", False, int((time.time() - t0) * 1000), msg, model, tin, tout,
+                     est, req=_brief(user_text), resp=_brief(resp))
+        return jsonify({"error": msg})
+
+    try:
+        req = urllib.request.Request(url, data=payload, method="POST", headers={
+            "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+        _preflight(url, 8)                                 # 地址不通时立刻报错，别耗光读超时
+        resp = urllib.request.urlopen(req, timeout=60)
+        obj = json.loads(resp.read().decode("utf-8", "ignore"))
+        text = ((((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or "")
+        usage = obj.get("usage") or {}
+        tin, tout = int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0)
+        if not (tin or tout):                              # 上游没给用量：按字数兜底估算
+            tin = _estimate_msgs([{"role": "system", "content": _AI_TPL_SYS},
+                                  {"role": "user", "content": user_text}])
+            tout, est = _estimate_tokens(text), True
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")[:200]
+        return _fail("AI 接口返回 %s：%s" % (e.code, detail))
+    except Exception as e:                                 # noqa: BLE001
+        return _fail("调用 AI 接口失败：%s" % e)
+
+    tpl = _parse_ai_tpl(text)
+    if not tpl:
+        return _fail("AI 返回的内容不是预期的 JSON，请重试或换个模型", resp=text)
+    title, body = _ensure_emoji(tpl["title"], tpl["body"])   # 模型没写 emoji 时兜底补上
+
+    elapsed = int((time.time() - t0) * 1000)
+    _log_ai_call("cron", True, elapsed, "", model, tin, tout, est,
+                 req=_brief(user_text), resp=_brief(text))
+    _log.info("定时任务通知文案生成：model=%s %dms", model, elapsed)
+    return jsonify({"ok": True, "title": title, "body": body,
+                    "model": model, "elapsed_ms": elapsed})
+
+
 @bp.route("/api/cron/notify-history")
 def api_cron_notify_history():
     """定时任务触发的通知记录（按来源过滤，最新在前）；支持关键字搜索与分页。"""
@@ -397,6 +601,13 @@ def _coerce_task(raw):
         "pre_hook": str(raw.get("pre_hook") or "").strip(),
         "post_hook": str(raw.get("post_hook") or "").strip(),
         "notify": raw.get("notify", True) is not False,
+        "notify_content": (str(raw.get("notify_content") or "status").strip().lower()
+                           if str(raw.get("notify_content") or "").strip().lower()
+                           in crondb.NOTIFY_MODES else "status"),
+        "notify_lines": min(200, _int(raw.get("notify_lines"), 20)),
+        "notify_title": str(raw.get("notify_title") or "").strip()[:200],
+        "notify_body": str(raw.get("notify_body") or "").strip()[:2000],
+        "notify_channels": crondb.norm_channels(raw.get("notify_channels")),
     }
 
 
@@ -435,7 +646,10 @@ def api_cron_restore():
                            enabled=f["enabled"], remark=f["remark"], timeout=f["timeout"],
                            max_retries=f["max_retries"], retry_interval=f["retry_interval"],
                            depends_on=f["depends_on"], pre_hook=f["pre_hook"],
-                           post_hook=f["post_hook"], notify=f["notify"], tid=tid)
+                           post_hook=f["post_hook"], notify=f["notify"], tid=tid,
+                           notify_content=f["notify_content"], notify_lines=f["notify_lines"],
+                           notify_title=f["notify_title"], notify_body=f["notify_body"],
+                           notify_channels=f["notify_channels"])
         imported += 1
     st = data.get("settings")
     if isinstance(st, dict):

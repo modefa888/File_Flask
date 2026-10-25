@@ -675,9 +675,18 @@ def _desktop_win(app_name: str, title: str, body: str,
 
 
 def _ps_native_toast(app_name: str, title: str, body: str, timeout_ms: int) -> str:
-    """Win10/11 原生 Notification 对象（用 AppId，可稳定弹到"通知中心"）。"""
+    """Win10/11 原生 Notification 对象（用 AppId，可稳定弹到"通知中心"）。
+
+    正文按行拆成多个 Text 节点：单个 Text 里的 \n 会被 XML 折叠成空格
+    （这正是 Windows 上「多行正文显示成一行」的原因），拆开才是真的多行；
+    Toast 最多 3 个文本节点，所以正文取前 2 行。
+    """
     # 用 AppID: File_Flask.Notify.<pid>
     appid = "File_Flask.Notify.%d" % os.getpid()
+    lines = [ln.strip() for ln in str(body).splitlines() if ln.strip()][:2]
+    if not lines:
+        lines = [str(body or "").strip()[:200] or " "]
+    body_calls = "\n".join("$content.Text('%s')" % _ps_esc(ln) for ln in lines)
     return """
 $ErrorActionPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
@@ -689,19 +698,17 @@ $null = $asTaskGeneric
 [void]([System.Reflection.Assembly]::LoadWithPartialName('Windows.Data.Xml.Dom'))
 [void]([System.Reflection.Assembly]::LoadWithPartialName('Windows.UI.Notifications'))
 $builder = [Windows.UI.Notifications.ToastContentBuilder]::new()
-$builder = [Windows.UI.Notifications.ToastContentBuilder]::new()
 $builder.ApplicationsExecutionState = 'running'
 $null = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('%s')
-$builder = [Windows.UI.Notifications.ToastContentBuilder]::new()
 $content = $builder
-$content.Text('"%s"')
-$content.Text('"%s"')
+$content.Text('%s')
+%s
 $toast = $content.Show()
 $null = $toast
 """ % (
     appid,
-    title.replace("'", "\\'").replace('"', '\\"'),
-    body.replace("'", "\\'").replace('"', '\\"'),
+    _ps_esc(title),
+    body_calls,
 )
 
 

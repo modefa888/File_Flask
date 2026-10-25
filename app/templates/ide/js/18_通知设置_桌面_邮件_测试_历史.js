@@ -639,6 +639,32 @@
     return ("Notification" in window) && Notification.permission === "granted";
   }
 
+  /* 页内通知卡片：浏览器通知不可用（http 内网 / 未授权）时镜像桌面通知。
+     与 toast 的区别：保留正文换行（多行可读）、停留更久、可点掉。 */
+  let _notifyCardTimer = null;
+  function notifyCard(title, body) {
+    let box = document.getElementById("notifyCard");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "notifyCard";
+      box.className = "ide-notify-card";   // 不能叫 notify-card：设置页的卡片占用了这个类名
+      box.innerHTML = '<div class="nc-head"><i class="bi bi-bell-fill"></i>' +
+        '<span class="nc-title"></span><button class="nc-x" title="关闭">×</button></div>' +
+        '<pre class="nc-body"></pre>';
+      document.body.appendChild(box);
+      box.querySelector(".nc-x").onclick = (e) => {
+        e.stopPropagation();
+        box.classList.remove("show");
+      };
+      box.onclick = () => box.classList.remove("show");
+    }
+    box.querySelector(".nc-title").textContent = title || "File_Flask";
+    box.querySelector(".nc-body").textContent = String(body || "").trim() || "（无正文）";
+    box.classList.add("show");
+    clearTimeout(_notifyCardTimer);
+    _notifyCardTimer = setTimeout(() => box.classList.remove("show"), 12000);
+  }
+
   // 首次开启「浏览器通知」或点测试时，向浏览器申请通知权限
   function notifyRequestBrowserPermission() {
     if (!("Notification" in window)) return;
@@ -658,16 +684,17 @@
     // 浏览器通知仅在安全上下文（https / localhost）可用；
     // http 内网访问时退化为页内 toast 提示。
     if (!notifyBrowserGranted()) {
-      const t = rec.title || "File_Flask";
-      const b = (rec.body || "").split("\n")[0];
-      notifyToast("🔔 " + t + (b ? "：" + b : ""), "ok");
+      // http 内网 / 未授权时走页内卡片：保留正文换行，别像 toast 那样只剩第一行
+      notifyCard(rec.title || "File_Flask", rec.body || "");
       return;
     }
     try {
       const soundOn = !document.getElementById("notifyDesktopSound") ||
                       document.getElementById("notifyDesktopSound").checked;
+      // 系统通知栏最多显示 3~4 行：先按行截断，避免被系统从中间粗暴截掉
+      const bodyText = String(rec.body || "").split("\n").slice(0, 6).join("\n");
       const n = new Notification(rec.title || "File_Flask", {
-        body: rec.body || "",
+        body: bodyText,
         silent: !soundOn,
         tag: "file-flask-notify-" + (rec.ts || ""),
       });
@@ -1089,9 +1116,11 @@
     { key: "exit", desc: "退出码" },
     { key: "duration", desc: "耗时（如 3.2s）" },
     { key: "attempt", desc: "重试进度（如 第 1/3 次；非重试为空）" },
+    { key: "status", desc: "状态：成功 / 失败 / 超时" },
     { key: "run", desc: "执行记录 ID" },
     { key: "date", desc: "触发日期 YYYY-MM-DD" },
     { key: "time", desc: "触发时间 HH:MM" },
+    { key: "output", desc: "脚本输出（任务里选「带脚本输出 / 自定义模板」时才有内容）" },
   ];
   const CRON_TPL_PRESETS = {
     std: {
@@ -1114,6 +1143,11 @@
       title: "[定时任务] {task} {event}",
       body: "{task} 于 {date} {time} {event}，退出码 {exit}，耗时 {duration}。执行记录 {run}。",
     },
+    output: {
+      name: "带脚本输出", icon: "bi-terminal", desc: "正文附上脚本输出；需在任务的「通知内容」里选「带脚本输出」或「自定义模板」",
+      title: "定时任务{event} · {task}",
+      body: "任务「{task}」{event}。\n退出码：{exit}　耗时：{duration}\n时间：{date} {time}\n执行记录：{run}\n\n▶ 脚本输出：\n{output}",
+    },
   };
   // 标题 / 正文都清空时，后端会用调用方默认文案；预览也按这份默认来
   const CRON_TPL_DEFAULTS = CRON_TPL_PRESETS.std;
@@ -1128,12 +1162,14 @@
     return {
       task: "每日备份",
       event: "执行失败",
+      status: "失败",
       exit: "1",
       duration: "3.2s",
       attempt: "",
       run: "ab12cd34ef",
       date: d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()),
       time: p2(d.getHours()) + ":" + p2(d.getMinutes()),
+      output: "Backup done: 128 files\nWarning: skipped ./cache (permission denied)",
     };
   }
 

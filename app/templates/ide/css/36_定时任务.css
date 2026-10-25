@@ -248,6 +248,90 @@
   .cron-dialog .cd-dep-empty { font-size: 11px; color: #6e6e76; }
   .cron-dialog .cd-check2 { display: flex; gap: 16px; flex-wrap: wrap; }
 
+  /* ===== 扩展：编辑器里的「通知内容」（仅结果 / 带脚本输出 / 自定义模板） ===== */
+  .cron-dialog .cd-notify { border: 1px solid #33333a; border-radius: 6px; background: #1e1e22;
+    padding: 8px 10px; gap: 7px; }
+  .cron-dialog .cd-notify-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .cron-dialog .cd-notify-head > label:first-child { font-size: 11px; color: #9aa4b2; }
+  .cron-dialog .cd-notify-row { display: flex; align-items: center; gap: 10px; }
+  .cron-dialog .cd-select { display: block; flex: 1; min-width: 0; background: #1b1b1e;
+    border: 1px solid #3c3c3c; border-radius: 6px; color: #d4d4d4; font-size: 12px;
+    line-height: 1.5; padding: 6px 9px; outline: none; font-family: inherit; cursor: pointer; }
+  .cron-dialog .cd-select:focus { border-color: #0a6aa8; }
+  .cron-dialog .cd-notify-lines { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+  .cron-dialog .cd-notify-lines > label { font-size: 11px; color: #9aa4b2; white-space: nowrap; }
+  .cron-dialog .cd-notify-lines input { width: 66px; }
+  .cron-dialog .cd-hint { font-size: 10.5px; color: #6e6e76; line-height: 1.5; }
+  .cron-dialog .cd-notify-tpl { display: flex; flex-direction: column; gap: 10px;
+    border: 1px dashed #3c3c3c; border-radius: 6px; padding: 9px 10px; background: #202024; }
+  .cron-dialog .cd-nvars { display: flex; flex-wrap: wrap; gap: 4px; }
+  .cron-dialog .cd-nvar { background: #2d2d31; border: 1px solid #3c3c3c; border-radius: 4px;
+    color: #9aa4b2; font-size: 10.5px; padding: 1px 7px; cursor: pointer;
+    font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .cron-dialog .cd-nvar:hover { border-color: #555; color: #dbe6f2; }
+  /* 来自脚本输出 JSON 的字段变量：虚线描边，跟内置变量区分开 */
+  .cron-dialog .cd-nvars-lbl { align-self: center; font-size: 10.5px; color: #6e6e76; margin-right: 3px; }
+  .cron-dialog .cd-nvar.out { border-style: dashed; color: #8fc7a8; }
+  .cron-dialog .cd-nvar.out:hover { border-color: #4f9a6a; color: #c6f0d6; }
+  :where(html.theme-light) .cron-dialog .cd-nvar.out { color: #1a7f37; border-color: #b7d8c0; }
+
+  /* ===== 扩展：任务级「通知渠道」（只列通知设置里已启用的渠道，可只发其中几个） ===== */
+  .cron-dialog .cd-ch { display: flex; flex-direction: column; gap: 6px; }
+  .cron-dialog .cd-ch-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .cron-dialog .cd-ch-head > span:first-child { font-size: 11px; color: #9aa4b2; }
+  .cron-dialog .cd-ch-tip { font-size: 10.5px; color: #6e6e76; }
+  .cron-dialog .cd-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cron-dialog .cd-chip { display: inline-flex; align-items: center; gap: 5px; font-family: inherit;
+    background: #2a2a2f; border: 1px solid #3c3c3c; border-radius: 999px; color: #9aa4b2;
+    font-size: 11.5px; line-height: 1.6; padding: 2px 11px; cursor: pointer; user-select: none; }
+  .cron-dialog .cd-chip:hover { border-color: #555; color: #dbe6f2; }
+  .cron-dialog .cd-chip.on { background: rgba(59, 130, 246, .16); border-color: #3b82f6; color: #dbe6f2; }
+  .cron-dialog .cd-chip i { font-size: 12px; }
+  .cron-dialog .cd-ch-empty { font-size: 11px; color: #6e6e76; line-height: 1.6; }
+  .cron-dialog .cd-ch-empty a { color: #4ea1ff; text-decoration: none; }
+  .cron-dialog .cd-ch-empty a:hover { text-decoration: underline; }
+  :where(html.theme-light) .cron-dialog .cd-chip { background: #f3f4f6; border-color: #d8d8d8; color: #57606a; }
+  :where(html.theme-light) .cron-dialog .cd-chip.on { background: #e7f1fb; border-color: #0969da; color: #0969da; }
+  :where(html.theme-light) .cron-dialog .cd-ch-empty { color: #8c959f; }
+
+  /* ===== 扩展：「测试运行」按钮与脚本输出预览 ===== */
+  .cron-dialog .cd-nh-right { display: inline-flex; align-items: center; gap: 12px; }
+  .cron-dialog .cd-try-btn { display: inline-flex; align-items: center; gap: 5px; height: 24px;
+    padding: 0 10px; border-radius: 6px; border: 1px solid #3c3c3c; background: #2d2d31;
+    color: #9ad1ff; font-size: 11.5px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+  .cron-dialog .cd-try-btn:hover { border-color: #0a6aa8; color: #dbe6f2; }
+  .cron-dialog .cd-try-btn:disabled { opacity: .6; cursor: default; }
+  .cron-dialog .cd-try { display: flex; flex-direction: column; gap: 6px; border: 1px dashed #3c3c3c;
+    border-radius: 6px; background: #1a1a1d; padding: 8px 10px; }
+  .cron-dialog .cd-try-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .cron-dialog .cd-try-st { font-size: 11.5px; color: #9aa4b2; }
+  .cron-dialog .cd-try-st.ok { color: #7fd88f; }
+  .cron-dialog .cd-try-st.bad { color: #e08a8a; }
+  .cron-dialog .cd-mini { height: 22px; padding: 0 9px; border-radius: 5px; border: 1px solid #3c3c3c;
+    background: #2d2d31; color: #9aa4b2; font-size: 11px; cursor: pointer; font-family: inherit; }
+  .cron-dialog .cd-mini:hover { border-color: #555; color: #dbe6f2; }
+  /* AI 生成文案：紫色调，跟普通操作按钮区分开 */
+  .cron-dialog .cd-mini.ai { color: #d8c3ff; border-color: #4c3a6b; }
+  .cron-dialog .cd-mini.ai:hover { border-color: #7c5cff; color: #efe6ff; }
+  .cron-dialog .cd-mini.ai:disabled { opacity: .6; cursor: default; }
+  :where(html.theme-light) .cron-dialog .cd-mini.ai { color: #6f42c1; border-color: #d9c9f2; background: #f7f3ff; }
+  .cron-dialog .cd-try-out { margin: 0; max-height: 180px; overflow: auto; background: #16161a;
+    border: 1px solid #2d2d31; border-radius: 5px; padding: 7px 9px; font-size: 11.5px;
+    line-height: 1.55; color: #cdd6e0; white-space: pre-wrap; word-break: break-word;
+    font-family: ui-monospace, Menlo, Consolas, monospace; }
+  /* 通知预览：按当前自定义模板渲染出来的最终标题 / 正文 */
+  .cron-dialog .cd-try-prev { display: flex; flex-direction: column; gap: 5px;
+    border-top: 1px dashed #33333a; padding-top: 7px; margin-top: 1px; }
+  .cron-dialog .cd-try-prev-h { display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: #9aa4b2; }
+  .cron-dialog .cd-try-prev-h .cd-hint { flex: 1; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; color: #cdd6e0; }
+  :where(html.theme-light) .cron-dialog .cd-try { background: #fafafa; border-color: #d8d8d8; }
+  :where(html.theme-light) .cron-dialog .cd-try-out { background: #ffffff; border-color: #e3e3e3; color: #1f2328; }
+  :where(html.theme-light) .cron-dialog .cd-mini,
+  :where(html.theme-light) .cron-dialog .cd-try-btn { background: #f3f4f6; border-color: #d8d8d8; color: #57606a; }
+  :where(html.theme-light) .cron-dialog .cd-try-btn { color: #0969da; }
+
   /* ===== 扩展：设置弹窗（日志清理 + 通知渠道） ===== */
   .cron-dialog.cd-settings { width: 560px; }
   .cron-dialog .cs-sec { font-size: 12px; font-weight: 600; color: #e6e6e6;
@@ -274,3 +358,11 @@
   :where(html.theme-light) .cron-dialog .cd-dep-empty { color: #9a9a9a; }
   :where(html.theme-light) .cron-dialog .cs-sec { color: #1f2328; border-bottom-color: #e3e3e3; }
   :where(html.theme-light) .cron-dialog .cs-row-lbl { color: #57606a; }
+  :where(html.theme-light) .cron-dialog .cd-notify { border-color: #dcdcdc; background: #f7f7f7; }
+  :where(html.theme-light) .cron-dialog .cd-notify-head > label:first-child,
+  :where(html.theme-light) .cron-dialog .cd-notify-lines > label { color: #57606a; }
+  :where(html.theme-light) .cron-dialog .cd-select { background: #ffffff; border-color: #d0d0d0; color: #1f2328; }
+  :where(html.theme-light) .cron-dialog .cd-hint { color: #9a9a9a; }
+  :where(html.theme-light) .cron-dialog .cd-notify-tpl { border-color: #d0d0d0; background: #fafafa; }
+  :where(html.theme-light) .cron-dialog .cd-nvar { background: #ffffff; border-color: #d0d0d0; color: #57606a; }
+  :where(html.theme-light) .cron-dialog .cd-nvar:hover { border-color: #bbb; color: #1f2328; }

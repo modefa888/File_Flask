@@ -129,9 +129,10 @@
     SSHC.conns.forEach(c => {
       const tab0 = findTab(SSH_VIEW_PREFIX + c.id);
       const open = !!tab0;                                  // 标签存在（可能是刷新后保留的未连接占位）
+      const focused = !!(tab0 && tab0.host.classList.contains("active"));   // 当前正在前台看的那个
       const online = !!(tab0 && tab0.sshSid && SESS[tab0.sshSid]);
       const item = document.createElement("div");
-      item.className = "ssh-item" + (open ? " open" : "");
+      item.className = "ssh-item" + (open ? " open" : "") + (focused ? " active" : "");
       item.dataset.id = c.id;
       item.innerHTML =
         '<div class="ssh-main">' +
@@ -172,9 +173,34 @@
       item.querySelector('[data-act="edit"]').onclick = () => openSshEditor(c);
       item.querySelector('[data-act="dup"]').onclick = () => openSshEditor(Object.assign({}, c, { id: "", name: c.name + " 副本" }));
       item.querySelector('[data-act="del"]').onclick = () => deleteSsh(c);
+      // 整行可点（和「常用命令」项、数据库 / 文件夹管理器的做法一致）：
+      // connectSsh 内部已覆盖三种情况——已连接 → 切到对应终端标签；只剩刷新恢复的
+      // 占位标签 → 复用该标签建连；没打开过 → 新建标签并建连。
+      // 右侧操作按钮各有自己的点击逻辑，这里用 closest 挡住冒泡，避免「点删除」顺带连一次。
+      item.title = open ? "点击切换到该终端" : "点击连接并在右侧打开终端";
+      item.onclick = (e) => {
+        if (e.target.closest && e.target.closest(".ssh-acts")) return;
+        connectSsh(c);
+      };
       box.appendChild(item);
     });
   }
+
+  /* ---------- 侧栏高亮：已打开（open）/ 当前正在查看（active） ----------
+     与数据库（dbcSyncOpenMarks）、文件夹管理器（fmSyncOpenMarks）完全同一套机制：
+     标签的增删 / 切换统一走 00_preamble 的 renderTabsAll / activate，那里回调本函数，
+     所以这里只按当前标签状态刷一遍样式即可。 */
+  function sshSyncOpenMarks() {
+    const box = $("sshList");
+    if (!box) return;
+    box.querySelectorAll(".ssh-item").forEach(item => {
+      if (!item.dataset.id) return;                    // 「常用命令」项没有连接 id，不参与
+      const t = findTab(SSH_VIEW_PREFIX + item.dataset.id);
+      item.classList.toggle("open", !!t);
+      item.classList.toggle("active", !!(t && t.host.classList.contains("active")));
+    });
+  }
+  window.sshSyncOpenMarks = sshSyncOpenMarks;
 
   /* ---------------- 连接 / 编辑器区终端 ---------------- */
 

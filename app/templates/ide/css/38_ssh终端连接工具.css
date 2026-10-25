@@ -2,14 +2,30 @@
 .ssh-tools { display: flex; gap: 6px; padding: 8px 10px; }
 .ssh-tools .g-btn.block { flex: 1; }
 .ssh-list { padding: 4px 8px 12px; }
+/* 连接项 / 常用命令项：与数据库面板 .dbc-item、文件夹管理器 .fm-remote-item
+   同一套高亮语言——悬停淡底、已打开淡底 + 左侧蓝条、当前查看整条蓝底 + 深蓝左条 */
 .ssh-item {
   position: relative;
   display: flex; align-items: center; gap: 8px;
-  padding: 9px 10px; margin-bottom: 6px; border-radius: 7px;
-  background: var(--bg-elev, #23252b); border: 1px solid transparent;
+  padding: 7px 8px; margin-bottom: 4px; border-radius: 6px;
+  background: transparent; border: 1px solid transparent; color: #e2e2e2;
+  cursor: pointer;          /* 整行可点：切换到该终端 / 未打开则建连 */
 }
-.ssh-item:hover { border-color: var(--border, #333); }
-.ssh-item.open { border-color: var(--accent, #4da3ff); background: var(--bg-elev2, #2a2d35); }
+.ssh-item:hover { background: #2a2d2e; border-color: #37373d; }
+/* 已打开（终端标签还在）但不在前台 */
+.ssh-item.open {
+  background: #26292c; border-color: transparent;
+  box-shadow: inset 2px 0 0 #3a6ea5;
+}
+.ssh-item.open .ssh-main > i { color: #7fb6e8; }
+/* 当前正在查看的那个 */
+.ssh-item.active {
+  background: #094771; border-color: #0e639c;
+  box-shadow: inset 2px 0 0 #4db8ff;
+}
+.ssh-item.active .ssh-main > i { color: #9fd0ff; }
+.ssh-item.active .ssh-name { color: #ffffff; }
+.ssh-item.active .ssh-sub { color: #b9d9f2; }
 .ssh-main { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; cursor: pointer; padding-right: 6px; }
 .ssh-main > i { font-size: 17px; color: var(--accent, #4da3ff); flex: none; }
 .ssh-meta { min-width: 0; }

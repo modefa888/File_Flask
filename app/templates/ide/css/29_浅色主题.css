@@ -1557,13 +1557,33 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 
 /* ---------- SSH 终端连接工具（38） ---------- */
 /* 侧栏连接列表 */
-:where(html.theme-light) .ssh-item { background: #f3f3f3; border-color: transparent; }
-:where(html.theme-light) .ssh-item:hover { border-color: #d0d0d0; }
-:where(html.theme-light) .ssh-item.open { background: #e3f0fb; border-color: #a8c8e8; }
+/* 连接项 / 常用命令项：与数据库面板 .dbc-item 同一套高亮（悬停淡灰、
+   已打开淡蓝 + 左侧蓝条、当前查看整条浅蓝 + 深蓝左条） */
+:where(html.theme-light) .ssh-item { background: transparent; border-color: transparent; }
+:where(html.theme-light) .ssh-item:hover { background: #f0f2f4; border-color: #e2e2e2; }
+:where(html.theme-light) .ssh-item.open {
+  background: #eef2f6; border-color: transparent; box-shadow: inset 2px 0 0 #a8c8e8;
+}
+:where(html.theme-light) .ssh-item.open .ssh-main > i { color: #005fb8; }
+:where(html.theme-light) .ssh-item.active {
+  background: #cde3f8; border-color: #a8c8e8; box-shadow: inset 2px 0 0 #005fb8;
+}
+:where(html.theme-light) .ssh-item.active .ssh-main > i { color: #005fb8; }
+:where(html.theme-light) .ssh-item.active .ssh-name { color: #0b3d63; }
+:where(html.theme-light) .ssh-item.active .ssh-sub { color: #0b5c9a; }
 :where(html.theme-light) .ssh-name { color: #1f2328; }
 :where(html.theme-light) .ssh-sub { color: #6b6b6b; }
+:where(html.theme-light) .ssh-cmd-head { color: #6b6b6b; border-top-color: #e0e0e0; }
+:where(html.theme-light) .ssh-cmd-head span { color: #1f2328; }
+:where(html.theme-light) .ssh-cmd .ssh-main > i { color: #1a7f37; }
+:where(html.theme-light) .ssh-acts { box-shadow: 0 0 0 1px #d8dde3; }
+:where(html.theme-light) .ssh-item.open > .ssh-acts { box-shadow: none; }
 :where(html.theme-light) .ssh-acts button { color: #6b6b6b; }
 :where(html.theme-light) .ssh-acts button:hover { background: #e4e6e8; color: #1f2328; }
+/* 当前查看项是浅蓝底：操作图标跟着换成深蓝，连接状态仍是绿色但压暗一档保证可读 */
+:where(html.theme-light) .ssh-item.active .ssh-acts button { color: #0b5c9a; }
+:where(html.theme-light) .ssh-item.active .ssh-acts button:hover { background: #b3d3f0; color: #08304f; }
+:where(html.theme-light) .ssh-item.active .ssh-acts button.ssh-stop { color: #14804a; }
 :where(html.theme-light) .ssh-list .ph { color: #6b6b6b; }
 :where(html.theme-light) .ssh-list .ph.warn { color: #b26a00; }
 :where(html.theme-light) .ssh-list .ph code { background: #ececec; color: #1f2328; }
@@ -1957,3 +1977,23 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .fm-ctx-i:hover { background: #e8f1fb; color: #1f2328; }
 :where(html.theme-light) .fm-ctx-i.danger { color: #c0392b; }
 :where(html.theme-light) .fm-ctx-i.danger:hover { background: #fbe9e7; color: #c0392b; }
+
+/* 侧栏「远程服务器」项：与数据库面板 .dbc-item 完全同一套高亮（浅色）
+   —— 淡灰悬停、已打开淡蓝底 + 左侧蓝条、当前查看整条浅蓝底 + 深蓝左侧条。
+   带 #fmPanel 前缀是为了压过本文件上面的 `:where(html.theme-light) .g-btn.outline`。 */
+:where(html.theme-light) #fmPanel .fm-remote-item {
+  background: transparent; border-color: transparent; color: #1f2328;
+}
+:where(html.theme-light) #fmPanel .fm-remote-item .bi { color: #5a6572; }
+:where(html.theme-light) #fmPanel .fm-remote-item:hover { background: #f0f2f4; border-color: #e2e2e2; }
+:where(html.theme-light) #fmPanel .fm-remote-item.open {
+  background: #eef2f6; border-color: #e2e2e2; box-shadow: inset 2px 0 0 #a8c8e8; color: #1f2328;
+}
+:where(html.theme-light) #fmPanel .fm-remote-item.open .bi { color: #005fb8; }
+:where(html.theme-light) #fmPanel .fm-remote-item.active {
+  background: #cde3f8; border-color: #a8c8e8; box-shadow: inset 2px 0 0 #005fb8; color: #0b3d63;
+}
+:where(html.theme-light) #fmPanel .fm-remote-item.active .bi { color: #005fb8; }
+:where(html.theme-light) #fmPanel .fm-remote-item.active .fm-remote-sub { color: #0b5c9a; opacity: .9; }
+/* 分组小标题（远程服务器）：与数据库面板的分组标题同色 */
+:where(html.theme-light) .fmv-rhd { color: #5a5a5a; }

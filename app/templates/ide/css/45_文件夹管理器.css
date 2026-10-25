@@ -128,16 +128,38 @@
 .fm-tools .g-btn.block { flex: 1 1 auto; width: auto; min-width: 0; margin-top: 0; }
 .fmv-rhd {
   display: flex; align-items: center; gap: 5px; margin: 6px 0 6px;
-  font-size: 11px; color: #6d7880; text-transform: none;
+  font-size: 11px; color: #8a8a8a; text-transform: none;   /* 与数据库面板的分组标题同色 */
 }
 .fmv-rhd .bi-hdd-network { color: #e2a04a; }
-.fm-remote-item { justify-content: flex-start; text-align: left; margin-bottom: 4px; gap: 6px; }
-/* 已打开 / 当前正在查看的远程文件管理器：侧栏连接项高亮 */
-.fm-remote-item.open { border-color: #0e639c; color: #d6e9ff; background: rgba(14, 99, 156, .22); }
-.fm-remote-item.active {
-  border-color: #1a8cff; color: #ffffff; background: #094771;
+/* 侧栏里的远程服务器项：与「数据库」面板的 .dbc-item 同一套高亮语言
+   （圆角卡片 + 悬停淡底 + 已打开左侧蓝条 + 当前查看整条蓝底）。
+   这里统一带 #fmPanel 前缀：它是 button.g-btn.block.outline，浅色主题的
+   `:where(html.theme-light) .g-btn.outline` 会在本文件之后加载，同特异性下
+   会把背景刷成灰色，必须提高特异性才压得住。 */
+#fmPanel .fm-remote-item {
+  display: flex; align-items: center; justify-content: flex-start;
+  gap: 7px; width: 100%; margin: 0 0 4px; padding: 7px 8px;
+  border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: #e2e2e2;
+  font-size: 12.5px; text-align: left; line-height: 1.35;
 }
-.fm-remote-item.active .fm-remote-sub { opacity: .85; }
+#fmPanel .fm-remote-item:focus { outline: none; }
+#fmPanel .fm-remote-item:focus-visible { outline: 2px solid #4db8ff; outline-offset: 1px; }
+#fmPanel .fm-remote-item .bi { flex: none; font-size: 15px; color: #9aa4ad; }
+#fmPanel .fm-remote-item:hover { background: #2a2d2e; border-color: #37373d; }
+/* 已打开（标签页还在）但不在前台：淡底 + 左侧蓝条 */
+#fmPanel .fm-remote-item.open {
+  background: #26292c; border-color: transparent;
+  box-shadow: inset 2px 0 0 #3a6ea5; color: #ffffff;
+}
+#fmPanel .fm-remote-item.open .bi { color: #7fb6e8; }
+/* 当前正在查看的那个：整条蓝底（与 .dbc-item.active 一致） */
+#fmPanel .fm-remote-item.active {
+  background: #094771; border-color: #0e639c;
+  box-shadow: inset 2px 0 0 #4db8ff; color: #ffffff;
+}
+#fmPanel .fm-remote-item.active .bi { color: #9fd0ff; }
+#fmPanel .fm-remote-item.active .fm-remote-sub { opacity: .9; }
 .fm-remote-sub { margin-left: auto; font-size: 11px; opacity: .6; }
 .fmv-rph { padding: 8px 2px; font-size: 12px; color: #6d7880; }
 

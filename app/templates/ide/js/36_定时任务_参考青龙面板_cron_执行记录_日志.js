@@ -141,6 +141,7 @@
     const hint = $("cronNotifyHint");
     const chEl = $("cronNotifyChannels");
     const chWrap = chEl && chEl.closest ? chEl.closest(".cd-ch") : null;   // 渠道多选块
+    if (sel) sel.disabled = !on;                    // 关掉通知后内容选择也置灰，避免以为仍在生效
     if (linesWrap) linesWrap.style.display = (on && mode !== "status") ? "" : "none";
     if (tplRow) tplRow.style.display = (on && mode === "custom") ? "" : "none";
     if (chWrap) chWrap.style.display = on ? "" : "none";
@@ -942,7 +943,8 @@
                        dingtalk: "钉钉", telegram: "Telegram", pushplus: "PushPlus" };
   const CRON_NF_EVENT = { success: ["执行成功", "ok"], fail: ["执行失败", "bad"],
                           timeout: ["执行超时", "warn"], retry: ["安排重试", "warn"] };
-  const CRON_NF_SKIP = { disabled: "通知总开关未开启", "event-off": "该事件未勾选" };
+  const CRON_NF_SKIP = { disabled: "通知总开关未开启", "event-off": "该事件未勾选",
+                         "task-off": "任务关闭了「执行后发送通知」" };
   async function cronLoadNotify(run) {
     const list = $("cronNotifyList");
     if (!list || !run) return;
@@ -1018,7 +1020,7 @@
           }).join("")
         : '<span class="cr-nf-ch skip"><i class="bi bi-slash-circle"></i>' +
             esc(CRON_NF_SKIP[r.skipped] || (r.skipped ? "未发送" : "没有启用的渠道")) + '</span>';
-      const title = String(r.title || "").trim() || "（无标题）";
+      const title = String(r.title || "").trim() || (r.skipped ? "未发送通知" : "（无标题）");
       const body = String(r.body || "").trim();
       // 这条通知整体成没成功（渠道都没启用时按「未发送」算）。
       // 逐个渠道分开显示、各自用自己的颜色：成功的绿、失败的红，一眼看出谁挂了。
@@ -1354,7 +1356,13 @@
       '<td class="cv-plan"><code>' + esc(t.cron) + '</code>' +
         (t.next && t.next.length ? '<div class="cv-next" title="接下来的运行时间">' + esc(t.next.slice(0, 2).join("  ·  ")) + '</div>' : "") + '</td>' +
       '<td><span class="ci-st ' + si[1] + '">' + esc(si[0]) + '</span>' +
-        '<div class="cv-sub">' + (t.enabled ? "已启用" : "已停用") + '</div></td>' +
+        '<div class="cv-tgl">' +
+          '<button class="cv-tgl-btn ' + (t.enabled ? "off" : "on") + '" data-act="toggle" title="' +
+            (t.enabled ? "停止：不再按 cron 计划自动触发（不影响手动运行）"
+                       : "启动：按 cron 计划自动触发") + '">' +
+            '<i class="bi ' + (t.enabled ? "bi-pause-circle" : "bi-play-circle") + '"></i>' +
+            (t.enabled ? "停止" : "启动") + '</button>' +
+        '</div></td>' +
       '<td class="cv-cmd" title="' + escAttr(t.command) + '">' + esc(t.command) + '</td>' +
       '<td class="cv-last">' + (t.last_at
         ? esc(cronFmtTime(t.last_at)) + '<div class="cv-sub">' + cronFmtDur(t.last_ms) + ' · 共 ' + (t.run_count || 0) + ' 次</div>'
@@ -1483,6 +1491,7 @@
       const task = () => (CRON.tasks || []).find(x => x.id === tid);
       act("run", () => cronViewRun(tid));
       act("stop", () => cronViewStop(tid));
+      act("toggle", () => cronViewToggle(tid));
       act("edit", () => cronOpenEditor(task()));
       act("copy", () => cronViewCopy(task()));
       act("del", () => cronViewDelete(task()));
@@ -1623,6 +1632,14 @@
         nf.recs = [];
         cronViewPaintNotify();
       });
+  }
+  async function cronViewToggle(tid) {             // 状态列的快捷按钮：启动 / 停止定时调度
+    const t = (CRON.tasks || []).find(x => x.id === tid);
+    if (!t) return;
+    const d = await cronAct("/api/cron/toggle", { id: tid, enabled: !t.enabled });
+    if (d.error) { toast(d.error, "err"); return; }
+    toast((t.enabled ? "已停止定时调度：" : "已启动定时调度：") + t.name, "ok");
+    await cronViewRefresh();
   }
   async function cronViewRun(tid) {
     const t = (CRON.tasks || []).find(x => x.id === tid);

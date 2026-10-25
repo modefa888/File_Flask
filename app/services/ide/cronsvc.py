@@ -411,6 +411,12 @@ def _notify_send(task, run_id, event, title, body, vars_, tpl, log_path):
     return res
 
 
+def _notify_skip(log_path, event):
+    """任务关了「执行后发送通知」：不推送，只在执行记录里留一条「未发送」说明，
+    让人能看出这次为什么没收到通知。"""
+    _log_notify(log_path, event, "", "", {"skipped": "task-off"})
+
+
 def read_notify_log(log_path):
     """读取某次执行的通知结果（供路由返回给前端）；没有记录时返回 []。"""
     path = _notify_sidecar(log_path)
@@ -643,6 +649,8 @@ def _watch(run_id, task_id, proc, log_path, started):
                 title, body, vars_, tpl = _notify_parts(
                     task, run_id, "success", 0 if code is None else code, dur, log_path)
                 _notify_send(task, run_id, "success", title, body, vars_, tpl, log_path)
+            else:
+                _notify_skip(log_path, "success")
         elif status in ("fail", "timeout"):
             _handle_failure(task, run_id, status, code, dur, log_path)
 
@@ -677,15 +685,21 @@ def _handle_failure(task, run_id, status, code, dur, log_path):
         except OSError:
             pass
         _log.info("定时任务将重试：%s run=%s（%s）", name, run_id, tip)
-        # 通知正文按任务配置组装（可带脚本输出），模板变量由 send 统一渲染
-        title, body, vars_, tpl = _notify_parts(task, run_id, status, code, dur, log_path, tip=tip)
-        vars_["attempt"] = "第 %d/%d 次" % (nxt, max_retries)
-        _notify_send(task, run_id, "retry", title, body, vars_, tpl, log_path)
+        # 通知正文按任务配置组装（可带脚本输出），模板变量由 send 统一渲染。
+        # 任务里关掉「发送通知」时这里也不发（与失败 / 成功分支保持一致）
+        if task.get("notify"):
+            title, body, vars_, tpl = _notify_parts(task, run_id, status, code, dur, log_path, tip=tip)
+            vars_["attempt"] = "第 %d/%d 次" % (nxt, max_retries)
+            _notify_send(task, run_id, "retry", title, body, vars_, tpl, log_path)
+        else:
+            _notify_skip(log_path, "retry")
         return
     # 2) 没有重试名额了（或没配重试）：推送失败 / 超时通知
     if task.get("notify"):
         title, body, vars_, tpl = _notify_parts(task, run_id, status, code, dur, log_path)
         _notify_send(task, run_id, status, title, body, vars_, tpl, log_path)
+    else:
+        _notify_skip(log_path, status)
 
 
 def _retry_fire(task_id, attempt):

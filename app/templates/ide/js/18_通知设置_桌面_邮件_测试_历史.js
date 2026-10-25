@@ -193,7 +193,8 @@
         '</div>' +
         '<div class="notify-row inline set-row" data-kw="触发事件 失败 超时 重试 成功 fail timeout retry success">' +
           '<div class="notify-label-wrap"><div class="notify-label">触发事件</div>' +
-          '<div class="notify-desc">勾选哪些事件时推送；「执行成功」默认关闭，开启后每次执行成功也会推送并留记录。</div></div>' +
+          '<div class="notify-desc">勾选哪些事件时推送（任务里关掉「发送通知」的不推送，两者取交集）；' +
+            '「执行成功」默认关闭，开启后每次执行成功也会推送并留记录。</div></div>' +
           '<div class="notify-cron-evs">' +
             '<label class="notify-check"><input type="checkbox" id="notifyCronEvFail"> 执行失败</label>' +
             '<label class="notify-check"><input type="checkbox" id="notifyCronEvTimeout"> 执行超时</label>' +

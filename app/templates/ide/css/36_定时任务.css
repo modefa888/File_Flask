@@ -237,6 +237,16 @@
   .cron-view .cv-cmd { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; color: #b9c6d4; }
   .cron-view .cv-last { white-space: nowrap; color: #b9c6d4; }
+  /* 状态列的快捷按钮：启动 / 停止定时调度 */
+  .cron-view .cv-tgl { margin-top: 4px; }
+  .cron-view .cv-tgl-btn { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 8px;
+    border-radius: 4px; border: 1px solid #3c3c3c; background: #2d2d31; color: #9aa4b2;
+    font-size: 10.5px; line-height: 1; cursor: pointer; font-family: inherit; white-space: nowrap; }
+  .cron-view .cv-tgl-btn:hover { border-color: #555; color: #fff; }
+  .cron-view .cv-tgl-btn.on { border-color: #2f6b45; background: #22392b; color: #7fd88f; }
+  .cron-view .cv-tgl-btn.on:hover { border-color: #3f8a5c; color: #a6e8b8; }
+  .cron-view .cv-tgl-btn.off { border-color: #6b3a3a; background: #3a2525; color: #e08a8a; }
+  .cron-view .cv-tgl-btn.off:hover { border-color: #8a4a4a; color: #f0aaaa; }
   .cron-view .cv-a { white-space: nowrap; text-align: right; }
   .cron-view .cv-ico { background: #37373d; border: none; border-radius: 4px; color: #cccccc; cursor: pointer;
     font-size: 12px; padding: 4px 7px; margin-left: 4px; }
@@ -329,6 +339,7 @@
     border: 1px solid #3c3c3c; border-radius: 6px; color: #d4d4d4; font-size: 12px;
     line-height: 1.5; padding: 6px 9px; outline: none; font-family: inherit; cursor: pointer; }
   .cron-dialog .cd-select:focus { border-color: #0a6aa8; }
+  .cron-dialog .cd-select:disabled { opacity: .55; cursor: not-allowed; }
   .cron-dialog .cd-notify-lines { display: inline-flex; align-items: center; gap: 5px; flex: none; }
   .cron-dialog .cd-notify-lines > label { font-size: 11px; color: #9aa4b2; white-space: nowrap; }
   .cron-dialog .cd-notify-lines input { width: 66px; }

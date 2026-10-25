@@ -1541,6 +1541,10 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .cron-view .cv-next { color: #1a7f37; }
 :where(html.theme-light) .cron-view .cv-cmd { color: #33404d; }
 :where(html.theme-light) .cron-view .cv-last { color: #333333; }
+:where(html.theme-light) .cron-view .cv-tgl-btn { background: #efefef; border-color: #d5d5d5; color: #4a5560; }
+:where(html.theme-light) .cron-view .cv-tgl-btn:hover { border-color: #a8a8a8; color: #1f2328; }
+:where(html.theme-light) .cron-view .cv-tgl-btn.on { background: #e6f4ea; border-color: #9dd3a8; color: #1a7f37; }
+:where(html.theme-light) .cron-view .cv-tgl-btn.off { background: #fdecea; border-color: #e8b0b0; color: #c0392b; }
 :where(html.theme-light) .cron-view .cv-ico { background: #e8e8e8; }
 :where(html.theme-light) .cron-view .cv-ico:hover { background: #dcdcdc; }
 :where(html.theme-light) .cron-view .cv-detail { background: #fafafa; border-left-color: #e3e3e3; }

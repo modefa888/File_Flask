@@ -117,7 +117,7 @@ def api_cron_save():
     depends_on = [str(s) for s in depends_on if str(s).strip()]
     pre_hook = str(data.get("pre_hook") or "").strip()
     post_hook = str(data.get("post_hook") or "").strip()
-    notify = data.get("notify", True) is not False
+    notify = crondb.as_bool(data.get("notify"), True)
     # 通知内容：status（仅结果）/ output（结果 + 脚本输出）/ output_only / custom（自定义模板）
     notify_content = str(data.get("notify_content") or "status").strip().lower()
     if notify_content not in crondb.NOTIFY_MODES:
@@ -134,7 +134,7 @@ def api_cron_save():
     notify_body = str(data.get("notify_body") or "").strip()[:2000]
     # 通知渠道：任务可只发其中几个（空 = 跟随「通知设置」里已启用的渠道）
     notify_channels = crondb.norm_channels(data.get("notify_channels"))
-    enabled = data.get("enabled", True) is not False
+    enabled = crondb.as_bool(data.get("enabled"), True)
     remark = str(data.get("remark") or "").strip()
     tid = str(data.get("id") or "").strip()
     # 依赖任务必须真实存在（依赖自己等于死锁，直接拒绝）
@@ -616,7 +616,7 @@ def _coerce_task(raw):
         "tid": str(raw.get("id") or "").strip() or None,
         "name": name, "cron": expr, "command": command,
         "cwd": str(raw.get("cwd") or "").strip(),
-        "enabled": bool(raw.get("enabled")),
+        "enabled": crondb.as_bool(raw.get("enabled")),
         "remark": str(raw.get("remark") or "").strip(),
         "timeout": _int(raw.get("timeout"), 0),
         "max_retries": _int(raw.get("max_retries"), 0),
@@ -624,7 +624,7 @@ def _coerce_task(raw):
         "depends_on": ",".join(str(s) for s in deps if str(s).strip()),
         "pre_hook": str(raw.get("pre_hook") or "").strip(),
         "post_hook": str(raw.get("post_hook") or "").strip(),
-        "notify": raw.get("notify", True) is not False,
+        "notify": crondb.as_bool(raw.get("notify"), True),
         "notify_content": (str(raw.get("notify_content") or "status").strip().lower()
                            if str(raw.get("notify_content") or "").strip().lower()
                            in crondb.NOTIFY_MODES else "status"),

@@ -39,6 +39,19 @@ def norm_channels(v):
     return ",".join(c for c in NOTIFY_CHANNELS if c in picked)
 
 
+def as_bool(v, default=True):
+    """布尔归一化：兼容 0/1、'0'/'1'、'false'/'true' 等写法。
+
+    历史数据里 notify 曾以字符串 '0' / '1' 落库，直接 bool('0') 会得到 True，
+    导致「取消勾选执行后发送通知 → 保存 → 再打开又变回勾选」。
+    """
+    if v is None:
+        return bool(default)
+    if isinstance(v, str):
+        return v.strip().lower() not in ("", "0", "false", "no", "off", "none")
+    return bool(v)
+
+
 def _norm_mode(v):
     v = str(v or "").strip().lower()
     return v if v in NOTIFY_MODES else "status"
@@ -55,8 +68,8 @@ def _task_dict(row):
     if not row:
         return None
     d = {k: row[k] for k in _TASK_COLS if k in row.keys()}
-    d["enabled"] = bool(d.get("enabled"))
-    d["notify"] = bool(d.get("notify"))
+    d["enabled"] = as_bool(d.get("enabled"))
+    d["notify"] = as_bool(d.get("notify"))
     d["notify_content"] = _norm_mode(d.get("notify_content"))
     d["notify_lines"] = _norm_lines(d.get("notify_lines"))
     d["notify_title"] = str(d.get("notify_title") or "")
@@ -102,10 +115,10 @@ def create_task(name, cron, command, cwd="", enabled=True, remark="", timeout=0,
             " max_retries, retry_interval, depends_on, pre_hook, post_hook, notify,"
             " notify_content, notify_lines, notify_title, notify_body, notify_channels,"
             " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (tid, name, cron, command, cwd, 1 if enabled else 0, remark, int(timeout or 0),
+            (tid, name, cron, command, cwd, 1 if as_bool(enabled) else 0, remark, int(timeout or 0),
              max(0, int(max_retries or 0)), max(1, int(retry_interval or 60)),
              str(depends_on or ""), str(pre_hook or ""), str(post_hook or ""),
-             1 if notify else 0, _norm_mode(notify_content), _norm_lines(notify_lines),
+             1 if as_bool(notify) else 0, _norm_mode(notify_content), _norm_lines(notify_lines),
              str(notify_title or ""), str(notify_body or ""), norm_channels(notify_channels),
              now, now))
     return get_task(tid)
@@ -123,7 +136,7 @@ def update_task(tid, **fields):
         v = fields[k]
         sets.append(k + "=?")
         if k in ("enabled", "notify"):
-            args.append(1 if bool(v) else 0)
+            args.append(1 if as_bool(v) else 0)
         elif k == "max_retries":
             args.append(max(0, int(v or 0)))
         elif k == "retry_interval":

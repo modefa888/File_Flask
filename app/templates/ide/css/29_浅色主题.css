@@ -1554,6 +1554,44 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .cron-view .cv-run-row.on { background: #e3f0fb; }
 :where(html.theme-light) .cron-view .cv-run-t { color: #333333; }
 :where(html.theme-light) .cron-view .cv-log { background: #f7f7f7; color: #26323c; }
+/* 执行记录 → 通知记录（36） */
+:where(html.theme-light) .cron-dialog .cr-nf { background: #f7f7f7; border-top-color: #e3e3e3; }
+:where(html.theme-light) .cron-dialog .cr-nf-head { color: #33404d; }
+:where(html.theme-light) .cron-dialog .cr-nf-head > .bi-bell { color: #8a5a00; }
+:where(html.theme-light) .cron-dialog .cr-nf-sum { color: #8a8a8a; }
+:where(html.theme-light) .cron-dialog .cr-nf-arrow { color: #8a8a8a; }
+:where(html.theme-light) .cron-dialog .cr-nf-empty,
+:where(html.theme-light) .cron-view .cv-notify .cr-nf-empty { color: #8a8a8a; }
+:where(html.theme-light) .cron-view .cv-notify { background: #fbfbfb; border-top-color: #e3e3e3; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-item {
+  background: #ffffff; border: 1px solid #e5e5e5; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-top { color: #1f2328; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-ev { background: #e3f0fb; color: #0b5c9a; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-ev.ok { background: #e6f4ea; color: #1a7f37; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-ev.bad { background: #fdecea; color: #c0392b; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-ev.warn { background: #fff4e0; color: #8a5a00; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-time { color: #8a8a8a; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-ch { background: #efefef; color: #4a5560; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-ch.ok { background: #e6f4ea; color: #1a7f37; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-ch.bad { background: #fdecea; color: #c0392b; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-ch.skip { background: #f0f0f0; color: #6b6b6b; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-body { color: #4a5560; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-detail { border-top-color: #e5e5e5; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-dl { color: #4a5560; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-dl b { color: #1f2328; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-dl.ok > .bi { color: #1a7f37; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-dl.bad > .bi { color: #c0392b; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-result { color: #6b6b6b; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-result.ok { color: #1a7f37; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-result.bad { color: #c0392b; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-result.warn { color: #8a5a00; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-result.skip { color: #6b6b6b; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-rlist .ok { color: #1a7f37; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-rlist .bad { color: #c0392b; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-rlist .skip { color: #6b6b6b; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-rlist .skip > .bi { color: #8a5a00; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-sep { color: #b8b8b8; }
+:where(html.theme-light) :is(.cron-dialog, .cron-view) .cr-nf-hint { color: #8a8a8a; }
 
 /* ---------- SSH 终端连接工具（38） ---------- */
 /* 侧栏连接列表 */

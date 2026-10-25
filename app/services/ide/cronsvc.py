@@ -98,6 +98,12 @@ def _remove_log(path):
             os.remove(path)
     except OSError:
         pass
+    try:                                            # 通知结果文件跟着日志一起清
+        side = _notify_sidecar(path)
+        if side and os.path.isfile(side):
+            os.remove(side)
+    except OSError:
+        pass
 
 
 def _log_size(path):
@@ -357,6 +363,67 @@ def _notify_parts(task, run_id, status, code, dur, log_path, tip=""):
     return title, body, vars_, tpl
 
 
+def _notify_meta(task, run_id):
+    """通知历史里的关联信息：让「执行记录 → 通知记录」能按这一次执行过滤。"""
+    return {"task_id": task.get("id"), "task_name": task.get("name"), "run_id": run_id}
+
+
+def _notify_sidecar(log_path):
+    """通知结果的落盘文件：与执行日志同目录的 <run_id>.notify.json。"""
+    base = os.path.splitext(str(log_path or ""))[0]
+    return base + ".notify.json" if base else ""
+
+
+def _log_notify(log_path, event, title, body, res):
+    """把这次执行的通知结果追加到 sidecar 文件（同一次执行可能先「安排重试」再「失败」）。
+
+    与全局通知历史分开存：执行记录被清理 / 通知历史被清空都不影响这里，
+    也不会混进别的任务的通知。前端按 run_id 读，展示「这一次执行发了什么」。
+    """
+    path = _notify_sidecar(log_path)
+    if not path:
+        return
+    rec = {"ts": int(time.time()), "event": str(event or ""),
+           "title": str(title or ""), "body": str(body or ""),
+           "channels": dict((res or {}).get("results") or {}),
+           "skipped": str((res or {}).get("skipped") or "")}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            items = json.load(f)
+        if not isinstance(items, list):
+            items = []
+    except (OSError, ValueError):
+        items = []
+    items.append(rec)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(items[-20:], f, ensure_ascii=False)
+    except OSError as e:
+        _log.warning("写入通知记录失败：%s（%s）", path, e)
+
+
+def _notify_send(task, run_id, event, title, body, vars_, tpl, log_path):
+    """发送一次通知并把结果落盘到该次执行旁边（send 自身不会抛异常）。"""
+    res = cronnotify.send(title, body, event=event, vars_=vars_, tpl=tpl,
+                          channels=task.get("notify_channels"),
+                          meta=_notify_meta(task, run_id))
+    _log_notify(log_path, event, title, body, res)
+    return res
+
+
+def read_notify_log(log_path):
+    """读取某次执行的通知结果（供路由返回给前端）；没有记录时返回 []。"""
+    path = _notify_sidecar(log_path)
+    if not path or not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            items = json.load(f)
+        return items if isinstance(items, list) else []
+    except (OSError, ValueError):
+        return []
+
+
 # ---------------------------------------------------------------- 执行
 def _run_env():
     """子进程环境：关掉缓冲 / 分页 / 交互提示，避免命令卡在等待输入。"""
@@ -575,8 +642,7 @@ def _watch(run_id, task_id, proc, log_path, started):
             if task.get("notify"):
                 title, body, vars_, tpl = _notify_parts(
                     task, run_id, "success", 0 if code is None else code, dur, log_path)
-                cronnotify.send(title, body, event="success", vars_=vars_, tpl=tpl,
-                                channels=task.get("notify_channels"))
+                _notify_send(task, run_id, "success", title, body, vars_, tpl, log_path)
         elif status in ("fail", "timeout"):
             _handle_failure(task, run_id, status, code, dur, log_path)
 
@@ -614,14 +680,12 @@ def _handle_failure(task, run_id, status, code, dur, log_path):
         # 通知正文按任务配置组装（可带脚本输出），模板变量由 send 统一渲染
         title, body, vars_, tpl = _notify_parts(task, run_id, status, code, dur, log_path, tip=tip)
         vars_["attempt"] = "第 %d/%d 次" % (nxt, max_retries)
-        cronnotify.send(title, body, event="retry", vars_=vars_, tpl=tpl,
-                        channels=task.get("notify_channels"))
+        _notify_send(task, run_id, "retry", title, body, vars_, tpl, log_path)
         return
     # 2) 没有重试名额了（或没配重试）：推送失败 / 超时通知
     if task.get("notify"):
         title, body, vars_, tpl = _notify_parts(task, run_id, status, code, dur, log_path)
-        cronnotify.send(title, body, event=status, vars_=vars_, tpl=tpl,
-                        channels=task.get("notify_channels"))
+        _notify_send(task, run_id, status, title, body, vars_, tpl, log_path)
 
 
 def _retry_fire(task_id, attempt):

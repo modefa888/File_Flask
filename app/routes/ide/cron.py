@@ -260,6 +260,22 @@ def api_cron_log():
     return jsonify({"ok": True, **res})
 
 
+@bp.route("/api/cron/notify-log")
+def api_cron_notify_log():
+    """某一次执行触发的通知记录（读该 run 日志旁的 .notify.json，最新在前）。
+
+    与全局通知历史分开：只包含这一次执行自己发出去（或被跳过）的通知，
+    不会混进别的任务 / 测试通知。没有记录时 records 为空数组。
+    """
+    run_id = (request.args.get("run_id") or "").strip()
+    run = crondb.get_run(run_id) if run_id else None
+    if not run:
+        return jsonify({"ok": False, "error": "执行记录不存在", "records": []})
+    recs = cronsvc.read_notify_log(run.get("log_path"))
+    recs = sorted(recs, key=lambda r: int(r.get("ts") or 0), reverse=True)
+    return jsonify({"ok": True, "records": recs})
+
+
 @bp.route("/api/cron/clear-runs", methods=["POST"])
 def api_cron_clear_runs():
     data = request.get_json(silent=True) or {}
@@ -528,12 +544,20 @@ def api_cron_notify_ai():
 
 @bp.route("/api/cron/notify-history")
 def api_cron_notify_history():
-    """定时任务触发的通知记录（按来源过滤，最新在前）；支持关键字搜索与分页。"""
+    """定时任务触发的通知记录（按来源过滤，最新在前）；支持关键字搜索与分页。
+
+    run_id / task_id 用于「执行记录 → 通知记录」：只取关联到该次执行 / 该任务的记录。
+    """
     from ..common.paginate import paginate_opt
-    recs = cronnotify.history(1000 if request.args.get("page") else 50)
+    run_id = (request.args.get("run_id") or "").strip()
+    task_id = (request.args.get("task_id") or "").strip()
+    recs = cronnotify.history(1000 if request.args.get("page") else 50,
+                              run_id=run_id or None, task_id=task_id or None)
     page_items, total = paginate_opt(recs, request)
     if total is None:
-        return jsonify({"ok": True, "records": recs, "total": cronnotify.count()})
+        return jsonify({"ok": True, "records": recs,
+                        "total": cronnotify.count(run_id=run_id or None,
+                                                  task_id=task_id or None)})
     return jsonify({"ok": True, "records": page_items, "total": total})
 
 

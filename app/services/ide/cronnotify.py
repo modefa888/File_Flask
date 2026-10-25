@@ -266,7 +266,8 @@ def _render_tpl(tpl, vars_):
     return re.sub(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", _sub, str(tpl or ""))
 
 
-def send(title, body, event="fail", source="cron", vars_=None, tpl=None, channels=None):
+def send(title, body, event="fail", source="cron", vars_=None, tpl=None, channels=None,
+         meta=None):
     """按配置推送一次通知；返回 {"results": {渠道: {ok, detail}}}。
 
     event: fail / timeout / retry / success —— 决定受哪个事件开关控制；
@@ -275,6 +276,8 @@ def send(title, body, event="fail", source="cron", vars_=None, tpl=None, channel
            tpl["raw_body"]=True 时 body 已是最终文本（如已拼好脚本输出），不再做变量渲染；
     channels: 任务级渠道（数组或逗号串，空 = 跟随全局「通知设置」里已启用的渠道）；
            只会在全局已启用的渠道里取交集，任务里选了但全局关掉的渠道不会发送；
+    meta:  关联信息 {"task_id","run_id","task_name"}，随记录一起写入通知历史，
+           供「执行记录 → 通知记录」按某一次执行过滤展示；
     配置了通知模板时用模板渲染标题与正文，否则用调用方传入的默认文案；
     总开关未开、该事件未勾选、或该渠道未启用时对应渠道会被跳过。
     """
@@ -314,26 +317,43 @@ def send(title, body, event="fail", source="cron", vars_=None, tpl=None, channel
     for ch in targets:
         ok, detail = _send_one(cfg, ch, title, body)
         results["results"][ch] = {"ok": bool(ok), "detail": detail}
+    rec = {"source": source, "title": title, "body": body,
+           "ts": int(time.time()), "channels": results["results"], "event": event}
+    if isinstance(meta, dict):                          # 关联到具体任务 / 执行记录
+        for k in ("task_id", "run_id", "task_name"):
+            v = str(meta.get(k) or "").strip()
+            if v:
+                rec[k] = v
     try:                                                # 写进通知历史（本分区按 source 过滤展示）
-        notifications.append_history({"source": source, "title": title, "body": body,
-                                      "ts": int(time.time()), "channels": results["results"]})
+        notifications.append_history(rec)
     except Exception:                                   # noqa: BLE001
         pass
     return results
 
 
-def history(limit=50):
-    """读取定时任务触发的通知记录（按 source == "cron" 过滤，新的在前）。"""
+def history(limit=50, run_id=None, task_id=None):
+    """读取定时任务触发的通知记录（按 source == "cron" 过滤，新的在前）。
+
+    run_id / task_id 非空时只返回关联到该次执行 / 该任务的记录，
+    供「执行记录」抽屉里展示"这一次执行发了哪些通知"。
+    """
+    rid = str(run_id or "").strip()
+    tid = str(task_id or "").strip()
     try:
         d = notifications.read_latest(0)
     except Exception:                                   # noqa: BLE001
         return []
     out = []
     for r in (d.get("history") or []):
-        if str(r.get("source") or "") == "cron":
-            out.append(r)
-            if len(out) >= max(1, int(limit or 50)):
-                break
+        if str(r.get("source") or "") != "cron":
+            continue
+        if rid and str(r.get("run_id") or "") != rid:
+            continue
+        if tid and str(r.get("task_id") or "") != tid:
+            continue
+        out.append(r)
+        if len(out) >= max(1, int(limit or 50)):
+            break
     return out
 
 
@@ -342,14 +362,24 @@ def clear_history() -> int:
     return notifications.clear_recent(source="cron")
 
 
-def count() -> int:
-    """定时任务触发的通知记录总数（存储里的实际条数，供页签角标显示）。"""
+def count(run_id=None, task_id=None) -> int:
+    """定时任务触发的通知记录总数（可只统计某次执行 / 某个任务）。"""
     try:
         d = notifications.read_latest(0)
     except Exception:                                   # noqa: BLE001
         return 0
-    return sum(1 for r in (d.get("history") or [])
-               if str(r.get("source") or "") == "cron")
+    rid = str(run_id or "").strip()
+    tid = str(task_id or "").strip()
+    n = 0
+    for r in (d.get("history") or []):
+        if str(r.get("source") or "") != "cron":
+            continue
+        if rid and str(r.get("run_id") or "") != rid:
+            continue
+        if tid and str(r.get("task_id") or "") != tid:
+            continue
+        n += 1
+    return n
 
 
 def test(channel):

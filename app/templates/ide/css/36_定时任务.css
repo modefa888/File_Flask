@@ -108,6 +108,8 @@
   .cron-dialog .cr-row-m { min-width: 0; flex: 1; }
   .cron-dialog .cr-row-t { font-size: 11.5px; color: #d4d4d4; }
   .cron-dialog .cr-row-t .cr-by { font-size: 10px; color: #8a8a8a; margin-left: 4px; }
+  .cron-dialog .cr-row-t .cr-by .bi { font-size: 10px; margin-right: 2px; }
+  .cron-view .cv-trigger .bi { font-size: 10px; margin-right: 2px; }
   .cron-dialog .cr-row-s { font-size: 10.5px; color: #8a8a8a; margin-top: 1px; }
   .cron-dialog .cr-logwrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .cron-dialog .cr-log-head { display: flex; align-items: center; gap: 6px; padding: 7px 10px; font-size: 11.5px;
@@ -118,6 +120,70 @@
   .cron-dialog .cr-log { flex: 1; min-height: 300px; margin: 0; padding: 10px; overflow: auto;
     background: #17171a; color: #cfe3d8; font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 11.5px; line-height: 17px; white-space: pre-wrap; word-break: break-word; }
+  /* 日志下方的「通知记录」：本次执行推送了哪些渠道 / 成功与否。
+     列表高度固定，内容多少都不改变上面的日志高度（否则切换记录时会上下抖） */
+  .cron-dialog .cr-nf { flex: none; display: flex; flex-direction: column;
+    background: #202024; border-top: 1px solid #33333a; }
+  .cron-dialog .cr-nf-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+    font-size: 11.5px; color: #b9c6d4; cursor: pointer; user-select: none; }
+  .cron-dialog .cr-nf-head > .bi-bell { font-size: 12px; color: #e2c08a; }
+  .cron-dialog .cr-nf-sum { color: #7f8b99; font-size: 10.5px; }
+  .cron-dialog .cr-nf-arrow { color: #7f8b99; font-size: 11px; transition: transform .15s; }
+  .cron-dialog .cr-nf.off .cr-nf-arrow { transform: rotate(-90deg); }
+  .cron-dialog .cr-nf.off .cr-nf-list { display: none; }
+  .cron-dialog .cr-nf-list { height: 150px; overflow-y: auto; padding: 0 10px 8px;
+    display: flex; flex-direction: column; }
+  .cron-dialog .cr-nf-empty { padding: 10px 2px 12px; font-size: 11px; color: #6e6e76; line-height: 1.7; }
+  /* 条目：执行记录抽屉与大页详情共用（flex:none：固定高度容器里不被压扁） */
+  :is(.cron-dialog, .cron-view) .cr-nf-item { flex: none; padding: 6px 8px; border-radius: 6px;
+    background: #26262b; margin-bottom: 5px; }
+  :is(.cron-dialog, .cron-view) .cr-nf-top { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #d4d4d4; }
+  :is(.cron-dialog, .cron-view) .cr-nf-ev { flex: none; font-size: 10px; line-height: 16px; padding: 0 5px; border-radius: 3px;
+    background: #2b3a4d; color: #8fc7ff; }
+  :is(.cron-dialog, .cron-view) .cr-nf-ev.ok { background: #24402c; color: #8ad7a2; }
+  :is(.cron-dialog, .cron-view) .cr-nf-ev.bad { background: #44292c; color: #eaa1a1; }
+  :is(.cron-dialog, .cron-view) .cr-nf-ev.warn { background: #443c22; color: #e6c887; }
+  :is(.cron-dialog, .cron-view) .cr-nf-t { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  :is(.cron-dialog, .cron-view) .cr-nf-time { flex: none; color: #7f8b99; font-size: 10px; }
+  :is(.cron-dialog, .cron-view) .cr-nf-chs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+  :is(.cron-dialog, .cron-view) .cr-nf-ch { font-size: 10px; line-height: 16px; padding: 0 5px; border-radius: 3px;
+    background: #2d2d31; color: #9aa4b2; display: inline-flex; align-items: center; gap: 3px; }
+  :is(.cron-dialog, .cron-view) .cr-nf-ch.ok { background: #24402c; color: #8ad7a2; }
+  :is(.cron-dialog, .cron-view) .cr-nf-ch.bad { background: #44292c; color: #eaa1a1; }
+  :is(.cron-dialog, .cron-view) .cr-nf-ch.skip { background: #33333a; color: #8a8a8a; }
+  :is(.cron-dialog, .cron-view) .cr-nf-body { margin-top: 5px; font-size: 10.5px; color: #9aa4b2; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-word; max-height: 52px; overflow: hidden; cursor: pointer; }
+  :is(.cron-dialog, .cron-view) .cr-nf-item.open .cr-nf-body { max-height: none; }
+  /* 展开后的逐渠道明细（默认收起，点渠道或正文展开） */
+  :is(.cron-dialog, .cron-view) .cr-nf-detail { display: none; margin-top: 5px; padding-top: 5px;
+    border-top: 1px dashed #3a3a42; }
+  :is(.cron-dialog, .cron-view) .cr-nf-item.open .cr-nf-detail { display: block; }
+  :is(.cron-dialog, .cron-view) .cr-nf-dl { display: flex; align-items: flex-start; gap: 5px;
+    font-size: 10.5px; line-height: 1.6; color: #9aa4b2; word-break: break-word; }
+  :is(.cron-dialog, .cron-view) .cr-nf-dl > .bi { flex: none; margin-top: 2px; }
+  :is(.cron-dialog, .cron-view) .cr-nf-dl b { flex: none; font-weight: 500; color: #c8c8c8; }
+  :is(.cron-dialog, .cron-view) .cr-nf-dl.ok > .bi { color: #6fcf8a; }
+  :is(.cron-dialog, .cron-view) .cr-nf-dl.bad > .bi { color: #e08a8a; }
+  /* 这条通知整体是否发送成功（常显，不用展开） */
+  :is(.cron-dialog, .cron-view) .cr-nf-result { display: flex; align-items: center; gap: 4px;
+    margin-top: 5px; font-size: 10.5px; line-height: 1.6; color: #8a8a8a; }
+  :is(.cron-dialog, .cron-view) .cr-nf-result > .bi { flex: none; }
+  :is(.cron-dialog, .cron-view) .cr-nf-result.ok { color: #8ad7a2; }
+  :is(.cron-dialog, .cron-view) .cr-nf-result.bad { color: #eaa1a1; }
+  :is(.cron-dialog, .cron-view) .cr-nf-result.warn { color: #e6c887; }
+  :is(.cron-dialog, .cron-view) .cr-nf-result.skip { color: #8a8a8a; }
+  /* 结果行里逐渠道分开着色（前缀图标仍是整条汇总色） */
+  :is(.cron-dialog, .cron-view) .cr-nf-rlist { display: inline-flex; flex: 1; min-width: 0;
+    flex-wrap: wrap; align-items: center; gap: 2px; }
+  :is(.cron-dialog, .cron-view) .cr-nf-rlist .ok,
+  :is(.cron-dialog, .cron-view) .cr-nf-rlist .bad,
+  :is(.cron-dialog, .cron-view) .cr-nf-rlist .skip { display: inline-flex; align-items: center; gap: 3px; }
+  :is(.cron-dialog, .cron-view) .cr-nf-rlist .ok { color: #8ad7a2; }
+  :is(.cron-dialog, .cron-view) .cr-nf-rlist .bad { color: #eaa1a1; }
+  :is(.cron-dialog, .cron-view) .cr-nf-rlist .skip { color: #8a8a8a; }
+  :is(.cron-dialog, .cron-view) .cr-nf-rlist .skip > .bi { color: #e6c887; }
+  :is(.cron-dialog, .cron-view) .cr-nf-sep { color: #5c5c66; margin: 0 3px; }
+  :is(.cron-dialog, .cron-view) .cr-nf-hint { color: #7f8b99; margin-left: 3px; }
   .cron-dialog .ph { padding: 18px 10px; text-align: center; color: #6e6e76; font-size: 11.5px; line-height: 1.8; }
   .cron-dialog .ph code { color: #e8c07a; }
 
@@ -221,6 +287,11 @@
   .cron-view .cv-log { flex: 1; min-height: 80px; margin: 0; padding: 9px 12px; overflow: auto;
     background: #17171a; color: #cfe3d8; font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 11.5px; line-height: 17px; white-space: pre-wrap; word-break: break-word; }
+  /* 大页详情：日志下方的通知记录（固定高度，避免日志区跟着跳） */
+  .cron-view .cv-notify { flex: none; height: 120px; overflow-y: auto; padding: 6px 10px 8px; background: #1b1b1e; }
+  .cron-view .cv-notify .cr-nf-empty { font-size: 11px; color: #6e6e76; padding: 4px 2px 8px;
+    line-height: 1.7; }
+  .cron-view .cv-notify { display: flex; flex-direction: column; }
   @media (max-width: 1200px) {
     .cron-view .cv-detail { flex-basis: 300px; }
     .cron-view .cv-cmd { max-width: 180px; }

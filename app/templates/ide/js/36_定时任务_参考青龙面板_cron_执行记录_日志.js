@@ -8,7 +8,7 @@
      ================================================================== */
   var CRON = { timer: null, tasks: [], editing: null, runs: [], runTask: null, logRun: null, logOffset: 0, logTimer: null,
                chanCfg: null, editChRaw: "", tplTarget: null, tryFields: null,
-               trySnap: null, notifyTpl: null };
+               trySnap: null, notifyTpl: null, notifyRun: null };
 
   const CRON_PRESETS = [
     ["每分钟", "* * * * *"], ["每 5 分钟", "*/5 * * * *"], ["每 30 分钟", "*/30 * * * *"],
@@ -784,7 +784,7 @@
     CRON.runTask = t;
     if (!keepLog || !ov.querySelector(".cron-runs-dialog")) {
       const pre = CRON.logRun ? CRON.logRun.id : "";
-      CRON.logRun = null; CRON.logOffset = 0;
+      CRON.logRun = null; CRON.logOffset = 0; CRON.notifyRun = null; CRON.notifyKey = undefined;
       ov.innerHTML =
         '<div class="cron-dialog cron-runs-dialog">' +
           '<div class="cd-head"><i class="bi bi-list-ul"></i><span></span>' +
@@ -797,6 +797,16 @@
                 '<button class="cr-mini" id="cronLogRefresh" title="刷新日志"><i class="bi bi-arrow-clockwise"></i></button>' +
               '</div>' +
               '<pre class="cr-log scroll-thin" id="cronLog"></pre>' +
+              '<div class="cr-nf" id="cronNotify">' +
+                '<div class="cr-nf-head" id="cronNotifyHead" title="点击折叠 / 展开">' +
+                  '<i class="bi bi-bell"></i><span>通知记录</span>' +
+                  '<span class="cr-nf-sum" id="cronNotifySum"></span>' +
+                  '<span class="cd-spacer"></span>' +
+                  '<button class="cr-mini" id="cronNotifyRefresh" title="刷新通知记录"><i class="bi bi-arrow-clockwise"></i></button>' +
+                  '<i class="bi bi-chevron-down cr-nf-arrow"></i>' +
+                '</div>' +
+                '<div class="cr-nf-list scroll-thin" id="cronNotifyList"></div>' +
+              '</div>' +
             '</div>' +
           '</div>' +
           '<div class="cd-foot"><span class="cd-spacer"></span>' +
@@ -815,6 +825,21 @@
         cronLoadRuns(t, pre);
       };
       $("cronLogRefresh").onclick = () => cronLoadLog(CRON.logRun, true);
+      // 通知记录：点标题折叠 / 展开，刷新按钮重新拉取当前这次执行的推送结果
+      const nfHead = $("cronNotifyHead"), nfBox = $("cronNotify");
+      if (nfHead && nfBox) {
+        nfHead.onclick = (e) => {
+          if (e.target.closest("button")) return;
+          nfBox.classList.toggle("off");
+        };
+      }
+      const nfBtn = $("cronNotifyRefresh");
+      if (nfBtn) {
+        nfBtn.onclick = (e) => {
+          e.stopPropagation();
+          cronLoadNotify(CRON.logRun);
+        };
+      }
     }
     ov.querySelector(".cd-head span").textContent = "执行记录 · " + t.name;
     cronLoadRuns(t, keepLog ? (CRON.logRun ? CRON.logRun.id : "") : "");
@@ -830,6 +855,8 @@
       box.innerHTML = '<div class="ph">还没有执行记录</div>';
       $("cronLogTitle").textContent = "还没有执行记录";
       $("cronLog").textContent = "";
+      const nf = $("cronNotifyList");
+      if (nf) nf.innerHTML = '<div class="cr-nf-empty">还没有执行记录</div>';
       return;
     }
     box.innerHTML = "";
@@ -839,9 +866,12 @@
       const row = document.createElement("div");
       row.className = "cr-row" + (target && x.id === target.id ? " on" : "");
       row.setAttribute("data-rid", x.id);
+      const byManual = x.trigger === "manual";
       row.innerHTML = '<span class="cr-dot ' + sCls + '"></span>' +
         '<div class="cr-row-m"><div class="cr-row-t">' + esc(cronFmtTime(x.started_at)) +
-          ' <span class="cr-by">' + (x.trigger === "manual" ? "手动" : "定时") + '</span></div>' +
+          ' <span class="cr-by" title="' + (byManual ? "手动触发" : "定时触发") + '">' +
+            '<i class="bi ' + (byManual ? "bi-hand-index" : "bi-clock") + '"></i>' +
+            (byManual ? "手动" : "定时") + '</span></div>' +
           '<div class="cr-row-s">' + esc(sText) + (x.status !== "running" ? " · " + cronFmtDur(x.duration) : "") + '</div></div>';
       row.onclick = () => {
         box.querySelectorAll(".cr-row").forEach(e => e.classList.remove("on"));
@@ -862,6 +892,7 @@
     const [sText] = cronStatusInfo(run.status);
     title.textContent = cronFmtTime(run.started_at) + " · " + sText +
       (run.exit_code === null || run.exit_code === undefined ? "" : " · 退出码 " + run.exit_code);
+    cronLoadNotify(run);
     clearTimeout(CRON.logTimer);
     const pull = () => {
       fetch("/api/cron/log?run_id=" + encodeURIComponent(run.id) + "&offset=" + CRON.logOffset)
@@ -874,7 +905,13 @@
             if (nearBottom) pre.scrollTop = pre.scrollHeight;
           }
           if (d.running) CRON.logTimer = setTimeout(pull, 1000);
-          else cronRefreshRunRow(run.id, d.status);
+          else {
+            cronRefreshRunRow(run.id, d.status);
+            // 通知是在执行结束后才发的：稍等一下再拉一次，避免停在「没有通知」
+            setTimeout(() => {
+              if (CRON.logRun && CRON.logRun.id === run.id && $("cronNotifyList")) cronLoadNotify(run);
+            }, 1200);
+          }
         }).catch(() => { CRON.logTimer = setTimeout(pull, 1500); });
     };
     pull();
@@ -898,6 +935,134 @@
       }
     }
     loadCron({ silent: true });
+  }
+
+  /* ---------- 通知记录（本次执行推送了哪些渠道、成功与否） ---------- */
+  const CRON_NF_CH = { desktop: "桌面", email: "邮件", smtp: "邮件",
+                       dingtalk: "钉钉", telegram: "Telegram", pushplus: "PushPlus" };
+  const CRON_NF_EVENT = { success: ["执行成功", "ok"], fail: ["执行失败", "bad"],
+                          timeout: ["执行超时", "warn"], retry: ["安排重试", "warn"] };
+  const CRON_NF_SKIP = { disabled: "通知总开关未开启", "event-off": "该事件未勾选" };
+  async function cronLoadNotify(run) {
+    const list = $("cronNotifyList");
+    if (!list || !run) return;
+    // 同一条执行重复刷新时保留已有内容（不再闪「加载中」），否则高度会一跳一跳
+    const sameRun = CRON.notifyRun === run.id && CRON.notifyKey !== undefined;
+    CRON.notifyRun = run.id;
+    if (!sameRun) {
+      CRON.notifyKey = null;
+      const sum = $("cronNotifySum");
+      if (sum) sum.textContent = "";
+      list.innerHTML = '<div class="cr-nf-empty">加载中…</div>';
+    }
+    let key, recs = null, errText = "";
+    try {
+      // 读该次执行日志旁的 .notify.json：只含这一次执行自己的通知，不会混进别的任务
+      const r = await fetch("/api/cron/notify-log?run_id=" + encodeURIComponent(run.id));
+      const d = await r.json().catch(() => ({}));
+      if (CRON.notifyRun !== run.id) return;       // 期间切了别的执行记录：丢弃
+      if (!r.ok && !d.error) errText = "通知记录接口不可用，请重启服务后重试";
+      else if (d.error) errText = String(d.error);
+      else recs = d.records || [];
+    } catch (_) {
+      if (CRON.notifyRun !== run.id) return;
+      errText = "通知记录加载失败";
+    }
+    if (errText) {
+      key = "err:" + errText;
+      if (key === CRON.notifyKey) return;
+      CRON.notifyKey = key;
+      list.innerHTML = '<div class="cr-nf-empty">' + esc(errText) + '</div>';
+      return;
+    }
+    key = run.id + "|" + JSON.stringify(recs);
+    if (key === CRON.notifyKey) return;            // 数据没变：不重绘，避免布局抖动
+    CRON.notifyKey = key;
+    cronRenderNotify(recs);
+  }
+  function cronRenderNotify(recs) {
+    const list = $("cronNotifyList"), sum = $("cronNotifySum");
+    if (!list) return;
+    if (!recs.length) {
+      if (sum) sum.textContent = "";
+      list.innerHTML = '<div class="cr-nf-empty">本次执行没有通知记录' +
+        '<div>可能是该事件没勾选 / 通知总开关关闭，或这条执行早于功能更新' +
+        '（从更新后新发起的执行开始记录）。</div></div>';
+      return;
+    }
+    let okN = 0, badN = 0;
+    recs.forEach(r => {
+      const chs = Object.keys(r.channels || {});
+      if (!chs.length) return;
+      if (chs.every(k => (r.channels[k] || {}).ok)) okN++;
+      else badN++;
+    });
+    if (sum) sum.textContent = "共 " + recs.length + " 条" + (okN + badN ? " · 成功 " + okN + " / 失败 " + badN : "");
+    list.innerHTML = cronNotifyItemsHtml(recs);
+    list.onclick = (e) => {                        // 点渠道 / 正文展开：看完整文案与各渠道明细
+      const hit = e.target.closest(".cr-nf-chs, .cr-nf-body");
+      if (hit) hit.parentElement.classList.toggle("open");
+    };
+  }
+  /* 通知条目 HTML（抽屉与大页详情共用；样式见 .cr-nf-*） */
+  function cronNotifyItemsHtml(recs) {
+    return recs.map(r => {
+      const [evText, evCls] = CRON_NF_EVENT[r.event] || ["通知", ""];
+      const chs = Object.keys(r.channels || {});
+      const chips = chs.length
+        ? chs.map(k => {
+            const c = r.channels[k] || {};
+            return '<span class="cr-nf-ch ' + (c.ok ? "ok" : "bad") + '" title="' +
+              esc(c.detail || "") + '"><i class="bi ' + (c.ok ? "bi-check-circle" : "bi-x-circle") +
+              '"></i>' + esc(CRON_NF_CH[k] || k) + '</span>';
+          }).join("")
+        : '<span class="cr-nf-ch skip"><i class="bi bi-slash-circle"></i>' +
+            esc(CRON_NF_SKIP[r.skipped] || (r.skipped ? "未发送" : "没有启用的渠道")) + '</span>';
+      const title = String(r.title || "").trim() || "（无标题）";
+      const body = String(r.body || "").trim();
+      // 这条通知整体成没成功（渠道都没启用时按「未发送」算）。
+      // 逐个渠道分开显示、各自用自己的颜色：成功的绿、失败的红，一眼看出谁挂了。
+      const okN = chs.filter(k => (r.channels[k] || {}).ok).length;
+      const badN = chs.length - okN;
+      let rCls = "skip", rIco = "bi-slash-circle", rHtml = "";
+      if (!chs.length) {
+        rHtml = '<span class="skip"><i class="bi bi-exclamation-triangle-fill"></i>未发送：' +
+          esc(CRON_NF_SKIP[r.skipped] || (r.skipped ? "本次未推送" : "没有启用的渠道")) + '</span>';
+      } else {
+        rHtml = chs.map(k => {
+          const c = r.channels[k] || {};
+          // 成功 → 对勾；失败 → 叉（每个渠道各自一枚图标，颜色随成功 / 失败）
+          return '<span class="' + (c.ok ? "ok" : "bad") + '">' +
+            '<i class="bi ' + (c.ok ? "bi-check-circle-fill" : "bi-x-circle-fill") + '"></i>' +
+            esc(CRON_NF_CH[k] || k) + (c.ok ? " 成功" : " 失败") + '</span>';
+        }).join('<span class="cr-nf-sep">·</span>');
+        if (!badN) { rCls = "ok"; rIco = "bi-check-circle"; }
+        else if (!okN) { rCls = "bad"; rIco = "bi-x-circle"; rHtml += '<span class="cr-nf-hint">（点渠道看原因）</span>'; }
+        else { rCls = "warn"; rIco = "bi-exclamation-triangle"; }
+      }
+      // 展开后逐渠道显示发送结果（成功是「已发送」，失败是接口返回的错误原因）
+      const detail = chs.length
+        ? '<div class="cr-nf-detail">' + chs.map(k => {
+            const c = r.channels[k] || {};
+            return '<div class="cr-nf-dl ' + (c.ok ? "ok" : "bad") + '">' +
+              '<i class="bi ' + (c.ok ? "bi-check-circle" : "bi-x-circle") + '"></i>' +
+              '<b>' + esc(CRON_NF_CH[k] || k) + '</b>' +
+              '<span>' + esc(c.detail || (c.ok ? "已发送" : "发送失败")) + '</span></div>';
+          }).join("") + '</div>'
+        : "";
+      return '<div class="cr-nf-item">' +
+        '<div class="cr-nf-top">' +
+          '<span class="cr-nf-ev ' + evCls + '">' + evText + '</span>' +
+          '<span class="cr-nf-t" title="' + esc(title) + '">' + esc(title) + '</span>' +
+          '<span class="cr-nf-time">' + cronFmtTime(r.ts) + '</span>' +
+        '</div>' +
+        '<div class="cr-nf-chs" title="点击展开 / 收起发送明细">' + chips + '</div>' +
+        (body ? '<div class="cr-nf-body" title="点击展开 / 收起">' + esc(body) + '</div>' : "") +
+        '<div class="cr-nf-result ' + rCls + '"><i class="bi ' + rIco + '"></i>' +
+          '<span class="cr-nf-rlist">' + rHtml + '</span></div>' +
+        detail +
+      '</div>';
+    }).join("");
   }
 
   function cronTick() {                             // 面板可见时刷新状态（运行中 2s，空闲 5s）
@@ -924,7 +1089,8 @@
      ================================================================== */
   const CRON_VIEW_PATH = "\u0000cron";
   CRON.view = { sel: {}, kw: "", filter: "all", cur: "", runs: [], logRun: null,
-                logOffset: 0, log: "", logTimer: null, timer: null, dsig: "", batchN: 0 };
+                logOffset: 0, log: "", logTimer: null, timer: null, dsig: "", batchN: 0,
+                notify: null, nfOpen: true };
 
   function cronOpenView(tid) {
     let tab = findTab(CRON_VIEW_PATH);
@@ -1251,7 +1417,9 @@
         return '<div class="cv-run-row' + on + '" data-rid="' + x.id + '">' +
           '<span class="cr-dot ' + xi[1] + '"></span>' +
           '<span class="cv-run-t">' + esc(cronFmtTime(x.started_at)) + '</span>' +
-          '<span class="cv-sub">' + (x.trigger === "manual" ? "手动" : "定时") + '</span>' +
+          '<span class="cv-sub cv-trigger" title="' + (x.trigger === "manual" ? "手动触发" : "定时触发") + '">' +
+            '<i class="bi ' + (x.trigger === "manual" ? "bi-hand-index" : "bi-clock") + '"></i>' +
+            (x.trigger === "manual" ? "手动" : "定时") + '</span>' +
           '<span class="cv-sp"></span>' +
           '<span class="cv-run-s">' + esc(xi[0]) +
             (x.status !== "running" ? " · " + cronFmtDur(x.duration) : "") + '</span></div>';
@@ -1260,7 +1428,15 @@
         (CRON.view.logRun ? ' <span class="cv-sub">' + esc(cronFmtTime(CRON.view.logRun.started_at)) + '</span>' : "") +
         '<span class="cv-sp"></span>' +
         '<button class="cv-btn" data-dact="logrefresh" title="重新加载日志"><i class="bi bi-arrow-clockwise"></i></button></div>' +
-      '<pre class="cv-log scroll-thin" id="cvLog">' + esc(CRON.view.log || "") + '</pre>';
+      '<pre class="cv-log scroll-thin" id="cvLog">' + esc(CRON.view.log || "") + '</pre>' +
+      '<div class="cv-d-sub">通知记录' + cronViewNotifySumHtml() +
+        '<span class="cv-sp"></span>' +
+        '<button class="cv-btn" data-dact="notifyrefresh" title="刷新通知记录"><i class="bi bi-bell"></i></button>' +
+        '<button class="cv-btn" data-dact="notifytoggle" title="折叠 / 展开通知记录"><i class="bi ' +
+          (CRON.view.nfOpen === false ? "bi-chevron-right" : "bi-chevron-down") + '"></i></button></div>' +
+      '<div class="cv-notify scroll-thin" id="cvNotify"' +
+        (CRON.view.nfOpen === false ? ' style="display:none"' : "") + '>' +
+        cronViewNotifyHtml() + '</div>';
     const pre = $("cvLog");
     if (pre) pre.scrollTop = pre.scrollHeight;
     cronViewBindDetail();
@@ -1321,6 +1497,13 @@
     document.querySelectorAll("#cvDetail [data-dact]").forEach(btn => {
       btn.onclick = () => cronViewDetailAct(btn.dataset.dact);
     });
+    const nfBox = $("cvNotify");
+    if (nfBox) {
+      nfBox.onclick = (e) => {                     // 点渠道 / 正文展开：看完整文案与各渠道明细
+        const hit = e.target.closest(".cr-nf-chs, .cr-nf-body");
+        if (hit) hit.parentElement.classList.toggle("open");
+      };
+    }
     const box = $("cvRunList");
     if (!box) return;
     box.querySelectorAll(".cv-run-row").forEach(row => {
@@ -1340,6 +1523,7 @@
     if (!same) {                                 // 换任务才清空记录与日志；同一任务刷新时保留，避免闪空
       CRON.view.runs = []; CRON.view.logRun = null;
       CRON.view.log = ""; CRON.view.logOffset = 0;
+      CRON.view.notify = null;
       CRON.view.dsig = "";
       clearTimeout(CRON.view.logTimer);
     }
@@ -1380,11 +1564,65 @@
             el.scrollTop = nearBottom ? el.scrollHeight : keep;
           }
           if (d.running) CRON.view.logTimer = setTimeout(pull, 1000);
-          // 这一轮结束了：立刻同步一次任务 / 执行记录状态，别等下一个轮询周期
-          else cronViewRefresh().catch(() => {});
+          else {
+            // 这一轮结束了：立刻同步一次任务 / 执行记录状态，别等下一个轮询周期
+            cronViewRefresh().catch(() => {});
+            // 通知是在执行结束后才发的：稍等一下再拉一次
+            setTimeout(() => {
+              if (CRON.view.logRun && CRON.view.logRun.id === run.id) cronViewLoadNotify(run, true);
+            }, 1200);
+          }
         }).catch(() => { CRON.view.logTimer = setTimeout(pull, 1500); });
     };
     pull();
+    cronViewLoadNotify(run);
+  }
+  /* ---------- 大页详情里的「通知记录」 ---------- */
+  function cronViewNotifySumHtml() {
+    const nf = CRON.view.notify, rid = (CRON.view.logRun || {}).id || "";
+    if (!nf || nf.rid !== rid || !nf.recs) return "";
+    return ' <span class="cv-sub">（' + nf.recs.length + ' 条）</span>';
+  }
+  function cronViewNotifyHtml() {
+    const rid = (CRON.view.logRun || {}).id || "";
+    if (!rid) return '<div class="cr-nf-empty">选择一条执行记录</div>';
+    const nf = CRON.view.notify;
+    if (!nf || nf.rid !== rid || !nf.recs) return '<div class="cr-nf-empty">加载中…</div>';
+    if (!nf.recs.length) {
+      return '<div class="cr-nf-empty">本次执行没有通知记录' +
+        '<div>可能是该事件没勾选 / 通知总开关关闭，或这条执行早于功能更新。</div></div>';
+    }
+    return cronNotifyItemsHtml(nf.recs);
+  }
+  function cronViewPaintNotify() {
+    const box = $("cvNotify");
+    if (box) box.innerHTML = cronViewNotifyHtml();
+    const sum = $("cvNotifySum");
+    if (sum) sum.innerHTML = cronViewNotifySumHtml();
+  }
+  function cronViewLoadNotify(run, force) {
+    if (!run) return;
+    const rid = run.id;
+    const cur = CRON.view.notify;
+    if (!force && cur && cur.rid === rid && cur.recs) { cronViewPaintNotify(); return; }
+    if (!cur || cur.rid !== rid) {                 // 换记录才显示「加载中」，同一条刷新保留旧内容
+      CRON.view.notify = { rid: rid, recs: null };
+      cronViewPaintNotify();
+    }
+    fetch("/api/cron/notify-log?run_id=" + encodeURIComponent(rid))
+      .then(r => r.json()).then(d => {
+        const nf = CRON.view.notify;
+        if (!nf || nf.rid !== rid) return;
+        const recs = (d && d.records) || [];
+        if (nf.recs && JSON.stringify(nf.recs) === JSON.stringify(recs)) return;   // 没变化不重绘
+        nf.recs = recs;
+        cronViewPaintNotify();
+      }).catch(() => {
+        const nf = CRON.view.notify;
+        if (!nf || nf.rid !== rid || nf.recs) return;
+        nf.recs = [];
+        cronViewPaintNotify();
+      });
   }
   async function cronViewRun(tid) {
     const t = (CRON.tasks || []).find(x => x.id === tid);
@@ -1462,6 +1700,15 @@
     if (act === "edit") return cronOpenEditor(t);
     if (act === "runs") return cronViewLoadRuns(t.id);
     if (act === "logrefresh") return cronViewLoadLog(CRON.view.logRun, true);
+    if (act === "notifyrefresh") return cronViewLoadNotify(CRON.view.logRun, true);
+    if (act === "notifytoggle") {                   // 折叠 / 展开通知记录（状态在重建详情后保留）
+      CRON.view.nfOpen = CRON.view.nfOpen === false;
+      const box = $("cvNotify");
+      if (box) box.style.display = CRON.view.nfOpen ? "" : "none";
+      const ico = document.querySelector('#cvDetail [data-dact="notifytoggle"] i');
+      if (ico) ico.className = "bi " + (CRON.view.nfOpen ? "bi-chevron-down" : "bi-chevron-right");
+      return;
+    }
     if (act === "clearruns") {
       const ok = await uiConfirm("清空执行记录", "确定清空「" + t.name + "」的历史执行记录与日志吗？（正在运行的会保留）", "清空", true);
       if (!ok) return;

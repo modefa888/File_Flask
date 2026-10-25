@@ -510,6 +510,8 @@
     summary: "对话记忆压缩", plugin: "插件宿主 AI", models: "拉取模型列表",
     proc: "资源占用诊断",
     term: "终端 AI 助手",
+    cron: "定时任务通知文案",
+    icon: "AI 生成图标",
   };
   var sysAiDetailMod = "";
   /* 弹窗关闭统一走 sysAiBindOverlay：点「关闭」、点弹窗外面任意位置、按 Esc 都能关。

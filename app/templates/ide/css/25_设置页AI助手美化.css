@@ -394,3 +394,22 @@
 .ai-set-btn.primary { background: #0a6aa8; border-color: #0a6aa8; color: #fff; }
 .ai-set-btn.primary:hover { background: #1177bb; border-color: #1177bb; }
 .ai-set-tip { margin-top: 8px; }
+
+/* 模块按用途分组的小标题：分组标题下的第一条不再画顶线（避免双线） */
+.sysai-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 2px;
+  padding: 4px 0 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .3px;
+  color: #9fb0c0;
+  border-bottom: 1px dashed #34343a;
+}
+.sysai-group:first-of-type { margin-top: 4px; }
+.sysai-group .bi { flex: none; font-size: 12.5px; color: #6f8ea8; }
+.sysai-group + .sysai-mod { border-top: none; }
+:where(html.theme-light) .sysai-group { color: #57606a; border-bottom-color: #e3e3e3; }
+:where(html.theme-light) .sysai-group .bi { color: #8c959f; }

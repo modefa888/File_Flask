@@ -203,6 +203,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
               '<button class="ai-set-btn sysai-all" id="sysAiAllOn" title="把所有已停用的模块重新启用">全部启用</button>' +
             '</div>' +
             '<div class="sysai-mods-desc">下面这些功能共用同一套 AI 接口配置；未单独指定时跟随 AI 助手当前选中的接口与模型。右侧开关可单独停用某个功能（停用后它不会再调用 AI）。</div>' +
+            '<div class="sysai-group"><i class="bi bi-chat-square-text"></i>对话与代理</div>' +
             '<div class="sysai-mod"><i class="bi bi-chat-left-quote"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">AI 助手对话<span class="sysai-stat" data-stat="chat"></span></div>' +
               '<div class="sysai-mod-desc">右侧 AI 面板的提问、代码解释与整段改写</div></div>' +
@@ -213,31 +214,39 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
               '<div class="sysai-mod-desc">让 AI 自动读写多个文件、连续执行任务</div></div>' +
               '<div class="sysai-mod-ctl"><code>POST /api/ai/agent</code>' +
               '<label class="set-switch sysai-sw" data-mod="agent" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
-            '<div class="sysai-mod"><i class="bi bi-git"></i><div class="sysai-mod-main">' +
-              '<div class="sysai-mod-name">生成提交信息<span class="sysai-stat" data-stat="commit"></span></div>' +
-              '<div class="sysai-mod-desc">源代码管理里按本次改动生成 Git 提交说明</div></div>' +
-              '<div class="sysai-mod-ctl"><code>POST /api/ai/commit-message</code>' +
-              '<label class="set-switch sysai-sw" data-mod="commit" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
-            '<div class="sysai-mod"><i class="bi bi-database"></i><div class="sysai-mod-main">' +
-              '<div class="sysai-mod-name">一句话生成查询<span class="sysai-stat" data-stat="nl2sql"></span></div>' +
-              '<div class="sysai-mod-desc">数据库查看器 / 连接工具里把自然语言翻译成 SQL、Redis 命令或 Mongo 查询</div></div>' +
-              '<div class="sysai-mod-ctl"><code>POST /api/db/nl2sql</code>' +
-              '<label class="set-switch sysai-sw" data-mod="nl2sql" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
-            '<div class="sysai-mod"><i class="bi bi-diagram-3"></i><div class="sysai-mod-main">' +
-              '<div class="sysai-mod-name">AI 推荐表设计<span class="sysai-stat" data-stat="tabledesign"></span></div>' +
-              '<div class="sysai-mod-desc">表结构设计弹窗里按一句话描述推荐表名与列定义</div></div>' +
-              '<div class="sysai-mod-ctl"><code>POST /api/db/table/ai-design</code>' +
-              '<label class="set-switch sysai-sw" data-mod="tabledesign" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
-            '<div class="sysai-mod"><i class="bi bi-diagram-3"></i><div class="sysai-mod-main">' +
-              '<div class="sysai-mod-name">新建项目 AI<span class="sysai-stat" data-stat="scaffold"></span></div>' +
-              '<div class="sysai-mod-desc">新建项目时按一句话描述生成项目初始框架</div></div>' +
-              '<div class="sysai-mod-ctl"><code>POST /api/projects/create</code>' +
-              '<label class="set-switch sysai-sw" data-mod="scaffold" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
             '<div class="sysai-mod"><i class="bi bi-collection"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">对话记忆压缩<span class="sysai-stat" data-stat="summary"></span></div>' +
               '<div class="sysai-mod-desc">长对话自动压缩成记忆摘要，节省上下文</div></div>' +
               '<div class="sysai-mod-ctl"><code>POST /api/ai/summarize</code>' +
               '<label class="set-switch sysai-sw" data-mod="summary" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
+            '<div class="sysai-group"><i class="bi bi-code-square"></i>代码与项目</div>' +
+            '<div class="sysai-mod"><i class="bi bi-git"></i><div class="sysai-mod-main">' +
+              '<div class="sysai-mod-name">生成提交信息<span class="sysai-stat" data-stat="commit"></span></div>' +
+              '<div class="sysai-mod-desc">源代码管理里按本次改动生成 Git 提交说明</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/ai/commit-message</code>' +
+              '<label class="set-switch sysai-sw" data-mod="commit" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
+            '<div class="sysai-mod"><i class="bi bi-diagram-3"></i><div class="sysai-mod-main">' +
+              '<div class="sysai-mod-name">新建项目 AI<span class="sysai-stat" data-stat="scaffold"></span></div>' +
+              '<div class="sysai-mod-desc">新建项目时按一句话描述生成项目初始框架</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/projects/create</code>' +
+              '<label class="set-switch sysai-sw" data-mod="scaffold" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
+            '<div class="sysai-mod"><i class="bi bi-palette"></i><div class="sysai-mod-main">' +
+              '<div class="sysai-mod-name">AI 生成图标<span class="sysai-stat" data-stat="icon"></span></div>' +
+              '<div class="sysai-mod-desc">管理页规则图标库里的「AI 生成」：按一句话描述生成 SVG 图标</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/adm/icons/ai/generate</code>' +
+              '<label class="set-switch sysai-sw" data-mod="icon" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
+            '<div class="sysai-group"><i class="bi bi-database"></i>数据与查询</div>' +
+            '<div class="sysai-mod"><i class="bi bi-search"></i><div class="sysai-mod-main">' +
+              '<div class="sysai-mod-name">一句话生成查询<span class="sysai-stat" data-stat="nl2sql"></span></div>' +
+              '<div class="sysai-mod-desc">数据库查看器 / 连接工具里把自然语言翻译成 SQL、Redis 命令或 Mongo 查询</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/db/nl2sql</code>' +
+              '<label class="set-switch sysai-sw" data-mod="nl2sql" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
+            '<div class="sysai-mod"><i class="bi bi-table"></i><div class="sysai-mod-main">' +
+              '<div class="sysai-mod-name">AI 推荐表设计<span class="sysai-stat" data-stat="tabledesign"></span></div>' +
+              '<div class="sysai-mod-desc">表结构设计弹窗里按一句话描述推荐表名与列定义</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/db/table/ai-design</code>' +
+              '<label class="set-switch sysai-sw" data-mod="tabledesign" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
+            '<div class="sysai-group"><i class="bi bi-tools"></i>系统与工具</div>' +
             '<div class="sysai-mod"><i class="bi bi-puzzle"></i><div class="sysai-mod-main">' +
               '<div class="sysai-mod-name">插件宿主 AI<span class="sysai-stat" data-stat="plugin"></span></div>' +
               '<div class="sysai-mod-desc">插件通过 host.ai 调用当前接口与模型</div></div>' +
@@ -258,6 +267,11 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
               '<div class="sysai-mod-desc">终端里用自然语言生成命令、判断风险，并在执行后解读输出</div></div>' +
               '<div class="sysai-mod-ctl"><code>POST /api/term/ai/plan</code>' +
               '<label class="set-switch sysai-sw" data-mod="term" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
+            '<div class="sysai-mod"><i class="bi bi-alarm"></i><div class="sysai-mod-main">' +
+              '<div class="sysai-mod-name">定时任务通知文案<span class="sysai-stat" data-stat="cron"></span></div>' +
+              '<div class="sysai-mod-desc">定时任务编辑里的「AI 生成文案」：按脚本输出写一版带 emoji 的通知标题与正文</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/cron/notify-ai</code>' +
+              '<label class="set-switch sysai-sw" data-mod="cron" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
           '</div>' +
         '</div>' +
 

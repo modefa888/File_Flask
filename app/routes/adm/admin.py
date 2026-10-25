@@ -34,6 +34,7 @@ POST /api/adm/pages/update     编辑页面登记 {path, desc?|access?|disabled?
 """
 import json
 import re
+import time
 
 from flask import (
     Blueprint, jsonify, make_response, redirect, render_template, request, session,
@@ -953,7 +954,8 @@ def api_adm_icons_ai_generate():
     """AI 生成图标：body {prompt, style?, count?}，返回未落库的候选图标。"""
     import urllib.request
     import urllib.error
-    from ..ide.ai import _load_cfg, _sys_pick
+    from ..ide.ai import (_brief, _estimate_msgs, _estimate_tokens, _load_cfg,
+                          _log_ai_call, _sys_pick)
     data = request.get_json(silent=True) or {}
     prompt = str(data.get("prompt") or "").strip()
     if not prompt:
@@ -967,7 +969,7 @@ def api_adm_icons_ai_generate():
         want = 4
 
     cfg = _load_cfg()
-    provider, model, err = _sys_pick(cfg, "chat")
+    provider, model, err = _sys_pick(cfg, "icon")     # 系统 AI 里可单独指定/停用「AI 生成图标」
     if err:
         return _fail("AI 还没配置好：%s（在 AI 设置里配一个可用模型即可）" % err, 400)
 
@@ -975,7 +977,7 @@ def api_adm_icons_ai_generate():
     url = base if base.endswith("/chat/completions") else base + "/chat/completions"
 
     def _ask(sys_prompt, extra=""):
-        """调一次模型，返回 choices[0].message.content。"""
+        """调一次模型，返回 choices[0].message.content（同时记一次「AI 生成图标」调用统计）。"""
         msg = "图标描述：%s\n风格：%s\n数量：%d 个" % (prompt[:200], style_desc, want)
         if extra:
             msg += "\n" + extra
@@ -986,9 +988,26 @@ def api_adm_icons_ai_generate():
         }).encode("utf-8")
         req = urllib.request.Request(url, data=payload, method="POST", headers={
             "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
-        resp = urllib.request.urlopen(req, timeout=_AI_ICON_TIMEOUT)
-        obj = json.loads(resp.read().decode("utf-8", "replace"))
-        return (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
+        t0 = time.time()
+        try:
+            resp = urllib.request.urlopen(req, timeout=_AI_ICON_TIMEOUT)
+            obj = json.loads(resp.read().decode("utf-8", "replace"))
+            text = (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
+            usage = obj.get("usage") or {}
+            tin = int(usage.get("prompt_tokens") or 0)
+            tout = int(usage.get("completion_tokens") or 0)
+            est = False
+            if not (tin or tout):
+                tin = _estimate_msgs([{"role": "system", "content": sys_prompt},
+                                      {"role": "user", "content": msg}])
+                tout, est = _estimate_tokens(text), True
+            _log_ai_call("icon", True, int((time.time() - t0) * 1000), "", model, tin, tout,
+                         est, req=_brief(msg), resp=_brief(text))
+            return text
+        except Exception as e:
+            _log_ai_call("icon", False, int((time.time() - t0) * 1000), str(e), model,
+                         0, 0, False, req=_brief(msg), resp="")
+            raise
 
     sys_prompt = _AI_ICON_SYS_KEEP if keep_color else _AI_ICON_SYS
     icons = []

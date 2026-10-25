@@ -461,7 +461,7 @@ def api_cron_notify_ai():
     from .ai import (_brief, _estimate_msgs, _estimate_tokens, _load_cfg, _log_ai_call,
                      _preflight, _sys_err_response, _sys_pick)
     cfg = _load_cfg()
-    provider, model, err = _sys_pick(cfg, "chat")
+    provider, model, err = _sys_pick(cfg, "cron")     # 系统 AI 里可单独指定/停用「定时任务通知文案」
     if err:
         return _sys_err_response(err, need_config=not cfg.get("providers"))
 

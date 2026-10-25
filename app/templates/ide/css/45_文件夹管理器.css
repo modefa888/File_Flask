@@ -115,8 +115,13 @@
 .rfv-tools .rfv-save:disabled:hover { background: #0d7ec4; }
 .rfv-tools .g-ico { color: #9aa4ad; text-decoration: none; }
 .rfv-tools .g-ico:hover { color: #e8edf2; }
-.rfv-cm { flex: 1; min-height: 0; }
+.rfv-cm { flex: 1; min-height: 0; position: relative; }
 .rfv-cm .CodeMirror { width: 100%; height: 100%; }
+/* 远程图片预览：绝对定位撑满内容区（.rfv-cm 的高度来自 flex，直接 height:100% 在部分场景会塌掉） */
+.rfv-cm > .img-preview { position: absolute; inset: 0; height: auto; }
+.rfv-cm > .img-preview img { max-height: calc(100% - 32px); }
+/* 远程视频播放：复用 28_ 的 .vpv 播放器，这里只负责撑满内容区（.vpv-wrap 是 height:100%） */
+.rfv-cm > .rfv-video-host { position: absolute; inset: 0; min-height: 0; }
 .rfv-bin {
   height: 100%; display: flex; flex-direction: column; gap: 12px;
   align-items: center; justify-content: center; color: #6d7880;
@@ -244,3 +249,23 @@
 .fm-ctx-i:hover { background: rgba(103,176,248,.16); color: #fff; }
 .fm-ctx-i.danger { color: #e07a6d; }
 .fm-ctx-i.danger:hover { background: rgba(224,122,109,.14); color: #ff9a8d; }
+/* ---------- 属性悬浮框（右键 → 属性） ---------- */
+.fm-prop {
+  position: fixed; z-index: 9999; width: 360px; max-width: calc(100vw - 16px);
+  background: #252526; border: 1px solid rgba(255,255,255,.12); border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.4); font-size: 12px; color: #cfd6dd;
+}
+.fm-prop-hd { display: flex; align-items: center; gap: 6px; padding: 7px 8px 7px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.08); color: #e6e6e6; font-weight: 500; }
+.fm-prop-hd .bi-info-circle { color: #67b0f8; }
+.fm-prop-sp { flex: 1; }
+.fm-prop-x { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+  padding: 0; border: 0; border-radius: 4px; background: transparent; color: #9aa4ad;
+  font-size: 11px; line-height: 1; cursor: pointer; }
+.fm-prop-x:hover { background: rgba(103,176,248,.16); color: #fff; }
+.fm-prop-body { padding: 7px 10px 9px; max-height: 60vh; overflow: auto; }
+.fm-prop-r { display: flex; gap: 10px; padding: 2px 0; line-height: 1.65; }
+.fm-prop-k { flex: none; width: 66px; color: #8a8a8a; }
+.fm-prop-v { flex: 1; min-width: 0; word-break: break-all; color: #d4d4d4; }
+/* 目录大小统计中：先压暗占位，算完再恢复 */
+.fm-prop-v.fm-prop-pending { color: #8a8a8a; font-style: italic; }

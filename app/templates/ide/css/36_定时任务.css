@@ -348,6 +348,16 @@
   .cron-view .cv-k { flex: none; width: 72px; color: #8a8a8a; }
   .cron-view .cv-v { flex: 1; min-width: 0; color: #d4d4d4; word-break: break-all; overflow-wrap: anywhere; }
   .cron-view .cv-v.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: #cfe3d8; }
+  /* 详情「通知渠道」：蓝色底 + 图标的渠道胶囊（与通知记录里的渠道标签同一套观感） */
+  .cron-view .cv-v-html { word-break: normal; }
+  .cron-view .cv-nf-chs { display: flex; flex-wrap: wrap; gap: 5px; }
+  .cron-view .cv-nf-ch { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px;
+    border-radius: 4px; border: 1px solid rgba(79, 193, 255, .3); background: rgba(79, 193, 255, .14);
+    color: #7ec4ff; font-size: 10.5px; line-height: 1; white-space: nowrap; }
+  .cron-view .cv-nf-ch > .bi { font-size: 10px; }
+  .cron-view .cv-nf-ch.off { border-color: #3a3a42; background: #2b2b31; color: #8a8a8a; }
+  :where(html.theme-light) .cron-view .cv-nf-ch { border-color: #b7d9f5; background: #e8f3ff; color: #0b5c9a; }
+  :where(html.theme-light) .cron-view .cv-nf-ch.off { border-color: #e0e0e0; background: #f0f0f0; color: #8a8a8a; }
   .cron-view .cv-d-sub { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 12px;
     font-size: 11.5px; color: #b9c6d4; border-top: 1px solid #2c2c2c; background: #232327; }
   .cron-view .cv-run-list { flex: 0 0 132px; overflow-y: auto; padding: 4px 6px; }

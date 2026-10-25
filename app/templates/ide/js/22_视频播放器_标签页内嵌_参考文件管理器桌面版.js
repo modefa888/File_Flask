@@ -63,11 +63,30 @@
     return h ? h + ":" + mm + ":" + ss : mm + ":" + ss;
   }
 
-  function setupVideoView(tab, host, path, name) {
+  /* opts（可选，用于复用本播放器播远程 / 其它来源的视频）：
+     · streamUrl(abs)   视频流地址，默认 /api/stream
+     · posterUrl(abs)   封面图地址，返回 "" 则不加载封面（远程没有缩略图）
+     · durationUrl(abs) 时长接口，传 null 表示不查询（远程拿不到，列表里显示 --:--）
+     · thumbUrl(abs)    播放列表缩略图，传 null 表示只显示图标
+     · transcode        是否允许 ffmpeg 转码兜底，默认 true（远程文件传 false）
+     · listVideos(dir)  返回 Promise<[{abs,name,size_str}]>，不传则用本地 /api/files
+     · activeHost       判断快捷键是否生效的元素（默认 host 自身；远程播放器传标签根节点）
+     · onSwitch(abs,name) 播放列表切歌后的回调，默认同步 IDE 标签页
+     · noMark           不打 tab.isVideo（远程文件标签不能被本地视频的「复用标签」逻辑抢走） */
+  function setupVideoView(tab, host, path, name, opts) {
     _vpvCleanupRun();          // 复用标签页切换视频时，先清掉旧实例的全局监听
-    tab.isVideo = true;
+    const _o = opts || {};
+    if (!_o.noMark) tab.isVideo = true;   // 远程文件标签不能被 openFile 当成「可复用的本地视频标签」
+    /* 全局唯一播放器：新实例接管前先停掉页面上其它视频，避免两处同时出声 */
+    document.querySelectorAll(".vpv-wrap video").forEach(v => { try { v.pause(); } catch (e) {} });
+    const urlStream = _o.streamUrl || (p => "/api/stream?path=" + encodeURIComponent(p));
+    const urlPoster = _o.posterUrl || (p => "/api/thumbnail?path=" + encodeURIComponent(p));
+    const urlDuration = _o.durationUrl === null ? null : (_o.durationUrl || (p => "/api/video_duration?path=" + encodeURIComponent(p)));
+    const urlThumb = _o.thumbUrl === null ? null : (_o.thumbUrl || (p => "/api/thumbnail?path=" + encodeURIComponent(p)));
+    const canTranscode = _o.transcode !== false;
     const dir = path.slice(0, path.lastIndexOf("/")) || "/";
-    const streamUrl = "/api/stream?path=" + encodeURIComponent(path);
+    const streamUrl = urlStream(path);
+    const posterUrl = urlPoster(path);
 
     host.innerHTML =
       '<div class="vpv-wrap">' +
@@ -76,7 +95,7 @@
           '<div class="vpv-title"></div>' +
           '<button class="vpv-title-toggle" title="隐藏标题"><i class="bi bi-eye"></i></button>' +
           '<video playsinline preload="metadata" src="' + streamUrl + '"></video>' +
-          '<div class="vpv-poster" style="background-image:url(\'/api/thumbnail?path=' + encodeURIComponent(path) + '\')">' +
+          '<div class="vpv-poster"' + (posterUrl ? ' style="background-image:url(\'' + posterUrl + '\')"' : '') + '>' +
             '<div class="vpv-name">' + _vpvEsc(name) + '</div>' +
           '</div>' +
           '<div class="vpv-seek-tip"></div>' +
@@ -175,6 +194,7 @@
     let transToken = 0;      // 转码会话序号（预留，配合快速连续切换防串流）
     const transUrl = (abs, ss) => "/api/stream_transcode?path=" + encodeURIComponent(abs) + "&ss=" + encodeURIComponent(String(ss || 0));
     const startTranscode = (abs, ss, autoplay) => {
+      if (!canTranscode) return;          // 远程 / 外部来源没有本地转码接口
       const first = !transMode;
       transToken++;
       transMode = true;
@@ -182,8 +202,8 @@
       video.dataset.trans = "1";
       video.src = transUrl(abs, ss);
       if (autoplay) video.play().catch(() => {});   // 仅当原本处于播放态时才续播；默认暂停打开则保持暂停
-      if (!transDur) {       // 拉取真实总时长，供进度显示与拖拽换算
-        fetch("/api/video_duration?path=" + encodeURIComponent(abs))
+      if (!transDur && urlDuration) {       // 拉取真实总时长，供进度显示与拖拽换算
+        fetch(urlDuration(abs))
           .then(r => r.json()).then(d => { if (d && d.duration) { transDur = d.duration; updateProgress(); } })
           .catch(() => {});
       }
@@ -191,6 +211,7 @@
     };
     // 检测：开始出数据后画面宽度仍为 0（只有音轨被解码）→ 走转码兜底
     const tryTransFallback = () => {
+      if (!canTranscode) return;
       if (transMode || video.videoWidth !== 0 || video.readyState < 2) return;
       startTranscode(curPath, 0, !video.paused);
     };
@@ -199,6 +220,7 @@
     video.addEventListener("error", () => {
       poster.classList.add("hide");
       // 直连源解码失败（不支持编码 / 容器异常）也先试一次转码；转码源再错才报错
+      if (!canTranscode) { showTip("视频加载失败（编码不支持或文件不可读）", "bi-exclamation-circle"); return; }
       if (!transMode) startTranscode(curPath, video.currentTime || 0, !video.paused);
       else showTip("视频加载失败，请确认文件可读", "bi-exclamation-circle");
     });
@@ -400,8 +422,9 @@
     wake();
 
     /* ---------- 键盘：空格 / M / F / ←→（仅当前标签可见时接管） ---------- */
+    const actHost = _o.activeHost || host;   // 远程播放器挂在 .rfv-cm 里，active 类在标签根节点上
     const keyHandler = e => {
-      if (!host.isConnected || !host.classList.contains("active")) return;
+      if (!host.isConnected || !actHost.classList.contains("active")) return;
       const tag = (e.target && e.target.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select" || (e.target && e.target.isContentEditable)) return;
       const k = (e.key || "").toLowerCase();
@@ -432,9 +455,10 @@
 
     const durCacheKey = abs => { return _vpvDurCache[abs]; };
     const fetchDuration = (abs, el) => {
+      if (!urlDuration) return;                 // 远程文件查不到时长，保留 --:--
       const cached = durCacheKey(abs);
       if (cached != null) { el.textContent = _vpvFmt(cached); return; }
-      fetch("/api/video_duration?path=" + encodeURIComponent(abs))
+      fetch(urlDuration(abs))
         .then(r => r.json())
         .then(d => {
           if (!d || d.duration == null || !el.isConnected) return;
@@ -451,15 +475,18 @@
         return;
       }
       plCount.textContent = plItems.length;
-      plList.innerHTML = plItems.map((it, i) =>
-        '<div class="vpv-pl-row' + (it.abs === curPath ? " cur" : "") + '" data-i="' + i + '">' +
-          '<span class="vpv-pl-thumb">🎬<img loading="lazy" alt="" src="/api/thumbnail?path=' + encodeURIComponent(it.abs) + '" onerror="this.remove()"></span>' +
+      plList.innerHTML = plItems.map((it, i) => {
+        const tSrc = urlThumb ? urlThumb(it.abs) : "";   // 取不到缩略图（如远程无封面）就只留图标
+        return '<div class="vpv-pl-row' + (it.abs === curPath ? " cur" : "") + '" data-i="' + i + '">' +
+          '<span class="vpv-pl-thumb">🎬' + (tSrc ? '<img loading="lazy" alt="" src="' + _vpvEsc(tSrc) + '" onerror="this.remove()">' : '') + '</span>' +
           '<span class="vpv-pl-name" title="' + _vpvEsc(it.name) + '">' + _vpvEsc(it.name) + '</span>' +
-          '<span class="vpv-pl-dur" data-dur="' + i + '">--:--</span>' +
-        '</div>').join("");
+          '<span class="vpv-pl-dur" data-dur="' + i + '">' +
+            (urlDuration ? "--:--" : _vpvEsc(it.size_str || "")) + '</span>' +
+        '</div>';
+      }).join("");
       plList.querySelectorAll(".vpv-pl-row").forEach(row => {
         const it = plItems[+row.dataset.i];
-        fetchDuration(it.abs, row.querySelector(".vpv-pl-dur"));
+        if (urlDuration) fetchDuration(it.abs, row.querySelector(".vpv-pl-dur"));
         row.addEventListener("click", () => playPath(it.abs, true));
       });
       const cur = plList.querySelector(".vpv-pl-row.cur");
@@ -474,7 +501,8 @@
       if (++switchToken === 0) switchToken = 1;   // 避免 0 作 token
       const token = switchToken;
       video.pause();
-      poster.style.backgroundImage = "url('/api/thumbnail?path=" + encodeURIComponent(abs) + "')";
+      const nextPoster = urlPoster(abs);
+      poster.style.backgroundImage = nextPoster ? "url('" + nextPoster + "')" : "none";
       const nameEl = poster.querySelector(".vpv-name");
       if (nameEl) nameEl.textContent = abs.split("/").pop() || "";
       if (titleEl) titleEl.textContent = abs.split("/").pop() || "";   // 标题同步切换
@@ -482,7 +510,7 @@
       delete poster.dataset.played;
       rotDeg = 0; applyRotate();
       transMode = false; transStart = 0; transDur = 0; delete video.dataset.trans;   // 新文件重新走直连 → 兜底检测
-      video.src = "/api/stream?path=" + encodeURIComponent(abs);
+      video.src = urlStream(abs);
       video.addEventListener("loadedmetadata", function onMeta() {
         video.removeEventListener("loadedmetadata", onMeta);
         if (token !== switchToken) return;
@@ -495,9 +523,9 @@
       if (cur) try { cur.scrollIntoView({ block: "nearest" }); } catch (e) {}
       // 换源完成后同步标签页（标题/图标/面包屑）；放最后且捕获异常，同步出错也绝不能影响切换播放
       try {
-        if (typeof window.IDE_SYNC_VIDEO_TAB === "function") {
-          window.IDE_SYNC_VIDEO_TAB(tab, abs, abs.split("/").pop() || "");
-        }
+        const nm = abs.split("/").pop() || "";
+        if (typeof _o.onSwitch === "function") _o.onSwitch(abs, nm);
+        else if (typeof window.IDE_SYNC_VIDEO_TAB === "function") window.IDE_SYNC_VIDEO_TAB(tab, abs, nm);
       } catch (e) {}
     };
 
@@ -515,15 +543,21 @@
       if (idx >= 0 && idx < plItems.length - 1) playPath(plItems[idx + 1].abs, true);
     });
 
-    // 拉取同目录视频列表 + 当前文件大小
-    fetch("/api/files?path=" + encodeURIComponent(dir))
-      .then(r => r.json())
-      .then(d => {
+    // 拉取同目录视频列表 + 当前文件大小（远程由调用方提供 listVideos）
+    const listPromise = (typeof _o.listVideos === "function")
+      ? Promise.resolve(_o.listVideos(dir))
+      : fetch("/api/files?path=" + encodeURIComponent(dir))
+          .then(r => r.json())
+          .then(d => {
+            if (d.error) throw new Error(d.error);
+            return (d.items || [])
+              .filter(it => !it.is_dir && IDE_VIDEO_EXTS.indexOf((it.name || "").split(".").pop().toLowerCase()) >= 0)
+              .map(it => ({ abs: dir.replace(/\/+$/, "") + "/" + it.name, name: it.name, size_str: it.size_str || "" }));
+          });
+    listPromise
+      .then(items => {
         if (!host.isConnected) return;
-        if (d.error) { plList.innerHTML = '<div class="vpv-pl-empty"><i class="bi bi-wifi-off"></i> 列表加载失败</div>'; return; }
-        plItems = (d.items || [])
-          .filter(it => !it.is_dir && IDE_VIDEO_EXTS.indexOf((it.name || "").split(".").pop().toLowerCase()) >= 0)
-          .map(it => ({ abs: dir.replace(/\/+$/, "") + "/" + it.name, name: it.name, size_str: it.size_str || "" }));
+        plItems = items || [];
         renderPlaylist();
         const cur = plItems.find(it => it.abs === path);
         if (cur && cur.size_str) { infoEl.textContent = cur.size_str; infoEl.style.display = ""; }

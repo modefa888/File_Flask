@@ -38,17 +38,50 @@ function fmParent(p) {
   return i <= 0 ? "/" : s.slice(0, i);
 }
 function fmIsImg(name) { return FM_IMG_EXTS.includes(getExt(String(name || "").toLowerCase())); }
+/* 记住当前目录：刷新页面 / 关掉再打开都回到同一目录（远程按连接 id 分开存） */
+function fmRememberPath(fm) {
+  if (!fm || !fm.path) return;
+  try {
+    if (fm.conn) localStorage.setItem("ide.fmView.rpath:" + fm.conn.id, fm.path);
+    else { FM_LAST_LOCAL = fm.path; localStorage.setItem(FM_PATH_KEY, fm.path); }
+  } catch (_) {}
+}
+/* 读取上次浏览的目录（远程按连接 id，本机一个全局值） */
+function fmSavedPath(fm) {
+  try {
+    if (fm && fm.conn) return localStorage.getItem("ide.fmView.rpath:" + fm.conn.id) || "";
+  } catch (_) {}
+  return FM_LAST_LOCAL || "";
+}
+/* 刷新 / 关闭页面前统一落盘一次：目录在每次加载成功时已写入，这里再兜底一次 */
+function fmRememberAll() {
+  try { tabs.forEach((t) => { if (t && t.fm) fmRememberPath(t.fm); }); } catch (_) {}
+}
+window.addEventListener("pagehide", fmRememberAll);
+window.addEventListener("beforeunload", fmRememberAll);
 /* 目录列表：本机走 /api/files（counts=1 附带子项计数），远程走 /api/ssh/fs/list */
 async function fmFetch(fm, path, showHidden) {
   if (fm.conn) {
-    const r = await fetch("/api/ssh/fs/list", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: fm.conn.id, path: path, hidden: showHidden ? 1 : 0 }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    if (!fm.home && d.home) fm.home = d.home;
-    return d;
+    /* SSH 首次建连（网络不通 / 主机不可达）可能一直挂住：加 30 秒上限，
+       超时报错而不是永远停在「正在加载…」 */
+    const ac = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = ac ? setTimeout(() => ac.abort(), 30000) : 0;
+    try {
+      const r = await fetch("/api/ssh/fs/list", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: fm.conn.id, path: path, hidden: showHidden ? 1 : 0 }),
+        signal: ac ? ac.signal : undefined,
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      if (!fm.home && d.home) fm.home = d.home;
+      return d;
+    } catch (e) {
+      if (e && e.name === "AbortError") throw new Error("连接超时（30 秒），请检查网络或远程主机状态");
+      throw e;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
   const url = "/api/files?path=" + encodeURIComponent(path) +
     (showHidden ? "&hidden=1" : "") + "&counts=1";
@@ -124,6 +157,7 @@ function _fmMakeTab(conn, startPath) {
     path: "", home: "",
     mode: FM_PREFS.mode, hidden: FM_PREFS.hidden,
     items: [], back: [], fwd: [], sel: "", loading: false, seq: 0,
+    loaded: false,                              // 是否已成功拉取过一次（用于判断切回标签要不要重新加载）
   };
   const tab = {
     path: vpath, host: host, cm: null, original: "", dirty: false,
@@ -136,10 +170,8 @@ function _fmMakeTab(conn, startPath) {
       : '<i class="bi bi-folder2-open" style="color:#c09553"></i>',
   };
   tab.onBeforeClose = () => {
-    try {
-      if (remote) localStorage.setItem("ide.fmView.rpath:" + conn.id, fm.path);
-      else { FM_LAST_LOCAL = fm.path; localStorage.setItem(FM_PATH_KEY, fm.path); }
-    } catch (_) {}
+    fmRememberPath(fm);                            // 关标签时把当前目录记下来，下次打开回到这里
+    fmCloseProps();                                // 属性悬浮框挂在 body 上，标签关了要一起收掉
     return true;
   };
   fmBindTab(tab);
@@ -152,9 +184,8 @@ function openFolderManagerView(conn, startPath) {
   const tab = _fmMakeTab(conn, startPath);
   activate(tab);
   const fm = tab.fm;
-  const initial = startPath || fm.path ||
-    (fm.conn ? (() => { try { return localStorage.getItem("ide.fmView.rpath:" + fm.conn.id) || ""; } catch (_) { return ""; } })() : FM_LAST_LOCAL) ||
-    (fm.conn ? "" : (ROOT || "/"));
+  /* 打开顺序：调用方指定 > 标签内当前目录 > 浏览器记住的上次目录 > 默认（远程交给服务端 home，本机项目根） */
+  const initial = startPath || fm.path || fmSavedPath(fm) || (fm.conn ? "" : (ROOT || "/"));
   fmNavigate(tab, initial, { noPush: true });
   return tab;
 }
@@ -222,9 +253,10 @@ function fmBindTab(tab) {
       fm.sel = ""; fmPaintSel(tab);
     }
   });
-  /* 切回本标签时刷新（目录可能在别处被改动） */
+  /* 切回本标签不自动重新拉目录：远程目录每次切换都重连 SFTP 重列一遍，既慢又会丢滚动位置 /
+     选中状态。需要看最新内容时点工具栏的刷新按钮（首次打开仍由 openFolderManagerView 导航）。 */
   tab.onFmActivate = () => {
-    if (!fm.loading && fm.path) fmNavigate(tab, fm.path, { noPush: true });
+    if (!fm.loaded && !fm.loading && fm.path) fmNavigate(tab, fm.path, { noPush: true });
   };
 }
 
@@ -240,6 +272,7 @@ async function fmNavigate(tab, path, opts) {
   }
   const seq = ++fm.seq;
   fm.loading = true;
+  fmCloseProps();                            // 换目录：属性悬浮框里是上一层的条目，关掉避免看着像当前目录
   fmPaintNav(tab);
   const body = fmQ(tab, ".fmv-body");
   if (body) body.innerHTML = '<div class="fmv-ph">正在加载…</div>';
@@ -251,11 +284,18 @@ async function fmNavigate(tab, path, opts) {
     fm.items = (d.items || []).slice();
     fm.sel = "";
     fm.loading = false;
+    fm.loaded = true;
+    fmRememberPath(fm);                       // 每进一个新目录就记下来，刷新后自动回到这里
     fmPaintNav(tab); fmPaintCrumbs(tab); fmPaint(tab);
   } catch (e) {
     if (seq !== fm.seq) return;
     fm.loading = false;
     fmPaintNav(tab);
+    /* 浏览器记住的目录已不存在 / 没权限：自动退回家目录，别让刷新后停在错误页 */
+    if (fm.conn && !fm.loaded && !opts.retryHome) {
+      fmNavigate(tab, "", { noPush: true, retryHome: true });
+      return;
+    }
     if (body) body.innerHTML = '<div class="fmv-ph">加载失败：' + esc(e.message || String(e)) + '</div>';
     toast("打开目录失败：" + (e.message || e), "err");
   }
@@ -379,6 +419,7 @@ function fmCtxMenu(tab, it, x, y, anchor) {
   items.push({ ico: "bi-clipboard", label: "复制路径", fn: () => {
     Promise.resolve(copyText(fmJoin(fm.path, it.name))).then(() => toast("已复制路径", "ok")).catch(() => toast("复制失败", "err"));
   } });
+  items.push({ ico: "bi-info-circle", label: "属性", fn: (at) => fmShowProps(tab, it, at) });
   if (fm.conn) {
     items.push({ ico: "bi-pencil", label: "重命名", fn: () => fmRemoteRename(tab, it) });
     items.push({ ico: "bi-files", label: "复制到…", fn: () => fmRemoteTransfer(tab, it, "copy") });
@@ -407,6 +448,134 @@ function fmCtxMenu(tab, it, x, y, anchor) {
   });
   document.addEventListener("mousedown", _fmCtxDoc, true);
   document.addEventListener("keydown", _fmCtxKey, true);
+}
+/* ---------- 属性悬浮框（右键 → 属性）：列出当前已知的全部信息 ---------- */
+var _fmPropOff = null;
+function fmCloseProps() {
+  var el = document.getElementById("fmProps");
+  if (el) el.remove();
+  if (_fmPropOff) { _fmPropOff(); _fmPropOff = null; }
+}
+/* 一行一个字段；值为空的不显示，避免出现一堆「—」 */
+function fmPropsRows(tab, it) {
+  var fm = tab.fm;
+  var full = fmJoin(fm.path, it.name);
+  var rows = [];
+  var typeText = it.type || (it.is_dir ? "文件夹" : "文件");
+  if (it.is_link && String(typeText).indexOf("链接") < 0) typeText += "（符号链接）";
+  rows.push(["名称", it.name]);
+  rows.push(["位置", fm.path || "/"]);
+  rows.push(["完整路径", full]);
+  rows.push(["类型", typeText]);
+  if (it.is_dir) {
+    rows.push(["大小", "统计中…", "dirsize"]);     // 打开面板后再递归统计，先占位
+  } else if (typeof it.size === "number") {
+    rows.push(["大小", (it.size_str || it.size.toLocaleString() + " 字节") +
+      (it.size_str ? "（" + it.size.toLocaleString() + " 字节）" : "")]);
+  } else if (it.size_str) {
+    rows.push(["大小", it.size_str]);
+  }
+  if (it.mtime) rows.push(["修改时间", it.mtime]);
+  if (it.ctime) rows.push(["创建时间", it.ctime]);
+  if (it.ext) rows.push(["扩展名", "." + it.ext]);
+  if (it.perm) rows.push(["权限", it.perm]);
+  if (it.uid != null || it.gid != null) {
+    rows.push(["属主", (it.uid != null ? "uid " + it.uid : "") + (it.gid != null ? (it.uid != null ? " · " : "") + "gid " + it.gid : "")]);
+  }
+  if (fm.conn) rows.push(["主机", (fm.conn.user || "root") + "@" + fm.conn.host]);
+  return rows;
+}
+/* 目录大小统计：远程递归扫描（后端带条目 / 耗时上限）；
+   本机复用现有的后台统计：先请求一次父目录触发计算，再轮询 /api/size-status 取缓存结果 */
+function fmDirSize(tab, it) {
+  var fm = tab.fm;
+  var full = fmJoin(fm.path, it.name);
+  if (fm.conn) {
+    return fetch("/api/ssh/fs/size", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: fm.conn.id, path: full }),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.error) throw new Error(d.error);
+      return {
+        size: d.size, size_str: d.size_str,
+        extra: d.files + " 个文件 / " + d.dirs + " 个子目录" +
+          (d.truncated ? "（超出统计上限，结果为部分）" : ""),
+      };
+    });
+  }
+  var parent = fm.path, name = it.name;
+  return fetch("/api/files?path=" + encodeURIComponent(parent) + "&hidden=1")
+    .then(function () {
+      return new Promise(function (resolve) {
+        var tries = 0;
+        (function poll() {
+          fetch("/api/size-status?path=" + encodeURIComponent(parent))
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              var s = d && d.sizes ? d.sizes[name] : null;
+              if (s != null && s >= 0) { resolve({ size: s }); return; }
+              if (++tries >= 12) { resolve(null); return; }
+              setTimeout(poll, 800);
+            })
+            .catch(function () { resolve(null); });
+        })();
+      });
+    });
+}
+function fmShowProps(tab, it, at) {
+  fmCloseProps();
+  var rows = fmPropsRows(tab, it);
+  var full = fmJoin(tab.fm.path, it.name);
+  var box = document.createElement("div");
+  box.className = "fm-prop";
+  box.id = "fmProps";
+  box.innerHTML =
+    '<div class="fm-prop-hd"><i class="bi bi-info-circle"></i><span>属性</span><span class="fm-prop-sp"></span>' +
+      '<button class="fm-prop-x" data-p="copy" title="复制完整路径"><i class="bi bi-clipboard"></i></button>' +
+      '<button class="fm-prop-x" data-p="close" title="关闭（Esc）"><i class="bi bi-x-lg"></i></button>' +
+    '</div>' +
+    '<div class="fm-prop-body">' + rows.map(function (r) {
+      return '<div class="fm-prop-r"><span class="fm-prop-k">' + esc(r[0]) + '</span>' +
+        '<span class="fm-prop-v' + (r[2] === "dirsize" ? " fm-prop-pending" : "") + '"' +
+        (r[2] ? ' data-role="' + r[2] + '"' : '') +
+        ' title="' + escAttr(r[1]) + '">' + esc(r[1]) + '</span></div>';
+    }).join("") + '</div>';
+  document.body.appendChild(box);
+  var pw = box.offsetWidth, ph = box.offsetHeight;
+  var x = at && at.left != null ? at.left : (window.innerWidth - pw) / 2;
+  var y = at && at.top != null ? at.top : 80;
+  box.style.left = Math.max(8, Math.min(x, window.innerWidth - pw - 8)) + "px";
+  box.style.top = Math.max(8, Math.min(y, window.innerHeight - ph - 8)) + "px";
+  box.querySelector('[data-p="close"]').onclick = fmCloseProps;
+  box.querySelector('[data-p="copy"]').onclick = function () {
+    Promise.resolve(copyText(full)).then(function () { toast("已复制路径", "ok"); })
+      .catch(function () { toast("复制失败", "err"); });
+  };
+  /* 文件夹：打开面板后再统计占用（远程递归扫，大目录可能要几秒） */
+  if (it.is_dir) {
+    var sizeEl = box.querySelector('[data-role="dirsize"]');
+    var finish = function (txt) {
+      if (!sizeEl || !box.isConnected) return;
+      sizeEl.classList.remove("fm-prop-pending");
+      sizeEl.textContent = txt;
+      sizeEl.title = txt;
+    };
+    fmDirSize(tab, it).then(function (d) {
+      if (!d) { finish("统计失败（目录过大或耗时过长）"); return; }
+      var bytes = Number(d.size || 0);
+      var txt = (d.size_str || (bytes.toLocaleString() + " 字节")) +
+        "（" + bytes.toLocaleString() + " 字节）" + (d.extra ? " · " + d.extra : "");
+      finish(txt);
+    }).catch(function (e) { finish("统计失败：" + (e.message || e)); });
+  }
+  var onDoc = function (e) { if (!box.contains(e.target)) fmCloseProps(); };
+  var onKey = function (e) { if (e.key === "Escape") fmCloseProps(); };
+  document.addEventListener("mousedown", onDoc, true);
+  document.addEventListener("keydown", onKey, true);
+  _fmPropOff = function () {
+    document.removeEventListener("mousedown", onDoc, true);
+    document.removeEventListener("keydown", onKey, true);
+  };
 }
 function fmBindItem(tab, el, it) {
   const fm = tab.fm;
@@ -843,6 +1012,127 @@ function fmFmtBytes(n) {
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
   return (n / 1024 / 1024).toFixed(2) + " MB";
 }
+/* 远程图片：直接内嵌预览（/api/ssh/fs/raw 原始字节，≤20MB），点击切换 1:1 / 适应窗口。
+   后缀集合复用文件顶部的 FM_IMG_EXTS（fmIsImg）。 */
+function fmSshImagePreview(host, conn, fspath, name, tab) {
+  tab.isImage = true;
+  var saveBtn = host.querySelector(".rfv-save");
+  if (saveBtn) saveBtn.style.display = "none";
+  var bakBtn = host.querySelector('[data-rfv="bak"]');
+  if (bakBtn) bakBtn.style.display = "none";           // 图片只读，没有备份 / 还原
+  var info = host.querySelector(".rfv-info");
+  var url = "/api/ssh/fs/raw?id=" + encodeURIComponent(conn.id) + "&path=" + encodeURIComponent(fspath);
+  host.querySelector(".rfv-cm").innerHTML =
+    '<div class="img-preview ssh-img">' +
+      '<img alt="' + escAttr(name) + '" src="' + escAttr(url) + '">' +
+      '<div class="ip-err" style="display:none;">图片加载失败（远程读取失败或超出 20MB 预览上限），请用工具栏的下载按钮查看。</div>' +
+    '</div>';
+  var im = host.querySelector(".ssh-img img");
+  var errBox = host.querySelector(".ssh-img .ip-err");
+  im.addEventListener("load", function () {
+    tab.imgSize = [im.naturalWidth, im.naturalHeight];
+    if (info) info.textContent = im.naturalWidth + " × " + im.naturalHeight;
+  });
+  im.addEventListener("error", function () {
+    im.style.display = "none";
+    if (errBox) errBox.style.display = "block";
+    if (info) info.textContent = "预览失败";
+  });
+  im.addEventListener("click", function () { im.classList.toggle("zoom"); });
+}
+/* 远程视频：复用编辑器里那套自定义播放器（22_ 的 setupVideoView），
+   只把「流地址 / 播放列表来源 / 封面」换成 SSH 的接口，交互（进度、倍速、循环、画中画、快捷键）完全一致 */
+var FM_VIDEO_EXTS = ["mp4", "webm", "ogv", "mov", "m4v", "mkv", "avi", "flv", "wmv", "mpg", "mpeg", "3gp"];
+function fmSshVideoPreview(host, conn, fspath, name, tab) {
+  var saveBtn = host.querySelector(".rfv-save");
+  if (saveBtn) saveBtn.style.display = "none";
+  var bakBtn = host.querySelector('[data-rfv="bak"]');
+  if (bakBtn) bakBtn.style.display = "none";           // 视频只读，没有备份 / 还原
+  var cm = host.querySelector(".rfv-cm");
+  cm.innerHTML = '<div class="rfv-video-host"></div>';
+  var vh = cm.querySelector(".rfv-video-host");
+  /* ---------- 同目录封面：xxx.mp4 对应的 xxx_cover.jpg（列一次目录同时得到视频列表 + 封面映射） ---------- */
+  var dir = fspath.replace(/\/[^/]*$/, "") || "/";
+  var covers = {};                     // 视频绝对路径 → 封面绝对路径
+  var listed = null;                   // 缓存列表 Promise：播放器列表 / 海报层共用同一次请求
+  var enc = encodeURIComponent;
+  var rawUrl = function (p) { return "/api/ssh/fs/raw?id=" + enc(conn.id) + "&path=" + enc(p); };
+  var loadDir = function () {
+    if (!listed) {
+      listed = fetch("/api/ssh/fs/list", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: conn.id, path: dir }),
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        if (d.error) throw new Error(d.error);
+        var base = String(d.current_path_abs || dir).replace(/\/+$/, "");
+        var items = d.items || [];
+        var coverOf = {};                // 视频主名（去扩展名）→ 封面绝对路径
+        items.forEach(function (it) {
+          if (it.is_dir) return;
+          var m = /^(.+)_cover\.(jpe?g|png|webp|gif|bmp)$/i.exec(String(it.name || ""));
+          if (m) coverOf[m[1]] = base + "/" + it.name;
+        });
+        var videos = [];
+        items.forEach(function (it) {
+          if (it.is_dir) return;
+          var nm = String(it.name || "");
+          if (FM_VIDEO_EXTS.indexOf(getExt(nm.toLowerCase())) < 0) return;
+          var abs = base + "/" + nm;
+          var cv = coverOf[nm.replace(/\.[^.]+$/, "")];
+          if (cv) covers[abs] = cv;
+          videos.push({ abs: abs, name: nm, size_str: it.size_str || "" });
+        });
+        return videos;
+      });
+    }
+    return listed;
+  };
+  var setup = window.setupVideoView;
+  if (typeof setup !== "function") {                   // 理论上不会：22_ 与 45_ 同页加载
+    cm.innerHTML = '<div class="rfv-bin"><i class="bi bi-camera-video"></i><p>视频播放器未加载</p>' +
+      '<a class="g-btn outline" href="/api/ssh/fs/stream?id=' + encodeURIComponent(conn.id) +
+      '&path=' + encodeURIComponent(fspath) + '"><i class="bi bi-box-arrow-up-right"></i> 浏览器直接打开</a></div>';
+    return;
+  }
+  setup(tab, vh, fspath, name, {
+    /* 视频流：SSH 侧带 Range 的流接口，可拖动进度 */
+    streamUrl: function (p) {
+      return "/api/ssh/fs/stream?id=" + encodeURIComponent(conn.id) + "&path=" + encodeURIComponent(p);
+    },
+    /* 封面：同目录的「视频名_cover.jpg」（见远程目录里的伴生封面图），没有就回落到只显示文件名 */
+    posterUrl: function (p) { return covers[p] ? rawUrl(covers[p]) : ""; },
+    durationUrl: null,                                // 远程查不到时长，列表里显示文件大小
+    thumbUrl: function (p) { return covers[p] ? rawUrl(covers[p]) : ""; },
+    transcode: false,                                 // ffmpeg 转码兜底只支持本机文件
+    noMark: true,                                     // 不打 tab.isVideo：本地视频标签复用逻辑不能抢走远程标签
+    activeHost: tab.host,                             // 快捷键的 active 判定挂在标签根节点
+    listVideos: function () { return loadDir(); },    // 同目录视频列表（与封面共用一次列目录请求）
+    /* 播放列表里切到另一个视频：标签页标题 / 路径跟着换（仍是 sshfile 虚拟路径，刷新后可恢复） */
+    onSwitch: function (abs, nm) {
+      tab.path = FM_SSHFILE_PREFIX + conn.id + ":" + abs;
+      tab.name = nm;
+      tab.displayPath = "远程 · " + nm;
+      tab.iconHtml = '<span class="fmv-ic-sm">' + iconFor(nm, false) + '</span>';
+      renderTabsAll();
+    },
+  });
+  var mine = vh.querySelector("video");
+  /* 封面要等列目录返回：拿到后补到海报层（首帧渲染出来前就能看到图） */
+  var posterEl = vh.querySelector(".vpv-poster");
+  loadDir().then(function () {
+    var cv = covers[fspath];
+    if (!cv || !posterEl || !posterEl.isConnected || posterEl.classList.contains("hide")) return;
+    posterEl.style.backgroundImage = "url('" + rawUrl(cv) + "')";
+  }).catch(function () {});
+  /* 关标签时停播并断开流（否则标签关了远端连接还在传） */
+  var prevClose = tab.onBeforeClose;
+  tab.onBeforeClose = function () {
+    try {
+      if (mine) { mine.pause(); mine.removeAttribute("src"); mine.load(); }
+    } catch (_) {}
+    return prevClose ? prevClose() : true;
+  };
+}
 function openSshFileViewer(conn, fspath, name) {
   const vpath = FM_SSHFILE_PREFIX + conn.id + ":" + fspath;
   let tab = findTab(vpath);
@@ -900,6 +1190,16 @@ function openSshFileViewer(conn, fspath, name) {
   /* 拉取内容 → 建 CodeMirror */
   (async () => {
     try {
+      /* 视频：走带 Range 的流接口内嵌播放，不读文本（否则必然判为二进制） */
+      if (FM_VIDEO_EXTS.indexOf(getExt(String(name).toLowerCase())) >= 0) {
+        fmSshVideoPreview(host, conn, fspath, name, tab);
+        return;
+      }
+      /* 图片：不读文本，直接内嵌预览（与本地图片标签页相同的交互） */
+      if (fmIsImg(name)) {
+        fmSshImagePreview(host, conn, fspath, name, tab);
+        return;
+      }
       const r = await fetch("/api/ssh/fs/read", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: conn.id, path: fspath }),

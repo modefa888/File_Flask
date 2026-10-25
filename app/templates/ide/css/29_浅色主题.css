@@ -2040,6 +2040,13 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .fm-ctx-i:hover { background: #e8f1fb; color: #1f2328; }
 :where(html.theme-light) .fm-ctx-i.danger { color: #c0392b; }
 :where(html.theme-light) .fm-ctx-i.danger:hover { background: #fbe9e7; color: #c0392b; }
+:where(html.theme-light) .fm-prop { background: #ffffff; border-color: #d5dae0;
+  box-shadow: 0 6px 20px rgba(0,0,0,.12); color: #1f2328; }
+:where(html.theme-light) .fm-prop-hd { color: #1f2328; border-bottom-color: #e4e8ec; }
+:where(html.theme-light) .fm-prop-x { color: #5a6572; }
+:where(html.theme-light) .fm-prop-x:hover { background: #e8f1fb; color: #1f2328; }
+:where(html.theme-light) .fm-prop-k { color: #8a95a1; }
+:where(html.theme-light) .fm-prop-v { color: #1f2328; }
 
 /* 侧栏「远程服务器」项：与数据库面板 .dbc-item 完全同一套高亮（浅色）
    —— 淡灰悬停、已打开淡蓝底 + 左侧蓝条、当前查看整条浅蓝底 + 深蓝左侧条。

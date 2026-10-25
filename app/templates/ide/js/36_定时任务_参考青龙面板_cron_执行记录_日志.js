@@ -116,6 +116,8 @@
       if (ch && typeof ch === "object") {
         CRON.chanCfg = ch;
         cronTaskChannelsRender();
+        // 大页详情里的「通知渠道 / 未通知」要按全局已启用渠道判断：配置一回来就重绘一次
+        if ($("cvDetail")) cronViewPaintDetail(true);
       }
     }).catch(() => { if (!CRON.chanCfg) cronTaskChannelsRender(); });
   }
@@ -1131,6 +1133,7 @@
     setTimeout(() => {
       if (!cronViewActive()) return;
       cronViewFitCols();                            // 后台标签页创建时宽度是 0，切回来要重算列
+      cronTaskChannelsLoad();                       // 通知设置可能刚改过：刷一次渠道配置（详情里的「通知渠道」要用）
       cronViewRefresh().catch(() => {});
       cronViewTick();
     }, 0);
@@ -1193,6 +1196,7 @@
     const runs = CRON.view.runs || [];
     return [t.id, t.running ? 1 : 0, t.last_status || "", t.run_count || 0,
             t.ok_count || 0, t.fail_count || 0, (CRON.view.logRun || {}).id || "",
+            t.notify ? 1 : 0, t.notify_channels || "",       // 通知开关 / 渠道变了也要重绘详情
             runs.map(x => x.id + ":" + x.status + ":" + (x.duration || 0)).join("|")].join("~");
   }
   function cronViewPaintDetail(force) {
@@ -1344,6 +1348,7 @@
     cronViewPaintRows();
     cronViewRenderDetail();
     cronViewWatchSize();
+    cronTaskChannelsLoad();                         // 详情里的「通知渠道」要按全局启用渠道判断
   }
   /* 表格宽度自适应：右侧详情展开后主区会变窄（约 700px），固定列宽会把「计划」挤没，
      所以窄的时候把「命令」列折进名称下方，把宽度让给名称 / 计划；再窄就把「上次运行」也收起。 */
@@ -1403,6 +1408,41 @@
         '<button class="cv-ico v-del" data-act="del" title="删除"><i class="bi bi-trash"></i></button>' +
       '</td></tr>';
   }
+  /* 详情里的「通知渠道」：与「通知记录」里的渠道一样用「图标 + 底色胶囊」展示，
+     并把「不会发通知」的情况说清楚（否则关了通知还挂着渠道名，看着像会推送）：
+     · 任务关了通知 / 全局没启用渠道 / 选的渠道都被关掉 → 灰胶囊「未通知」（原因放 title）
+     · 任务没指定渠道 → 列出通知设置里已启用的渠道 */
+  function cronViewNotifyChips(t) {
+    const chipOf = (key) => {
+      const hit = CRON_TASK_NOTIFY_CHANNELS.find(c => c[0] === key);
+      const label = hit ? hit[1] : (CRON_NF_CH[key] || key);
+      const icon = hit ? hit[2] : "bi-bell";
+      return '<span class="cv-nf-ch" title="' + escAttr(label) + '">' +
+        '<i class="bi ' + icon + '"></i>' + esc(label) + '</span>';
+    };
+    const offChip = (why) => '<span class="cv-nf-ch off" title="' + escAttr(why) + '">' +
+      '<i class="bi bi-bell-slash"></i>未通知</span>';
+    if (!t.notify) return offChip("已关闭「执行后发送通知」，不会推送");
+    const chs = String(t.notify_channels || "").split(",").map(s => s.trim()).filter(Boolean);
+    const cfg = CRON.chanCfg && typeof CRON.chanCfg === "object" ? CRON.chanCfg : null;
+    const enabled = cfg ? Object.keys(cfg).filter(k => cfg[k]) : null;
+    if (enabled && !enabled.length) return offChip("「设置 → 定时任务通知」里没有启用任何渠道");
+    if (!chs.length) {
+      return enabled && enabled.length ? enabled.map(chipOf).join("")
+        : '<span class="cv-nf-ch" title="跟随通知设置里已启用的渠道"><i class="bi bi-bell"></i>跟随通知设置</span>';
+    }
+    if (enabled) {
+      const hit = chs.filter(c => enabled.indexOf(c) >= 0);
+      if (!hit.length) return offChip("所选渠道都已在「设置 → 定时任务通知」里关闭");
+      return hit.map(chipOf).join("");
+    }
+    return chs.map(chipOf).join("");
+  }
+  /* 值里要放 HTML（渠道胶囊等）时用这个，普通 KV 会转义 */
+  function cronViewKVHtml(k, html) {
+    return '<div class="cv-kv"><span class="cv-k">' + esc(k) + '</span>' +
+      '<span class="cv-v cv-v-html">' + html + '</span></div>';
+  }
   function cronViewKV(k, v, mono) {
     return '<div class="cv-kv"><span class="cv-k">' + esc(k) + '</span>' +
       '<span class="cv-v' + (mono ? " mono" : "") + '">' +
@@ -1438,9 +1478,7 @@
         cronViewKV("工作目录", t.cwd || "（默认：任务所在项目目录）", true) +
         cronViewKV("超时", t.timeout ? (t.timeout + " 秒") : "不限时") +
         cronViewKV("运行统计", "共 " + (t.run_count || 0) + " 次 · 成功 " + (t.ok_count || 0) + " · 失败 " + (t.fail_count || 0)) +
-        (t.notify_channels
-          ? cronViewKV("通知渠道", String(t.notify_channels).split(",").map(cronTaskChannelName).join(" / "))
-          : "") +
+        cronViewKVHtml("通知渠道", '<span class="cv-nf-chs">' + cronViewNotifyChips(t) + '</span>') +
         (t.remark ? cronViewKV("备注", t.remark) : "") +
       '</div>' +
       '<div class="cv-d-sub">执行记录 <span class="cv-sub">（' + runs.length + ' 条，点一行看日志）</span>' +

@@ -10,6 +10,8 @@ POST /api/ssh/fs/move      {id, path, to}         移动文件 / 文件夹到目
 POST /api/ssh/fs/delete    {id, path}             递归删除（文件 / 目录）
 GET  /api/ssh/fs/download  ?id=&path=             流式下载（attachment）
 GET  /api/ssh/fs/raw       ?id=&path=             原始字节（内嵌图片缩略图用，≤20MB）
+GET  /api/ssh/fs/stream    ?id=&path=             音视频流（支持 Range，可拖动进度）
+POST /api/ssh/fs/size      {id, path}             递归统计目录占用（条目 / 耗时都有上限）
 POST /api/ssh/fs/upload    multipart: id, path(目标目录), file
 
 连接复用 sshconn 的存储（.ssh_connections.json，密码 / 私钥 secret 加密）。
@@ -17,6 +19,7 @@ SFTP 客户端按连接 id 缓存（默认 15 分钟 TTL，惰性清理），请
 """
 import mimetypes
 import os
+import re
 import stat as _stat
 import threading
 import time
@@ -522,6 +525,183 @@ def fs_raw():
     except Exception as e:  # noqa: BLE001
         _drop(cid)
         return jsonify({"error": _ssh_err(e)}), 400
+
+
+def _parse_range(hdr, size):
+    """解析单区间 Range 头：返回 (start, end)；"bad"=区间非法；None=不处理（按全量返回）。
+    支持 bytes=a-b / bytes=a- / bytes=-n（后缀区间，mp4 找 moov 时浏览器会这么请求）。"""
+    m = re.match(r"^\s*bytes=(\d*)-(\d*)\s*$", hdr or "")
+    if not m:
+        return None
+    a, b = m.group(1), m.group(2)
+    if not a and not b:
+        return None
+    if not a:                                   # bytes=-n：最后 n 字节
+        try:
+            n = int(b)
+        except ValueError:
+            return "bad"
+        if n <= 0 or size <= 0:
+            return "bad"
+        return (max(0, size - n), size - 1)
+    try:
+        start = int(a)
+        end = int(b) if b else size - 1
+    except ValueError:
+        return "bad"
+    end = min(end, size - 1)
+    if start >= size or start > end:
+        return "bad"
+    return (start, end)
+
+
+@bp.route("/api/ssh/fs/stream", methods=["GET"])
+def fs_stream():
+    """远程音视频流：支持 HTTP Range，可暂停 / 拖进度 / 边下边播。
+
+    每次播放单独建一条 SSH 连接（不占用文件管理器共用的 SFTP 通道），
+    响应结束（或浏览器中断）时关了它。"""
+    cid = request.args.get("id", "")
+    path = request.args.get("path", "")
+    if not cid or not path:
+        return jsonify({"error": "缺少 id 或 path"}), 400
+    if not _PARAMIKO_OK:
+        return jsonify({"error": "后端未安装 paramiko，无法访问远程文件"}), 400
+    conn = _get_conn(cid)
+    if not conn:
+        return jsonify({"error": "连接不存在"}), 400
+
+    name = os.path.basename(path.rstrip("/")) or "file"
+    mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    client = sftp = None
+    try:
+        client = _connect(conn)
+        try:
+            client.get_transport().set_keepalive(30)
+        except Exception:  # noqa: BLE001
+            pass
+        sftp = client.open_sftp()
+        real = sftp.normalize(path)
+        size = int(sftp.stat(real).st_size or 0)
+    except Exception as e:  # noqa: BLE001
+        for x in (sftp, client):
+            try:
+                if x:
+                    x.close()
+            except Exception:  # noqa: BLE001
+                pass
+        return jsonify({"error": _ssh_err(e)}), 400
+
+    state = {"closed": False}
+
+    def cleanup():
+        if state["closed"]:
+            return
+        state["closed"] = True
+        for x in (sftp, client):
+            try:
+                x.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    rng = _parse_range(request.headers.get("Range"), size)
+    if rng == "bad":
+        cleanup()
+        resp = Response(status=416)
+        resp.headers["Content-Range"] = "bytes */%d" % size
+        resp.headers["Accept-Ranges"] = "bytes"
+        return resp
+    start, end = rng if rng else (0, size - 1)
+    length = max(0, end - start + 1)
+    status = 206 if rng else 200
+
+    def gen():
+        f = None
+        try:
+            f = sftp.open(real, "rb")
+            f.seek(start)                        # SFTP 支持随机读，拖动进度直接定位
+            left = length
+            while left > 0:
+                chunk = f.read(min(512 * 1024, left))
+                if not chunk:
+                    break
+                left -= len(chunk)
+                yield chunk
+        except Exception as e:  # noqa: BLE001
+            _log.warning("ssh stream interrupted: cid=%s path=%s %s", cid, real, e)
+        finally:
+            try:
+                if f:
+                    f.close()
+            except Exception:  # noqa: BLE001
+                pass
+            cleanup()
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(length),
+        "Cache-Control": "no-store",
+    }
+    if status == 206:
+        headers["Content-Range"] = "bytes %d-%d/%d" % (start, end, size)
+    resp = Response(stream_with_context(gen()), status=status, mimetype=mime, headers=headers)
+    resp.call_on_close(cleanup)                  # 生成器没跑起来（如 HEAD）也不会漏连接
+    return resp
+
+
+_SCAN_MAX_ENTRIES = 200000         # 目录统计最多扫多少条目
+_SCAN_MAX_SECONDS = 25.0           # 目录统计最长耗时（秒）
+
+
+@bp.route("/api/ssh/fs/size", methods=["POST"])
+def fs_size():
+    """递归统计远程目录的占用大小与文件 / 子目录数量（属性面板用）。
+
+    大目录可能很慢：超过 20 万条目或 25 秒就提前收工，返回 truncated=True，
+    前端据此标注「结果为部分统计」，避免一次点击把 SFTP 通道占死。"""
+    data = request.get_json(silent=True) or {}
+    cid, path = data.get("id"), data.get("path")
+    if not cid or not path:
+        return jsonify({"error": "缺少 id 或 path"}), 400
+
+    def op(sftp):
+        real = sftp.normalize(path)
+        st = sftp.stat(real)
+        if not _stat.S_ISDIR(st.st_mode):
+            size = int(st.st_size or 0)
+            return {"path": real, "is_dir": False, "size": size,
+                    "files": 1, "dirs": 0, "truncated": False}
+        total = files = dirs = 0
+        truncated = False
+        deadline = time.time() + _SCAN_MAX_SECONDS
+        stack = [real]
+        while stack:
+            cur = stack.pop()
+            try:
+                entries = sftp.listdir_attr(cur)
+            except IOError:
+                continue                        # 没权限 / 中途被删：跳过这一层
+            for a in entries:
+                mode = a.st_mode or 0
+                if _stat.S_ISDIR(mode):
+                    dirs += 1
+                    stack.append(cur.rstrip("/") + "/" + a.filename)
+                else:
+                    files += 1
+                    total += int(a.st_size or 0)
+                if files + dirs >= _SCAN_MAX_ENTRIES or time.time() > deadline:
+                    truncated = True
+                    break
+            if truncated:
+                break
+        return {"path": real, "is_dir": True, "size": total,
+                "files": files, "dirs": dirs, "truncated": truncated}
+
+    res, err = _run(cid, op)
+    if err:
+        return jsonify({"error": err}), 400
+    res["size_str"] = format_size(res["size"])
+    return jsonify(res)
 
 
 @bp.route("/api/ssh/fs/upload", methods=["POST"])

@@ -193,13 +193,15 @@
         if (t.path === "\u0000runner" && typeof openRunnerView === "function") { openRunnerView(); continue; }
         // 文件夹管理器可视化查看（虚拟路径 \u0000fm）：直接重开，当前目录由模块自己记在 localStorage
         if (t.path === "\u0000fm" && typeof openFolderManagerView === "function") { openFolderManagerView(); continue; }
-        // 远程文件管理器（虚拟路径 \u0000sshfm:<连接id>）：按 id 找回 SSH 连接后重开
-        if (typeof FM_SSHFM_PREFIX === "string" && t.path.indexOf(FM_SSHFM_PREFIX) === 0 && typeof openSshFileManagerById === "function") { openSshFileManagerById(t.path.slice(FM_SSHFM_PREFIX.length)); continue; }
-        // 远程文件查看器（虚拟路径 \u0000sshfile:<连接id>:<绝对路径>）：同样按 id 找回连接后重开
+        // 远程文件管理器（虚拟路径 \u0000sshfm:<连接id>）：按 id 找回 SSH 连接后重开。
+        // 必须 await：内部要等连接列表返回再建标签并 activate 自己，不 await 的话它会晚于
+        // 下面的「恢复上次活动标签」，刷新后焦点就被远程标签抢走（当前页被切走）。
+        if (typeof FM_SSHFM_PREFIX === "string" && t.path.indexOf(FM_SSHFM_PREFIX) === 0 && typeof openSshFileManagerById === "function") { await openSshFileManagerById(t.path.slice(FM_SSHFM_PREFIX.length)); continue; }
+        // 远程文件查看器（虚拟路径 \u0000sshfile:<连接id>:<绝对路径>）：同样按 id 找回连接后重开（同样要 await）
         if (typeof FM_SSHFILE_PREFIX === "string" && t.path.indexOf(FM_SSHFILE_PREFIX) === 0) {
           const _fmRest = t.path.slice(FM_SSHFILE_PREFIX.length);
           const _fmI = _fmRest.indexOf(":");
-          if (_fmI > 0 && typeof openSshFileRestored === "function") openSshFileRestored(_fmRest.slice(0, _fmI), _fmRest.slice(_fmI + 1));
+          if (_fmI > 0 && typeof openSshFileRestored === "function") await openSshFileRestored(_fmRest.slice(0, _fmI), _fmRest.slice(_fmI + 1));
           continue;
         }
         // 旧版会话快照里可能存了 "ssh:<id>"（不带 \u0000 前缀的 SSH 终端假标签）：跳过不恢复

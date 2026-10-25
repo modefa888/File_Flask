@@ -1130,6 +1130,7 @@
     // 延到下一个事件循环：DOM 刚切过来，避免和 activate 内部的渲染抢执行
     setTimeout(() => {
       if (!cronViewActive()) return;
+      cronViewFitCols();                            // 后台标签页创建时宽度是 0，切回来要重算列
       cronViewRefresh().catch(() => {});
       cronViewTick();
     }, 0);
@@ -1342,6 +1343,26 @@
     cronViewBindHead();
     cronViewPaintRows();
     cronViewRenderDetail();
+    cronViewWatchSize();
+  }
+  /* 表格宽度自适应：右侧详情展开后主区会变窄（约 700px），固定列宽会把「计划」挤没，
+     所以窄的时候把「命令」列折进名称下方，把宽度让给名称 / 计划；再窄就把「上次运行」也收起。 */
+  var cronViewRO = null;
+  function cronViewFitCols() {
+    const view = $("cronView");
+    const wrap = document.querySelector("#cronView .cv-table-wrap");
+    if (!view || !wrap) return;
+    const w = wrap.clientWidth || 0;
+    view.classList.toggle("cv-narrow", w > 0 && w < 900);
+    view.classList.toggle("cv-tiny", w > 0 && w < 640);
+  }
+  function cronViewWatchSize() {
+    cronViewFitCols();
+    const wrap = document.querySelector("#cronView .cv-table-wrap");
+    if (!wrap || typeof ResizeObserver === "undefined") return;
+    if (!cronViewRO) cronViewRO = new ResizeObserver(cronViewFitCols);
+    cronViewRO.disconnect();                        // 整页重建过：旧节点已经不在文档里
+    cronViewRO.observe(wrap);
   }
   function cronViewRowHtml(t) {
     const stKey = t.running ? "running" : (t.last_status || "");
@@ -1352,9 +1373,14 @@
     return '<tr class="cv-row' + on + off + '" data-tid="' + t.id + '">' +
       '<td class="cv-c"><input type="checkbox" data-sel="' + t.id + '"' + sel + '></td>' +
       '<td class="cv-name"><div class="cv-name-t" title="' + escAttr(t.name) + '">' + esc(t.name) + '</div>' +
-        (t.remark ? '<div class="cv-sub" title="' + escAttr(t.remark) + '">' + esc(t.remark) + '</div>' : "") + '</td>' +
+        (t.remark ? '<div class="cv-sub" title="' + escAttr(t.remark) + '">' + esc(t.remark) + '</div>' : "") +
+        /* 窄屏下命令列会被折叠，这里留一份，避免看不到执行命令 */
+        '<div class="cv-sub cv-name-cmd" title="' + escAttr(t.command) + '">' + esc(t.command) + '</div></td>' +
       '<td class="cv-plan"><code>' + esc(t.cron) + '</code>' +
-        (t.next && t.next.length ? '<div class="cv-next" title="接下来的运行时间">' + esc(t.next.slice(0, 2).join("  ·  ")) + '</div>' : "") + '</td>' +
+        (t.next && t.next.length
+          ? '<div class="cv-next" title="接下来的运行时间：' + escAttr(t.next.join(" · ")) + '">下次 ' +
+            esc(t.next[0]) + '</div>'
+          : "") + '</td>' +
       '<td><span class="ci-st ' + si[1] + '">' + esc(si[0]) + '</span>' +
         '<div class="cv-tgl">' +
           '<button class="cv-tgl-btn ' + (t.enabled ? "off" : "on") + '" data-act="toggle" title="' +
@@ -1363,9 +1389,10 @@
             '<i class="bi ' + (t.enabled ? "bi-pause-circle" : "bi-play-circle") + '"></i>' +
             (t.enabled ? "停止" : "启动") + '</button>' +
         '</div></td>' +
-      '<td class="cv-cmd" title="' + escAttr(t.command) + '">' + esc(t.command) + '</td>' +
-      '<td class="cv-last">' + (t.last_at
-        ? esc(cronFmtTime(t.last_at)) + '<div class="cv-sub">' + cronFmtDur(t.last_ms) + ' · 共 ' + (t.run_count || 0) + ' 次</div>'
+      '<td class="cv-cmd" title="' + escAttr(t.command) + '"><span class="cv-cmd-t">' + esc(t.command) + '</span></td>' +
+      /* 列宽有限：列表里只到分钟，完整到秒的时间放 title */
+      '<td class="cv-last" title="' + (t.last_at ? escAttr(cronFmtTime(t.last_at)) : "从未运行") + '">' + (t.last_at
+        ? esc(cronFmtTime(t.last_at).slice(0, 11)) + '<div class="cv-sub">' + cronFmtDur(t.last_ms) + ' · 共 ' + (t.run_count || 0) + ' 次</div>'
         : '<span class="cv-sub">从未运行</span>') + '</td>' +
       '<td class="cv-a">' +
         (t.running

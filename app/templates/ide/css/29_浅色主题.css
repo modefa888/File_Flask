@@ -1520,6 +1520,7 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .cron-view .cv-head { background: #f5f5f5; border-bottom-color: #e3e3e3; }
 :where(html.theme-light) .cron-view .cv-title { color: #1f2328; }
 :where(html.theme-light) .cron-view .cv-stats { color: #6b6b6b; }
+:where(html.theme-light) .cron-view .cv-stat { background: #ffffff; border-color: #e1e4e8; }
 :where(html.theme-light) .cron-view .cv-stat b { color: #1f2328; }
 :where(html.theme-light) .cron-view .cv-stat.ok b { color: #1a7f37; }
 :where(html.theme-light) .cron-view .cv-stat.run b { color: #0969da; }
@@ -1529,24 +1530,44 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .cron-view .cv-btn { background: #efefef; border-color: #d5d5d5; color: #333333; }
 :where(html.theme-light) .cron-view .cv-btn:hover { border-color: #a8a8a8; color: #000000; }
 :where(html.theme-light) .cron-view .cv-batch { background: #e3f0fb; border-color: #a8c8e8; color: #0b5c9a; }
-:where(html.theme-light) .cron-view .cv-table thead th { background: #f7f7f7; color: #6b6b6b; border-bottom-color: #e3e3e3; }
-:where(html.theme-light) .cron-view .cv-table td { color: #333333; border-bottom-color: #eeeeee; }
-:where(html.theme-light) .cron-view .cv-row:hover td { background: #f6f8fa; }
-:where(html.theme-light) .cron-view .cv-row.on td { background: #e3f0fb; }
+:where(html.theme-light) .cron-view .cv-table thead th { background: #f7f8fa; color: #6b7280; border-bottom-color: #e5e7eb; }
+:where(html.theme-light) .cron-view .cv-table td { color: #374151; border-bottom-color: #f0f1f3; }
+:where(html.theme-light) .cron-view .cv-row:hover td { background: #f7f9fb; }
+:where(html.theme-light) .cron-view .cv-row.on td { background: #eaf4fd; }
+:where(html.theme-light) .cron-view .cv-row:hover td:first-child { box-shadow: inset 2px 0 0 #c7d2de; }
+:where(html.theme-light) .cron-view .cv-row.on td:first-child { box-shadow: inset 2px 0 0 #0969da; }
+:where(html.theme-light) .cron-view .cv-row:hover .cv-name-t { color: #000000; }
 :where(html.theme-light) .cron-view .cv-name-t { color: #1f2328; }
-:where(html.theme-light) .cron-view .cv-row.off .cv-name-t,
-:where(html.theme-light) .cron-view .cv-row.off .cv-cmd { color: #9a9a9a; }
+:where(html.theme-light) .cron-view .cv-row.off .cv-name-t { color: #9a9a9a; }
+:where(html.theme-light) .cron-view .cv-row.off .cv-cmd,
+:where(html.theme-light) .cron-view .cv-row.off .cv-name-cmd { color: #a8a8a8; }
+:where(html.theme-light) .cron-view .cv-row.off .cv-plan code { color: #b08a5a; border-color: #ececee; }
 :where(html.theme-light) .cron-view .cv-sub { color: #8a8a8a; }
-:where(html.theme-light) .cron-view .cv-plan code { background: #f4f4f4; border-color: #e0e0e0; color: #8a5a00; }
+:where(html.theme-light) .cron-view .cv-name-cmd { color: #9aa4b2; }
+:where(html.theme-light) .cron-view .cv-plan code { background: #f6f6f7; border-color: #e6e6e8; color: #9a5b00; }
 :where(html.theme-light) .cron-view .cv-next { color: #1a7f37; }
-:where(html.theme-light) .cron-view .cv-cmd { color: #33404d; }
-:where(html.theme-light) .cron-view .cv-last { color: #333333; }
-:where(html.theme-light) .cron-view .cv-tgl-btn { background: #efefef; border-color: #d5d5d5; color: #4a5560; }
-:where(html.theme-light) .cron-view .cv-tgl-btn:hover { border-color: #a8a8a8; color: #1f2328; }
-:where(html.theme-light) .cron-view .cv-tgl-btn.on { background: #e6f4ea; border-color: #9dd3a8; color: #1a7f37; }
-:where(html.theme-light) .cron-view .cv-tgl-btn.off { background: #fdecea; border-color: #e8b0b0; color: #c0392b; }
-:where(html.theme-light) .cron-view .cv-ico { background: #e8e8e8; }
-:where(html.theme-light) .cron-view .cv-ico:hover { background: #dcdcdc; }
+:where(html.theme-light) .cron-view .cv-cmd { color: #6b7280; }
+:where(html.theme-light) .cron-view .cv-row:hover .cv-cmd { color: #374151; }
+:where(html.theme-light) .cron-view .cv-last { color: #374151; }
+:where(html.theme-light) .cron-view .cv-tgl-btn { background: transparent; border-color: transparent; color: #6b7280; }
+:where(html.theme-light) .cron-view .cv-tgl-btn:hover { background: #eef1f4; border-color: #e3e7ec; color: #111827; }
+:where(html.theme-light) .cron-view .cv-tgl-btn.on { background: transparent; border-color: transparent; color: #1a7f37; }
+:where(html.theme-light) .cron-view .cv-tgl-btn.on:hover { background: #e9f7ee; border-color: #c6e8d0; color: #12692c; }
+:where(html.theme-light) .cron-view .cv-tgl-btn.off { background: transparent; border-color: transparent; color: #c0392b; }
+:where(html.theme-light) .cron-view .cv-tgl-btn.off:hover { background: #fdecea; border-color: #f0cfcb; color: #9b2c1c; }
+:where(html.theme-light) .cron-view .cv-ico { background: transparent; color: #8a94a0; }
+:where(html.theme-light) .cron-view .cv-ico:hover { background: #eef1f4; border-color: #e3e7ec; color: #111827; }
+:where(html.theme-light) .cron-view .cv-ico.v-run:hover { background: #e9f7ee; border-color: #c6e8d0; color: #1a7f37; }
+:where(html.theme-light) .cron-view .cv-ico.v-stop:hover { background: #fdecea; border-color: #f0cfcb; color: #c0392b; }
+:where(html.theme-light) .cron-view .cv-ico.v-edit:hover { background: #e8f2fd; border-color: #bcd8f5; color: #0969da; }
+:where(html.theme-light) .cron-view .cv-ico.v-copy:hover { background: #f7eefc; border-color: #e3cdee; color: #8250df; }
+:where(html.theme-light) .cron-view .cv-ico.v-del:hover { background: #fdecea; border-color: #f0cfcb; color: #c0392b; }
+/* 状态徽标（大页）：浅底 + 圆点，白底上也能看清 */
+:where(html.theme-light) .cron-view .ci-st { background: #f1f2f4; color: #6b7280; }
+:where(html.theme-light) .cron-view .ci-st.ok { background: #e9f7ee; color: #1a7f37; }
+:where(html.theme-light) .cron-view .ci-st.bad { background: #fdecea; color: #c0392b; }
+:where(html.theme-light) .cron-view .ci-st.warn { background: #fff4e0; color: #8a5a00; }
+:where(html.theme-light) .cron-view .ci-st.run { background: #e3f0fb; color: #0b5c9a; }
 :where(html.theme-light) .cron-view .cv-detail { background: #fafafa; border-left-color: #e3e3e3; }
 :where(html.theme-light) .cron-view .cv-d-head { border-bottom-color: #e3e3e3; }
 :where(html.theme-light) .cron-view .cv-d-title { color: #1f2328; }

@@ -13,7 +13,9 @@
   store_meta 的 `update_last`，重启后页面能回显「上次更新是否成功」）。
 - **重启方式**（配置项 `restart_mode`）：
     exec    —— `os.execv` 原地替换进程（适合 `python run.py` / 打包后的可执行文件，
-               端口不中断太久；仅在本进程就是服务主进程时可用）；
+               仅在本进程就是服务主进程时可用）。注意 werkzeug 会把监听 socket 标成
+               「可继承」，execv 后新进程会继续持有该 socket 导致 Address already in use，
+               因此替换前必须先调 `_release_listen_ports()` 把标志去掉；
     exit    —— 更新完直接退出，由 systemd / supervisor / pm2 的自动重启拉起
                （服务单元里必须配置了 Restart=always，否则服务会停）；
     command —— 执行自定义重启命令（如 `systemd-run --no-block systemctl restart xxx`）；
@@ -864,7 +866,105 @@ def _can_self_exec():
     if (sys.argv[0] or "").endswith("__main__.py"):
         return False, ("当前通过 `python -m` 方式启动，自动替换进程不可靠。"
                        "建议改用「退出进程，由守护进程拉起」或「自定义重启命令」。")
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        # debug 模式下监听 socket 由 reloader 父进程持有，替换子进程只会多出半个服务
+        return False, ("当前运行在 Flask 调试重载子进程中（debug 模式），原地重启会残留父进程"
+                       "占用的端口。建议关闭调试模式，或改用「退出进程，由守护进程拉起」"
+                       "「自定义重启命令」。")
     return True, ""
+
+
+def _listen_port():
+    """当前服务实际监听的端口：优先 --port/-P 参数，其次 config.PORT。"""
+    argv = sys.argv[1:]
+    for i, arg in enumerate(argv):
+        if arg in ("--port", "-P") and i + 1 < len(argv):
+            try:
+                return int(argv[i + 1])
+            except (TypeError, ValueError):
+                pass
+        if arg.startswith("--port="):
+            try:
+                return int(arg.split("=", 1)[1])
+            except (TypeError, ValueError):
+                pass
+    try:
+        return int(config.PORT)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _proc_listen_fds(port=None):
+    """兜底：不依赖 psutil，扫 /proc/self/fd 找出本进程中处于 LISTEN 的 socket fd。"""
+    targets = {}
+    try:
+        names = os.listdir("/proc/self/fd")
+    except OSError:
+        return []
+    for name in names:
+        try:
+            fd = int(name)
+            link = os.readlink("/proc/self/fd/" + name)
+        except (OSError, ValueError):
+            continue
+        if link.startswith("socket:["):
+            targets[link[8:-1]] = fd      # inode -> fd
+    if not targets:
+        return []
+    out = []
+    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(path, "r") as fp:
+                next(fp, None)                 # 跳过表头
+                for line in fp:
+                    parts = line.split()
+                    if len(parts) < 10 or parts[3] != "0A":   # 0A = LISTEN
+                        continue
+                    fd = targets.get(parts[9])                # 第 10 列是 inode
+                    if fd is None:
+                        continue
+                    if port:
+                        try:
+                            if int(parts[1].rsplit(":", 1)[1], 16) != port:
+                                continue
+                        except (IndexError, ValueError):
+                            continue
+                    out.append(fd)
+        except OSError:
+            continue
+    return out
+
+
+def _release_listen_ports(port=0):
+    """把本进程的监听 socket 改回「不可继承」，让 os.execv 时由内核关闭并释放端口。
+
+    坑点：werkzeug 的 run_simple 为了让调试重载的子进程复用端口，会执行
+    `srv.socket.set_inheritable(True)`，监听 socket 因此带上可继承标志。
+    os.execv 之后新进程映像仍然持有这个处于 LISTEN 的 socket，再 bind 同一端口
+    必然报「Address already in use」，表现为：更新日志一切正常、重启后服务起不来。
+    这里在 execv 前把标志去掉（不 close，避免主线程的 serve_forever 立刻崩）。
+    """
+    fds = []
+    try:
+        import psutil
+        for conn in psutil.Process().net_connections(kind="inet"):
+            if conn.status != psutil.CONN_LISTEN or not conn.fd or conn.fd < 0:
+                continue
+            if port and conn.laddr and conn.laddr.port != port:
+                continue
+            fds.append(conn.fd)
+    except Exception:
+        fds = []
+    if not fds:
+        fds = _proc_listen_fds(port)
+    released = []
+    for fd in fds:
+        try:
+            os.set_inheritable(fd, False)
+            released.append(fd)
+        except OSError:
+            continue
+    return released
 
 
 def _spawn_self():
@@ -873,6 +973,11 @@ def _spawn_self():
         argv = [sys.executable] + list(sys.argv[1:])
     else:
         argv = [sys.executable] + list(sys.argv)
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
     os.execv(sys.executable, argv)
 
 
@@ -924,9 +1029,19 @@ def _do_restart(cfg, run):
         run["result"] = "原地重启（os.execv）"
     _save_last(run)
 
+    port = _listen_port()
+
     def _boot():
         time.sleep(2.0)
         try:
+            # 必须先放开监听 socket 的「可继承」标志，否则 execv 后新进程仍占着端口
+            released = _release_listen_ports(port)
+            if released:
+                _log.info("[在线更新] 已释放监听端口（port=%s fd=%s），即将原地重启",
+                          port or "-", released)
+            else:
+                _log.warning("[在线更新] 未能识别监听端口（port=%s）：若重启后提示端口被占用，"
+                             "请手动重启服务", port or "-")
             _spawn_self()
         except Exception as e:                 # execv 失败：至少不要静默死掉
             _log.error("自动重启失败: %s", e)

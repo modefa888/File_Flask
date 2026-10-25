@@ -202,6 +202,8 @@ try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'li
 {# 敏感字段传输加密：注入 RSA 公钥 + 纯 JS 加密工具（供各提交处调用 window.TP） #}
 <script>window.__tpPub = {{ (tp_pub or {'enabled': false})|tojson }};</script>
 <script>window.__collabUser = {{ (collab_user or '')|tojson }};</script>
+{# 应用版本号：来自 app/config.py 的 APP_VERSION，「帮助 → 关于」里展示 #}
+<script>window.__appVersion = {{ (app_version or '')|tojson }};</script>
 <script>
 {% include 'ide/js/24_敏感字段传输加密.js' %}
 </script>

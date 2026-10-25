@@ -280,3 +280,47 @@
   .np-msg { min-height: 16px; margin-top: 8px; font-size: 12px; color: #8a8a8a; word-break: break-all; }
   .np-msg.err { color: #e08a8a; }
   .fp-hint { margin-top: 8px; font-size: 11px; color: #777; }
+
+  /* ===== 「帮助 → 关于」面板（宽弹窗，两列功能分组） ===== */
+  .ide-modal .ab-head { text-align: center; padding-bottom: 14px; border-bottom: 1px solid #333333; }
+  .ide-modal .ab-logo {
+    width: 42px; height: 42px; margin: 0 auto 9px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; font-size: 21px; color: #ffffff;
+    background: linear-gradient(135deg, #0d7ec4, #4fc1ff);
+    box-shadow: 0 4px 14px rgba(13, 126, 196, .35);
+  }
+  .ide-modal .ab-name {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    font-size: 16px; font-weight: 600; color: #f0f0f0;
+  }
+  .ide-modal .ab-ver {
+    font-size: 11px; font-weight: 500; color: #4fc1ff; line-height: 1.6;
+    background: rgba(79, 193, 255, .12); border: 1px solid rgba(79, 193, 255, .38);
+    border-radius: 10px; padding: 0 8px;
+  }
+  .ide-modal .ab-sub { margin-top: 6px; font-size: 12px; color: #9a9a9a; }
+  .ide-modal .ab-grps {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; margin-top: 14px;
+  }
+  .ide-modal .ab-grp { min-width: 0; }
+  .ide-modal .ab-t {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12.5px; font-weight: 600; color: #dcdcdc;
+  }
+  .ide-modal .ab-t .bi { color: #4fc1ff; }
+  .ide-modal .ab-d { margin-top: 5px; font-size: 12px; line-height: 1.75; color: #a8a8a8; }
+  .ide-modal .ab-foot {
+    margin-top: 15px; padding-top: 11px; border-top: 1px solid #333333;
+    font-size: 11.5px; line-height: 1.8; color: #8a8a8a;
+  }
+  @media (max-width: 640px) { .ide-modal .ab-grps { grid-template-columns: 1fr; } }
+  :where(html.theme-light) .ide-modal .ab-head { border-bottom-color: #e0e0e0; }
+  :where(html.theme-light) .ide-modal .ab-name { color: #1f2328; }
+  :where(html.theme-light) .ide-modal .ab-ver {
+    color: #0d7ec4; background: rgba(13, 126, 196, .08); border-color: rgba(13, 126, 196, .35);
+  }
+  :where(html.theme-light) .ide-modal .ab-sub { color: #6a6a6a; }
+  :where(html.theme-light) .ide-modal .ab-t { color: #1f2328; }
+  :where(html.theme-light) .ide-modal .ab-t .bi { color: #0d7ec4; }
+  :where(html.theme-light) .ide-modal .ab-d { color: #4a4a4a; }
+  :where(html.theme-light) .ide-modal .ab-foot { color: #6a6a6a; border-top-color: #e0e0e0; }

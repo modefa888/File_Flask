@@ -728,6 +728,49 @@
   const uiConfirm = (title, msg, okText, danger) => uiModal({ title, icon: danger ? "bi-exclamation-triangle" : "bi-question-circle", msg, okText: okText || "确定", danger: !!danger });
   const uiAlert = (title, msg) => uiModal({ title, icon: "bi-info-circle", msg, hideCancel: true, okText: "知道了" });
 
+  /* ---------- 帮助 → 关于 ----------
+     按 IDE 实际具备的能力分组写，避免「关于」只有一句话时看不出这个页面能干什么。
+     版本号来自后端 app/config.py 的 APP_VERSION（由 /ide 页面注入 window.__appVersion），
+     取不到时回退占位值，避免显示 undefined。 */
+  const IDE_VERSION = String(window.__appVersion || "1.0.0").replace(/^v/i, "");
+  const ABOUT_GROUPS = [
+    { icon: "bi-pencil-square", title: "编辑与浏览",
+      items: "多标签 / 分屏、语法高亮、代码折叠、IntelliSense 自动补全、查找替换（正则 · 全字 · " +
+             "区分大小写）、Markdown 三态预览、表格（xlsx / csv）编辑、图片 · 视频 · SQLite 直接查看" },
+    { icon: "bi-terminal", title: "运行与终端",
+      items: "F5 运行当前文件、Ctrl+F5 后台服务模式、输出日志实时推送、后台任务与历史日志、" +
+             "运行环境探测与一键安装、多终端会话、终端 AI 助手、SSH 远程终端" },
+    { icon: "bi-code-branch", title: "工程与协作",
+      items: "Git 源代码管理（暂存 · 提交 · 差异 · 放弃改动）、实时协作编辑与版本对比、单文件分享、" +
+             "文件时间线、后台改动自动刷新" },
+    { icon: "bi-tools", title: "工具与扩展",
+      items: "数据库连接（MySQL · PostgreSQL · SQLite · Redis · MongoDB）、HTTP 接口调试、" +
+             "定时任务（cron）、进程资源管理器、文件夹管理器、插件系统（宿主 API 沙箱）" },
+  ];
+  function showAbout() {
+    const groups = ABOUT_GROUPS.map((g) =>
+      '<div class="ab-grp"><div class="ab-t"><i class="bi ' + g.icon + '"></i>' + esc(g.title) + "</div>" +
+      '<div class="ab-d">' + esc(g.items) + "</div></div>").join("");
+    uiModal({
+      title: "关于",
+      icon: "bi-info-circle",
+      wide: true,
+      hideCancel: true,
+      okText: "知道了",
+      html:
+        '<div class="ab-head">' +
+          '<div class="ab-logo"><i class="bi bi-code-slash"></i></div>' +
+          '<div class="ab-name">在线项目 IDE<span class="ab-ver">v' + esc(IDE_VERSION) + "</span></div>" +
+          '<div class="ab-sub">浏览器里的文件管理 + 代码编辑 + 运行调试工作台</div>' +
+        "</div>" +
+        '<div class="ab-grps">' + groups + "</div>" +
+        '<div class="ab-foot">' +
+          "安全与配置：命令安全策略 · 敏感字段传输加密 · .env 可视化编辑 · 通知（桌面 / 邮件）<br>" +
+          "基于 CodeMirror 5 · xterm.js · Flask 构建　|　Ctrl+P 快速打开文件" +
+        "</div>",
+    });
+  }
+
   /* 轻量二次确认悬浮框：贴着触发元素弹出（下方空间不足自动改上方）。
      点击弹窗外部 / Esc = 取消；返回 Promise<boolean>，用于 Git 面板等高频危险操作 */
   function uiConfirmPop(anchor, opts) {
@@ -943,7 +986,7 @@
     ],
     help: [
       { label: "键盘快捷方式", icon: "bi-keyboard", act: showShortcuts },
-      { label: "关于", icon: "bi-info-circle", act: () => uiAlert("关于", "在线项目 IDE\n基于 CodeMirror 的自建轻量代码编辑器\n支持多标签、语法高亮、差异确认保存。") },
+      { label: "关于", icon: "bi-info-circle", act: showAbout },
     ],
   };
 

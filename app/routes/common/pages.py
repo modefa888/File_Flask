@@ -3,6 +3,7 @@ import re
 
 from flask import Blueprint, make_response, redirect, render_template, request
 
+from ... import config
 from ...log import get_logger
 from ...services.common import transport
 
@@ -84,6 +85,8 @@ def ide_entry():
         return redirect(f"/collab?collab={token}" if token else "/collab")
     _log.info("GET /ide path=%s", request.args.get("path", ""))
     # 注入传输加密公钥：前端提交 Token / API Key 前用它加密（见 services/common/transport.py）；
-    # 同时注入登录用户名，协作编辑用做固定昵称（不能再随机生成）
+    # 同时注入登录用户名，协作编辑用做固定昵称（不能再随机生成）；
+    # app_version 供「帮助 → 关于」显示版本号（app/config.py 的 APP_VERSION）
     return _render_page("ide/ide.html", tp_pub=transport.public_key_payload(),
-                        collab_user=current_username())
+                        collab_user=current_username(),
+                        app_version=config.APP_VERSION)

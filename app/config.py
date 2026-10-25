@@ -45,6 +45,10 @@ DEBUG = _env_bool("DEBUG", False)
 HOST = _env_str("HOST", "0.0.0.0")
 PORT = _env_int("PORT", 5001)
 
+# 应用版本号：IDE 的「帮助 → 关于」等处展示。
+# 发版时改这里，或用环境变量 APP_VERSION 覆盖（不想动代码时用 .env 更省事）。
+APP_VERSION = _env_str("APP_VERSION", "1.0.0")
+
 # ===== 凭据加密盐 =====
 # Git Token / AI API Key / SMTP 授权码 / Telegram Bot Token 等落库前一律加密保存，
 # 这里配置派生加密密钥（PBKDF2-HMAC-SHA256）所用的盐。

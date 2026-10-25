@@ -7,9 +7,10 @@
        · 重启本服务 -> 自动重新接管仍在运行的进程，继续跟踪日志。
      var 声明，避免 showPanel 提前调用时命中 TDZ。
      ================================================================== */
-  var RUNNER = { timer: null, tasks: [], holdUntil: 0, rightHoldUntil: 0, polling: false };
+  var RUNNER = { timer: null, tasks: [], all: [], holdUntil: 0, rightHoldUntil: 0, polling: false };
   const RUNNER_EMPTY_HTML =
-    '<div class="ph">暂时没有运行任务。<br>在「运行和调试」面板点「运行当前文件」或「后台运行（服务模式）」。</div>';
+    '<div class="ph">还没有后台任务。<br>这里只列长期运行的程序（「后台运行（服务模式）」启动的，' +
+    '或前台运行后转后台的）。F5 前台运行的脚本跑完就结束，不会留在这里。</div>';
 
   function fmtDur(sec) {
     sec = Math.max(0, Math.round(sec || 0));
@@ -223,9 +224,13 @@
       const r = await fetch("/api/run/tasks");
       const d = await r.json();
       if (d.error) throw new Error(d.error);
-      RUNNER.tasks = d.tasks || [];
+      const all = d.tasks || [];
+      RUNNER.all = all;                                   // 全量（含前台）：只给「是否已在运行」这类判断用
+      // 「后台任务」列表只列后台任务（mode=bg）：F5 前台跑的脚本属于一次性运行，
+      // 跑完就结束，不该堆在这里；前台运行中想转常驻走「转后台」。
+      RUNNER.tasks = all.filter(t => t && t.mode !== "fg");
       if (typeof applyRunnerAliases === "function") applyRunnerAliases();   // 套用自定义显示名
-      setRunnerBadge(d.running || 0);
+      setRunnerBadge(RUNNER.tasks.filter(t => t && t.running).length);
       renderRunnerList();
       if (typeof rvSync === "function") rvSync();   // 编辑区「后台任务」面板开着时同步刷新
       refreshTaskInfo();   // 详情悬浮框开着时，同步刷新内容
@@ -422,7 +427,7 @@
     let last = "";
     try { last = localStorage.getItem("ide.run.lastLog") || ""; } catch (e) { last = ""; }
     if (!last) return;
-    const t = (RUNNER.tasks || []).filter(x => x.id === last)[0];
+    const t = (RUNNER.all || RUNNER.tasks || []).filter(x => x.id === last)[0];
     if (!t) {                                    // 任务已被移除 / 清理 → 忘掉它
       try { localStorage.removeItem("ide.run.lastLog"); } catch (e) { /* 忽略 */ }
       return;
@@ -434,7 +439,7 @@
      「行号旁 ⏸」＋「上次在看的输出面板」，而不是退回到未运行的样子。 */
   function restoreRunnerState() {
     loadRunnerList({ silent: true }).then(() => {
-      if (window.restoreFgOnLoad) window.restoreFgOnLoad(RUNNER.tasks);   // 前台：接回「输出」面板
+      if (window.restoreFgOnLoad) window.restoreFgOnLoad(RUNNER.all || RUNNER.tasks);   // 前台：接回「输出」面板
       maybeAttachOnLoad();                                                // 后台：接回上次看的日志
     });
   }

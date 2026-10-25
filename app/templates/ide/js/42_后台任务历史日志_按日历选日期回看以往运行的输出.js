@@ -42,7 +42,7 @@ function rvhCurTarget() { const t = rvCur(); return t ? String(t.target || "") :
 function rvhName(it) {
   const tgt = String((it && it.target) || "");
   if (tgt) {
-    const t = (RUNNER.tasks || []).filter(x => String(x.target || "") === tgt)[0];
+    const t = (RUNNER.all || RUNNER.tasks || []).filter(x => String(x.target || "") === tgt)[0];
     if (t && t.name) return t.name;
   }
   return String((it && (it.name || it.target)) || "任务");
@@ -239,7 +239,7 @@ function rvHistRenderAll() {
    只在「范围」真的变了才重绘列表，避免把用户正要点的条目换掉。 */
 function rvHistOnPaint() {
   if (!RVH.el) return;
-  const key = (RVH.onlyCur ? rvhCurTarget() : "*") + "|" + (RUNNER.tasks || []).length;
+  const key = (RVH.onlyCur ? rvhCurTarget() : "*") + "|" + ((RUNNER.all || RUNNER.tasks) || []).length;
   if (key === RVH.paintKey) return;
   RVH.paintKey = key;
   rvHistRenderScope();
@@ -264,7 +264,7 @@ function rvHistRenderScope() {
   if (!el) return;
   el.textContent = (RVH.onlyCur && cur)
     ? "范围：仅「" + name + "」"
-    : "范围：全部任务（共 " + (RUNNER.tasks || []).length + " 个任务）";
+    : "范围：全部任务（共 " + ((RUNNER.all || RUNNER.tasks) || []).length + " 个任务）";
   el.title = el.textContent;
 }
 function rvHistRenderList() {

@@ -104,7 +104,7 @@ function rvAliasGet(t) {
 }
 /* 把别名写回任务的 name：侧栏卡片、详情悬浮框、各确认提示、本视图标题都读 name，改一处即全同步 */
 function applyRunnerAliases() {
-  (RUNNER.tasks || []).forEach(t => {
+  (RUNNER.all || RUNNER.tasks || []).forEach(t => {
     if (!t) return;
     if (!t.orig_name) t.orig_name = t.name || "";
     t.name = rvAliasGet(t) || t.orig_name;

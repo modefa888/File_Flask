@@ -272,7 +272,7 @@
     });
     /* 刷新后恢复：后端持久化了任务，本次会话还没有对应的日志标签，
        但程序其实仍在跑 —— 不把它们算进去，行号旁的按钮会退回 ▶（点了还会重复启动）。 */
-    (RUNNER && RUNNER.tasks || []).forEach(t => {
+    ((RUNNER && (RUNNER.all || RUNNER.tasks)) || []).forEach(t => {
       if (t.running && t.target) map[t.target] = t.id;
     });
     return map;
@@ -299,7 +299,8 @@
     return xa ? x.endsWith("/" + y) : y.endsWith("/" + x);   // 一个是另一个的相对路径
   }
   function runningTaskFor(target) {
-    const t = (RUNNER && RUNNER.tasks || []).filter(x => x && x.running && sameRunPath(x.target, target))[0];
+    const t = ((RUNNER && (RUNNER.all || RUNNER.tasks)) || [])
+      .filter(x => x && x.running && sameRunPath(x.target, target))[0];
     if (t) return t;
     // 刚启动的前台任务可能还没进入列表：如果看的正好是它，也算
     if (RUNBG.id && sameRunPath(RUNBG.target, target)) {

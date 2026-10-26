@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS v2ray_nodes (
     raw        TEXT DEFAULT '',
     node_json  TEXT DEFAULT '',
     remark     TEXT DEFAULT '',
+    grp        TEXT DEFAULT '',
     sort       INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL DEFAULT 0
 );
@@ -83,6 +84,12 @@ def init_db():
             conn.executescript(_SCHEMA)
     except Exception as e:                      # noqa: BLE001
         _log.warning("V2Ray 表初始化失败: %s", e)
+    # 旧库迁移：v2ray_nodes 补 grp（自定义分组）列，已存在则忽略
+    try:
+        with store_tx() as conn:
+            conn.execute("ALTER TABLE v2ray_nodes ADD COLUMN grp TEXT DEFAULT ''")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +300,8 @@ _NODE_JSON_FIELDS = ("uuid", "aid", "scy", "flow", "method", "password",
                      "fp", "pbk", "sid", "spx", "insecure")
 
 
-def update_node(nid, name=None, remark=None, server=None, port=None, fields=None):
-    """更新节点：name/remark/server/port 是行内列；fields 是连接参数（并入 node_json）。"""
+def update_node(nid, name=None, remark=None, server=None, port=None, fields=None, grp=None):
+    """更新节点：name/remark/grp/server/port 是行内列；fields 是连接参数（并入 node_json）。"""
     sets, args = [], []
     if name is not None:
         sets.append("name=?")
@@ -302,6 +309,9 @@ def update_node(nid, name=None, remark=None, server=None, port=None, fields=None
     if remark is not None:
         sets.append("remark=?")
         args.append(str(remark))
+    if grp is not None:
+        sets.append("grp=?")
+        args.append(str(grp).strip())
     if server is not None:
         sets.append("server=?")
         args.append(str(server).strip())

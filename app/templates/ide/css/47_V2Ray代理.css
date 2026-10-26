@@ -582,6 +582,22 @@
 .v2-save-info .v2-save-tip { justify-content: flex-start; font-size: 10.5px; color: #7a7a83; margin-top: 4px; }
 :where(html.theme-light) .v2-save-info span { color: #5d626b; }
 :where(html.theme-light) .v2-save-info b { color: #23262d; }
+/* 节点列表 tab 分组 */
+.v2v-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; }
+.v2v-tab {
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid rgba(150, 151, 161, .25);
+  background: transparent;
+  color: #9a9ca6;
+  cursor: pointer;
+}
+.v2v-tab:hover { color: #cfd1d8; border-color: rgba(150, 151, 161, .45); }
+.v2v-tab.on { background: rgba(77, 155, 255, .18); border-color: transparent; color: #8ecaff; }
+:where(html.theme-light) .v2v-tab { border-color: #d8dbe2; color: #6b7280; }
+:where(html.theme-light) .v2v-tab:hover { color: #374151; border-color: #b6bac4; }
+:where(html.theme-light) .v2v-tab.on { background: #e0ecfd; color: #1d4ed8; border-color: transparent; }
 
 /* --- 概览指标卡 --- */
 .v2v-stats {

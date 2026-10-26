@@ -24,6 +24,7 @@
                pick: "", selSub: null, logTimer: null, autoLog: false, log: "",
                trafTimer: null, traffic: null,
                busy: false, showManual: false, exit: null, ping: {}, dl: {}, kw: "",
+               nodeTab: "__all__", sortPing: false, hideFail: false,
                job: null, es: null, pendingUrl: "" };
 
   function escA(s) { return esc(String(s == null ? "" : s)).replace(/"/g, "&quot;"); }
@@ -202,8 +203,10 @@
     const running = !!st.running;
     const badge = $("actV2Badge");
     if (badge) {
-      badge.textContent = String(V2.nodes.length);
-      badge.style.display = V2.nodes.length ? "" : "none";
+      const okN = V2.nodes.filter(n => V2.ping[n.id] && V2.ping[n.id].ok).length;
+      badge.textContent = String(okN);        // 只显示测速连接成功的节点数
+      badge.title = "测速成功节点 " + okN + " / " + V2.nodes.length;
+      badge.style.display = okN ? "" : "none";
     }
     const hero = $("v2Hero");
     if (hero) hero.classList.toggle("on", running);
@@ -242,29 +245,39 @@
       ).join("");
     }
     const num = $("v2NodeNum");
-    if (num) num.textContent = String(V2.nodes.length);
+    if (num) {
+      const okN = V2.nodes.filter(n => V2.ping[n.id] && V2.ping[n.id].ok).length;
+      num.textContent = String(okN);          // 只显示测速成功的节点数
+      num.title = "测速连接成功的节点数";
+    }
     const lst = $("v2NodeList");
     if (lst) {
       if (!V2.nodes.length) {
         lst.innerHTML = '<div class="v2v-empty" style="padding:16px 8px;font-size:11px">' +
           '<i class="bi bi-inbox"></i>还没有节点<br>点下方「打开管理面板」添加</div>';
       } else {
-        const cid = curNodeId(), pid = pickNodeId();
-        const sorted = V2.nodes.slice().sort((a, b) => {
-          const va = (V2.ping[a.id] && V2.ping[a.id].ok) ? V2.ping[a.id].ms : 9e9;
-          const vb = (V2.ping[b.id] && V2.ping[b.id].ok) ? V2.ping[b.id].ms : 9e9;
-          return va - vb;
-        });
-        lst.innerHTML = sorted.map(n => {
-          const p = V2.ping[n.id];
-          const tag = p ? (p.ok ? '<span class="v2-tag-ping" title="延迟">' + p.ms + 'ms</span>'
-                                : '<span class="v2-tag-ping fail" title="延迟">超时</span>') : "";
-          return '<div class="v2-item' + (n.id === pid ? " on" : "") + '" data-node="' + escA(n.id) + '">' +
-          '<i class="bi ' + protoIcon(n.proto) + '"></i>' +
-          '<div class="v2-it-info"><div class="v2-it-nm">' + esc(n.name || "(未命名)") + "</div>" +
-          '<div class="v2-it-sub">' + esc(n.proto || "") + " · " + esc(n.server || "") + ":" + esc(n.port || "") + "</div></div>" +
-          (n.id === cid ? '<span class="v2-tag-live">已连接</span>' : "") + tag + "</div>";
-        }).join("");
+        // 隐藏测速超时的节点；未测速的节点照常显示
+        const alive = V2.nodes.filter(n => !(V2.ping[n.id] && !V2.ping[n.id].ok));
+        if (!alive.length) {
+          lst.innerHTML = '<div class="v2v-empty" style="padding:16px 8px;font-size:11px">' +
+            '<i class="bi bi-wifi-off"></i>没有可用的节点<br>所有节点测速均超时</div>';
+        } else {
+          const cid = curNodeId(), pid = pickNodeId();
+          const sorted = alive.slice().sort((a, b) => {
+            const va = (V2.ping[a.id] && V2.ping[a.id].ok) ? V2.ping[a.id].ms : 9e9;
+            const vb = (V2.ping[b.id] && V2.ping[b.id].ok) ? V2.ping[b.id].ms : 9e9;
+            return va - vb;
+          });
+          lst.innerHTML = sorted.map(n => {
+            const p = V2.ping[n.id];
+            const tag = (p && p.ok) ? '<span class="v2-tag-ping" title="延迟">' + p.ms + 'ms</span>' : "";
+            return '<div class="v2-item' + (n.id === pid ? " on" : "") + '" data-node="' + escA(n.id) + '">' +
+            '<i class="bi ' + protoIcon(n.proto) + '"></i>' +
+            '<div class="v2-it-info"><div class="v2-it-nm">' + esc(n.name || "(未命名)") + "</div>" +
+            '<div class="v2-it-sub">' + esc(n.proto || "") + " · " + esc(n.server || "") + ":" + esc(n.port || "") + "</div></div>" +
+            (n.id === cid ? '<span class="v2-tag-live">已连接</span>' : "") + tag + "</div>";
+          }).join("");
+        }
       }
     }
   }
@@ -607,8 +620,25 @@
 
   function v2vNodes() {
     const kw = (V2.kw || "").trim().toLowerCase();
-    const list = V2.nodes.filter(n => !kw ||
+    // tab 分组：全部 / 按订阅名 / 自定义分组（节点编辑里填的 grp）
+    const grpNames = [...new Set(V2.nodes.map(n => (n.grp || "").trim()).filter(Boolean))];
+    const tabs = [{ k: "__all__", label: "全部" }]
+      .concat((V2.subs || []).map(s => ({ k: "sub:" + s.id, label: s.name || s.id })))
+      .concat(grpNames.map(g => ({ k: "grp:" + g, label: g })));
+    if (!tabs.some(t => t.k === V2.nodeTab)) V2.nodeTab = "__all__";
+    let list = V2.nodes.filter(n => !kw ||
       String(n.name || "").toLowerCase().includes(kw) || String(n.server || "").toLowerCase().includes(kw));
+    if (V2.nodeTab.indexOf("sub:") === 0) list = list.filter(n => n.sub_id === V2.nodeTab.slice(4));
+    else if (V2.nodeTab.indexOf("grp:") === 0) list = list.filter(n => (n.grp || "").trim() === V2.nodeTab.slice(4));
+    if (V2.hideFail) list = list.filter(n => !(V2.ping[n.id] && !V2.ping[n.id].ok));   // 隐藏超时节点
+    if (V2.sortPing) list = list.slice().sort((a, b) => {   // 按延迟升序，未测的排最后
+      const va = (V2.ping[a.id] && V2.ping[a.id].ok) ? V2.ping[a.id].ms : 9e9;
+      const vb = (V2.ping[b.id] && V2.ping[b.id].ok) ? V2.ping[b.id].ms : 9e9;
+      return va - vb;
+    });
+    const tabHtml = '<div class="v2v-tabs">' + tabs.map(t =>
+      '<button class="v2v-tab' + (V2.nodeTab === t.k ? " on" : "") + '" data-act="node-tab" data-tab="' +
+      escA(t.k) + '">' + esc(t.label) + (t.k === "__all__" ? " " + V2.nodes.length : "") + "</button>").join("") + "</div>";
     const cid = curNodeId();
     let h = '<div class="v2v-sec">' +
       v2vSecHead("bi-plus-circle", "导入节点", "支持 vmess / vless / trojan / ss 分享链接，可一次粘贴多行") +
@@ -645,11 +675,16 @@
 
     h += '<div class="v2v-sec">' +
       v2vSecHead("bi-diagram-3", "节点列表",
-        list.length ? ("共 " + list.length + " 个节点" + (kw ? "（已过滤）" : "")) : "还没有可用的节点",
+        (V2.pingProg ? "并发测速中 " + V2.pingProg.done + "/" + V2.pingProg.total + " · " : "") +
+        (list.length ? ("共 " + list.length + " 个节点" + (kw ? "（已过滤）" : "")) : "还没有可用的节点"),
         '<span class="v2v-flex"></span>' +
         '<input type="text" id="v2vKw" class="v2v-kw" placeholder="搜索名称 / 地址" value="' + escA(V2.kw || "") + '">' +
-        '<button class="v2v-btn" data-act="ping-all"' + (list.length ? "" : " disabled") +
-        '><i class="bi bi-lightning-charge"></i>全部测速</button>');
+        '<button class="v2v-tab' + (V2.sortPing ? " on" : "") + '" data-act="sort-ping" title="按延迟从低到高排序">' +
+        '<i class="bi bi-sort-down"></i>延迟</button>' +
+        '<button class="v2v-tab' + (V2.hideFail ? " on" : "") + '" data-act="hide-fail" title="隐藏测速超时的节点">' +
+        '<i class="bi bi-eye-slash"></i>隐藏超时</button>' +
+        '<button class="v2v-btn" data-act="ping-all"' + (list.length && !V2.pingProg ? "" : " disabled") +
+        '><i class="bi bi-lightning-charge"></i>' + (V2.pingProg ? "测速中…" : "全部测速") + "</button>" + tabHtml);
     if (!list.length) {
       h += '<div class="v2v-empty"><i class="bi bi-inbox"></i><b>' +
         (V2.nodes.length ? "没有匹配的节点" : "还没有节点") + "</b><span>" +
@@ -978,6 +1013,7 @@
 
       let h = '<div class="v2v-grid">' +
         fd("v2vENName", "节点名称", n.name) + fd("v2vENRemark", "备注", n.remark, "可留空") +
+        fd("v2vENGrp", "自定义分组（节点列表 tab）", n.grp, "如：机场A / 日常；留空 = 不分组") +
         fd("v2vENServer", "服务器地址", n.server) + fd("v2vENPort", "端口", n.port, "", "number");
       if (n.proto === "vmess" || n.proto === "vless") {
         h += fd("v2vENUuid", "UUID", n.uuid);
@@ -1025,7 +1061,7 @@
       const done = (ok) => {
         let data = null;
         if (ok) {
-          data = { id: n.id, name: g("v2vENName"), remark: g("v2vENRemark"),
+          data = { id: n.id, name: g("v2vENName"), remark: g("v2vENRemark"), grp: g("v2vENGrp"),
                    server: g("v2vENServer"), port: g("v2vENPort"), fields: {} };
           if (n.proto === "vmess") { data.fields.uuid = g("v2vENUuid"); data.fields.aid = g("v2vENAid"); }
           else if (n.proto === "vless") { data.fields.uuid = g("v2vENUuid"); data.fields.flow = g("v2vENFlow"); }
@@ -1060,6 +1096,21 @@
     switch (act) {
       case "refresh": await v2Reload(); toast("已刷新", "ok"); break;
       case "toggle": await v2ToggleConnect(); break;
+      case "node-tab": {
+        V2.nodeTab = ds.tab || "__all__";
+        if (v2vActive()) v2vRender();
+        break;
+      }
+      case "sort-ping": {
+        V2.sortPing = !V2.sortPing;
+        if (v2vActive()) v2vRender();
+        break;
+      }
+      case "hide-fail": {
+        V2.hideFail = !V2.hideFail;
+        if (v2vActive()) v2vRender();
+        break;
+      }
       case "restart": {
         const r = await post("/api/v2ray/restart");
         if (r.error) toast(r.error, "err"); else { toast("已重启", "ok"); await v2Reload(); }
@@ -1157,9 +1208,24 @@
         break;
       }
       case "ping-all": {
-        toast("正在测速…", "info");
+        if (V2.pingProg) break;                 // 已在进行中，防止重复触发
         const ids = V2.nodes.map(n => n.id);
-        await Promise.all(ids.map(async (id) => { V2.ping[id] = await post("/api/v2ray/ping", { id: id }); }));
+        if (!ids.length) { toast("还没有节点", "warn"); break; }
+        V2.pingProg = { done: 0, total: ids.length };
+        if (v2vActive()) v2vRender();
+        // 分批走后端并发测速（每批 100、后端内部 40 线程），每批只重绘一次，
+        // 避免大列表上千次 HTTP 请求 + 频繁全量重绘导致卡顿
+        const CHUNK = 100;
+        for (let i = 0; i < ids.length; i += CHUNK) {
+          const batch = ids.slice(i, i + CHUNK);
+          const r = await post("/api/v2ray/ping-batch", { ids: batch }).catch(() => null);
+          const res = (r && r.results) || {};
+          for (const k of Object.keys(res)) V2.ping[k] = res[k];
+          if (V2.pingProg) V2.pingProg.done += batch.length;
+          if (v2vActive()) v2vRender();
+          v2SideRender();
+        }
+        V2.pingProg = null;
         if (v2vActive()) v2vRender();
         v2SideRender();
         toast("测速完成", "ok");

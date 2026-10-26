@@ -178,7 +178,7 @@ def v2_nodes():
     # 列表里不重复回传完整参数，只给界面展示需要的字段
     out = [{"id": n.get("id"), "sub_id": n.get("sub_id"), "name": n.get("name"),
             "proto": n.get("proto"), "server": n.get("server"), "port": n.get("port"),
-            "remark": n.get("remark"), "raw": n.get("raw")} for n in nodes]
+            "remark": n.get("remark"), "grp": n.get("grp"), "raw": n.get("raw")} for n in nodes]
     return jsonify({"nodes": out, "total": len(out), "metrics": _metrics()})
 
 
@@ -268,7 +268,7 @@ def v2_nodes_update():
     fields = data.get("fields") if isinstance(data.get("fields"), dict) else None
     node = v2raydb.update_node(nid, name=data.get("name"), remark=data.get("remark"),
                                server=data.get("server"), port=data.get("port"),
-                               fields=fields)
+                               fields=fields, grp=data.get("grp"))
     return jsonify({"ok": True, "node": node})
 
 
@@ -482,6 +482,22 @@ def v2_preview():
     return jsonify({"config": cfg, "json": json.dumps(cfg, ensure_ascii=False, indent=2)})
 
 
+def _tcp_ping(host: str, port: int):
+    """TCP 握手测一次延迟；返回 (ms, 错误信息)，成功时 ms>=0。"""
+    t0 = time.time()
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(5)
+    try:
+        s.connect((host, port))
+        return int((time.time() - t0) * 1000), ""
+    except (socket.timeout, TimeoutError):
+        return -1, "连接超时（5 秒）"
+    except OSError as e:
+        return -1, proxyutil.friendly_error(e, host)
+    finally:
+        s.close()
+
+
 @bp.post("/api/v2ray/ping")
 def v2_ping():
     """节点连通性测试：直接对 服务器:端口 建 TCP 连接，返回延迟毫秒。"""
@@ -492,22 +508,40 @@ def v2_ping():
     host, port = node.get("server"), _int(node.get("port"))
     if not host or not port:
         return _fail("节点缺少地址或端口")
-    t0 = time.time()
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(5)
-    try:
-        s.connect((host, port))
-        ms = int((time.time() - t0) * 1000)
-        _metric_save(node.get("id"), "ping", ms)      # 持久化：覆盖上次延迟
-        return jsonify({"ok": True, "ms": ms})
-    except (socket.timeout, TimeoutError):
-        _metric_save(node.get("id"), "ping", -1)      # -1 表示超时
-        return jsonify({"ok": False, "error": "连接超时（5 秒）"})
-    except OSError as e:
-        _metric_save(node.get("id"), "ping", -1)
-        return jsonify({"ok": False, "error": proxyutil.friendly_error(e, host)})
-    finally:
-        s.close()
+    ms, err = _tcp_ping(host, port)
+    _metric_save(node.get("id"), "ping", ms)          # 持久化：-1 表示超时
+    if err:
+        return jsonify({"ok": False, "error": err})
+    return jsonify({"ok": True, "ms": ms})
+
+
+@bp.post("/api/v2ray/ping-batch")
+def v2_ping_batch():
+    """批量并发测速：一次 HTTP 请求并发对多个节点做 TCP 握手，
+    避免大列表逐个请求的开销（前端分批调用，每批 ≤ 500 个）。"""
+    from concurrent.futures import ThreadPoolExecutor
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return _fail("ids 不能为空")
+    ids = [str(x) for x in ids[:500]]
+
+    def ping_one(nid):
+        node = v2raydb.get_node(nid)
+        if not node:
+            return nid, {"ok": False, "error": "节点不存在"}
+        host, port = node.get("server"), _int(node.get("port"))
+        if not host or not port:
+            return nid, {"ok": False, "error": "节点缺少地址或端口"}
+        ms, err = _tcp_ping(host, port)
+        return nid, ({"ok": True, "ms": ms} if not err else {"ok": False, "error": err})
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=40) as ex:
+        for nid, res in ex.map(ping_one, ids):
+            _metric_save(nid, "ping", res["ms"] if res.get("ok") else -1)
+            results[nid] = res
+    return jsonify({"ok": True, "results": results})
 
 
 def _node_share_link(node: dict) -> str:

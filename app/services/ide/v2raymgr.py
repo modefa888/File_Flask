@@ -566,36 +566,60 @@ def reset_traffic() -> dict:
 # 订阅拉取
 # ---------------------------------------------------------------------------
 
+def _node_proxy_url() -> str:
+    """当前已连接节点对应的本机 socks 代理地址（带认证开关生效的凭据）；未运行返回空。"""
+    st = status()
+    if not st.get("running"):
+        return ""
+    s = _apply_auth(_settings())
+    user, pwd = str(s.get("socks_user") or ""), str(s.get("socks_pass") or "")
+    auth = ("%s:%s@" % (user, pwd)) if user else ""
+    port = int((st.get("inbound") or {}).get("socks_port") or 10808)
+    return "socks5://%s127.0.0.1:%d" % (auth, port)
+
+
 def fetch_subscription(sub: dict):
     """拉取订阅内容，返回 (分享链接列表, 错误信息)。
 
-    sub 里可用 proxy 字段指定拉取时走的代理（例如已连上本模块自己的
-    socks5://127.0.0.1:10808，用来拉取需要翻墙才能访问的订阅站）。
+    优先用 sub.proxy / 全局 sub_proxy 指定的代理（留空 = 直连）；
+    直连或指定代理失败时，若内核正在运行，自动改走当前连接节点的本机
+    socks 代理重试一次（订阅站常需要翻墙才能访问）。
     """
     url = str((sub or {}).get("url") or "").strip()
     if not url:
         return [], "订阅地址为空"
     proxy = str((sub or {}).get("proxy") or "").strip() or _settings().get("sub_proxy") or ""
-    try:
-        opener = proxyutil.build_opener(proxy=proxy, follow_redirects=True)
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (compatible; FileFlask-V2Ray/1.0)",
-            "Accept": "*/*",
-        })
-        with opener.open(req, timeout=30) as resp:
-            raw = resp.read(4 * 1024 * 1024)
-    except urllib.error.HTTPError as e:
-        return [], "订阅请求失败：%s" % proxyutil.http_status_text(e.code)
-    except Exception as e:                      # noqa: BLE001
-        return [], proxyutil.friendly_error(e, url)
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        text = raw.decode("utf-8", "replace")
-    links = v2raycfg.parse_subscription(text)
-    if not links:
-        return [], "订阅内容里没有解析到节点（支持 vmess / vless / trojan / ss 分享链接）"
-    return links, ""
+    proxies = [proxy]
+    fallback = _node_proxy_url()
+    if fallback and fallback != proxy:
+        proxies.append(fallback)
+    last_err = ""
+    for i, px in enumerate(proxies):
+        try:
+            opener = proxyutil.build_opener(proxy=px, follow_redirects=True)
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; FileFlask-V2Ray/1.0)",
+                "Accept": "*/*",
+            })
+            with opener.open(req, timeout=30) as resp:
+                raw = resp.read(4 * 1024 * 1024)
+        except urllib.error.HTTPError as e:
+            last_err = "订阅请求失败：%s" % proxyutil.http_status_text(e.code)
+            continue
+        except Exception as e:                  # noqa: BLE001
+            last_err = proxyutil.friendly_error(e, url)
+            continue
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = raw.decode("utf-8", "replace")
+        links = v2raycfg.parse_subscription(text)
+        if not links:
+            return [], "订阅内容里没有解析到节点（支持 vmess / vless / trojan / ss 分享链接）"
+        if i > 0:
+            _log.info("订阅 %s 直连失败，已改走本机节点代理拉取成功", url)
+        return links, ""
+    return [], last_err
 
 
 def fetch_and_store(sub: dict) -> dict:

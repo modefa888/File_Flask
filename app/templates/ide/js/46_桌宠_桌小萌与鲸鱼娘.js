@@ -1,8 +1,21 @@
 /* IDE 桌宠：小 Buddy (Buddy)、桌小萌 (Deskie)、鲸鱼娘 (Kujira)、奶龙 (Nailong)、肥嘟嘟 (Dudu)。
    - 可拖动到任意位置（localStorage 记忆），会眨眼、呼吸/漂浮、眼神跟随鼠标
    - 单击说话（按时间段问候 + 随机吐槽），双击跳一下
-   - 右键菜单：说点什么 / 随便动一下 / 跳一下 / 回到右下角 /
-     换个表情 + 换个颜色 / 换个伙伴（五个角色任选）/ 隐身
+   - 右键菜单：和我聊聊天 / 说点什么 / 随便动一下 / 跳一下 / 回到右下角 /
+     换个表情 + 换个颜色 / 换个伙伴（二级菜单，五个角色任选）/ 隐身
+   - AI 对话（showChat）：桌宠头顶的对话小按钮或右键菜单进入，走 POST /api/ai/chat 流式；
+     每个伙伴一份记忆（localStorage，最近 80 条，请求带最近 12 轮），
+     面板右上角地球按钮 = 按需联网：请求体带 web_tool=1，只把 web_search 工具交给模型，
+     由它判断要不要查（不做「回复前预搜索」，不做无谓的搜索延迟），
+     「项目」开关 = 智能体模式：带 repo + use_tools，模型可 list_dir / read_file /
+     search_files / code_intel 读取当前项目文件（perm=readonly，只读），
+     工具过程通过 SSE 的 step / result 事件显示在顶部提示条上；
+     对话超过 30 条时自动把早期内容压成摘要（LS_SUM），只保留最近 16 条原文，
+     摘要随 system 消息一起发送 —— 长对话不会越聊越贵，也不再显示「记忆 N 轮」；
+     「Agent」开关 = 界面操作：模型在正文里写 <ide>{"act":…}</ide>，前端边流式边执行
+     （开/关侧栏面板、打开文件、切标签、运行、终端、搜索、设置…），并把标签从文本里剥掉；
+     发消息时还会把「当前左侧面板的可点条目清单」（序号 + 文字）附进 system，
+     所以模型能按 click 动作精确点第 N 个远程连接 / 某个任务卡片，而不只是"打开面板"
    - 角色选择记忆在 localStorage；隐身后右下角留小圆钮召唤
    - 小 Buddy 的造型直接复用欢迎页（#welcome .wc-mascot）的吉祥物 SVG，
      只把渐变 id 换成 dkBd* 前缀，避免与欢迎页同时渲染时 id 冲突；
@@ -684,7 +697,7 @@
   (function autoPlay() {
     setTimeout(function () {
       if (MOOD[curId] && !el.classList.contains('hide') && !document.hidden) {
-        doAct(null, Math.random() > 0.78);
+        doAct(null, Math.random() > 0.78 || chatOpen());   // 对话面板开着时只动嘴不动手，别抢话
         if (Math.random() < 0.5) nextHue();
       }
       autoPlay();
@@ -864,7 +877,8 @@
     var p = curPet();
     for (var i = 0; i < ORDER.length; i++) el.classList.remove('is-' + ORDER[i]);
     el.classList.add('is-' + curId);
-    el.innerHTML = '<div class="dk-stage"><div class="dk-shadow"></div>' + p.html + '</div>';
+    el.innerHTML = '<div class="dk-stage"><div class="dk-shadow"></div>' + p.html + '</div>' +
+                   '<div class="dk-chatbtn" title="和我聊聊天（AI 对话）"><i class="bi bi-chat-dots-fill"></i></div>';
     bindGaze();
     if (MOOD[curId]) {                 // 换回来时沿用这个伙伴上次的表情与配色
       paintFace(stateNow().face);
@@ -876,6 +890,7 @@
 
   function renderMenu() {
     var h =
+      '<div class="dk-mi" data-act="chat"><i class="bi bi-chat-heart"></i>和我聊聊天<i class="bi bi-stars dk-new"></i></div>' +
       '<div class="dk-mi" data-act="say"><i class="bi bi-chat-dots"></i>说点什么</div>' +
       '<div class="dk-mi" data-act="act"><i class="bi bi-magic"></i>随便动一下</div>' +
       '<div class="dk-mi" data-act="hop"><i class="bi bi-arrow-up-square"></i>跳一下</div>' +
@@ -893,25 +908,32 @@
              '<div class="dk-chip" data-hue="1"><i class="bi bi-palette"></i> 换个颜色</div>' +
            '</div>';
     }
-    h += '<div class="dk-sep"></div><div class="dk-cap">换个伙伴</div>';
+    // 「换个伙伴」收进二级菜单：hover 或点击展开，避免主菜单拉得太长
+    var subs = '';
     for (var i = 0; i < ORDER.length; i++) {
       var id = ORDER[i], p = PETS[id];
-      h += '<div class="dk-mi' + (id === curId ? ' on' : '') + '" data-pet="' + id + '">' +
-             '<i class="bi ' + p.icon + '"></i>' + p.name +
-             (id === curId ? '<span class="dk-tick">✔</span>' : '') +
-           '</div>';
+      subs += '<div class="dk-mi' + (id === curId ? ' on' : '') + '" data-pet="' + id + '">' +
+                '<i class="bi ' + p.icon + '"></i>' + p.name +
+                (id === curId ? '<span class="dk-tick">✔</span>' : '') +
+              '</div>';
     }
     h += '<div class="dk-sep"></div>' +
+         '<div class="dk-mi has-sub" data-act="pets"><i class="bi bi-people"></i>换个伙伴' +
+           '<i class="bi bi-chevron-right dk-caret"></i>' +
+           '<div class="dk-sub">' + subs + '</div>' +
+         '</div>' +
          '<div class="dk-mi" data-act="hide"><i class="bi bi-moon-stars"></i>隐身</div>';
     menu.innerHTML = h;
   }
 
   function use(id) {
     if (!PETS[id] || id === curId) return;
+    if (chatOpen() && chatAbort) { try { chatAbort.abort(); } catch (e) {} }   // 换人前先停掉上一场对话
     curId = id;
     try { localStorage.setItem(LS_PET, id); } catch (e) {}
     renderPet();
     renderMenu();
+    if (chatOpen()) { chatPosition(); chatRender(); }   // 对话面板跟着换成新伙伴的记忆
     say(PETS[id].hello, 2800);
   }
 
@@ -956,6 +978,7 @@
     el.style.left = p.x + 'px';
     el.style.top = p.y + 'px';
     if (bubble.classList.contains('show')) moveBubble();
+    if (chatOpen()) syncChatToPet();          // 拖桌宠时对话框跟着一起走
   }
   function savePos() {
     try { localStorage.setItem(LS_POS, JSON.stringify({ x: el.offsetLeft, y: el.offsetTop })); } catch (e) {}
@@ -974,7 +997,14 @@
 
   // ---------- 拖动 / 单击 / 双击 ----------
   var drag = null;
+  el.addEventListener('click', function (ev) {    // 头顶的对话小按钮
+    if (ev.target.closest && ev.target.closest('.dk-chatbtn')) {
+      ev.stopPropagation();
+      showChat();
+    }
+  }, true);
   el.addEventListener('pointerdown', function (ev) {
+    if (ev.target.closest && ev.target.closest('.dk-chatbtn')) return;   // 点对话按钮不触发拖动
     if (ev.button !== 0) return;                 // 右键交给 contextmenu
     el.setPointerCapture(ev.pointerId);
     drag = { sx: ev.clientX, sy: ev.clientY, ox: el.offsetLeft, oy: el.offsetTop, moved: false };
@@ -1040,11 +1070,36 @@
   // ---------- 右键菜单 ----------
   function openMenu(x, y) {
     menu.classList.add('open');
+    menu.classList.remove('sub-up');
     var mw = menu.offsetWidth, mh = menu.offsetHeight;
-    menu.style.left = Math.max(4, Math.min(x, window.innerWidth - mw - 4)) + 'px';
+    var mx = Math.max(4, Math.min(x, window.innerWidth - mw - 4));
+    menu.style.left = mx + 'px';
     menu.style.top = Math.max(4, Math.min(y, window.innerHeight - mh - 4)) + 'px';
+    // 右边放不下二级菜单时，让它从左侧展开
+    menu.classList.toggle('sub-left', mx + mw + 176 > window.innerWidth);
+    // 下方放不下整份伙伴列表时，二级菜单改为向上展开（否则会被视口底部切掉）
+    var subMi = menu.querySelector('.dk-mi.has-sub');
+    if (subMi) {
+      var sub = subMi.querySelector('.dk-sub');
+      var need = 0;
+      if (sub) {                              // 绝对定位 + 隐藏测量，不会闪也不会撑开主菜单
+        sub.style.visibility = 'hidden';
+        sub.style.display = 'block';
+        need = sub.offsetHeight;
+        sub.style.display = '';
+        sub.style.visibility = '';
+      }
+      if (need) {
+        var r = subMi.getBoundingClientRect();
+        if (r.top + need > window.innerHeight - 6) menu.classList.add('sub-up');
+      }
+    }
   }
-  function closeMenu() { menu.classList.remove('open'); }
+  function closeMenu() {
+    menu.classList.remove('open');
+    var op = menu.querySelector('.dk-mi.open');
+    if (op) op.classList.remove('open');
+  }
   el.addEventListener('contextmenu', function (ev) {
     ev.preventDefault();
     renderMenu();                                  // 打开前重绘，保证表情高亮 / 伙伴勾选是最新的
@@ -1060,10 +1115,15 @@
     }
     var mi = ev.target.closest('.dk-mi');
     if (!mi) return;
+    if (mi.dataset.act === 'pets') {               // 二级菜单：点一下展开 / 收起（触屏没有 hover）
+      mi.classList.toggle('open');
+      return;
+    }
     closeMenu();
     if (mi.dataset.pet) { use(mi.dataset.pet); return; }
     var act = mi.dataset.act;
-    if (act === 'say') {
+    if (act === 'chat') showChat();
+    else if (act === 'say') {
       if (MOOD[curId]) doAct(null); else say(pick(curPet().lines));
     } else if (act === 'act') {
       if (MOOD[curId]) doAct(); else hop();
@@ -1075,7 +1135,10 @@
     if (menu.classList.contains('open') && !menu.contains(ev.target) && !el.contains(ev.target)) closeMenu();
   }, true);
   window.addEventListener('blur', closeMenu);
-  window.addEventListener('resize', function () { setPos(el.offsetLeft, el.offsetTop); });
+  window.addEventListener('resize', function () {
+    setPos(el.offsetLeft, el.offsetTop);
+    if (chatOpen()) chatPosition();
+  });
 
   // ---------- 隐身 / 召唤 ----------
   function show() {
@@ -1094,6 +1157,1426 @@
   summon.addEventListener('click', show);
   try { if (localStorage.getItem(LS_HIDDEN) === '1') { el.classList.add('hide'); summon.classList.add('show'); } } catch (e) {}
 
+  // ---------- 桌宠 AI 对话（带记忆 + 可选联网） ----------
+  // 记忆：每个伙伴一份，存在 localStorage（key = ide.deskie.chat.<id>），最多 80 条；
+  //       每次请求带上最近 12 轮，模型因此能接上下文，刷新页面也不会忘。
+  // 联网：面板右上角「联网」开关，打开后请求带 web_search=true，服务端会先搜索再把结果注入系统消息。
+  var CHAT_TURNS = 12, CHAT_KEEP = 80;
+  var LS_CHAT = 'ide.deskie.chat.', LS_WEB = 'ide.deskie.web', LS_PROJ = 'ide.deskie.proj', LS_AGENT = 'ide.deskie.agent';
+  /* 上下文压缩：条数超过 TRIGGER 就把早期对话压成一段摘要（存 LS_SUM），
+     只保留最近 KEEP 条原文 —— 长对话不会越聊越贵，也不会顶到上下文上限。 */
+  var LS_SUM = 'ide.deskie.summary.';
+  var CHAT_SUM_TRIGGER = 30, CHAT_SUM_KEEP = 16;
+  var chatCompacting = false;
+
+  var PERSONA = {
+    buddy: '你是「小 Buddy」，住在在线 IDE 右下角的机器人桌面伙伴，性格开朗、有点俏皮，说话简短温暖。',
+    deskie: '你是「桌小萌」，一个圆头机器小助手，活泼爱吐槽但很贴心，自称"我"。',
+    whale: '你是「鲸鱼娘」，住在海里的鲸鱼少女，语气软萌，偶尔说"咕噜"，喜欢用海洋做比喻。',
+    nailong: '你是「奶龙」，一只圆滚滚的黄橙色小恐龙，单纯贪吃、说话幼稚可爱，会提到吃饭和睡觉。',
+    dudu: '你是「肥嘟嘟」，一坨软软的粉色糯米团子，说话慢悠悠、暖乎乎的，喜欢鼓励人。'
+  };
+  var CHAT_RULE = '你现在在桌宠对话框里和用户聊天：回答口语化、简短（一般 2~3 句），不要输出 Markdown 表格或大段代码；' +
+                  '需要实时 / 事实性信息（天气、新闻、股价、赛事、最近发生的事、你没把握的数据）时，' +
+                  '可以直接调用 web_search 工具查询后再回答；普通聊天、解释概念、写代码不必联网；' +
+                  '上下文里出现「[联网搜索结果]」说明结果已查好，直接据此回答并注明「据网络检索」，不要说“我无法联网”；' +
+                  '用户问技术问题时给要点式建议，不确定就直说。';
+  var PROJ_RULE = '你现在可以读取用户当前项目里的文件（列出目录 / 搜索文件 / 读取文件内容，只读不改）。' +
+                  '回答与这个项目有关的问题（某个功能在哪、某个文件写了什么、怎么实现的）之前，先用工具查证再回答，' +
+                  '不要凭空猜测代码；回答时直接给结论，不要复述你调用了哪些工具。';
+
+  /* Agent 模式：模型在正文里输出 <ide>{"act":…,"arg":…}</ide>，前端立即执行并从文本里剥掉。
+     这样桌宠就能"替用户点" IDE 的按钮 —— 打开面板、打开文件、运行、切换终端等。 */
+  var AGENT_RULE = '【界面操作能力】你可以在回复里插入 <ide>{"act":"动作","arg":"参数"}</ide>，' +
+    '前端会立即执行并把这段标签从显示文本中删掉，不要向用户解释这个标签。可用动作：\n' +
+    '- panel：arg=explorer|search|git|run|runner|env|dbconn|api|cron|sshconn|fm|ext（打开对应侧栏面板）\n' +
+    '- file：arg=项目内相对路径（如 app/config.py），在左侧文件树里打开它\n' +
+    '- tab：arg=标签名关键字（切换到已打开的标签）；closetab：arg=标签名关键字，留空=当前标签\n' +
+    '- save：保存当前文件；run：运行当前文件；stop：终止正在运行的程序\n' +
+    '- terminal：打开底部终端；output：打开底部输出面板\n' +
+    '- sidebar：arg=1 显示 / 0 隐藏左侧边栏；bottom：arg=1 显示 / 0 隐藏底部面板\n' +
+    '- zen：切换专注模式；settings：打开设置；ai：打开右侧 AI 助手\n' +
+    '- search：arg=关键字，在项目中搜索；refresh：刷新资源管理器\n' +
+    '- click：arg=序号（如 "2"）或文字（如 "11月18日过期" / "保存"），点击左侧面板条目或弹窗按钮\n' +
+    '- fill：arg=字段名（照「[当前弹窗]」清单），value=要填的值；select 的 value 写选项文字\n' +
+    '系统消息会附带「[当前界面]」（侧栏条目 + 序号）和「[当前弹窗]」（字段名 + 当前值 + 按钮清单）。' +
+    '用户说「第一个 / 那个 xx」时照清单用 click / fill，不要反问；' +
+    '若同一条回复里先切了面板再点条目，click 请用文字（切面板后序号会重新编号）。\n' +
+    '规则：一次最多 8 个动作、按顺序写；填表单时先 fill 各字段、最后 click 保存；' +
+    '本轮动作刚打开一个新表单时，不要猜字段名，等下一轮看到「[当前弹窗]」清单再填；' +
+    '「[当前界面]」清单里同时包含面板条目和面板上的按钮（如「新建任务」「刷新」），都在同一份序号里。\n' +
+    '常见面板的入口按钮：定时任务=「新建任务」、数据库连接=「新建连接」、API=「新建请求」、' +
+    'SSH=「新建连接」、后台任务=「新建任务」；切完面板可以直接跟上 click 这些按钮名。\n' +
+    '只在用户确实要操作界面时用；没有对应动作就不要编造。' +
+    '用户让你操作界面时，必须真的用 <ide> 动作去做，不要只用文字说「我无法操作 / 你自己点一下」。\n' +
+    '例：用户说「打开 Git 面板」，你回答：好嘞，打开啦～<ide>{"act":"panel","arg":"git"}</ide>\n' +
+    '例：用户说「打开 config 然后跑一下」，你回答：走着～<ide>{"act":"file","arg":"app/config.py"}</ide>' +
+    '<ide>{"act":"run"}</ide>\n' +
+    '例：用户说「建一个每天早上 9 点的定时任务」，你回答：好嘞～<ide>{"act":"panel","arg":"cron"}</ide>' +
+    '<ide>{"act":"click","arg":"新建任务"}</ide>\n' +
+    '注意：新建 / 创建类请求里，只打开面板不算完成，必须紧接着点该面板的「新建」按钮；' +
+    '表单弹出后前端会自动再给你一轮，那时候再 fill 各字段 + click 保存。';
+
+  var chatEl = null, chatListEl = null, chatInEl = null, chatBtnEl = null, chatWebEl = null;
+  var chatTipEl = null, chatMaxEl = null, chatProjEl = null, chatAgentEl = null, chatAnchor = null;
+  var histEl = null;                       // 历史对话下拉列表
+  var chatAbort = null, chatBusy = false;
+  /* 本轮 Agent 已经执行过的动作 + 用户原话：用来判断「是不是只做了一半」 */
+  var ideActLog = [], chatLastUserText = '';
+  var chatMaxed = false, chatPrevPos = null, chatSyncing = false;
+
+  /* ---------- 多会话：每个伙伴可以有多段彼此独立的对话 ----------
+     存储：ide.deskie.sess.<petId> = { cur: 当前会话 id, list: [ { id, title, ts, msgs, sum } ] }
+     旧版本把消息直接放在 ide.deskie.chat.<petId>（一个数组），首次读取时自动迁移成第一段会话，
+     所以老用户升级后原来的聊天记录不会丢。摘要（LS_SUM）也搬进会话对象，切会话时一起跟着走。 */
+  var SESS_MAX = 15;
+  var LS_SESS = 'ide.deskie.sess.';
+
+  function sessNewId() {
+    return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+  /* 会话标题：取第一条用户消息（截 16 字），没消息就是「新对话」 */
+  function sessTitle(msgs) {
+    var l = msgs || [];
+    for (var i = 0; i < l.length; i++) {
+      if (l[i].role === 'user' && l[i].content) {
+        var t = String(l[i].content).replace(/\s+/g, ' ').trim();
+        return t.length > 16 ? t.slice(0, 16) + '…' : t;
+      }
+    }
+    return '新对话';
+  }
+  function sessSaveFor(petId, o) {
+    try { localStorage.setItem(LS_SESS + petId, JSON.stringify(o)); } catch (e) {}
+  }
+  function sessLoadFor(petId) {
+    var o = null;
+    try { o = JSON.parse(localStorage.getItem(LS_SESS + petId) || 'null'); } catch (e) {}
+    if (!o || !Array.isArray(o.list) || !o.list.length) {
+      // 迁移旧格式
+      var old = [], legacySum = null;
+      try { old = JSON.parse(localStorage.getItem(LS_CHAT + petId) || '[]') || []; } catch (e2) {}
+      try { legacySum = JSON.parse(localStorage.getItem(LS_SUM + petId) || 'null'); } catch (e3) {}
+      var id = sessNewId();
+      o = { cur: id, list: [{ id: id, title: sessTitle(old), ts: Date.now(), msgs: old, sum: legacySum }] };
+      sessSaveFor(petId, o);
+    }
+    var hit = false;
+    for (var i = 0; i < o.list.length; i++) if (o.list[i].id === o.cur) { hit = true; break; }
+    if (!hit) o.cur = o.list[0].id;
+    return o;
+  }
+  /* 当前会话对象 + 所属整包（写回用） */
+  function sessCur(petId) {
+    var o = sessLoadFor(petId);
+    for (var i = 0; i < o.list.length; i++) if (o.list[i].id === o.cur) return { s: o.list[i], o: o };
+    return { s: o.list[0], o: o };
+  }
+
+  /* 记忆按「伙伴 id + 当前会话」存取：切伙伴 / 切会话时，正在生成的那一轮仍写回它自己那段 */
+  function chatLoadFor(petId) { return sessCur(petId).s.msgs || []; }
+  function chatStoreFor(petId, list) {
+    var r = sessCur(petId), s = r.s;
+    s.msgs = (list || []).slice(-CHAT_KEEP);
+    s.ts = Date.now();
+    s.title = sessTitle(s.msgs);           // 标题随第一条用户消息自动生成
+    sessSaveFor(petId, r.o);
+  }
+  function chatLoad() { return chatLoadFor(curId); }
+  function chatStore(list) { chatStoreFor(curId, list); }
+
+  /* 早前对话的压缩摘要：现在跟着会话走，换会话不会再串味 */
+  function chatSumLoadFor(petId) { return sessCur(petId).s.sum || null; }
+  function chatSumSaveFor(petId, obj) {
+    var r = sessCur(petId);
+    r.s.sum = (obj && obj.text) ? obj : null;
+    sessSaveFor(petId, r.o);
+  }
+
+  /* 读一个 SSE 响应，把 delta 拼成纯文本（给摘要压缩用） */
+  function readSseText(res) {
+    return new Promise(function (resolve) {
+      if (!res || !res.body) { resolve(''); return; }
+      var reader = res.body.getReader(), dec = new TextDecoder(), buf = '', text = '';
+      (function pump() {
+        reader.read().then(function (rd) {
+          if (rd.done) { resolve(text); return; }
+          buf += dec.decode(rd.value, { stream: true });
+          var i;
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            var chunk = buf.slice(0, i);
+            buf = buf.slice(i + 2);
+            var lines = chunk.split('\n');
+            for (var k = 0; k < lines.length; k++) {
+              var ln = lines[k];
+              if (ln.indexOf('data:') !== 0) continue;
+              var payload = ln.slice(5).trim();
+              if (!payload || payload === '[DONE]') continue;
+              var obj;
+              try { obj = JSON.parse(payload); } catch (e) { continue; }
+              if (obj.delta) text += obj.delta;
+            }
+          }
+          pump();
+        }).catch(function () { resolve(text); });
+      })();
+    });
+  }
+
+  /* 上下文压缩：条数超过阈值时，把早期对话交给模型压成一段摘要，
+     然后只保留最近 CHAT_SUM_KEEP 条原文。摘要会随 system 消息一起发送。 */
+  function chatCompact(petId) {
+    if (chatCompacting) return;
+    var list = chatLoadFor(petId);
+    if (list.length <= CHAT_SUM_TRIGGER) return;
+    var cut = list.length - CHAT_SUM_KEEP;
+    if (cut < 6) return;
+
+    var old = chatSumLoadFor(petId);
+    var body = list.slice(0, cut).map(function (m) {
+      var t = String(m.content || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+      return (m.role === 'user' ? '用户：' : '我：') + t;
+    }).join('\n');
+    var ask = (old && old.text ? '【已有摘要】\n' + old.text + '\n\n' : '') +
+              '【新增对话】\n' + body +
+              '\n\n把以上内容合并压缩成一段不超过 200 字的中文摘要，保留：用户的目标与偏好、已经确认的结论、' +
+              '待办与未解决的问题、重要上下文（路径、名字、数字）。只输出摘要正文，不要任何解释。';
+
+    chatCompacting = true;
+    fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: '你是对话摘要助手，只做信息压缩，不回答问题、不闲聊。' },
+          { role: 'user', content: ask }
+        ],
+        use_tools: false,
+        perm: 'readonly'
+      })
+    }).then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return readSseText(res);
+    }).then(function (text) {
+      text = String(text || '').trim();
+      if (!text) return;
+      var cur = chatLoadFor(petId);              // 重新读一次，避免覆盖压缩期间新产生的消息
+      chatStoreFor(petId, cur.slice(-CHAT_SUM_KEEP));
+      chatSumSaveFor(petId, { text: text.slice(0, 1500), at: Date.now() });
+      if (curId === petId) {
+        chatRender();
+        if (chatOpen()) chatTip('已把早前对话压缩成摘要（悬停列表顶部可查看）');
+      }
+    }).catch(function () {
+      /* 压缩失败就保持原样，下次对话结束再试 */
+    }).then(function () { chatCompacting = false; });
+  }
+  function chatWebOn() { try { return localStorage.getItem(LS_WEB) === '1'; } catch (e) { return false; } }
+  function chatSetWeb(on) { try { localStorage.setItem(LS_WEB, on ? '1' : '0'); } catch (e) {} }
+  function chatOpen() { return !!(chatEl && chatEl.classList.contains('show')); }
+
+  /* 「智能体」模式：允许模型读当前项目文件（list_dir / read_file / search_files / code_intel）。
+     项目根目录的取法与 IDE 前端一致：?path 优先，其次 localStorage 里上次打开的路径。 */
+  function chatProjOn() { try { return localStorage.getItem(LS_PROJ) === '1'; } catch (e) { return false; } }
+  function chatSetProj(on) { try { localStorage.setItem(LS_PROJ, on ? '1' : '0'); } catch (e) {} }
+  function ideRoot() {
+    var p = '';
+    try { p = new URLSearchParams(location.search).get('path') || ''; } catch (e) {}
+    if (!p) { try { p = localStorage.getItem('ide_last_path') || ''; } catch (e) {} }
+    if (!p) {                                   // 兜底：地址栏的 ?id 是路径混淆后的 token
+      try {
+        var id = new URLSearchParams(location.search).get('id') || '';
+        if (id) {
+          var bytes = Uint8Array.from(atob(id), function (c) { return c.charCodeAt(0); });
+          var s = '';
+          for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i] ^ 0x5f);
+          p = s;
+        }
+      } catch (e2) {}
+    }
+    p = String(p || '').replace(/\/+$/, '');
+    return p.charAt(0) === '/' ? p : '';        // 只认绝对路径
+  }
+  var TOOL_LABEL = {
+    list_dir: '查看目录', read_file: '读取文件', search_files: '搜索文件',
+    code_intel: '分析代码', web_search: '联网搜索', todo_write: '更新任务清单',
+    generate_image: '生成图片'
+  };
+
+  /* ---------- Agent：直接操作 IDE 界面 ----------
+     模型输出 <ide>{"act":"panel","arg":"git"}</ide>，这里落地成真实的点击/切换。 */
+  function chatAgentOn() { try { return localStorage.getItem(LS_AGENT) === '1'; } catch (e) { return false; } }
+  function chatSetAgent(on) { try { localStorage.setItem(LS_AGENT, on ? '1' : '0'); } catch (e) {} }
+
+  var IDE_PANELS = {
+    explorer: '资源管理器', search: '搜索', git: '源代码管理', run: '运行和调试', runner: '后台任务',
+    env: '运行环境', dbconn: '数据库', api: 'API 调试', cron: '定时任务', sshconn: '终端连接',
+    fm: '文件夹管理器', ext: '扩展'
+  };
+  function ideQ(sel) { return document.querySelector(sel); }
+  function ideClick(el) { if (!el) return false; try { el.click(); } catch (e) { return false; } return true; }
+  function ideVisible(el) { return !!(el && el.offsetWidth > 0 && el.offsetHeight > 0); }
+
+  /* 当前可见侧栏面板里的可点条目：抓最内层的 item / card / task / 文件树行，
+     每次发消息时快照一次，随 system 一起给模型看，点击时按序号或文字定位。 */
+  var ideSnapItems = [];
+  var ideFormFields = [], ideFormButtons = [];
+
+  /* 当前最上层的弹窗（浮层）：类名或 id 里带 overlay / modal / mask 的可见元素里挑一个 */
+  function ideOverlayNow() {
+    var sel = '[class*="overlay"], [class*="modal"], [class*="-ov"], [class*="mask"], [id*="Modal"], [id*="Overlay"]';
+    var list = document.querySelectorAll(sel);
+    var best = null, bestScore = -1;
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      if (!el.offsetWidth || !el.offsetHeight) continue;
+      var cs = window.getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+      var z = parseInt(cs.zIndex, 10);
+      if (isNaN(z)) z = 0;
+      // 带输入框的优先，其次 z-index 高的
+      var score = (el.querySelector('input, textarea, select') ? 1000 : 0) + z;
+      if (score > bestScore) { bestScore = score; best = el; }
+    }
+    return best;
+  }
+
+  /* 字段名：label > 前一个兄弟 > 父级里的 label 元素 > placeholder > name/id */
+  function ideFieldLabel(el) {
+    var clean = function (s) { return String(s || '').replace(/\s+/g, ' ').trim(); };
+    var box = el.closest && el.closest('label');
+    if (box) {
+      var t = clean(box.textContent);
+      if (t && t.length <= 40) return t;
+    }
+    var pv = el.previousElementSibling;
+    if (pv) {
+      var t2 = clean(pv.textContent);
+      if (t2 && t2.length <= 40) return t2;
+    }
+    var p = el.parentElement;
+    for (var i = 0; i < 3 && p; i++, p = p.parentElement) {
+      var lb = p.querySelector('label, [class*="label"], [class*="lbl"]');
+      if (lb && !lb.contains(el)) {
+        var t3 = clean(lb.textContent);
+        if (t3 && t3.length <= 40) return t3;
+      }
+    }
+    return el.placeholder || el.name || el.id || '';
+  }
+
+  function ideSnapshot() {
+    ideSnapItems = [];
+    ideFormFields = [];
+    ideFormButtons = [];
+
+    var wrap = document.getElementById('sidebar');
+    var title = '';
+    if (wrap) {
+      var panels = wrap.querySelectorAll('.side-panel');
+      var panel = null;
+      for (var i = 0; i < panels.length; i++) {
+        if (panels[i].offsetHeight > 0) { panel = panels[i]; break; }
+      }
+      if (panel) {
+        var tEl = document.getElementById('sideTitle');
+        title = tEl ? String(tEl.textContent || '').trim() : '';
+        var ITEM_SEL = '[class*="item"], [class*="card"], [class*="task"], .tree-row';
+        var seenTxt = {};
+        var pushItem = function (el, maxLen) {
+          if (!el || !el.offsetHeight || ideSnapItems.length >= 32) return;
+          var txt = String(el.innerText || el.textContent || el.title || '').replace(/\s+/g, ' ').trim();
+          if (!txt || txt.length > (maxLen || 120)) return;
+          if (seenTxt[txt]) return;                          // 同名条目 / 重复按钮只留一个
+          seenTxt[txt] = 1;
+          ideSnapItems.push({ el: el, text: txt });
+        };
+        // ① 面板里的条目（任务卡片 / 连接 / 文件行…）
+        var cands = panel.querySelectorAll(ITEM_SEL);
+        for (var k = 0; k < cands.length && ideSnapItems.length < 22; k++) {
+          var el = cands[k];
+          if (!el.offsetHeight) continue;
+          if (el.querySelector(ITEM_SEL)) continue;          // 只取最内层，避免父子重复
+          pushItem(el, 120);
+        }
+        // ② 面板工具栏的按钮（新建任务 / 刷新 / 打开管理面板…）——
+        //    之前漏了这类 <button class="g-btn">，模型看不到「新建任务」就没法点
+        var btns = panel.querySelectorAll('button, [class*="btn"], [class*="g-ico"]');
+        for (var b = 0; b < btns.length; b++) {
+          var bt = btns[b];
+          if (!bt.offsetHeight) continue;
+          if (bt.querySelector('button')) continue;
+          pushItem(bt, 24);
+        }
+      }
+    }
+
+    // 弹窗：字段 + 按钮（新建定时任务、SSH 连接编辑这类表单）
+    var ov = ideOverlayNow();
+    var form = null;
+    if (ov) {
+      var ins = ov.querySelectorAll('input, textarea, select');
+      for (var m = 0; m < ins.length && ideFormFields.length < 20; m++) {
+        var f = ins[m];
+        if (!f.offsetHeight) continue;
+        var tp = String(f.type || f.tagName).toLowerCase();
+        if (tp === 'hidden' || tp === 'file') continue;
+        ideFormFields.push({
+          el: f, label: ideFieldLabel(f), type: tp,
+          value: String(f.value == null ? '' : f.value), ph: f.placeholder || ''
+        });
+      }
+      var seenBtn = {};
+      var pushBtn = function (el) {
+        if (!el || !el.offsetHeight || ideFormButtons.length >= 18) return;
+        if (el.querySelector('button')) return;                    // 取最内层按钮
+        var t = String(el.innerText || el.textContent || el.title || '').replace(/\s+/g, ' ').trim();
+        if (!t || t.length > 24) return;
+        if (seenBtn[t]) return;
+        seenBtn[t] = 1;
+        ideFormButtons.push({ el: el, text: t });
+      };
+      // 底部操作区优先：预设按钮很多，先把「保存 / 取消」捞进来，避免被上限挤掉
+      var footBtns = ov.querySelectorAll('.cd-foot button, [class*="foot"] button, [class*="action"] button');
+      for (var fi = 0; fi < footBtns.length; fi++) pushBtn(footBtns[fi]);
+      var allBtns = ov.querySelectorAll('button, [role="button"], [class*="btn"]');
+      for (var bi = 0; bi < allBtns.length; bi++) pushBtn(allBtns[bi]);
+      var tt = ov.querySelector('.cd-head span, .m-title, [class*="head"] span, [class*="title"]');
+      form = { title: tt ? String(tt.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40) : '表单',
+               fields: ideFormFields, buttons: ideFormButtons };
+    }
+
+    return { name: title, items: ideSnapItems, form: form };
+  }
+
+  function ideSnapText(snap) {
+    var lines = [];
+    if (snap && snap.items.length) {
+      lines.push('[当前界面] 左侧面板：' + (snap.name || '未知') +
+                 '（下面是当前可点的条目，click 动作用这里的序号或文字）');
+      for (var i = 0; i < snap.items.length; i++) lines.push((i + 1) + ') ' + snap.items[i].text);
+    }
+    var fm = snap && snap.form;
+    if (fm && (fm.fields.length || fm.buttons.length)) {
+      lines.push('[当前弹窗] ' + (fm.title || '表单'));
+      if (fm.fields.length) {
+        lines.push('字段（fill 动作：arg=字段名，value=要填的值）：');
+        for (var k = 0; k < fm.fields.length; k++) {
+          var f = fm.fields[k];
+          lines.push('- ' + (f.label || '(未命名)') + ' [' + f.type + '] 当前="' +
+                     f.value.slice(0, 60) + '"' + (f.ph ? ' 提示:' + f.ph : ''));
+        }
+      }
+      if (fm.buttons.length) {
+        lines.push('按钮（click 动作：arg=按钮文字）：' +
+                   fm.buttons.map(function (b) { return b.text; }).join(' / '));
+      }
+    }
+    return lines.join('\n');
+  }
+
+  /* 往表单控件写值：input / textarea / select / checkbox 都兼顾，并派发 input+change 事件 */
+  function ideSetValue(el, val) {
+    if (!el) return;
+    var tag = String(el.tagName || '').toUpperCase();
+    var tp = String(el.type || '').toLowerCase();
+    if (tag === 'SELECT') {
+      var hit = false, i;
+      for (i = 0; i < el.options.length; i++) {
+        var o = el.options[i];
+        if (String(o.value) === val || String(o.textContent || '').trim() === val) { el.selectedIndex = i; hit = true; break; }
+      }
+      if (!hit) {
+        for (i = 0; i < el.options.length; i++) {
+          if (String(el.options[i].textContent || '').indexOf(val) >= 0) { el.selectedIndex = i; break; }
+        }
+      }
+    } else if (tp === 'checkbox' || tp === 'radio') {
+      el.checked = !(val === '' || val === '0' || val === 'false' || val === '否');
+    } else {
+      el.value = val;
+    }
+    try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+    try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e2) {}
+  }
+
+  function ideDo(spec) {
+    var act = String((spec && spec.act) || '').toLowerCase();
+    var arg = spec && spec.arg != null ? String(spec.arg) : '';
+    var rows, hit, i;
+
+    if (act === 'panel') {
+      if (!IDE_PANELS[arg]) return { ok: false, msg: '没有这个面板：' + arg };
+      if (!ideClick(ideQ('.activitybar .act[data-panel="' + arg + '"]'))) return { ok: false, msg: '找不到面板按钮' };
+      ideSnapshot();                                   // 面板换了，后面的 click 要按新清单来
+      return { ok: true, msg: '已打开「' + IDE_PANELS[arg] + '」面板' };
+    }
+
+    if (act === 'file') {                              // 在文件树里找到并打开
+      var want = arg.replace(/^\.?\//, '');
+      if (!want) return { ok: false, msg: '缺少文件路径' };
+      var findRow = function () {
+        var list = [].slice.call(document.querySelectorAll('#explorerPanel .tree-row[data-path]'));
+        for (var k = 0; k < list.length; k++) {
+          var p = list[k].dataset.path || '';
+          if (p === want || p.slice(-(want.length + 1)) === '/' + want || list[k].dataset.name === want) return list[k];
+        }
+        return null;
+      };
+      hit = findRow();
+      if (hit) {
+        if (hit.dataset.isdir === '1') { hit.click(); return { ok: true, msg: '已展开目录 ' + (hit.dataset.name || want) }; }
+        hit.click();
+        return { ok: true, msg: '已打开 ' + (hit.dataset.name || want) };
+      }
+      // 没找到：先展开它的父目录再找一次（树是懒加载的）
+      var segs = want.split('/');
+      if (segs.length > 1) {
+        var dirWant = segs.slice(0, -1).join('/');
+        var dirRow = [].slice.call(document.querySelectorAll('#explorerPanel .tree-row[data-path]'))
+          .filter(function (r) { return (r.dataset.path || '').slice(-(dirWant.length + 1)) === '/' + dirWant; })[0];
+        if (dirRow) {
+          dirRow.click();
+          return new Promise(function (res) {
+            setTimeout(function () {
+              var h2 = findRow();
+              if (h2) { h2.click(); res({ ok: true, msg: '已打开 ' + (h2.dataset.name || want) }); }
+              else res({ ok: false, msg: '展开目录后仍没找到 ' + arg });
+            }, 450);
+          });
+        }
+      }
+      return { ok: false, msg: '文件树里没有 ' + arg + '（需要先在资源管理器展开该目录）' };
+    }
+
+    if (act === 'tab' || act === 'closetab') {
+      var tabs = [].slice.call(document.querySelectorAll('.tab'));
+      var t = arg ? tabs.filter(function (x) { return (x.textContent || '').indexOf(arg) >= 0; })[0]
+                  : document.querySelector('.tab.active');
+      if (!t) return { ok: false, msg: '没有找到标签：' + (arg || '当前') };
+      if (act === 'tab') { t.click(); return { ok: true, msg: '已切换到「' + arg + '」' }; }
+      var x = t.querySelector('.t-close');
+      if (!x) return { ok: false, msg: '该标签没有关闭按钮' };
+      x.click();
+      return { ok: true, msg: '已关闭标签' };
+    }
+
+    if (act === 'save') return ideClick(ideQ('#tbSave')) ? { ok: true, msg: '已保存当前文件' } : { ok: false, msg: '找不到保存按钮' };
+    if (act === 'run') return ideClick(ideQ('#runPanelRun')) ? { ok: true, msg: '已运行当前文件' } : { ok: false, msg: '找不到运行按钮' };
+    if (act === 'stop') return ideClick(ideQ('#bpKill')) ? { ok: true, msg: '已终止运行' } : { ok: false, msg: '找不到终止按钮' };
+    if (act === 'refresh') return ideClick(ideQ('#sideRefresh')) ? { ok: true, msg: '已刷新资源管理器' } : { ok: false, msg: '找不到刷新按钮' };
+    if (act === 'zen') return ideClick(ideQ('#tbZen')) ? { ok: true, msg: '已切换专注模式' } : { ok: false, msg: '找不到专注模式按钮' };
+    if (act === 'settings') return ideClick(ideQ('#actSettings')) ? { ok: true, msg: '已打开设置' } : { ok: false, msg: '找不到设置入口' };
+
+    if (act === 'terminal' || act === 'output') {
+      var bp = document.getElementById('bottomPanel');
+      if (!ideVisible(bp)) ideClick(ideQ('#tbBottom'));
+      ideClick(ideQ(act === 'terminal' ? '.bp-tab[data-pane="term"]' : '.bp-tab[data-pane="output"]'));
+      return { ok: true, msg: act === 'terminal' ? '已打开终端' : '已打开输出面板' };
+    }
+
+    if (act === 'sidebar' || act === 'bottom') {
+      var isSide = act === 'sidebar';
+      var el = document.getElementById(isSide ? 'sidebar' : 'bottomPanel');
+      var wantShow = arg === '1' || arg === 'show' || arg === 'open';
+      if (ideVisible(el) !== wantShow) ideClick(ideQ(isSide ? '#tbSide' : '#tbBottom'));
+      return { ok: true, msg: (wantShow ? '已显示' : '已隐藏') + (isSide ? '侧边栏' : '底部面板') };
+    }
+
+    if (act === 'ai') {
+      if (!ideVisible(ideQ('#aiPanel'))) ideClick(ideQ('#aiToggle'));
+      return { ok: true, msg: '已打开 AI 助手' };
+    }
+
+    if (act === 'search') {
+      if (!arg) return { ok: false, msg: '缺少搜索关键字' };
+      ideClick(ideQ('.activitybar .act[data-panel="search"]'));
+      var inp = document.getElementById('searchInput');
+      if (!inp) return { ok: false, msg: '找不到搜索框' };
+      inp.value = arg;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+      return { ok: true, msg: '已在项目中搜索「' + arg + '」' };
+    }
+
+    if (act === 'click') {                             // 点左侧面板条目 / 弹窗按钮
+      var a = String(arg || '').trim();
+      var tryClick = function () {
+        var idx = -1;
+        if (/^\d+$/.test(a)) idx = parseInt(a, 10) - 1;
+        if (!(idx >= 0 && idx < ideSnapItems.length)) {
+          idx = -1;
+          for (var n = 0; n < ideSnapItems.length; n++) {
+            if (ideSnapItems[n].text.indexOf(a) >= 0) { idx = n; break; }
+          }
+        }
+        if (idx >= 0 && idx < ideSnapItems.length) {
+          var it = ideSnapItems[idx];
+          if (!it.el.isConnected || !it.el.offsetHeight) return { ok: false, msg: '该条目已不在当前面板，请再说一次' };
+          try { it.el.click(); } catch (e) { return { ok: false, msg: '点击失败：' + (e && e.message || e) }; }
+          return { ok: true, msg: '已点击「' + it.text.slice(0, 22) + '」' };
+        }
+        for (var m = 0; m < ideFormButtons.length; m++) { // 弹窗里的按钮（保存 / 取消 …）
+          if (ideFormButtons[m].text.indexOf(a) >= 0) {
+            var btn = ideFormButtons[m];
+            if (!btn.el.isConnected || !btn.el.offsetHeight) return { ok: false, msg: '弹窗已关闭' };
+            try { btn.el.click(); } catch (e2) { return { ok: false, msg: '点击失败：' + (e2 && e2.message || e2) }; }
+            return { ok: true, msg: '已点击「' + btn.text + '」' };
+          }
+        }
+        return null;
+      };
+      var first = tryClick();
+      if (first) return first;
+      // 找不到多半是刚切了面板、列表还在异步加载：等 420ms 重新抓一次再试
+      return new Promise(function (res) {
+        setTimeout(function () {
+          ideSnapshot();
+          res(tryClick() || { ok: false, msg: '界面清单里没有「' + a + '」' });
+        }, 420);
+      });
+    }
+
+    if (act === 'fill' || act === 'set') {             // 填弹窗里的字段
+      var fname = String(arg || '').trim();
+      var val = spec && spec.value != null ? String(spec.value) : '';
+      if (!fname) return { ok: false, msg: '缺少字段名' };
+      var fld = null, q;
+      for (q = 0; q < ideFormFields.length; q++) {
+        if (ideFormFields[q].label === fname) { fld = ideFormFields[q]; break; }
+      }
+      if (!fld) {
+        for (q = 0; q < ideFormFields.length; q++) {
+          var L = ideFormFields[q].label || '';
+          if (L && (L.indexOf(fname) >= 0 || fname.indexOf(L) >= 0)) { fld = ideFormFields[q]; break; }
+        }
+      }
+      if (!fld) {
+        for (q = 0; q < ideFormFields.length; q++) {
+          if ((ideFormFields[q].ph || '').indexOf(fname) >= 0) { fld = ideFormFields[q]; break; }
+        }
+      }
+      if (!fld) return { ok: false, msg: '弹窗里没有「' + fname + '」字段（先打开表单）' };
+      if (!fld.el.isConnected) return { ok: false, msg: '弹窗已关闭' };
+      ideSetValue(fld.el, val);
+      fld.value = String(fld.el.value == null ? '' : fld.el.value);
+      return { ok: true, msg: '已填写「' + (fld.label || fname) + '」= ' + String(val).slice(0, 30) };
+    }
+
+    return { ok: false, msg: '不认识的动作：' + (act || '(空)') };
+  }
+
+  /* 渲染前把动作标签剥掉（未闭合的那半截也隐藏，避免闪出来） */
+  function stripIde(t) {
+    return String(t || '')
+      .replace(/<ide>[\s\S]*?<\/ide>/gi, '')
+      .replace(/<ide>[\s\S]*$/i, '');
+  }
+
+  /* 边流式边扫描：每凑齐一个闭合标签就执行一条；改成串行（上一条动作完成后再做下一条），
+     否则「切面板 → 点新建任务」这种有依赖的连续动作会并发，顺序就乱了。 */
+  function ideScan(reply) {
+    if (!chatAgentOn() || !reply || reply._ideBusy) return;
+    var m = /<ide>([\s\S]*?)<\/ide>/i.exec(reply.content);
+    if (!m) return;
+    reply.content = reply.content.slice(0, m.index) + reply.content.slice(m.index + m[0].length);
+
+    var spec;
+    try {
+      spec = JSON.parse(m[1].trim());
+    } catch (e) {
+      chatTip('动作格式不对，已忽略', true, 5000);
+      ideScan(reply);
+      return;
+    }
+
+    reply._ideBusy = true;
+    var done = function (res) {
+      reply._ideBusy = false;
+      if (res) {
+        // 记一笔：本轮到底做了什么，自动续轮时要用
+        ideActLog.push({ act: spec.act, arg: String(spec.arg == null ? '' : spec.arg), ok: !!res.ok, msg: String(res.msg || '') });
+        chatTip((res.ok ? '✓ ' : '✗ ') + res.msg, !res.ok, 4200);
+      }
+      ideScan(reply);                       // 接着处理下一条
+    };
+    var r;
+    try {
+      r = ideDo(spec);
+    } catch (e2) {
+      r = { ok: false, msg: String((e2 && e2.message) || e2) };
+    }
+    if (r && typeof r.then === 'function') r.then(done, function () { done(null); });
+    else done(r);
+  }
+
+  function dkEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function chatBuild() {
+    if (chatEl) return;
+    chatEl = document.createElement('div');
+    chatEl.id = 'deskie-chat';
+    chatEl.innerHTML =
+      '<div class="dkc-head">' +
+        '<span class="dkc-title"><i class="bi bi-stars"></i><b id="dkcName">伙伴</b></span>' +
+        '<button class="dkc-ico" id="dkcWeb" title="按需联网：需要实时信息时我才会去查"><i class="bi bi-globe2"></i></button>' +
+        '<button class="dkc-ico" id="dkcProj" title="智能体：允许读取当前项目里的文件来回答（只读）"><i class="bi bi-folder2-open"></i></button>' +
+        '<button class="dkc-ico" id="dkcAgent" title="Agent：可以直接替你操作界面（开关面板 / 打开文件 / 运行 / 终端 …）"><i class="bi bi-robot"></i></button>' +
+        '<button class="dkc-ico" id="dkcNew" title="新建对话（当前这段会存进历史，从空白重新开始）"><i class="bi bi-plus-lg"></i></button>' +
+        '<button class="dkc-ico" id="dkcHist" title="历史对话（所有会话都在这里，可点任意一段继续聊）"><i class="bi bi-clock-history"></i></button>' +
+        '<button class="dkc-ico" id="dkcMax" title="放大窗口"><i class="bi bi-arrows-angle-expand"></i></button>' +
+        '<button class="dkc-ico" id="dkcClose" title="关闭（Esc）"><i class="bi bi-x-lg"></i></button>' +
+        /* 提示条 / 历史列表都挂在标题栏里、绝对定位浮在消息区上方：出现 / 消失都不会顶动消息 */
+        '<div class="dkc-tip" id="dkcTip"></div>' +
+        '<div class="dkc-hist" id="dkcHistList"></div>' +
+      '</div>' +
+      '<div class="dkc-list scroll-thin" id="dkcList"></div>' +
+      '<div class="dkc-foot">' +
+        '<textarea id="dkcIn" rows="1" spellcheck="false"' +
+          ' placeholder="和我说点什么…" title="Enter 发送 / Shift+Enter 换行"></textarea>' +
+        '<button class="dkc-send" id="dkcSend" title="发送"><i class="bi bi-send"></i></button>' +
+      '</div>';
+    document.body.appendChild(chatEl);
+
+    chatListEl = chatEl.querySelector('#dkcList');
+    chatInEl = chatEl.querySelector('#dkcIn');
+    chatBtnEl = chatEl.querySelector('#dkcSend');
+    chatWebEl = chatEl.querySelector('#dkcWeb');
+    chatProjEl = chatEl.querySelector('#dkcProj');
+    chatAgentEl = chatEl.querySelector('#dkcAgent');
+    chatMaxEl = chatEl.querySelector('#dkcMax');
+    chatTipEl = chatEl.querySelector('#dkcTip');
+    histEl = chatEl.querySelector('#dkcHistList');
+
+    chatEl.querySelector('#dkcClose').addEventListener('click', hideChat);
+    chatEl.querySelector('#dkcNew').addEventListener('click', function () {
+      hideHist();
+      sessNew();
+    });
+    chatEl.querySelector('#dkcHist').addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      if (histEl.classList.contains('open')) hideHist();
+      else showHist();
+    });
+    /* 历史列表：点条目切会话、点 × 删会话、底部两个动作（清空当前 / 新建对话） */
+    histEl.addEventListener('click', function (ev) {
+      var del = ev.target.closest && ev.target.closest('.dkc-hdel');
+      if (del) { ev.stopPropagation(); sessDel(del.dataset.del); return; }
+      var act = ev.target.closest && ev.target.closest('.dkc-hbtn');
+      if (act) {
+        if (act.dataset.act === 'new') sessNew();
+        else if (act.dataset.act === 'clear') sessClear();
+        return;
+      }
+      var item = ev.target.closest && ev.target.closest('.dkc-hitem');
+      if (item) sessUse(item.dataset.id);
+    });
+    document.addEventListener('click', function (ev) {
+      if (!histEl.classList.contains('open')) return;
+      if (histEl.contains(ev.target)) return;
+      if (ev.target.closest && ev.target.closest('#dkcHist')) return;
+      hideHist();
+    });
+    chatWebEl.addEventListener('click', function () {
+      var on = !chatWebOn();
+      chatSetWeb(on);
+      chatWebEl.classList.toggle('on', on);
+      say(on ? '联网打开啦，需要的时候我会自己去查 ~' : '联网关掉啦，我靠自己。', 2400);
+    });
+    chatProjEl.addEventListener('click', function () {
+      var on = !chatProjOn();
+      if (on && !ideRoot()) {                            // 没打开项目就没得读
+        chatTip('没找到当前项目路径：先在 IDE 里打开一个文件夹', true, 8000);
+        return;
+      }
+      chatSetProj(on);
+      chatProjEl.classList.toggle('on', on);
+      say(on ? '好，我可以翻你的项目文件了（只读）~' : '不翻文件啦，就纯聊天。', 2400);
+    });
+    chatAgentEl.addEventListener('click', function () {
+      var on = !chatAgentOn();
+      chatSetAgent(on);
+      chatAgentEl.classList.toggle('on', on);
+      say(on ? 'Agent 上线！要开什么面板、跑什么，直接说 ~' : 'Agent 退啦，我只动嘴不动手。', 2600);
+    });
+    chatBtnEl.addEventListener('click', function () {
+      if (chatBusy) { if (chatAbort) { try { chatAbort.abort(); } catch (e) {} } return; }
+      chatSend();
+    });
+    chatMaxEl.addEventListener('click', chatToggleMax);
+    chatInEl.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); chatSend(); }
+    });
+    chatInEl.addEventListener('input', chatAutoGrow);
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && chatOpen()) hideChat();
+    });
+
+    // 标题栏可拖动（只挪面板，不会带动桌宠）；松手后把新位置记成「相对桌宠」的偏移，
+    // 之后拖桌宠时面板仍按这个新偏移跟随。
+    var headEl = chatEl.querySelector('.dkc-head');
+    var cDrag = null;
+    headEl.addEventListener('pointerdown', function (ev) {
+      if (ev.button !== 0 || chatMaxed) return;                 // 最大化后不拖
+      if (ev.target.closest && ev.target.closest('button, .dkc-hist')) return;   // 按钮 / 历史列表不当作拖拽把手
+      cDrag = { sx: ev.clientX, sy: ev.clientY,
+                ox: chatEl.offsetLeft, oy: chatEl.offsetTop,   // 面板起点
+                px: el.offsetLeft, py: el.offsetTop };         // 桌宠起点
+      chatEl.classList.add('dragging');
+      headEl.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    headEl.addEventListener('pointermove', function (ev) {
+      if (!cDrag) return;
+      var dx = ev.clientX - cDrag.sx, dy = ev.clientY - cDrag.sy;
+
+      // 先让桌宠跟着走（chatSyncing 期间 setPos 不会反过来再推面板，避免循环抖动）
+      chatSyncing = true;
+      setPos(cDrag.px + dx, cDrag.py + dy);
+      chatSyncing = false;
+
+      var x = Math.max(4, Math.min(cDrag.ox + dx, window.innerWidth - chatEl.offsetWidth - 4));
+      var y = Math.max(4, Math.min(cDrag.oy + dy, window.innerHeight - chatEl.offsetHeight - 4));
+      chatEl.style.left = x + 'px';
+      chatEl.style.top = y + 'px';
+    });
+    headEl.addEventListener('pointerup', function () {
+      if (!cDrag) return;
+      cDrag = null;
+      chatEl.classList.remove('dragging');
+      // 松手后把「面板相对桌宠」的偏移重新记下来，两边仍保持联动
+      chatAnchor = { dx: chatEl.offsetLeft - el.offsetLeft, dy: chatEl.offsetTop - el.offsetTop };
+      savePos();
+    });
+    headEl.addEventListener('pointercancel', function () {
+      cDrag = null;
+      chatEl.classList.remove('dragging');
+    });
+  }
+
+  function chatRender() {
+    if (!chatEl) return;
+    var p = PETS[curId] || PETS.buddy;
+    var nameEl = chatEl.querySelector('#dkcName');
+    if (nameEl) nameEl.textContent = p.name.replace(/\s*\(.*\)\s*$/, '');
+    chatWebEl.classList.toggle('on', chatWebOn());
+    if (chatProjEl) chatProjEl.classList.toggle('on', chatProjOn());
+    if (chatAgentEl) chatAgentEl.classList.toggle('on', chatAgentOn());
+
+    var list = chatLoad();
+
+    // 有压缩摘要在就先挂一条提示（悬停可看摘要内容）
+    var sum = chatSumLoadFor(curId);
+    var html = '';
+    if (sum && sum.text) {
+      html += '<div class="dkc-sum" title="' + dkEsc(String(sum.text).slice(0, 500)) + '">' +
+                '<i class="bi bi-archive"></i>早前对话已压缩成摘要（悬停查看）</div>';
+    }
+    if (!list.length) {
+      html += '<div class="dkc-empty">' +
+                '<i class="bi bi-chat-heart"></i>' +
+                '<div>' + dkEsc(p.hello || '你好呀 ~') + '</div>' +
+                '<span>我会记住我们聊过的话，聊技术、聊心情都行。</span>' +
+              '</div>';
+    } else {
+      for (var k = 0; k < list.length; k++) {
+        var isMe = list[k].role === 'user';
+        var role = isMe ? 'me' : 'pet';
+        // 自己说的话保持纯文本（所见即所发），伙伴的回复走 Markdown 渲染（动作标签先剥掉）
+        var body = isMe ? dkEsc(list[k].content) : mdToHtml(stripIde(list[k].content));
+        html += '<div class="dkc-msg ' + role + '"><div class="dkc-body">' + body + '</div></div>';
+      }
+    }
+    chatListEl.innerHTML = html;
+    chatScroll();
+    if (histOpen()) histRender();          // 历史面板开着时一起刷新（删 / 切会话后即时反映）
+  }
+
+  /* ---------- 会话操作：新建 / 切换 / 删除 / 清空 ---------- */
+  function dkFmtTime(ts) {
+    var d = new Date(ts || Date.now()), n = new Date();
+    var p = function (x) { return (x < 10 ? '0' : '') + x; };
+    var hm = p(d.getHours()) + ':' + p(d.getMinutes());
+    if (d.toDateString() === n.toDateString()) return '今天 ' + hm;
+    var y = new Date(n.getTime() - 864e5);
+    if (d.toDateString() === y.toDateString()) return '昨天 ' + hm;
+    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hm;
+  }
+
+  function histRender() {
+    if (!histEl) return;
+    var o = sessLoadFor(curId);
+    var h = '<div class="dkc-hist-cap"><span><i class="bi bi-clock-history"></i> 历史对话</span>' +
+              '<span class="dkc-hist-n">' + o.list.length + ' 段</span></div>' +
+            '<div class="dkc-hist-items scroll-thin">';
+    for (var i = 0; i < o.list.length; i++) {
+      var s = o.list[i], cnt = (s.msgs || []).length;
+      h += '<div class="dkc-hitem' + (s.id === o.cur ? ' on' : '') + '" data-id="' + s.id + '">' +
+             '<div class="dkc-hmain">' +
+               '<div class="dkc-ht">' + dkEsc(s.title || '新对话') + '</div>' +
+               '<div class="dkc-hm">' + dkFmtTime(s.ts) + ' · ' + cnt + ' 条' +
+                 (s.id === o.cur ? '<span class="dkc-htag">当前</span>' : '') + '</div>' +
+             '</div>' +
+             '<button class="dkc-hdel" data-del="' + s.id + '" title="删除这段对话"><i class="bi bi-x-lg"></i></button>' +
+           '</div>';
+    }
+    h += '</div><div class="dkc-hist-foot">' +
+           '<button class="dkc-hbtn" data-act="clear" title="只清空当前这段，其他历史保留"><i class="bi bi-eraser"></i> 清空当前</button>' +
+           '<button class="dkc-hbtn primary" data-act="new"><i class="bi bi-plus-lg"></i> 新建对话</button>' +
+         '</div>';
+    histEl.innerHTML = h;
+  }
+  function histOpen() { return !!(histEl && histEl.classList.contains('open')); }
+  function showHist() { histRender(); histEl.classList.add('open'); }
+  function hideHist() { if (histEl) histEl.classList.remove('open'); }
+
+  /* 新建对话：当前这段留着进历史，从空白开始；当前本来就是空的就直接复用 */
+  function sessNew() {
+    if (chatBusy) { chatTip('等这轮说完再开新对话 ~', true, 3000); return; }
+    var r = sessCur(curId);
+    if (!r.s.msgs.length) {
+      hideHist();
+      if (chatInEl) { chatInEl.value = ''; chatInEl.focus(); }
+      chatTip('当前就是一段新对话，直接说就好');
+      return;
+    }
+    var id = sessNewId();
+    r.o.list.unshift({ id: id, title: '新对话', ts: Date.now(), msgs: [], sum: null });
+    r.o.cur = id;
+    if (r.o.list.length > SESS_MAX) r.o.list.length = SESS_MAX;   // 最早的那些丢掉
+    sessSaveFor(curId, r.o);
+    chatRender();
+    hideHist();
+    if (chatInEl) { chatInEl.value = ''; chatInEl.focus(); }
+    say('开新对话啦，刚才那段收进历史了 ~', 2600);
+  }
+
+  /* 切回某段历史继续聊 */
+  function sessUse(id) {
+    if (chatBusy) { chatTip('等这轮说完再切 ~', true, 3000); return; }
+    var o = sessLoadFor(curId), ok = false;
+    for (var i = 0; i < o.list.length; i++) if (o.list[i].id === id) ok = true;
+    if (!ok) return;
+    hideHist();
+    if (o.cur === id) return;
+    o.cur = id;
+    sessSaveFor(curId, o);
+    chatRender();
+    if (chatInEl) chatInEl.focus();
+  }
+
+  function sessDel(id) {
+    if (chatBusy) { chatTip('等这轮说完再删 ~', true, 3000); return; }
+    var o = sessLoadFor(curId), idx = -1;
+    for (var i = 0; i < o.list.length; i++) if (o.list[i].id === id) idx = i;
+    if (idx < 0) return;
+    if (o.list.length <= 1) {                   // 只剩一段：清空内容，不删壳
+      o.list[0].msgs = [];
+      o.list[0].sum = null;
+      o.list[0].title = '新对话';
+      o.list[0].ts = Date.now();
+    } else {
+      o.list.splice(idx, 1);
+      if (o.cur === id) o.cur = o.list[0].id;
+    }
+    sessSaveFor(curId, o);
+    chatRender();
+    histRender();
+  }
+
+  /* 清空当前这段（其他历史保留） */
+  function sessClear() {
+    if (chatBusy) { chatTip('等这轮说完再清空 ~', true, 3000); return; }
+    var r = sessCur(curId);
+    r.s.msgs = [];
+    r.s.sum = null;
+    r.s.title = '新对话';
+    r.s.ts = Date.now();
+    sessSaveFor(curId, r.o);
+    chatRender();
+    hideHist();
+    say('这段我忘掉啦 ~', 2200);
+  }
+
+  function chatScroll() {
+    if (chatListEl) chatListEl.scrollTop = chatListEl.scrollHeight;
+  }
+
+  /* 输入框自动长高：先把高度归零再量 scrollHeight，并用 rAF 合并连续 input，
+     以前直接写 height:auto 会让「min-height → 内容高」来回量，肉眼就是一直抖。 */
+  var growQueued = false;
+  function chatAutoGrow() {
+    if (!chatInEl || growQueued) return;
+    growQueued = true;
+    requestAnimationFrame(function () {
+      growQueued = false;
+      chatInEl.style.height = '0px';
+      var h = Math.max(33, Math.min(chatInEl.scrollHeight, 84));
+      chatInEl.style.height = h + 'px';
+      chatScroll();                     // 输入区变高时消息仍贴着底部，不跳动
+    });
+  }
+
+  /* ---------- 轻量 Markdown 渲染 ----------
+     先摘出代码块 / 行内代码 → 整体转义 HTML → 再做行内与块级替换，因此不存在 XSS；
+     未闭合的 ``` 也能正常渲染（流式输出时经常来不及闭合）。
+     支持：代码块、行内代码、粗体、斜体、删除线、链接、标题、有序/无序列表、引用、分隔线。 */
+  function mdToHtml(src) {
+    var s = String(src == null ? '' : src);
+    var blocks = [], inlines = [];
+
+    s = s.replace(/```([\w+-]*)[ \t]*\r?\n?([\s\S]*?)(?:```|$)/g, function (m, lang, code) {
+      blocks.push({ lang: lang || '', code: code.replace(/\r?\n$/, '') });
+      return '\u0001' + (blocks.length - 1) + '\u0001';
+    });
+    s = s.replace(/`([^`\n]+)`/g, function (m, code) {
+      inlines.push(code);
+      return '\u0002' + (inlines.length - 1) + '\u0002';
+    });
+
+    s = dkEsc(s);
+
+    s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+         .replace(/(^|[^*\w])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+         .replace(/~~([^~\n]+)~~/g, '<del>$1</del>')
+         .replace(/\[([^\]\n]{1,80})\]\((https?:\/\/[^\s)]+)\)/g,
+                  '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+    var lines = s.split('\n'), out = [], list = null, para = [];
+    function flushPara() {
+      if (para.length) { out.push('<p>' + para.join('<br>') + '</p>'); para = []; }
+    }
+    function flushList() {
+      if (list) { out.push('</' + list + '>'); list = null; }
+    }
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i];
+      var mUl = /^\s*[-*+]\s+(.*)$/.exec(ln);
+      var mOl = /^\s*\d+[.)]\s+(.*)$/.exec(ln);
+      var mHd = /^\s*(#{1,6})\s+(.*)$/.exec(ln);
+      if (/^\s*$/.test(ln)) { flushPara(); flushList(); continue; }
+      // 独占一行的代码块占位：直接作为块级元素输出，别被包进 <p>
+      if (/^\u0001\d+\u0001$/.test(ln.trim())) { flushPara(); flushList(); out.push(ln.trim()); continue; }
+      if (/^\s*([-*_])\s*\1\s*\1\s*$/.test(ln)) { flushPara(); flushList(); out.push('<hr>'); continue; }
+      if (mHd) { flushPara(); flushList(); out.push('<div class="dkc-h">' + mHd[2] + '</div>'); continue; }
+      if (mUl) {
+        flushPara();
+        if (list !== 'ul') { flushList(); out.push('<ul>'); list = 'ul'; }
+        out.push('<li>' + mUl[1] + '</li>');
+        continue;
+      }
+      if (mOl) {
+        flushPara();
+        if (list !== 'ol') { flushList(); out.push('<ol>'); list = 'ol'; }
+        out.push('<li>' + mOl[1] + '</li>');
+        continue;
+      }
+      if (/^\s*&gt;\s?/.test(ln)) {
+        flushPara(); flushList();
+        out.push('<blockquote>' + ln.replace(/^\s*&gt;\s?/, '') + '</blockquote>');
+        continue;
+      }
+      flushList();
+      para.push(ln);
+    }
+    flushPara();
+    flushList();
+
+    return out.join('')
+      .replace(/\u0002(\d+)\u0002/g, function (m, n) {
+        return '<code>' + dkEsc(inlines[+n] || '') + '</code>';
+      })
+      .replace(/\u0001(\d+)\u0001/g, function (m, n) {
+        var b = blocks[+n] || { code: '' };
+        return '<pre class="dkc-pre"><code>' + dkEsc(b.code) + '</code></pre>';
+      });
+  }
+  /* 顶部提示条：联网检索结果 / 失败原因（不然模型一句“我没法联网”根本没法排查） */
+  function chatTip(text, isErr, ms) {
+    if (!chatTipEl) return;
+    chatTipEl.textContent = text;
+    chatTipEl.classList.toggle('err', !!isErr);
+    chatTipEl.classList.add('show');
+    clearTimeout(chatTipEl._t);
+    chatTipEl._t = setTimeout(function () { chatTipEl.classList.remove('show'); }, ms || 7000);
+  }
+  /* 流式输出：只重绘最后一条气泡，并用 rAF 合并高频 delta（Markdown 重渲染不会一卡一卡） */
+  var patchQueued = false, patchText = '';
+  function chatPatch(text) {
+    patchText = text;
+    if (!chatListEl) return;
+    if (patchQueued) return;
+    patchQueued = true;
+    requestAnimationFrame(function () {
+      patchQueued = false;
+      var items = chatListEl.querySelectorAll('.dkc-msg');
+      var last = items[items.length - 1];
+      var body = last && last.querySelector('.dkc-body');
+      if (!body) { chatRender(); return; }
+      body.innerHTML = mdToHtml(stripIde(patchText));
+      chatScroll();
+    });
+  }
+  function chatSetBusy(on) {
+    if (!chatBtnEl) return;
+    chatBtnEl.classList.toggle('busy', !!on);
+    chatBtnEl.innerHTML = on ? '<i class="bi bi-stop-fill"></i>' : '<i class="bi bi-send"></i>';
+    chatBtnEl.title = on ? '停止生成' : '发送';
+  }
+
+  /* 放大态：铺开并居中，且不再跟随桌宠（不然刚放大就被拖走） */
+  function chatCenter() {
+    if (!chatEl) return;
+    var w = chatEl.offsetWidth, h = chatEl.offsetHeight;
+    chatEl.style.left = Math.max(8, Math.round((window.innerWidth - w) / 2)) + 'px';
+    chatEl.style.top = Math.max(8, Math.round((window.innerHeight - h) / 2)) + 'px';
+  }
+  function chatToggleMax() {
+    if (!chatEl) return;
+    chatMaxed = !chatMaxed;
+    if (chatMaxed) {
+      chatPrevPos = { left: chatEl.offsetLeft + 'px', top: chatEl.offsetTop + 'px' };
+      chatEl.classList.add('maxed');
+      chatCenter();
+    } else {
+      chatEl.classList.remove('maxed');
+      if (chatPrevPos) {
+        chatEl.style.left = chatPrevPos.left;
+        chatEl.style.top = chatPrevPos.top;
+      }
+      chatAnchor = { dx: chatEl.offsetLeft - el.offsetLeft, dy: chatEl.offsetTop - el.offsetTop };
+    }
+    if (chatMaxEl) {
+      chatMaxEl.innerHTML = '<i class="bi ' +
+        (chatMaxed ? 'bi-arrows-angle-contract' : 'bi-arrows-angle-expand') + '"></i>';
+      chatMaxEl.title = chatMaxed ? '还原窗口' : '放大窗口';
+    }
+    chatScroll();
+  }
+
+  function chatPosition() {
+    if (!chatEl) return;
+    if (chatMaxed) { chatCenter(); return; }
+    var CW = 304, CH = 396;
+    var r = el.getBoundingClientRect();
+    var x = r.left - CW - 14;
+    if (x < 8) x = r.right + 14;                 // 左边放不下就放到右边
+    x = Math.max(8, Math.min(x, window.innerWidth - CW - 8));
+    var y = Math.max(8, Math.min(r.top + r.height - CH, window.innerHeight - CH - 8));
+    chatEl.style.left = x + 'px';
+    chatEl.style.top = y + 'px';
+    // 记住「对话框相对桌宠」的偏移，拖动桌宠时按这个偏移同步平移
+    chatAnchor = { dx: x - el.offsetLeft, dy: y - el.offsetTop };
+  }
+  function syncChatToPet() {
+    if (chatSyncing || chatMaxed || !chatOpen() || !chatAnchor) return;
+    var x = el.offsetLeft + chatAnchor.dx;
+    var y = el.offsetTop + chatAnchor.dy;
+    x = Math.max(4, Math.min(x, window.innerWidth - chatEl.offsetWidth - 4));
+    y = Math.max(4, Math.min(y, window.innerHeight - chatEl.offsetHeight - 4));
+    chatEl.style.left = x + 'px';
+    chatEl.style.top = y + 'px';
+  }
+
+  function showChat() {
+    chatBuild();
+    chatPosition();
+    chatEl.classList.add('show');
+    chatRender();
+    setTimeout(function () { if (chatInEl) chatInEl.focus(); }, 40);
+    if (MOOD[curId]) { paintFace('happy'); setTimeout(function () { paintFace('normal'); }, 1400); }
+  }
+  function hideChat() {
+    if (!chatEl) return;
+    hideHist();                          // 收起面板时历史列表也一并收掉
+    chatEl.classList.remove('show');
+    if (chatAbort) { try { chatAbort.abort(); } catch (e) {} }
+  }
+
+  /* Agent 续轮（每轮最多补一次）：
+     A. 表单已经弹出来 → 把最新字段清单交给模型，直接填完保存；
+     B. 用户要的是「新建 / 创建」这类多步请求，但这一轮只做了「打开面板」——
+        自动再给一轮机会，把「点新建」补齐（用户不用再催一句）。 */
+  // 一条消息最多自动补 3 轮：①点「新建」→ ②填字段 → ③点保存/收尾。
+  // 每轮都要重新判断（不能只判断一次），否则「打开面板」后表单弹出来了却没人填。
+  var followCount = 0;
+  /* 用户这句是不是「要建东西」——覆盖新建 / 创建 / 定一个 / 设一个 / 提醒我 这些说法 */
+  function chatWantsCreate() {
+    return /(新建|创建|新增|添加|加一?个|建一?个|开一?个|定一?个|设一?个|设置一?个|帮我(建|加|定|设|开)|给我(建|加|定|设|开)|提醒我)/.test(chatLastUserText || '');
+  }
+  function chatActSummary() {
+    return ideActLog.slice(-3).map(function (a) {      // 只列最近 3 条，免得提示词越滚越长
+      return (a.ok ? '' : '（失败）') + a.act + (a.arg ? '「' + String(a.arg).slice(0, 20) + '」' : '');
+    }).join('、');
+  }
+  function chatAutoFollow(petId) {
+    if (!chatAgentOn() || chatBusy || followCount >= 3) return false;
+    var snap = ideSnapshot();                    // 重新抓：这一轮的动作可能刚把表单弹出来
+    var hasForm = !!(snap.form && snap.form.fields.length);
+
+    // 只做了一半：用户要建东西、表单还没出现、而且还没成功点过「新建」
+    // （模型光说不做、只开了面板、点了别的东西，都算「没做到位」，值得再给一轮）
+    var halfDone = false;
+    if (!hasForm && chatWantsCreate() && ideActLog.length <= 2) {
+      var clickedNew = false;
+      for (var i = 0; i < ideActLog.length; i++) {
+        // 只有「点新建且成功」才算做到位；点了但失败（面板还没渲染完之类）仍要再给一轮
+        if (ideActLog[i].act === 'click' && ideActLog[i].ok &&
+            /新建|创建|添加|新增/.test(ideActLog[i].arg)) clickedNew = true;
+      }
+      // 已经点过「新建」但表单没出来（可能点错了），就不再纠缠，免得来回绕圈
+      halfDone = !clickedNew;
+    }
+    if (!hasForm && !halfDone) return false;
+    followCount++;
+
+    var snapText = ideSnapText(snap);
+    var sysText = (PERSONA[petId] || PERSONA.buddy) + '\n' + CHAT_RULE + '\n' + AGENT_RULE;
+    if (snapText) sysText += '\n\n' + snapText;
+    if (hasForm) {
+      sysText += '\n\n[系统] 界面刚刚更新（上面是弹窗字段与按钮）。若用户请求还没完成，' +
+                 '就用 fill 填好字段、再 click 保存；已完成就用一句话告诉用户结果，不要重复做过的动作。';
+    } else {
+      sysText += '\n\n[系统] 这是自动续接。你上一轮只做了：' + (chatActSummary() || '（没有任何界面动作）') + '。' +
+                 '用户要的是「新建」，但表单还没打开，任务并没有完成。' +
+                 '请立刻继续用 <ide> 动作：click 面板里的「新建」按钮（定时任务是「新建任务」，' +
+                 '数据库 / SSH 是「新建连接」，API 是「新建请求」，后台任务是「新建任务」）。' +
+                 '不要再用文字解释，也不要重复已经做过的动作。';
+    }
+
+    var list = chatLoadFor(petId);
+    var msgs = [{ role: 'system', content: sysText }];
+    var ctx = list.slice(-CHAT_TURNS * 2);
+    for (var i = 0; i < ctx.length; i++) {
+      if (ctx[i].role === 'user' || ctx[i].role === 'assistant') {
+        msgs.push({ role: ctx[i].role, content: ctx[i].content });
+      }
+    }
+
+    var reply = { role: 'assistant', content: '' };
+    list.push(reply);
+    chatStoreFor(petId, list);
+    chatRender();
+    chatPatch('（继续操作…）');
+
+    chatBusy = true;
+    chatSetBusy(true);
+    if (curId === petId && MOOD[curId]) paintFace('think');
+    chatAbort = new AbortController();
+
+    (async function () {
+      try {
+        var res = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: msgs,
+            web_tool: chatWebOn(),
+            web_event: 1,
+            use_tools: true,
+            perm: 'readonly',
+            repo: (chatProjOn() && ideRoot()) || ''
+          }),
+          signal: chatAbort.signal
+        });
+        if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+        var reader = res.body.getReader(), dec = new TextDecoder(), buf = '';
+        while (true) {
+          var rd = await reader.read();
+          if (rd.done) break;
+          buf += dec.decode(rd.value, { stream: true });
+          var idx;
+          while ((idx = buf.indexOf('\n\n')) >= 0) {
+            var chunk = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            var lines = chunk.split('\n');
+            for (var li = 0; li < lines.length; li++) {
+              var ln = lines[li];
+              if (ln.indexOf('data:') !== 0) continue;
+              var payload = ln.slice(5).trim();
+              if (!payload || payload === '[DONE]') continue;
+              var obj;
+              try { obj = JSON.parse(payload); } catch (e3) { continue; }
+              if (obj.error) throw new Error(obj.error);
+              if (obj.delta) {
+                reply.content += obj.delta;
+                ideScan(reply);
+                if (curId === petId) chatPatch(reply.content);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        if (!reply.content) reply.content = '';
+      } finally {
+        chatBusy = false;
+        chatAbort = null;
+        chatSetBusy(false);
+        ideScan(reply);
+        if (!reply.content) {
+          chatStoreFor(petId, list.filter(function (m) { return m !== reply; }));
+        } else {
+          chatStoreFor(petId, list);
+        }
+        if (curId === petId) chatRender();
+        // 这一轮可能只是把表单点出来了：同样等一拍再看要不要继续补（填字段 / 保存），
+        // 否则「面板 → 新建 → 填表」会断在第二步，用户还得自己再催一次。
+        // 模型这一轮要是啥都没吐（网络抖动 / 接口报错），就别再自动续了，免得空转。
+        var gotContent = !!reply.content;
+        setTimeout(function () {
+          if (!gotContent || !chatAutoFollow(petId)) chatCompact(petId);
+        }, 520);
+      }
+    })();
+    return true;
+  }
+
+  function chatSend() {
+    chatBuild();
+    if (chatBusy) return;
+    followCount = 0;                      // 新一轮消息：自动补轮次数归零
+    ideActLog = [];                       // 新一轮：动作记录与用户原话都重记，供续轮判断
+    var text = (chatInEl.value || '').trim();
+    if (!text) return;
+    chatLastUserText = text;
+    chatInEl.value = '';
+    chatInEl.style.height = '33px';    // 回到单行，和 CSS 基准高度一致（用 auto 会再量一次，容易抖）
+
+    var petId = curId;                 // 本轮归属：中途换伙伴也不会串记忆
+    var list = chatLoadFor(petId);
+    list.push({ role: 'user', content: text });
+    chatStoreFor(petId, list);
+
+    // 「智能体」模式：允许读项目文件（只读），项目根目录按 IDE 当前打开的文件夹给
+    var proj = chatProjOn() && !!ideRoot();
+    // 上下文 = 人设 + 早前对话摘要（压缩记忆）+ 最近 12 轮原文
+    var sumObj = chatSumLoadFor(petId);
+    var agent = chatAgentOn();
+    var sysText = (PERSONA[petId] || PERSONA.buddy) + '\n' + CHAT_RULE +
+                  (proj ? '\n' + PROJ_RULE : '') + (agent ? '\n' + AGENT_RULE : '');
+    if (agent) {                                  // 发消息时抓一份「当前界面清单」，模型才看得见具体条目
+      var snapText = ideSnapText(ideSnapshot());
+      if (snapText) sysText += '\n\n' + snapText;
+    }
+    if (sumObj && sumObj.text) sysText += '\n\n[早前对话摘要（更早的内容已被压缩）]\n' + sumObj.text;
+    var msgs = [{ role: 'system', content: sysText }];
+    var ctx = list.slice(-CHAT_TURNS * 2);
+    for (var i = 0; i < ctx.length; i++) {
+      if (ctx[i].role === 'user' || ctx[i].role === 'assistant') {
+        msgs.push({ role: ctx[i].role, content: ctx[i].content });
+      }
+    }
+
+    var reply = { role: 'assistant', content: '' };
+    list.push(reply);
+    chatStoreFor(petId, list);
+    chatRender();
+    chatPatch('（思考中…）');
+
+    chatBusy = true;
+    chatSetBusy(true);
+    if (curId === petId && MOOD[curId]) paintFace('think');
+
+    chatAbort = new AbortController();
+    (async function () {
+      try {
+        var res = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: msgs,
+            // 按需联网：不给「回复前预搜索」，只把 web_search 工具交给模型自己判断
+            web_tool: chatWebOn(),
+            web_event: 1,                 // 预搜索时服务端会回推检索实况（此处通常不触发）
+            use_tools: true,              // 具体给哪类工具由服务端按 repo / web_tool 决定
+            perm: 'readonly',
+            repo: proj ? ideRoot() : ''   // 项目根目录（文件工具的相对路径基于它）
+          }),
+          signal: chatAbort.signal
+        });
+        if (!res.ok) {
+          var em = 'HTTP ' + res.status;
+          try { var j = await res.json(); em = j.error || em; } catch (e2) {}
+          throw new Error(em);
+        }
+        if (!res.body) throw new Error('当前浏览器不支持流式读取');
+
+        var reader = res.body.getReader(), dec = new TextDecoder(), buf = '';
+        while (true) {
+          var rd = await reader.read();
+          if (rd.done) break;
+          buf += dec.decode(rd.value, { stream: true });
+          var idx;
+          while ((idx = buf.indexOf('\n\n')) >= 0) {
+            var chunk = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            var lines = chunk.split('\n');
+            for (var li = 0; li < lines.length; li++) {
+              var ln = lines[li];
+              if (ln.indexOf('data:') !== 0) continue;
+              var payload = ln.slice(5).trim();
+              if (!payload || payload === '[DONE]') continue;
+              var obj;
+              try { obj = JSON.parse(payload); } catch (e3) { continue; }
+              if (obj.type === 'web') {                 // 服务端回报联网检索实况
+                if (obj.ok) chatTip('已联网检索到 ' + obj.count + ' 条结果');
+                else chatTip('联网检索失败：' + (obj.error || '没拿到结果') +
+                             '（确认服务器能访问外网 / Bing）', true, 9000);
+                continue;
+              }
+              if (obj.type === 'step') {                // 智能体正在调用工具
+                chatTip('正在' + (TOOL_LABEL[obj.tool] || obj.tool) + '…', false, 15000);
+                continue;
+              }
+              if (obj.type === 'result') {              // 工具执行完，回报读到了什么
+                var sg = String(obj.summary || TOOL_LABEL[obj.tool] || obj.tool).slice(0, 70);
+                chatTip((obj.ok ? '✓ ' : '✗ ') + sg, !obj.ok, 6000);
+                continue;
+              }
+              if (obj.error) throw new Error(obj.error);
+              if (obj.delta) {
+                if (!reply.content && curId === petId && MOOD[curId]) paintFace('happy');
+                reply.content += obj.delta;
+                ideScan(reply);                       // 凑齐一个 <ide>…</ide> 就立刻执行
+                if (curId === petId) chatPatch(reply.content);
+              }
+            }
+          }
+        }
+        if (!reply.content) reply.content = '（没收到内容，检查一下「设置 → AI 接口」是否配置好了？）';
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          reply.content = reply.content || '（已停止）';
+        } else {
+          reply.content = reply.content || ('啊…出了点问题：' + (err && err.message ? err.message : err));
+        }
+      } finally {
+        chatBusy = false;
+        chatAbort = null;
+        chatSetBusy(false);
+        ideScan(reply);                      // 兜底：最后一帧才闭合的动作也别漏
+        chatStoreFor(petId, list);
+        if (curId === petId) {
+          chatRender();
+          if (MOOD[curId]) {
+            paintFace('happy');
+            setTimeout(function () { paintFace('normal'); }, 1800);
+          }
+        }
+        // 本轮动作打开了表单 / 只做了一半 → 自动续一轮把剩下的事做完；否则再考虑压缩记忆。
+        // 等 520ms：最后一条动作可能是带重试的 click（面板刚切、列表还在渲染），
+        // 先让动作真正落定，续轮判断和快照才不会错位。
+        setTimeout(function () {
+          if (!chatAutoFollow(petId)) chatCompact(petId);
+        }, 520);
+      }
+    })();
+  }
+
   // ---------- 对外 API ----------
   window.Deskie = {
     say: function (text, ms) { show(); say(text, ms); },
@@ -1103,6 +2586,7 @@
     use: use,
     pets: ORDER.slice(),
     current: function () { return curId; },
+    chat: function () { showChat(); },        // 打开 / 聚焦桌宠 AI 对话面板
     /* 当前伙伴的表情 / 颜色 / 动作 */
     face: function (f) { paintFace(f); },
     faces: FACE_ORDER.slice(),

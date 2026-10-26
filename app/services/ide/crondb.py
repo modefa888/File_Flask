@@ -4,6 +4,7 @@
 通知渠道配置见 cronnotify.py（同样落在 cron_cfg 表）。
 """
 import json
+import secrets
 import time
 import uuid
 
@@ -12,7 +13,8 @@ from ..common.store_db import store_conn, store_tx
 
 _log = get_logger()
 
-_TASK_COLS = ("id", "name", "cron", "command", "cwd", "enabled", "remark", "timeout",
+_TASK_COLS = ("id", "name", "cron", "command", "kind", "lang", "content", "ai_sys", "web_token", "cwd",
+              "enabled", "remark", "timeout",
               "max_retries", "retry_interval", "depends_on", "pre_hook", "post_hook",
               "notify", "notify_content", "notify_lines", "notify_title", "notify_body",
               "notify_channels",
@@ -23,8 +25,14 @@ _TASK_COLS = ("id", "name", "cron", "command", "cwd", "enabled", "remark", "time
 NOTIFY_MODES = ("status", "output", "output_only", "custom")
 _NOTIFY_LINES_MAX = 200
 
+# 任务执行方式：command（shell 命令）/ code（代码片段）/ ai（AI 提示词）
+KINDS = ("command", "code", "ai")
+LANGS = ("python", "node", "bash")
+KIND_LABELS = {"command": "命令", "code": "代码", "ai": "AI 提示词"}
+LANG_LABELS = {"python": "Python", "node": "Node.js", "bash": "Shell"}
+
 # 可推送的通知渠道（与 cronnotify 的渠道一致）；任务里为空 = 跟随「通知设置」里已启用的渠道
-NOTIFY_CHANNELS = ("desktop", "email", "dingtalk", "telegram", "pushplus")
+NOTIFY_CHANNELS = ("desktop", "email", "dingtalk", "telegram", "pushplus", "web")
 
 
 def norm_channels(v):
@@ -64,6 +72,16 @@ def _norm_lines(v):
         return 20
 
 
+def _norm_kind(v):
+    v = str(v or "").strip().lower()
+    return v if v in KINDS else "command"
+
+
+def _norm_lang(v):
+    v = str(v or "").strip().lower()
+    return v if v in LANGS else "python"
+
+
 def _task_dict(row):
     if not row:
         return None
@@ -75,6 +93,11 @@ def _task_dict(row):
     d["notify_title"] = str(d.get("notify_title") or "")
     d["notify_body"] = str(d.get("notify_body") or "")
     d["notify_channels"] = norm_channels(d.get("notify_channels"))
+    d["kind"] = _norm_kind(d.get("kind"))
+    d["lang"] = _norm_lang(d.get("lang"))
+    d["content"] = str(d.get("content") or "")
+    d["ai_sys"] = str(d.get("ai_sys") or "")
+    d["web_token"] = str(d.get("web_token") or "")
     return d
 
 
@@ -106,16 +129,20 @@ def get_task(tid):
 def create_task(name, cron, command, cwd="", enabled=True, remark="", timeout=0,
                 max_retries=0, retry_interval=60, depends_on="", pre_hook="", post_hook="",
                 notify=True, tid=None, notify_content="status", notify_lines=20,
-                notify_title="", notify_body="", notify_channels=""):
+                notify_title="", notify_body="", notify_channels="",
+                kind="command", lang="python", content="", ai_sys=""):
     now = time.time()
     tid = str(tid) if tid else uuid.uuid4().hex[:12]
     with store_tx() as conn:
         conn.execute(
-            "INSERT INTO cron_tasks (id, name, cron, command, cwd, enabled, remark, timeout,"
+            "INSERT INTO cron_tasks (id, name, cron, command, kind, lang, content, ai_sys,"
+            " cwd, enabled, remark, timeout,"
             " max_retries, retry_interval, depends_on, pre_hook, post_hook, notify,"
             " notify_content, notify_lines, notify_title, notify_body, notify_channels,"
-            " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (tid, name, cron, command, cwd, 1 if as_bool(enabled) else 0, remark, int(timeout or 0),
+            " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (tid, name, cron, command, _norm_kind(kind), _norm_lang(lang),
+             str(content or ""), str(ai_sys or ""),
+             cwd, 1 if as_bool(enabled) else 0, remark, int(timeout or 0),
              max(0, int(max_retries or 0)), max(1, int(retry_interval or 60)),
              str(depends_on or ""), str(pre_hook or ""), str(post_hook or ""),
              1 if as_bool(notify) else 0, _norm_mode(notify_content), _norm_lines(notify_lines),
@@ -125,7 +152,8 @@ def create_task(name, cron, command, cwd="", enabled=True, remark="", timeout=0,
 
 
 def update_task(tid, **fields):
-    allowed = ("name", "cron", "command", "cwd", "enabled", "remark", "timeout",
+    allowed = ("name", "cron", "command", "kind", "lang", "content", "ai_sys",
+               "cwd", "enabled", "remark", "timeout",
                "max_retries", "retry_interval", "depends_on", "pre_hook", "post_hook", "notify",
                "notify_content", "notify_lines", "notify_title", "notify_body",
                "notify_channels")
@@ -147,6 +175,12 @@ def update_task(tid, **fields):
             args.append(_norm_lines(v))
         elif k == "notify_channels":
             args.append(norm_channels(v))
+        elif k == "kind":
+            args.append(_norm_kind(v))
+        elif k == "lang":
+            args.append(_norm_lang(v))
+        elif k in ("content", "ai_sys"):
+            args.append(str(v or ""))
         else:
             args.append(v)
     if sets:
@@ -259,6 +293,70 @@ def clear_runs_before(ts):
             conn.execute("DELETE FROM cron_runs WHERE id IN (%s)"
                          % ",".join("?" * len(dropped)), tuple(r["id"] for r in dropped))
     return dropped
+
+
+# ---------------------------------------------------------------- 网页版通知
+_WEB_NOTE_COLS = ("id", "token", "task_id", "task_name", "run_id", "title", "body",
+                  "status", "created_at", "expires_at", "deleted")
+
+
+def ensure_web_token(tid):
+    """取任务的网页通知令牌；没有就生成随机串并落库（每个任务固定一个，地址可收藏）。"""
+    tid = str(tid or "")
+    rows = _query("SELECT web_token FROM cron_tasks WHERE id=?", (tid,))
+    if rows and rows[0]["web_token"]:
+        return str(rows[0]["web_token"])
+    token = secrets.token_hex(16)
+    with store_tx() as conn:
+        conn.execute("UPDATE cron_tasks SET web_token=? WHERE id=?", (token, tid))
+    return token
+
+
+def get_task_by_web_token(token):
+    """按网页通知令牌反查任务（页面标题 / 归属用）。"""
+    token = str(token or "").strip()
+    if not token:
+        return None
+    rows = _query("SELECT * FROM cron_tasks WHERE web_token=?", (token,))
+    return _task_dict(rows[0]) if rows else None
+
+
+def add_web_note(token, title, body, task_id="", task_name="", run_id="", status="", days=7):
+    """保存一条网页通知（Markdown 正文），返回 {id, expires_at}。"""
+    try:
+        days = max(1, min(int(days or 7), 365))
+    except (TypeError, ValueError):
+        days = 7
+    now = time.time()
+    nid = uuid.uuid4().hex[:12]
+    with store_tx() as conn:
+        conn.execute(
+            "INSERT INTO cron_web_notes (id, token, task_id, task_name, run_id, title, body,"
+            " status, created_at, expires_at, deleted) VALUES (?,?,?,?,?,?,?,?,?,?,0)",
+            (nid, str(token or ""), str(task_id or ""), str(task_name or ""), str(run_id or ""),
+             str(title or "")[:200], str(body or ""), str(status or ""), now, now + days * 86400))
+    return {"id": nid, "expires_at": now + days * 86400}
+
+
+def list_web_notes(token, limit=50):
+    """某个令牌下仍有效的通知（新的在前；过期 / 已假删除的不返回）。"""
+    token = str(token or "").strip()
+    if not token:
+        return []
+    limit = max(1, min(int(limit or 50), 200))
+    rows = _query(
+        "SELECT * FROM cron_web_notes WHERE token=? AND deleted=0 AND expires_at>?"
+        " ORDER BY created_at DESC LIMIT ?", (token, time.time(), limit))
+    return [{k: r[k] for k in _WEB_NOTE_COLS if k in r.keys()} for r in rows]
+
+
+def purge_web_notes():
+    """把过期通知标记为已删除（假删除，不物理删）；返回处理条数。"""
+    with store_tx() as conn:
+        cur = conn.execute(
+            "UPDATE cron_web_notes SET deleted=1 WHERE deleted=0 AND expires_at<=?",
+            (time.time(),))
+        return cur.rowcount or 0
 
 
 # ---------------------------------------------------------------- 模块设置（cron_cfg 键值表）

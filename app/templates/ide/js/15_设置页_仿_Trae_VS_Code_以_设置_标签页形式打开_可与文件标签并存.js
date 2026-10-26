@@ -272,6 +272,16 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
               '<div class="sysai-mod-desc">定时任务编辑里的「AI 生成文案」：按脚本输出写一版带 emoji 的通知标题与正文</div></div>' +
               '<div class="sysai-mod-ctl"><code>POST /api/cron/notify-ai</code>' +
               '<label class="set-switch sysai-sw" data-mod="cron" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
+            '<div class="sysai-mod"><i class="bi bi-stars"></i><div class="sysai-mod-main">' +
+              '<div class="sysai-mod-name">定时任务 AI 提示词<span class="sysai-stat" data-stat="crontask"></span></div>' +
+              '<div class="sysai-mod-desc">「AI 提示词」类型的定时任务：到点把固定提示词发给模型，输出写进执行日志并推送通知</div></div>' +
+              '<div class="sysai-mod-ctl"><code>定时任务执行</code>' +
+              '<label class="set-switch sysai-sw" data-mod="crontask" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
+            '<div class="sysai-mod"><i class="bi bi-magic"></i><div class="sysai-mod-main">' +
+              '<div class="sysai-mod-name">定时任务一键生成<span class="sysai-stat" data-stat="crongen"></span></div>' +
+              '<div class="sysai-mod-desc">新建定时任务时的「一句话生成」：把自然语言需求翻译成任务类型 / 运行时间 / 代码或提示词</div></div>' +
+              '<div class="sysai-mod-ctl"><code>POST /api/cron/ai-draft</code>' +
+              '<label class="set-switch sysai-sw" data-mod="crongen" title="启用 / 停用"><input type="checkbox"><span></span></label></div></div>' +
           '</div>' +
         '</div>' +
 

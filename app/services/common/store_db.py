@@ -394,6 +394,10 @@ CREATE TABLE IF NOT EXISTS cron_tasks (
     name        TEXT DEFAULT '',
     cron        TEXT DEFAULT '',                 -- 5 段（分 时 日 月 周）或 6 段（秒 分 时 日 月 周）
     command     TEXT DEFAULT '',
+    kind        TEXT DEFAULT 'command',          -- 执行方式：command（命令）/ code（代码片段）/ ai（AI 提示词）
+    lang        TEXT DEFAULT 'python',           -- 代码语言：python / node / bash（仅 kind=code）
+    content     TEXT DEFAULT '',                 -- 代码片段 或 AI 提示词正文（仅 kind=code / ai）
+    ai_sys      TEXT DEFAULT '',                 -- AI 任务的系统提示（可选，留空用内置）
     cwd         TEXT DEFAULT '',
     enabled     INTEGER NOT NULL DEFAULT 1,
     remark      TEXT DEFAULT '',
@@ -440,6 +444,23 @@ CREATE TABLE IF NOT EXISTS cron_cfg (
     key   TEXT PRIMARY KEY,
     value TEXT DEFAULT ''
 );
+-- 网页版通知：一行一条通知（Markdown 正文），地址里的 token 按任务唯一。
+-- 过期后只把 deleted 置 1（假删除），不物理删，便于排查「为什么看不到了」。
+CREATE TABLE IF NOT EXISTS cron_web_notes (
+    id         TEXT PRIMARY KEY,
+    token      TEXT DEFAULT '',                  -- 地址里的访问令牌（每任务一个，测试通知为 test）
+    task_id    TEXT DEFAULT '',
+    task_name  TEXT DEFAULT '',
+    run_id     TEXT DEFAULT '',
+    title      TEXT DEFAULT '',
+    body       TEXT DEFAULT '',                  -- Markdown / 纯文本正文
+    status     TEXT DEFAULT '',                  -- success / fail / timeout / killed / test
+    created_at REAL NOT NULL DEFAULT 0,
+    expires_at REAL NOT NULL DEFAULT 0,          -- 到期时间（默认 7 天后）
+    deleted    INTEGER NOT NULL DEFAULT 0        -- 1 = 已过期（假删除，页面不再展示）
+);
+CREATE INDEX IF NOT EXISTS idx_cron_web_notes_token ON cron_web_notes(token, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cron_web_notes_exp ON cron_web_notes(deleted, expires_at);
 -- 文件说明（用户自定义）：键 = 文件名 / 文件夹名（与 special_hints.json 的键一致）。
 -- special_hints.json 提供内置「基础说明」（只读、随代码维护）；本表存界面上补充或覆盖的说明，
 -- 前端合并时自定义优先；hint 清空 = 删除该条自定义记录、回落到内置基础说明。
@@ -582,6 +603,13 @@ def _migrate_ai_columns(conn):
         ("cron_tasks", "notify_body", "TEXT DEFAULT ''"),
         # 任务级通知渠道（空 = 跟随「通知设置」里已启用的渠道）
         ("cron_tasks", "notify_channels", "TEXT DEFAULT ''"),
+        # 任务执行方式：命令 / 代码片段 / AI 提示词（老库补列）
+        ("cron_tasks", "kind", "TEXT DEFAULT 'command'"),
+        ("cron_tasks", "lang", "TEXT DEFAULT 'python'"),
+        ("cron_tasks", "content", "TEXT DEFAULT ''"),
+        ("cron_tasks", "ai_sys", "TEXT DEFAULT ''"),
+        # 网页版通知的访问令牌（每个任务一个，随机不可猜）
+        ("cron_tasks", "web_token", "TEXT DEFAULT ''"),
         ("cron_runs", "attempt", "INTEGER NOT NULL DEFAULT 0"),
         # 终端 AI 历史：AI 标题列（老库补列）
         ("term_ai_history", "title", "TEXT DEFAULT ''"),

@@ -16,8 +16,10 @@
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -27,6 +29,7 @@ from ... import config
 from ...log import get_logger
 from ..common.safety import check_command
 from . import crondb
+from . import cronai
 from . import cronnotify
 from . import cronutil
 from . import procinfo
@@ -407,7 +410,9 @@ def _notify_send(task, run_id, event, title, body, vars_, tpl, log_path):
     res = cronnotify.send(title, body, event=event, vars_=vars_, tpl=tpl,
                           channels=task.get("notify_channels"),
                           meta=_notify_meta(task, run_id))
-    _log_notify(log_path, event, title, body, res)
+    # send 会在正文末尾补上「前往网页版通知」地址，记录里也用补过的版本，
+    # 这样「执行记录 → 通知记录」展开的正文与真实发出去的一致。
+    _log_notify(log_path, event, title, res.get("body") or body, res)
     return res
 
 
@@ -439,9 +444,120 @@ def _run_env():
     return env
 
 
-def dry_run(data, lines=20):
-    """试运行：用编辑框里当前的命令立刻跑一次，只返回输出给前端预览。
+# ---------------------------------------------------------------- 任务类型 → 命令
+# 「代码片段」任务：把代码落成脚本文件，再用对应解释器执行（工作目录仍取任务里的 cwd）
+_CODE_EXT = {"python": "py", "node": "js", "bash": "sh"}
 
+
+def _norm_lang(lang):
+    lang = str(lang or "").strip().lower()
+    return lang if lang in _CODE_EXT else "python"
+
+
+def _code_interpreter(lang):
+    lang = _norm_lang(lang)
+    if lang == "python":
+        return [sys.executable or "python3"]
+    if lang == "node":
+        return ["node"]
+    return ["bash"]
+
+
+def _code_script_path(task_id, lang):
+    return os.path.join(LOG_DIR, str(task_id or "_tmp"), "job." + _CODE_EXT[_norm_lang(lang)])
+
+
+def _write_code(task_id, lang, content):
+    """把代码片段写成任务目录下的脚本文件，返回脚本绝对路径。"""
+    path = _code_script_path(task_id, lang)
+    _ensure_dir(os.path.dirname(path))
+    text = str(content or "")
+    if not text.endswith("\n"):
+        text += "\n"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    try:
+        os.chmod(path, 0o755)
+    except OSError:
+        pass
+    return path
+
+
+def _code_command(task_id, lang, content):
+    """代码片段 → 「解释器 + 脚本路径」形式的 shell 命令。"""
+    path = _write_code(task_id, lang, content)
+    parts = _code_interpreter(lang) + [path]
+    return " ".join(shlex.quote(p) for p in parts)
+
+
+def _task_command(task):
+    """把任务归一成真正要执行的 shell 命令；不能执行时抛 ValueError。
+
+    · command：直接用任务里的命令；
+    · code：把代码写成脚本文件后用对应解释器运行；
+    · ai：不走 shell（由 _start_ai_run 单独处理），这里返回空串。
+    """
+    kind = str((task or {}).get("kind") or "command")
+    if kind == "code":
+        content = str(task.get("content") or "")
+        if not content.strip():
+            raise ValueError("代码为空，请先在编辑里填写")
+        return _code_command(task.get("id") or "_tmp", task.get("lang"), content)
+    if kind == "ai":
+        return ""
+    cmd = str(task.get("command") or "").strip()
+    if not cmd:
+        raise ValueError("任务命令为空，请先在编辑里填写")
+    return cmd
+
+
+def _display_command(kind, command, lang, content):
+    """执行记录 / 日志头里显示的一行说明（代码与提示词用摘要，避免糊一大段）。"""
+    kind = str(kind or "command")
+    if kind == "code":
+        label = crondb.LANG_LABELS.get(_norm_lang(lang), "Python")
+        n = len([x for x in str(content or "").splitlines() if x.strip()])
+        return "[%s 代码 %d 行]" % (label, n)
+    if kind == "ai":
+        first = ""
+        for line in str(content or "").splitlines():
+            if line.strip():
+                first = line.strip()
+                break
+        return "[AI 提示词] " + (first[:60] + ("…" if len(first) > 60 else "") if first else "（空）")
+    return str(command or "")
+
+
+def _dry_result(data, text, ok, code, dur, lines, timed_out=False):
+    """把试运行输出整理成统一返回结构（命令 / 代码 / AI 三种方式共用）。"""
+    try:
+        n = max(0, min(int(lines or 0), 200))
+    except (TypeError, ValueError):
+        n = 20
+    # 通知里会带上的那几行（与 _tail_output 的口径一致：末尾 n 行 + 字符上限）
+    rows = text.replace("\r\n", "\n").split("\n")
+    while rows and not rows[-1].strip():
+        rows.pop()
+    tail_rows = rows[-n:] if n else rows
+    tail = "\n".join(tail_rows)
+    if len(tail) > _NOTIFY_MAX_CHARS:
+        tail = "…（仅显示末尾部分）\n" + tail[-_NOTIFY_MAX_CHARS:]
+    fields = _json_vars(text)                          # 输出是 JSON 对象时可直接当模板变量用
+    truncated = False
+    if len(text) > _DRY_OUT_CHARS:                     # 预览别塞爆浏览器
+        text = "…（仅显示末尾部分）\n" + text[-_DRY_OUT_CHARS:]
+        truncated = True
+    return {"ok": ok,
+            "exit_code": code, "duration": dur, "timed_out": timed_out,
+            "output": text, "tail": tail, "lines": n, "truncated": truncated,
+            "fields": fields,
+            "preview": _notify_preview(data, ok, code, dur, tail, fields)}
+
+
+def dry_run(data, lines=20):
+    """试运行：用编辑框里当前的内容立刻跑一次，只返回输出给前端预览。
+
+    支持三种任务类型：命令（command）/ 代码片段（code）/ AI 提示词（ai）。
     与正式执行的区别：不写执行记录、不计统计、不发通知；
     超时上限 120 秒（防止编辑弹窗里的请求无限挂起），输出最多回传 2 万字符。
     返回 {ok, exit_code, duration, timed_out, output, tail, lines, truncated} 或 {error}。
@@ -449,13 +565,29 @@ def dry_run(data, lines=20):
     data = data or {}
     if not getattr(config, "ENABLE_EXEC", True):
         return {"error": "已禁用命令执行（config.ENABLE_EXEC = False）"}
-    cmd = str(data.get("command") or "").strip()
-    if not cmd:
-        return {"error": "执行命令为空"}
+    kind = str(data.get("kind") or "command").strip().lower()
+    if kind == "ai":
+        return _dry_run_ai(data, lines)
+    if kind == "code":
+        content = str(data.get("content") or "")
+        if not content.strip():
+            return {"error": "代码为空，请先填写代码"}
+        try:
+            cmd = _code_command("_dry", data.get("lang"), content)
+        except OSError as e:
+            return {"error": "写入脚本失败：%s" % e}
+    else:
+        cmd = str(data.get("command") or "").strip()
+        if not cmd:
+            return {"error": "执行命令为空"}
     pre_hook = str(data.get("pre_hook") or "").strip()
     post_hook = str(data.get("post_hook") or "").strip()
-    for label, hook in (("前置钩子", pre_hook), ("后置钩子", post_hook), ("主命令", cmd)):
-        verdict = check_command(hook)
+    # 代码片段的内容本身就是代码，不做危险命令匹配；shell 代码按命令校验
+    checks = [("前置钩子", pre_hook), ("后置钩子", post_hook)]
+    if kind == "command" or str(data.get("lang") or "") == "bash":
+        checks.append(("主命令", cmd if kind == "command" else str(data.get("content") or "")))
+    for label, text in checks:
+        verdict = check_command(text)
         if verdict.get("level") == "blocked":
             return {"error": "已拦截危险命令（%s）：%s" % (label, verdict.get("reason"))}
     cwd = str(data.get("cwd") or "").strip() or None
@@ -487,29 +619,29 @@ def dry_run(data, lines=20):
             raw = b""
     dur = int((time.time() - started) * 1000)
     text = (raw or b"").decode("utf-8", "replace")
-    try:
-        n = max(0, min(int(lines or 0), 200))
-    except (TypeError, ValueError):
-        n = 20
-    # 通知里会带上的那几行（与 _tail_output 的口径一致：末尾 n 行 + 字符上限）
-    rows = text.replace("\r\n", "\n").split("\n")
-    while rows and not rows[-1].strip():
-        rows.pop()
-    tail_rows = rows[-n:] if n else rows
-    tail = "\n".join(tail_rows)
-    if len(tail) > _NOTIFY_MAX_CHARS:
-        tail = "…（仅显示末尾部分）\n" + tail[-_NOTIFY_MAX_CHARS:]
-    fields = _json_vars(text)                          # 输出是 JSON 对象时可直接当模板变量用
-    truncated = False
-    if len(text) > _DRY_OUT_CHARS:                     # 预览别塞爆浏览器
-        text = "…（仅显示末尾部分）\n" + text[-_DRY_OUT_CHARS:]
-        truncated = True
     ok = (not timed_out) and proc.returncode == 0
-    return {"ok": ok,
-            "exit_code": proc.returncode, "duration": dur, "timed_out": timed_out,
-            "output": text, "tail": tail, "lines": n, "truncated": truncated,
-            "fields": fields,
-            "preview": _notify_preview(data, ok, proc.returncode, dur, tail, fields)}
+    return _dry_result(data, text, ok, proc.returncode, dur, lines, timed_out)
+
+
+def _dry_run_ai(data, lines=20):
+    """试运行 AI 提示词任务：直接问一次模型，把正文当「脚本输出」返回。"""
+    prompt = str(data.get("content") or "").strip()
+    if not prompt:
+        return {"error": "提示词为空，请先填写固定提示词"}
+    try:
+        timeout = max(0, int(data.get("timeout") or 0))
+    except (TypeError, ValueError):
+        timeout = 0
+    timeout = min(timeout, _DRY_TIMEOUT_MAX) if timeout else _DRY_TIMEOUT_MAX
+    started = time.time()
+    task = {"content": prompt, "ai_sys": str(data.get("ai_sys") or ""),
+            "lang": data.get("lang"), "kind": "ai"}
+    try:
+        text = cronai.run_prompt(task, timeout=timeout)
+    except Exception as e:                                 # noqa: BLE001
+        return {"error": str(e) or "调用 AI 失败"}
+    dur = int((time.time() - started) * 1000)
+    return _dry_result(data, text, True, 0, dur, lines)
 
 
 def start_run(task_id, trigger="manual"):
@@ -519,15 +651,19 @@ def start_run(task_id, trigger="manual"):
         return {"error": "任务不存在"}
     if not getattr(config, "ENABLE_EXEC", True):
         return {"error": "已禁用命令执行（config.ENABLE_EXEC = False）"}
-    cmd = str(task.get("command") or "").strip()
-    if not cmd:
-        return {"error": "任务命令为空，请先在编辑里填写"}
     ok, tip = cronutil.validate(task.get("cron") or "")
     if not ok:
         return {"error": "cron 表达式非法：" + tip}
     with _LOCK:
         if task_id in _BY_TASK:
             return {"error": "该任务正在运行中，请先停止"}
+    # AI 提示词任务不走 shell，单独起线程问模型
+    if str(task.get("kind") or "command") == "ai":
+        return _start_ai_run(task, trigger)
+    try:
+        cmd = _task_command(task)
+    except (ValueError, OSError) as e:
+        return {"error": str(e)}
     pre_hook = str(task.get("pre_hook") or "").strip()
     post_hook = str(task.get("post_hook") or "").strip()
     for label, hook in (("前置钩子", pre_hook), ("后置钩子", post_hook), ("主命令", cmd)):
@@ -620,6 +756,80 @@ def _watch(run_id, task_id, proc, log_path, started):
         if rec and _BY_TASK.get(task_id) == run_id:
             _BY_TASK.pop(task_id, None)
         stopped = bool(rec and rec.get("stopped"))
+    _finalize(run_id, task_id, log_path, started, status, code, stopped)
+
+
+def _start_ai_run(task, trigger):
+    """启动一次「AI 提示词」任务：不开子进程，起线程问模型后按常规流程收尾。"""
+    prompt = str(task.get("content") or "").strip()
+    if not prompt:
+        return {"error": "任务的提示词为空，请先在编辑里填写固定提示词"}
+    task_id = task["id"]
+    run_id = uuid.uuid4().hex[:12]
+    task_dir = os.path.join(LOG_DIR, task_id)
+    _ensure_dir(task_dir)
+    log_path = os.path.join(task_dir, run_id + ".log")
+    started = time.time()
+    try:
+        with open(log_path, "wb") as fh:
+            fh.write(("\n[%s] ▶ 开始执行（%s）\n$ %s\n" % (
+                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started)),
+                "手动" if trigger == "manual" else ("重试" if trigger == "retry" else "定时"),
+                _display_command("ai", "", "", prompt))).encode("utf-8"))
+    except OSError as e:
+        return {"error": "创建日志文件失败：%s" % e}
+    if trigger in ("cron", "manual"):
+        with _LOCK:
+            _RETRIES.pop(task_id, None)
+    with _LOCK:
+        attempt = _RETRIES.get(task_id, 0)
+    crondb.insert_run(run_id, task_id, task.get("name") or "", trigger, log_path,
+                      started, attempt)
+    stop_ev = threading.Event()
+    with _LOCK:
+        _RUNNING[run_id] = {"proc": None, "task_id": task_id, "start": started,
+                            "log_path": log_path, "stopped": False, "stop": stop_ev}
+        _BY_TASK[task_id] = run_id
+    threading.Thread(target=_ai_watch, args=(run_id, task_id, log_path, started, task, stop_ev),
+                     name="cron-ai-%s" % run_id, daemon=True).start()
+    _log.info("定时任务启动（AI 提示词）：%s（%s）run=%s", task.get("name"), trigger, run_id)
+    return {"run_id": run_id, "pid": 0}
+
+
+def _ai_watch(run_id, task_id, log_path, started, task, stop_ev):
+    """AI 提示词任务的执行线程：调模型 → 输出写日志 → 按常规流程收尾。"""
+    status, code = "success", 0
+    try:
+        timeout = int(task.get("timeout") or 0)
+    except (TypeError, ValueError):
+        timeout = 0
+    try:
+        text = cronai.run_prompt(task, timeout=timeout, should_stop=stop_ev.is_set)
+        body = "\n----- AI 输出 -----\n" + text + "\n"
+    except Exception as e:                         # noqa: BLE001
+        msg = str(e) or "调用 AI 失败"
+        status, code = "fail", 1
+        if "已手动停止" in msg:
+            status = "killed"
+        elif "超时" in msg or "timed out" in msg.lower():
+            status = "timeout"
+        body = "\n----- AI 输出 -----\n✘ %s\n" % msg
+    try:
+        with open(log_path, "ab") as w:
+            w.write(body.encode("utf-8"))
+    except OSError:
+        pass
+    with _LOCK:
+        rec = _RUNNING.pop(run_id, None)
+        if rec and _BY_TASK.get(task_id) == run_id:
+            _BY_TASK.pop(task_id, None)
+        stopped = bool(rec and rec.get("stopped")) or stop_ev.is_set()
+    _finalize(run_id, task_id, log_path, started, status, code, stopped)
+
+
+def _finalize(run_id, task_id, log_path, started, status, code, stopped=False):
+    """一次执行的统一收尾：落状态、写统计、清理旧记录、按配置推送通知。"""
+    task = crondb.get_task(task_id) or {}
     if stopped:
         status = "killed"
     ended = time.time()
@@ -729,8 +939,12 @@ def stop_run(run_id):
         if not rec:
             return {"error": "该执行已不在了（可能已结束）"}
         rec["stopped"] = True
-        proc = rec["proc"]
-    _kill_group(proc)
+        proc = rec.get("proc")
+        stop_ev = rec.get("stop")
+    if stop_ev is not None:                        # AI 任务：通知线程别再往下走
+        stop_ev.set()
+    if proc is not None:
+        _kill_group(proc)
     return {"ok": True}
 
 
@@ -819,6 +1033,13 @@ def _cleanup():
             removed += 1
     if removed:
         _log.info("定时任务日志自动清理：%d 条记录（保留 %d 天 / 每任务 %d 条）", removed, days, keep)
+    # 网页版通知：过期只做假删除（deleted=1），页面不再展示，数据仍可查
+    try:
+        purged = crondb.purge_web_notes()
+        if purged:
+            _log.info("网页版通知到期清理：%d 条（假删除）", purged)
+    except Exception as e:                             # noqa: BLE001
+        _log.warning("网页版通知清理失败：%s", e)
 
 
 # ---------------------------------------------------------------- 资源监控
@@ -826,7 +1047,7 @@ def monitor():
     """系统资源概况 + 正在运行的定时任务进程占用（复用 procinfo 的采样快照）。"""
     with _LOCK:
         items = [(rid, rec["task_id"], rec["proc"].pid, rec["start"])
-                 for rid, rec in _RUNNING.items()]
+                 for rid, rec in _RUNNING.items() if rec.get("proc") is not None]
     runs = []
     for rid, tid, pid, start in items:
         usage = procinfo.tree_usage(pid)
@@ -948,7 +1169,11 @@ def shutdown():
     global _STARTED
     with _LOCK:
         _STARTED = False
-        procs = [r["proc"] for r in _RUNNING.values()]
+        procs = [r["proc"] for r in _RUNNING.values() if r.get("proc") is not None]
+        for rec in _RUNNING.values():               # AI 任务：让线程尽快退出
+            ev = rec.get("stop")
+            if ev is not None:
+                ev.set()
         _RUNNING.clear()
         _BY_TASK.clear()
         timers = [t for ts in _RETRY_TIMERS.values() for t in ts]

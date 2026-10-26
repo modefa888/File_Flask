@@ -122,7 +122,7 @@ _MAX_IMAGE_PARTS = 8                  # 单次请求最多图片部件数
 # provider/model 为空表示「跟随 AI 助手」（用 cfg["active"]）；off 里列出的模块禁止调用。
 _SYS_META_KEY = "ai_sys"
 _SYS_MODULES = ("chat", "plugin", "agent", "commit", "nl2sql", "tabledesign", "summary", "models",
-                "scaffold", "proc", "term", "cron", "icon")
+                "scaffold", "proc", "term", "cron", "crontask", "crongen", "icon")
 _AI_CALLS_KEEP = 2000            # 调用明细最多保留多少条（超出从最旧的开始删）
 _AI_DETAIL_CHARS = 1500          # 明细里保存的请求 / 响应摘要上限（点开能看清这次做了什么）
 
@@ -893,22 +893,40 @@ def _inject_system_time(clean):
 
 
 def _inject_web_search(clean):
-    """针对最后一条用户消息做联网搜索，并把结果注入为 system 消息。"""
+    """针对最后一条用户消息做联网搜索，并把结果注入为 system 消息。
+
+    返回 {"ok", "count", "error"}，供上层把「联网成功 / 失败」的实况推给前端
+    （否则模型说一句“我没法联网”，用户根本分不清是没搜到还是开关没生效）。"""
     if not clean:
-        return
+        return None
     last = clean[-1]
     if last.get("role") != "user":
-        return
+        return None
     query = _extract_text(last.get("content"))
     if not query:
-        return
+        return None
     _log.info("AI 联网搜索：query=%s", query[:120])
+    ok, count, err = False, 0, ""
     try:
         results = search_web(query, max_results=5)
+        good = [r for r in (results or []) if isinstance(r, dict) and not r.get("error")]
+        errs = [str(r.get("error")) for r in (results or []) if isinstance(r, dict) and r.get("error")]
+        ok, count = bool(good), len(good)
+        if errs:
+            err = "；".join(errs[:2])
         text = format_results(results, max_chars=2500)
     except Exception as e:  # noqa: BLE001
+        err = str(e)
         text = "（联网搜索异常：%s）" % e
-    clean.insert(len(clean) - 1, {"role": "system", "content": "[联网搜索结果]\n" + text})
+    if ok:
+        head = ("[联网搜索结果]（这是刚刚实时检索到的网页摘要：涉及实时 / 事实性信息时请优先据此回答，"
+                "并注明「据网络检索」；不要回答自己无法联网。）\n")
+    else:
+        # 没搜到就别让模型硬答，明确要求如实转述失败原因，避免编造“实时信息”
+        head = ("[联网搜索结果]（本次联网检索失败：%s。请如实告诉用户「联网检索失败」并转述这个原因，"
+                "不要编造结果，也不要假装查到了。）\n" % (err or "未知原因"))
+    clean.insert(len(clean) - 1, {"role": "system", "content": head + text})
+    return {"ok": ok, "count": count, "error": err}
 
 
 # 内置 Skill 提示词：前端选择对应 id 后，会在 system 消息里追加这段说明。
@@ -1138,8 +1156,9 @@ def api_ai_chat():
     clean = [{"role": str(m.get("role") or "user")[:16], "content": _clean_content(m.get("content"))}
              for m in msgs[:40]]
     _inject_system_time(clean)                       # 自动注入当前系统时间
+    web_meta = None
     if data.get("web_search"):
-        _inject_web_search(clean)                    # 联网搜索并注入结果
+        web_meta = _inject_web_search(clean)         # 联网搜索并注入结果（同时拿到检索实况）
     skills = data.get("skills") or data.get("skill")            # 支持多个 skill
     _inject_skill(clean, skills)                                # 注入技能提示词
     # 「文件权限」在普通对话里同样生效：只读→读取类工具；工作区/完全→额外开放写入工具
@@ -1148,14 +1167,18 @@ def api_ai_chat():
         perm = "readonly"
     repo = str(data.get("repo") or "")
     root = os.path.abspath(repo) if repo and os.path.isdir(repo) else ""
-    use_tools = bool(root) and data.get("use_tools", True) is not False
+    want_tools = data.get("use_tools", True) is not False
+    use_file_tools = bool(root) and want_tools           # 文件类工具需要有项目根目录
+    # 按需联网：只把 web_search 工具交给模型，由它自己判断要不要查（不做回复前预搜索）
+    web_tool = bool(data.get("web_tool")) and want_tools
+    use_tools = use_file_tools or web_tool
     image_tool = data.get("image_tool", True) is not False
     lsp_tool = data.get("lsp_tool", True) is not False
     image_model = str(data.get("image_model") or "").strip()
     n_imgs = sum(1 for m in clean for part in (m["content"] if isinstance(m["content"], list) else [])
                  if isinstance(part, dict) and part.get("type") == "image_url")
-    _log.info("AI 对话：provider=%s model=%s msgs=%d images=%d web_search=%s skills=%s perm=%s tools=%s",
-              provider["name"], model, len(clean), n_imgs, bool(data.get("web_search")),
+    _log.info("AI 对话：provider=%s model=%s msgs=%d images=%d web_search=%s web_tool=%s skills=%s perm=%s tools=%s",
+              provider["name"], model, len(clean), n_imgs, bool(data.get("web_search")), web_tool,
               ",".join(skills) if isinstance(skills, list) else (skills or "-"), perm, use_tools)
 
     base = provider["base_url"].rstrip("/")
@@ -1168,20 +1191,22 @@ def api_ai_chat():
             "Accept": "text/event-stream",
         }
 
-    def _text_tool_note(perm_now, web=False, image_tool=False, lsp_tool=False):
+    def _text_tool_note(perm_now, web=False, image_tool=False, lsp_tool=False, files=True):
         """接口不支持原生 tools 时，用系统提示告诉模型可用工具与文本调用格式。"""
-        names = ["list_dir(path)", "read_file(path, start, end)", "search_files(pattern, path, max)",
-                 'todo_write(todos=[{"content":"…","status":"pending|in_progress|completed"}])']
+        names = ['todo_write(todos=[{"content":"…","status":"pending|in_progress|completed"}])']
+        if files:
+            names = ["list_dir(path)", "read_file(path, start, end)", "search_files(pattern, path, max)"] + names
         if web:
             names.append("web_search(query, max_results)")
         if image_tool:
             names.append("generate_image(prompt, size, n)")
-        if lsp_tool:
+        if lsp_tool and files:
             names.append("code_intel(action, query, path)")
-        if perm_now in ("workspace", "full"):
+        if files and perm_now in ("workspace", "full"):
             names += ["write_file(path, content)", "edit_file(path, old_text, new_text)"]
-        return ("\n\n[可用工具] 你可以按需读取项目文件来回答问题，不要凭空猜测，也不要让用户手动粘贴代码。"
-                "当前项目根目录：%s\n可用工具：%s\n"
+        head = ("你可以按需读取项目文件来回答问题，不要凭空猜测，也不要让用户手动粘贴代码。"
+                if files else "你可以在需要实时 / 事实性信息时调用 web_search 查询，不要编造数据。")
+        return ("\n\n[可用工具] " + head + "当前项目根目录：%s\n可用工具：%s\n"
                 "调用格式（严格使用工具名与参数名）：<tool_use>{\"name\":\"read_file\",\"input\":{\"path\":\"app/xxx.py\"}}</tool_use>"
                 % (root or "/", "；".join(names)))
     user_query = _last_user_text(msgs)   # 通知用的用户提问
@@ -1193,8 +1218,15 @@ def api_ai_chat():
     def gen():
         from .agent import tools_for_perm, _run_tool_job, _parse_text_calls, _gate
         convo = list(clean)
+        # 只有明确要（web_event=1，如桌宠对话框）才推这个事件，避免影响面板 / 插件的既有流程
+        if web_meta is not None and data.get("web_event"):
+            yield _sse({"type": "web", "ok": bool(web_meta.get("ok")),
+                        "count": int(web_meta.get("count") or 0),
+                        "error": web_meta.get("error") or ""})
         all_tools = tools_for_perm(perm, image_tool=image_tool, lsp_tool=lsp_tool) if use_tools else []
-        if not data.get("web_search"):                       # 未开「联网」时不给 web_search 工具
+        if use_tools and not use_file_tools:                 # 只按需联网：不暴露文件类工具
+            all_tools = [t for t in all_tools if t["function"]["name"] == "web_search"]
+        if not data.get("web_search") and not web_tool:      # 既不开预搜索也不开按需联网 → 不给 web_search
             all_tools = [t for t in all_tools if t["function"]["name"] != "web_search"]
         tools = list(all_tools)
         offered_names = {t["function"]["name"] for t in all_tools}
@@ -1231,7 +1263,8 @@ def api_ai_chat():
                         tools = []
                         rounds -= 1
                         if not any("可用工具" in str(m.get("content") or "") for m in convo):
-                            note = _text_tool_note(perm, bool(data.get("web_search")), image_tool, lsp_tool)
+                            note = _text_tool_note(perm, bool(data.get("web_search")) or web_tool,
+                                                   image_tool, lsp_tool, use_file_tools)
                             if convo and convo[0].get("role") == "system":
                                 convo[0]["content"] = str(convo[0].get("content") or "") + note
                             else:

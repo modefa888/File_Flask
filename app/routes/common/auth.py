@@ -74,8 +74,9 @@ _FORCE_PW_PASS_PATHS = (CHANGE_PW_PATH, "/logout", "/login")
 
 # 无需登录即可访问的路径（前缀）
 # /share/<token>：token 本身就是随机不可猜测的访问凭证
+# /n/<token>：定时任务「网页版通知」的只读渲染页，token 同样是随机不可猜的凭证
 # /register：开放注册（协作者没有账号时自行注册后再通过邀请链接加入）
-_PUBLIC_PATHS = ("/login", "/register", "/static", "/share/", "/ws/", "/api/collab/")
+_PUBLIC_PATHS = ("/login", "/register", "/static", "/share/", "/n/", "/ws/", "/api/collab/")
 
 
 def _is_public_path(path: str) -> bool:

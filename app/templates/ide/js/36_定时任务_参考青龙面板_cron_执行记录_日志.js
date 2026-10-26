@@ -1,14 +1,16 @@
   /* ==================================================================
      定时任务（参考青龙面板）：
        · 侧栏列出所有任务，可启用 / 停用、立即运行、停止、编辑、删除；
+       · 任务类型三选一：Shell 命令 / 代码片段（python·node·bash）/ AI 固定提示词；
        · 编辑器里校验 cron 表达式并实时显示「下次运行时间」；
        · 每次执行都留一条记录（状态 / 退出码 / 耗时），可回看完整日志。
      后端：/api/cron/*（services/ide/cronsvc.py 每 5s 扫描一次调度）。
      var 声明，避免 showPanel 提前调用时命中 TDZ。
      ================================================================== */
   var CRON = { timer: null, tasks: [], editing: null, runs: [], runTask: null, logRun: null, logOffset: 0, logTimer: null,
-               chanCfg: null, editChRaw: "", tplTarget: null, tryFields: null,
-               trySnap: null, notifyTpl: null, notifyRun: null };
+              chanCfg: null, editChRaw: "", editKind: "command", tplTarget: null, tryFields: null,
+              trySnap: null, notifyTpl: null, notifyRun: null,
+              prevCh: "", prevText: null, webCfg: null };
 
   const CRON_PRESETS = [
     ["每分钟", "* * * * *"], ["每 5 分钟", "*/5 * * * *"], ["每 30 分钟", "*/30 * * * *"],
@@ -48,10 +50,103 @@
     ["dingtalk", "钉钉机器人", "bi-chat-dots"],
     ["telegram", "Telegram", "bi-telegram"],
     ["pushplus", "PushPlus", "bi-wechat"],
+    ["web", "网页版", "bi-globe2"],
   ];
   function cronTaskChannelName(key) {
     const hit = CRON_TASK_NOTIFY_CHANNELS.find(c => c[0] === key);
     return hit ? hit[1] : key;
+  }
+  /* 把文本里的 http(s) 地址变成可点链接（网页版通知的地址就靠它） */
+  function cronLinkify(text) {
+    return esc(text).replace(/(https?:\/\/[^\s<]+)/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+  }
+  /* 网页版通知的地址藏在 detail 里（"已生成：http://…"），这里抠出来供一键复制 */
+  function cronWebUrlOf(detail) {
+    const m = String(detail || "").match(/https?:\/\/[^\s"'<>]+/);
+    return m ? m[0] : "";
+  }
+  /* 复制一段文本（剪贴板不可用时退回 textarea 方案） */
+  function cronCopyText(text, okMsg) {
+    if (!text) { toast("没有可复制的地址", "warn"); return; }
+    const done = () => toast(okMsg || ("已复制：" + text), "ok");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => cronTryCopyFallback(text, done));
+    } else {
+      cronTryCopyFallback(text, done);
+    }
+  }
+  /* 通知记录里的点击：网页版渠道 / 复制按钮 → 复制地址；其余区域 → 展开明细 */
+  function cronNotifyAreaClick(e) {
+    const closest = sel => (e.target && e.target.closest ? e.target.closest(sel) : null);
+    const copyBtn = closest("[data-copy-web]");
+    if (copyBtn) {
+      e.stopPropagation();
+      cronCopyText(copyBtn.dataset.copyWeb, "网页通知地址已复制，可直接粘贴到浏览器");
+      return;
+    }
+    const webChip = closest(".cr-nf-ch.has-url");
+    if (webChip) {                                 // 点「网页版」= 新标签页打开通知页
+      e.stopPropagation();
+      const u = webChip.dataset.webUrl;
+      if (u) window.open(u, "_blank", "noopener");
+      return;
+    }
+    const hit = closest(".cr-nf-chs, .cr-nf-body");
+    if (hit) hit.parentElement.classList.toggle("open");
+  }
+  /* 任务类型：命令 / 代码片段 / AI 提示词（值必须与后端 crondb.KINDS 一致） */
+  const CRON_TASK_KINDS = [
+    ["command", "Shell 命令", "bi-terminal"],
+    ["code", "代码片段", "bi-code-slash"],
+    ["ai", "AI 提示词", "bi-stars"],
+  ];
+  /* 代码片段支持的语言（值必须与后端 crondb.LANGS 一致） */
+  const CRON_CODE_LANGS = [
+    ["python", "Python"],
+    ["node", "Node.js"],
+    ["bash", "Shell"],
+  ];
+  /* 固定提示词预设：适合「每天学一点」这类不需要外部输入的任务，点一下填进输入框 */
+  const CRON_AI_PRESETS = [
+    ["每日知识点", "请挑一个后端 / 前端开发里容易被忽视但很重要的知识点（避开烂大街的面试题），" +
+      "按「结论 → 原理 → 代码示例 → 常见坑」四段式讲清楚，控制在 600 字以内。"],
+    ["英文技术表达", "请给出 5 个程序员日常沟通里高频的英文表达，每条包含：英文短语、中文释义、" +
+      "一句真实场景例句，并指出中文母语者最容易用错的地方。"],
+    ["算法小题", "请出一道中等难度的算法题（LeetCode 风格）：题目描述、输入输出示例、提示，" +
+      "再给一段带注释的 Python 参考实现和时间 / 空间复杂度分析。不要直接剧透在最前面。"],
+    ["代码审查清单", "请给出 8 条日常 Code Review 检查项，按「正确性 / 可读性 / 性能 / 安全」分类，" +
+      "每条一句话说明该怎么看、常见反例是什么。"],
+  ];
+  /* AI 一键生成的示例描述：点一下填进输入框并直接生成 */
+  const CRON_AI_SAMPLES = [
+    "每天早上 8 点讲一道算法题，结果发到钉钉",
+    "每天 9 点备份项目目录到 backup 文件夹",
+    "每周一 10 点统计昨天日志里的报错条数",
+  ];
+  /* 当前编辑中的任务类型（弹窗里切换用，保存 / 试运行时读取） */
+  const cronEditKind = () => CRON.editKind || "command";
+  function cronKindLabel(kind) {
+    const hit = CRON_TASK_KINDS.find(k => k[0] === kind);
+    return hit ? hit[1] : "Shell 命令";
+  }
+  function cronLangLabel(lang) {
+    const hit = CRON_CODE_LANGS.find(l => l[0] === lang);
+    return hit ? hit[1] : "Python";
+  }
+  /* 取当前编辑内容的「命令摘要」：AI 生成通知文案 / 预览等场景只关心它 */
+  function cronCurrentCommandText() {
+    const kind = cronEditKind();
+    if (kind === "code") {
+      const code = $("cronCode") ? $("cronCode").value : "";
+      return "[" + cronLangLabel($("cronLang") ? $("cronLang").value : "python") + " 代码] " +
+        code.split("\n").filter(l => l.trim()).length + " 行";
+    }
+    if (kind === "ai") {
+      const p = $("cronPrompt") ? $("cronPrompt").value.trim() : "";
+      return "AI 提示词：" + (p.length > 120 ? p.slice(0, 120) + "…" : p);
+    }
+    return $("cronCmd") ? $("cronCmd").value.trim() : "";
   }
   /* 渲染渠道 chips（CRON.chanCfg 来自 /api/cron/settings 的 notify.channels） */
   function cronTaskChannelsRender() {
@@ -104,6 +199,12 @@
       : (on === 0
         ? "一个都没勾：仍按全部已启用渠道发送；要完全不发请关掉上面的「执行后发送通知」。"
         : "只发送到勾选的 " + on + " / " + chips.length + " 个渠道。");
+    // 勾了网页版：说明地址在哪拿、会影响哪些渠道
+    if (chips.some(c => c.dataset.cch === "web" && c.classList.contains("on"))) {
+      hint.textContent += " 网页版会生成 /n/… 页面（正文按 Markdown 渲染，任务详情右上角可复制地址），" +
+        "同时其它渠道的正文末尾会自动附上这个地址。";
+    }
+    if (typeof cronTryPreview === "function") cronTryPreview();   // 渠道一变，预览 tab 跟着变
   }
   function cronTaskChannelsLoad() {
     if (CRON.chanCfg) cronTaskChannelsRender();     // 先用上次拿到的渲染，避免闪烁
@@ -112,6 +213,8 @@
       const nf = (d && d.notify) || {};
       // 全局模板：任务模板留空时「通知预览」要用它（与真实发送的回退逻辑一致）
       if (nf.template && typeof nf.template === "object") CRON.notifyTpl = nf.template;
+      // 网页版配置：预览里的页面地址 / 保留天数要用
+      if (nf.web && typeof nf.web === "object") CRON.webCfg = nf.web;
       const ch = nf.channels;
       if (ch && typeof ch === "object") {
         CRON.chanCfg = ch;
@@ -245,7 +348,8 @@
         '<div class="ci-cron"><i class="bi bi-clock-history"></i><code>' + esc(t.cron) + '</code>' +
           (t.next && t.next.length ? '<span class="ci-next" title="接下来的运行时间">下次 ' + esc(t.next[0]) + '</span>' : "") +
         '</div>' +
-        '<div class="ci-cmd" title="' + escAttr(t.command) + '">$ ' + esc(t.command) + '</div>' +
+        '<div class="ci-cmd" title="' + escAttr(t.command) + '">' +
+          (t.kind === "code" || t.kind === "ai" ? "" : "$ ") + esc(t.command) + '</div>' +
         '<div class="ci-meta">' +
           (t.last_at ? '上次 ' + cronFmtTime(t.last_at) + ' · ' + cronFmtDur(t.last_ms) +
             ' · 共 ' + (t.run_count || 0) + ' 次（成功 ' + (t.ok_count || 0) + '）' : '从未运行过') +
@@ -334,6 +438,10 @@
       const v = src[k];
       return (v !== undefined && v !== null && v !== "") ? v : d;
     };
+    // 任务类型：命令 / 代码片段 / AI 提示词
+    const kind = CRON_TASK_KINDS.some(k => k[0] === src.kind) ? src.kind : "command";
+    const lang = CRON_CODE_LANGS.some(l => l[0] === src.lang) ? src.lang : "python";
+    CRON.editKind = kind;
     // 通知内容：默认「仅执行结果」+ 开启通知（与后端默认一致）
     const nOn = src.notify !== false && src.notify !== 0;
     const nMode = CRON_TASK_NOTIFY_MODES.some(m => m[0] === src.notify_content) ? src.notify_content : "status";
@@ -344,16 +452,75 @@
     CRON.editChRaw = String(src.notify_channels || "");
     CRON.tryFields = null;                           // 本次试运行解析出的 JSON 字段
     CRON.trySnap = null;                             // 本次试运行的输出快照（通知预览用）
+    CRON.prevCh = "";                                // 通知预览默认看第一个渠道
+    CRON.prevText = null;
     ov.innerHTML =
       '<div class="cron-dialog">' +
         '<div class="cd-head"><i class="bi bi-alarm"></i><span>' + (isNew ? "新建定时任务" : "编辑定时任务") + '</span>' +
           '<button class="cd-x" title="关闭"><i class="bi bi-x-lg"></i></button></div>' +
         '<div class="cd-body">' +
+          '<div class="cd-aig" id="cronAiGenBox">' +
+            '<div class="cd-aig-head"><i class="bi bi-magic"></i><span>AI 一键生成</span>' +
+              '<span class="cd-aig-tip">用一句话描述，自动填好名称 / 类型 / 时间 / 内容</span></div>' +
+            '<textarea id="cronAiDesc" rows="2" spellcheck="false" ' +
+              'placeholder="例如：每天早上 8 点讲一道算法题，把结果发到钉钉"></textarea>' +
+            '<div class="cd-aig-foot">' +
+              '<div class="cd-presets cd-aig-samples" id="cronAiSamples">' + CRON_AI_SAMPLES.map((s, i) =>
+                '<button type="button" data-i="' + i + '">' + esc(s) + '</button>').join("") + '</div>' +
+              '<button type="button" class="cd-btn primary cd-aig-go" id="cronAiGen">' +
+                '<i class="bi bi-stars"></i> 生成</button>' +
+            '</div>' +
+            '<div class="cd-hint" id="cronAiGenHint">生成后仍可手动修改任意字段；没配 AI 接口时会提示去设置里配。</div>' +
+          '</div>' +
+          '<div class="cd-fold">' +
+            '<button type="button" class="cd-fold-btn" id="cronFoldBtn" ' +
+              'title="折叠 / 展开下面的基础设置（不影响通知内容等其它模块）">' +
+              '<i class="bi bi-chevron-up"></i><span>基础设置</span>' +
+              '<span class="cd-fold-tip" id="cronFoldTip"></span></button>' +
+          '</div>' +
+          '<div class="cd-fold-body" id="cronFoldBody">' +
           '<div class="cd-row"><label>任务名称</label>' +
             '<input id="cronName" placeholder="例如：每日备份" value="' + escAttr(val("name", "")) + '"></div>' +
-          '<div class="cd-row"><label>执行命令</label>' +
-            '<textarea id="cronCmd" rows="3" spellcheck="false" placeholder="例如：python /path/to/job.py &gt;&gt; out.log 2&gt;&amp;1">' +
-              esc(val("command", "")) + '</textarea></div>' +
+          '<div class="cd-row"><label>任务类型</label>' +
+            '<div class="cd-kinds" id="cronKind">' + CRON_TASK_KINDS.map(k =>
+              '<button type="button" data-kind="' + k[0] + '"' + (kind === k[0] ? ' class="on"' : "") +
+                ' title="' + escAttr(k[1]) + '"><i class="bi ' + k[2] + '"></i>' + esc(k[1]) + '</button>').join("") +
+            '</div>' +
+            '<div class="cd-hint" id="cronKindHint"></div></div>' +
+          '<div class="cd-kind-pane" id="cronPaneCommand"' + (kind === "command" ? "" : ' style="display:none"') + '>' +
+            '<div class="cd-row"><label>执行命令</label>' +
+              '<textarea id="cronCmd" rows="3" spellcheck="false" placeholder="例如：python /path/to/job.py &gt;&gt; out.log 2&gt;&amp;1">' +
+                esc(val("command", "")) + '</textarea></div>' +
+          '</div>' +
+          '<div class="cd-kind-pane" id="cronPaneCode"' + (kind === "code" ? "" : ' style="display:none"') + '>' +
+            '<div class="cd-row cd-code-row">' +
+              '<label>代码语言</label>' +
+              '<select id="cronLang" class="cd-select">' + CRON_CODE_LANGS.map(l =>
+                '<option value="' + l[0] + '"' + (lang === l[0] ? " selected" : "") + '>' + esc(l[1]) + '</option>'
+              ).join("") + '</select>' +
+            '</div>' +
+            '<div class="cd-row"><label>代码（保存后每次执行都会用对应解释器运行）</label>' +
+              '<textarea id="cronCode" rows="10" spellcheck="false" class="cd-code" ' +
+                'placeholder="# 例如&#10;import datetime&#10;print(\'cron ok\', datetime.datetime.now())">' +
+                (kind === "code" ? esc(val("content", "")) : "") + '</textarea>' +
+              '<div class="cd-hint">执行时会把代码写成任务目录下的脚本文件，用 ' +
+                '<code>python</code> / <code>node</code> / <code>bash</code> 运行；工作目录取下面的「工作目录」。</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="cd-kind-pane" id="cronPaneAi"' + (kind === "ai" ? "" : ' style="display:none"') + '>' +
+            '<div class="cd-row"><label>固定提示词（到点把这段发给 AI）</label>' +
+              '<textarea id="cronPrompt" rows="6" spellcheck="false" placeholder="例如：请用「结论 → 原理 → 代码示例 → 常见坑」讲一个后端知识点，控制在 600 字以内。">' +
+                (kind === "ai" ? esc(val("content", "")) : "") + '</textarea>' +
+              '<div class="cd-presets cd-ai-presets" id="cronAiPresets">' + CRON_AI_PRESETS.map((p, i) =>
+                '<button type="button" data-k="' + i + '">' + esc(p[0]) + '</button>').join("") + '</div>' +
+            '</div>' +
+            '<div class="cd-row"><label>系统提示（可选，留空用内置）</label>' +
+              '<textarea id="cronAiSys" rows="2" spellcheck="false" placeholder="例如：你是我的技术学习教练，回答要短、要能落地。">' +
+                esc(val("ai_sys", "")) + '</textarea></div>' +
+            '<div class="cd-hint">模型走「设置 → 系统 AI → 定时任务 AI 提示词」（未单独指定时跟随 AI 助手）；' +
+              '输出会写进执行日志。想把内容直接推到微信 / 钉钉 / Telegram，' +
+              '把下面的「通知内容」选成「仅脚本输出」即可。「超时」留 0 时按 180 秒上限。</div>' +
+          '</div>' +
           '<div class="cd-row"><label>cron 表达式 <span class="cd-lbl-tip">分 时 日 月 周</span></label>' +
             '<div class="cd-cron-row"><input id="cronExpr" placeholder="0 9 * * *" spellcheck="false" autocomplete="off" value="' +
               escAttr(val("cron", "")) + '"><span class="cd-cron-tip" id="cronExprTip"></span></div>' +
@@ -368,6 +535,7 @@
           '</div>' +
           '<div class="cd-row"><label>备注（可选）</label>' +
             '<input id="cronRemark" placeholder="给自己看的说明" value="' + escAttr(val("remark", "")) + '"></div>' +
+          '</div>' +
           '<div class="cd-row cd-notify">' +
             '<div class="cd-notify-head">' +
               '<label>通知内容</label>' +
@@ -425,8 +593,8 @@
             // 通知预览放在自定义标题 / 正文下面：改模板能立刻看到最终效果
             '<div class="cd-try-prev" id="cronTryPrev" style="display:none">' +
               '<div class="cd-try-prev-h"><i class="bi bi-send"></i> 通知预览' +
-                '<span class="cd-hint" id="cronTryPrevTitle"></span></div>' +
-              '<pre class="cd-try-out" id="cronTryPrevBody"></pre>' +
+                '<div class="cd-prev-tabs" id="cronPrevTabs"></div></div>' +
+              '<div class="cd-prev-stage" id="cronPrevStage"></div>' +
             '</div>' +
           '</div>' +
           '<label class="cd-check"><input type="checkbox" id="cronEnabled"' + (val("enabled", true) ? " checked" : "") +
@@ -440,6 +608,45 @@
         '</div>' +
       '</div>';
     ov.style.display = "flex";
+    // 任务类型切换：只显示对应的输入区，并同步「测试运行」按钮文案
+    const kindBtns = [...ov.querySelectorAll("#cronKind button")];
+    const paneOf = { command: $("cronPaneCommand"), code: $("cronPaneCode"), ai: $("cronPaneAi") };
+    const kindHints = {
+      command: "执行一条 shell 命令（支持多行，会用 bash -lc 在下面的工作目录里运行）。",
+      code: "直接写代码：每次执行用对应解释器运行，输出会自动写进执行日志（不用自己重定向）。",
+      ai: "固定提示词任务：到点把提示词发给 AI，输出写进执行日志；适合每日学习、知识点讲解、例行总结。",
+    };
+    const syncKind = () => {
+      const cur = cronEditKind();
+      kindBtns.forEach(b => b.classList.toggle("on", b.dataset.kind === cur));
+      Object.keys(paneOf).forEach(k => {
+        if (paneOf[k]) paneOf[k].style.display = (k === cur ? "" : "none");
+      });
+      const hint = $("cronKindHint");
+      if (hint) hint.textContent = kindHints[cur] || "";
+      const tb = $("cronTryRun");
+      if (tb) {
+        tb.innerHTML = '<i class="bi bi-play-circle"></i> ' + (cur === "ai" ? "测试提问" : "测试运行");
+        tb.title = cur === "ai"
+          ? "用这段提示词问一次模型（不写执行记录、不发通知），先看看输出什么"
+          : "用上面的内容试跑一次（不写执行记录、不发通知），先看看输出什么";
+      }
+    };
+    kindBtns.forEach(b => {
+      b.onclick = () => { CRON.editKind = b.dataset.kind; syncKind(); };
+    });
+    syncKind();
+    // AI 提示词预设：点一下填进输入框（已有内容时追加到末尾，方便组合）
+    ov.querySelectorAll("#cronAiPresets button").forEach(b => {
+      b.onclick = () => {
+        const p = CRON_AI_PRESETS[parseInt(b.dataset.k, 10)];
+        const el = $("cronPrompt");
+        if (!p || !el) return;
+        el.value = el.value.trim() ? (el.value.replace(/\s*$/, "") + "\n\n" + p[1]) : p[1];
+        el.focus();
+        el.selectionStart = el.selectionEnd = el.value.length;
+      };
+    });
     const exprEl = $("cronExpr");
     const validate = () => {
       const expr = exprEl.value.trim();
@@ -457,9 +664,92 @@
     };
     exprEl.addEventListener("input", validate);
     if (exprEl.value.trim()) validate();
-    ov.querySelectorAll(".cd-presets button").forEach(b => {
+    // ---------- AI 一键生成：一句话 → 回填名称 / 类型 / 时间 / 内容 / 通知方式 ----------
+    const applyDraft = (d) => {
+      const setV = (id, v) => {
+        const el = $(id);
+        if (el && v !== undefined && v !== null && String(v) !== "") el.value = v;
+      };
+      setV("cronName", d.name);
+      if (CRON_TASK_KINDS.some(k => k[0] === d.kind)) CRON.editKind = d.kind;
+      if (CRON_CODE_LANGS.some(l => l[0] === d.lang) && $("cronLang")) $("cronLang").value = d.lang;
+      setV("cronExpr", d.cron);
+      // 内容只落到对应类型的输入框，别覆盖用户在别的类型里已经写的东西
+      if (d.kind === "code") setV("cronCode", d.content);
+      else if (d.kind === "ai") setV("cronPrompt", d.content);
+      else setV("cronCmd", d.command);
+      setV("cronCwd", d.cwd);
+      if (d.timeout !== undefined && d.timeout !== null && $("cronTimeout")) {
+        $("cronTimeout").value = d.timeout;
+      }
+      setV("cronRemark", d.remark);
+      const nc = $("cronNotifyContent");
+      if (nc && d.notify_content) { nc.value = d.notify_content; cronTaskNotifySync(); }
+      syncKind();
+      validate();
+    };
+    const genDraft = async () => {
+      const btn = $("cronAiGen"), hint = $("cronAiGenHint");
+      const desc = $("cronAiDesc") ? $("cronAiDesc").value.trim() : "";
+      if (!desc) {
+        toast("先用一句话描述你想要的任务", "warn");
+        if ($("cronAiDesc")) $("cronAiDesc").focus();
+        return;
+      }
+      if (!btn || btn.disabled) return;
+      const old = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="bi bi-stars"></i> 生成中…';
+      if (hint) { hint.className = "cd-hint"; hint.textContent = "正在理解你的需求…"; }
+      try {
+        const d = await cronAct("/api/cron/ai-draft", { desc: desc, cwd: $("cronCwd").value.trim() });
+        if (d.error) {
+          if (hint) { hint.className = "cd-hint bad-hint"; hint.textContent = d.error; }
+          return;
+        }
+        applyDraft(d.draft || {});
+        if (hint) {
+          hint.className = "cd-hint";
+          const bits = [];
+          if (d.reason) bits.push(d.reason);
+          if (d.warning) bits.push("⚠ " + d.warning);
+          bits.push("已填好，检查后点「保存」即可。");
+          hint.textContent = bits.join(" ");
+        }
+        toast("AI 已生成任务配置", "ok");
+      } catch (e) {
+        if (hint) {
+          hint.className = "cd-hint bad-hint";
+          hint.textContent = "生成失败：" + (e && e.message ? e.message : e);
+        }
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = old;
+      }
+    };
+    if ($("cronAiGen")) $("cronAiGen").onclick = genDraft;
+    ov.querySelectorAll("#cronAiSamples button").forEach(b => {
+      b.onclick = () => {
+        const s = CRON_AI_SAMPLES[parseInt(b.dataset.i, 10)];
+        if (!s || !$("cronAiDesc")) return;
+        $("cronAiDesc").value = s;
+        genDraft();                            // 点示例直接生成，省一步
+      };
+    });
+    // 只绑 cron 预设（AI 提示词预设也用了 .cd-presets 样式，靠 data-expr 区分）
+    ov.querySelectorAll(".cd-presets button[data-expr]").forEach(b => {
       b.onclick = () => { exprEl.value = b.dataset.expr; validate(); };
     });
+    // 基础设置折叠：只收「任务名称 → 备注」这一段，通知内容 / 底部按钮等其它模块不折叠
+    const foldBtn = $("cronFoldBtn"), foldBody = $("cronFoldBody");
+    const setFold = (on) => {
+      if (foldBody) foldBody.classList.toggle("folded", !!on);
+      if (foldBtn) foldBtn.classList.toggle("folded", !!on);
+      const tip = $("cronFoldTip");
+      if (tip) tip.textContent = on ? "已收起" : "";
+    };
+    if (foldBtn && foldBody) foldBtn.onclick = () => setFold(!foldBody.classList.contains("folded"));
+    setFold(false);                                  // 每次打开默认展开，保证能直接编辑
     ov.querySelector(".cd-x").onclick = cronCloseModal;
     $("cronCancel").onclick = cronCloseModal;
     $("cronSave").onclick = cronSave;
@@ -558,9 +848,156 @@
     const sub = s => String(s || "").replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
       (m, k) => (k in vars ? String(vars[k]) : m));
     box.style.display = "";
-    const h = $("cronTryPrevTitle"), b = $("cronTryPrevBody");
-    if (h) h.textContent = sub(tTpl) || "（无标题）";
-    if (b) b.textContent = sub(bTpl) || "（正文为空）";
+    CRON.prevText = { t: sub(tTpl) || "（无标题）", b: sub(bTpl) || "（正文为空）" };
+    cronPrevPaint();
+  }
+
+  /* ---------- 通知预览：按渠道 tab 切换不同呈现 ---------- */
+  /* 本次会走的渠道（与后端一致：任务勾选 ∩ 全局已启用；没勾 = 全部已启用） */
+  function cronPrevChannels() {
+    const box = $("cronNotifyChannels");
+    const picked = box ? [...box.querySelectorAll(".cd-chip.on")].map(c => c.dataset.cch) : [];
+    let chs = picked;
+    if (!chs.length) {
+      chs = CRON.chanCfg
+        ? CRON_TASK_NOTIFY_CHANNELS.filter(c => CRON.chanCfg[c[0]]).map(c => c[0])
+        : ["desktop"];
+    }
+    const order = CRON_TASK_NOTIFY_CHANNELS.map(c => c[0]);
+    return chs.filter(k => order.indexOf(k) >= 0)
+      .sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  }
+  /* 网页版地址：编辑已有任务有真实令牌；新建时给个占位（保存后才生成） */
+  function cronPrevWebUrl() {
+    const base = String((CRON.webCfg || {}).base_url || "").replace(/\/+$/, "") || location.origin;
+    const tok = (CRON.editing && CRON.editing.web_token) || "";
+    return base + "/n/" + (tok || "保存后生成");
+  }
+  /* 其它渠道末尾追加的网页通知入口：预览里显示成 a 标签（点击新标签打开），
+     不再把长地址摊在正文里。文案 / 固定跳转地址取「设置 → 网页版设置」。 */
+  function cronPrevFootHtml() {
+    const w = CRON.webCfg || {};
+    if (w.link_enabled === false) return "";
+    const days = w.retention_days || 7;
+    const text = String(w.link_text || "").trim() || "网页通知";
+    const fixed = String(w.link_url || "").trim();
+    const url = fixed || cronPrevWebUrl();
+    const pending = !fixed && url.indexOf("保存后生成") >= 0;
+    return "\n\n" + '<span class="pv-foot-sep">━━━━━━━━━━━━━━</span>\n' +
+      (pending
+        ? '<span class="pv-web-link pending" title="保存任务后才会生成真实地址">🔗 ' + esc(text) + '</span>'
+        : '<a class="pv-web-link" href="' + escAttr(url) + '" target="_blank" rel="noopener noreferrer" ' +
+          'title="' + escAttr(url) + '">🔗 ' + esc(text) + '</a>') +
+      ' <span class="pv-foot-tip">（排版更完整 · 保留 ' + days + ' 天）</span>';
+  }
+  /* 正文里的链接渲染（纯文本渠道预览用）：
+     裸 URL / Markdown [文字](url) / <a href="url">文字</a>（HTML / Telegram parse_mode 写法）
+     统一转成可点链接。先整体转义再按白名单还原链接，不会引入 XSS。 */
+  function cronLinkifyText(text) {
+    const stash = [];
+    const keep = h => { stash.push(h); return "\u0001" + (stash.length - 1) + "\u0001"; };
+    let s = esc(text);
+    // 1) <a href="https://…">文字</a>（esc 后是 &lt;a …&gt;）
+    s = s.replace(/&lt;a\s+[^&]*?href=(?:"|')?(https?:\/\/[^"'\s&]+)(?:"|')?[^&]*?&gt;([\s\S]*?)&lt;\/a&gt;/gi,
+      (m, url, txt) => keep('<a href="' + url + '" target="_blank" rel="noopener noreferrer">' +
+        (String(txt).trim() || url) + '</a>'));
+    // 2) Markdown 链接
+    s = s.replace(/\[([^\]\n]{1,120})\]\((https?:\/\/[^\s)]+)\)/g,
+      (m, txt, url) => keep('<a href="' + url + '" target="_blank" rel="noopener noreferrer">' +
+        (txt || url) + '</a>'));
+    // 3) 裸 URL（前面排除字母数字 / 引号 / 等号，避免把属性里的地址又包一层）
+    s = s.replace(/(^|[^A-Za-z0-9"'=\/])(https?:\/\/[^\s<]+)/g, (m, pre, url) =>
+      pre + keep('<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>'));
+    return s.replace(/\u0001(\d+)\u0001/g, (m, i) => stash[+i] || "");
+  }
+  /* 把各种链接写法统一成 Markdown 链接，交给 renderMarkdown 渲染（网页版预览用） */
+  function cronMdSource(text) {
+    let s = String(text || "");
+    s = s.replace(/<a\s+[^>]*href=["']?(https?:\/\/[^"'\s>]+)["']?[^>]*>([\s\S]*?)<\/a>/gi,
+      (m, url, txt) => "[" + (String(txt).replace(/<[^>]*>/g, "").trim() || url) + "](" + url + ")");
+    const stash = [];                              // 已有的 markdown 链接先保护起来
+    s = s.replace(/\[([^\]\n]{1,120})\]\((https?:\/\/[^\s)]+)\)/g, m => {
+      stash.push(m); return "\u0002" + (stash.length - 1) + "\u0002";
+    });
+    s = s.replace(/(^|[^A-Za-z0-9"'=\/(])(https?:\/\/[^\s<)]+)/g, (m, pre, url) =>
+      pre + "[" + url + "](" + url + ")");
+    return s.replace(/\u0002(\d+)\u0002/g, (m, i) => stash[+i] || "");
+  }
+  function cronPrevMd(text) {
+    const s = cronMdSource(text);
+    if (typeof renderMarkdown === "function") return renderMarkdown(s);
+    return esc(s).replace(/\n/g, "<br>");
+  }
+  function cronPrevPaint() {
+    const stage = $("cronPrevStage"), tabs = $("cronPrevTabs");
+    if (!stage) return;
+    const t = (CRON.prevText || {}).t || "";
+    const b = (CRON.prevText || {}).b || "";
+    const chs = cronPrevChannels();
+    if (!chs.length) {
+      if (tabs) tabs.innerHTML = "";
+      stage.innerHTML = '<div class="pv-empty">还没有可用的通知渠道：' +
+        '先到「设置 → 定时任务通知」里启用至少一个</div>';
+      return;
+    }
+    if (chs.indexOf(CRON.prevCh) < 0) CRON.prevCh = chs[0];
+    if (tabs) {
+      tabs.innerHTML = chs.map(k => {
+        const meta = CRON_TASK_NOTIFY_CHANNELS.find(c => c[0] === k) || [k, k, "bi-bell"];
+        return '<button type="button" class="cd-prev-tab' + (k === CRON.prevCh ? " on" : "") +
+          '" data-ch="' + k + '" title="查看' + escAttr(meta[1]) + '的呈现效果">' +
+          '<i class="bi ' + meta[2] + '"></i>' + esc(meta[1]) + '</button>';
+      }).join("");
+      tabs.querySelectorAll(".cd-prev-tab").forEach(btn => {
+        btn.onclick = () => { CRON.prevCh = btn.dataset.ch; cronPrevPaint(); };
+      });
+    }
+    const ch = CRON.prevCh;
+    // 网页版渠道也在本次发送范围内时，其它渠道的正文末尾会带上入口（与真实发送一致）
+    const foot = (ch !== "web" && chs.indexOf("web") >= 0) ? cronPrevFootHtml() : "";
+    if (ch === "web") {
+      stage.innerHTML =
+        '<div class="pv-web">' +
+          '<div class="pv-web-bar"><span class="pv-web-dots"><i></i><i></i><i></i></span>' +
+            '<code>' + esc(cronPrevWebUrl()) + '</code></div>' +
+          '<div class="pv-web-page">' +
+            '<div class="pv-web-badge"><span></span>定时任务通知</div>' +
+            '<h3 class="pv-web-title">' + esc(t) + '</h3>' +
+            '<div class="pv-md">' + cronPrevMd(b) + '</div>' +
+          '</div>' +
+        '</div>';
+      return;
+    }
+    if (ch === "desktop") {
+      stage.innerHTML =
+        '<div class="pv-desk">' +
+          '<div class="pv-desk-head"><i class="bi bi-bell-fill"></i><b>File_Flask</b>' +
+            '<span class="pv-desk-time">刚刚</span></div>' +
+          '<div class="pv-desk-title">' + esc(t) + '</div>' +
+          '<pre class="pv-desk-body">' + cronLinkifyText(b) + foot + '</pre>' +
+        '</div>';
+      return;
+    }
+    if (ch === "email") {
+      stage.innerHTML =
+        '<div class="pv-mail">' +
+          '<div class="pv-mail-head">' +
+            '<div class="pv-mail-sub">' + esc(t) + '</div>' +
+            '<div class="pv-mail-meta">File_Flask &lt;no-reply@local&gt;</div>' +
+          '</div>' +
+          '<pre class="pv-mail-body">' + cronLinkifyText(b) + foot + '</pre>' +
+        '</div>';
+      return;
+    }
+    const meta = CRON_TASK_NOTIFY_CHANNELS.find(c => c[0] === ch) || [ch, ch, "bi-chat-dots"];
+    stage.innerHTML =
+      '<div class="pv-chat pv-chat-' + ch + '">' +
+        '<div class="pv-chat-head"><i class="bi ' + meta[2] + '"></i>' + esc(meta[1]) + '</div>' +
+        '<div class="pv-bubble">' +
+          '<div class="pv-bubble-t">' + esc(t) + '</div>' +
+          '<pre class="pv-bubble-b">' + cronLinkifyText(b) + foot + '</pre>' +
+        '</div>' +
+      '</div>';
   }
   function cronTryPreviewSoon() {
     clearTimeout(cronPrevTimer);
@@ -570,8 +1007,13 @@
     const btn = $("cronTryRun"), box = $("cronTryBox"), out = $("cronTryOut");
     const st = $("cronTryStatus"), hint = $("cronTryHint");
     if (!btn || !box || !out) return;
-    const cmd = $("cronCmd").value.trim();
-    if (!cmd) { toast("请先填写执行命令", "warn"); $("cronCmd").focus(); return; }
+    const kind = cronEditKind();
+    const cmd = $("cronCmd") ? $("cronCmd").value.trim() : "";
+    const code = $("cronCode") ? $("cronCode").value : "";
+    const prompt = $("cronPrompt") ? $("cronPrompt").value.trim() : "";
+    if (kind === "command" && !cmd) { toast("请先填写执行命令", "warn"); $("cronCmd").focus(); return; }
+    if (kind === "code" && !code.trim()) { toast("请先填写要执行的代码", "warn"); $("cronCode").focus(); return; }
+    if (kind === "ai" && !prompt) { toast("请先填写固定提示词", "warn"); $("cronPrompt").focus(); return; }
     // 预览口径跟「末尾行数」一致（用 output / output_only / custom 时才有意义，status 也给个预览）
     let lines = 20;
     const ln = $("cronNotifyLines");
@@ -587,6 +1029,10 @@
     btn.disabled = true;
     try {
       const d = await cronAct("/api/cron/dry-run", {
+        kind: kind,
+        lang: $("cronLang") ? $("cronLang").value : "python",
+        content: kind === "code" ? code : (kind === "ai" ? prompt : ""),
+        ai_sys: $("cronAiSys") ? $("cronAiSys").value.trim() : "",
         command: cmd,
         cwd: $("cronCwd").value.trim(),
         timeout: parseInt($("cronTimeout").value, 10) || 0,
@@ -673,9 +1119,9 @@
   async function cronTryAi() {
     const btn = $("cronTryAi");
     const snap = CRON.trySnap;
-    if (!snap) { toast("先点「测试运行」，让 AI 知道脚本会输出什么", "warn"); return; }
-    const cmd = $("cronCmd").value.trim();
-    if (!cmd) { toast("请先填写执行命令", "warn"); return; }
+    if (!snap) { toast("先点「测试运行」，让 AI 知道这次会输出什么", "warn"); return; }
+    const cmd = cronCurrentCommandText();
+    if (!cmd) { toast("请先填写任务内容", "warn"); return; }
     if (!btn || btn.disabled) return;
     const old = btn.innerHTML;
     btn.disabled = true;
@@ -724,10 +1170,16 @@
     // 通知渠道：界面还没就绪（加载中 / 读取失败）时保持原值，避免误清空
     const chVal = cronTaskChannelsValue();
     const nChannels = chVal === null ? String(CRON.editChRaw || "") : chVal;
+    const kind = cronEditKind();
     const body = {
       id: CRON.editing ? CRON.editing.id : "",
       name: $("cronName").value.trim(),
-      command: $("cronCmd").value.trim(),
+      kind: kind,
+      lang: $("cronLang") ? $("cronLang").value : "python",
+      content: kind === "code" ? ($("cronCode") ? $("cronCode").value : "")
+        : (kind === "ai" ? ($("cronPrompt") ? $("cronPrompt").value.trim() : "") : ""),
+      ai_sys: $("cronAiSys") ? $("cronAiSys").value.trim() : "",
+      command: $("cronCmd") ? $("cronCmd").value.trim() : "",
       cron: $("cronExpr").value.trim(),
       cwd: $("cronCwd").value.trim(),
       remark: $("cronRemark").value.trim(),
@@ -742,7 +1194,9 @@
       notify_channels: nChannels,
     };
     if (!body.name) { err.textContent = "请填写任务名称"; return; }
-    if (!body.command) { err.textContent = "请填写要执行的命令"; return; }
+    if (kind === "command" && !body.command) { err.textContent = "请填写要执行的命令"; return; }
+    if (kind === "code" && !body.content.trim()) { err.textContent = "请填写要执行的代码"; return; }
+    if (kind === "ai" && !body.content.trim()) { err.textContent = "请填写固定的 AI 提示词"; return; }
     if (!body.cron) { err.textContent = "请填写 cron 表达式"; return; }
     err.textContent = "";
     const d = await cronAct("/api/cron/save", body);
@@ -942,7 +1396,8 @@
 
   /* ---------- 通知记录（本次执行推送了哪些渠道、成功与否） ---------- */
   const CRON_NF_CH = { desktop: "桌面", email: "邮件", smtp: "邮件",
-                       dingtalk: "钉钉", telegram: "Telegram", pushplus: "PushPlus" };
+                       dingtalk: "钉钉", telegram: "Telegram", pushplus: "PushPlus",
+                       web: "网页版" };
   const CRON_NF_EVENT = { success: ["执行成功", "ok"], fail: ["执行失败", "bad"],
                           timeout: ["执行超时", "warn"], retry: ["安排重试", "warn"] };
   const CRON_NF_SKIP = { disabled: "通知总开关未开启", "event-off": "该事件未勾选",
@@ -1003,10 +1458,8 @@
     });
     if (sum) sum.textContent = "共 " + recs.length + " 条" + (okN + badN ? " · 成功 " + okN + " / 失败 " + badN : "");
     list.innerHTML = cronNotifyItemsHtml(recs);
-    list.onclick = (e) => {                        // 点渠道 / 正文展开：看完整文案与各渠道明细
-      const hit = e.target.closest(".cr-nf-chs, .cr-nf-body");
-      if (hit) hit.parentElement.classList.toggle("open");
-    };
+    // 点网页版渠道 / 「复制」→ 复制地址；点其它区域 → 展开明细
+    list.onclick = cronNotifyAreaClick;
   }
   /* 通知条目 HTML（抽屉与大页详情共用；样式见 .cr-nf-*） */
   function cronNotifyItemsHtml(recs) {
@@ -1016,9 +1469,16 @@
       const chips = chs.length
         ? chs.map(k => {
             const c = r.channels[k] || {};
-            return '<span class="cr-nf-ch ' + (c.ok ? "ok" : "bad") + '" title="' +
-              esc(c.detail || "") + '"><i class="bi ' + (c.ok ? "bi-check-circle" : "bi-x-circle") +
-              '"></i>' + esc(CRON_NF_CH[k] || k) + '</span>';
+            // 网页版：地址可一键复制（点 chip 就复制，不用展开明细）
+            const webUrl = k === "web" ? cronWebUrlOf(c.detail) : "";
+            return '<span class="cr-nf-ch ' + (c.ok ? "ok" : "bad") + (webUrl ? " has-url" : "") + '"' +
+              (webUrl
+                ? ' data-web-url="' + escAttr(webUrl) + '" title="点击在新标签页打开网页版通知：' +
+                  escAttr(webUrl) + '"'
+                : ' title="' + escAttr(c.detail || "") + '"') +
+              '><i class="bi ' + (c.ok ? "bi-check-circle" : "bi-x-circle") +
+              '"></i>' + esc(CRON_NF_CH[k] || k) +
+              (webUrl ? '<i class="bi bi-clipboard"></i>' : "") + '</span>';
           }).join("")
         : '<span class="cr-nf-ch skip"><i class="bi bi-slash-circle"></i>' +
             esc(CRON_NF_SKIP[r.skipped] || (r.skipped ? "未发送" : "没有启用的渠道")) + '</span>';
@@ -1048,10 +1508,14 @@
       const detail = chs.length
         ? '<div class="cr-nf-detail">' + chs.map(k => {
             const c = r.channels[k] || {};
+            const dlUrl = k === "web" ? cronWebUrlOf(c.detail) : "";
             return '<div class="cr-nf-dl ' + (c.ok ? "ok" : "bad") + '">' +
               '<i class="bi ' + (c.ok ? "bi-check-circle" : "bi-x-circle") + '"></i>' +
               '<b>' + esc(CRON_NF_CH[k] || k) + '</b>' +
-              '<span>' + esc(c.detail || (c.ok ? "已发送" : "发送失败")) + '</span></div>';
+              '<span>' + cronLinkify(c.detail || (c.ok ? "已发送" : "发送失败")) + '</span>' +
+              (dlUrl ? '<button type="button" class="cr-nf-copy" data-copy-web="' + escAttr(dlUrl) +
+                '" title="复制网页地址"><i class="bi bi-clipboard"></i> 复制</button>' : "") +
+              '</div>';
           }).join("") + '</div>'
         : "";
       return '<div class="cr-nf-item">' +
@@ -1094,7 +1558,7 @@
   const CRON_VIEW_PATH = "\u0000cron";
   CRON.view = { sel: {}, kw: "", filter: "all", cur: "", runs: [], logRun: null,
                 logOffset: 0, log: "", logTimer: null, timer: null, dsig: "", batchN: 0,
-                notify: null, nfOpen: true };
+                notify: null, nfOpen: false };            // 通知记录默认收起，点标题右侧箭头再展开
 
   function cronOpenView(tid) {
     let tab = findTab(CRON_VIEW_PATH);
@@ -1468,13 +1932,18 @@
         (t.running
           ? '<button class="cv-btn danger" data-dact="stop"><i class="bi bi-stop-fill"></i> 停止</button>'
           : '<button class="cv-btn primary" data-dact="run"><i class="bi bi-play-fill"></i> 运行</button>') +
-        '<button class="cv-btn" data-dact="edit"><i class="bi bi-pencil-square"></i> 编辑</button>' +
+        '<button class="cv-btn" data-dact="edit" title="编辑"><i class="bi bi-pencil-square"></i></button>' +
+        '<button class="cv-btn" data-dact="weblink" title="复制网页通知地址（/n/…）"><i class="bi bi-globe2"></i></button>' +
         '<button class="cv-btn" data-dact="runs" title="刷新执行记录"><i class="bi bi-arrow-clockwise"></i></button>' +
       '</div>' +
       '<div class="cv-d-info">' +
         cronViewKV("cron 表达式", t.cron) +
         cronViewKV("下次运行", (t.next && t.next.length) ? t.next.join("   ·   ") : "") +
-        cronViewKV("执行命令", t.command, true) +
+        cronViewKV("任务类型", cronKindLabel(t.kind) +
+          (t.kind === "code" ? "（" + cronLangLabel(t.lang) + "）" : "")) +
+        (t.kind === "code" ? cronViewKV("代码", t.content || "", true)
+          : t.kind === "ai" ? cronViewKV("固定提示词", t.content || "", true)
+            : cronViewKV("执行命令", t.command, true)) +
         cronViewKV("工作目录", t.cwd || "（默认：任务所在项目目录）", true) +
         cronViewKV("超时", t.timeout ? (t.timeout + " 秒") : "不限时") +
         cronViewKV("运行统计", "共 " + (t.run_count || 0) + " 次 · 成功 " + (t.ok_count || 0) + " · 失败 " + (t.fail_count || 0)) +
@@ -1502,7 +1971,7 @@
         '<span class="cv-sp"></span>' +
         '<button class="cv-btn" data-dact="logrefresh" title="重新加载日志"><i class="bi bi-arrow-clockwise"></i></button></div>' +
       '<pre class="cv-log scroll-thin" id="cvLog">' + esc(CRON.view.log || "") + '</pre>' +
-      '<div class="cv-d-sub">通知记录' + cronViewNotifySumHtml() +
+      '<div class="cv-d-sub">通知记录<span class="cv-sub" id="cvNotifySum">' + cronNotifySumInner() + '</span>' +
         '<span class="cv-sp"></span>' +
         '<button class="cv-btn" data-dact="notifyrefresh" title="刷新通知记录"><i class="bi bi-bell"></i></button>' +
         '<button class="cv-btn" data-dact="notifytoggle" title="折叠 / 展开通知记录"><i class="bi ' +
@@ -1573,10 +2042,8 @@
     });
     const nfBox = $("cvNotify");
     if (nfBox) {
-      nfBox.onclick = (e) => {                     // 点渠道 / 正文展开：看完整文案与各渠道明细
-        const hit = e.target.closest(".cr-nf-chs, .cr-nf-body");
-        if (hit) hit.parentElement.classList.toggle("open");
-      };
+      // 点网页版渠道 / 「复制」→ 复制地址；点其它区域 → 展开明细
+      nfBox.onclick = cronNotifyAreaClick;
     }
     const box = $("cvRunList");
     if (!box) return;
@@ -1652,10 +2119,23 @@
     cronViewLoadNotify(run);
   }
   /* ---------- 大页详情里的「通知记录」 ---------- */
-  function cronViewNotifySumHtml() {
+  /* 摘要：条数 + 通知渠道成功 / 失败数（按渠道算，一条通知可能推了多个渠道，
+     例如「钉钉成功 · Telegram 成功 · 网页版失败」→ 成功 2 / 失败 1） */
+  function cronNotifySumInner() {
     const nf = CRON.view.notify, rid = (CRON.view.logRun || {}).id || "";
     if (!nf || nf.rid !== rid || !nf.recs) return "";
-    return ' <span class="cv-sub">（' + nf.recs.length + ' 条）</span>';
+    let okN = 0, badN = 0;
+    nf.recs.forEach(r => {
+      Object.keys(r.channels || {}).forEach(k => {
+        if ((r.channels[k] || {}).ok) okN++; else badN++;
+      });
+    });
+    const tot = okN + badN;
+    return '（' + nf.recs.length + ' 条' +
+      (tot
+        ? ' · <span class="' + (okN ? "cv-nf-ok" : "cv-nf-zero") + '">成功 ' + okN + '</span>' +
+          ' · <span class="' + (badN ? "cv-nf-bad" : "cv-nf-zero") + '">失败 ' + badN + '</span>'
+        : '') + '）';
   }
   function cronViewNotifyHtml() {
     const rid = (CRON.view.logRun || {}).id || "";
@@ -1672,7 +2152,7 @@
     const box = $("cvNotify");
     if (box) box.innerHTML = cronViewNotifyHtml();
     const sum = $("cvNotifySum");
-    if (sum) sum.innerHTML = cronViewNotifySumHtml();
+    if (sum) sum.innerHTML = cronNotifySumInner();   // 摘要随数据到达即时更新
   }
   function cronViewLoadNotify(run, force) {
     if (!run) return;
@@ -1727,6 +2207,8 @@
     if (!t) return;
     const d = await cronAct("/api/cron/save", {
       name: t.name + " 副本", cron: t.cron, command: t.command, cwd: t.cwd || "",
+      kind: t.kind || "command", lang: t.lang || "python",
+      content: t.content || "", ai_sys: t.ai_sys || "",
       remark: t.remark || "", timeout: t.timeout || 0, enabled: false,
     });
     if (d.error) { toast(d.error, "err"); return; }
@@ -1774,12 +2256,33 @@
     await cronViewRefresh();
     if (action === "run" && CRON.view.cur) cronViewSelect(CRON.view.cur);
   }
+  /* 复制某任务的网页版通知地址（没有就现生成一个令牌，地址可长期收藏） */
+  async function cronCopyWebLink(tid) {
+    if (!tid) return;
+    try {
+      const r = await fetch("/api/cron/web-link?task_id=" + encodeURIComponent(tid));
+      const d = await r.json();
+      if (d.error) { toast(d.error, "err"); return; }
+      const done = () => toast(d.enabled
+        ? "网页通知地址已复制：" + d.url
+        : "已复制地址：" + d.url + "（网页渠道还没在通知设置里开启）", d.enabled ? "ok" : "warn");
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(d.url).then(done).catch(() => cronTryCopyFallback(d.url, done));
+      } else {
+        cronTryCopyFallback(d.url, done);
+      }
+    } catch (e) {
+      toast("获取网页地址失败：" + (e && e.message ? e.message : e), "err");
+    }
+  }
+
   async function cronViewDetailAct(act) {
     const t = (CRON.tasks || []).find(x => x.id === CRON.view.cur);
     if (!t) return;
     if (act === "run") return cronViewRun(t.id);
     if (act === "stop") return cronViewStop(t.id);
     if (act === "edit") return cronOpenEditor(t);
+    if (act === "weblink") return cronCopyWebLink(t.id);
     if (act === "runs") return cronViewLoadRuns(t.id);
     if (act === "logrefresh") return cronViewLoadLog(CRON.view.logRun, true);
     if (act === "notifyrefresh") return cronViewLoadNotify(CRON.view.logRun, true);
@@ -1807,7 +2310,7 @@
      ================================================================== */
   const CRON_CH_NAMES = {
     desktop: "桌面通知", email: "邮件（全局 SMTP）", dingtalk: "钉钉机器人",
-    telegram: "Telegram（全局）", pushplus: "PushPlus",
+    telegram: "Telegram（全局）", pushplus: "PushPlus", web: "网页版",
   };
   const CRON_EV_NAMES = { fail: "执行失败", timeout: "执行超时", retry: "安排重试" };
 

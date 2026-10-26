@@ -217,6 +217,8 @@
             "Bot 推送（来源可选复用全局或独立配置）。", "notifyCronChTelegram") +
           cronChCard("bi-wechat", "", "定时任务 pushplus 微信 推送", "PushPlus",
             "推送到微信（www.pushplus.plus）。", "notifyCronChPushplus") +
+          cronChCard("bi-globe2", "", "定时任务 网页版 web 页面 markdown 渲染", "网页版",
+            "生成 Markdown 渲染页，地址按任务唯一，默认保留 7 天。", "notifyCronChWeb") +
         '</div>' +
       '</div>' +
 
@@ -370,6 +372,46 @@
         '</div>' +
       '</div>' +
 
+      '<div class="notify-card notifyCronWebOpts">' +
+        '<div class="notify-card-title"><i class="bi bi-globe2"></i> 网页版设置</div>' +
+        '<div class="notify-row stack set-row" data-kw="网页 web 站点 地址 base url 域名">' +
+          '<div class="notify-label-wrap"><div class="notify-label">站点地址（可选）</div>' +
+          '<div class="notify-desc">通知里的链接前缀，例如 <code>http://192.168.1.10:5001</code>；' +
+            '留空自动按本机 IP + 端口推断（反向代理 / 域名访问时建议填）。</div></div>' +
+          '<input class="notify-input" id="notifyCronWebBase" placeholder="http://192.168.1.10:5001" autocomplete="off" spellcheck="false">' +
+        '</div>' +
+        '<div class="notify-row stack set-row" data-kw="网页 web 保留 天数 retention days 过期">' +
+          '<div class="notify-label-wrap"><div class="notify-label">每条通知保留天数</div>' +
+          '<div class="notify-desc">到期后自动失效（数据库假删除，不物理删除），页面不再展示。' +
+            '网页渠道开启时，其它渠道的正文末尾会自动附上这个页面地址。</div></div>' +
+          '<input class="notify-input" id="notifyCronWebDays" type="number" min="1" max="365" placeholder="7">' +
+        '</div>' +
+        '<div class="notify-row inline set-row" data-kw="网页 web 入口 链接 附加 按钮 link enabled">' +
+          '<div class="notify-label-wrap"><div class="notify-label">在其它渠道附加网页通知入口</div>' +
+          '<div class="notify-desc">桌面 / 邮件 / 钉钉 / Telegram / PushPlus 的正文末尾会多一行链接，' +
+            '点开就是网页通知页（IDE 预览里是可点的文字链接）。</div></div>' +
+          '<label class="set-switch"><input type="checkbox" id="notifyCronWebLinkOn"><span></span></label>' +
+        '</div>' +
+        '<div class="notify-row stack set-row" data-kw="网页 web 入口 文字 文案 link text 名称">' +
+          '<div class="notify-label-wrap"><div class="notify-label">入口文字</div>' +
+          '<div class="notify-desc">纯文本渠道显示「文字 + 下一行地址」；留空用「网页通知」。</div></div>' +
+          '<input class="notify-input" id="notifyCronWebLinkText" placeholder="网页通知" autocomplete="off" spellcheck="false">' +
+        '</div>' +
+        '<div class="notify-row stack set-row" data-kw="网页 web 固定 跳转 地址 统一 link url 域名">' +
+          '<div class="notify-label-wrap"><div class="notify-label">固定跳转地址（可选）</div>' +
+          '<div class="notify-desc">填了就统一跳到这个地址（比如你自己的通知中心）；' +
+            '留空 = 跳该任务自己的 /n/&lt;令牌&gt; 页面。</div></div>' +
+          '<input class="notify-input" id="notifyCronWebLinkUrl" placeholder="留空 = 各任务自己的 /n/… 地址" autocomplete="off" spellcheck="false">' +
+        '</div>' +
+        '<div class="notify-row inline set-row" data-kw="网页 web 地址 预览 link 任务">' +
+          '<div class="notify-label-wrap"><div class="notify-label">查看测试页</div>' +
+          '<div class="notify-desc">先保存并开启网页渠道，再点「测试网页」生成一条测试通知；' +
+            '这里可直接打开测试页（地址 <code>/n/test</code>）。</div></div>' +
+          '<a class="notify-btn" id="notifyCronWebOpen" target="_blank" rel="noopener" style="text-decoration:none;">' +
+            '<i class="bi bi-box-arrow-up-right"></i> 打开测试页</a>' +
+        '</div>' +
+      '</div>' +
+
       '<div class="notify-card">' +
         '<div class="notify-card-title"><i class="bi bi-pencil-square"></i> 通知模板</div>' +
         '<div class="notify-row stack set-row" data-kw="定时任务 快速模板 预设 preset 模板 template">' +
@@ -427,6 +469,7 @@
           '<button class="notify-btn" id="notifyCronTestTelegram"><i class="bi bi-telegram"></i> 测试 Telegram</button>' +
           '<button class="notify-btn" id="notifyCronTestDingtalk"><i class="bi bi-chat-dots"></i> 测试钉钉</button>' +
           '<button class="notify-btn" id="notifyCronTestPushplus"><i class="bi bi-wechat"></i> 测试 PushPlus</button>' +
+          '<button class="notify-btn" id="notifyCronTestWeb"><i class="bi bi-globe2"></i> 测试网页</button>' +
           '<button class="notify-btn primary" id="notifyCronSaveBtn" style="margin-left:auto;"><i class="bi bi-save"></i> 保存</button>' +
         '</div>' +
       '</div>' +
@@ -643,6 +686,45 @@
   /* 页内通知卡片：浏览器通知不可用（http 内网 / 未授权）时镜像桌面通知。
      与 toast 的区别：保留正文换行（多行可读）、停留更久、可点掉。 */
   let _notifyCardTimer = null;
+  /* 已转义文本里的链接自动渲染：<a href>（HTML / Telegram parse_mode 写法）、
+     Markdown [文字](url)、裸 URL 统一转成可点链接（新标签打开）。 */
+  function notifyLinkify(escaped) {
+    const stash = [];
+    const keep = h => { stash.push(h); return "\u0001" + (stash.length - 1) + "\u0001"; };
+    let s = escaped;
+    s = s.replace(/&lt;a\s+[^&]*?href=(?:"|')?(https?:\/\/[^"'\s&]+)(?:"|')?[^&]*?&gt;([\s\S]*?)&lt;\/a&gt;/gi,
+      (m, url, txt) => keep('<a href="' + url + '" target="_blank" rel="noopener noreferrer">' +
+        (String(txt).trim() || url) + '</a>'));
+    s = s.replace(/\[([^\]\n]{1,120})\]\((https?:\/\/[^\s)]+)\)/g,
+      (m, txt, url) => keep('<a href="' + url + '" target="_blank" rel="noopener noreferrer">' +
+        (txt || url) + '</a>'));
+    s = s.replace(/(^|[^A-Za-z0-9"'=\/&])(https?:\/\/[^\s<"']+)/g, (m, pre, url) => {
+      // 去掉被连带吞进来的转义实体尾巴，避免把 &amp; 后的字面量当成 URL
+      const clean = url.replace(/&(?:amp|lt|gt|quot)?;?$/, "");
+      return pre + keep('<a href="' + clean + '" target="_blank" rel="noopener noreferrer">' +
+        clean + '</a>') + url.slice(clean.length);
+    });
+    return s.replace(/\u0001(\d+)\u0001/g, (m, i) => stash[+i] || "");
+  }
+
+  /* 通知正文 → HTML：末尾的「前往网页版通知」段落换成可点按钮（新标签打开），
+     其余内容按纯文本显示（保留换行），其中的链接自动变成可点链接。 */
+  function notifyBodyHtml(body) {
+    const esc = s => String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const text = String(body || "").trim();
+    if (!text) return "（无正文）";
+    // 后端追加的格式：空行 + 分隔线 + 标题行 + 裸地址
+    const m = text.match(/\n*━{3,}[^\n]*\n[^\n]*前往网页版通知[^\n]*\n(https?:\/\/[^\s]+)\s*$/);
+    if (!m) return notifyLinkify(esc(text));
+    const url = m[1];
+    const head = text.slice(0, m.index).replace(/\s*$/, "");
+    return (head ? notifyLinkify(esc(head)) + "\n" : "") +
+      '<a class="nc-web-go" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer" ' +
+      'title="在新标签页打开网页版通知">' +
+      '<i class="bi bi-globe2"></i> 前往网页版通知</a>';
+  }
+
   function notifyCard(title, body) {
     let box = document.getElementById("notifyCard");
     if (!box) {
@@ -660,7 +742,10 @@
       box.onclick = () => box.classList.remove("show");
     }
     box.querySelector(".nc-title").textContent = title || "File_Flask";
-    box.querySelector(".nc-body").textContent = String(body || "").trim() || "（无正文）";
+    const bodyEl = box.querySelector(".nc-body");
+    bodyEl.innerHTML = notifyBodyHtml(body);
+    // 点正文里的「前往网页版通知」：新标签打开，别顺手把卡片关掉
+    bodyEl.querySelectorAll("a").forEach(a => { a.onclick = (e) => e.stopPropagation(); });
     box.classList.add("show");
     clearTimeout(_notifyCardTimer);
     _notifyCardTimer = setTimeout(() => box.classList.remove("show"), 12000);
@@ -692,14 +777,29 @@
     try {
       const soundOn = !document.getElementById("notifyDesktopSound") ||
                       document.getElementById("notifyDesktopSound").checked;
-      // 系统通知栏最多显示 3~4 行：先按行截断，避免被系统从中间粗暴截掉
-      const bodyText = String(rec.body || "").split("\n").slice(0, 6).join("\n");
+      // 系统通知栏最多显示 3~4 行：先按行截断，避免被系统从中间粗暴截掉。
+      // 末尾的「前往网页版通知」压成一行，且点通知时直接新标签打开该地址。
+      const raw = String(rec.body || "");
+      const m = raw.match(/\n*━{3,}[^\n]*\n[^\n]*前往网页版通知[^\n]*\n(https?:\/\/[^\s]+)\s*$/);
+      let bodyText, webUrl = "";
+      if (m) {
+        webUrl = m[1];
+        const head = raw.slice(0, m.index).trim().split("\n").slice(0, 4).join("\n");
+        bodyText = (head ? head + "\n" : "") + "🔗 网页版：\n" + webUrl;
+      } else {
+        bodyText = raw.split("\n").slice(0, 6).join("\n");
+      }
       const n = new Notification(rec.title || "File_Flask", {
         body: bodyText,
         silent: !soundOn,
         tag: "file-flask-notify-" + (rec.ts || ""),
       });
-      n.onclick = () => { try { window.focus(); n.close(); } catch (_) {} };
+      n.onclick = () => {
+        try {
+          window.focus(); n.close();
+          if (webUrl) window.open(webUrl, "_blank", "noopener");   // 点通知 → 新标签打开网页版
+        } catch (_) {}
+      };
     } catch (_) {}
   }
 
@@ -771,6 +871,20 @@
     if (q("notifyCronChDingtalk")) q("notifyCronChDingtalk").checked = !!ch.dingtalk;
     if (q("notifyCronChTelegram")) q("notifyCronChTelegram").checked = !!ch.telegram;
     if (q("notifyCronChPushplus")) q("notifyCronChPushplus").checked = !!ch.pushplus;
+    if (q("notifyCronChWeb"))      q("notifyCronChWeb").checked = !!ch.web;
+    // 网页版：站点地址（留空自动推断）+ 保留天数 + 测试页链接
+    const web = n.web || {};
+    if (q("notifyCronWebBase")) q("notifyCronWebBase").value = web.base_url || "";
+    if (q("notifyCronWebDays")) q("notifyCronWebDays").value = web.retention_days || 7;
+    // 固定跳转 / 入口文字
+    if (q("notifyCronWebLinkOn"))   q("notifyCronWebLinkOn").checked = web.link_enabled !== false;
+    if (q("notifyCronWebLinkText")) q("notifyCronWebLinkText").value = web.link_text || "";
+    if (q("notifyCronWebLinkUrl"))  q("notifyCronWebLinkUrl").value = web.link_url || "";
+    const webOpen = q("notifyCronWebOpen");
+    if (webOpen) {
+      const base = String(web.base_url || "").replace(/\/+$/, "") || location.origin;
+      webOpen.href = base + "/n/test";
+    }
     // 配置来源判断字段：use_global = true → 复用全局；false → 独立配置
     const pickSrc = (gid, oid, useGlobal) => {
       if (q(gid)) q(gid).checked = useGlobal !== false;
@@ -825,7 +939,7 @@
         channels: {
           desktop: c("notifyCronChDesktop"), email: c("notifyCronChEmail"),
           dingtalk: c("notifyCronChDingtalk"), telegram: c("notifyCronChTelegram"),
-          pushplus: c("notifyCronChPushplus"),
+          pushplus: c("notifyCronChPushplus"), web: c("notifyCronChWeb"),
         },
         desktop: {
           use_global: useGlobal("cronDeskSrc"),
@@ -848,6 +962,13 @@
         },
         dingtalk: { webhook: v("notifyCronDingWebhook"), secret: v("notifyCronDingSecret") },
         pushplus: { token: v("notifyCronPpToken"), topic: v("notifyCronPpTopic") },
+        web: {
+          base_url: v("notifyCronWebBase").replace(/\/+$/, ""),
+          retention_days: parseInt(v("notifyCronWebDays"), 10) || 7,
+          link_enabled: c("notifyCronWebLinkOn"),
+          link_text: v("notifyCronWebLinkText"),
+          link_url: v("notifyCronWebLinkUrl"),
+        },
         template: { title: v("notifyCronTitle"), body: v("notifyCronBody") },
       },
     };
@@ -893,7 +1014,7 @@
       const d = await r.json();
       const res = d && d.results && d.results[channel];
       const name = { desktop: "桌面", email: "邮件", dingtalk: "钉钉",
-                     telegram: "Telegram", pushplus: "PushPlus" }[channel] || channel;
+                     telegram: "Telegram", pushplus: "PushPlus", web: "网页版" }[channel] || channel;
       if (res && res.ok) notifyToast(`测试通知已发送（${name}）`, "ok");
       else notifyToast(`测试失败（${name}）：${(res && res.detail) || d.error || "未知错误"}`, "err");
       await notifyLoad();
@@ -977,6 +1098,7 @@
     document.querySelectorAll(".notifyCronTgOpts").forEach(el => el.style.display = cronChOn("notifyCronChTelegram") ? "" : "none");
     document.querySelectorAll(".notifyCronDingOpts").forEach(el => el.style.display = cronChOn("notifyCronChDingtalk") ? "" : "none");
     document.querySelectorAll(".notifyCronPpOpts").forEach(el => el.style.display = cronChOn("notifyCronChPushplus") ? "" : "none");
+    document.querySelectorAll(".notifyCronWebOpts").forEach(el => el.style.display = cronChOn("notifyCronChWeb") ? "" : "none");
     const ownOn = (name) => {
       const own = document.querySelector('input[name="' + name + '"][value="own"]');
       return !!(own && own.checked);
@@ -1227,10 +1349,18 @@
       const chats = notifyChannelsOf(r);
       const chips = chats.length
         ? chats.map(c => {
+            // 网页版：点 chip 直接新标签打开通知页（地址藏在 detail 里）
+            const webUrl = c.key === "web"
+              ? ((String(c.detail || "").match(/https?:\/\/[^\s"'<>]+/) || [""])[0])
+              : "";
             const tip = c.detail ? ` title="${notifyEsc(c.detail)}"` : "";
-            return `<span class="notify-hch ${c.ok ? "ok" : "fail"}"${tip}>` +
+            const attrs = webUrl
+              ? ` data-web-url="${notifyEsc(webUrl)}" title="点击在新标签页打开网页版通知：${notifyEsc(webUrl)}"`
+              : tip;
+            return `<span class="notify-hch ${c.ok ? "ok" : "fail"}${webUrl ? " linkable" : ""}"${attrs}>` +
                    `<i class="bi ${c.ok ? "bi-check-circle" : "bi-x-circle"}"></i>` +
-                   `${NOTIFY_CH_NAME[c.key] || c.key}</span>`;
+                   `${NOTIFY_CH_NAME[c.key] || c.key}` +
+                   (webUrl ? ` <i class="bi bi-box-arrow-up-right"></i>` : "") + `</span>`;
           }).join("")
         : `<span class="notify-hch skip"><i class="bi bi-slash-circle"></i>未发送</span>`;
       const rawTitle = String(r.title || "").trim();
@@ -1275,7 +1405,8 @@
     test:  { icon: "🧪", name: "测试通知" },
   };
   const NOTIFY_CH_NAME = { desktop: "桌面", smtp: "邮件", telegram: "Telegram",
-                           email: "邮件", dingtalk: "钉钉", pushplus: "PushPlus" };
+                          email: "邮件", dingtalk: "钉钉", pushplus: "PushPlus",
+                          web: "网页版" };
 
   function notifyEsc(v) {
     return String(v == null ? "" : v)
@@ -1295,7 +1426,7 @@
       ? r.channels
       : { desktop: r && r.desktop, smtp: r && r.smtp, telegram: r && r.telegram };
     const out = [];
-    for (const key of ["desktop", "smtp", "email", "telegram", "dingtalk", "pushplus"]) {
+    for (const key of ["desktop", "smtp", "email", "telegram", "dingtalk", "pushplus", "web"]) {
       const v = src[key];
       if (v === null || v === undefined) continue;
       if (typeof v === "boolean") { out.push({ key, ok: v, detail: "" }); continue; }
@@ -1336,10 +1467,18 @@
       const chats = notifyChannelsOf(r);
       const chips = chats.length
         ? chats.map(c => {
+            // 网页版：点 chip 直接新标签打开通知页（地址藏在 detail 里）
+            const webUrl = c.key === "web"
+              ? ((String(c.detail || "").match(/https?:\/\/[^\s"'<>]+/) || [""])[0])
+              : "";
             const tip = c.detail ? ` title="${notifyEsc(c.detail)}"` : "";
-            return `<span class="notify-hch ${c.ok ? "ok" : "fail"}"${tip}>` +
+            const attrs = webUrl
+              ? ` data-web-url="${notifyEsc(webUrl)}" title="点击在新标签页打开网页版通知：${notifyEsc(webUrl)}"`
+              : tip;
+            return `<span class="notify-hch ${c.ok ? "ok" : "fail"}${webUrl ? " linkable" : ""}"${attrs}>` +
                    `<i class="bi ${c.ok ? "bi-check-circle" : "bi-x-circle"}"></i>` +
-                   `${NOTIFY_CH_NAME[c.key] || c.key}</span>`;
+                   `${NOTIFY_CH_NAME[c.key] || c.key}` +
+                   (webUrl ? ` <i class="bi bi-box-arrow-up-right"></i>` : "") + `</span>`;
           }).join("")
         : `<span class="notify-hch skip"><i class="bi bi-slash-circle"></i>未发送</span>`;
       const rawTitle = String(r.title || "").trim();
@@ -1408,6 +1547,12 @@
         if (cronPresetBtn) { cronApplyPreset(cronPresetBtn.dataset.cpreset); return; }
         const varBtn = e.target && e.target.closest ? e.target.closest(".notify-var") : null;
         if (varBtn) { notifyInsertVar(varBtn.dataset.var); return; }
+        // 历史记录里的「网页版」渠道：点一下新标签打开通知页
+        const webChip = e.target && e.target.closest ? e.target.closest(".notify-hch[data-web-url]") : null;
+        if (webChip) {
+          window.open(webChip.dataset.webUrl, "_blank", "noopener");
+          return;
+        }
         // 按钮内含 <i> 图标，e.target 可能是图标而不是按钮，统一向上找最近的 button
         const btn = e.target && e.target.closest ? e.target.closest("button") : null;
         const id = btn ? btn.id : (e.target ? e.target.id : "");
@@ -1421,6 +1566,7 @@
         else if (id === "notifyCronTestTelegram") cronNotifyTest("telegram", btn);
         else if (id === "notifyCronTestDingtalk") cronNotifyTest("dingtalk", btn);
         else if (id === "notifyCronTestPushplus") cronNotifyTest("pushplus", btn);
+        else if (id === "notifyCronTestWeb") cronNotifyTest("web", btn);
         else if (id === "notifyCronSaveBtn") cronNotifySave();
         else if (id === "notifyCronHistoryRefresh") cronNotifyLoadHistory();
         else if (id === "notifyClearHistory") notifyClearHistory();

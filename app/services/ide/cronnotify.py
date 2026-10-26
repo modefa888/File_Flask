@@ -6,6 +6,7 @@
   telegram  Telegram Bot（复用全局通知的 Bot 配置）
   dingtalk  钉钉群机器人 Webhook（本模块独立配置，支持加签安全设置）
   pushplus  PushPlus 微信推送（本模块独立配置，一对 one 推送 token）
+  web       网页版：把通知写进本地库，生成 Markdown 渲染页（地址按任务唯一，默认保留 7 天）
 
 配置存 store.db 的 cron_cfg 表（键 notify，JSON 结构），由
 「定时任务管理 → 通知设置」弹窗维护；测试按钮可对单个渠道发一条测试消息。
@@ -51,6 +52,7 @@ DEFAULT_CFG = {
         "dingtalk": False,
         "telegram": False,
         "pushplus": False,
+        "web": False,
     },
     # desktop / email / telegram 的「判断字段」use_global：
     # True = 复用「设置 → 通知」的全局通道配置；False = 用本模块独立填写的配置
@@ -81,6 +83,14 @@ DEFAULT_CFG = {
         "token": "",                                # PushPlus 的 token（www.pushplus.plus）
         "topic": "",                                # 群组编码（留空 = 发给自己）
     },
+    # 网页版：写库 + 生成渲染页；地址 = base_url + /n/<任务令牌>
+    "web": {
+        "base_url": "",                             # 站点地址（如 http://192.168.1.10:5001）；留空自动推断
+        "retention_days": 7,                        # 每条通知保留天数（到期假删除）
+        "link_enabled": True,                       # 其它渠道正文末尾是否附加「网页通知」入口
+        "link_text": "网页通知",                     # 入口文字（纯文字渠道会连同地址一起显示）
+        "link_url": "",                             # 固定跳转地址（留空 = 该任务自己的 /n/<令牌> 页面）
+    },
     # 通知模板：变量 {task} {event} {exit} {duration} {attempt} {run} {date} {time} {output}
     # {output} = 脚本输出（末尾若干行，由任务里的「通知内容」决定是否带入）
     # 标题与正文都清空时回退到 cronsvc 传入的默认文案
@@ -93,7 +103,7 @@ DEFAULT_CFG = {
 # 事件名（模板 {event} 变量用）
 _EVENT_NAMES = {"fail": "执行失败", "timeout": "执行超时", "retry": "安排重试", "success": "执行成功"}
 
-_CHANNELS = ("desktop", "email", "dingtalk", "telegram", "pushplus")
+_CHANNELS = ("desktop", "email", "dingtalk", "telegram", "pushplus", "web")
 _EVENTS = ("fail", "timeout", "retry", "success")
 
 
@@ -115,6 +125,7 @@ def get_cfg():
         _merge_dict(cfg, saved, "telegram")
         _merge_dict(cfg, saved, "dingtalk")
         _merge_dict(cfg, saved, "pushplus")
+        _merge_dict(cfg, saved, "web")
         _merge_dict(cfg, saved, "template")
         if "enabled" in saved:
             cfg["enabled"] = bool(saved.get("enabled"))
@@ -133,13 +144,20 @@ def save_cfg(patch):
             for k, v in patch[key].items():
                 if k in (cfg.get(key) or {}):
                     cfg[key][k] = bool(v)
-    for key in ("desktop", "email", "telegram", "dingtalk", "pushplus"):
+    for key in ("desktop", "email", "telegram", "dingtalk", "pushplus", "web"):
         if isinstance(patch.get(key), dict):
             for k, v in patch[key].items():
                 if k not in (cfg.get(key) or {}):
                     continue
                 if k == "use_global":
                     cfg[key][k] = bool(v)           # 判断字段：复用全局 / 独立配置
+                elif k == "retention_days":
+                    try:
+                        cfg[key][k] = max(1, min(int(v or 7), 365))
+                    except (TypeError, ValueError):
+                        cfg[key][k] = 7
+                elif k == "link_enabled":
+                    cfg[key][k] = bool(v)
                 elif k == "port":
                     try:
                         cfg[key][k] = max(1, int(v or 465))
@@ -225,8 +243,61 @@ def _send_pushplus(cfg, title, body):
     return ok, ("已发送" if ok else res)
 
 
+# ---------------------------------------------------------------- 网页版（写库 + 渲染页地址）
+def _local_ip():
+    """尽力取本机局域网 IP（仅用于拼出可点的通知地址）。"""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:                                   # noqa: BLE001
+        return "127.0.0.1"
+
+
+def web_base(cfg=None):
+    """网页通知的站点根地址：配置里的 base_url > 当前请求的 host > 本机 IP:PORT。"""
+    cfg = cfg or get_cfg()
+    base = str((cfg.get("web") or {}).get("base_url") or "").strip().rstrip("/")
+    if base:
+        return base
+    try:
+        from flask import has_request_context, request
+        if has_request_context():
+            return request.host_url.rstrip("/")
+    except Exception:                                   # noqa: BLE001
+        pass
+    from ... import config
+    try:
+        port = int(getattr(config, "PORT", 5001) or 5001)
+    except (TypeError, ValueError):
+        port = 5001
+    return "http://%s:%s" % (_local_ip(), port)
+
+
+def web_url(token, cfg=None):
+    """某个令牌对应的网页地址（/n/<token>）。"""
+    return "%s/n/%s" % (web_base(cfg), str(token or "").strip())
+
+
+def _send_web(cfg, title, body, meta=None):
+    """网页版：把标题 + Markdown 正文写库，返回可访问的地址。"""
+    meta = meta or {}
+    tid = str(meta.get("task_id") or "").strip()
+    token = crondb.ensure_web_token(tid) if tid else "test"
+    days = (cfg.get("web") or {}).get("retention_days") or 7
+    crondb.add_web_note(token, title, body, task_id=tid,
+                        task_name=str(meta.get("task_name") or ""),
+                        run_id=str(meta.get("run_id") or ""),
+                        status=str(meta.get("event") or ""), days=days)
+    return True, "已生成：%s" % web_url(token, cfg)
+
+
 # ---------------------------------------------------------------- 统一入口
-def _send_one(cfg, channel, title, body):
+def _send_one(cfg, channel, title, body, meta=None):
     """向单个渠道发一条；返回 {ok, detail}。
 
     desktop / email / telegram 按各自的 use_global 判断字段决定：
@@ -252,6 +323,8 @@ def _send_one(cfg, channel, title, body):
             return _send_dingtalk(cfg, title, body)
         if channel == "pushplus":
             return _send_pushplus(cfg, title, body)
+        if channel == "web":
+            return _send_web(cfg, title, body, meta)
         return False, "未知渠道：%s" % channel
     except Exception as e:                              # noqa: BLE001
         _log.warning("定时任务通知（%s）发送异常：%s", channel, e)
@@ -264,6 +337,34 @@ def _render_tpl(tpl, vars_):
         key = m.group(1)
         return str(vars_[key]) if key in vars_ else m.group(0)
     return re.sub(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", _sub, str(tpl or ""))
+
+
+def _url_of(text):
+    """从「已生成：http://…」这类描述里抠出地址。"""
+    m = re.search(r"https?://[^\s\"'<>]+", str(text or ""))
+    return m.group(0) if m else ""
+
+
+def _web_link_foot(cfg, url):
+    """给其它渠道正文末尾追加的网页通知入口（纯文本）。
+
+    · link_enabled=False 时完全不追加；
+    · 文字取 link_text（默认「网页通知」）；
+    · 跳转地址取 link_url（固定的统一入口），留空则跳该任务自己的 /n/<令牌> 页面。
+    钉钉 / Telegram / PushPlus / 邮件都按纯文本发送，做不了真正的按钮，
+    所以是「文字 + 下一行裸地址」：这些客户端会把 URL 自动识别成可点链接。
+    """
+    w = cfg.get("web") or {}
+    if not w.get("link_enabled", True):
+        return ""
+    try:
+        days = int(w.get("retention_days") or 7)
+    except (TypeError, ValueError):
+        days = 7
+    text = str(w.get("link_text") or "").strip()[:40] or "网页通知"
+    target = str(w.get("link_url") or "").strip() or url
+    return ("\n\n━━━━━━━━━━━━━━\n"
+            "🔗 %s（排版更完整 · 保留 %d 天）\n%s" % (text, days, target))
 
 
 def send(title, body, event="fail", source="cron", vars_=None, tpl=None, channels=None,
@@ -314,10 +415,26 @@ def send(title, body, event="fail", source="cron", vars_=None, tpl=None, channel
         picked = set(wanted.split(","))
         targets = [ch for ch in targets if ch in picked]   # 取交集：全局没启用的发不出去
         results["channels"] = wanted
+    send_meta = dict(meta or {})
+    send_meta["event"] = event
+    # 网页版先发：拿到地址后才能给其它渠道的正文末尾追加「前往网页版通知」
+    web_url, web_res = "", None
+    if "web" in targets:
+        ok, detail = _send_one(cfg, "web", title, body, send_meta)
+        web_res = {"ok": bool(ok), "detail": detail}
+        if ok:
+            web_url = _url_of(detail)
+        targets = [ch for ch in targets if ch != "web"]
+    foot = _web_link_foot(cfg, web_url) if web_url else ""
     for ch in targets:
-        ok, detail = _send_one(cfg, ch, title, body)
+        ok, detail = _send_one(cfg, ch, title, body + foot, send_meta)
         results["results"][ch] = {"ok": bool(ok), "detail": detail}
-    rec = {"source": source, "title": title, "body": body,
+    if web_res is not None:
+        results["results"]["web"] = web_res              # 放最后，保持渠道展示顺序稳定
+    # 记录里也带上网页地址：浏览器通知弹窗、通知记录展开的正文都读这里
+    rec_body = (body + foot) if foot else body
+    results["body"] = rec_body                            # 供 cronsvc 写执行记录旁的通知记录
+    rec = {"source": source, "title": title, "body": rec_body,
            "ts": int(time.time()), "channels": results["results"], "event": event}
     if isinstance(meta, dict):                          # 关联到具体任务 / 执行记录
         for k in ("task_id", "run_id", "task_name"):

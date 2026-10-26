@@ -511,6 +511,8 @@
     proc: "资源占用诊断",
     term: "终端 AI 助手",
     cron: "定时任务通知文案",
+    crontask: "定时任务 AI 提示词",
+    crongen: "定时任务一键生成",
     icon: "AI 生成图标",
   };
   var sysAiDetailMod = "";

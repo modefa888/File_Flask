@@ -500,6 +500,34 @@
 #deskie-menu .dk-chip.on { background: #10466f; border-color: #1d5f92; color: #fff; }
 #deskie-menu .dk-chip .bi { font-size: 11px; }
 
+/* ---------- 二级菜单（换个伙伴） ---------- */
+#deskie-menu .dk-mi.has-sub { position: relative; }
+#deskie-menu .dk-caret { margin-left: auto; font-size: 10px; color: #8a8a8a; }
+#deskie-menu .dk-mi.has-sub:hover .dk-caret,
+#deskie-menu .dk-mi.has-sub.open .dk-caret { color: #9fd0f5; }
+#deskie-menu .dk-sub {
+  display: none;
+  position: absolute;
+  left: 100%; top: -5px;
+  min-width: 156px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  padding: 4px;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .55);
+}
+/* 主菜单贴近屏幕底部时，子菜单向上展开 */
+#deskie-menu.sub-up .dk-sub { top: auto; bottom: -5px; }
+/* 主菜单靠右时，子菜单改从左侧展开，避免被屏幕切掉 */
+#deskie-menu.sub-left .dk-sub { left: auto; right: 100%; }
+#deskie-menu .dk-mi.has-sub:hover > .dk-sub,
+#deskie-menu .dk-mi.has-sub.open > .dk-sub { display: block; }
+#deskie-menu .dk-mi.has-sub:hover { background: #04395e; color: #fff; }
+/* 「聊聊天」后面的小星标 */
+#deskie-menu .dk-new { margin-left: auto; font-size: 10px; color: #7fd8a8; }
+
 /* ================= 隐身召唤钮 ================= */
 #deskie-summon {
   position: fixed;
@@ -521,6 +549,396 @@
 }
 #deskie-summon.show { display: flex; }
 #deskie-summon:hover { opacity: 1; transform: scale(1.1); }
+
+/* ---------- 桌宠头顶的「聊聊天」小按钮（hover 出现） ---------- */
+#deskie .dk-chatbtn {
+  position: absolute;
+  right: -3px; top: -9px;
+  width: 21px; height: 21px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid #1177bb;
+  background: #0e639c;
+  color: #fff;
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(.7);
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease, background .15s ease;
+}
+#deskie:hover .dk-chatbtn { opacity: 1; transform: scale(1); pointer-events: auto; }
+#deskie .dk-chatbtn:hover { background: #1177bb; }
+/* 触屏没有 hover：常显，否则点不到 */
+@media (hover: none) {
+  #deskie .dk-chatbtn { opacity: 1; transform: scale(1); pointer-events: auto; }
+}
+html.theme-light #deskie .dk-chatbtn { border-color: #0e639c; }
+
+/* ================= AI 对话面板 ================= */
+#deskie-chat {
+  position: fixed;
+  width: 304px;
+  height: 396px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  z-index: 9603;
+  display: none;
+  flex-direction: column;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 10px;
+  color: #d8d8d8;
+  font-size: 12.5px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .55);
+  overflow: hidden;
+}
+#deskie-chat.show { display: flex; }
+/* 放大态：铺开并居中，标题栏不再可拖（位置由 JS 居中控制） */
+#deskie-chat.maxed {
+  width: 640px;
+  height: 780px;
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 20px);
+}
+#deskie-chat.maxed .dkc-head { cursor: default; }
+
+/* 标题栏 */
+#deskie-chat .dkc-head {
+  position: relative;           /* 提示条绝对定位的参照 */
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-bottom: 1px solid #3c3c3d;
+  background: #2b2b2c;
+  cursor: move;                 /* 标题栏可拖动 */
+  user-select: none;
+  touch-action: none;
+}
+#deskie-chat.dragging { cursor: grabbing; }
+#deskie-chat.dragging .dkc-head { cursor: grabbing; }
+#deskie-chat .dkc-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-right: auto;        /* 标题吃掉剩余空间，按钮一律靠右、不被压缩 */
+  color: #e6e6e6;
+}
+#deskie-chat .dkc-title .bi { color: #7fd8a8; font-size: 13px; }
+#deskie-chat .dkc-title b {
+  font-weight: 600;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 联网实况提示条：浮在消息区上方的浮层，出现 / 消失都不占布局，不会把消息顶下去 */
+#deskie-chat .dkc-tip {
+  position: absolute;
+  left: 6px; right: 6px;
+  top: calc(100% + 4px);
+  z-index: 3;
+  padding: 5px 9px;
+  border: 1px solid #33556d;
+  border-radius: 6px;
+  background: #22384a;
+  color: #9fd0f5;
+  font-size: 11px;
+  line-height: 1.5;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .45);
+  opacity: 0;
+  transform: translateY(-5px);
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+}
+#deskie-chat .dkc-tip.show { opacity: 1; transform: translateY(0); }
+#deskie-chat .dkc-tip.err { color: #ffc0b4; background: #4a2422; border-color: #7a3a35; }
+
+/* ---------- 历史对话下拉（挂在标题栏下方，浮在消息区上面） ---------- */
+#deskie-chat .dkc-hist {
+  position: absolute;
+  left: 6px; right: 6px;
+  top: calc(100% + 4px);
+  z-index: 4;                       /* 比提示条高一级：两个同时出现时以历史列表为准 */
+  display: none;
+  flex-direction: column;
+  max-height: 268px;
+  padding: 5px;
+  border: 1px solid #3c3c3d;
+  border-radius: 8px;
+  background: #252526;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .55);
+  cursor: default;
+  text-align: left;
+}
+#deskie-chat .dkc-hist.open { display: flex; }
+#deskie-chat .dkc-hist-cap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 6px 5px;
+  color: #8f8f8f;
+  font-size: 11px;
+  letter-spacing: .3px;
+}
+#deskie-chat .dkc-hist-cap .bi { font-size: 11px; margin-right: 3px; }
+#deskie-chat .dkc-hist-n { color: #6f6f6f; }
+#deskie-chat .dkc-hist-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+#deskie-chat .dkc-hitem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .12s ease;
+}
+#deskie-chat .dkc-hitem:hover { background: #313132; }
+#deskie-chat .dkc-hitem.on { background: #10466f; }
+#deskie-chat .dkc-hmain { flex: 1; min-width: 0; }
+#deskie-chat .dkc-ht {
+  color: #ddd;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#deskie-chat .dkc-hitem.on .dkc-ht { color: #fff; }
+#deskie-chat .dkc-hm { margin-top: 2px; color: #7f7f7f; font-size: 10.5px; }
+#deskie-chat .dkc-hitem.on .dkc-hm { color: #9fc8e6; }
+#deskie-chat .dkc-htag {
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .16);
+  color: #cfe8ff;
+  font-size: 9.5px;
+}
+#deskie-chat .dkc-hdel {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #7c7c7c;
+  font-size: 9.5px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease, background .12s ease, color .12s ease;
+}
+#deskie-chat .dkc-hitem:hover .dkc-hdel { opacity: 1; }
+#deskie-chat .dkc-hdel:hover { background: #5a2a2a; color: #ff9d9d; }
+/* 触屏没有 hover，删除按钮常显，否则永远点不到 */
+@media (hover: none) {
+  #deskie-chat .dkc-hdel { opacity: .75; }
+}
+#deskie-chat .dkc-hist-foot {
+  display: flex;
+  gap: 5px;
+  margin-top: 3px;
+  padding-top: 5px;
+  border-top: 1px solid #363637;
+}
+#deskie-chat .dkc-hbtn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 24px;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  background: transparent;
+  color: #b8b8b8;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+#deskie-chat .dkc-hbtn:hover { background: #313132; color: #fff; }
+#deskie-chat .dkc-hbtn.primary { background: #0e639c; border-color: #1177bb; color: #fff; }
+#deskie-chat .dkc-hbtn.primary:hover { background: #1177bb; }
+#deskie-chat .dkc-hbtn .bi { font-size: 10.5px; }
+
+#deskie-chat .dkc-ico {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;                 /* 不参与收缩：以前空间不够会把「联网」两个字挤成竖排 */
+  white-space: nowrap;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #9a9a9a;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+#deskie-chat .dkc-ico:hover { background: #3a3a3b; color: #fff; }
+#deskie-chat .dkc-ico .bi { font-size: 12px; }
+#deskie-chat .dkc-ico.on {
+  background: #10466f;
+  border-color: #1d5f92;
+  color: #bfe6ff;
+}
+
+/* 消息区 */
+#deskie-chat .dkc-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+#deskie-chat .dkc-msg { display: flex; }
+#deskie-chat .dkc-msg.me { justify-content: flex-end; }
+#deskie-chat .dkc-body {
+  max-width: 86%;
+  padding: 7px 10px;
+  border-radius: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+#deskie-chat .dkc-msg.me .dkc-body {
+  background: #0e639c;
+  color: #fff;
+  border-bottom-right-radius: 3px;
+}
+#deskie-chat .dkc-msg.pet .dkc-body {
+  background: #333334;
+  color: #e8e8e8;
+  border-bottom-left-radius: 3px;
+}
+/* 早前对话被压缩后的提示条（悬停可看摘要正文） */
+#deskie-chat .dkc-sum {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 8px;
+  padding: 4px 8px;
+  border: 1px dashed #454545;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .04);
+  color: #8f8f8f;
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: help;
+}
+#deskie-chat .dkc-sum .bi { font-size: 11px; }
+
+/* ---------- 消息里的 Markdown ---------- */
+#deskie-chat .dkc-body p { margin: 0 0 6px; }
+#deskie-chat .dkc-body p:last-child { margin-bottom: 0; }
+#deskie-chat .dkc-body strong { color: #fff; }
+#deskie-chat .dkc-body .dkc-h {
+  margin: 2px 0 5px;
+  font-weight: 600;
+  color: #fff;
+}
+#deskie-chat .dkc-body ul,
+#deskie-chat .dkc-body ol { margin: 3px 0 6px; padding-left: 17px; }
+#deskie-chat .dkc-body li { margin: 2px 0; }
+#deskie-chat .dkc-body code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .1);
+  font-family: Consolas, Menlo, monospace;
+  font-size: 11.5px;
+}
+#deskie-chat .dkc-body pre {
+  margin: 5px 0 6px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: #1b1b1c;
+  border: 1px solid #3c3c3d;
+  overflow: auto;
+  max-height: 240px;
+  white-space: pre;
+}
+#deskie-chat .dkc-body pre code { padding: 0; background: none; font-size: 11.5px; line-height: 1.55; }
+#deskie-chat .dkc-body a { color: #6cb6ff; text-decoration: none; }
+#deskie-chat .dkc-body a:hover { text-decoration: underline; }
+#deskie-chat .dkc-body blockquote {
+  margin: 4px 0;
+  padding: 2px 0 2px 8px;
+  border-left: 2px solid #4a4a4b;
+  color: #b4b4b4;
+}
+#deskie-chat .dkc-body hr { border: none; border-top: 1px solid #454545; margin: 7px 0; }
+#deskie-chat .dkc-empty {
+  margin: auto;
+  padding: 12px;
+  text-align: center;
+  color: #8a8a8a;
+  font-size: 12px;
+  line-height: 1.7;
+}
+#deskie-chat .dkc-empty .bi { font-size: 22px; color: #5f7f9a; display: block; margin-bottom: 6px; }
+#deskie-chat .dkc-empty span { font-size: 11px; color: #6d6d6d; }
+
+/* 输入区 */
+#deskie-chat .dkc-foot {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid #3c3c3d;
+  background: #2b2b2c;
+}
+#deskie-chat textarea {
+  flex: 1;
+  /* 高度由 JS 按 scrollHeight 设；这里固定行高基准，避免 auto 反复量出不同结果导致抖动 */
+  height: 33px;
+  min-height: 33px;
+  max-height: 84px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid #454545;
+  border-radius: 8px;
+  background: #1e1e1e;
+  color: #e0e0e0;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
+  outline: none;
+  transition: none;
+}
+#deskie-chat textarea:focus { border-color: #0e639c; }
+#deskie-chat .dkc-send {
+  flex: none;
+  width: 32px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: #0e639c;
+  color: #fff;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+#deskie-chat .dkc-send:hover { background: #1177bb; }
+#deskie-chat .dkc-send.busy { background: #b54040; }
+#deskie-chat .dkc-send.busy:hover { background: #c94b4b; }
 
 /* ================= 浅色主题覆盖 ================= */
 html.theme-light #deskie.is-deskie .dk-body {
@@ -561,6 +979,78 @@ html.theme-light #deskie-menu .dk-sep { background: #e4e7ec; }
 html.theme-light #deskie-menu .dk-chip { border-color: #d4d8de; color: #555; }
 html.theme-light #deskie-menu .dk-chip:hover { background: #e8f1fb; border-color: #b9d5ee; color: #111; }
 html.theme-light #deskie-menu .dk-chip.on { background: #d7ebfb; border-color: #a8c8e8; color: #111; }
+html.theme-light #deskie-menu .dk-sub {
+  background: #ffffff;
+  border-color: #d4d8de;
+  box-shadow: 0 10px 34px rgba(30, 40, 60, .18);
+}
+html.theme-light #deskie-menu .dk-mi.has-sub:hover { background: #e8f1fb; color: #111; }
+html.theme-light #deskie-menu .dk-new { color: #1a7f37; }
+
+/* 对话面板 */
+html.theme-light #deskie-chat {
+  background: #ffffff;
+  border-color: #d4d8de;
+  color: #333;
+  box-shadow: 0 14px 40px rgba(30, 40, 60, .2);
+}
+html.theme-light #deskie-chat .dkc-head,
+html.theme-light #deskie-chat .dkc-foot { background: #f6f7f9; border-color: #e4e7ec; }
+html.theme-light #deskie-chat .dkc-title { color: #1f2328; }
+html.theme-light #deskie-chat .dkc-title .bi { color: #1a7f37; }
+html.theme-light #deskie-chat .dkc-stat { color: #9aa0a8; }
+html.theme-light #deskie-chat .dkc-tip {
+  color: #14538a;
+  background: #eaf4fc;
+  border-color: #b9d5ee;
+  box-shadow: 0 8px 20px rgba(30, 40, 60, .16);
+}
+html.theme-light #deskie-chat .dkc-tip.err {
+  color: #a13a2c;
+  background: #fdeceb;
+  border-color: #f0c0ba;
+}
+html.theme-light #deskie-chat .dkc-ico { color: #666; }
+html.theme-light #deskie-chat .dkc-ico:hover { background: #e6e9ee; color: #111; }
+html.theme-light #deskie-chat .dkc-ico.on { background: #d7ebfb; border-color: #a8c8e8; color: #14538a; }
+
+/* 历史对话下拉（浅色） */
+html.theme-light #deskie-chat .dkc-hist {
+  background: #ffffff;
+  border-color: #d4d8de;
+  box-shadow: 0 10px 26px rgba(30, 40, 60, .18);
+}
+html.theme-light #deskie-chat .dkc-hist-cap { color: #8a9098; }
+html.theme-light #deskie-chat .dkc-hist-n { color: #a6acb4; }
+html.theme-light #deskie-chat .dkc-hitem:hover { background: #eef2f6; }
+html.theme-light #deskie-chat .dkc-hitem.on { background: #d7ebfb; }
+html.theme-light #deskie-chat .dkc-ht { color: #2a2f35; }
+html.theme-light #deskie-chat .dkc-hitem.on .dkc-ht { color: #10375c; }
+html.theme-light #deskie-chat .dkc-hm { color: #9aa0a8; }
+html.theme-light #deskie-chat .dkc-hitem.on .dkc-hm { color: #4a7fa6; }
+html.theme-light #deskie-chat .dkc-htag { background: rgba(20, 80, 140, .12); color: #14538a; }
+html.theme-light #deskie-chat .dkc-hdel { color: #9aa0a8; }
+html.theme-light #deskie-chat .dkc-hdel:hover { background: #fdeceb; color: #c0392b; }
+html.theme-light #deskie-chat .dkc-hist-foot { border-color: #e4e7ec; }
+html.theme-light #deskie-chat .dkc-hbtn { border-color: #d4d8de; color: #555; }
+html.theme-light #deskie-chat .dkc-hbtn:hover { background: #eef2f6; color: #111; }
+html.theme-light #deskie-chat .dkc-hbtn.primary { background: #0e639c; border-color: #1177bb; color: #fff; }
+
+html.theme-light #deskie-chat .dkc-msg.pet .dkc-body { background: #eef1f4; color: #2a2f35; }
+html.theme-light #deskie-chat .dkc-sum {
+  background: #f4f6f8;
+  border-color: #dde1e6;
+  color: #7a8088;
+}
+html.theme-light #deskie-chat .dkc-body strong { color: #111; }
+html.theme-light #deskie-chat .dkc-body .dkc-h { color: #111; }
+html.theme-light #deskie-chat .dkc-body code { background: rgba(0, 0, 0, .06); }
+html.theme-light #deskie-chat .dkc-body pre { background: #f6f7f9; border-color: #e0e3e8; }
+html.theme-light #deskie-chat .dkc-body blockquote { border-color: #d4d8de; color: #5a6068; }
+html.theme-light #deskie-chat .dkc-body a { color: #0b6bcb; }
+html.theme-light #deskie-chat textarea { background: #ffffff; border-color: #d4d8de; color: #1f2328; }
+html.theme-light #deskie-chat .dkc-empty { color: #8a9098; }
+html.theme-light #deskie-chat .dkc-empty span { color: #a6acb4; }
 html.theme-light #deskie-summon {
   background: #ffffff;
   border-color: #d4d8de;

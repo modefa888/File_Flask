@@ -5,6 +5,8 @@ POST /api/cron/save            新建 / 更新任务 {id?, name, cron(5或6段),
                                remark, timeout, max_retries, retry_interval, depends_on,
                                pre_hook, post_hook, notify, notify_content, notify_lines,
                                notify_title, notify_body}
+                               任务类型：kind=command（命令）/ code（代码片段，配 lang=python|node|bash
+                               与 content）/ ai（固定提示词，配 content 与可选 ai_sys）
 POST /api/cron/delete          删除任务 {id}
 POST /api/cron/toggle          启用 / 停用 {id, enabled}
 POST /api/cron/run             立即运行一次 {id}
@@ -20,6 +22,7 @@ GET  /api/cron/settings        模块设置（日志清理 / 通知配置，密�
 POST /api/cron/settings        保存模块设置 {log_days, keep_runs, notify:{...}}
 POST /api/cron/notify-test     对指定渠道发测试通知 {channel}
 POST /api/cron/notify-ai       让 AI 根据试运行输出生成一版自定义通知文案
+POST /api/cron/ai-draft        一句话生成定时任务草稿（名称 / 类型 / cron / 代码或提示词 / 通知方式）
 GET  /api/cron/backup          导出全部任务与设置（JSON，供下载备份）
 POST /api/cron/restore         恢复备份 {tasks:[...], settings:{...}, mode:"merge"|"replace"}
 """
@@ -31,7 +34,7 @@ import time
 import urllib.error
 import urllib.request
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, render_template, request
 
 from ...log import get_logger
 from ...services.ide import crondb, cronnotify, cronsvc, cronutil
@@ -89,10 +92,29 @@ def api_cron_save():
     name = str(data.get("name") or "").strip()
     expr = str(data.get("cron") or "").strip()
     command = str(data.get("command") or "").strip()
+    # 任务类型：command（shell 命令）/ code（代码片段）/ ai（固定提示词）
+    kind = str(data.get("kind") or "command").strip().lower()
+    if kind not in crondb.KINDS:
+        kind = "command"
+    lang = str(data.get("lang") or "python").strip().lower()
+    if lang not in crondb.LANGS:
+        lang = "python"
+    content = str(data.get("content") or "")
+    ai_sys = str(data.get("ai_sys") or "").strip()[:4000]
     if not name:
         return jsonify({"error": "请填写任务名称"})
-    if not command:
-        return jsonify({"error": "请填写要执行的命令"})
+    if kind == "command":
+        if not command:
+            return jsonify({"error": "请填写要执行的命令"})
+    elif kind == "code":
+        if not content.strip():
+            return jsonify({"error": "请填写要执行的代码"})
+        # 命令字段只做界面展示 / 日志摘要，真正执行时由 cronsvc 落脚本再跑
+        command = cronsvc._display_command("code", "", lang, content)
+    else:
+        if not content.strip():
+            return jsonify({"error": "请填写固定的 AI 提示词"})
+        command = cronsvc._display_command("ai", "", lang, content)
     ok, tip = cronutil.validate(expr)
     if not ok:
         return jsonify({"error": "cron 表达式非法：" + tip})
@@ -148,7 +170,8 @@ def api_cron_save():
         verdict = check_command(hook)
         if verdict.get("level") == "blocked":
             return jsonify({"error": "%s被拦截：%s" % (label, verdict.get("reason"))})
-    fields = dict(name=name, cron=expr, command=command, cwd=cwd, enabled=enabled,
+    fields = dict(name=name, cron=expr, command=command, kind=kind, lang=lang,
+                  content=content, ai_sys=ai_sys, cwd=cwd, enabled=enabled,
                   remark=remark, timeout=timeout, max_retries=max_retries,
                   retry_interval=retry_interval, depends_on=",".join(depends_on),
                   pre_hook=pre_hook, post_hook=post_hook, notify=notify,
@@ -167,7 +190,8 @@ def api_cron_save():
                                   post_hook=post_hook, notify=notify,
                                   notify_content=notify_content, notify_lines=notify_lines,
                                   notify_title=notify_title, notify_body=notify_body,
-                                  notify_channels=notify_channels)
+                                  notify_channels=notify_channels,
+                                  kind=kind, lang=lang, content=content, ai_sys=ai_sys)
     return jsonify({"ok": True, "task": _with_runtime(task)})
 
 
@@ -411,6 +435,18 @@ _AI_TPL_SYS = (
 
 def _parse_ai_tpl(text):
     """从模型回复里取出 {"title","body"}；容忍代码块包裹与前后多余文字。"""
+    d = _parse_ai_obj(text)
+    if not d:
+        return None
+    title = str(d.get("title") or "").strip()
+    body = str(d.get("body") or "").strip()
+    if title or body:
+        return {"title": title[:200], "body": body[:2000]}
+    return None
+
+
+def _parse_ai_obj(text):
+    """从模型回复里取出第一个可用 JSON 对象；容忍 ```json 包裹与前后多余文字。"""
     s = str(text or "").strip()
     if not s:
         return None
@@ -426,11 +462,36 @@ def _parse_ai_tpl(text):
         except Exception:                              # noqa: BLE001
             continue
         if isinstance(d, dict):
-            title = str(d.get("title") or "").strip()
-            body = str(d.get("body") or "").strip()
-            if title or body:
-                return {"title": title[:200], "body": body[:2000]}
+            return d
     return None
+
+
+_AI_DRAFT_SYS = (
+    "你是「定时任务配置生成器」。用户会用一句中文描述想要的定时任务，"
+    "你要把它翻译成一条可直接保存的定时任务配置。\n"
+    "只输出一个 JSON 对象，不要 markdown 代码块、不要任何解释：\n"
+    '{"name": "任务名称（不超过 16 字）",\n'
+    ' "kind": "command | code | ai",\n'
+    ' "lang": "python | node | bash",\n'
+    ' "cron": "5 段 cron：分 时 日 月 周",\n'
+    ' "content": "kind=code 时是完整可运行代码；kind=ai 时是可直接发给模型的完整提示词；command 时留空",\n'
+    ' "command": "kind=command 时是 shell 命令；其余留空",\n'
+    ' "cwd": "工作目录，用户没说要就留空",\n'
+    ' "timeout": 0,\n'
+    ' "notify_content": "status | output | output_only | custom",\n'
+    ' "remark": "一句话备注",\n'
+    ' "reason": "用一句话说明你为什么这样设"}\n\n'
+    "选择规则：\n"
+    "1. 需要「讲解 / 学习 / 总结 / 出题 / 写文案 / 给建议」这类靠模型输出内容的需求，用 kind=ai："
+    "content 要写成自包含的提示词，指明输出结构与字数，让它每天重复执行也不会重复啰嗦；\n"
+    "2. 需要读写文件、调用脚本、抓数据、算指标，用 kind=code（代码要完整、可直接运行，"
+    "只用标准库，路径用用户给的或留空）；一次性 shell 动作可用 kind=command；\n"
+    "3. 时间：用户没说就默认每天 9 点（0 9 * * *）；说「每早 8 点」→ 0 8 * * *，"
+    "「每天 0 点」→ 0 0 * * *，「每周一 9 点」→ 0 9 * * 1；\n"
+    "4. 通知：只要结果成败用 status；想把生成内容 / 脚本输出直接推到渠道，用 output_only；"
+    "输出是 JSON、想按变量排版才用 custom；\n"
+    "5. 不要编造用户没提到的数据、路径、账号；content 里不要写 shell 重定向（输出会被自动记录）。"
+)
 
 
 _EMOJI_RE = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F]")
@@ -542,6 +603,123 @@ def api_cron_notify_ai():
                     "model": model, "elapsed_ms": elapsed})
 
 
+@bp.route("/api/cron/ai-draft", methods=["POST"])
+def api_cron_ai_draft():
+    """一句话生成定时任务草稿：AI 直接返回可回填编辑器的字段。
+
+    入参：{desc, cwd}
+    返回：{ok, draft:{name, kind, lang, cron, content, command, cwd, timeout,
+                     notify_content, remark}, reason, warning, model}
+    draft 已经过归一化：类型 / 语言 / cron 不合法会回退到安全值并给出 warning。
+    """
+    from .ai import (_brief, _estimate_msgs, _estimate_tokens, _load_cfg, _log_ai_call,
+                     _preflight, _sys_err_response, _sys_pick)
+    cfg = _load_cfg()
+    provider, model, err = _sys_pick(cfg, "crongen")   # 系统 AI 里可单独指定 / 停用「定时任务一键生成」
+    if err:
+        return _sys_err_response(err, need_config=not cfg.get("providers"))
+
+    data = request.get_json(silent=True) or {}
+    desc = str(data.get("desc") or "").strip()
+    if not desc:
+        return jsonify({"error": "请先用一句话描述你想要的任务"})
+    desc = desc[:2000]
+    default_cwd = str(data.get("cwd") or "").strip()
+    user_text = ("需求：%s\n当前工作目录：%s\n现在时间：%s（周%s）" % (
+        desc, default_cwd or "（未指定）", time.strftime("%Y-%m-%d %H:%M"),
+        "日一二三四五六"[int(time.strftime("%w"))]))
+
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    payload = json.dumps({"model": model, "stream": False, "temperature": 0.3,
+                          "messages": [{"role": "system", "content": _AI_DRAFT_SYS},
+                                       {"role": "user", "content": user_text}]}).encode("utf-8")
+    t0 = time.time()
+    tin = tout = 0
+    est = False
+    text = ""
+
+    def _fail(msg, resp=""):
+        _log_ai_call("crongen", False, int((time.time() - t0) * 1000), msg, model, tin, tout,
+                     est, req=_brief(desc), resp=_brief(resp))
+        return jsonify({"error": msg})
+
+    try:
+        req = urllib.request.Request(url, data=payload, method="POST", headers={
+            "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+        _preflight(url, 8)                                 # 地址不通时立刻报错，别耗光读超时
+        resp = urllib.request.urlopen(req, timeout=90)
+        obj = json.loads(resp.read().decode("utf-8", "ignore"))
+        text = ((((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or "")
+        usage = obj.get("usage") or {}
+        tin, tout = int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0)
+        if not (tin or tout):                              # 上游没给用量：按字数兜底估算
+            tin = _estimate_msgs([{"role": "system", "content": _AI_DRAFT_SYS},
+                                  {"role": "user", "content": user_text}])
+            tout, est = _estimate_tokens(text), True
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")[:200]
+        return _fail("AI 接口返回 %s：%s" % (e.code, detail))
+    except Exception as e:                                 # noqa: BLE001
+        return _fail("调用 AI 接口失败：%s" % e)
+
+    draft = _parse_ai_obj(text)
+    if not draft:
+        return _fail("AI 返回的内容不是预期的 JSON，请重试或换个模型", resp=text)
+
+    warns = []
+    kind = str(draft.get("kind") or "").strip().lower()
+    if kind not in crondb.KINDS:
+        kind = "ai"
+    lang = str(draft.get("lang") or "").strip().lower()
+    if lang not in crondb.LANGS:
+        lang = "python"
+    content = str(draft.get("content") or "").strip()
+    command = str(draft.get("command") or "").strip()
+    # 类型与内容不匹配时做兜底，别让用户保存一个空任务
+    if kind == "code" and not content:
+        kind = "command" if command else "ai"
+        content = desc if kind == "ai" else ""
+    if kind == "command" and not command:
+        kind = "ai"
+        content = content or desc
+    if kind == "ai" and not content:
+        content = desc
+    expr = str(draft.get("cron") or "").strip()
+    ok, tip = cronutil.validate(expr)
+    if not ok:
+        warns.append("AI 给的时间表达式不合法（%s），已回退为每天 9 点" % (tip or expr))
+        expr = "0 9 * * *"
+    cwd = str(draft.get("cwd") or "").strip()
+    if cwd and not os.path.isdir(cwd):
+        warns.append("AI 给的目录 %s 不存在，已改用当前工作目录" % cwd)
+        cwd = default_cwd
+    elif not cwd:
+        cwd = default_cwd
+    try:
+        timeout = max(0, min(int(draft.get("timeout") or 0), 86400))
+    except (TypeError, ValueError):
+        timeout = 0
+    ncontent = str(draft.get("notify_content") or "").strip().lower()
+    if ncontent not in crondb.NOTIFY_MODES:
+        # 生成内容 / 代码的任务默认把输出一起推过去，纯命令任务只看成败
+        ncontent = "status" if kind == "command" else "output_only"
+    name = (str(draft.get("name") or "").strip() or desc[:16])[:40]
+    out = {
+        "name": name, "kind": kind, "lang": lang, "cron": expr,
+        "content": content, "command": command, "cwd": cwd,
+        "timeout": timeout, "notify_content": ncontent,
+        "remark": str(draft.get("remark") or "").strip()[:200],
+    }
+    elapsed = int((time.time() - t0) * 1000)
+    _log_ai_call("crongen", True, elapsed, "", model, tin, tout, est,
+                 req=_brief(desc), resp=_brief(text))
+    _log.info("定时任务一键生成：%s（%s/%s）%dms", name, kind, lang, elapsed)
+    return jsonify({"ok": True, "draft": out, "model": model,
+                    "reason": str(draft.get("reason") or "").strip()[:200],
+                    "warning": "；".join(warns), "elapsed_ms": elapsed})
+
+
 @bp.route("/api/cron/notify-history")
 def api_cron_notify_history():
     """定时任务触发的通知记录（按来源过滤，最新在前）；支持关键字搜索与分页。
@@ -571,6 +749,50 @@ def api_cron_notify_history_clear():
         return jsonify({"ok": False, "error": str(e)}), 400
 
 
+# ---------------------------------------------------------------- 网页版通知（公开只读页）
+@bp.route("/n/<token>")
+def cron_web_note_page(token):
+    """网页版通知的渲染页：地址里的 token 按任务唯一，无需登录即可查看。
+
+    只展示未过期（且未被假删除）的通知；正文按 Markdown 渲染。
+    token 只允许字母数字下划线短横线，避免拼出奇怪的 URL / 注入。
+    """
+    token = re.sub(r"[^0-9a-zA-Z_-]", "", str(token or ""))[:64]
+    notes = crondb.list_web_notes(token, 100) if token else []
+    task = crondb.get_task_by_web_token(token) if token else None
+    cfg = cronnotify.get_cfg()
+    try:
+        days = int((cfg.get("web") or {}).get("retention_days") or 7)
+    except (TypeError, ValueError):
+        days = 7
+    # 中文直出（不转义成 \uXXXX）：正文可能很长，转义后体积会膨胀好几倍；
+    # < > & 仍转成 \u003c 等，避免正文里的 </script> 提前闭合脚本块。
+    notes_json = (json.dumps(notes, ensure_ascii=False)
+                  .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+    return render_template("cron_web_note.html", token=token, notes_json=notes_json,
+                           task_name=((task or {}).get("name") or
+                                      (notes[0]["task_name"] if notes else "")),
+                           retention_days=days, server_now=time.time())
+
+
+@bp.route("/api/cron/web-link")
+def api_cron_web_link():
+    """取某个任务的网页通知地址（没有就现生成一个令牌）。"""
+    tid = (request.args.get("task_id") or "").strip()
+    task = crondb.get_task(tid)
+    if not task:
+        return jsonify({"error": "任务不存在"})
+    cfg = cronnotify.get_cfg()
+    token = crondb.ensure_web_token(tid)
+    try:
+        days = int((cfg.get("web") or {}).get("retention_days") or 7)
+    except (TypeError, ValueError):
+        days = 7
+    return jsonify({"ok": True, "token": token, "url": cronnotify.web_url(token, cfg),
+                    "retention_days": days,
+                    "enabled": bool((cfg.get("channels") or {}).get("web"))})
+
+
 # ---------------------------------------------------------------- 备份 / 恢复
 @bp.route("/api/cron/backup")
 def api_cron_backup():
@@ -597,8 +819,21 @@ def _coerce_task(raw):
     name = str(raw.get("name") or "").strip()
     expr = str(raw.get("cron") or "").strip()
     command = str(raw.get("command") or "").strip()
-    if not name or not command:
+    kind = str(raw.get("kind") or "command").strip().lower()
+    if kind not in crondb.KINDS:
+        kind = "command"
+    lang = str(raw.get("lang") or "python").strip().lower()
+    if lang not in crondb.LANGS:
+        lang = "python"
+    content = str(raw.get("content") or "")
+    if not name:
         return None
+    if kind == "command" and not command:
+        return None
+    if kind in ("code", "ai"):
+        if not content.strip():
+            return None
+        command = cronsvc._display_command(kind, "", lang, content)
     ok, _tip = cronutil.validate(expr)
     if not ok:
         return None
@@ -615,6 +850,8 @@ def _coerce_task(raw):
     return {
         "tid": str(raw.get("id") or "").strip() or None,
         "name": name, "cron": expr, "command": command,
+        "kind": kind, "lang": lang, "content": content,
+        "ai_sys": str(raw.get("ai_sys") or "").strip()[:4000],
         "cwd": str(raw.get("cwd") or "").strip(),
         "enabled": crondb.as_bool(raw.get("enabled")),
         "remark": str(raw.get("remark") or "").strip(),
@@ -673,7 +910,9 @@ def api_cron_restore():
                            post_hook=f["post_hook"], notify=f["notify"], tid=tid,
                            notify_content=f["notify_content"], notify_lines=f["notify_lines"],
                            notify_title=f["notify_title"], notify_body=f["notify_body"],
-                           notify_channels=f["notify_channels"])
+                           notify_channels=f["notify_channels"],
+                           kind=f["kind"], lang=f["lang"], content=f["content"],
+                           ai_sys=f["ai_sys"])
         imported += 1
     st = data.get("settings")
     if isinstance(st, dict):

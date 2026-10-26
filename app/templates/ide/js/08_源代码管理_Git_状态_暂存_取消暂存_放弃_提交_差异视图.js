@@ -21,6 +21,54 @@
       .catch(e => { toast("操作失败：" + (e.message || e), "err"); return false; });
   }
 
+  /* 删除未跟踪文件的二次确认：把待删除的文件清单一起弹出来（超过 200 条只列前 200 条） */
+  function confirmDeleteUntracked(anchor, paths) {
+    const MAX = 200;
+    const shown = paths.slice(0, MAX);
+    const html = '<div class="upc-files">' +
+      shown.map(p => '<div class="uf" title="' + escAttr(p) + '">' +
+        '<i class="bi bi-file-earmark"></i><span>' + esc(p) + '</span></div>').join("") +
+      (paths.length > MAX ? '<div class="uf more">… 另有 ' + (paths.length - MAX) + ' 个文件未列出</div>' : "") +
+      '</div>' +
+      '<div class="upc-sum">共 ' + paths.length + ' 个文件将被从磁盘删除</div>';
+    return uiConfirmPop(anchor, {
+      title: paths.length > 1 ? "删除 " + paths.length + " 个新增文件" : "删除新增文件",
+      msg: "以下未跟踪的新文件将被从磁盘删除，此操作不可撤销：",
+      html: html, wide: true, danger: true,
+      okText: paths.length > 1 ? "全部删除" : "删除文件",
+    });
+  }
+
+  /* 删除未跟踪的新增文件（“更改”分组里状态为 U 的文件）：支持单个 / 批量 */
+  function gitDeleteUntracked(files) {
+    return fetch("/api/git/delete-untracked", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo: gitState.repo, files: files })
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) throw new Error(d.error);
+        const n = (d.removed || []).length;
+        if (n) {
+          toast("已删除 " + n + " 个新增文件", "ok");
+          refreshTree(ROOT);              // 资源管理器同步移除这些文件
+          // 先本地摘掉已删除的条目即时重绘，避免等待一次状态请求
+          if (gitState.last) {
+            const gone = new Set(d.removed || []);
+            gitState.last.untracked = (gitState.last.untracked || []).filter(f => !gone.has(f.path));
+            renderGitStatus(gitState.last);
+          }
+        } else {
+          toast("没有可删除的新增文件", "err");
+        }
+        if (d.failed && d.failed.length) toast(d.failed.length + " 个文件删除失败：" + d.failed[0].error, "err");
+        loadGitStatus();
+        scheduleReloadAllChanges();
+        return true;
+      })
+      .catch(e => { toast("删除失败：" + (e.message || e), "err"); return false; });
+  }
+
   function renderGitMessage(msg, withInit) {
     $("gitBranch").textContent = "—";
     $("gitSync").textContent = "";
@@ -92,6 +140,12 @@
           const ok = await uiConfirmPop(e.currentTarget.closest(".gf-acts") || acts,
             { title: "放弃更改", msg: "将丢弃 " + f.path + " 的未暂存修改，此操作不可撤销。", okText: "放弃更改", danger: true });
           if (ok) gitPost("/api/git/discard", { repo: gitState.repo, files: [f.path] }, "已放弃更改");
+        });
+      } else {
+        // 未跟踪的新增文件：丢弃 = 直接从磁盘删除
+        addBtn("bi-trash", "删除文件（从磁盘移除这个新增文件）", async (e) => {
+          const anchorEl = e.currentTarget.closest(".gf-acts") || acts;
+          if (await confirmDeleteUntracked(anchorEl, [f.path])) gitDeleteUntracked([f.path]);
         });
       }
     }
@@ -209,6 +263,13 @@
           { title: "放弃所有更改", msg: "将丢弃所有未暂存的修改（未跟踪的新文件不受影响），此操作不可撤销。", okText: "全部放弃", danger: true });
         if (ok) gitPost("/api/git/discard", { repo: gitState.repo, all: true }, "已放弃所有更改");
       });
+      // 删除所有新增（未跟踪）文件：只删当前列表里的 U 文件，已跟踪 / 被忽略的文件不受影响
+      const untrackedPaths = sec.files.filter(f => f.status === "U" || f.status === "?").map(f => f.path);
+      if (untrackedPaths.length) {
+        addAct("bi-trash", "删除所有新增文件（未跟踪，共 " + untrackedPaths.length + " 个）", async (e) => {
+          if (await confirmDeleteUntracked(e.currentTarget, untrackedPaths)) gitDeleteUntracked(untrackedPaths);
+        });
+      }
       addAct("bi-plus-lg", "暂存所有更改（含未跟踪文件）", () => gitPost("/api/git/stage", { repo: gitState.repo, all: true }, "已暂存所有更改"));
     }
     // 树形视图：折叠/展开全部目录

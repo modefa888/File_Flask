@@ -1,0 +1,340 @@
+/* IDE 桌宠：桌小萌 (Deskie) 与 鲸鱼娘 (Kujira)。
+   两者共用一套外壳（舞台动画 / 气泡 / 菜单 / 拖动位置 / 隐身），
+   通过 #deskie 上的 is-deskie / is-whale 切换外观。
+   深色为主题默认配色，浅色主题用 html.theme-light 覆盖。 */
+
+/* ================= 通用外壳 ================= */
+#deskie {
+  position: fixed;
+  left: 0; top: 0;
+  width: 84px; height: 92px;
+  z-index: 9600;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, .45));
+  transition: opacity .25s ease;
+}
+#deskie:active { cursor: grabbing; }
+#deskie.hide { display: none; }
+
+/* 内部舞台：整体呼吸 / 跳跃动画，拖动位移由 left/top 控制 */
+#deskie .dk-stage {
+  position: absolute;
+  left: 0; right: 0; top: 0; bottom: 0;
+  transform-origin: 50% 100%;
+}
+#deskie.is-deskie .dk-stage { animation: dk-bob 3.6s ease-in-out infinite; }
+/* 鲸鱼娘：水里漂（左右轻摆 + 上下浮动） */
+#deskie.is-whale .dk-stage { animation: dk-float 4.2s ease-in-out infinite; }
+#deskie.hop .dk-stage { animation: dk-hop .62s cubic-bezier(.3, 1.6, .5, 1) 1 !important; }
+#deskie.dragging .dk-stage { animation: none; }
+
+@keyframes dk-bob {
+  0%, 100% { transform: translateY(0) }
+  50% { transform: translateY(-4px) }
+}
+@keyframes dk-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg) }
+  50% { transform: translateY(-5px) rotate(2deg) }
+}
+@keyframes dk-hop {
+  0% { transform: translateY(0) scaleY(1) }
+  22% { transform: translateY(2px) scaleY(.86) }    /* 蹲 */
+  55% { transform: translateY(-22px) scaleY(1.08) } /* 跳起 */
+  80% { transform: translateY(0) scaleY(.94) }      /* 落地压缩 */
+  100% { transform: translateY(0) scaleY(1) }
+}
+
+/* 地面 / 海面投影 */
+#deskie .dk-shadow {
+  position: absolute;
+  left: 18px; right: 18px; bottom: 2px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .35);
+  filter: blur(2px);
+}
+#deskie.hop .dk-shadow { animation: dk-shadow .62s ease 1; }
+@keyframes dk-shadow {
+  0%, 100% { transform: scaleX(1); opacity: 1 }
+  55% { transform: scaleX(.6); opacity: .5 }
+}
+
+/* ================= 桌小萌 (Deskie) ================= */
+#deskie.is-deskie .dk-body {
+  position: absolute;
+  left: 12px; bottom: 8px;
+  width: 60px; height: 54px;
+  background: linear-gradient(160deg, #33363b 0%, #17181b 70%);
+  border: 1px solid #3d4148;
+  border-radius: 18px 18px 14px 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07);
+}
+#deskie.is-deskie .dk-rod {
+  position: absolute;
+  left: 50%; bottom: 58px;
+  width: 3px; height: 12px;
+  margin-left: -1.5px;
+  background: #4a4f57;
+  border-radius: 2px;
+}
+#deskie.is-deskie .dk-bulb {
+  position: absolute;
+  left: 50%; bottom: 66px;
+  width: 10px; height: 10px;
+  margin-left: -5px;
+  background: #3aa4ff;
+  border-radius: 50%;
+  box-shadow: 0 0 8px 2px rgba(58, 164, 255, .55);
+  animation: dk-bulb 2.4s ease-in-out infinite;
+}
+@keyframes dk-bulb {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px 2px rgba(58, 164, 255, .55) }
+  50% { opacity: .55; box-shadow: 0 0 4px 1px rgba(58, 164, 255, .3) }
+}
+#deskie.is-deskie .dk-eye {
+  width: 14px; height: 14px;
+  transition: transform .09s ease;
+}
+#deskie.is-deskie.blink .dk-eye { transform: scaleY(.12); }
+#deskie.is-deskie .dk-gaze {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  align-items: flex-end;
+  padding-bottom: 16px;
+  transition: transform .12s ease-out;
+}
+#deskie.is-deskie .dk-blush {
+  position: absolute;
+  bottom: 18px;
+  width: 9px; height: 4px;
+  border-radius: 50%;
+  background: rgba(255, 122, 140, .4);
+}
+#deskie.is-deskie .dk-blush.l { left: 15px; }
+#deskie.is-deskie .dk-blush.r { right: 15px; }
+#deskie.is-deskie .dk-foot {
+  position: absolute;
+  bottom: 2px;
+  width: 16px; height: 8px;
+  background: #2a2d31;
+  border: 1px solid #3d4148;
+  border-radius: 4px 4px 5px 5px;
+}
+#deskie.is-deskie .dk-foot.l { left: 18px; }
+#deskie.is-deskie .dk-foot.r { right: 18px; }
+#deskie.is-deskie .dk-belly {
+  position: absolute;
+  left: 0; right: 0; bottom: 6px;
+  text-align: center;
+  font: 600 9px/1 Consolas, monospace;
+  color: #5b6270;
+  letter-spacing: .5px;
+}
+
+/* ================= 鲸鱼娘 (Kujira) ================= */
+#deskie.is-whale .dk-wh {
+  --wh-body1: #66cbff;   /* 身体顶 */
+  --wh-body2: #1f6fd0;   /* 身体底 */
+  --wh-belly: #e9f7ff;   /* 腹部 */
+  --wh-line: #9ed6f7;    /* 腹褶 */
+  --wh-hair: #22355e;    /* 头发 / 眼睛 */
+  --wh-ribbon: #ff7fa8;  /* 蝴蝶结 */
+  --wh-blow: #bfe9ff;    /* 喷水 */
+  position: absolute;
+  left: 0; top: 0;
+  width: 84px; height: 92px;
+  overflow: visible;
+}
+/* 身体渐变的两端（stop 的颜色只能由 CSS 指定，不能直接写 var 到属性上） */
+#deskie.is-whale .dk-wh-s1 { stop-color: var(--wh-body1); }
+#deskie.is-whale .dk-wh-s2 { stop-color: var(--wh-body2); }
+/* 头顶喷水：三颗小水珠循环上升淡出 */
+#deskie.is-whale .dk-drop {
+  fill: var(--wh-blow);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: dk-drop 2.4s ease-in infinite;
+  opacity: 0;
+}
+#deskie.is-whale .dk-drop.d2 { animation-delay: .5s; }
+#deskie.is-whale .dk-drop.d3 { animation-delay: 1s; }
+@keyframes dk-drop {
+  0% { transform: translateY(8px) scale(.5); opacity: 0 }
+  35% { opacity: .95 }
+  100% { transform: translateY(-12px) scale(1.1); opacity: 0 }
+}
+/* 尾鳍摆动 */
+#deskie.is-whale .dk-tail {
+  transform-box: fill-box;
+  transform-origin: 50% 0%;
+  animation: dk-tail 2.8s ease-in-out infinite;
+}
+@keyframes dk-tail {
+  0%, 100% { transform: rotate(-5deg) }
+  50% { transform: rotate(5deg) }
+}
+/* 双马尾轻摆 */
+#deskie.is-whale .dk-plait {
+  transform-box: fill-box;
+  transform-origin: 50% 0%;
+  animation: dk-plait 3.4s ease-in-out infinite;
+}
+@keyframes dk-plait {
+  0%, 100% { transform: rotate(-3deg) }
+  50% { transform: rotate(4deg) }
+}
+/* 侧鳍（小手臂）划水 */
+#deskie.is-whale .dk-fin { transform-box: fill-box; }
+#deskie.is-whale .dk-fin.l { transform-origin: 90% 30%; animation: dk-fin-l 1.9s ease-in-out infinite; }
+#deskie.is-whale .dk-fin.r { transform-origin: 10% 30%; animation: dk-fin-r 1.9s ease-in-out infinite; }
+@keyframes dk-fin-l { 0%, 100% { transform: rotate(-8deg) } 50% { transform: rotate(10deg) } }
+@keyframes dk-fin-r { 0%, 100% { transform: rotate(8deg) } 50% { transform: rotate(-10deg) } }
+/* 眼睛：眨眼压扁；眼神跟随由 .dk-gaze 平移（JS 写 transform） */
+#deskie.is-whale .dk-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform .09s ease;
+}
+#deskie.is-whale.blink .dk-eye { transform: scaleY(.12); }
+#deskie.is-whale .dk-gaze { transition: transform .12s ease-out; }
+/* 跳跃时喷一大口水花 */
+#deskie.is-whale.hop .dk-drop { animation-duration: .62s; }
+
+/* ================= 说话气泡 ================= */
+#deskie-bubble {
+  position: fixed;
+  max-width: 240px;
+  z-index: 9601;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 8px;
+  color: #d8d8d8;
+  font-size: 12.5px;
+  line-height: 1.55;
+  padding: 8px 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .5);
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+  word-break: break-all;
+}
+#deskie-bubble.show { opacity: 1; transform: translateY(0); }
+#deskie-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%; bottom: -6px;
+  width: 10px; height: 10px;
+  margin-left: -5px;
+  transform: rotate(45deg);
+  background: #252526;
+  border-right: 1px solid #454545;
+  border-bottom: 1px solid #454545;
+}
+
+/* ================= 右键菜单 ================= */
+#deskie-menu {
+  position: fixed;
+  z-index: 9602;
+  min-width: 148px;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .55);
+  padding: 4px;
+  display: none;
+}
+#deskie-menu.open { display: block; }
+#deskie-menu .dk-mi {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#deskie-menu .dk-mi:hover { background: #04395e; color: #fff; }
+#deskie-menu .dk-mi .bi { font-size: 13px; color: #8ab4d8; width: 14px; text-align: center; }
+#deskie-menu .dk-mi:hover .bi { color: #9fd0f5; }
+#deskie-menu .dk-mi.on { color: #fff; background: #10466f; }
+#deskie-menu .dk-mi .dk-tick { margin-left: auto; font-size: 11px; color: #7fd8a8; }
+#deskie-menu .dk-sep { height: 1px; background: #3c3c3d; margin: 4px 6px; }
+#deskie-menu .dk-cap {
+  font-size: 10.5px;
+  color: #7d7d7d;
+  padding: 4px 10px 2px;
+  letter-spacing: .5px;
+}
+
+/* ================= 隐身召唤钮 ================= */
+#deskie-summon {
+  position: fixed;
+  right: 14px; bottom: 34px;
+  z-index: 9500;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: #252526;
+  border: 1px solid #454545;
+  color: #6ea8d8;
+  font-size: 14px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
+  opacity: .55;
+  transition: opacity .15s ease, transform .15s ease;
+}
+#deskie-summon.show { display: flex; }
+#deskie-summon:hover { opacity: 1; transform: scale(1.1); }
+
+/* ================= 浅色主题覆盖 ================= */
+html.theme-light #deskie.is-deskie .dk-body {
+  background: linear-gradient(160deg, #e7e9ee 0%, #cfd3da 70%);
+  border-color: #b4bac4;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8);
+}
+html.theme-light #deskie.is-deskie .dk-rod { background: #a8adb8; }
+html.theme-light #deskie.is-deskie .dk-foot { background: #d5d9df; border-color: #b4bac4; }
+html.theme-light #deskie.is-deskie .dk-belly { color: #9aa2ae; }
+html.theme-light #deskie.is-whale .dk-wh {
+  --wh-body1: #8fdcff;
+  --wh-body2: #3f86dd;
+  --wh-belly: #fbfdff;
+  --wh-line: #86c4ee;
+  --wh-hair: #2c3d63;
+  --wh-ribbon: #ff6f9c;
+  --wh-blow: #78c6f0;
+}
+html.theme-light #deskie .dk-shadow { background: rgba(40, 50, 70, .18); }
+html.theme-light #deskie-bubble {
+  background: #ffffff;
+  border-color: #d4d8de;
+  color: #333;
+  box-shadow: 0 8px 28px rgba(30, 40, 60, .16);
+}
+html.theme-light #deskie-bubble::after { background: #ffffff; border-color: #d4d8de; }
+html.theme-light #deskie-menu {
+  background: #ffffff;
+  border-color: #d4d8de;
+  box-shadow: 0 10px 34px rgba(30, 40, 60, .18);
+}
+html.theme-light #deskie-menu .dk-mi { color: #444; }
+html.theme-light #deskie-menu .dk-mi:hover { background: #e8f1fb; color: #111; }
+html.theme-light #deskie-menu .dk-mi.on { background: #d7ebfb; color: #111; }
+html.theme-light #deskie-menu .dk-cap { color: #9aa0a8; }
+html.theme-light #deskie-menu .dk-sep { background: #e4e7ec; }
+html.theme-light #deskie-summon {
+  background: #ffffff;
+  border-color: #d4d8de;
+  box-shadow: 0 4px 14px rgba(30, 40, 60, .16);
+}

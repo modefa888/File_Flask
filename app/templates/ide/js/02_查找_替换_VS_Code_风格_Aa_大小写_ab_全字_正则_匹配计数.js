@@ -778,11 +778,13 @@
       const old = document.getElementById("uiPopConfirm");
       if (old) old.remove();
       const pop = document.createElement("div");
-      pop.className = "ui-pop-confirm" + (opts.danger ? " danger" : "");
+      pop.className = "ui-pop-confirm" + (opts.danger ? " danger" : "") + (opts.wide ? " wide" : "");
       pop.id = "uiPopConfirm";
       pop.innerHTML =
         '<div class="upc-t"><i class="bi ' + (opts.danger ? "bi-exclamation-triangle" : "bi-question-circle") + '"></i><span>' + esc(opts.title || "确认操作") + '</span></div>' +
         '<div class="upc-m">' + esc(opts.msg || "") + '</div>' +
+        // opts.html：调用方提供已转义的自定义内容（如待删除文件列表）
+        (opts.html ? '<div class="upc-extra">' + opts.html + '</div>' : '') +
         '<div class="upc-f"><button class="upc-no">取消</button><button class="upc-ok"' + (opts.okDisabled ? " disabled" : "") + '>' + esc(opts.okText || "确定") + '</button></div>';
       document.body.appendChild(pop);
       const r = anchor.getBoundingClientRect();

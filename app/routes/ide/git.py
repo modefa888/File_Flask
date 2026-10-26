@@ -5,6 +5,7 @@ GET  /api/git/diff?path=<仓库>&file=<相对路径>&staged=0|1&untracked=0|1   
 POST /api/git/stage      {repo, files[], all}   暂存
 POST /api/git/unstage    {repo, files[]}        取消暂存
 POST /api/git/discard    {repo, files[]}        放弃更改（仅已跟踪文件）
+POST /api/git/delete-untracked {repo, files[], all}  删除未跟踪的新增文件
 POST /api/git/commit     {repo, message, all}   提交
 POST /api/git/init       {repo}                 初始化仓库
 """
@@ -578,6 +579,71 @@ def api_git_discard():
         if err2 or proc2.returncode != 0:
             return _fail(proc.stderr.strip() or "放弃更改失败", 500)
     return jsonify({"ok": True})
+
+
+@bp.route("/api/git/delete-untracked", methods=["POST"])
+def api_git_delete_untracked():
+    """删除未跟踪的新增文件（“更改”分组里的 U 状态文件）。
+
+    出于安全考虑只删除 git 认定的未跟踪文件（git ls-files --others --exclude-standard），
+    已跟踪 / 被 .gitignore 忽略 / 仓库外的路径一律拒绝；删掉文件后顺手清理变空的父目录。
+    """
+    data = request.get_json(silent=True) or {}
+    root, err = _repo_root(data.get("repo") or "")
+    if err:
+        return _fail(err)
+    if not root:
+        return _fail("不是 Git 仓库")
+    root_abs = os.path.abspath(root)
+    files = [f for f in (data.get("files") or []) if f]
+
+    proc, err = _git(root, ["ls-files", "-z", "--others", "--exclude-standard"])
+    if err:
+        return _fail(err, 500)
+    if proc.returncode != 0:
+        return _fail(proc.stderr.strip() or "读取未跟踪文件失败", 500)
+    untracked = {p.replace(os.sep, "/") for p in proc.stdout.split("\0") if p}
+
+    if not files and not data.get("all"):
+        return _fail("缺少文件参数")
+    targets = sorted(untracked) if data.get("all") else files
+    if not targets:
+        return _fail("没有可删除的新增文件")
+
+    removed, skipped, failed = [], [], []
+    for rel in targets:
+        rel = str(rel).replace(os.sep, "/").strip()
+        if rel not in untracked:
+            skipped.append(rel)
+            continue
+        full = os.path.abspath(os.path.join(root_abs, rel))
+        if full != root_abs and os.path.commonpath([root_abs, full]) != root_abs:
+            skipped.append(rel)
+            continue
+        try:
+            if os.path.isdir(full) and not os.path.islink(full):
+                shutil.rmtree(full)
+            else:
+                os.remove(full)
+        except OSError as e:
+            failed.append({"path": rel, "error": str(e)})
+            continue
+        removed.append(rel)
+        # 清理因删除而变空的父目录（不越过仓库根）
+        parent = os.path.dirname(full)
+        while parent and parent != root_abs and parent.startswith(root_abs) and os.path.isdir(parent):
+            try:
+                if os.listdir(parent):
+                    break
+                os.rmdir(parent)
+            except OSError:
+                break
+            parent = os.path.dirname(parent)
+
+    _log.info("POST /api/git/delete-untracked removed=%s skipped=%s", len(removed), len(skipped))
+    if not removed and failed:
+        return jsonify({"ok": False, "error": failed[0]["error"], "removed": [], "failed": failed})
+    return jsonify({"ok": True, "removed": removed, "skipped": skipped, "failed": failed})
 
 
 @bp.route("/api/git/log")

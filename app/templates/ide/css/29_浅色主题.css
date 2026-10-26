@@ -268,6 +268,11 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ui-pop-confirm .upc-m { color: #5a5a5a; }
 :where(html.theme-light) .ui-pop-confirm .upc-no { border-color: #cecece; color: #333333; }
 :where(html.theme-light) .ui-pop-confirm .upc-no:hover { border-color: #a0a0a0; color: #000000; }
+:where(html.theme-light) .ui-pop-confirm .upc-files { background: #ffffff; border-color: #cecece; }
+:where(html.theme-light) .ui-pop-confirm .upc-files .uf { color: #333333; }
+:where(html.theme-light) .ui-pop-confirm .upc-files .uf:nth-child(odd) { background: #f2f2f2; }
+:where(html.theme-light) .ui-pop-confirm .upc-files .uf.more,
+:where(html.theme-light) .ui-pop-confirm .upc-sum { color: #8a8a8a; }
 :where(html.theme-light) .rule-head, :where(html.theme-light) .kb-head { color: #1f2328; }
 :where(html.theme-light) .rule-list { color: #5a5a5a; }
 :where(html.theme-light) .rule-note { color: #8a8a8a; }

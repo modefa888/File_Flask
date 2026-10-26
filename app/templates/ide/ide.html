@@ -171,6 +171,7 @@ html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacit
 {% include 'ide/css/41_后台任务历史日志.css' %}
 {% include 'ide/css/42_终端AI助手.css' %}
 {% include 'ide/css/45_文件夹管理器.css' %}
+{% include 'ide/css/46_桌宠_桌小萌与鲸鱼娘.css' %}
 </style>
 {# 29_浅色主题 必须最后一个 <style> 加载：它的浅色覆盖与原始规则同权重，靠「后加载者胜」生效 #}
 <style>
@@ -268,6 +269,8 @@ try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'li
 {% include 'ide/js/17_SQLite数据库查看器_db_sqlite只读浏览_表列表_分页数据.js' %}
 {# 标签页内嵌视频播放器：openFile 的视频分支调用 setupVideoView（全局函数，须在 IIFE 关闭后加载） #}
 {% include 'ide/js/22_视频播放器_标签页内嵌_参考文件管理器桌面版.js' %}
+{# 桌宠模块（桌小萌 Deskie / 鲸鱼娘 Kujira）：自包含模块（window.Deskie API），放在最后加载 #}
+{% include 'ide/js/46_桌宠_桌小萌与鲸鱼娘.js' %}
 </script>
 </body>
 </html>

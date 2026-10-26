@@ -187,6 +187,8 @@
           if (apiReq && typeof apiOpen === "function") apiOpen(apiReq.id);
           continue;
         }
+        // V2Ray 代理管理大页（虚拟路径 \u0000v2ray）：直接重开（所在分区由模块自己的 localStorage 恢复）
+        if (t.path === "\u0000v2ray" && typeof window.v2rayRestoreView === "function") { window.v2rayRestoreView(); continue; }
         // 定时任务管理大页（虚拟路径 \u0000cron）：不是真实文件，直接重开这个大页
         if (t.path === "\u0000cron" && typeof cronOpenView === "function") { cronOpenView(); continue; }
         // 后台任务管理面板（虚拟路径 \u0000runner）：同样直接重开
@@ -1896,6 +1898,9 @@
     if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏高亮跟随当前标签
     if (typeof apiSyncOpenMarks === "function") apiSyncOpenMarks();   // API 调试侧栏高亮跟随当前标签
     if (typeof fmSyncOpenMarks === "function") fmSyncOpenMarks();     // 文件夹管理器侧栏高亮跟随当前标签
+    if (active && typeof active.onActivate === "function") {          // 自定义视图（V2Ray 等）：切换回来时刷新内容
+      try { active.onActivate(); } catch (_) {}
+    }
     if (typeof sshSyncOpenMarks === "function") sshSyncOpenMarks();   // SSH 终端侧栏高亮跟随当前标签
     if (typeof runnerViewOnActivate === "function") runnerViewOnActivate();   // 后台任务轮询跟随当前标签
     if (active && typeof active.onFmActivate === "function") active.onFmActivate();   // 文件夹管理器：切回时刷新目录

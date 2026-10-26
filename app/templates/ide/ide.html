@@ -172,6 +172,7 @@ html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacit
 {% include 'ide/css/42_终端AI助手.css' %}
 {% include 'ide/css/45_文件夹管理器.css' %}
 {% include 'ide/css/46_桌宠_桌小萌与鲸鱼娘.css' %}
+{% include 'ide/css/47_V2Ray代理.css' %}
 </style>
 {# 29_浅色主题 必须最后一个 <style> 加载：它的浅色覆盖与原始规则同权重，靠「后加载者胜」生效 #}
 <style>
@@ -265,6 +266,8 @@ try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'li
 {% include 'ide/js/44_终端AI助手_自然语言转命令_风险说明_执行后解读输出.js' %}
 {# 文件夹管理器可视化查看（编辑器区域标签页）：须放在 16_（关闭大 IIFE）之前，复用闭包内的 $ / esc / escAttr / toast / apiFiles / iconFor / openFile / findTab / activate / renderTabsAll #}
 {% include 'ide/js/45_文件夹管理器可视化查看.js' %}
+{# V2Ray 代理（订阅 / 节点 / 10808 出口）：须放在 16_（关闭大 IIFE）之前，复用闭包内的 $ / esc / toast / uiConfirm / uiPrompt / copyText / findTab / activate / renderTabsAll / tabs / currentWrap #}
+{% include 'ide/js/47_V2Ray代理_订阅_节点_10808出口.js' %}
 {% include 'ide/js/16_自定义悬停提示_全局接管所有_title_属性.js' %}
 {% include 'ide/js/17_SQLite数据库查看器_db_sqlite只读浏览_表列表_分页数据.js' %}
 {# 标签页内嵌视频播放器：openFile 的视频分支调用 setupVideoView（全局函数，须在 IIFE 关闭后加载） #}

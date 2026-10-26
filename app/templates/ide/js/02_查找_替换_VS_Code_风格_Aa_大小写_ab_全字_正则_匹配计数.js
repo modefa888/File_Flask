@@ -1344,6 +1344,7 @@
     if (name === "api" && typeof loadApiReqs === "function") loadApiReqs();
     if (name === "cron" && typeof loadCron === "function") loadCron().then(cronTick);
     if (name === "fm" && typeof fmLoadRemoteList === "function") fmLoadRemoteList();
+    if (name === "v2ray" && typeof window.v2rayLoad === "function") window.v2rayLoad();
   }
   document.getElementById("activitybar").addEventListener("click", (e) => {
     const a = e.target.closest(".act[data-panel]"); if (!a) return;

@@ -32,6 +32,7 @@
       <div class="act" data-panel="cron" title="定时任务（cron 计划任务，参考青龙面板）"><i class="bi bi-alarm"></i><span class="runner-badge" id="actCronBadge" style="display:none">0</span></div>
       <div class="act" data-panel="sshconn" title="终端连接工具（SSH 远程主机，仿 Xshell）"><i class="bi bi-hdd-network"></i><span class="runner-badge ssh-badge" id="actSshBadge" style="display:none">0</span></div>
       <div class="act" data-panel="fm" title="文件夹管理器（可视化浏览服务器文件系统）"><i class="bi bi-folder2-open"></i></div>
+      <div class="act" data-panel="v2ray" title="V2Ray 代理（订阅 / 节点 / 10808 出口）"><i class="bi bi-shield-shaded"></i><span class="runner-badge v2-badge" id="actV2Badge" style="display:none">0</span></div>
       <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
       {# 底部两个图标：进程资源管理器在设置之上，设置永远在最底下。
          act-spacer 让「组内第一个」吸收上方全部空白，把整组顶到活动栏最底部（若两个都写 margin-top:auto，
@@ -188,6 +189,27 @@
           <button class="g-ico" id="sshCmdNew" title="新建常用命令（保存后点击即可在当前终端执行）"><i class="bi bi-plus-lg"></i></button>
         </div>
         <div class="ssh-cmds scroll-thin" id="sshCmds"></div>
+      </div>
+      <div class="side-panel" id="v2rayPanel">
+        <div class="v2-hero" id="v2Hero">
+          <span class="v2-dot"></span>
+          <div class="v2-hero-tx">
+            <div class="v2-hero-t" id="v2StRun">未运行</div>
+            <div class="v2-hero-s" id="v2StPort">尚未连接节点</div>
+          </div>
+          <button class="v2-btn v2-btn-pri" id="v2Connect" title="连接当前节点：启动内核并开放代理端口"><i class="bi bi-play-fill"></i><span>连接</span></button>
+        </div>
+        <div class="v2-chiprow">
+          <span class="v2-chip" id="v2StCore" title=""><i class="bi bi-cpu"></i><span>检测中…</span></span>
+          <button class="v2-ico" id="v2Refresh" title="刷新状态与节点列表"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+        <div class="v2-share" id="v2Share"></div>
+        <div class="v2-grow">
+          <div class="v2-listhead"><span>节点快选</span><span class="v2-listnum" id="v2NodeNum">0</span></div>
+          <div class="v2-list scroll-thin" id="v2NodeList"></div>
+        </div>
+        <div class="v2-hint" id="v2Hint">连接后同网段的其他设备把「本机IP:10808」填成 SOCKS5 代理即可共用出口。</div>
+        <button class="v2-btn v2-btn-ghost" id="v2OpenView" title="在右侧编辑区打开完整的 V2Ray 管理面板（订阅 / 节点 / 设置 / 日志）"><i class="bi bi-window-stack"></i><span>打开管理面板</span></button>
       </div>
     </div>
 

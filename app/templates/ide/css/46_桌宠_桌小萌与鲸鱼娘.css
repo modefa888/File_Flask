@@ -31,6 +31,35 @@
 #deskie.hop .dk-stage { animation: dk-hop .62s cubic-bezier(.3, 1.6, .5, 1) 1 !important; }
 #deskie.dragging .dk-stage { animation: none; }
 
+/* 自动漫步：一小跳一小跳地挪。left/top 靠 transition 推进（--wd 由 JS 按单跳时长给），
+   每一步再叠一次「蓄力-腾空-落地」姿态，两者节奏对上就是蹦着往前走。 */
+#deskie.wander {
+  transition: left var(--wd, .68s) cubic-bezier(.32, .72, .4, 1),
+              top var(--wd, .68s) cubic-bezier(.32, .72, .4, 1),
+              opacity .25s ease;          /* 原有的显隐过渡要一起写上，否则被这条覆盖掉 */
+}
+/* 单次小跳：蹲一下 → 起跳拉伸 → 最高点 → 落地压扁 → 站直。
+   .stepping 由 JS 每跳重新挂一次，动画才会从头播；动作（a-*）带 !important，会临时接管 */
+#deskie.wander.stepping .dk-stage {
+  animation: dk-stroll-hop .68s cubic-bezier(.32, .72, .4, 1) 1;
+}
+@keyframes dk-stroll-hop {
+  0%   { transform: translateY(3px) scale(1.07, .9) }
+  14%  { transform: translateY(-8px) scale(.93, 1.09) }
+  46%  { transform: translateY(-17px) scale(.98, 1.03) }
+  74%  { transform: translateY(0) scale(.97, 1.04) }
+  86%  { transform: translateY(2.5px) scale(1.08, .91) }
+  100% { transform: translateY(0) scale(1, 1) }
+}
+/* 影子：腾空时收小变淡，落地时张开，跳跃的高度感就出来了 */
+#deskie.wander.stepping .dk-shadow { animation: dk-stroll-shadow .68s ease-in-out 1; }
+@keyframes dk-stroll-shadow {
+  0%   { transform: scaleX(1.1); opacity: .38 }
+  46%  { transform: scaleX(.68); opacity: .18 }
+  86%  { transform: scaleX(1.14); opacity: .4 }
+  100% { transform: scaleX(1); opacity: .35 }
+}
+
 @keyframes dk-bob {
   0%, 100% { transform: translateY(0) }
   50% { transform: translateY(-4px) }
@@ -427,16 +456,35 @@
   word-break: break-all;
 }
 #deskie-bubble.show { opacity: 1; transform: translateY(0); }
+/* 尖角：一个旋转 45° 的小方块，只画指向桌宠那两条边。
+   方位由 JS 写的 ar-top / ar-bottom / ar-left / ar-right 决定，
+   --ar-x / --ar-y 是对准桌宠中心的偏移，尖角就不会歪到气泡角上。 */
 #deskie-bubble::after {
   content: "";
   position: absolute;
-  left: 50%; bottom: -6px;
   width: 10px; height: 10px;
-  margin-left: -5px;
   transform: rotate(45deg);
   background: #252526;
+}
+#deskie-bubble.ar-top::after {          /* 气泡在上方 → 尖朝下 */
+  left: var(--ar-x, 50%); bottom: -6px;
   border-right: 1px solid #454545;
   border-bottom: 1px solid #454545;
+}
+#deskie-bubble.ar-bottom::after {       /* 气泡在下方 → 尖朝上 */
+  left: var(--ar-x, 50%); top: -6px;
+  border-left: 1px solid #454545;
+  border-top: 1px solid #454545;
+}
+#deskie-bubble.ar-right::after {        /* 气泡在右侧 → 尖朝左 */
+  top: var(--ar-y, 50%); left: -6px;
+  border-left: 1px solid #454545;
+  border-bottom: 1px solid #454545;
+}
+#deskie-bubble.ar-left::after {         /* 气泡在左侧 → 尖朝右 */
+  top: var(--ar-y, 50%); right: -6px;
+  border-right: 1px solid #454545;
+  border-top: 1px solid #454545;
 }
 
 /* ================= 右键菜单 ================= */
@@ -475,13 +523,13 @@
   padding: 4px 10px 2px;
   letter-spacing: .5px;
 }
-/* 表情 / 眼色选择：一排小胶囊 */
+/* 表情 / 颜色选择：一排小胶囊 */
 #deskie-menu .dk-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   padding: 2px 8px 6px;
-  max-width: 196px;
+  max-width: 212px;      /* 够「换个颜色 + 固定颜色」并排一行 */
 }
 #deskie-menu .dk-chip {
   display: inline-flex;

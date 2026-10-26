@@ -666,8 +666,17 @@
     stateNow().hue = ((i % m.hues.length) + m.hues.length) % m.hues.length;
     paintHue();
   }
-  /* 换一个和当前不同的颜色 */
-  function nextHue() {
+  /* 固定颜色：锁住之后，空闲自动玩耍 / 漫步到站都不再随机换色，
+     只有手动点「换个颜色」才会变（每个伙伴各记一份） */
+  function colorLocked() {
+    try { return localStorage.getItem('ide.deskie.colorlock.' + curId) === '1'; } catch (e) { return false; }
+  }
+  function setColorLock(on) {
+    try { localStorage.setItem('ide.deskie.colorlock.' + curId, on ? '1' : '0'); } catch (e) {}
+  }
+  /* 换一个和当前不同的颜色；force = 用户主动点的，锁定时也算数 */
+  function nextHue(force) {
+    if (!force && colorLocked()) return;
     var m = moodNow();
     if (!m || m.hues.length < 2) return;
     setHue(stateNow().hue + 1 + Math.floor(Math.random() * (m.hues.length - 1)));
@@ -696,7 +705,8 @@
   /* 空闲时自己玩耍：每 5~12 秒来一次小动作，偶尔换个颜色 / 嘀咕一句 */
   (function autoPlay() {
     setTimeout(function () {
-      if (MOOD[curId] && !el.classList.contains('hide') && !document.hidden) {
+      // 漫步途中不另外插动作：走路本身已经在动，再叠一套会显得抽风
+      if (MOOD[curId] && !el.classList.contains('hide') && !document.hidden && !wanderMoving) {
         doAct(null, Math.random() > 0.78 || chatOpen());   // 对话面板开着时只动嘴不动手，别抢话
         if (Math.random() < 0.5) nextHue();
       }
@@ -894,6 +904,8 @@
       '<div class="dk-mi" data-act="say"><i class="bi bi-chat-dots"></i>说点什么</div>' +
       '<div class="dk-mi" data-act="act"><i class="bi bi-magic"></i>随便动一下</div>' +
       '<div class="dk-mi" data-act="hop"><i class="bi bi-arrow-up-square"></i>跳一下</div>' +
+      '<div class="dk-mi" data-act="wander"><i class="bi ' + (wanderOn() ? 'bi-toggle-on' : 'bi-toggle-off') + '"></i>自动漫步' +
+        (wanderOn() ? '<span class="dk-tick">✔</span>' : '') + '</div>' +
       '<div class="dk-mi" data-act="home"><i class="bi bi-house"></i>回到右下角</div>';
     // 所有伙伴都有：换个表情 / 换个颜色
     if (MOOD[curId]) {
@@ -905,7 +917,10 @@
                FACE_NAME[f] + '</div>';
       }
       h += '</div><div class="dk-chips">' +
-             '<div class="dk-chip" data-hue="1"><i class="bi bi-palette"></i> 换个颜色</div>' +
+             '<div class="dk-chip" data-hue="1" title="手动换一个颜色"><i class="bi bi-palette"></i> 换个颜色</div>' +
+             '<div class="dk-chip' + (colorLocked() ? ' on' : '') + '" data-lock="1"' +
+               ' title="' + (colorLocked() ? '已固定：不再自动变色' : '固定当前颜色，不再自动变色') + '">' +
+               '<i class="bi ' + (colorLocked() ? 'bi-lock-fill' : 'bi-unlock') + '"></i> 固定颜色</div>' +
            '</div>';
     }
     // 「换个伙伴」收进二级菜单：hover 或点击展开，避免主菜单拉得太长
@@ -955,13 +970,43 @@
     clearTimeout(bubbleTimer);
     bubbleTimer = setTimeout(function () { bubble.classList.remove('show'); }, ms || 3600);
   }
+  /* 气泡位置：右 → 左 → 上 → 下。
+     以前只有「上 / 下」两种，顶部放不下就掉到脚下，正好压住文件树、Git 提交框，
+     所以优先摆到左右两侧；实在没地方才放下方。方位同时写进 class，尖角好跟着换方向。 */
   function moveBubble() {
     var r = el.getBoundingClientRect();
     var bw = bubble.offsetWidth, bh = bubble.offsetHeight;
-    var x = r.left + r.width / 2 - bw / 2;
-    x = Math.max(8, Math.min(x, window.innerWidth - bw - 8));
-    var y = r.top - bh - 12;
-    if (y < 8) y = r.bottom + 12;               // 顶部放不下就放脚下
+    var pad = 8, gap = 12;
+    var vw = window.innerWidth, vh = window.innerHeight;
+
+    var cx = r.left + r.width / 2 - bw / 2;
+    var cy = r.top + r.height / 2 - bh / 2;
+    var cands = [
+      { pos: 'right',  x: r.right + gap,     y: cy },               // 右
+      { pos: 'left',   x: r.left - bw - gap, y: cy },               // 左
+      { pos: 'top',    x: cx,                y: r.top - bh - gap }, // 上
+      { pos: 'bottom', x: cx,                y: r.bottom + gap }    // 下（兜底）
+    ];
+    var fit = function (x, y) {
+      return x >= pad && y >= pad && x + bw <= vw - pad && y + bh <= vh - pad;
+    };
+    var pick = cands[2];
+    for (var i = 0; i < cands.length; i++) {
+      if (fit(cands[i].x, cands[i].y)) { pick = cands[i]; break; }
+    }
+    var x = Math.max(pad, Math.min(pick.x, vw - bw - pad));
+    var y = Math.max(pad, Math.min(pick.y, vh - bh - pad));
+
+    bubble.classList.remove('ar-top', 'ar-bottom', 'ar-left', 'ar-right');
+    bubble.classList.add('ar-' + pick.pos);
+    // 尖角对准桌面伙伴中心，并夹在气泡范围内（免得跑到圆角外面）
+    if (pick.pos === 'left' || pick.pos === 'right') {
+      var ay = r.top + r.height / 2 - y - 5;
+      bubble.style.setProperty('--ar-y', Math.max(9, Math.min(ay, bh - 19)).toFixed(0) + 'px');
+    } else {
+      var ax = r.left + r.width / 2 - x - 5;
+      bubble.style.setProperty('--ar-x', Math.max(9, Math.min(ax, bw - 19)).toFixed(0) + 'px');
+    }
     bubble.style.left = x + 'px';
     bubble.style.top = y + 'px';
   }
@@ -984,6 +1029,8 @@
     try { localStorage.setItem(LS_POS, JSON.stringify({ x: el.offsetLeft, y: el.offsetTop })); } catch (e) {}
   }
   function goHome() {
+    stopWander();                               // 回家的路上不再自己乱走
+    wanderPauseUntil = Date.now() + 8000;
     setPos(window.innerWidth - W - 24, window.innerHeight - H - 46);
     savePos();
   }
@@ -1006,6 +1053,9 @@
   el.addEventListener('pointerdown', function (ev) {
     if (ev.target.closest && ev.target.closest('.dk-chatbtn')) return;   // 点对话按钮不触发拖动
     if (ev.button !== 0) return;                 // 右键交给 contextmenu
+    // 漫步半路被抓住：按「当前视觉位置」定住，避免撤掉过渡时被拽一下
+    freezeWander();
+    wanderPauseUntil = Date.now() + 12000;       // 摸过它之后先安分一会儿
     el.setPointerCapture(ev.pointerId);
     drag = { sx: ev.clientX, sy: ev.clientY, ox: el.offsetLeft, oy: el.offsetTop, moved: false };
     el.classList.add('dragging');
@@ -1024,7 +1074,7 @@
     if (moved) { savePos(); return; }
     closeMenu();
     if ((ev.detail || 0) >= 2) {                   // 双击：跳一下
-      if (MOOD[curId]) { paintFace('happy'); nextHue(); }
+      if (MOOD[curId]) { paintFace('happy'); nextHue(true); }   // 用户主动逗它，固定颜色也照样换
       hop('哇，被抓到了 ~');
     } else if (MOOD[curId]) {                      // 单击：随机来套动作 + 换表情
       doAct();
@@ -1046,6 +1096,98 @@
     if (line) say(line, 2600);
   }
   el.addEventListener('dblclick', function () { hop(); });
+
+  // ---------- 自动漫步：一小跳一小跳地挪，到了就跳一下 / 转个圈 ----------
+  // 一次出行拆成若干小跳：每跳挪 50~70px，配一次「蓄力-腾空-落地」姿态，跳完喘口气再跳下一段。
+  // 平均速度 ≈ 70px/s（比原先的匀速滑行慢四成），看起来才像走走停停，而不是一路滑过去。
+  // 用户一碰它 / 打开对话面板 / 隐身 / 切到别的标签页，都会自动停下或不再出发。
+  var wanderTimer = null, wanderChain = null, wanderQueue = [], wanderMoving = false, wanderPauseUntil = 0;
+  var HOP_MS = 680;        // 单次跳跃用时（含腾空）
+  var HOP_GAP = 170;       // 落地后喘口气再跳
+
+  function wanderOn() {
+    try { return localStorage.getItem('ide.deskie.wander') !== '0'; } catch (e) { return true; }   // 默认开启
+  }
+  function wanderSet(on) {
+    try { localStorage.setItem('ide.deskie.wander', on ? '1' : '0'); } catch (e) {}
+  }
+  function wanderCan() {
+    return wanderOn() && !wanderMoving && !drag
+        && !el.classList.contains('hide') && !document.hidden
+        && !chatOpen() && !menu.classList.contains('open')
+        && Date.now() > wanderPauseUntil;
+  }
+  /* 立刻停住（召唤回原位 / 打开对话 / 隐身时用） */
+  function stopWander() {
+    clearTimeout(wanderChain);
+    wanderChain = null;
+    wanderQueue = [];
+    wanderMoving = false;
+    el.classList.remove('wander', 'stepping');
+  }
+  /* 停在「眼前这个位置」：过渡还在走时 left/top 已经是目标值，
+     直接撤掉过渡会瞬间跳过去 —— 所以先把当前视觉坐标写回去，再撤。 */
+  function freezeWander() {
+    if (!wanderMoving) { stopWander(); return; }
+    var r0 = el.getBoundingClientRect();
+    stopWander();
+    el.style.left = Math.round(r0.left) + 'px';
+    el.style.top = Math.round(r0.top) + 'px';
+  }
+  function wanderLoop() {
+    clearTimeout(wanderTimer);
+    wanderTimer = setTimeout(wanderStep, 4200 + Math.random() * 7000);
+  }
+  /* 蹦下一小步；队列空了就算到站 */
+  function wanderHopNext() {
+    if (!wanderQueue.length) {
+      el.classList.remove('wander', 'stepping');
+      wanderMoving = false;
+      // 到站了就耍一下：跳 / 转圈 / 换表情（quiet，不吭声，免得一路叨叨）
+      var r = Math.random();
+      if (r < 0.26) hop();
+      else if (r < 0.7) doAct(null, true);
+      wanderLoop();
+      return;
+    }
+    var p = wanderQueue.shift();
+    el.style.setProperty('--wd', (HOP_MS / 1000).toFixed(2) + 's');
+    el.classList.add('wander');
+    el.classList.remove('stepping');
+    void el.offsetWidth;                       // 强制回流，让跳跃动画从头播
+    el.classList.add('stepping');
+    setPos(p.x, p.y);
+    wanderChain = setTimeout(wanderHopNext, HOP_MS + HOP_GAP);
+  }
+  function wanderStep() {
+    if (!wanderCan()) { wanderLoop(); return; }
+    var w = el.offsetWidth || W, h = el.offsetHeight || H;
+    var maxX = window.innerWidth - w - 8, maxY = window.innerHeight - h - 8;
+    if (maxX < 40 || maxY < 40) { wanderLoop(); return; }   // 窗口太小就别乱跑了
+
+    var cx = el.offsetLeft, cy = el.offsetTop;
+    var tx = cx, ty = cy, tries = 0;
+    // 目标点至少挪 90px，免得在原地小碎步打转
+    while (Math.hypot(tx - cx, ty - cy) < 90 && tries++ < 8) {
+      tx = 8 + Math.random() * (maxX - 8);
+      ty = 8 + Math.random() * (maxY - 8);
+    }
+    var dx = tx - cx, dy = ty - cy;
+    var dist = Math.hypot(dx, dy);
+    if (dist < 40) { wanderLoop(); return; }
+
+    // 拆成若干小跳：每跳 46~68px，最后一跳把余量补足
+    var steps = Math.max(2, Math.round(dist / (46 + Math.random() * 22)));
+    wanderQueue = [];
+    for (var i = 1; i <= steps; i++) {
+      wanderQueue.push({ x: cx + dx * i / steps, y: cy + dy * i / steps });
+    }
+    wanderMoving = true;
+    clearTimeout(wanderChain);
+    wanderHopNext();
+  }
+  wanderPauseUntil = Date.now() + 2600;      // 刚进页面先让人看清楚它在哪，别马上乱跑
+  wanderLoop();
 
   // ---------- 眨眼 ----------
   (function blinkLoop() {
@@ -1110,7 +1252,13 @@
     var chip = ev.target.closest && ev.target.closest('.dk-chip');
     if (chip) {                                    // 表情 / 颜色：点完不关菜单，方便连着试
       if (chip.dataset.face) { paintFace(chip.dataset.face); renderMenu(); }
-      else if (chip.dataset.hue) nextHue();
+      else if (chip.dataset.hue) nextHue(true);
+      else if (chip.dataset.lock) {
+        var lk = !colorLocked();
+        setColorLock(lk);
+        renderMenu();                            // 重绘，锁图标 / 高亮立刻变
+        say(lk ? '颜色固定住啦，不再乱变 ~' : '好，我又开始自己换颜色了。', 2600);
+      }
       return;
     }
     var mi = ev.target.closest('.dk-mi');
@@ -1128,6 +1276,13 @@
     } else if (act === 'act') {
       if (MOOD[curId]) doAct(); else hop();
     } else if (act === 'hop') hop();
+    else if (act === 'wander') {
+      var won = !wanderOn();
+      wanderSet(won);
+      if (won) { wanderPauseUntil = Date.now() + 1200; wanderLoop(); }
+      else stopWander();
+      say(won ? '好呀，我去溜达一圈 ~' : '那我就在这儿待着。', 2400);
+    }
     else if (act === 'home') { goHome(); say('回我的小窝啦 ~', 2200); }
     else if (act === 'hide') hide();
   });
@@ -1144,10 +1299,12 @@
   function show() {
     el.classList.remove('hide');
     summon.classList.remove('show');
+    wanderPauseUntil = Date.now() + 4000;       // 刚召唤回来先站一会儿再溜达
     try { localStorage.setItem(LS_HIDDEN, '0'); } catch (e) {}
     say('我回来啦！', 2200);
   }
   function hide() {
+    stopWander();                               // 隐身了就别在半路上飘
     el.classList.add('hide');
     bubble.classList.remove('show');
     closeMenu();
@@ -2258,15 +2415,41 @@
     chatScroll();
   }
 
+  /* 面板位置：右 → 左 → 下 → 上，挑第一个能完整塞进视口的方向。
+     以前只判断了左右，桌宠漫步到上方时「底对齐」会算出负数、被夹到屏幕顶端，
+     结果面板直接压住桌宠（还挡住左侧文件树）。 */
   function chatPosition() {
     if (!chatEl) return;
     if (chatMaxed) { chatCenter(); return; }
-    var CW = 304, CH = 396;
+
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var pad = 8, gap = 12;
+    var CW = Math.min(304, vw - pad * 2);        // 与 CSS 的 max-width / max-height 对齐
+    var CH = Math.min(396, vh - pad * 2);
     var r = el.getBoundingClientRect();
-    var x = r.left - CW - 14;
-    if (x < 8) x = r.right + 14;                 // 左边放不下就放到右边
-    x = Math.max(8, Math.min(x, window.innerWidth - CW - 8));
-    var y = Math.max(8, Math.min(r.top + r.height - CH, window.innerHeight - CH - 8));
+
+    // 竖直：默认与桌宠底边齐平；靠上时改成顶对齐，免得顶出屏幕
+    var baseY = r.top + r.height - CH;
+    if (baseY < pad) baseY = r.top;
+    baseY = Math.max(pad, Math.min(baseY, vh - CH - pad));
+    var midX = Math.max(pad, Math.min(r.left + r.width / 2 - CW / 2, vw - CW - pad));
+
+    var fit = function (x, y) {
+      return x >= pad && y >= pad && x + CW <= vw - pad && y + CH <= vh - pad;
+    };
+    var x = midX, y = baseY;
+    var rightX = r.right + gap;
+    var leftX = r.left - CW - gap;
+    var belowY = r.bottom + gap;
+    var aboveY = r.top - CH - gap;
+
+    if (fit(rightX, baseY)) { x = rightX; y = baseY; }
+    else if (fit(leftX, baseY)) { x = leftX; y = baseY; }
+    else if (fit(midX, belowY)) { x = midX; y = belowY; }
+    else if (fit(midX, aboveY)) { x = midX; y = aboveY; }
+
+    x = Math.max(pad, Math.min(x, vw - CW - pad));
+    y = Math.max(pad, Math.min(y, vh - CH - pad));
     chatEl.style.left = x + 'px';
     chatEl.style.top = y + 'px';
     // 记住「对话框相对桌宠」的偏移，拖动桌宠时按这个偏移同步平移
@@ -2283,6 +2466,7 @@
   }
 
   function showChat() {
+    freezeWander();                      // 聊天时别一边说话一边满屏跑（停在眼前位置）
     chatBuild();
     chatPosition();
     chatEl.classList.add('show');
@@ -2591,7 +2775,9 @@
     face: function (f) { paintFace(f); },
     faces: FACE_ORDER.slice(),
     color: function (i) { setHue(typeof i === 'number' ? i : 0); },
-    nextColor: nextHue,
+    nextColor: function () { nextHue(true); },       // 主动换色：固定颜色也照样换
+    lockColor: function (on) { setColorLock(!!on); }, // 固定 / 解除固定当前颜色
+    colorLocked: colorLocked,
     act: function (i) { doAct(i); },
     acts: function () { return (moodNow() ? moodNow().acts : []).map(function (a) { return a.mv; }); }
   };

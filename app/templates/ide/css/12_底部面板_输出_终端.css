@@ -1,12 +1,14 @@
   /* ===== 底部面板（输出 / 终端）===== */
   .bottom-panel {
     flex: none; height: 240px; display: none; flex-direction: column;
-    background: #1b1b1b; border-top: 1px solid #3a3a3a; min-height: 0;
+    background: #1b1b1b; border-top: 1px solid #3a3a3a; min-height: 0; overflow: hidden;
   }
   .bottom-panel.show { display: flex; }
+  /* z-index：面板内容区（含滚动条）滚动时不会盖住工具条上的「搜索 / 清空」按钮 */
   .bp-tabs {
     flex: none; height: 32px; display: flex; align-items: center; gap: 2px;
     padding: 0 8px; background: #252526; border-bottom: 1px solid #333;
+    position: relative; z-index: 4; overflow: hidden;
   }
   .bp-tab {
     background: transparent; border: none; border-bottom: 1px solid transparent;
@@ -31,6 +33,9 @@
   .bp-btn:hover { background: #3a3d41; color: #fff; }
   .bp-btn.danger { color: #f14c4c; }
   .bp-btn.danger:hover { background: #4b2020; color: #ff6b6b; }
+  /* 页签行末尾的「＋」：新建 bash 终端（比「搜索 / 清空」更轻，不占按钮宽度） */
+  .bp-plus { padding: 2px 6px; margin-left: 2px; }
+  .bp-plus .bi { font-size: 11px; }
   .bp-pane { display: none; flex: 1; min-height: 0; flex-direction: column; }
   .bp-pane.active { display: flex; }
   .op-body {
@@ -55,7 +60,7 @@
   .op-find[hidden] { display: none; }
   .op-find > .bi { flex: none; color: #8a8a8a; font-size: 10.5px; }
   .op-find-in {
-    width: 128px; height: 100%; box-sizing: border-box;
+    width: 128px; flex: 0 1 128px; min-width: 40px; height: 100%; box-sizing: border-box;
     background: transparent; border: 0; outline: 0; color: #d4d4d4;
     font-family: inherit; font-size: 11.5px; line-height: 1; padding: 0;
   }

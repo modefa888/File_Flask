@@ -337,6 +337,8 @@
     };
   });
   $("bpClear").onclick = clearOutput;
+  // 标签行末尾的「+」：直接开一个新的 bash 终端（termNew 内部会展开面板并聚焦输入）
+  if ($("bpNewTerm")) $("bpNewTerm").onclick = () => { termNew(); };
   $("bpClose").onclick = () => toggleBottom(false);
   $("bpKill").onclick = () => {
     if (bottomPane === "term") { termKill(); return; }  // 终端标签：结束终端会话

@@ -101,6 +101,8 @@ function opFindOpen() {
   const box = $("opFind");
   if (!box) return;
   box.hidden = false;
+  const btn = $("opFindBtn");
+  if (btn) btn.style.display = "none";          // 搜索条已展开：按钮让位，窄面板 / 矮面板下也点得到「清空」
   const inp = $("opFindIn");
   if (inp) {
     if (inp.value !== OPFIND.kw) inp.value = OPFIND.kw;
@@ -112,6 +114,11 @@ function opFindOpen() {
 function opFindClose() {
   const box = $("opFind");
   if (box) box.hidden = true;
+  const btn = $("opFindBtn");
+  // 只有「输出 / 运行日志」页签才需要这个按钮（终端页签不显示）
+  if (btn && (typeof bottomPane === "undefined" || bottomPane === "output" || bottomPane === "log")) {
+    btn.style.display = "";
+  }
   OPFIND.kw = ""; OPFIND.hits = 0; OPFIND.idx = -1;
   opFindClearPaint();                                            // 去掉黄底与红字
   opFindNum();
@@ -123,10 +130,10 @@ function opFindRescan() {                                        // 切页签 / 
 /* 页签切换：「输出」「运行日志」两个页签都能搜（终端没有日志文本，隐藏按钮与搜索条）。
    目标面板变了 → 先清掉旧面板的高亮，搜索条还开着就在新面板上重扫一遍。 */
 function opFindShow(keep) {
-  const btn = $("opFindBtn");
-  if (btn) btn.style.display = keep ? "" : "none";
-  const box = $("opFind");
+  const btn = $("opFindBtn"), box = $("opFind");
   if (!keep && box) box.hidden = true;
+  // 搜索条开着时不显示「搜索」按钮（避免和输入框抢位置）
+  if (btn) btn.style.display = (keep && box && box.hidden) ? "" : "none";
   opFindClearPaint();
   if (box && !box.hidden && OPFIND.kw) opFindScan(false);
   else { OPFIND.hits = 0; OPFIND.idx = -1; opFindNum(); }

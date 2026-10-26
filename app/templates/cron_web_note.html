@@ -87,8 +87,16 @@
   .card.fail::before, .card.timeout::before { background: linear-gradient(180deg, var(--bad), #b91c1c); }
   .card.killed::before { background: linear-gradient(180deg, var(--text-mute), #475569); }
   .card.test::before { background: linear-gradient(180deg, var(--ok), #0ea5e9); }
-  .card-head { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+  .card-head { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; cursor: pointer; user-select: none; }
   .card-title { font-size: 17px; font-weight: 650; line-height: 1.45; margin: 0; flex: 1 1 240px; word-break: break-word; }
+  /* 折叠箭头：最新一条默认展开，更早的默认收起（点标题行切换） */
+  .fold-ico {
+    flex: none; align-self: center; font-size: 10px; line-height: 1;
+    color: var(--text-mute); transition: transform .15s;
+  }
+  .card.folded .fold-ico { transform: rotate(-90deg); }
+  .card.folded .body { display: none; }
+  .card.folded { padding-bottom: 18px; }
   .st {
     flex: none; font-size: 11.5px; border-radius: 999px; padding: 1px 10px; white-space: nowrap;
     border: 1px solid currentColor;
@@ -206,6 +214,34 @@
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
+  /* 标题开头的图标（emoji）：网页图标直接复用它，找不到就保持浏览器默认 */
+  function leadEmoji(text) {
+    const s = String(text || "").trim();
+    try {
+      const re = new RegExp("^(?:\\p{Extended_Pictographic}|\\p{Emoji_Presentation})" +
+        "(?:\\uFE0F|\\u200D(?:\\p{Extended_Pictographic}|\\p{Emoji_Presentation}))*", "u");
+      const m = s.match(re);
+      return m ? m[0] : "";
+    } catch (e) {                                   // 老引擎不支持 \p{}：退化成「首字符是代理对」
+      const c = s.charCodeAt(0);
+      return (c >= 0xD800 && c <= 0xDBFF) ? s.slice(0, 2) : "";
+    }
+  }
+  function setFavicon(emoji) {
+    if (!emoji) return;
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+      '<text x="50" y="52" font-size="82" text-anchor="middle" dominant-baseline="central">' +
+      emoji + '</text></svg>';
+    let link = document.querySelector('link[rel="icon"]');
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "icon";
+      document.head.appendChild(link);
+    }
+    link.type = "image/svg+xml";
+    link.href = "data:image/svg+xml," + encodeURIComponent(svg);
+  }
+
   /* 链接自动渲染：<a href="…">文字</a>（AI 输出 / Telegram parse_mode 写法）与裸 URL
      统一转成 Markdown 链接，再交给 renderMarkdown；已有 Markdown 链接不重复处理。 */
   function mdSource(text) {
@@ -232,6 +268,7 @@
       return;
     }
     const latest = NOTES[0];
+    setFavicon(leadEmoji(latest.title) || leadEmoji(latest.task_name));
     sub.innerHTML = '<span>' + NOTES.length + ' 条通知</span><span class="sep">·</span>' +
       '<span>最新 ' + esc(fmtTime(latest.created_at)) + '</span><span class="sep">·</span>' +
       '<span>' + esc(fmtLeft(latest.expires_at)) + '</span>';
@@ -239,8 +276,11 @@
     list.innerHTML = NOTES.map(function (n, i) {
       const st = STATUS[n.status] || ["通知", "mute"];
       const title = n.title || (n.task_name ? n.task_name + " 通知" : "任务通知");
-      return '<article class="card ' + esc(n.status || "") + '">' +
-        '<div class="card-head">' +
+      /* 最新一条展开；更早的全部默认折叠，点标题行展开 / 收起 */
+      const folded = i > 0 ? " folded" : "";
+      return '<article class="card ' + esc(n.status || "") + folded + '">' +
+        '<div class="card-head" title="点击折叠 / 展开正文">' +
+          '<span class="fold-ico" aria-hidden="true">▾</span>' +
           '<h2 class="card-title">' + esc(title) + '</h2>' +
           '<span class="st ' + st[1] + '">' + esc(st[0]) + '</span>' +
         '</div>' +
@@ -252,6 +292,12 @@
         '<div class="body md">' + renderMarkdown(mdSource(n.body || "")) + '</div>' +
       '</article>';
     }).join("");
+    // 点标题行折叠 / 展开（最新一条默认展开，其余默认收起）
+    list.querySelectorAll(".card-head").forEach(function (h) {
+      h.addEventListener("click", function () {
+        h.parentElement.classList.toggle("folded");
+      });
+    });
     // 正文里的链接一律新标签打开，别把通知页顶掉
     list.querySelectorAll(".md a").forEach(a => {
       a.target = "_blank";

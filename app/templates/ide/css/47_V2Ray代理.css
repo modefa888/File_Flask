@@ -708,6 +708,19 @@
 :where(html.theme-light) .v2v-tab { border-color: #d8dbe2; color: #6b7280; }
 :where(html.theme-light) .v2v-tab:hover { color: #374151; border-color: #b6bac4; }
 :where(html.theme-light) .v2v-tab.on { background: #e0ecfd; color: #1d4ed8; border-color: transparent; }
+/* tab 末尾「+」新建分组 / 分组 tab 内「×」删分组 */
+.v2v-tab-add { display: inline-flex; align-items: center; justify-content: center; padding: 3px 9px; border-style: dashed; }
+.v2v-tab-add:hover { color: #4d9bff; border-color: rgba(77, 155, 255, .6); }
+.v2v-tab-add .bi { font-size: 11px; }
+.v2v-tab-x {
+  display: inline-flex; align-items: center;
+  margin: -1px -5px -1px 3px; padding: 1px 3px;
+  border-radius: 999px; font-size: 9px; opacity: .5;
+}
+.v2v-tab-x:hover { opacity: 1; background: rgba(228, 87, 99, .25); color: #ff8b96; }
+.v2v-tab-x .bi { font-size: 9px; }
+::where(html.theme-light) .v2v-tab-add:hover { color: #1d4ed8; }
+::where(html.theme-light) .v2v-tab-x:hover { background: rgba(228, 87, 99, .15); color: #c33a4a; }
 
 /* --- 概览指标卡 --- */
 .v2v-stats {

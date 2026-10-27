@@ -329,21 +329,62 @@ def clear_sub_nodes(sub_id):
         conn.execute("DELETE FROM v2ray_nodes WHERE sub_id=?", (str(sub_id),))
 
 
-def add_nodes(nodes: list, sub_id="", start_sort=0) -> int:
-    """批量写入节点，返回写入条数。nodes 为 parse_share_link 得到的 dict 列表。"""
+def add_nodes(nodes: list, sub_id="", start_sort=0, grp="") -> int:
+    """批量写入节点，返回写入条数。nodes 为 parse_share_link 得到的 dict 列表。
+
+    grp：可选自定义分组名，手动添加节点到某个分组 tab 时带上，让新节点直接归组。
+    """
     now = time.time()
     n = 0
     with store_tx() as conn:
         for i, nd in enumerate(nodes or []):
             conn.execute(
                 "INSERT INTO v2ray_nodes (id, sub_id, name, proto, server, port, raw, node_json,"
-                " remark, sort, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " remark, grp, sort, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (uuid.uuid4().hex[:12], str(sub_id or ""), nd.get("name") or "", nd.get("proto") or "",
                  nd.get("server") or "", int(nd.get("port") or 0), nd.get("raw") or "",
                  json.dumps(nd, ensure_ascii=False), nd.get("remark") or "",
-                 int(start_sort) + i, now))
+                 str(grp or "").strip(), int(start_sort) + i, now))
             n += 1
     return n
+
+
+# ---------------------------------------------------------------------------
+# 自定义分组（空分组也持久化，否则没有任何节点时 tab 会消失）
+# ---------------------------------------------------------------------------
+
+def get_custom_grps() -> list:
+    """返回手动创建的自定义分组名列表（按创建顺序）。"""
+    v = all_settings().get("custom_grps")
+    if not isinstance(v, list):
+        return []
+    out, seen = [], set()
+    for x in v:
+        s = str(x or "").strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+def save_custom_grps(names: list) -> list:
+    """整体保存自定义分组名列表，返回去重后的结果。"""
+    out, seen = [], set()
+    for x in (names or []):
+        s = str(x or "").strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    set_setting("custom_grps", out)
+    return out
+
+
+def clear_grp(name: str) -> int:
+    """删除分组时把还挂在该分组下的节点 grp 清空，返回受影响的节点数。"""
+    with store_tx() as conn:
+        cur = conn.execute("UPDATE v2ray_nodes SET grp='' WHERE grp=?",
+                           (str(name or "").strip(),))
+        return cur.rowcount or 0
 
 
 # 允许通过 update_node(fields=...) 直接修改的连接参数（存进 node_json，连接时生效）

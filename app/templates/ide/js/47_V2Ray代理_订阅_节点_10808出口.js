@@ -81,6 +81,7 @@
     if (!st.error) V2.st = st;
     if (!nd.error) {
       V2.nodes = nd.nodes || [];
+      V2.groups = nd.groups || [];                // 手动新建的自定义分组（可能还是空的）
       const m = nd.metrics || {};                 // 持久化的测速结果（覆盖到本地缓存）
       Object.keys(m).forEach(id => {
         if (!V2.nodes.some(n => n.id === id)) return;
@@ -746,21 +747,44 @@
     return list;
   }
 
+  // 手动添加节点时的归属：当前打开的是自定义分组 tab → 归组；订阅 tab → 挂到该订阅下
+  function v2AddTarget() {
+    const t = V2.nodeTab || "__all__";
+    if (t.indexOf("grp:") === 0) return { grp: t.slice(4) };
+    if (t.indexOf("sub:") === 0) return { sub_id: t.slice(4) };
+    return {};
+  }
+
   function v2vNodes() {
-    // tab 分组：全部 / 按订阅名 / 自定义分组（节点编辑里填的 grp）
+    // tab 分组：全部 / 按订阅名 / 自定义分组（节点编辑里填的 grp + 「+」手动新建的空分组）
     const grpNames = [...new Set(V2.nodes.map(n => (n.grp || "").trim()).filter(Boolean))];
-    const tabs = [{ k: "__all__", label: "全部" }]
-      .concat((V2.subs || []).map(s => ({ k: "sub:" + s.id, label: s.name || s.id })))
-      .concat(grpNames.map(g => ({ k: "grp:" + g, label: g })));
+    const customGrps = (V2.groups || []).filter(g => grpNames.indexOf(g) < 0);   // 还没有节点的空分组
+    const tabs = [{ k: "__all__", label: "全部", n: V2.nodes.length }]
+      .concat((V2.subs || []).map(s => ({
+        k: "sub:" + s.id, label: s.name || s.id,
+        n: V2.nodes.filter(n => n.sub_id === s.id).length,
+      })))
+      .concat(grpNames.map(g => ({
+        k: "grp:" + g, label: g, grp: true,
+        n: V2.nodes.filter(n => (n.grp || "").trim() === g).length,
+      })))
+      .concat(customGrps.map(g => ({ k: "grp:" + g, label: g, grp: true, n: 0 })));
     if (!tabs.some(t => t.k === V2.nodeTab)) V2.nodeTab = "__all__";
     const list = v2NodeFilteredList();
     // 大量节点（上千条）时一次性 innerHTML 全量渲染会严重卡顿：
     // 只渲染前 V2.nodeShow 条，列表末尾放「加载更多」，点一次补一批
     if (!V2.nodeShow) V2.nodeShow = 60;
     const shown = list.slice(0, V2.nodeShow);
+    // 每个 tab 后面跟当前组的节点数；末尾的「+」新建自定义分组；
+    // 自定义分组 tab 内还有一个「×」删分组（组内节点保留，回到「全部」）
     const tabHtml = '<div class="v2v-tabs">' + tabs.map(t =>
       '<button class="v2v-tab' + (V2.nodeTab === t.k ? " on" : "") + '" data-act="node-tab" data-tab="' +
-      escA(t.k) + '">' + esc(t.label) + (t.k === "__all__" ? " " + V2.nodes.length : "") + "</button>").join("") + "</div>";
+      escA(t.k) + '">' + esc(t.label) + " " + t.n +
+      (t.grp ? '<span class="v2v-tab-x" data-act="node-grp-del" data-grp="' + escA(t.label) +
+        '" title="删除该分组（组内节点保留，回到全部）"><i class="bi bi-x-lg"></i></span>' : "") +
+      "</button>").join("") +
+      '<button class="v2v-tab v2v-tab-add" data-act="node-grp-new" title="新建自定义分组">' +
+      '<i class="bi bi-plus-lg"></i></button></div>';
     const cid = curNodeId();
     // 测速超时的节点数（当前已连接的节点不算，避免误删导致断网）
     const failN = V2.nodes.filter(n => n.id !== cid && V2.ping[n.id] && !V2.ping[n.id].ok).length;
@@ -1428,6 +1452,36 @@
         if (v2vActive()) v2vRender();
         break;
       }
+      case "node-grp-new": {
+        // 「+」新建自定义分组：建好直接切到该分组 tab，之后手动添加的节点都会归到这里
+        const gn = (await uiPrompt("新建自定义分组", "", "例如：日常 / 流媒；之后手动添加的节点会进入该组")) || "";
+        const name = gn.trim();
+        if (!name) break;
+        if (name.length > 40) { toast("分组名过长（最多 40 字）", "warn"); break; }
+        const r = await post("/api/v2ray/groups/save", { name: name });
+        if (r.error) { toast(r.error, "err"); break; }
+        V2.groups = r.groups || [];
+        V2.nodeTab = "grp:" + name;
+        V2.nodeShow = 60;
+        v2SaveNodesView();
+        if (v2vActive()) v2vRender();
+        toast("已新建分组「" + name + "」", "ok");
+        break;
+      }
+      case "node-grp-del": {
+        // 删除自定义分组：组内节点保留（grp 清空后回到「全部」），仅去掉这个 tab
+        const gname = ds.grp || "";
+        const okd = await uiConfirm("删除分组",
+          "确定删除分组「" + gname + "」？组内节点不会被删除，会回到「全部」。", "删除", true);
+        if (!okd) break;
+        const r = await post("/api/v2ray/groups/delete", { name: gname });
+        if (r.error) { toast(r.error, "err"); break; }
+        V2.groups = r.groups || [];
+        if (V2.nodeTab === "grp:" + gname) { V2.nodeTab = "__all__"; V2.nodeShow = 60; v2SaveNodesView(); }
+        if (v2vActive()) v2vRender();
+        toast("已删除分组" + (r.moved ? "，" + r.moved + " 个节点回到「全部」" : ""), "ok");
+        break;
+      }
       case "sort-ping": {
         V2.sortPing = !V2.sortPing;
         V2.nodeShow = 60;
@@ -1502,7 +1556,7 @@
         const ta = $("v2vLinks");
         const links = (ta && ta.value || "").trim();
         if (!links) return toast("请先粘贴分享链接", "warn");
-        const r = await post("/api/v2ray/nodes/add", { links: links });
+        const r = await post("/api/v2ray/nodes/add", Object.assign({ links: links }, v2AddTarget()));
         if (r.error) return toast(r.error, "err");
         toast("已添加 " + r.added + " 个节点" + (r.errors && r.errors.length ? "（" + r.errors.length + " 条被跳过）" : ""), "ok");
         await v2Reload();
@@ -1525,7 +1579,7 @@
           net: val("v2vMNet"), tls: val("v2vMTls"), host: val("v2vMHost"), path: val("v2vMPath"),
           sni: val("v2vMSni"), aid: val("v2vMAid"),
         };
-        const r = await post("/api/v2ray/nodes/add", { node: node });
+        const r = await post("/api/v2ray/nodes/add", Object.assign({ node: node }, v2AddTarget()));
         if (r.error) return toast(r.error, "err");
         toast("已添加 " + r.added + " 个节点", "ok");
         V2.showManual = false;

@@ -231,13 +231,15 @@ def v2_nodes():
     out = [{"id": n.get("id"), "sub_id": n.get("sub_id"), "name": n.get("name"),
             "proto": n.get("proto"), "server": n.get("server"), "port": n.get("port"),
             "remark": n.get("remark"), "grp": n.get("grp"), "raw": n.get("raw")} for n in nodes]
-    return jsonify({"nodes": out, "total": len(out), "metrics": _metrics()})
+    return jsonify({"nodes": out, "total": len(out), "metrics": _metrics(),
+                    "groups": v2raydb.get_custom_grps()})
 
 
 @bp.post("/api/v2ray/nodes/add")
 def v2_nodes_add():
     data = request.get_json(silent=True) or {}
     sub_id = str(data.get("sub_id") or "")
+    grp = str(data.get("grp") or "").strip()      # 当前打开的是自定义分组 tab 时，新节点直接归组
     links = data.get("links")
     if isinstance(links, str):
         links = [x.strip() for x in links.replace("\r", "\n").split("\n") if x.strip()]
@@ -255,8 +257,37 @@ def v2_nodes_add():
             errors.append("手填节点：%s" % e)
     if not parsed:
         return _fail(errors[0] if errors else "没有可添加的节点")
-    n = v2raydb.add_nodes(parsed, sub_id=sub_id)
+    n = v2raydb.add_nodes(parsed, sub_id=sub_id, grp=grp)
     return jsonify({"ok": True, "added": n, "errors": errors})
+
+
+@bp.post("/api/v2ray/groups/save")
+def v2_groups_save():
+    """新建自定义分组（空分组也保存，节点列表 tab 上常驻显示）。"""
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return _fail("分组名不能为空")
+    if len(name) > 40:
+        return _fail("分组名过长（最多 40 字）")
+    grps = v2raydb.get_custom_grps()
+    if name not in grps:
+        grps.append(name)
+        v2raydb.save_custom_grps(grps)
+    return jsonify({"ok": True, "groups": grps})
+
+
+@bp.post("/api/v2ray/groups/delete")
+def v2_groups_delete():
+    """删除自定义分组：清掉持久化记录，并把还挂在该分组下的节点 grp 一并清空。"""
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return _fail("分组名不能为空")
+    grps = [g for g in v2raydb.get_custom_grps() if g != name]
+    v2raydb.save_custom_grps(grps)
+    moved = v2raydb.clear_grp(name)
+    return jsonify({"ok": True, "groups": grps, "moved": moved})
 
 
 def _build_from_form(f: dict) -> dict:

@@ -1352,14 +1352,36 @@
     // 再点一次当前面板则折叠侧栏
     if (a.classList.contains("active") && !$("sidebar").classList.contains("collapsed") && p === "explorer") { toggleSidebar(); return; }
     $("sidebar").classList.remove("collapsed");
+    sidebarSyncState();   // 展开也要落盘：否则上次「收起」存的旧值会在刷新时把侧栏又收回去
     showPanel(p);   // 各面板的内容加载已收进 showPanel，这里不再重复调用
   });
+  // 侧栏开合状态落 localStorage：无论从哪条路径改变开合（折叠按钮 / 活动栏图标 / 各面板展开），
+  // 都统一走这里保存，避免某条路径漏存导致刷新后按旧值恢复错状态
+  function sidebarSyncState() {
+    try { localStorage.setItem("ide.sidebar.collapsed", $("sidebar").classList.contains("collapsed") ? "1" : "0"); } catch (_) {}
+  }
   function toggleSidebar() {
     $("sidebar").classList.toggle("collapsed");
+    // 保险：任何展开动作都清掉首帧预置类，避免它残留导致侧栏点不开
+    document.documentElement.classList.remove("sb-pre");
+    sidebarSyncState();
     const b = $("tbSide");
     if (b) b.classList.toggle("on", !$("sidebar").classList.contains("collapsed"));
   }
+  // 恢复侧栏开合状态（会话恢复后调用）：上次是收起的就保持收起
+  window.sidebarRestoreCollapsed = function () {
+    let c = "0";
+    try { c = localStorage.getItem("ide.sidebar.collapsed") || "0"; } catch (_) {}
+    if (c === "1") $("sidebar").classList.add("collapsed");
+    // 首帧预置类使命完成：显示控制交给 #sidebar 上的 .collapsed，之后展开/收起才正常生效
+    document.documentElement.classList.remove("sb-pre");
+    const b = $("tbSide");
+    if (b) b.classList.toggle("on", !$("sidebar").classList.contains("collapsed"));
+  };
   $("sideCollapse").onclick = toggleSidebar;
+  // 页面加载时立即恢复上次的收起状态：如果等会话恢复（异步）再收，
+  // 侧栏会先按默认状态画出「资源管理器」再收起，产生明显的抖动闪烁。
+  window.sidebarRestoreCollapsed();
 
   /* ---------- 侧边栏宽度拖动（左搜索区 / 右编辑区） ---------- */
   const SIDEBAR_DEFAULT_W = 280;

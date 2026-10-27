@@ -183,6 +183,10 @@ html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacit
 <script>/* 首屏按已保存的主题立即上色，避免深色闪一下再变浅 */
 try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'light') document.documentElement.classList.add('theme-light'); } catch (e) {}
 </script>
+<script>/* 首屏预置侧栏收起状态：body 还没渲染就读 localStorage 给 <html> 打 sb-pre 类，
+   CSS 据此让侧栏从第一帧就是隐藏态，杜绝「先画出资源管理器再收起」的抖动闪烁 */
+try { if (localStorage.getItem('ide.sidebar.collapsed') === '1') document.documentElement.classList.add('sb-pre'); } catch (e) {}
+</script>
 {% include 'ide/partials/body.html' %}
 <script src="/static/vendor/codemirror/codemirror.min.js"></script>
 <!-- dialog 插件：search 插件没有它时会退化成原生 prompt() 弹窗 -->

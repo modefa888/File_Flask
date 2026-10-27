@@ -421,6 +421,13 @@
   border-color: rgba(240, 97, 109, .62);
   color: #ffb1b8;
 }
+/* 更新中：按钮图标旋转（转 ::before 字形本身，盒子不动，避免图标偏移抖动） */
+.v2v-btn .bi.spin::before, .v2v-tab .bi.spin::before {
+  display: inline-block;
+  transform-origin: 50% 50%;
+  animation: v2Spin 1s linear infinite;
+}
+@keyframes v2Spin { to { transform: rotate(360deg); } }
 .v2v-head-ops .v2v-btn.danger {
   background: linear-gradient(180deg, #e45763, #c33a4a);
   border-color: #e45763;
@@ -824,6 +831,8 @@
 
 /* --- 列表项 --- */
 .v2v-list { display: flex; flex-direction: column; gap: 8px; }
+/* 「加载更多」分页按钮：节点量大时列表分批渲染，按钮居中放在列表末尾 */
+.v2v-more { display: flex; justify-content: center; padding: 12px 0 4px; }
 .v2v-item {
   display: flex;
   align-items: center;

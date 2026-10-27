@@ -25,6 +25,10 @@
     display: flex; flex-direction: column; min-height: 0; transition: width .12s ease;
   }
   .sidebar.collapsed { display: none; }
+  /* 首帧防抖动：<body> 顶部内联脚本在渲染前按 localStorage 给 <html> 打 sb-pre，
+     侧栏与分隔条从第一帧就是隐藏态；JS 恢复完 .collapsed 后移除 sb-pre 交接 */
+  html.sb-pre .sidebar { display: none; }
+  html.sb-pre .sidebar + .splitter { display: none; }
   .side-header {
     height: 35px; flex: none; display: flex; align-items: center; justify-content: space-between;
     padding: 0 12px; font-size: 11px; letter-spacing: .6px; text-transform: uppercase; color: #bbbbbb;

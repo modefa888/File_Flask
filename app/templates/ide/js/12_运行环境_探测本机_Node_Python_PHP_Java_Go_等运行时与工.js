@@ -9,12 +9,14 @@
 
   function openEnvPanel() {
     $("sidebar").classList.remove("collapsed");
+    sidebarSyncState();   // 展开侧栏也要落盘，避免刷新后按旧「收起」值恢复
     showPanel("env");
     loadEnv(false);
   }
 
   function openRunnerPanel() {
     $("sidebar").classList.remove("collapsed");
+    sidebarSyncState();   // 同上
     showPanel("runner");
     loadRunnerList().then(runnerTick);
   }

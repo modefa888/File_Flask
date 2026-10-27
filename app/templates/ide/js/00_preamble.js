@@ -157,6 +157,8 @@
       const panel = localStorage.getItem("ide.session.panel");
       // 「终端连接」是工具面板，刷新后自动弹出来很打扰（连接本身也已断开），直接忽略。
       if (panel && panel !== "sshconn" && typeof showPanel === "function") showPanel(panel);
+      // 侧栏开合状态：上次收起的就保持收起（showPanel 只负责内容加载，不强制展开侧栏）
+      if (typeof window.sidebarRestoreCollapsed === "function") window.sidebarRestoreCollapsed();
       if (panel === "search" && typeof window.sessionRestoreSearch === "function") window.sessionRestoreSearch();
       // 数据库连接面板：连接列表是懒加载的（点侧栏图标才拉取），会话恢复时要主动补一次，否则刷新后左栏空白
       if (panel === "dbconn" && typeof loadDbConns === "function") loadDbConns();

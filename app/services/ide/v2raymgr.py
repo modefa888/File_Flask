@@ -18,14 +18,17 @@
 """
 from __future__ import annotations
 
+import gzip
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -578,12 +581,71 @@ def _node_proxy_url() -> str:
     return "socks5://%s127.0.0.1:%d" % (auth, port)
 
 
+# HTML 跳转页里的真实地址：<meta http-equiv="refresh" content="0; url=...">
+# 或 window.location.href = "..." / location.replace("...")
+_SUB_HTML_REDIRECT_RE = re.compile(
+    r'(?:url=|window\.location(?:\.href)?\s*=\s*|location\.(?:href|replace)\s*[=(]\s*)'
+    r'[\'"]?\s*(https?://[^\s\'"<>;]+)', re.I)
+
+
+def _sub_fetch_raw(url: str, proxy: str):
+    """拉取一个订阅地址：手动跟随 3xx 重定向（支持相对地址与 http/https 互跳）。
+
+    返回 (原始字节, 最终地址, 错误信息)；出错时字节为空。
+    """
+    cur = str(url or "").strip()
+    for _ in range(8):
+        if not cur.startswith(("http://", "https://")):
+            return b"", cur, "订阅重定向到了不支持的地址：%s" % cur
+        try:
+            opener = proxyutil.build_opener(proxy=proxy, follow_redirects=False)
+            req = urllib.request.Request(cur, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; FileFlask-V2Ray/1.0)",
+                "Accept": "*/*",
+            })
+            with opener.open(req, timeout=30) as resp:
+                code = resp.getcode()
+                loc = (resp.headers.get("Location") or "").strip()
+                if 300 <= code < 400 and loc:
+                    cur = urllib.parse.urljoin(cur, loc)
+                    continue
+                return resp.read(4 * 1024 * 1024), cur, ""
+        except urllib.error.HTTPError as e:
+            # follow_redirects=False 时 3xx 以 HTTPError 抛出，Location 在其 headers 里
+            loc = ""
+            try:
+                loc = (e.headers.get("Location") or "").strip()
+            except Exception:                      # noqa: BLE001
+                pass
+            if e.code in (301, 302, 303, 307, 308) and loc:
+                cur = urllib.parse.urljoin(cur, loc)
+                continue
+            return b"", cur, "订阅请求失败：%s" % proxyutil.http_status_text(e.code)
+        except Exception as e:                  # noqa: BLE001
+            return b"", cur, proxyutil.friendly_error(e, cur)
+    return b"", cur, "订阅重定向次数过多（超过 8 次）"
+
+
+def _sub_decode(raw: bytes) -> str:
+    """订阅原始字节 → 文本：解 gzip（部分服务器强制压缩）、去 BOM。"""
+    if raw[:2] == b"\x1f\x8b":
+        try:
+            raw = gzip.decompress(raw)
+        except OSError:
+            pass
+    return raw.decode("utf-8", "replace").lstrip("\ufeff").strip()
+
+
 def fetch_subscription(sub: dict):
     """拉取订阅内容，返回 (分享链接列表, 错误信息)。
 
     优先用 sub.proxy / 全局 sub_proxy 指定的代理（留空 = 直连）；
     直连或指定代理失败时，若内核正在运行，自动改走当前连接节点的本机
     socks 代理重试一次（订阅站常需要翻墙才能访问）。
+
+    重定向处理：手动跟随 3xx（含相对地址 / http↔https 互跳）；
+    若拿到的是 HTML 跳转页（meta refresh / JS location），自动提取
+    里面的真实 txt 订阅地址再拉一次。
     """
     url = str((sub or {}).get("url") or "").strip()
     if not url:
@@ -595,25 +657,23 @@ def fetch_subscription(sub: dict):
         proxies.append(fallback)
     last_err = ""
     for i, px in enumerate(proxies):
-        try:
-            opener = proxyutil.build_opener(proxy=px, follow_redirects=True)
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "Mozilla/5.0 (compatible; FileFlask-V2Ray/1.0)",
-                "Accept": "*/*",
-            })
-            with opener.open(req, timeout=30) as resp:
-                raw = resp.read(4 * 1024 * 1024)
-        except urllib.error.HTTPError as e:
-            last_err = "订阅请求失败：%s" % proxyutil.http_status_text(e.code)
+        raw, final_url, err = _sub_fetch_raw(url, px)
+        if err:
+            last_err = err
             continue
-        except Exception as e:                  # noqa: BLE001
-            last_err = proxyutil.friendly_error(e, url)
-            continue
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            text = raw.decode("utf-8", "replace")
+        if final_url != url:
+            _log.info("订阅 %s 重定向到 %s", url, final_url)
+        text = _sub_decode(raw)
         links = v2raycfg.parse_subscription(text)
+        if not links:
+            # 内容不是订阅：多半是 HTML 跳转页，抓出里面的真实地址再拉一次
+            m = _SUB_HTML_REDIRECT_RE.search(text[:8192])
+            if m:
+                raw2, final2, err2 = _sub_fetch_raw(m.group(1), px)
+                if not err2:
+                    if final2 != m.group(1):
+                        _log.info("订阅 %s 经 HTML 跳转到 %s", url, final2)
+                    links = v2raycfg.parse_subscription(_sub_decode(raw2))
         if not links:
             return [], "订阅内容里没有解析到节点（支持 vmess / vless / trojan / ss 分享链接）"
         if i > 0:

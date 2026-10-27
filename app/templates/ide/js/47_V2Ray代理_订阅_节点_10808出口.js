@@ -25,6 +25,7 @@
                trafTimer: null, traffic: null,
                busy: false, showManual: false, exit: null, ping: {}, dl: {}, kw: "",
                nodeTab: "__all__", sortPing: false, hideFail: false,
+               subBusy: {}, subAllBusy: false,
                job: null, es: null, pendingUrl: "" };
 
   function escA(s) { return esc(String(s == null ? "" : s)).replace(/"/g, "&quot;"); }
@@ -351,6 +352,29 @@
 
   /* 打开状态持久化：刷新后自动恢复「V2Ray 代理」大页及其所在分区 */
   const LS_VIEW = "ide_v2ray_view";
+
+  /* 节点列表视图状态持久化：延迟排序 / 隐藏超时 / 分组 tab / 搜索关键词，刷新后仍在 */
+  const LS_NODES_VIEW = "ide_v2ray_nodes_view";
+  function v2SaveNodesView() {
+    try {
+      localStorage.setItem(LS_NODES_VIEW, JSON.stringify({
+        sortPing: !!V2.sortPing,
+        hideFail: !!V2.hideFail,
+        nodeTab: V2.nodeTab || "__all__",
+        kw: V2.kw || "",
+      }));
+    } catch (_) { /* 隐私模式等场景忽略 */ }
+  }
+  function v2LoadNodesView() {
+    try {
+      const s = JSON.parse(localStorage.getItem(LS_NODES_VIEW) || "null") || {};
+      V2.sortPing = !!s.sortPing;
+      V2.hideFail = !!s.hideFail;
+      V2.nodeTab = s.nodeTab || "__all__";
+      V2.kw = s.kw || "";
+    } catch (_) { /* 解析失败就用默认值 */ }
+  }
+  v2LoadNodesView();
   function v2SaveView(open) {
     try {
       localStorage.setItem(LS_VIEW, JSON.stringify({
@@ -636,10 +660,16 @@
       const vb = (V2.ping[b.id] && V2.ping[b.id].ok) ? V2.ping[b.id].ms : 9e9;
       return va - vb;
     });
+    // 大量节点（上千条）时一次性 innerHTML 全量渲染会严重卡顿：
+    // 只渲染前 V2.nodeShow 条，列表末尾放「加载更多」，点一次补一批
+    if (!V2.nodeShow) V2.nodeShow = 60;
+    const shown = list.slice(0, V2.nodeShow);
     const tabHtml = '<div class="v2v-tabs">' + tabs.map(t =>
       '<button class="v2v-tab' + (V2.nodeTab === t.k ? " on" : "") + '" data-act="node-tab" data-tab="' +
       escA(t.k) + '">' + esc(t.label) + (t.k === "__all__" ? " " + V2.nodes.length : "") + "</button>").join("") + "</div>";
     const cid = curNodeId();
+    // 测速超时的节点数（当前已连接的节点不算，避免误删导致断网）
+    const failN = V2.nodes.filter(n => n.id !== cid && V2.ping[n.id] && !V2.ping[n.id].ok).length;
     let h = '<div class="v2v-sec">' +
       v2vSecHead("bi-plus-circle", "导入节点", "支持 vmess / vless / trojan / ss 分享链接，可一次粘贴多行") +
       '<div class="v2v-grid"><label class="v2v-field v2v-field-wide">' +
@@ -684,14 +714,16 @@
         '<button class="v2v-tab' + (V2.hideFail ? " on" : "") + '" data-act="hide-fail" title="隐藏测速超时的节点">' +
         '<i class="bi bi-eye-slash"></i>隐藏超时</button>' +
         '<button class="v2v-btn" data-act="ping-all"' + (list.length && !V2.pingProg ? "" : " disabled") +
-        '><i class="bi bi-lightning-charge"></i>' + (V2.pingProg ? "测速中…" : "全部测速") + "</button>" + tabHtml);
+        '><i class="bi bi-lightning-charge"></i>' + (V2.pingProg ? "测速中…" : "全部测速") + "</button>" +
+        '<button class="v2v-btn danger" data-act="del-timeout"' + (failN && !V2.pingProg ? "" : " disabled") +
+        ' title="删除所有测速超时的节点"><i class="bi bi-trash"></i>删除超时' + (failN ? " " + failN : "") + "</button>" + tabHtml);
     if (!list.length) {
       h += '<div class="v2v-empty"><i class="bi bi-inbox"></i><b>' +
         (V2.nodes.length ? "没有匹配的节点" : "还没有节点") + "</b><span>" +
         (V2.nodes.length ? "换个关键词试试，或清空搜索框"
                          : "在上方粘贴分享链接，或到「订阅」里添加一个订阅地址") + "</span></div>";
     } else {
-      h += '<div class="v2v-list">' + list.map(n => {
+      h += '<div class="v2v-list">' + shown.map(n => {
         const p = V2.ping[n.id];
         let ping = "";
         if (p !== undefined) {
@@ -722,7 +754,11 @@
             '<button class="v2v-btn ico" data-act="rename" data-id="' + escA(n.id) + '" title="编辑节点信息"><i class="bi bi-pencil"></i></button>' +
             '<button class="v2v-btn ico danger" data-act="del-node" data-id="' + escA(n.id) + '" title="删除"><i class="bi bi-trash"></i></button>' +
           "</div></div>";
-      }).join("") + "</div>";
+      }).join("") +
+      (list.length > shown.length
+        ? '<div class="v2v-more"><button class="v2v-btn" data-act="nodes-more">' +
+          '<i class="bi bi-chevron-down"></i>加载更多（已显示 ' + shown.length + " / " + list.length + "）</button></div>"
+        : "") + "</div>";
     }
     return h + "</div>";
   }
@@ -747,7 +783,9 @@
       '<button class="v2v-btn primary" data-act="save-sub"><i class="bi bi-check2"></i>' + (editing ? "保存修改" : "添加订阅") + "</button>" +
       (editing ? '<button class="v2v-btn" data-act="cancel-sub">取消编辑</button>' : "") +
       '<div class="v2v-flex"></div>' +
-      '<button class="v2v-btn" data-act="refresh-all-subs"><i class="bi bi-cloud-download"></i>刷新全部订阅</button>' +
+      '<button class="v2v-btn" data-act="refresh-all-subs"' + (V2.subAllBusy ? " disabled" : "") + '>' +
+      '<i class="bi bi-cloud-download' + (V2.subAllBusy ? " spin" : "") + '"></i>' +
+      (V2.subAllBusy ? "更新中…" : "刷新全部订阅") + "</button>" +
       "</div>" +
       '<div class="v2v-hint"><i class="bi bi-info-circle"></i><div>订阅内容里的分享链接会被解析成节点；刷新会<strong>覆盖该订阅下已有的节点</strong>，' +
       "手动添加的节点（不属于任何订阅）不受影响。</div></div></div>";
@@ -770,7 +808,10 @@
             (s.last_error ? '<span class="fail">' + esc(s.last_error) + "</span>" : "") +
           "</div></div>" +
           '<div class="v2v-ops">' +
-            '<button class="v2v-btn" data-act="refresh-sub" data-id="' + escA(s.id) + '"><i class="bi bi-arrow-repeat"></i>刷新</button>' +
+            '<button class="v2v-btn" data-act="refresh-sub" data-id="' + escA(s.id) + '"' +
+              (V2.subBusy[s.id] || V2.subAllBusy ? " disabled" : "") + '>' +
+              '<i class="bi bi-arrow-repeat' + (V2.subBusy[s.id] ? " spin" : "") + '"></i>' +
+              (V2.subBusy[s.id] ? "更新中…" : "刷新") + "</button>" +
             '<button class="v2v-btn ico" data-act="edit-sub" data-id="' + escA(s.id) + '" title="编辑"><i class="bi bi-pencil"></i></button>' +
             '<button class="v2v-btn ico danger" data-act="del-sub" data-id="' + escA(s.id) + '" title="删除"><i class="bi bi-trash"></i></button>' +
           "</div></div>";
@@ -991,6 +1032,8 @@
       clearTimeout(V2.kwTimer);
       V2.kwTimer = setTimeout(() => {
         const pos = e.target.selectionStart;
+        V2.nodeShow = 60;   // 搜索词变了，重置回首屏批量
+        v2SaveNodesView();
         v2vRender();
         const el = $("v2vKw");
         if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch (_) { /* 忽略 */ } }
@@ -1098,17 +1141,39 @@
       case "toggle": await v2ToggleConnect(); break;
       case "node-tab": {
         V2.nodeTab = ds.tab || "__all__";
+        V2.nodeShow = 60;   // 过滤条件变了，重置回首屏批量
+        v2SaveNodesView();
         if (v2vActive()) v2vRender();
         break;
       }
       case "sort-ping": {
         V2.sortPing = !V2.sortPing;
+        V2.nodeShow = 60;
+        v2SaveNodesView();
         if (v2vActive()) v2vRender();
         break;
       }
       case "hide-fail": {
         V2.hideFail = !V2.hideFail;
+        V2.nodeShow = 60;
+        v2SaveNodesView();
         if (v2vActive()) v2vRender();
+        break;
+      }
+      case "nodes-more": {
+        // 追加一批节点：重渲染后把滚动位置还原，避免视口跳回顶部
+        V2.nodeShow = (V2.nodeShow || 60) + 150;
+        const vbox = $("v2View");
+        const sc = (function findScroll(el) {
+          while (el && el.parentElement) {
+            el = el.parentElement;
+            if (el.scrollHeight > el.clientHeight + 1) return el;
+          }
+          return null;
+        })(vbox);
+        const stTop = sc ? sc.scrollTop : 0;
+        if (v2vActive()) v2vRender();
+        if (sc) sc.scrollTop = stTop;
         break;
       }
       case "restart": {
@@ -1258,6 +1323,21 @@
         await v2Reload();
         break;
       }
+      case "del-timeout": {
+        // 批量删除测速超时的节点（排除当前已连接的节点，避免误删导致断网）
+        const ids = V2.nodes
+          .filter(n => n.id !== curNodeId() && V2.ping[n.id] && !V2.ping[n.id].ok)
+          .map(n => n.id);
+        if (!ids.length) { toast("没有测速超时的节点", "warn"); break; }
+        const ok = await uiConfirm("删除超时节点",
+          "确定删除 " + ids.length + " 个测速超时的节点？该操作不可恢复。", "删除", true);
+        if (!ok) break;
+        const r = await post("/api/v2ray/nodes/delete", { ids: ids });
+        if (r.error) return toast(r.error, "err");
+        toast("已删除 " + ids.length + " 个超时节点", "ok");
+        await v2Reload();
+        break;
+      }
 
       /* -------- 订阅 -------- */
       case "save-sub": {
@@ -1280,20 +1360,38 @@
       case "cancel-sub": V2.selSub = null; v2vRender(); break;
       case "edit-sub": V2.selSub = V2.subs.find(s => s.id === ds.id) || null; v2vRender(); break;
       case "refresh-sub": {
+        // 更新中不允许重复点击
+        if (V2.subBusy[ds.id] || V2.subAllBusy) break;
+        V2.subBusy[ds.id] = true;
+        if (v2vActive()) v2vRender();
         toast("正在拉取订阅…", "info");
-        const r = await post("/api/v2ray/subs/refresh", { id: ds.id });
-        const one = (r.results || [])[0] || {};
-        toast(one.error ? one.error : ("已更新 " + (one.count || 0) + " 个节点"), one.error ? "err" : "ok");
-        await v2Reload();
+        try {
+          const r = await post("/api/v2ray/subs/refresh", { id: ds.id });
+          const one = (r.results || [])[0] || {};
+          toast(one.error ? one.error : ("已更新 " + (one.count || 0) + " 个节点"), one.error ? "err" : "ok");
+          await v2Reload();
+        } finally {
+          delete V2.subBusy[ds.id];
+          if (v2vActive()) v2vRender();
+          v2SideRender();
+        }
         break;
       }
       case "refresh-all-subs": {
+        if (V2.subAllBusy) break;
+        V2.subAllBusy = true;
+        if (v2vActive()) v2vRender();
         toast("正在拉取全部订阅…", "info");
-        const r = await post("/api/v2ray/subs/refresh", {});
-        if (r.error) return toast(r.error, "err");
-        const bad = (r.results || []).filter(x => x.error).length;
-        toast("共导入 " + (r.total || 0) + " 个节点" + (bad ? "，" + bad + " 个订阅失败" : ""), bad ? "warn" : "ok");
-        await v2Reload();
+        try {
+          const r = await post("/api/v2ray/subs/refresh", {});
+          if (r.error) { toast(r.error, "err"); break; }
+          const bad = (r.results || []).filter(x => x.error).length;
+          toast("共导入 " + (r.total || 0) + " 个节点" + (bad ? "，" + bad + " 个订阅失败" : ""), bad ? "warn" : "ok");
+          await v2Reload();
+        } finally {
+          V2.subAllBusy = false;
+          if (v2vActive()) v2vRender();
+        }
         break;
       }
       case "del-sub": {

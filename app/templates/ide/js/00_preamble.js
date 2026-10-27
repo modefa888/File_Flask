@@ -1546,10 +1546,14 @@
             "Ctrl-Alt-[": function (c) { c.foldCode(c.getCursor(), null, "unfold"); },  // 展开光标所在块
             "Cmd-Alt-[":  function (c) { c.foldCode(c.getCursor(), null, "unfold"); },
             "Ctrl-Alt-Shift-]": function (c) { CodeMirror.commands.foldAll(c); },        // 折叠全部
-            "Ctrl-Alt-Shift-[": function (c) { CodeMirror.commands.unfoldAll(c); }       // 展开全部
+            "Ctrl-Alt-Shift-[": function (c) { CodeMirror.commands.unfoldAll(c); },      // 展开全部
+            // JSON 格式优化显示（实现见 02_ 编辑器菜单模块；非 JSON 文件给出提示）
+            "Shift-Alt-F": function (c) { if (typeof jsonFormatDoc === "function") jsonFormatDoc(null, false); }
           }
         });
         tab.cm = cm;
+        // JSON 文件：在编辑器右上角挂「格式化 / 压缩」浮动工具条（样式同 Markdown 预览工具条，实现见 02_）
+        if (typeof jsonEnsureToolbar === "function") jsonEnsureToolbar(tab);
         // 语法模式异步套用：内容先可见，模式脚本即使慢/失败也不再阻塞打开
         if (!big) ensureMode(ext).then(m => { if (m && tab.cm === cm) { cm.setOption("mode", m); scheduleRefresh(tab); } }).catch(() => {});
         // 代码补全（仿 VS Code IntelliSense）：候选来源与触发逻辑见 37_ 模块

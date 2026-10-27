@@ -142,14 +142,14 @@ def _plugin_counts():
 
 
 def _ssh_count():
-    """统计已保存的 SSH 连接数。"""
-    import json
-    path = os.path.join(config.DATA_ROOT, ".ssh_connections.json")
+    """统计已保存的 SSH 连接数（store.db · ssh_conns 表）。"""
     try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        return len(data) if isinstance(data, list) else 0
-    except (OSError, ValueError):
+        conn = store_conn()
+        try:
+            return conn.execute("SELECT COUNT(*) FROM ssh_conns").fetchone()[0]
+        finally:
+            conn.close()
+    except Exception:
         return 0
 
 

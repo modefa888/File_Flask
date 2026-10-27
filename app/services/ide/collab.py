@@ -21,6 +21,8 @@ import time
 from bisect import bisect_left
 
 from ...log import get_logger
+from ...services.common import store_db
+from ...services.common.store_db import store_conn, store_tx, migrate_json_once, get_meta
 
 _log = get_logger()
 
@@ -32,6 +34,26 @@ _rooms_lock = threading.Lock()
 _DATA_FILE = os.path.abspath(os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "data", "collab_rooms.json"))
 _MAX_PERSIST_TEXT = 2 * 1024 * 1024   # 超大文件不落盘（房间仍可用，但重启后需重建）
+
+# 本模块专属表：协作房间 / 共享前快照（建表 DDL 放本模块，而非 store_db 的 _SCHEMA，跟随模块演进）
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS collab_rooms (
+    token TEXT PRIMARY KEY,
+    data  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS collab_preshare (
+    path TEXT PRIMARY KEY,
+    data TEXT NOT NULL
+);
+"""
+
+def init_db():
+    """幂等建表；失败只告警，不阻断启动。"""
+    try:
+        with store_tx() as conn:
+            conn.executescript(_SCHEMA)
+    except Exception as e:                      # noqa: BLE001
+        _log.warning("协作表初始化失败: %s", e)
 
 _save_lock = threading.Lock()
 _save_timer = None
@@ -74,38 +96,67 @@ _preshare = {}
 _preshare_lock = threading.Lock()
 
 
+# 最多保留多少份「共享前版本」快照；超出时删最旧（created 最小）的，避免无限增长
+_PRESHARE_MAX = 2000
+
+
+def _import_collab_preshare(conn, data):
+    if isinstance(data, dict):
+        for path, snap in data.items():
+            if isinstance(snap, dict):
+                conn.execute("INSERT OR REPLACE INTO collab_preshare (path, data) VALUES (?, ?)",
+                             (path, json.dumps(snap, ensure_ascii=False)))
+
+
 def _load_preshare():
+    """从 store.db 恢复内存中的共享前快照（启动时调用）。"""
     try:
-        with open(_PRESHARE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            _preshare.update(data)
-    except (OSError, ValueError):
-        pass
-
-
-def _save_preshare():
-    try:
-        os.makedirs(os.path.dirname(_PRESHARE_FILE), exist_ok=True)
-        tmp = _PRESHARE_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(_preshare, f, ensure_ascii=False)
-        os.replace(tmp, _PRESHARE_FILE)
-    except OSError:
-        pass
+        conn = store_conn()
+        try:
+            rows = conn.execute("SELECT path, data FROM collab_preshare").fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return
+    with _preshare_lock:
+        for r in rows:
+            try:
+                _preshare[r["path"]] = json.loads(r["data"])
+            except Exception:
+                pass
 
 
 def record_preshare(path, text, token=None, created=None):
-    """记录某路径的「共享前版本」快照；同一路径再次发起共享时覆盖为最新一次。"""
+    """记录某路径的「共享前版本」快照；同一路径再次发起共享时覆盖为最新一次。
+
+    落 store.db 的 collab_preshare 表（按文件绝对路径为主键）；超出上限时删最旧的快照。
+    """
     if not path or text is None or len(text) > _MAX_PERSIST_TEXT:
         return
+    abp = os.path.abspath(path)
+    created = int(created or time.time())
+    blob = json.dumps({"text": text, "created": created, "token": token}, ensure_ascii=False)
     with _preshare_lock:
-        _preshare[os.path.abspath(path)] = {
-            "text": text,
-            "created": int(created or time.time()),
-            "token": token,
-        }
-    _save_preshare()
+        _preshare[abp] = {"text": text, "created": created, "token": token}
+    try:
+        with store_tx() as conn:
+            conn.execute("INSERT OR REPLACE INTO collab_preshare (path, data) VALUES (?, ?)",
+                         (abp, blob))
+            n = conn.execute("SELECT COUNT(*) FROM collab_preshare").fetchone()[0]
+            if n > _PRESHARE_MAX:
+                excess = n - _PRESHARE_MAX
+                old = conn.execute(
+                    "SELECT path FROM collab_preshare "
+                    "ORDER BY CAST(json_extract(data, '$.created') AS INTEGER) ASC LIMIT ?",
+                    (excess,)).fetchall()
+                old_paths = [r["path"] for r in old]
+                for p in old_paths:
+                    conn.execute("DELETE FROM collab_preshare WHERE path=?", (p,))
+                with _preshare_lock:
+                    for p in old_paths:
+                        _preshare.pop(p, None)
+    except Exception:
+        pass
 
 
 def preshare_for(path):
@@ -114,17 +165,14 @@ def preshare_for(path):
         return _preshare.get(os.path.abspath(path))
 
 
-_load_preshare()
-
-
 def _persist():
-    """把全部房间写入磁盘（原子替换）。"""
+    """把全部房间写入 store.db（collab_rooms 表；超大文件按 _MAX_PERSIST_TEXT 跳过）。"""
     try:
-        data = []
+        rows = []
         for r in _rooms.values():
             if len(r.text) > _MAX_PERSIST_TEXT:
                 continue
-            data.append({
+            rows.append((r.token, json.dumps({
                 "token": r.token, "path": r.path, "name": r.name,
                 "created": r.created, "version": r.version,
                 "host_key": r.host_key, "group": r.group,
@@ -133,13 +181,12 @@ def _persist():
                 "text": r.text, "baseline": r.baseline, "log": r.log,
                 "char_authors": _pack_authors(r.char_authors),
                 "author_info": r.author_info,
-            })
-        os.makedirs(os.path.dirname(_DATA_FILE), exist_ok=True)
-        tmp = _DATA_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-        os.replace(tmp, _DATA_FILE)
-    except OSError:
+            }, ensure_ascii=False)))
+        with store_tx() as conn:
+            conn.execute("DELETE FROM collab_rooms")
+            conn.executemany(
+                "INSERT OR REPLACE INTO collab_rooms (token, data) VALUES (?, ?)", rows)
+    except Exception:
         pass
 
 
@@ -161,12 +208,22 @@ def _flush_save():
 
 
 def _load():
+    """从 store.db（collab_rooms 表）恢复上次未关闭的房间。"""
     try:
-        with open(_DATA_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
+        conn = store_conn()
+        try:
+            rows = conn.execute("SELECT data FROM collab_rooms").fetchall()
+        finally:
+            conn.close()
+    except Exception:
         return
-    for d in data or []:
+    for raw in rows:
+        try:
+            d = json.loads(raw["data"])
+        except Exception:
+            continue
+        if not isinstance(d, dict) or not d.get("token"):
+            continue
         try:
             r = Room(d["token"], d["path"], d.get("name") or os.path.basename(d["path"]))
             r.version = int(d.get("version", 0))
@@ -269,7 +326,29 @@ class Room:
         ]
 
 
-_load()   # 启动时恢复上次未关闭的房间（Room 类已定义）
+def _import_collab_rooms(conn, data):
+    """旧版 collab_rooms.json 一次性迁入 store.db。"""
+    if isinstance(data, list):
+        for d in data:
+            if isinstance(d, dict) and d.get("token"):
+                conn.execute("INSERT OR REPLACE INTO collab_rooms (token, data) VALUES (?, ?)",
+                             (d["token"], json.dumps(d, ensure_ascii=False)))
+
+
+# 旧版 JSON 一次性迁入 store.db（仅首次执行；成功后删除旧文件，避免与库双份）
+init_db()
+migrate_json_once("json_migrated:collab_rooms", _DATA_FILE, _import_collab_rooms)
+migrate_json_once("json_migrated:collab_preshare", _PRESHARE_FILE, _import_collab_preshare)
+for _marker, _jf in (("json_migrated:collab_rooms", _DATA_FILE),
+                     ("json_migrated:collab_preshare", _PRESHARE_FILE)):
+    if get_meta(_marker) and os.path.isfile(_jf):
+        try:
+            os.remove(_jf)
+        except OSError:
+            pass
+
+_load_preshare()   # 从库恢复内存中的共享前快照
+_load()            # 从库恢复上次未关闭的房间（Room 类已定义）
 
 
 def create_room(path, name=None, group=None, max_peers=None, allowed_users=None, expires_in=None):

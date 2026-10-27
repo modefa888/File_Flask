@@ -25,6 +25,21 @@
   .ed-tools:hover, .ed-tools.m-open { background: #3a3a3a; color: #ffffff; }
   /* 拆分按钮只在当前激活的编辑组显示（同 VS Code，全局只出现一个） */
   .editor-group:not(.active-group) .ed-split { display: none; }
+  /* JSON 格式化浮动工具条：挂在 cm-host 内右上角，样式同 Markdown 预览工具条（22_） */
+  .json-toolbar {
+    position: absolute; top: 8px; right: 16px; z-index: 20;
+    display: flex; gap: 2px; padding: 2px;
+    background: #252526; border: 1px solid #454545; border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+    opacity: .4; transition: opacity .15s;
+  }
+  .json-toolbar:hover, .json-toolbar:focus-within { opacity: 1; }
+  .json-toolbar button {
+    background: transparent; border: none; color: #bbbbbb; font-family: inherit;
+    font-size: 12px; padding: 3px 9px; border-radius: 4px; cursor: pointer;
+    display: flex; align-items: center; gap: 4px; white-space: nowrap;
+  }
+  .json-toolbar button:hover { background: #3a3d41; color: #ffffff; }
 
   .editor-host-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; }
   .cm-host { position: absolute; inset: 0; display: none; }

@@ -515,6 +515,24 @@ CREATE TABLE IF NOT EXISTS api_stats (
     last_status INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (rule, method)
 );
+
+-- SSH 终端连接（密码 / 私钥经 secret.encrypt 加密后存 data 列；与 db_conns 同为连接类配置，统一进库）
+CREATE TABLE IF NOT EXISTS ssh_conns (
+    id   TEXT PRIMARY KEY,
+    data TEXT NOT NULL
+);
+
+-- 实时协作房间（整条房间快照存 data 列：text / baseline / 归属序列等；超大文件按 _MAX_PERSIST_TEXT 跳过）
+CREATE TABLE IF NOT EXISTS collab_rooms (
+    token TEXT PRIMARY KEY,
+    data  TEXT NOT NULL
+);
+
+-- 协作「共享前版本」快照（按文件绝对路径；保存协作文件时据此在文件旁留备份）
+CREATE TABLE IF NOT EXISTS collab_preshare (
+    path TEXT PRIMARY KEY,
+    data TEXT NOT NULL
+);
 """
 
 

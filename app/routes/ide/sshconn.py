@@ -10,8 +10,8 @@ POST /api/ssh/input          {id, data}  发送按键 / 字符串
 POST /api/ssh/resize         {id, cols, rows}
 POST /api/ssh/close          {id}
 
-存储：config.DATA_ROOT/.ssh_connections.json；密码 / 私钥用 secret.encrypt 加密落库，
-前端提交时先经 transport.unwrap（RSA 传输层）再加密存储。
+存储：store.db 的 ssh_conns 表（密码 / 私钥用 secret.encrypt 加密后存 data 列）；
+前端提交时先经 transport.unwrap（RSA 传输层）再加密存储。旧版 .ssh_connections.json 已在启动时迁入并删除。
 """
 import base64
 import json
@@ -30,6 +30,7 @@ from flask import Blueprint, request, jsonify, Response
 from ... import config
 from ...log import get_logger
 from ...services.common import secret, transport
+from ...services.common.store_db import store_conn, store_tx, migrate_json_once, get_meta
 
 
 _log = get_logger()
@@ -41,8 +42,26 @@ try:
 except Exception:  # noqa: BLE001
     _PARAMIKO_OK = False
 
+# 连接配置统一存 store.db 的 ssh_conns 表（密码 / 私钥经 secret.encrypt 加密后存 data 列）。
+# 旧版 .ssh_connections.json 在启动时一次性迁入，迁移成功后删除，避免与数据库双份。
 _CONN_FILE = os.path.join(config.DATA_ROOT, ".ssh_connections.json")
 _LOCK = threading.Lock()
+
+# 本模块专属表：SSH 连接（建表 DDL 放本模块，而非 store_db 的 _SCHEMA，跟随模块演进）
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS ssh_conns (
+    id   TEXT PRIMARY KEY,
+    data TEXT NOT NULL
+);
+"""
+
+def init_db():
+    """幂等建表；失败只告警，不阻断启动。"""
+    try:
+        with store_tx() as conn:
+            conn.executescript(_SCHEMA)
+    except Exception as e:                      # noqa: BLE001
+        _log.warning("SSH 连接表初始化失败: %s", e)
 
 # 会话输出缓冲上限（块数），超出丢弃最旧，防止慢消费撑爆内存
 _OUT_MAX = 2000
@@ -71,29 +90,62 @@ class _Sess:
 
 
 # --------------------------------------------------------------------------
-# 连接存储
+# 连接存储（store.db · ssh_conns 表；data 列存整条连接 JSON，敏感字段已加密）
 # --------------------------------------------------------------------------
+def _import_ssh_conns(conn, data):
+    if not isinstance(data, list):
+        return
+    for c in data:
+        if isinstance(c, dict):
+            cid = c.get("id") or uuid.uuid4().hex[:12]
+            conn.execute("INSERT OR REPLACE INTO ssh_conns (id, data) VALUES (?, ?)",
+                         (cid, json.dumps(c, ensure_ascii=False)))
+
+
 def _load_conns():
     try:
-        with open(_CONN_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except (OSError, ValueError):
+        conn = store_conn()
+        try:
+            rows = conn.execute("SELECT data FROM ssh_conns").fetchall()
+        finally:
+            conn.close()
+    except Exception:
         return []
+    out = []
+    for r in rows:
+        try:
+            d = json.loads(r["data"])
+            if isinstance(d, dict):
+                out.append(d)
+        except Exception:
+            pass
+    return out
 
 
 def _save_conns(conns):
-    tmp = _CONN_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(conns, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, _CONN_FILE)
+    """整表重写（连接数很少，且 _save_conn 内部用「读-改-写」语义调用）。"""
+    with store_tx() as conn:
+        conn.execute("DELETE FROM ssh_conns")
+        for c in conns:
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("id") or uuid.uuid4().hex[:12]
+            conn.execute("INSERT OR REPLACE INTO ssh_conns (id, data) VALUES (?, ?)",
+                         (cid, json.dumps(c, ensure_ascii=False)))
 
 
 def _get_conn(cid):
-    for c in _load_conns():
-        if c.get("id") == cid:
-            return c
-    return None
+    if not cid:
+        return None
+    try:
+        conn = store_conn()
+        try:
+            r = conn.execute("SELECT data FROM ssh_conns WHERE id=?", (cid,)).fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        return None
+    return json.loads(r["data"]) if r else None
 
 
 def _public(c):
@@ -499,3 +551,13 @@ def api_ssh_close():
     except Exception:  # noqa: BLE001
         pass
     return jsonify({"ok": True})
+
+
+# 旧版 .ssh_connections.json 一次性迁入 store.db（仅首次执行；成功后删除旧文件，避免与库双份）
+init_db()
+migrate_json_once("json_migrated:ssh_conns", _CONN_FILE, _import_ssh_conns)
+if get_meta("json_migrated:ssh_conns") and os.path.isfile(_CONN_FILE):
+    try:
+        os.remove(_CONN_FILE)
+    except OSError:
+        pass

@@ -378,6 +378,10 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .actord-ic { color: #005fb8; }
 :where(html.theme-light) .actord-mv { background: #e8e8e8; color: #333333; border-color: #cecece; }
 :where(html.theme-light) .actord-mv:hover { background: #dcdcdc; color: #000000; }
+:where(html.theme-light) .actord-tgl { color: #8a8a8a; border-color: #cecece; background: #ffffff; }
+:where(html.theme-light) .actord-tgl:hover { color: #333333; border-color: #b0b0b0; }
+:where(html.theme-light) .actord-tgl.on { color: #107c41; border-color: rgba(16, 124, 65, .55); background: rgba(16, 124, 65, .08); }
+:where(html.theme-light) .actord-tgl.on:hover { color: #0b5c31; }
 
 /* ---------- 设置页：通知（24） ---------- */
 :where(html.theme-light) .set-sec h2 { color: #333333; border-bottom-color: #e0e0e0; }
@@ -748,6 +752,12 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
   background: #f3f3f3; border-color: #cecece; box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
 }
 :where(html.theme-light) .md-toolbar button, :where(html.theme-light) .gitignore-toolbar button { color: #5a5a5a; }
+/* JSON 格式化浮动工具条（10_） */
+:where(html.theme-light) .json-toolbar {
+  background: #f3f3f3; border-color: #cecece; box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+}
+:where(html.theme-light) .json-toolbar button { color: #5a5a5a; }
+:where(html.theme-light) .json-toolbar button:hover { background: #e0e0e0; color: #000000; }
 :where(html.theme-light) .md-toolbar button:hover, :where(html.theme-light) .gitignore-toolbar button:hover { background: #e0e0e0; color: #000000; }
 :where(html.theme-light) .md-toolbar button.active { background: #dcdcdc; color: #000000; }
 :where(html.theme-light) .md-toolbar .md-tb-sep { background: #cecece; }

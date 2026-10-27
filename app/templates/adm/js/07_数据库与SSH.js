@@ -103,7 +103,7 @@ ADM.modules.push({
             }
         ];
         var html = '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '连接总览',
-            '<span class="adm-hint">数据来源：data/.ssh_connections.json</span>') + '<div class="adm-stat-grid">';
+            '<span class="adm-hint">数据来源：store.db · ssh_conns</span>') + '<div class="adm-stat-grid">';
         html += ADM.stat('bi-terminal-fill', 'SSH 连接', sum.total || 0, '密码 / 私钥已加密存储');
         html += ADM.stat('bi-plug', 'paramiko', sum.paramiko ? '可用' : '未安装',
             sum.paramiko ? '远程建连依赖正常' : '安装后才能建立 SSH 连接');

@@ -1186,6 +1186,50 @@
       return s ? String(s.toString() || "").trim() : "";
     } catch (_) { return ""; }
   }
+  /* ---------- JSON 格式优化显示（格式化 / 压缩，仿 VS Code「格式化文档」） ---------- */
+  // 当前标签是否适合做 JSON 格式化：.json 等后缀直接认；其它后缀看内容开头是否为 { 或 [（另存的接口返回等）
+  function jsonFmtTab(tab) {
+    const t = tab || active;
+    if (!t || !t.cm || t.diff || t.allDiff || t.pluginView) return null;
+    if (typeof t.path === "string" && t.path.charCodeAt(0) < 32) return null;   // 设置页等内部虚拟视图
+    if (["json", "jsonc", "json5", "map"].includes(getExt(t.name))) return t;
+    const head = t.cm.getValue().slice(0, 2048).trimStart();
+    return (head.startsWith("{") || head.startsWith("[")) ? t : null;
+  }
+  // 编辑器右上角浮动工具条（样式同 Markdown 预览工具条）：JSON 标签打开时挂到编辑器内，
+  // cm-host 只在标签激活时显示，所以天然只作用于当前标签；非 JSON 文件不挂
+  function jsonEnsureToolbar(tab) {
+    if (!tab || !tab.cm || tab.jsonTb || !jsonFmtTab(tab)) return;
+    const tb = document.createElement("div");
+    tb.className = "json-toolbar";
+    tb.innerHTML =
+      '<button data-a="fmt" title="JSON 格式优化显示 (Shift+Alt+F)"><i class="bi bi-braces"></i>格式化</button>' +
+      '<button data-a="min" title="压缩为单行"><i class="bi bi-arrows-collapse"></i>压缩</button>';
+    tb.querySelectorAll("button").forEach(b => {
+      b.addEventListener("mousedown", (e) => e.preventDefault());   // 不抢编辑器焦点
+      b.addEventListener("click", () => jsonFormatDoc(tab, b.dataset.a === "min"));
+    });
+    tab.host.appendChild(tb);
+    tab.jsonTb = tb;
+  }
+  // minify=false 美化缩进；true 压缩成单行。只改编辑器缓冲区（可 Ctrl+Z 撤销），保存后写入文件
+  function jsonFormatDoc(tab, minify) {
+    const t = tab || active;
+    if (!t || !t.cm) { toast("先打开一个 JSON 文件", "info"); return; }
+    if (!jsonFmtTab(t)) { toast("当前标签不是 JSON 文件", "info"); return; }
+    const cm = t.cm, src = cm.getValue();
+    let obj;
+    try { obj = JSON.parse(src); }
+    catch (e) { toast("JSON 解析失败：" + String(e.message || e).replace(/^JSON\.parse:?\s*/i, ""), "err"); return; }
+    const out = minify ? JSON.stringify(obj) : JSON.stringify(obj, null, Math.max(2, IDE_SETTINGS.indent || 4));
+    if (out === src) { toast(minify ? "内容已经是压缩格式" : "内容已经是格式化格式", "info"); return; }
+    cm.operation(() => {
+      cm.replaceRange(out, { line: 0, ch: 0 }, { line: cm.lineCount() - 1, ch: cm.getLine(cm.lineCount() - 1).length }, "*json-fmt");
+    });
+    cm.scrollIntoView({ line: 0, ch: 0 });
+    cm.focus();
+    toast(minify ? "JSON 已压缩为单行（Ctrl+Z 可撤销，保存后写入文件）" : "JSON 已格式化（Ctrl+Z 可撤销，保存后写入文件）", "ok");
+  }
   function openEditorCtxMenu(tab, x, y) {
     const cm = tab.cm;
     const ro = !!tab.diff;                                    // 差异视图只读
@@ -1317,6 +1361,18 @@
     // 未知面板（例如会话恢复时插件面板尚未注册、或插件已被卸载）回退到资源管理器，
     // 否则下面的循环会把所有面板隐藏却没有目标可显示，导致侧栏空白。
     if (!panels[name]) name = "explorer";
+    // 被「设置 → 外观」停用的面板不可进入，回退到第一个仍启用的面板（会话恢复等途径的兜底）
+    try {
+      const dis = ideSettingGet("actDisabled", []);
+      if (Array.isArray(dis) && dis.indexOf(name) >= 0) {
+        let fb = null;
+        document.querySelectorAll(".activitybar .act[data-panel]").forEach(a => {
+          const p = a.dataset.panel;
+          if (fb === null && panels[p] && dis.indexOf(p) < 0) fb = p;
+        });
+        if (fb) name = fb;
+      }
+    } catch (_) {}
     // 统一显式设置显示状态：隐藏时置 none，显示时清空内联样式交给 CSS（搜索面板需要 flex 布局）
     Object.keys(panels).forEach(k => {
       const el = $(panels[k]), on = (k === name);

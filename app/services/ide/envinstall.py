@@ -27,6 +27,7 @@ import zipfile
 
 from ... import config
 from ...log import get_logger
+from . import envhist
 
 
 _log = get_logger()
@@ -35,6 +36,7 @@ LOCAL_ROOT = os.path.join(os.path.expanduser("~"), ".local")
 LOCAL_BIN = os.path.join(LOCAL_ROOT, "bin")
 SRC_DIR = os.path.join(LOCAL_ROOT, ".ff-install")
 _HTTP_TIMEOUT = 20
+_META_TIMEOUT = 8                       # 解析版本号的元数据请求：超时就放弃（下载仍用 20 秒）
 _RESOLVE_TTL = 900                      # 版本解析成功缓存 15 分钟
 _RESOLVE_FAIL_TTL = 60                  # 解析失败只短暂缓存，避免反复卡住面板
 _HTTP_ATTEMPTS = 4                      # 单次请求重试次数（网络抖动常见）
@@ -70,12 +72,13 @@ def _open(url, timeout=_HTTP_TIMEOUT, retries=None, headers=None):
 
 
 def _get_json(url):
-    with _open(url) as r:
+    """元数据请求：短超时 + 不重试（解析版本号不能把面板卡死，失败就走「版本待确认」）"""
+    with _open(url, timeout=_META_TIMEOUT, retries=1) as r:
         return json.loads(r.read().decode("utf-8", "replace"))
 
 
 def _get_text(url):
-    with _open(url) as r:
+    with _open(url, timeout=_META_TIMEOUT, retries=1) as r:
         return r.read().decode("utf-8", "replace")
 
 
@@ -296,8 +299,12 @@ def auto_install_enabled() -> bool:
 # ======================================================================
 # 方案展示
 # ======================================================================
-def list_plans(rid: str) -> dict:
-    """返回某运行时的安装方案（用户级方案会解析出最新版本与下载地址）。"""
+def list_plans(rid: str, resolve: bool = True) -> dict:
+    """返回某运行时的安装方案。
+
+    resolve=False 时不访问官方源解析版本号（只返回静态方案，带 resolving=True），
+    面板先秒开方案、再单独补版本，避免网络不通时一直停在「正在获取安装方案…」。
+    """
     plans = PLANS.get(rid)
     if not plans:
         return {"id": rid, "plans": [], "enabled": auto_install_enabled(),
@@ -311,6 +318,7 @@ def list_plans(rid: str) -> dict:
             "enabled": auto_install_enabled() if p["mode"] == "user" else False,
             "packages": p.get("packages") or [],
             "version": "", "url": "", "error": "", "kind": p.get("kind", "tarball"),
+            "resolving": False,
         }
         if p["mode"] == "system":
             if item["packages"]:
@@ -318,12 +326,15 @@ def list_plans(rid: str) -> dict:
             else:
                 item["command"] = ""
         if p["mode"] == "user" and p.get("resolver"):
-            try:
-                info = _cached("res:" + rid + ":" + p["key"], p["resolver"])
-                item["version"] = info.get("version", "")
-                item["url"] = info.get("url", "")
-            except Exception as e:
-                item["error"] = f"获取最新版本失败：{e}"
+            if not resolve:
+                item["resolving"] = True           # 版本号稍后再补（要访问官方源）
+            else:
+                try:
+                    info = _cached("res:" + rid + ":" + p["key"], p["resolver"])
+                    item["version"] = info.get("version", "")
+                    item["url"] = info.get("url", "")
+                except Exception as e:
+                    item["error"] = f"获取最新版本失败：{e}"
         elif p["mode"] == "user" and p.get("script"):
             item["url"] = p["script"]
         elif p["mode"] == "user" and p.get("kind") == "run":
@@ -348,6 +359,7 @@ class _Task:
         self.cancelled = False
         self.installed = []          # 安装出的可执行文件（绝对路径）
         self.started = time.time()
+        self.hist_seq = 0            # env_install_history 里的记录 id（0 = 没落库）
 
     def log(self, text, cls=""):
         self.lines.append({"t": round(time.time() - self.started, 2), "m": str(text), "c": cls})
@@ -483,6 +495,24 @@ def _env_with_bin():
     return env
 
 
+def _resolve_for_install(task, plan):
+    """安装前解析最新版本 / 下载地址。
+
+    元数据请求用短超时（面板不能被卡住），安装时失败一次再重试一次，避免网络抖动误判。
+    """
+    fn = plan.get("resolver")
+    if not fn:
+        return None
+    key = "res:" + task.rid + ":" + plan["key"]
+    try:
+        return _cached(key, fn)
+    except Exception as e:
+        task.log("  获取最新版本失败，重试一次：%s" % e, "err")
+        _resolve_cache.pop(key, None)          # 清掉失败缓存，给第二次机会
+        time.sleep(1)
+        return _cached(key, fn)
+
+
 def _run_user_plan(task, plan):
     """执行用户级安装方案。所有 URL / 参数均来自内置表。"""
     dest_rel = plan.get("dest") or plan.get("key")
@@ -516,7 +546,7 @@ def _run_user_plan(task, plan):
         task.log("完成", "ok")
         return
 
-    info = _cached("res:" + task.rid + ":" + plan["key"], plan["resolver"]) if plan.get("resolver") else None
+    info = _resolve_for_install(task, plan)
     url = (info or {}).get("url") or plan.get("url")
     if not url:
         raise RuntimeError("无法解析下载地址")
@@ -568,11 +598,18 @@ def _worker(task, plan):
             envprobe.invalidate_cache()
         except Exception:
             pass
+        try:                                     # 安装记录落库（失败不影响安装结果）
+            envhist.finish(task)
+        except Exception as e:
+            _log.warning("写安装记录失败：%s", e)
         _log.info("env install %s done ok=%s err=%s", task.rid, task.ok, task.error)
 
 
-def start_install(rid: str, key: str) -> dict:
-    """启动安装任务，返回任务 id。"""
+def start_install(rid: str, key: str, source: str = "panel") -> dict:
+    """启动安装任务，返回任务 id。
+
+    source 只用于安装记录（ai = 运行管理里的「AI 安装」；panel = 侧栏的运行环境面板）。
+    """
     if not auto_install_enabled():
         return {"error": "已禁用一键安装（config.ENABLE_AUTO_INSTALL / ENABLE_EXEC = False）"}
     plan = next((p for p in (PLANS.get(rid) or []) if p["key"] == key), None)
@@ -589,6 +626,8 @@ def start_install(rid: str, key: str) -> dict:
             _tasks[task.tid] = task
             for old in [k for k, v in _tasks.items() if v.done and time.time() - v.started > 3600]:
                 _tasks.pop(old, None)
+        # 先落一条 running 记录：进程中途退出时界面上也能看到这次尝试
+        task.hist_seq = envhist.begin(task.tid, rid, plan["label"], key, plan["mode"], source)
         threading.Thread(target=_worker, args=(task, plan), daemon=True).start()
     return {"ok": True, "tid": task.tid, "title": f"正在安装 {rid}：{plan['label']}"}
 

@@ -189,6 +189,9 @@
           if (apiReq && typeof apiOpen === "function") apiOpen(apiReq.id);
           continue;
         }
+        // 运行环境「运行管理」大页（虚拟路径 \u0000envview）：不是真实文件，直接按原样重开
+        // （筛选 / 展开项 / AI 方案面板由 12_ 的 ENV.view / ENV.ai 自己维护，这里只负责把标签建回来）
+        if (t.path === "\u0000envview" && typeof envViewOpen === "function") { envViewOpen(); continue; }
         // V2Ray 代理管理大页（虚拟路径 \u0000v2ray）：直接重开（所在分区由模块自己的 localStorage 恢复）
         if (t.path === "\u0000v2ray" && typeof window.v2rayRestoreView === "function") { window.v2rayRestoreView(); continue; }
         // 定时任务管理大页（虚拟路径 \u0000cron）：不是真实文件，直接重开这个大页

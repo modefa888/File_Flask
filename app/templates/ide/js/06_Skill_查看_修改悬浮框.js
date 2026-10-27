@@ -514,6 +514,7 @@
     crontask: "定时任务 AI 提示词",
     crongen: "定时任务一键生成",
     icon: "AI 生成图标",
+    envinstall: "运行环境 AI 安装",
   };
   var sysAiDetailMod = "";
   /* 弹窗关闭统一走 sysAiBindOverlay：点「关闭」、点弹窗外面任意位置、按 Esc 都能关。

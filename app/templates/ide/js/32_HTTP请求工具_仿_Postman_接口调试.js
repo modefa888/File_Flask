@@ -77,7 +77,7 @@
   function apiCloudPush() { _cloudDirty = true; apiDirtyFlag(true); apiSavePaint(); }   // 旧调用点：只标记「有未保存改动」
   function apiSavePaint(saving) {
     document.querySelectorAll(".api-save").forEach(function (b) {
-      if (saving) { b.disabled = true; b.innerHTML = '<i class="bi bi-arrow-repeat pa-spin"></i> 保存中'; return; }
+      if (saving) { b.disabled = true; b.innerHTML = '<i class="pa-spin"></i> 保存中'; return; }
       b.disabled = !_cloudDirty;
       b.innerHTML = _cloudDirty ? '<i class="bi bi-cloud-arrow-up-fill"></i> 保存' : '<i class="bi bi-cloud-check"></i> 已保存';
       b.title = _cloudDirty ? "保存到数据库 (Ctrl+S)" : "没有未保存的改动";
@@ -1763,7 +1763,7 @@
     const el = tab.api.el; if (!el) return;
     const r = tab.api.res, err = tab.api.err, sending = tab.api.sending;
     if (el.copy) el.copy.disabled = !!sending || !r;   // 没有响应时「复制响应体」不可点
-    if (sending) { el.meta.className = "api-res-meta info"; el.meta.textContent = "发送中…"; el.res.innerHTML = '<div class="api-res-hint"><i class="bi bi-arrow-repeat pa-spin"></i> 正在发送请求</div>'; apiHideResView(el); return; }
+    if (sending) { el.meta.className = "api-res-meta info"; el.meta.textContent = "发送中…"; el.res.innerHTML = '<div class="api-res-hint"><i class="pa-spin"></i> 正在发送请求</div>'; apiHideResView(el); return; }
     if (err) { el.meta.className = "api-res-meta err"; el.meta.textContent = "请求失败"; el.res.innerHTML = '<div class="api-res-err"><i class="bi bi-exclamation-triangle"></i> ' + esc(err) + '</div>'; apiHideResView(el); return; }
     if (!r) { el.meta.className = "api-res-meta"; el.meta.textContent = "尚未发送"; el.res.innerHTML = '<div class="api-res-hint">填写请求后点「发送」查看响应。</div>'; apiHideResView(el); return; }
     const sizeTxt = (r.size || 0) >= 1024 ? ((r.size / 1024).toFixed(1) + " KB") : (r.size + " B");

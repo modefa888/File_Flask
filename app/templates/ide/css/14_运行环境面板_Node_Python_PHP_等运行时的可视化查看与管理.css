@@ -1,5 +1,11 @@
   /* ===== 运行环境面板（Node / Python / PHP 等运行时的可视化查看与管理） ===== */
-  #envPanel { display: none; flex-direction: column; padding: 8px 8px 0; min-height: 0; }
+  /* 侧栏面板本身也会滚动（.side-panel 是 overflow:auto）。展开「系统信息」时 PATH 里是长路径，
+     一旦横向溢出就会弹出横向滚动条 → 可用高度变化 → 纵向滚动条反复出现/消失，看起来就是整块在抖。
+     所以：禁止横向滚动 + 固定预留纵向滚动条的位置 + 长路径强制换行 */
+  #envPanel {
+    display: none; flex-direction: column; padding: 8px 8px 0; min-height: 0;
+    overflow-x: hidden; scrollbar-gutter: stable; overscroll-behavior: contain;
+  }
   #envPanel.active { display: flex; }
   .env-tools { display: flex; align-items: center; gap: 4px; padding-bottom: 6px; }
   .env-tools input {
@@ -67,12 +73,305 @@
     font-family: "SF Mono", Menlo, monospace; font-size: 11px;
   }
   .env-var .k { color: #4fc1ff; flex: none; }
-  .env-var .v { color: #ce9178; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  /* min-width:0 必须有：否则超长环境变量值（nowrap）会把行撑出面板，弹出横向滚动条 */
+  .env-var .v { color: #ce9178; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
   .env-var .x { background: transparent; border: none; color: #8a8a8a; cursor: pointer; padding: 0 3px; font-size: 12px; }
   .env-var .x:hover { color: #f48771; }
   .env-sys { padding: 2px 5px 12px; font-size: 11.5px; color: #a8a8a8; }
   .env-sys .r { display: flex; gap: 6px; padding: 1px 0; }
   .env-sys .k { color: #7d7d7d; width: 78px; flex: none; }
   .env-sys .v { word-break: break-all; color: #b8b8b8; }
-  .env-sys .path { font-family: "SF Mono", Menlo, monospace; font-size: 10.5px; color: #9d9d9d; }
+  .env-sys .path {
+    font-family: "SF Mono", Menlo, monospace; font-size: 10.5px; color: #9d9d9d;
+    /* PATH 里的长路径必须能断行，否则撑出横向滚动条（展开系统信息时整块会抖） */
+    overflow-wrap: anywhere; word-break: break-all;
+  }
+
+  /* ===== 编辑区「运行管理」大页（12，复用上面的 .env-* 组件样式） ===== */
+  /* 不要改 .env-view-host 的 display / position（显隐由 .cm-host.active 控制，宿主 absolute 铺满） */
+  /* overflow-x:hidden 防止窄编辑器区被右列撑出横向滚动条；
+     scrollbar-gutter:stable 让纵向滚动条的位置固定预留，内容高度变化时不会来回重排（表现为整页抖动） */
+  .env-view {
+    position: absolute; inset: 0; overflow: auto; overflow-x: hidden;
+    scrollbar-gutter: stable; overscroll-behavior: contain;
+    background: #1e1e1e; padding: 14px 16px 22px;
+  }
+  .env-view .ev-loading {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    color: #8a8a8a; font-size: 13px; padding: 46px 0;
+  }
+  .env-view .ev-spin {
+    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    border: 1.5px solid currentColor; border-top-color: transparent; animation: pa-spin .9s linear infinite;
+  }
+  .env-view .ev-head {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 11px 14px; background: #252528; border: 1px solid #2c2c2c; border-radius: 8px;
+  }
+  .env-view .ev-title { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 220px; }
+  .env-view .ev-title > .bi { color: #6fcf8a; font-size: 17px; flex: none; }
+  .env-view .ev-title b { font-size: 13.5px; color: #e7e7e7; display: block; line-height: 1.3; }
+  .env-view .ev-title .ev-sub { display: block; font-size: 11px; color: #8a8a8a; font-weight: 400; }
+  .env-view .ev-title .ev-sub b { display: inline; color: #6fcf8a; }
+  .env-view .ev-acts { display: flex; gap: 6px; flex: none; }
+  .env-view .ev-cards {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
+    gap: 8px; margin-top: 10px;
+  }
+  .env-view .ev-card {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    background: #252528; border: 1px solid #2c2c2c; border-radius: 8px; padding: 10px 12px;
+  }
+  .env-view .ev-card > .bi { color: #4fc1ff; font-size: 15px; margin-bottom: 3px; }
+  .env-view .ev-card b { font-size: 16px; color: #e7e7e7; font-family: "SF Mono", Menlo, monospace; line-height: 1.2; }
+  .env-view .ev-card.ok > .bi, .env-view .ev-card.ok b { color: #6fcf8a; }
+  .env-view .ev-card span { font-size: 11px; color: #8a8a8a; }
+  /* 用 flex-wrap + flex-basis 换行，而不是按视口宽度的 media query：
+     编辑器区实际宽度 = 窗口 - 侧栏 - AI 面板，窗口很宽但编辑区很窄时也要能正常换行 */
+  .env-view .ev-cols { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; align-items: flex-start; }
+  .env-view .ev-left { flex: 1 1 380px; min-width: 0; background: #252528; border: 1px solid #2c2c2c; border-radius: 8px; padding: 10px 12px 12px; }
+  .env-view .ev-right { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  .env-view .ev-filter {
+    display: flex; align-items: center; gap: 6px; background: #3c3c3c;
+    border: 1px solid #3c3c3c; border-radius: 4px; padding: 0 8px; margin-bottom: 6px;
+  }
+  .env-view .ev-filter:focus-within { border-color: #007fd4; }
+  .env-view .ev-filter .bi { color: #8a8a8a; font-size: 12px; flex: none; }
+  .env-view .ev-filter input {
+    flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+    color: #fff; font-size: 12px; padding: 6px 0; font-family: inherit;
+  }
+  .env-view .ev-list { max-height: calc(100vh - 350px); overflow: auto; overscroll-behavior: contain; }
+  .env-view .ev-panelbox { background: #252528; border: 1px solid #2c2c2c; border-radius: 8px; padding: 10px 12px 12px; }
+  .env-view .ev-box-head {
+    display: flex; align-items: center; gap: 6px; font-size: 12px; color: #cccccc;
+    padding-bottom: 7px; border-bottom: 1px solid #2c2c2c; margin-bottom: 6px;
+  }
+  .env-view .ev-box-head > .bi { color: #4fc1ff; font-size: 13px; }
+  .env-view .ev-box-head .ev-mini { margin-left: auto; }
+  .env-view .ev-detail-slot { padding-bottom: 4px; }
+  @media (max-width: 900px) {
+    .env-view .ev-list { max-height: none; }
+  }
+
+  /* ===== AI 安装方案（运行管理 → AI 安装：需求输入 → 建议清单 → 一键安装进度） ===== */
+  .env-view .ev-aibox { margin-top: 10px; }
+  .env-view .ev-aibox .ev-box-head > .bi { color: #d7ba7d; }
+  .env-view .ev-ai-tip { font-size: 11px; color: #7d7d7d; font-weight: 400; }
+  .env-view .ev-ai-acts { display: flex; gap: 6px; margin-left: auto; }
+  .env-view .ev-ai-acts .env-btn { display: inline-flex; align-items: center; gap: 4px; }
+  .env-view .ev-ai-btn { border-color: #6b5a1f; color: #e0c070; }
+  .env-view .ev-ai-btn:hover { background: #3a3524; color: #f0d79a; }
+
+  /* 需求输入 */
+  .env-view .ev-ai-form { margin: 2px 0 4px; }
+  .env-view .ev-ai-form textarea {
+    width: 100%; box-sizing: border-box; resize: vertical; min-height: 52px; max-height: 170px;
+    background: #1b1b1d; border: 1px solid #3c3c3c; border-radius: 4px; color: #e0e0e0;
+    font-family: inherit; font-size: 12px; line-height: 1.65; padding: 6px 8px; outline: none;
+  }
+  .env-view .ev-ai-form textarea:focus { border-color: #007fd4; }
+  .env-view .ev-ai-form textarea::placeholder { color: #6a6a6a; }
+  .env-view .ev-ai-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
+  .env-view .ev-chip {
+    background: #2f3236; border: 1px solid #3d4045; color: #b8b8b8; border-radius: 999px;
+    font-size: 11px; padding: 2px 9px; cursor: pointer; font-family: inherit;
+  }
+  .env-view .ev-chip:hover { background: #3a3d42; color: #e0e0e0; border-color: #4d5158; }
+  .env-view .ev-ai-form-act { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+  .env-view .ev-ai-hint { font-size: 11px; color: #7d7d7d; }
+
+  .env-view .ev-ai-loading { display: flex; align-items: center; gap: 7px; color: #8a8a8a; padding: 8px 0 6px; font-size: 12px; }
+  .env-view .ev-ai-loading .ev-spin { flex: none; }
+  .env-view .ev-ai-sum { font-size: 12.5px; color: #dcdcdc; padding: 9px 0 2px; line-height: 1.6; }
+  .env-view .ev-ai-off { color: #8a8a8a; font-size: 11.5px; padding: 2px 0 6px; }
+
+  /* 进度条：轨道 + 填充 + 计数；运行时填充条走流动条纹 */
+  .env-view .ev-ai-prog { position: relative; display: flex; align-items: center; margin: 8px 0 8px; height: 14px; }
+  .env-view .ev-ai-prog::before {
+    content: ""; position: absolute; left: 0; right: 52px; top: 4px; height: 6px;
+    border-radius: 999px; background: #3a3a3a;
+  }
+  .env-view .ev-ai-prog span {
+    position: absolute; left: 0; top: 4px; height: 6px; width: 0; max-width: calc(100% - 52px);
+    border-radius: 999px; background: #0d7ec4; transition: width .25s ease;
+  }
+  .env-view .ev-ai-prog.run span {
+    background-image: linear-gradient(90deg, rgba(255, 255, 255, .22) 25%, transparent 25%,
+      transparent 50%, rgba(255, 255, 255, .22) 50%, rgba(255, 255, 255, .22) 75%, transparent 75%);
+    background-size: 16px 16px; animation: ev-ai-bar .8s linear infinite;
+  }
+  @keyframes ev-ai-bar { to { background-position: 16px 0; } }
+  .env-view .ev-ai-prog b { margin-left: auto; font-size: 11px; color: #8a8a8a; font-weight: 400; }
+
+  /* 建议清单 */
+  .env-view .ev-ai-list { display: flex; flex-direction: column; gap: 4px; }
+  .env-view .ev-ai-item {
+    display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px;
+    background: #242427; border: 1px solid #2e2e31; border-radius: 6px;
+  }
+  .env-view .ev-ai-item.manual { background: #232324; }
+  .env-view .ev-ai-item .st { flex: none; width: 15px; text-align: center; color: #6a6a6a; font-size: 12px; line-height: 1.5; }
+  .env-view .ev-ai-item[data-state="run"] .st { color: #4fc1ff; }
+  .env-view .ev-ai-item[data-state="ok"] .st { color: #6fcf8a; }
+  .env-view .ev-ai-item[data-state="fail"] .st { color: #f48771; }
+  .env-view .ev-ai-item .main { flex: 1; min-width: 0; }
+  .env-view .ev-ai-item .nm { font-size: 12.5px; color: #dcdcdc; line-height: 1.5; }
+  .env-view .ev-ai-item .nm b { font-family: "SF Mono", Menlo, monospace; font-size: 11px; color: #6fcf8a; font-weight: 400; }
+  .env-view .ev-ai-item .rs { font-size: 11px; color: #8a8a8a; line-height: 1.6; margin-top: 1px; }
+  .env-view .ev-ai-item .rs.err { color: #e08a8a; }
+  .env-view .ev-ai-item .op { flex: none; }
+  .env-view .ev-ai-item .tg {
+    font-size: 10px; padding: 1px 6px; border-radius: 8px; margin-left: 4px;
+    background: #33363a; color: #9d9d9d;
+  }
+  .env-view .ev-ai-item .tg.auto { background: #0d5a8a; color: #cfe9ff; }
+  .env-view .ev-ai-item .tg.man { background: #4a3a1f; color: #e0c070; }
+  .env-view .ev-ai-item .tg.ok { background: #22401f; color: #9fd898; }
+
+  .env-view .ev-ai-notes { font-size: 11.5px; color: #8a8a8a; line-height: 1.75; margin-top: 7px; }
+  .env-view .ev-ai-risk { font-size: 11.5px; color: #d7ba7d; line-height: 1.7; margin-top: 4px; }
+  .env-view .ev-ai-run { display: flex; align-items: center; gap: 6px; margin-top: 9px; }
+  .env-view .ev-ai-log {
+    margin-top: 7px; max-height: 170px; overflow: auto;
+    background: #191919; border: 1px solid #333333; border-radius: 4px; padding: 6px 8px;
+    font-family: "SF Mono", Menlo, monospace; font-size: 11px; line-height: 1.6;
+    color: #b8b8b8; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .env-view .ev-ai-log:empty { display: none; }
+  .env-view .ev-ai-log .h { color: #4fc1ff; }
+  .env-view .ev-ai-log .ok { color: #6fcf8a; }
+  .env-view .ev-ai-log .err { color: #e08a8a; }
+
+  /* 纯文本兜底（模型没按 JSON 回时）复用 AI 助手的 Markdown 渲染 */
+  .env-view .ev-ai-body { font-size: 12px; color: #c8c8c8; margin-top: 6px; }
+  .env-view .ev-ai-md { max-width: none; background: transparent; padding: 0; }
+  .env-view .ev-ai-md pre { max-height: 260px; overflow: auto; }
+  /* 代码块自带的「复制 / 插入到项目」由 AI 面板的委托处理，这里不可点，隐藏掉 */
+  .env-view .ev-ai-md .ai-md-btns { display: none; }
+
+  /* ===== 安装记录（数据库 env_install_history） ===== */
+  .env-view .ev-box-head .ev-mini { margin-left: auto; }
+  .env-view .ev-hist-tip { margin-left: auto; font-size: 11px; color: #7d7d7d; font-weight: 400; }
+  .env-view .ev-hist-tip + .ev-mini { margin-left: 8px; }
+  .env-view .ev-hist { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow: auto; }
+  .env-view .ev-hist-row {
+    display: flex; align-items: flex-start; gap: 7px; padding: 5px 6px;
+    border-radius: 5px; cursor: pointer;
+  }
+  .env-view .ev-hist-row:hover { background: #2a2d2e; }
+  .env-view .ev-hist-row.open { background: #2a2d2e; }
+  .env-view .ev-hist-row .st { flex: none; width: 14px; text-align: center; font-size: 11px; line-height: 1.6; color: #6a6a6a; }
+  .env-view .ev-hist-row .st.ok { color: #6fcf8a; }
+  .env-view .ev-hist-row .st.fail { color: #f48771; }
+  .env-view .ev-hist-row .st.cancel { color: #d7ba7d; }
+  .env-view .ev-hist-row .st.run { color: #8a8a8a; }
+  .env-view .ev-hist-row .main { flex: 1; min-width: 0; }
+  .env-view .ev-hist-row .nm { font-size: 12px; color: #d4d4d4; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .env-view .ev-hist-row .nm b { font-family: "SF Mono", Menlo, monospace; font-size: 10.5px; color: #6fcf8a; font-weight: 400; }
+  .env-view .ev-hist-row .rs { font-size: 10.5px; color: #7d7d7d; line-height: 1.55; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .env-view .ev-hist-row .tg { font-size: 10px; padding: 0 5px; border-radius: 8px; background: #33363a; color: #9d9d9d; }
+  .env-view .ev-hist-row .tg.ok { background: #22401f; color: #9fd898; }
+  .env-view .ev-hist-row .tg.fail { background: #4a2222; color: #e08a8a; }
+  .env-view .ev-hist-row .tg.cancel { background: #4a3a1f; color: #e0c070; }
+  .env-view .ev-hist-row .exp { flex: none; color: #6a6a6a; font-size: 10px; line-height: 1.8; }
+  .env-view .ev-hist-log {
+    margin: 0 0 5px 21px; max-height: 220px; overflow: auto;
+    background: #191919; border: 1px solid #333333; border-radius: 4px; padding: 6px 8px;
+    font-family: "SF Mono", Menlo, monospace; font-size: 10.5px; line-height: 1.6;
+    color: #b0b0b0; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .env-view .ev-hist-meta {
+    color: #7d7d7d; margin-bottom: 5px; padding-bottom: 4px;
+    border-bottom: 1px dashed #2e2e2e; white-space: pre-wrap;
+  }
+
+  /* ===== 添加环境变量：可视化表单（#modalOverlay 里的 .env-var-modal） ===== */
+  .ide-modal.env-var-modal { width: 520px; border-radius: 12px; box-shadow: 0 24px 70px rgba(0, 0, 0, .55); }
+  .ide-modal.env-var-modal .m-body { padding: 18px; }
+
+  /* 标题：渐变徽标 + 主副两行 */
+  .ide-modal.env-var-modal .evf-title { padding: 14px 18px; gap: 11px; }
+  .ide-modal.env-var-modal .evf-badge {
+    flex: none; width: 36px; height: 36px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #0d7ec4, #4fc1ff); color: #ffffff; font-size: 17px;
+    box-shadow: 0 3px 12px rgba(13, 126, 196, .4);
+  }
+  .ide-modal.env-var-modal .evf-tt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .ide-modal.env-var-modal .evf-tt b { font-size: 13.5px; font-weight: 600; color: #f0f0f0; line-height: 1.4; }
+  .ide-modal.env-var-modal .evf-tt small { font-size: 11px; font-weight: 400; color: #8a8a8a; line-height: 1.5; }
+
+  /* 分组标签：小图标 + 提亮 */
+  .ide-modal.env-var-modal .evf-lab {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 12px; font-weight: 600; color: #c8c8c8; letter-spacing: .3px;
+  }
+  .ide-modal.env-var-modal .evf-lab .bi { font-size: 12px; color: #4fc1ff; }
+
+  /* 输入框：加高加大圆角，聚焦带一圈光晕 */
+  .ide-modal.env-var-modal input:not([type="checkbox"]) {
+    padding: 9px 12px; border-radius: 8px; background: #1b1b1b; border-color: #3d3d3d;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px;
+  }
+  .ide-modal.env-var-modal input:not([type="checkbox"]):focus {
+    border-color: #0e639c; box-shadow: 0 0 0 3px rgba(14, 99, 156, .25);
+  }
+
+  /* 变量名候选：胶囊 chip，选中的填充蓝 */
+  .ide-modal.env-var-modal .evf-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+  .ide-modal.env-var-modal .evf-chip {
+    background: #2d2d2d; border: 1px solid #3a3a3a; color: #b8b8b8; border-radius: 999px;
+    font-size: 11.5px; padding: 3px 11px; cursor: pointer; font-family: inherit;
+    transition: background .12s, color .12s, border-color .12s;
+  }
+  .ide-modal.env-var-modal .evf-chip:hover { background: #3a3d41; color: #ffffff; border-color: #4a4d51; }
+  .ide-modal.env-var-modal .evf-chip.on {
+    background: linear-gradient(135deg, #0d6aa8, #0e8ad0); border-color: transparent; color: #ffffff;
+    box-shadow: 0 2px 8px rgba(13, 126, 196, .35);
+  }
+
+  /* 变量值输入行：输入框吃满 + 右侧「浏览文件夹」按钮 */
+  .ide-modal.env-var-modal .evf-val { display: flex; gap: 8px; align-items: stretch; }
+  .ide-modal.env-var-modal .evf-val input { flex: 1; min-width: 0; }
+  .ide-modal.env-var-modal .evf-browse {
+    flex: none; width: 40px; border-radius: 8px; cursor: pointer;
+    background: #2d2d2d; border: 1px solid #3d3d3d; color: #b8b8b8; font-size: 14px;
+    transition: background .12s, color .12s, border-color .12s;
+  }
+  .ide-modal.env-var-modal .evf-browse:hover { background: #0e4a75; border-color: #0e639c; color: #ffffff; }
+
+  /* 常用值候选：整行卡片（长路径不再挤成一坨），URL / 路径 / 普通值各配图标 */
+  .ide-modal.env-var-modal .evf-vlist { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
+  .ide-modal.env-var-modal .evf-vlist:empty { display: none; }
+  .ide-modal.env-var-modal .evf-vrow {
+    display: flex; align-items: center; gap: 9px; padding: 7px 11px; text-align: left;
+    background: #1e1e1e; border: 1px solid #333333; border-radius: 8px; cursor: pointer;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11.5px; color: #9cdcfe;
+    transition: background .12s, color .12s, border-color .12s;
+  }
+  .ide-modal.env-var-modal .evf-vrow .bi { flex: none; font-size: 13px; color: #c09553; }
+  .ide-modal.env-var-modal .evf-vrow span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ide-modal.env-var-modal .evf-vrow:hover { background: #0e4a75; border-color: #0e639c; color: #ffffff; }
+  .ide-modal.env-var-modal .evf-vrow:hover .bi { color: #9fd8ff; }
+
+  /* 底部提示：信息框（正常蓝 / 覆盖警告橙 / 错误红） */
+  .ide-modal.env-var-modal .evf-tip {
+    display: flex; align-items: flex-start; gap: 7px; margin-top: 12px; padding: 8px 11px;
+    border-radius: 8px; font-size: 11.5px; line-height: 1.6;
+    background: #22303c; border: 1px solid #2f4658; color: #7fb6d8;
+  }
+  .ide-modal.env-var-modal .evf-tip .bi { flex: none; margin-top: 1px; }
+  .ide-modal.env-var-modal .evf-tip.warn { background: #3a2f1a; border-color: #5a4a20; color: #e2b341; }
+  .ide-modal.env-var-modal .evf-tip.err { background: #3a1e1e; border-color: #5a2828; color: #e08a8a; }
+
+  /* 底部按钮：加大加圆角，主按钮渐变 */
+  .ide-modal.env-var-modal .m-foot { padding: 12px 18px 16px; gap: 10px; }
+  .ide-modal.env-var-modal .m-foot button { padding: 8px 24px; border-radius: 8px; font-size: 13px; }
+  .ide-modal.env-var-modal .m-foot .m-ok {
+    background: linear-gradient(135deg, #0d7ec4, #0a9adf); font-weight: 500;
+    box-shadow: 0 3px 10px rgba(13, 126, 196, .35);
+  }
+  .ide-modal.env-var-modal .m-foot .m-ok:hover { background: linear-gradient(135deg, #0b6cae, #0886c4); }
+
 

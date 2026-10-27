@@ -164,6 +164,27 @@ CREATE TABLE IF NOT EXISTS env_cfg (
     value TEXT DEFAULT '',
     PRIMARY KEY (kind, name)
 );
+-- 运行环境安装记录（一次一键安装一行；开始写 running，结束补结果与日志）
+-- source：ai = 运行管理里的「AI 安装」，panel = 侧栏的运行环境面板
+CREATE TABLE IF NOT EXISTS env_install_history (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    tid         TEXT DEFAULT '',
+    rid         TEXT DEFAULT '',
+    label       TEXT DEFAULT '',
+    version     TEXT DEFAULT '',
+    plan_key    TEXT DEFAULT '',
+    mode        TEXT DEFAULT 'user',
+    source      TEXT DEFAULT 'panel',
+    ok          INTEGER NOT NULL DEFAULT 0,
+    cancelled   INTEGER NOT NULL DEFAULT 0,
+    error       TEXT DEFAULT '',
+    installed   TEXT DEFAULT '',
+    elapsed     REAL NOT NULL DEFAULT 0,
+    started_at  REAL NOT NULL DEFAULT 0,
+    finished_at REAL NOT NULL DEFAULT 0,
+    log         TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_env_hist_started ON env_install_history(started_at DESC);
 -- Git 认证信息（一行一个字段：type / token）
 CREATE TABLE IF NOT EXISTS git_creds (
     name  TEXT PRIMARY KEY,

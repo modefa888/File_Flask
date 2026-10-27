@@ -1405,8 +1405,8 @@
   document.getElementById("activitybar").addEventListener("click", (e) => {
     const a = e.target.closest(".act[data-panel]"); if (!a) return;
     const p = a.dataset.panel;
-    // 再点一次当前面板则折叠侧栏
-    if (a.classList.contains("active") && !$("sidebar").classList.contains("collapsed") && p === "explorer") { toggleSidebar(); return; }
+    // 再点一次当前面板则折叠侧栏（对所有活动栏图标生效，与 VS Code 行为一致）
+    if (a.classList.contains("active") && !$("sidebar").classList.contains("collapsed")) { toggleSidebar(); return; }
     $("sidebar").classList.remove("collapsed");
     sidebarSyncState();   // 展开也要落盘：否则上次「收起」存的旧值会在刷新时把侧栏又收回去
     showPanel(p);   // 各面板的内容加载已收进 showPanel，这里不再重复调用

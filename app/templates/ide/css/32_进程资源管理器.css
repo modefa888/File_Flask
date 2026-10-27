@@ -213,8 +213,13 @@
 .pa-loading-row { display: flex; align-items: center; gap: 6px; }
 .pa-loading-row .pa-spin { flex: none; }
 .pa-loading-tip { font-size: 11px; color: #7d7d7d; }
-.pa-spin { display: inline-block; flex: none; transform-origin: center; animation: pa-spin 1s linear infinite; }
-@keyframes pa-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+/* 旋转图标用 CSS 圆环而不是 bi 字形（bi-arrow-repeat 字形在字框里不居中，rotate 起来会抖动偏摆） */
+.pa-spin {
+  display: inline-block; flex: none; width: 11px; height: 11px; border-radius: 50%;
+  border: 1.5px solid currentColor; border-top-color: transparent;
+  vertical-align: -1.5px; animation: pa-spin .9s linear infinite;
+}
+@keyframes pa-spin { to { transform: rotate(360deg); } }
 .pa-skel { display: flex; flex-direction: column; gap: 7px; margin-top: 2px; }
 .pa-skel span {
   height: 9px; border-radius: 5px; background: linear-gradient(90deg, #2f2f2f, #3d3d3d, #2f2f2f);

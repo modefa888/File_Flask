@@ -8,8 +8,11 @@
   .traffic { display: flex; gap: 8px; }
   .traffic span { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
   .traffic .r { background: #ff5f56; } .traffic .y { background: #ffbd2e; } .traffic .g { background: #27c93f; }
-  .menubar { display: flex; gap: 16px; color: #cfcfcf; flex: 0 1 auto; min-width: 0; overflow: hidden; }
-  .menubar span { cursor: default; }
+  /* 菜单栏不能被压缩：窗口变窄时 flex 会把每个菜单项压到「一个字宽」，
+     中文就会变成「文/件」两行。这里让它保持原宽（多余的由 .tb-title 省略），
+     菜单项也禁止换行，真的放不下时整条被裁掉而不是折行 */
+  .menubar { display: flex; align-items: center; gap: 16px; color: #cfcfcf; flex: none; overflow: hidden; }
+  .menubar span { cursor: default; flex: none; white-space: nowrap; }
   .titlebar .tb-title { margin: 0 auto; color: #9aa0a6; font-size: 12px; max-width: 50%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .titlebar .tb-actions { display: flex; gap: 8px; flex: none; align-items: center; }
   /* 标题栏右上角当前时间：等宽数字，随秒刷新（不换行、不被压缩） */
@@ -31,4 +34,6 @@
   .titlebar .tb-actions .tb-ai { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 10px; font-size: 12px; }
   .titlebar .tb-actions .tb-ai i { font-size: 13px; }
   .titlebar .tb-actions .tb-ai.on { color: #4daafc; background: #2f3a45; }
+  /* 窗口很窄（如开着 DevTools）时先让中间的标题让位，保证菜单与右侧按钮都完整 */
+  @media (max-width: 900px) { .titlebar .tb-title { display: none; } }
 

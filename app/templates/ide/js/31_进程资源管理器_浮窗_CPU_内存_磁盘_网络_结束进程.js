@@ -706,7 +706,7 @@ function procDiagPaint() {
 function procDiagPaintState() {
   const st = $("paState");
   if (st) {
-    if (PROCDIAG.busy) st.innerHTML = '<i class="bi bi-arrow-repeat pa-spin"></i> 正在分析…';
+    if (PROCDIAG.busy) st.innerHTML = '<i class="pa-spin"></i> 正在分析…';
     else if (PROCDIAG.error) st.innerHTML = '<i class="bi bi-exclamation-triangle"></i> 分析失败';
     else if (PROCDIAG.data) st.innerHTML = '<i class="bi bi-check2-circle"></i> 已生成结论';
     else st.textContent = "准备中…";
@@ -769,7 +769,7 @@ function procDiagPaintResult() {
   if (!box) return;
   if (PROCDIAG.busy) {
     box.innerHTML = '<div class="pa-loading">' +
-      '<div class="pa-loading-row"><i class="bi bi-arrow-repeat pa-spin"></i>' +
+      '<div class="pa-loading-row"><i class="pa-spin"></i>' +
       '正在分析本机资源占用…已等待 <b id="paTime">0 秒</b></div>' +
       '<div class="pa-skel"><span></span><span></span><span></span></div>' +
       '<div class="pa-loading-tip">快照已采集，正在等模型给出结论；接口越慢这里等得越久</div></div>';

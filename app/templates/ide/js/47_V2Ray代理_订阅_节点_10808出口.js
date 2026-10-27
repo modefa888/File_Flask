@@ -242,10 +242,12 @@
     const running = !!st.running;
     const badge = $("actV2Badge");
     if (badge) {
+      // 侧栏徽标只在代理运行中显示；未连接时显示节点数会让人以为已经连上了
       const okN = V2.nodes.filter(n => V2.ping[n.id] && V2.ping[n.id].ok).length;
+      const show = running && okN > 0;
       badge.textContent = String(okN);        // 只显示测速连接成功的节点数
       badge.title = "测速成功节点 " + okN + " / " + V2.nodes.length;
-      badge.style.display = okN ? "" : "none";
+      badge.style.display = show ? "" : "none";
     }
     const hero = $("v2Hero");
     if (hero) hero.classList.toggle("on", running);

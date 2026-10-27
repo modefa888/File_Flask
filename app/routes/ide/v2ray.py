@@ -3,7 +3,7 @@
 GET  /api/v2ray/status           汇总状态（内核 / 进程 / 入站端口 / 分享地址）
 GET  /api/v2ray/core             内核探测结果（候选列表 + 当前选用）
 POST /api/v2ray/core/detect      启动后台探测任务 → {job}
-POST /api/v2ray/core/download    启动后台下载任务 {url?} → {job}
+POST /api/v2ray/core/download    启动后台下载任务 {url?, kind?}（kind = xray / sing-box）→ {job}
 GET  /api/v2ray/core/job/<jid>/stream   SSE：任务进度（阶段 / 百分比 / 已下载字节 / 步骤日志）
 POST /api/v2ray/core/path        手动指定内核路径 {path}
 GET  /api/v2ray/nodes            节点列表 ?sub_id=
@@ -47,9 +47,9 @@ _log = get_logger()
 bp = Blueprint("v2ray", __name__)
 
 # 允许通过设置接口写入的键（其余一律忽略）
-_SETTING_KEYS = ("core_path", "core_url", "socks_port", "socks_listen", "socks_user",
-                 "http_port", "log_level", "sub_proxy", "auto_start", "api_port",
-                 "auth_enabled")
+_SETTING_KEYS = ("core_path", "core_url", "core_kind", "socks_port", "socks_listen",
+                 "socks_user", "http_port", "log_level", "sub_proxy", "auto_start",
+                 "api_port", "auth_enabled")
 _LISTEN_CHOICES = ("0.0.0.0", "127.0.0.1")
 
 
@@ -80,23 +80,35 @@ def v2_core():
 
 @bp.post("/api/v2ray/core/detect")
 def v2_core_detect():
-    """启动后台探测任务，返回 job id（进度用 /core/job/<jid>/stream 订阅）。"""
-    return jsonify({"ok": True, "job": v2raymgr.core_detect_job()})
+    """启动后台探测任务 {kind?}，返回 job id（进度用 /core/job/<jid>/stream 订阅）。
+
+    kind 限定只探测某一类内核（xray = Xray/V2Ray 系，sing-box），不传则全部探测。
+    """
+    data = request.get_json(silent=True) or {}
+    kind = str(data.get("kind") or "")
+    return jsonify({"ok": True, "job": v2raymgr.core_detect_job(_kind(kind) if kind else "")})
 
 
 @bp.post("/api/v2ray/core/download")
 def v2_core_download():
-    """启动后台下载任务，返回 job id（进度用 /core/job/<jid>/stream 订阅）。"""
+    """启动后台下载任务 {url?, kind?}，返回 job id（进度用 /core/job/<jid>/stream 订阅）。"""
     data = request.get_json(silent=True) or {}
-    return jsonify({"ok": True, "job": v2raymgr.core_download_job(str(data.get("url") or ""))})
+    return jsonify({"ok": True, "job": v2raymgr.core_download_job(
+        str(data.get("url") or ""), str(data.get("kind") or "xray"))})
+
+
+def _kind(v) -> str:
+    """内核类型参数归一：只认 xray / sing-box，其余按 xray。"""
+    return "sing-box" if str(v or "") == "sing-box" else "xray"
 
 
 @bp.get("/api/v2ray/core/versions")
 def v2_core_versions():
-    """多版本管理：已安装版本 + 当前选用 + 官方近期发布列表（remote）。"""
-    data = v2raymgr.core_versions_info()
+    """多版本管理：某类型内核的已安装版本 + 当前选用 + 官方近期发布列表（remote）。"""
+    kind = _kind(request.args.get("kind"))
+    data = v2raymgr.core_versions_info(kind)
     try:
-        data["remote"] = v2raycfg.list_versions(30)
+        data["remote"] = v2raymgr.core_remote_versions(kind, 30)
         data["remote_error"] = ""
     except ValueError as e:
         data["remote"] = []
@@ -109,7 +121,8 @@ def v2_core_install_version():
     """后台下载安装指定版本（不自动切换），返回 job id。"""
     data = request.get_json(silent=True) or {}
     try:
-        job = v2raymgr.core_install_version_job(str(data.get("version") or ""))
+        job = v2raymgr.core_install_version_job(str(data.get("version") or ""),
+                                                _kind(data.get("kind")))
     except ValueError as e:
         return _fail(str(e))
     return jsonify({"ok": True, "job": job})
@@ -119,7 +132,7 @@ def v2_core_install_version():
 def v2_core_use_version():
     """切换当前使用的内核版本；内核在跑会自动重启加载。"""
     data = request.get_json(silent=True) or {}
-    r = v2raymgr.core_use_version(str(data.get("version") or ""))
+    r = v2raymgr.core_use_version(str(data.get("version") or ""), _kind(data.get("kind")))
     if r.get("error"):
         return _fail(r["error"])
     return jsonify(r)
@@ -165,8 +178,13 @@ def v2_core_path():
     data = request.get_json(silent=True) or {}
     path = str(data.get("path") or "").strip()
     if path and not v2raycfg.core_version(path):
-        return _fail("该路径不是可用的 Xray / V2Ray 内核（无法执行 version）")
-    v2raydb.set_setting("core_path", path)
+        return _fail("该路径不是可用的 Xray / V2Ray / sing-box 内核（无法执行 version）")
+    # 路径按内核类型分开存：清空时要知道清的是哪一类，所以也允许显式传 kind
+    kind = v2raycfg.core_kind(path) if path else _kind(data.get("kind"))
+    items = {v2raymgr.core_path_key(kind): path}
+    if path:
+        items["core_kind"] = kind          # 手动指定后同步内核类型，生成的配置格式才对
+    v2raydb.set_settings(items)
     return jsonify({"ok": True, "core": v2raymgr.core_info()})
 
 
@@ -399,6 +417,7 @@ def v2_gen_auth():
 @bp.post("/api/v2ray/settings")
 def v2_settings_save():
     data = request.get_json(silent=True) or {}
+    kind = _kind(data.get("core_kind"))      # 路径要按当前内核类型分开落库
     items = {}
     for k in _SETTING_KEYS:
         if k not in data:
@@ -427,6 +446,11 @@ def v2_settings_save():
             items[k] = 1 if data.get(k) else 0
         elif k == "auth_enabled":
             items[k] = 1 if data.get(k) else 0
+        elif k == "core_kind":
+            items[k] = kind
+        elif k == "core_path":
+            # Xray 与 sing-box 各存一份，切 Tab 后互不覆盖
+            items[v2raymgr.core_path_key(kind)] = str(data.get(k) or "").strip()
         else:
             items[k] = str(data.get(k) or "").strip()
     # 入站密码：传输层先 unwrap，再加密落库；留空 = 保留原值，clear_pass=1 = 清空
@@ -509,6 +533,8 @@ def v2_preview():
     st = v2raydb.all_settings()
     opts = dict(st)
     opts["socks_pass"] = ""            # 预览里不回显密码
+    # 预览按真正会被使用的内核生成配置（Xray / sing-box 两种格式不同）
+    opts["core_path"] = v2raymgr.pick_core(st)
     try:
         cfg = v2raycfg.build_config(node, opts)
     except ValueError as e:

@@ -23,10 +23,11 @@
   const V2 = { st: null, nodes: [], subs: [], cores: [], coreInfo: null, sec: "overview",
                pick: "", selSub: null, logTimer: null, autoLog: false, log: "",
                trafTimer: null, traffic: null,
-               busy: false, showManual: false, exit: null, ping: {}, dl: {}, kw: "",
+               busy: false, showManual: false, nodeForm: false, exit: null, ping: {}, dl: {}, kw: "",
                nodeTab: "__all__", sortPing: false, hideFail: false,
-               subBusy: {}, subAllBusy: false,
-               job: null, es: null, pendingUrl: "" };
+               subBusy: {}, subAllBusy: false, subForm: false,
+               job: null, es: null, pendingUrl: "", versKind: "xray", coreKind: "",
+              pathDraft: {}, instVer: "", progTimer: null, shareOpen: false };
 
   function escA(s) { return esc(String(s == null ? "" : s)).replace(/"/g, "&quot;"); }
   function api(path, opts) {
@@ -112,15 +113,23 @@
 
   function v2JobFail(kind, msg) {
     v2JobClose();
+    V2.instVer = "";
     V2.job = { kind: kind, phase: "失败", pct: 0, log: [], done: true, ok: false, error: msg };
     v2ProgPaint();
     toast(msg, "err");
+    if (v2vActive()) v2vRender();
   }
 
-  /** 拉取多版本信息（已安装 + 官方发布列表），存 V2.vers 供设置页渲染。 */
-  function v2VersLoad() {
-    return api("/api/v2ray/core/versions").then(r => {
-      if (r && !r.error) { V2.vers = r; if (v2vActive()) v2vRender(); }
+  /** 拉取多版本信息（已安装 + 官方发布列表），按内核类型取，存 V2.vers 供设置页渲染。 */
+  function v2VersLoad(kind) {
+    const k = kind === "sing-box" ? "sing-box" : "xray";
+    return api("/api/v2ray/core/versions?kind=" + k).then(r => {
+      // 请求期间用户可能又切了内核类型：过期的结果直接丢弃，否则面板会串台
+      if (r && !r.error && k === v2CoreKind()) {
+        V2.vers = r;
+        V2.versKind = k;
+        v2vRenderKeep(["v2vSetCore"]);        // 别把用户正在改的设置抹掉
+      }
       return r;
     });
   }
@@ -129,8 +138,14 @@
   function v2JobRun(kind, path, body) {
     if (v2JobBusy()) return toast("已有任务在进行中，请稍候", "warn");
     v2JobClose();
+    clearTimeout(V2.progTimer);
     V2.job = { kind: kind, phase: "准备中", pct: 0, log: [], done: false, ok: null, error: "" };
     v2ProgPaint();
+    // 从版本列表里点「安装」时进度面板在上方，滚到可见位置，免得以为没反应
+    requestAnimationFrame(() => {
+      const b = $("v2Prog");
+      if (b && b.offsetParent !== null) b.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
     post(path, body || {}).then(r => {
       if (!r || r.error || !r.job) return v2JobFail(kind, (r && r.error) || "任务启动失败");
       const es = new EventSource("/api/v2ray/core/job/" + r.job + "/stream");
@@ -142,12 +157,13 @@
         v2ProgPaint();
         if (!j.done) return;
         v2JobClose();
+        V2.instVer = "";
         if (j.ok) {
           const found = ((j.result || {}).found || []).length;
           toast(j.kind === "detect" ? ("探测完成，找到 " + found + " 个可用内核")
                                     : ("内核已就绪：" + ((j.result || {}).version || "")), "ok");
           v2Reload().catch(() => {});
-          if (V2.vers) v2VersLoad().catch(() => {});   // 版本面板开着就同步刷新它
+          if (V2.vers) v2VersLoad(V2.versKind).catch(() => {});   // 版本面板开着就同步刷新它
         } else {
           toast(j.error || "任务失败", "err");
         }
@@ -170,6 +186,14 @@
     const doneOk = j.done && j.ok === true, doneErr = j.done && j.ok === false;
     box.classList.toggle("ok", doneOk);
     box.classList.toggle("err", doneErr);
+    // 成功后过几秒自动收起，否则「安装完成 100%」会一直挂在页面上
+    clearTimeout(V2.progTimer);
+    V2.progTimer = null;
+    if (doneOk) {
+      V2.progTimer = setTimeout(() => {
+        if (V2.job === j) { V2.job = null; V2.instVer = ""; v2ProgPaint(); }
+      }, 8000);
+    }
     // 下载时拿不到 Content-Length 就退化为「不确定态」来回滑动的条纹
     const indet = j.kind === "download" && !j.done && !(j.total > 0);
     box.classList.toggle("indet", indet);
@@ -185,6 +209,8 @@
     }
     const fill = $("v2ProgFill");
     if (fill) fill.style.width = pct + "%";
+    const x = box.querySelector(".v2-prog-x");
+    if (x) x.style.display = j.done ? "" : "none";   // 任务跑着时不给收起，避免以为任务停了
     const sub = $("v2ProgSub");
     if (sub) sub.textContent = j.error || (j.done ? (doneOk ? "任务已完成" : "任务失败") : "");
     const lg = $("v2ProgLog");
@@ -198,7 +224,9 @@
     return '<div class="v2-prog" id="v2Prog" style="display:none">' +
       '<div class="v2-prog-head"><i class="bi bi-cloud-arrow-down" id="v2ProgIco"></i>' +
       '<span class="v2-prog-phase" id="v2ProgPhase">准备中</span>' +
-      '<span class="v2-prog-pct" id="v2ProgPct"></span></div>' +
+      '<span class="v2-prog-pct" id="v2ProgPct"></span>' +
+      '<button type="button" class="v2-prog-x" data-act="prog-close" title="收起进度">' +
+      '<i class="bi bi-x-lg"></i></button></div>' +
       '<div class="v2-prog-track"><div class="v2-prog-fill" id="v2ProgFill"></div></div>' +
       '<div class="v2-prog-sub" id="v2ProgSub"></div>' +
       '<div class="v2-prog-log" id="v2ProgLog"></div>' +
@@ -248,11 +276,26 @@
     const sh = $("v2Share");
     if (sh) {
       const list = (running && st.share) ? st.share : [];
-      sh.innerHTML = list.map(s =>
+      // 默认折叠，只露一条；点下面的按钮再展开全部（侧栏空间留给节点列表）
+      const shown = V2.shareOpen ? list : list.slice(0, 1);
+      sh.innerHTML = shown.map(s =>
         '<div class="v2-share-row"><span class="v2-share-tag">' + esc(s.label) + "</span>" +
         '<span class="v2-share-url" title="' + escA(s.url) + '">' + esc(s.url) + "</span>" +
         '<i class="bi bi-clipboard v2-share-cp" data-copy="' + escA(s.url) + '" title="复制"></i></div>'
-      ).join("");
+      ).join("") + (list.length > 1
+        ? '<button class="v2-share-more" data-share-more="1" title="展开 / 收起全部代理地址">' +
+          '<i class="bi bi-chevron-' + (V2.shareOpen ? "up" : "down") + '"></i>' +
+          (V2.shareOpen ? "收起地址" : "共 " + list.length + " 个地址") + "</button>"
+        : "");
+    }
+    const td = $("v2Today");
+    if (td) {
+      const t = st.today || {};
+      const up = Number(t.up) || 0, down = Number(t.down) || 0;
+      td.innerHTML = '<span class="v2-today-k"><i class="bi bi-calendar2-range"></i>今日流量</span>' +
+        '<span class="v2-today-v">↑ ' + esc(fmtBytes(up)) + " · ↓ " + esc(fmtBytes(down)) + "</span>";
+      td.title = "今日（" + (t.day || "本地日期") + "）累计：上行 " + fmtBytes(up) +
+        " / 下行 " + fmtBytes(down);
     }
     const num = $("v2NodeNum");
     if (num) {
@@ -320,6 +363,8 @@
     const ov = $("v2OpenView"); if (ov) ov.onclick = () => v2OpenView();
     const sh = $("v2Share");
     if (sh) sh.addEventListener("click", (e) => {
+      const more = e.target.closest("[data-share-more]");
+      if (more) { V2.shareOpen = !V2.shareOpen; v2SideRender(); return; }
       const cp = e.target.closest("[data-copy]"); if (cp) copyText(cp.dataset.copy);
     });
     const lst = $("v2NodeList");
@@ -486,8 +531,8 @@
     const st = V2.st || {};
     if (st.core && st.core.ok) return "";
     return '<div class="v2v-hint warn"><i class="bi bi-exclamation-triangle"></i><div>' +
-      "<strong>还没有可用的内核。</strong>到「设置」里点「一键下载 Xray-core」，" +
-      "或把已有的 xray / v2ray 可执行文件路径填进去。</div></div>";
+      "<strong>还没有可用的内核。</strong>到「设置」里点「一键下载」（可选 Xray-core / sing-box），" +
+      "或把已有的 xray / v2ray / sing-box 可执行文件路径填进去。</div></div>";
   }
 
   function v2vOverview(st) {
@@ -516,14 +561,23 @@
         running ? ("PID " + st.pid) : "等待连接", running ? "on" : "off") +
       stat("bi-diagram-3", "当前节点", n ? (n.name || "(未命名)") : "未选择",
         n ? (n.proto + " · " + n.server + ":" + n.port) : "从「节点」里挑一个") +
-      stat("bi-cpu", "内核", c.ok ? (c.version || "已就绪") : "未找到",
-        c.ok ? "xray / v2ray 已就绪" : "到「设置」一键下载", c.ok ? "" : "bad") +
+      stat("bi-cpu", "使用中的内核",
+        c.ok ? ((c.kind === "sing-box" ? "sing-box" : "xray") + (c.version ? " " + c.version : ""))
+             : "未找到",
+        c.ok ? (running ? "本次连接正在使用" : "已就绪，连接后生效") : "到「设置」一键下载",
+        c.ok ? "" : "bad") +
       stat("bi-hdd-network", "代理监听", inb.socks_port ? ("SOCKS5 · " + inb.socks_port) : "-",
         inb.listen ? ("监听 " + inb.listen) : "未启动", running ? "on" : "") +
       '<div class="v2v-stat' + (running ? " on" : "") + '" id="v2vSpdCard">' +
       '<span class="v2v-stat-ico"><i class="bi bi-arrow-down-up"></i></span>' +
       '<div class="v2v-stat-tx"><b>实时网速</b><strong id="v2vSpdTx">' +
       esc(v2vSpeedText()) + '</strong><em>每 5 秒自动刷新 · 采样自内核统计</em></div></div>' +
+      '<div class="v2v-stat' + (running ? " on" : "") + '" id="v2vMemCard">' +
+      '<span class="v2v-stat-ico"><i class="bi bi-memory"></i></span>' +
+      '<div class="v2v-stat-tx"><b>内存占用</b><strong id="v2vMemTx">' +
+      esc(v2MemText(st)) + '</strong><em id="v2vMemSub">' +
+      esc(running ? ("内核进程 PID " + st.pid + " · 每 5 秒刷新") : "内核未启动") +
+      "</em></div></div>" +
       "</div>" +
       '<div class="v2v-kv">' +
       kv("内核路径", c.path || "-", "mono") +
@@ -531,6 +585,9 @@
       kv("HTTP 代理", inb.http_port ? ("端口 " + inb.http_port + " · " + inb.listen) : "未开启", inb.http_port ? "mono" : "") +
       kv("节点地址", n ? (n.server + ":" + n.port) : "-", "mono") +
       "</div></div>";
+
+    // 先看用量再看分享地址：流量统计放前面
+    h += '<div class="v2v-sec" id="v2vTrafSec">' + v2vTrafSecHTML() + "</div>";
 
     const share = (running && st.share) ? st.share : [];
     h += '<div class="v2v-sec">' +
@@ -551,8 +608,6 @@
         "<span>连接一个节点后，这里会列出局域网与本机的代理地址</span></div>";
     }
     h += "</div>";
-
-    h += '<div class="v2v-sec" id="v2vTrafSec">' + v2vTrafSecHTML() + "</div>";
 
     const e = V2.exit;
     const exCls = e ? (e.ok ? "ok" : "err") : "idle";
@@ -575,6 +630,12 @@
   }
 
   /* ---------- 实时网速 + 流量统计（概览页专属，5 秒轮询局部更新） ---------- */
+  /** 内核进程常驻内存（后端 /status 与 /traffic 都带 mem.rss 字节数）。 */
+  function v2MemText(st) {
+    const rss = Number((((st || {}).mem) || {}).rss) || 0;
+    return rss ? fmtBytes(rss) : "-";
+  }
+
   function v2vSpeedText() {
     const t = V2.traffic;
     if (!t) return "…";
@@ -639,6 +700,8 @@
     if (!v2vActive()) return;
     const tx = $("v2vSpdTx");
     if (tx) tx.textContent = v2vSpeedText();
+    const mt = $("v2vMemTx");                 // 内存占用跟着一起刷新
+    if (mt) mt.textContent = Number(r.mem) ? fmtBytes(r.mem) : "-";
     const sec = $("v2vTrafSec");
     if (sec) sec.innerHTML = v2vTrafSecHTML();
   }
@@ -701,15 +764,22 @@
     const cid = curNodeId();
     // 测速超时的节点数（当前已连接的节点不算，避免误删导致断网）
     const failN = V2.nodes.filter(n => n.id !== cid && V2.ping[n.id] && !V2.ping[n.id].ok).length;
-    let h = '<div class="v2v-sec">' +
-      v2vSecHead("bi-plus-circle", "导入节点", "支持 vmess / vless / trojan / ss 分享链接，可一次粘贴多行") +
-      '<div class="v2v-grid"><label class="v2v-field v2v-field-wide">' +
-      '<span>粘贴分享链接（每行一条）</span>' +
-      '<textarea id="v2vLinks" placeholder="vmess://...&#10;vless://...&#10;trojan://...&#10;ss://..."></textarea></label></div>' +
-      '<div class="v2v-actions"><button class="v2v-btn primary" data-act="add-links"><i class="bi bi-box-arrow-in-down"></i>添加链接</button>' +
-      '<button class="v2v-btn" data-act="toggle-manual"><i class="bi bi-pencil-square"></i>' +
+    // 导入面板默认收起，点「节点列表」右上角的「导入节点」才展开
+    const importOpen = !!V2.nodeForm || !!V2.showManual;
+    let h = "";
+    if (importOpen) {
+      h += '<div class="v2v-sec">' +
+        v2vSecHead("bi-plus-circle", "导入节点", "支持 vmess / vless / trojan / ss 分享链接，可一次粘贴多行",
+          '<span class="v2v-flex"></span>' +
+          '<button class="v2v-btn ico" data-act="node-import" title="收起导入面板"><i class="bi bi-x-lg"></i></button>') +
+        '<div class="v2v-grid"><label class="v2v-field v2v-field-wide">' +
+        '<span>粘贴分享链接（每行一条）</span>' +
+        '<textarea id="v2vLinks" placeholder="vmess://...&#10;vless://...&#10;trojan://...&#10;ss://..."></textarea></label></div>' +
+        '<div class="v2v-actions"><button class="v2v-btn primary" data-act="add-links"><i class="bi bi-box-arrow-in-down"></i>添加链接</button>' +
+        '<button class="v2v-btn" data-act="toggle-manual"><i class="bi bi-pencil-square"></i>' +
         (V2.showManual ? "收起手填表单" : "手填节点参数") + "</button></div>";
-    if (V2.showManual) {
+    }
+    if (importOpen && V2.showManual) {
       h += '<div class="v2v-subhead"><span>手填参数</span></div>' +
         '<div class="v2v-grid">' +
         '<label class="v2v-field"><span>协议</span><select id="v2vMProto">' +
@@ -732,12 +802,17 @@
       "</div>" +
       '<div class="v2v-actions"><button class="v2v-btn primary" data-act="add-manual"><i class="bi bi-check2"></i>添加节点</button></div>';
     }
-    h += "</div>";
+    if (importOpen) h += "</div>";
 
     h += '<div class="v2v-sec">' +
       v2vSecHead("bi-diagram-3", "节点列表",
         (V2.pingProg ? "并发测速中 " + V2.pingProg.done + "/" + V2.pingProg.total + " · " : "") +
         (list.length ? ("共 " + list.length + " 个节点" + ((V2.kw || "").trim() ? "（已过滤）" : "")) : "还没有可用的节点"),
+        // 导入面板默认收起，入口紧贴标题，行内其余按钮换行时它也不会跑丢
+        '<button class="v2v-btn' + (V2.nodeForm ? "" : " primary") + '" data-act="node-import" title="' +
+        (V2.nodeForm ? "收起导入面板" : "粘贴分享链接 / 手填参数导入节点") + '">' +
+        '<i class="bi ' + (V2.nodeForm ? "bi-chevron-up" : "bi-plus-lg") + '"></i>' +
+        (V2.nodeForm ? "收起导入" : "导入节点") + "</button>" +
         '<span class="v2v-flex"></span>' +
         '<input type="text" id="v2vKw" class="v2v-kw" placeholder="搜索名称 / 地址" value="' + escA(V2.kw || "") + '">' +
         '<button class="v2v-tab' + (V2.sortPing ? " on" : "") + '" data-act="sort-ping" title="按延迟从低到高排序">' +
@@ -748,12 +823,13 @@
         (list.length && !V2.pingProg ? "" : " disabled") +
         '><i class="bi bi-lightning-charge"></i>' + (V2.pingProg ? "测速中…" : "全部测速") + "</button>" +
         '<button class="v2v-btn danger" data-act="del-timeout"' + (failN && !V2.pingProg ? "" : " disabled") +
-        ' title="删除所有测速超时的节点"><i class="bi bi-trash"></i>删除超时' + (failN ? " " + failN : "") + "</button>" + tabHtml);
+        ' title="删除所有测速超时的节点"><i class="bi bi-trash"></i>删除超时' + (failN ? " " + failN : "") + "</button>" +
+        tabHtml);
     if (!list.length) {
       h += '<div class="v2v-empty"><i class="bi bi-inbox"></i><b>' +
         (V2.nodes.length ? "没有匹配的节点" : "还没有节点") + "</b><span>" +
         (V2.nodes.length ? "换个关键词试试，或清空搜索框"
-                         : "在上方粘贴分享链接，或到「订阅」里添加一个订阅地址") + "</span></div>";
+                         : "点右上角「导入节点」粘贴分享链接，或到「订阅」里添加一个订阅地址") + "</span></div>";
     } else {
       h += '<div class="v2v-list">' + shown.map(n => {
         const p = V2.ping[n.id];
@@ -798,35 +874,54 @@
   function v2vSubs() {
     const e = V2.selSub || {};
     const editing = !!e.id;
-    let h = '<div class="v2v-sec">' +
-      v2vSecHead(editing ? "bi-pencil-square" : "bi-rss", editing ? "编辑订阅" : "新建订阅",
-        editing ? "修改后保存会自动重新拉取节点" : "填入订阅地址，保存后自动拉取并导入节点") +
-      '<div class="v2v-grid">' +
-      '<label class="v2v-field v2v-field-wide"><span>订阅地址（http:// 或 https://）</span>' +
-      '<input type="text" id="v2vSubUrl" value="' + escA(e.url || "") + '" placeholder="https://example.com/sub?token=..."></label>' +
-      '<label class="v2v-field"><span>名称</span><input type="text" id="v2vSubName" value="' + escA(e.name || "") + '" placeholder="例如：机场 A"></label>' +
-      '<label class="v2v-field"><span>拉取时走的代理（可选）</span>' +
-      '<input type="text" id="v2vSubProxy" value="' + escA(e.proxy || "") + '" placeholder="socks5://127.0.0.1:10808"></label>' +
-      '<label class="v2v-field"><span>状态</span><select id="v2vSubEnabled">' +
-      '<option value="1"' + (e.enabled === 0 ? "" : " selected") + ">启用</option>" +
-      '<option value="0"' + (e.enabled === 0 ? " selected" : "") + ">停用</option></select></label>" +
-      "</div>" +
-      '<div class="v2v-actions">' +
-      '<button class="v2v-btn primary" data-act="save-sub"><i class="bi bi-check2"></i>' + (editing ? "保存修改" : "添加订阅") + "</button>" +
-      (editing ? '<button class="v2v-btn" data-act="cancel-sub">取消编辑</button>' : "") +
-      '<div class="v2v-flex"></div>' +
-      '<button class="v2v-btn" data-act="refresh-all-subs"' + (V2.subAllBusy ? " disabled" : "") + '>' +
-      '<i class="bi bi-cloud-download' + (V2.subAllBusy ? " spin" : "") + '"></i>' +
-      (V2.subAllBusy ? "更新中…" : "刷新全部订阅") + "</button>" +
-      "</div>" +
-      '<div class="v2v-hint"><i class="bi bi-info-circle"></i><div>订阅内容里的分享链接会被解析成节点；刷新会<strong>覆盖该订阅下已有的节点</strong>，' +
-      "手动添加的节点（不属于任何订阅）不受影响。</div></div></div>";
+    const formOpen = editing || !!V2.subForm;
+    let h = "";
 
+    // —— 新建 / 编辑表单：默认收起，点「新建订阅」或行内「编辑」才展开 ——
+    if (formOpen) {
+      h += '<div class="v2v-sec">' +
+        v2vSecHead(editing ? "bi-pencil-square" : "bi-rss", editing ? "编辑订阅" : "新建订阅",
+          editing ? "修改后保存会自动重新拉取节点" : "填入订阅地址，保存后自动拉取并导入节点",
+          '<span class="v2v-flex"></span>' +
+          '<button class="v2v-btn ico" data-act="cancel-sub" title="收起表单"><i class="bi bi-x-lg"></i></button>') +
+        '<div class="v2v-grid">' +
+        '<label class="v2v-field v2v-field-wide"><span>订阅地址（http:// 或 https://）</span>' +
+        '<input type="text" id="v2vSubUrl" value="' + escA(e.url || "") + '" placeholder="https://example.com/sub?token=..."></label>' +
+        '<label class="v2v-field"><span>名称</span><input type="text" id="v2vSubName" value="' + escA(e.name || "") + '" placeholder="例如：机场 A"></label>' +
+        '<label class="v2v-field"><span>拉取时走的代理（可选）</span>' +
+        '<input type="text" id="v2vSubProxy" value="' + escA(e.proxy || "") +
+        '" placeholder="留空 = 自动：直连不行就用当前节点"></label>' +
+        '<label class="v2v-field"><span>状态</span><select id="v2vSubEnabled">' +
+        '<option value="1"' + (e.enabled === 0 ? "" : " selected") + ">启用</option>" +
+        '<option value="0"' + (e.enabled === 0 ? " selected" : "") + ">停用</option></select></label>" +
+        "</div>" +
+        '<div class="v2v-actions">' +
+        '<button class="v2v-btn primary" data-act="save-sub"><i class="bi bi-check2"></i>' +
+        (editing ? "保存修改" : "添加订阅") + "</button>" +
+        '<button class="v2v-btn" data-act="cancel-sub">取消</button>' +
+        "</div>" +
+        '<div class="v2v-hint"><i class="bi bi-info-circle"></i><div>订阅内容里的分享链接会被解析成节点；刷新会<strong>覆盖该订阅下已有的节点</strong>，' +
+        "手动添加的节点（不属于任何订阅）不受影响。<br>" +
+        "拉取顺序：<strong>上面填的代理 → 当前连接的节点 → 直连</strong>，" +
+        "所以代理留空就行，需要翻墙的订阅会自动走正在连的节点；" +
+        "返回网页时会自动找页面里的 .txt 订阅地址再抓。</div></div></div>";
+    }
+
+    // —— 订阅列表：右上角统一放「刷新全部订阅」+「新建订阅」 ——
     h += '<div class="v2v-sec">' +
-      v2vSecHead("bi-list-ul", "订阅列表", V2.subs.length ? ("共 " + V2.subs.length + " 个订阅") : "还没有订阅");
+      v2vSecHead("bi-list-ul", "订阅列表",
+        V2.subs.length ? ("共 " + V2.subs.length + " 个订阅") : "还没有订阅",
+        '<span class="v2v-flex"></span>' +
+        '<button class="v2v-btn" data-act="refresh-all-subs"' +
+        (V2.subAllBusy || !V2.subs.length ? " disabled" : "") + ' title="逐个重新拉取全部订阅">' +
+        '<i class="bi bi-cloud-download' + (V2.subAllBusy ? " spin" : "") + '"></i>' +
+        (V2.subAllBusy ? "更新中…" : "刷新全部订阅") + "</button>" +
+        '<button class="v2v-btn primary" data-act="new-sub"' +
+        (formOpen && !editing ? " disabled" : "") + ' title="展开新建订阅表单">' +
+        '<i class="bi bi-plus-lg"></i>新建订阅</button>');
     if (!V2.subs.length) {
       h += '<div class="v2v-empty"><i class="bi bi-rss"></i><b>还没有订阅</b>' +
-        "<span>在上方填入订阅地址，保存后会自动拉取节点</span></div>";
+        "<span>点右上角「新建订阅」填一个订阅地址，保存后会自动拉取节点</span></div>";
     } else {
       h += '<div class="v2v-list">' + V2.subs.map(s => {
         const cnt = V2.nodes.filter(n => n.sub_id === s.id).length;
@@ -852,55 +947,154 @@
     return h + "</div>";
   }
 
+  /** 设置页当前选中的内核类型（Tab 切换优先，其次落库值）。 */
+  function v2CoreKind() {
+    if (V2.coreKind === "sing-box" || V2.coreKind === "xray") return V2.coreKind;
+    const s = (V2.st && V2.st.settings) || {};
+    return s.core_kind === "sing-box" ? "sing-box" : "xray";
+  }
+
+  /** 某种内核「已保存 / 正在编辑」的路径（两种内核各存一份，切 Tab 不互相覆盖）。 */
+  function v2PathOf(kind) {
+    if (V2.pathDraft[kind] !== undefined) return V2.pathDraft[kind];
+    const s = (V2.st && V2.st.settings) || {};
+    return (kind === "sing-box" ? s.core_path_singbox : s.core_path) || "";
+  }
+
+  /** 探测到的、可用的某类内核路径（用来给输入框做占位提示）。 */
+  function v2KindCorePath(kind) {
+    const c = (V2.cores || []).find(x => (x.kind || "xray") === kind && x.ok);
+    return c ? (c.path || "") : "";
+  }
+
+  /** 路径输入框下面的说明：当前实际在用哪个 / 自动探测到的路径 / 没找到时的提示。 */
+  function v2KindTip(kind) {
+    const c = (V2.st || {}).core || {};
+    if (c.ok && c.path && (c.kind || "xray") === kind) {
+      return "当前使用：" + c.path + (c.version ? "（" + c.version + "）" : "");
+    }
+    const det = v2KindCorePath(kind);
+    if (det) return "自动探测到：" + det;
+    return "本机没探测到 " + v2CoreName(kind) + " 内核，可直接下载或用「使用」按钮指定";
+  }
+
+  /** 切 Tab 要整页重绘，但不想丢掉用户正在输入的设置：先快照，重绘后回填。 */
+  function v2SnapInputs(skip) {
+    const out = {};
+    document.querySelectorAll("#v2View input[id], #v2View select[id], #v2View textarea[id]")
+      .forEach(el => {
+        if (skip && skip.indexOf(el.id) >= 0) return;
+        out[el.id] = el.type === "checkbox" ? !!el.checked : el.value;
+      });
+    return out;
+  }
+
+  function v2RestoreInputs(snap) {
+    Object.keys(snap || {}).forEach(id => {
+      const el = $(id);
+      if (!el) return;
+      if (el.type === "checkbox") el.checked = !!snap[id];
+      else el.value = snap[id];
+    });
+  }
+
+  /** 整页重绘但保留正在输入的内容（skip = 不保留的控件 id 列表）。 */
+  function v2vRenderKeep(skip) {
+    if (!v2vActive()) return;
+    const snap = v2SnapInputs(skip);
+    v2vRender();
+    v2RestoreInputs(snap);
+  }
+  function v2CoreName(kind) { return kind === "sing-box" ? "sing-box" : "Xray-core"; }
+  function v2CoreUrlPlaceholder(kind) {
+    // sing-box 的压缩包文件名里带版本号，所以给 releases 总目录最省事：填目录页会自动取最新版
+    if (kind === "sing-box") return "https://github.com/SagerNet/sing-box/releases（留空 = 自动取最新版）";
+    const plat = ((V2.coreInfo || {}).platform || "linux/64").replace("/", "-");
+    return "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-" + plat + ".zip";
+  }
+
   function v2vSettings(st) {
     const s = st.settings || {};
     const cores = V2.cores || [];
     const busy = v2JobBusy();
     const core = st.core || {};
     const plat = (V2.coreInfo && V2.coreInfo.platform) || "linux/64";
+    const kind = v2CoreKind();
     const lan = (s.socks_listen || "127.0.0.1") === "0.0.0.0";
     const authOn = lan || String(s.auth_enabled === undefined ? 1 : s.auth_enabled) !== "0";
     let h = v2vBanner();
     h += '<div class="v2v-sec">' +
-      v2vSecHead("bi-cpu", "内核", "自动探测本机的 xray / v2ray，找不到可一键下载官方版本") +
+      v2vSecHead("bi-cpu", "内核", "自动探测本机的 xray / v2ray / sing-box，找不到可一键下载官方版本") +
       '<div class="v2v-grid">' +
-      '<label class="v2v-field v2v-field-wide"><span>内核可执行文件路径（留空 = 自动探测）</span>' +
-      '<input type="text" id="v2vSetCore" value="' + escA(s.core_path || "") + '" placeholder="' +
-      escA(core.path || "/path/to/xray") + '"></label>' +
-      '<label class="v2v-field v2v-field-wide"><span>下载源（留空 = 官方 GitHub Release；可填镜像前缀或完整 zip 地址）</span>' +
+      '<div class="v2v-field v2v-field-wide"><span>内核类型（决定下载哪个内核、管理谁的版本列表；连接时按选中的内核自动选配置格式）</span>' +
+      '<div class="v2v-kindtabs">' +
+        [["xray", "Xray-core", "bi-cpu"], ["sing-box", "sing-box", "bi-box"]].map(t =>
+          '<button type="button" class="v2v-kindtab' + (kind === t[0] ? " on" : "") +
+          '" data-act="core-kind" data-kind="' + t[0] + '"><i class="bi ' + t[2] + '"></i>' + t[1] + "</button>"
+        ).join("") +
+      "</div></div>" +
+      '<div class="v2v-field v2v-field-wide"><span>' + esc(v2CoreName(kind)) +
+      ' 内核可执行文件路径（留空 = 自动探测）</span>' +
+      '<input type="text" id="v2vSetCore" value="' + escA(v2PathOf(kind)) + '" placeholder="' +
+      escA(v2KindCorePath(kind) || ("/path/to/" + (kind === "sing-box" ? "sing-box" : "xray"))) + '">' +
+      '<div class="v2v-tip" id="v2vCoreTip">' + esc(v2KindTip(kind)) + "</div></div>" +
+      '<label class="v2v-field v2v-field-wide"><span>下载源（留空 = 官方最新版；也可填 releases 页面地址、镜像前缀或完整压缩包地址）</span>' +
       '<input type="text" id="v2vSetCoreUrl" value="' + escA(s.core_url || "") + '" placeholder="' +
-      escA("https://github.com/XTLS/Xray-core/releases/latest/download/Xray-" +
-           plat.replace("/", "-") + ".zip") + '"></label>' +
+      escA(v2CoreUrlPlaceholder(kind)) + '"></label>' +
       "</div>";
     h += '<div class="v2v-actions">' +
       '<button class="v2v-btn primary" data-act="download-core"' + (busy ? " disabled" : "") +
-      '><i class="bi bi-cloud-arrow-down"></i>一键下载 Xray-core</button>' +
+      '><i class="bi bi-cloud-arrow-down"></i><span id="v2vDlLabel">一键下载 ' + esc(v2CoreName(kind)) + "</span></button>" +
       '<button class="v2v-btn" data-act="detect-core"' + (busy ? " disabled" : "") +
-      '><i class="bi bi-search"></i>重新探测</button>' +
+      ' title="只探测当前选择的 ' + escA(v2CoreName(kind)) + ' 内核">' +
+      '<i class="bi bi-search"></i>重新探测</button>' +
       '<button class="v2v-btn" data-act="ver-list"' + (busy || V2.versBusy ? " disabled" : "") +
       '><i class="bi ' + (V2.versBusy ? "bi-arrow-repeat spin"
         : (V2.vers ? "bi-chevron-up" : "bi-list-stars")) + '"></i>' +
       (V2.vers ? "收起版本列表" : "查看其他版本") + "</button>" +
       '<span class="v2v-plat"><i class="bi bi-pc-display"></i>当前平台 · ' + esc(plat) + "</span>" +
       "</div>" + v2ProgHtml();
-    if (cores.length) {
-      h += '<div class="v2v-cores">' + cores.map(c =>
+    // 只展示当前 Tab 那一类内核（探测结果也按类型分开），避免两种内核混在一列
+    const myCores = cores.filter(c => (c.kind || "xray") === kind);
+    if (myCores.length) {
+      h += '<div class="v2v-cores">' + myCores.map(c =>
         '<div class="v2v-core' + (c.ok ? " ok" : "") + '">' +
         '<span class="v2v-core-nm"><i class="bi bi-terminal"></i>' + esc(c.name) + "</span>" +
         '<span class="v2v-core-v">' + esc(c.version || "不可用") + "</span>" +
         '<span class="v2v-core-p" title="' + escA(c.path) + '">' + esc(c.path) + "</span>" +
+        (c.ok
+          ? (c.path === core.path
+              ? '<span class="v2v-core-v">使用中</span>'
+              : '<button class="v2v-btn sm" data-act="core-use" data-path="' + escA(c.path) +
+                '"' + (busy ? " disabled" : "") +
+                ' title="把该内核设为当前使用（会覆盖上面的路径设置）"><i class="bi bi-check2"></i>使用</button>')
+          : "") +
         "</div>").join("") + "</div>";
+    } else if (cores.length) {
+      h += '<div class="v2v-hint"><i class="bi bi-info-circle"></i><div>' +
+        "本机还没有 " + esc(v2CoreName(kind)) + " 内核（已探测到 " +
+        esc(cores.map(c => c.name).join(" / ")) + "）：点上面的「一键下载 " +
+        esc(v2CoreName(kind)) + "」即可装到 data/v2ray/core，或把已有可执行文件路径填进去。</div></div>";
     } else {
       h += '<div class="v2v-hint warn"><i class="bi bi-exclamation-triangle"></i><div>' +
-        "系统里没有探测到 xray / v2ray，请点上面的「一键下载 Xray-core」（会装到 data/v2ray/core）。</div></div>";
+        "系统里没有探测到 xray / v2ray / sing-box，请点上面的「一键下载 " + esc(v2CoreName(kind)) +
+        "」（会装到 data/v2ray/core）。</div></div>";
     }
-    // —— 版本管理：已安装多版本切换 + 官方发布版本按需安装 ——
+    // —— 版本管理：已安装多版本切换 + 官方发布版本按需安装（按内核类型分别管理） ——
     if (V2.vers) {
       const vs = V2.vers;
+      const vKind = vs.kind === "sing-box" ? "sing-box" : "xray";
       const curV = vs.current_version || "";
-      h += '<div class="v2v-subhead"><span>版本管理</span>' +
-        '<em class="v2v-sub-note">当前使用：' + esc(curV || "未知") +
-        " · 安装到 data/v2ray/versions/，切换后若内核在跑会自动重启</em></div>";
+      // 该类型没在用（比如正在跑 xray）时，别显示成「未知」，讲清楚现在用的是谁
+      const curText = curV ? curV
+        : ("未使用" + (vs.current_kind && vs.current_kind !== vKind
+            ? "（当前内核：" + v2CoreName(vs.current_kind) + "）" : ""));
+      h += '<div id="v2vVersBox"><div class="v2v-subhead"><span>' + esc(v2CoreName(vKind)) +
+        " 版本管理</span>" +
+        '<em class="v2v-sub-note">当前使用：' + esc(curText) +
+        " · 安装到 data/v2ray/versions/，切换后若内核在跑会自动重启</em>" +
+        '<span class="v2v-flex"></span>' +
+        '<button class="v2v-btn sm" data-act="ver-hide"><i class="bi bi-x-lg"></i>收起</button></div>';
       if (vs.installed && vs.installed.length) {
         h += '<div class="v2v-cores">' + vs.installed.map(v =>
           '<div class="v2v-core' + (v.ok ? " ok" : "") + '">' +
@@ -909,23 +1103,41 @@
           '<span class="v2v-core-p" title="' + escA(v.path) + '">' + esc(v.path) + "</span>" +
           (v.ok && v.version !== curV
             ? '<button class="v2v-btn sm" data-act="ver-use" data-ver="' + escA(v.version || v.dir) +
-              '" title="切换到该版本"><i class="bi bi-arrow-left-right"></i>使用</button>'
+              '" data-kind="' + escA(vKind) + '" title="切换到该版本"><i class="bi bi-arrow-left-right"></i>使用</button>'
             : "") +
           "</div>").join("") + "</div>";
       }
       if (vs.remote_error) {
         h += '<div class="v2v-hint warn"><i class="bi bi-exclamation-triangle"></i><div>' + esc(vs.remote_error) + "</div></div>";
       } else if (vs.remote && vs.remote.length) {
-        h += '<div class="v2v-cores">' + vs.remote.slice(0, 15).map(v =>
-          '<div class="v2v-core' + (v.version === curV ? " ok" : "") + '">' +
-          '<span class="v2v-core-nm"><i class="bi bi-tag"></i>' + esc(v.version) + "</span>" +
-          '<span class="v2v-core-v">' + esc(v.published || "") + "</span>" +
-          '<span class="v2v-core-p">' + (v.version === curV ? "当前版本" : "") + "</span>" +
-          '<button class="v2v-btn sm" data-act="ver-install" data-ver="' + escA(v.version) +
-          '"' + (busy ? " disabled" : "") + ' title="下载安装该版本（不自动切换）">' +
-          '<i class="bi bi-cloud-arrow-down"></i>安装</button>' +
-          "</div>").join("") + "</div>";
+        const instList = vs.installed || [];
+        h += '<div class="v2v-cores">' + vs.remote.slice(0, 15).map(v => {
+          const inst = instList.find(x => x.version === v.version);
+          const isCur = !!curV && v.version === curV;
+          let act;
+          if (isCur) {
+            act = '<span class="v2v-core-v">使用中</span>';
+          } else if (inst) {
+            // 已经装过的版本就别再给「安装」，直接给「使用」
+            act = '<span class="v2v-core-v">已安装</span>' +
+              '<button class="v2v-btn sm" data-act="ver-use" data-ver="' + escA(v.version) +
+              '" data-kind="' + escA(vKind) + '" title="切换到该版本">' +
+              '<i class="bi bi-arrow-left-right"></i>使用</button>';
+          } else {
+            act = '<button class="v2v-btn sm" data-act="ver-install" data-ver="' + escA(v.version) +
+              '" data-kind="' + escA(vKind) + '"' + (busy ? " disabled" : "") +
+              ' title="下载安装该版本（不自动切换）">' +
+              '<i class="bi ' + (V2.instVer === v.version ? "bi-arrow-repeat spin" : "bi-cloud-arrow-down") +
+              '"></i>' + (V2.instVer === v.version ? "安装中…" : "安装") + "</button>";
+          }
+          return '<div class="v2v-core' + (isCur || inst ? " ok" : "") + '">' +
+            '<span class="v2v-core-nm"><i class="bi bi-tag"></i>' + esc(v.version) + "</span>" +
+            '<span class="v2v-core-v">' + esc(v.published || "") + "</span>" +
+            '<span class="v2v-core-p">' + (isCur ? "当前版本" : "") + "</span>" +
+            act + "</div>";
+        }).join("") + "</div>";
       }
+      h += "</div>";
     }
     h += "</div>";
 
@@ -970,8 +1182,9 @@
       "</form>" +
       '<div class="v2v-subhead"><span>其它</span></div>' +
       '<div class="v2v-grid">' +
-      '<label class="v2v-field"><span>订阅拉取代理（可选，默认直连）</span>' +
-      '<input type="text" id="v2vSetSubProxy" value="' + escA(s.sub_proxy || "") + '" placeholder="socks5://127.0.0.1:10808"></label>' +
+      '<label class="v2v-field"><span>订阅拉取代理（可选，留空 = 自动用当前节点）</span>' +
+      '<input type="text" id="v2vSetSubProxy" value="' + escA(s.sub_proxy || "") +
+      '" placeholder="留空即自动：直连不行就用当前连接的节点"></label>' +
       '<label class="v2v-field"><span>服务启动时自动连接上次的节点</span><select id="v2vSetAuto">' +
         '<option value="1"' + (Number(s.auto_start) ? " selected" : "") + ">开启</option>" +
         '<option value="0"' + (Number(s.auto_start) ? "" : " selected") + ">关闭</option></select></label>" +
@@ -987,7 +1200,7 @@
 
   function v2vLog() {
     return '<div class="v2v-sec">' +
-      v2vSecHead("bi-journal-text", "内核运行日志", "来自内核进程输出（data/v2ray/xray.log）",
+      v2vSecHead("bi-journal-text", "内核运行日志", "来自内核进程输出（data/v2ray/xray.log，Xray / sing-box 共用）",
         '<span class="v2v-flex"></span>' +
         '<span class="v2v-live' + (V2.autoLog ? " on" : "") + '"><i></i>' +
         (V2.autoLog ? "实时刷新中" : "已暂停") + "</span>" +
@@ -1295,7 +1508,16 @@
         await v2Reload();
         break;
       }
-      case "toggle-manual": V2.showManual = !V2.showManual; v2vRender(); break;
+      case "node-import":
+        V2.nodeForm = !V2.nodeForm;
+        if (!V2.nodeForm) V2.showManual = false;   // 收起面板时连带收起手填表单
+        v2vRender();
+        break;
+      case "toggle-manual":
+        V2.nodeForm = true;                    // 手填表单一定在导入面板里
+        V2.showManual = !V2.showManual;
+        v2vRender();
+        break;
       case "add-manual": {
         const node = {
           proto: val("v2vMProto"), name: val("v2vMName"), server: val("v2vMServer"), port: val("v2vMPort"),
@@ -1429,6 +1651,7 @@
         const r = await post("/api/v2ray/subs/save", body);
         if (r.error) return toast(r.error, "err");
         V2.selSub = null;
+        V2.subForm = false;              // 保存后收起表单，回到列表
         toast("订阅已保存，正在拉取节点…", "info");
         await v2Reload();
         if (r.sub && r.sub.id) {
@@ -1439,8 +1662,18 @@
         }
         break;
       }
-      case "cancel-sub": V2.selSub = null; v2vRender(); break;
-      case "edit-sub": V2.selSub = V2.subs.find(s => s.id === ds.id) || null; v2vRender(); break;
+      case "new-sub":
+        if (V2.subForm && !V2.selSub) break;      // 已经在新建，别把输入清掉
+        V2.subForm = true;
+        V2.selSub = null;
+        v2vRender();
+        break;
+      case "cancel-sub": V2.subForm = false; V2.selSub = null; v2vRender(); break;
+      case "edit-sub":
+        V2.selSub = V2.subs.find(s => s.id === ds.id) || null;
+        V2.subForm = true;
+        v2vRender();
+        break;
       case "refresh-sub": {
         // 更新中不允许重复点击
         if (V2.subBusy[ds.id] || V2.subAllBusy) break;
@@ -1482,19 +1715,67 @@
         if (!ok) return;
         const r = await post("/api/v2ray/subs/delete", { id: ds.id, confirm: 1 });
         if (r.error) return toast(r.error, "err");
-        if (V2.selSub && V2.selSub.id === ds.id) V2.selSub = null;
+        if (V2.selSub && V2.selSub.id === ds.id) { V2.selSub = null; V2.subForm = false; }
         toast("已删除", "ok");
         await v2Reload();
         break;
       }
 
       /* -------- 设置 / 内核 -------- */
-      case "detect-core": v2JobRun("detect", "/api/v2ray/core/detect"); break;
-      case "download-core": {
-        V2.pendingUrl = val("v2vSetCoreUrl");
-        v2JobRun("download", "/api/v2ray/core/download", { url: V2.pendingUrl });
+      case "core-kind": {
+        const k = ds.kind === "sing-box" ? "sing-box" : "xray";
+        const prev = v2CoreKind();
+        if (k === prev) break;
+        const wasOpen = !!V2.vers;          // 版本面板开着就跟着切到新类型重新拉
+        // 整页重绘：内核列表 / 下载按钮 / 路径 / 版本面板一次全切到位，
+        // 不用等版本信息回来才更新；其它输入框的内容先快照再回填
+        const cur = $("v2vSetCore");
+        if (cur) V2.pathDraft[prev] = cur.value;
+        V2.coreKind = k;
+        V2.vers = null;
+        v2vRenderKeep(["v2vSetCore"]);
+        if (wasOpen) {
+          V2.versBusy = true;
+          v2VersLoad(k).catch(() => {}).then(() => {
+            V2.versBusy = false;
+            v2vRenderKeep(["v2vSetCore"]);
+          });
+        }
         break;
       }
+      case "detect-core":
+        // 只探测当前 Tab 选的那类内核，避免日志里混进另一类内核的路径
+        v2JobRun("detect", "/api/v2ray/core/detect", { kind: v2CoreKind() });
+        break;
+      case "prog-close": {
+        clearTimeout(V2.progTimer);
+        V2.job = null;
+        V2.instVer = "";
+        v2ProgPaint();
+        if (v2vActive()) v2vRender();
+        break;
+      }
+      case "core-use": {
+        const kind = v2CoreKind();
+        const r = await post("/api/v2ray/core/path", { path: ds.path || "", kind: kind });
+        if (r.error) return toast(r.error, "err");
+        delete V2.pathDraft[kind];          // 后端已写好该类型的路径，让输入框显示新值
+        toast("已切换到 " + (ds.path || ""), "ok");
+        await v2Reload();
+        if ((V2.st || {}).running) {
+          const ok = await uiConfirm("重启内核", "当前内核正在运行，重启后才会用新内核加载配置。", "重启", false);
+          if (ok) await post("/api/v2ray/restart");
+          await v2Reload();
+        }
+        break;
+      }
+      case "download-core": {
+        V2.pendingUrl = val("v2vSetCoreUrl");
+        v2JobRun("download", "/api/v2ray/core/download",
+                 { url: V2.pendingUrl, kind: v2CoreKind() });
+        break;
+      }
+      case "ver-hide": V2.vers = null; if (v2vActive()) v2vRender(); break;
       case "ver-list": {
         // 开关：再点收起；拉取期间按钮禁用转圈（防止重复请求）
         if (V2.versBusy) break;
@@ -1506,7 +1787,7 @@
         V2.versBusy = true;
         if (v2vActive()) v2vRender();
         try {
-          const rv = await v2VersLoad();
+          const rv = await v2VersLoad(v2CoreKind());
           if (rv && rv.error) toast(rv.error, "err");
         } finally {
           V2.versBusy = false;
@@ -1516,20 +1797,32 @@
       }
       case "ver-install": {
         if (v2JobBusy()) return toast("已有任务在进行中，请稍候", "warn");
-        v2JobRun("download", "/api/v2ray/core/install-version", { version: ds.ver });
+        V2.instVer = ds.ver || "";          // 让被点的那一行显示「安装中…」
+        // 就地禁用所有「安装」，被点的那行换成转圈文案：
+        // 不能先重绘再启动任务（那时 busy 还是 false，按钮会留成可点状态）
+        document.querySelectorAll('#v2View [data-act="ver-install"]').forEach(b => {
+          b.disabled = true;
+          if (b.dataset.ver === V2.instVer) {
+            b.innerHTML = '<i class="bi bi-arrow-repeat spin"></i>安装中…';
+          }
+        });
+        v2JobRun("download", "/api/v2ray/core/install-version",
+                 { version: ds.ver, kind: ds.kind || v2CoreKind() });
         break;
       }
       case "ver-use": {
-        const ru = await post("/api/v2ray/core/use-version", { version: ds.ver });
+        const kind = ds.kind || v2CoreKind();
+        const ru = await post("/api/v2ray/core/use-version", { version: ds.ver, kind: kind });
         if (ru.error) return toast(ru.error, "err");
         toast("已切换到 " + (ru.version || ds.ver) + (ru.restarted ? "，内核已自动重启" : ""), "ok");
         await v2Reload().catch(() => {});
-        await v2VersLoad().catch(() => {});
+        await v2VersLoad(kind).catch(() => {});
         break;
       }
       case "save-settings": {
         const body = {
           core_path: val("v2vSetCore"), core_url: val("v2vSetCoreUrl"),
+          core_kind: v2CoreKind(),
           socks_port: val("v2vSetPort"), socks_listen: val("v2vSetListen"),
           http_port: val("v2vSetHttp"), api_port: val("v2vSetApi"), log_level: val("v2vSetLog"),
           socks_user: val("v2vSetUser"), sub_proxy: val("v2vSetSubProxy"),

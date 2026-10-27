@@ -55,12 +55,20 @@ CREATE TABLE IF NOT EXISTS v2ray_traffic (
     down       INTEGER NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS v2ray_traffic_day (
+    day        TEXT PRIMARY KEY,   -- 本地日期 YYYY-MM-DD
+    up         INTEGER NOT NULL DEFAULT 0,
+    down       INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL DEFAULT 0
+);
 """
 
 # 模块默认设置（未落库时用这些值）
 DEFAULT_SETTINGS = {
-    "core_path": "",            # 手动指定的内核路径（留空 = 自动探测）
+    "core_path": "",            # 手动指定的 Xray / V2Ray 内核路径（留空 = 自动探测）
+    "core_path_singbox": "",    # 手动指定的 sing-box 内核路径（与 xray 分开存，切 Tab 互不覆盖）
     "core_url": "",             # 一键下载内核的地址（留空 = 官方 Release 直链）
+    "core_kind": "xray",        # 当前使用的内核类型：xray（Xray-core）/ sing-box
     "socks_port": 10808,        # SOCKS5 入站端口
     "socks_listen": "0.0.0.0",  # 入站监听地址（0.0.0.0 = 供局域网其他用户使用）
     "socks_user": "",           # 非空则要求用户名密码认证
@@ -142,6 +150,50 @@ def add_traffic(node_id, up: int, down: int):
             "ON CONFLICT(node_id) DO UPDATE SET up = up + excluded.up, "
             "down = down + excluded.down, updated_at = excluded.updated_at",
             (node_id, up, down, time.time()))
+
+
+def add_traffic_sample(node_id, up: int, down: int):
+    """采样一次：同一事务里累加「该节点行 + 总行 + 今日行」。
+
+    节点 / 总行是累计值（重启不丢），今日行按本地日期分桶，供侧栏「今日流量」。
+    """
+    node_id = str(node_id or "")
+    up, down = int(up or 0), int(down or 0)
+    if node_id and (up > 0 or down > 0):
+        now = time.time()
+        day = time.strftime("%Y-%m-%d")
+        with store_tx() as conn:
+            for nid in (node_id, "__total__"):
+                conn.execute(
+                    "INSERT INTO v2ray_traffic (node_id, up, down, updated_at) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(node_id) DO UPDATE SET up = up + excluded.up, "
+                    "down = down + excluded.down, updated_at = excluded.updated_at",
+                    (nid, up, down, now))
+            conn.execute(
+                "INSERT INTO v2ray_traffic_day (day, up, down, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(day) DO UPDATE SET up = up + excluded.up, "
+                "down = down + excluded.down, updated_at = excluded.updated_at",
+                (day, up, down, now))
+
+
+def traffic_today(day: str = "") -> dict:
+    """今日累计流量（本地日期）：{day, up, down}；表不可用时返回 0。"""
+    day = day or time.strftime("%Y-%m-%d")
+    out = {"day": day, "up": 0, "down": 0}
+    try:
+        conn = store_conn()
+        try:
+            row = conn.execute("SELECT up, down FROM v2ray_traffic_day WHERE day=?",
+                               (day,)).fetchone()
+        finally:
+            conn.close()
+    except Exception as e:                          # noqa: BLE001
+        _log.warning("读取今日流量失败: %s", e)
+        return out
+    if row:
+        out["up"] = int(row["up"] or 0)
+        out["down"] = int(row["down"] or 0)
+    return out
 
 
 def traffic_rows() -> dict:

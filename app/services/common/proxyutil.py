@@ -304,7 +304,10 @@ def friendly_error(exc, url: str = "") -> str:
             text = str(reason, "utf-8", "replace") if isinstance(reason, bytes) else str(reason)
             text = text.strip()
             if text:
-                return "%s%s" % (_phrase_text(text) or "请求失败", target)
+                zh = _phrase_text(text)
+                if zh:
+                    return "%s%s" % (zh, target)
+                return "请求失败%s：%s" % (target, text)
         else:
             return friendly_error(reason, url)
 
@@ -351,7 +354,10 @@ def friendly_error(exc, url: str = "") -> str:
     zh = _phrase_text(msg)
     if zh:
         return "%s%s" % (zh, target)
-    return ("请求失败%s：%s" % (target, msg)) if msg else ("请求失败%s" % target)
+    # 兜底也带上异常类型，否则只剩一句「请求失败（域名）」，看不出是 DNS、TLS 还是连接被断
+    name = exc.__class__.__name__
+    detail = msg if (msg and msg != name) else name
+    return "请求失败%s：%s" % (target, detail)
 
 
 # ---------------------------------------------------------------------------

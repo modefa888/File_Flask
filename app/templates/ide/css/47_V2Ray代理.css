@@ -164,6 +164,54 @@
 .v2-share-cp { flex: none; cursor: pointer; color: #8fbde8; }
 .v2-share-cp:hover { color: #fff; }
 
+/* 分享地址折叠开关：默认只露一行，其余点这里展开 */
+.v2-share-more {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  color: #8fbde8;
+  font-size: 10.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.v2-share-more .bi { font-size: 9px; }
+.v2-share-more:hover { color: #fff; }
+
+/* 今日流量 */
+.v2-today {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid var(--v2-line);
+  border-radius: 7px;
+  background: var(--v2-card-2);
+  font-size: 11px;
+  color: var(--v2-dim);
+}
+.v2-today-k { flex: none; display: inline-flex; align-items: center; gap: 5px; }
+.v2-today-k .bi { color: #7fa9d6; font-size: 12px; }
+.v2-today-v {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: #dcdde3;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+:where(html.theme-light) .v2-share-more { color: #0d6ab8; }
+:where(html.theme-light) .v2-share-more:hover { color: #0b4f88; }
+:where(html.theme-light) .v2-today { background: #f8fafc; border-color: #e3e4e8; color: #7b7f86; }
+:where(html.theme-light) .v2-today-v { color: #1f2328; }
+
 /* --- 节点快选 --- */
 .v2-grow { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
 .v2-listhead {
@@ -511,6 +559,51 @@
 }
 .v2v-tab.on .v2v-num { background: rgba(53, 208, 165, .22); color: #9df0d6; }
 
+/* --- 内核类型切换（分段标签，高度与输入框一致） --- */
+.v2v-kindtabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border: 1px solid #2d2e37;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .022);
+}
+.v2v-kindtab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #95969f;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .15s ease, background .15s ease;
+}
+.v2v-kindtab > .bi { font-size: 12.5px; opacity: .92; }
+.v2v-kindtab:hover { color: #e2e3e8; background: rgba(255, 255, 255, .045); }
+.v2v-kindtab.on {
+  color: #fff;
+  background: linear-gradient(180deg, rgba(53, 208, 165, .16), rgba(53, 208, 165, .04));
+}
+.v2v-kindtab.on > .bi { color: #5fe3b0; }
+:where(html.theme-light) .v2v-kindtabs { border-color: #d7dae1; background: #f6f7f9; }
+:where(html.theme-light) .v2v-kindtab { color: #6a6e77; }
+:where(html.theme-light) .v2v-kindtab:hover { color: #23262d; background: rgba(15, 23, 42, .05); }
+:where(html.theme-light) .v2v-kindtab.on {
+  color: #12161c;
+  background: linear-gradient(180deg, rgba(18, 163, 126, .16), rgba(18, 163, 126, .05));
+}
+:where(html.theme-light) .v2v-kindtab.on > .bi { color: #0f9d78; }
+
 /* --- 卡片 --- */
 .v2v-sec {
   position: relative;
@@ -709,7 +802,8 @@
 
 /* --- 表单 --- */
 .v2v-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px 16px; }
-.v2v-field { display: block; min-width: 0; }
+/* 字段纵向排列并把内容压到行底：同一行里标题长短不一（自动换行）时，输入框仍然对齐 */
+.v2v-field { display: flex; flex-direction: column; justify-content: flex-end; min-width: 0; }
 .v2v-field-wide { grid-column: 1 / -1; }
 .v2v-field > span {
   display: flex;
@@ -719,7 +813,8 @@
   font-size: 11.5px;
   color: #9a9ca6;
 }
-.v2v-field .v2v-tip { margin-top: 5px; font-size: 10.5px; color: #74747c; }
+.v2v-field .v2v-tip { margin-top: 5px; font-size: 10.5px; color: #74747c; word-break: break-all; }
+:where(html.theme-light) .v2v-field .v2v-tip { color: #6a6e77; }
 
 /* 输入框 / 下拉 / 文本域：内凹质感 + 悬停提亮 + 聚焦光圈 */
 .v2-view input[type="text"],
@@ -973,6 +1068,26 @@
 .v2-prog-head .bi { color: #5fe3b0; }
 .v2-prog-phase { flex: 1; min-width: 0; color: #e9e9ed; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .v2-prog-pct { flex: none; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; color: #b4b4bd; }
+.v2-prog-x {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #7c7d87;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color .15s ease, background .15s ease;
+}
+.v2-prog-x .bi { color: inherit; font-size: 11px; }
+.v2-prog-x:hover { color: #e2e3e8; background: rgba(255, 255, 255, .07); }
+:where(html.theme-light) .v2-prog-x { color: #8a8f98; }
+:where(html.theme-light) .v2-prog-x:hover { color: #23262d; background: rgba(15, 23, 42, .06); }
 .v2-prog-track {
   height: 7px;
   border-radius: 999px;

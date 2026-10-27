@@ -1,15 +1,24 @@
-"""V2Ray / Xray 底层能力：内核探测与下载、分享链接解析、Xray 运行配置生成。
+"""V2Ray / Xray / sing-box 底层能力：内核探测与下载、分享链接解析、运行配置生成。
 
 对外接口：
-    detect_cores()                    探测本机可用的 xray / v2ray（含版本）
-    find_core()                       取一个可用内核路径（找不到返回空串）
-    download_core(url, arch)          一键下载官方内核压缩包并解压到 data 目录
+    detect_cores()                    探测本机可用的 xray / v2ray / sing-box（含版本）
+    find_core(manual, prefer)         取一个可用内核路径（找不到返回空串）
+    core_kind(path)                   判断内核类型：xray / v2ray / sing-box
+    download_core(dest, url, kind)    一键下载官方内核压缩包并解压到 data 目录
     lan_ip()                          取本机局域网 IPv4（供「其他用户使用」提示）
     parse_share_link(uri)             解析 vmess:// vless:// trojan:// ss:// 分享链接
     node_to_share(node)               把节点还原成分享链接（列表复制用）
-    build_config(node, opts)          按节点 + 入站选项生成 Xray JSON 配置
+    build_config(node, opts)          按节点 + 入站选项生成内核配置（按类型分派）
 
-只依赖标准库；解析失败的分享链接抛 ValueError（中文说明）。
+两种内核的配置格式完全不同：Xray / V2Ray 用 protocol + settings + streamSettings，
+sing-box 用 type + tls + transport，所以生成配置前先按 core_kind() 判定类型。
+
+只依赖标准库（走 SOCKS5 兜底代理时才会延迟导入 common.proxyutil）；
+解析失败 / 下载失败一律抛 ValueError（中文说明）。
+
+GitHub 相关请求的尝试顺序：探测可达的代理 → 直连 → 各加速镜像 → 探测不通的代理。
+代理由 v2raymgr 通过 set_fallback_proxies() 注入（订阅拉取代理 + 当前节点的本机 socks）：
+直连 GitHub 常常能连上但极慢、中途断流，所以在有可用代理时直接优先走代理。
 """
 from __future__ import annotations
 
@@ -24,6 +33,8 @@ import shutil
 import socket
 import stat
 import subprocess
+import tarfile
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -34,7 +45,7 @@ import zipfile
 
 # 探测顺序：PATH → 常见安装位置（含 v2rayN 自带内核目录）
 _CORE_DIRS = (
-    "/usr/local/bin", "/usr/bin", "/opt/xray", "/opt/v2ray",
+    "/usr/local/bin", "/usr/bin", "/opt/xray", "/opt/v2ray", "/opt/sing-box",
 )
 _HOME = os.path.expanduser("~")
 _CORE_DIRS_HOME = (
@@ -44,10 +55,20 @@ _CORE_DIRS_HOME = (
     os.path.join(_HOME, ".local", "share", "v2rayN", "bin", "v2ray"),
     os.path.join(_HOME, ".local", "share", "v2rayN", "bin"),
     os.path.join(_HOME, ".config", "xray"),
+    os.path.join(_HOME, ".config", "sing-box"),
 )
+
+# 支持的内核类型（kind）与可执行文件名：探测时按这些名字挨个找
+_CORE_NAMES = ("xray", "v2ray", "sing-box")
 
 # 官方内核下载地址（GitHub Release 直链，可在模块设置里覆盖）
 _XRAY_RELEASE = "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-{plat}-{arch}.zip"
+# sing-box 的资产名里带版本号，没有 latest 直链，需要先查 API 拿最新 tag
+_SINGBOX_RELEASE = ("https://github.com/SagerNet/sing-box/releases/download/v{ver}/"
+                    "sing-box-{ver}-{os}-{arch}{ext}")
+
+# kind → GitHub 仓库（查最新版本 / 版本列表用）
+_REPOS = {"xray": "XTLS/Xray-core", "v2ray": "XTLS/Xray-core", "sing-box": "SagerNet/sing-box"}
 
 # GitHub 直连慢 / 不可达时的加速镜像前缀（依次尝试，哪个通用哪个；留空项 = 官方直连）。
 # 把用户实测最稳的 ghfast.top / gh-proxy.com 放在直连之后优先重试。
@@ -61,8 +82,10 @@ _MIRRORS = (
     "https://github.moeyy.xyz/",
 )
 
-# 版本号取法：`xray version` 首行形如 "Xray 26.3.27 (Xray, Penetrates Everything.) ..."
-_VER_RE = re.compile(r"(?:Xray|V2Ray|v2ray)\s+([0-9][0-9A-Za-z.\-]*)")
+# 版本号取法：
+#   xray / v2ray → "Xray 26.3.27 (Xray, Penetrates Everything.) ..."
+#   sing-box     → "sing-box version 1.12.4"
+_VER_RE = re.compile(r"(?:Xray|V2Ray|v2ray|sing-box)\s+(?:version\s+)?([0-9][0-9A-Za-z.\-]*)", re.I)
 
 
 def _notify(cb, *a):
@@ -93,15 +116,22 @@ def _plat_arch() -> tuple:
     return plat, arch
 
 
-def _probe(path: str) -> str:
-    """跑一次 `版本` 命令，成功返回版本号字符串，失败返回空串。"""
+def _version_output(path: str) -> str:
+    """跑一次 `版本` 命令，返回原始输出（失败返回空串）。"""
     if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
         return ""
     try:
         p = subprocess.run([path, "version"], capture_output=True, text=True, timeout=6)
     except (OSError, subprocess.SubprocessError):
         return ""
-    out = (p.stdout or "") + (p.stderr or "")
+    return (p.stdout or "") + (p.stderr or "")
+
+
+def _probe(path: str) -> str:
+    """跑一次 `版本` 命令，成功返回版本号字符串，失败返回空串。"""
+    out = _version_output(path)
+    if not out:
+        return ""
     m = _VER_RE.search(out)
     if m:
         return m.group(1)
@@ -112,21 +142,80 @@ def _probe(path: str) -> str:
     return ""
 
 
-def detect_cores(progress=None, extra=()) -> list:
-    """探测本机可用的内核，返回 [{name, path, version, ok}]（按可用性优先排序）。
+def kind_by_name(path: str) -> str:
+    """只按可执行文件名判断内核类型（不启动进程）；判断不出返回空串。"""
+    base = os.path.basename(str(path or "")).lower()
+    if not base:
+        return ""
+    if "sing-box" in base or base.startswith("singbox"):
+        return "sing-box"
+    if "xray" in base:
+        return "xray"
+    if "v2ray" in base:
+        return "v2ray"
+    return ""
+
+
+def core_kind(path: str) -> str:
+    """判断内核类型：sing-box / xray / v2ray（无内核返回空串，判断不出时按 xray 处理）。
+
+    先看可执行文件名（data/v2ray/versions 里的多版本目录也按名字区分），
+    名字不直观时再跑一次 `version` 看输出。
+    """
+    kind = kind_by_name(path)
+    if kind:
+        return kind
+    if not str(path or "").strip():
+        return ""
+    out = _version_output(path)
+    if not out:
+        return ""
+    low = out.lower()
+    for k in ("sing-box", "xray", "v2ray"):
+        if k in low:
+            return k
+    return "xray"
+
+
+def detect_cores(progress=None, extra=(), only: str = "") -> list:
+    """探测本机可用的内核，返回 [{name, path, version, ok, kind}]（按可用性优先排序）。
 
     progress 为可选回调 (已完成数, 总数, 当前路径)：探测点先收集再逐个校验，
     所以总数在开始前就确定，前端可以据此画出真实的进度。
     extra 为额外候选目录（如应用自带的 data/v2ray/core 安装目录）——
     内核装在这些地方时不会被视为「系统里没有可用内核」。
+    only 限定只探测某一类内核（xray = Xray/V2Ray 系，sing-box = sing-box），
+    前端按当前 Tab 传进来，避免日志里出现一堆「跟我没关系」的路径。
     """
+    names = _CORE_NAMES
+    if only == "sing-box":
+        names = ("sing-box",)
+    elif only in ("xray", "v2ray"):
+        names = ("xray", "v2ray")
+    def _match(kind: str) -> bool:
+        """only 为空 = 不限类型；xray 含 v2ray，sing-box 只认自己。"""
+        if not only:
+            return True
+        if only == "sing-box":
+            return kind == "sing-box"
+        return kind in ("xray", "v2ray")
+
+    def _wanted(p: str) -> bool:
+        """指定了 only 时，直接给出的文件也要按类型过滤。"""
+        k = kind_by_name(p)
+        return _match(k) if k else True     # 名字看不出类型就交给 version 输出判定
+
     cands = []
-    for name in ("xray", "v2ray"):
+    for name in names:
         w = shutil.which(name)
-        if w:
+        if w and w not in cands:
             cands.append(w)
     for d in tuple(_CORE_DIRS) + tuple(_CORE_DIRS_HOME) + tuple(extra):
-        for name in ("xray", "v2ray"):
+        if os.path.isfile(d):               # 用户手动指定的是「文件」而不是目录
+            if d not in cands and _wanted(d):
+                cands.append(d)
+            continue
+        for name in names:
             p = os.path.join(d, name)
             if p not in cands:
                 cands.append(p)
@@ -136,17 +225,29 @@ def detect_cores(progress=None, extra=()) -> list:
         _notify(progress, i, total, p)
         ver = _probe(p)
         if ver:
-            out.append({"name": os.path.basename(p), "path": p, "version": ver, "ok": True})
+            k = kind_by_name(p) or core_kind(p)
+            if not _match(k):
+                continue                    # 名字看不出类型、但实际是别种内核 → 丢弃
+            out.append({"name": os.path.basename(p), "path": p, "version": ver, "ok": True,
+                        "kind": k})
     _notify(progress, total, total, "")
     return out
 
 
-def find_core(manual: str = "") -> str:
-    """取可用内核路径：优先用户手动指定的，其次自动探测；都没有返回空串。"""
+def find_core(manual: str = "", prefer: str = "") -> str:
+    """取可用内核路径：优先用户手动指定的，其次自动探测；都没有返回空串。
+
+    prefer 指定优先的内核类型（xray / sing-box）：自动探测时优先取该类型，
+    没装该类型时退回任意可用内核，避免「切了类型但系统里只装了另一种」时彻底不可用。
+    """
     manual = str(manual or "").strip()
     if manual and _probe(manual):
         return manual
     cores = detect_cores()
+    if prefer:
+        for c in cores:
+            if c.get("kind") == prefer:
+                return c["path"]
     return cores[0]["path"] if cores else ""
 
 
@@ -160,74 +261,413 @@ def platform_arch() -> tuple:
     return _plat_arch()
 
 
-def download_core(dest_dir: str, url: str = "", progress=None, on_phase=None, on_log=None) -> str:
+def _sb_plat_arch() -> tuple:
+    """sing-box 的资产命名：返回 (系统, 架构, 扩展名)，如 ("linux", "amd64", ".tar.gz")。"""
+    plat, arch = _plat_arch()
+    osname = {"linux": "linux", "macos": "darwin", "windows": "windows"}.get(plat, plat)
+    name = {"64": "amd64", "32": "386",
+            "arm64-v8a": "arm64", "arm32-v7a": "armv7"}.get(arch, "amd64")
+    return osname, name, ".zip" if osname == "windows" else ".tar.gz"
+
+
+def _extract_archive(data: bytes, dest_dir: str):
+    """按文件头判断压缩格式（zip / tar.gz）并解压；格式不对抛 ValueError。
+
+    Xray 官方包是 zip，sing-box 官方包在 Linux / macOS 是 tar.gz、Windows 是 zip。
+    """
+    if data[:2] == b"\x1f\x8b":
+        try:
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
+                try:
+                    tf.extractall(dest_dir, filter="data")   # 3.12+：过滤越界路径
+                except TypeError:                            # 老版本 Python 不支持 filter
+                    tf.extractall(dest_dir)
+        except (tarfile.TarError, EOFError, OSError) as e:
+            raise ValueError("下载到的 tar.gz 解压失败：%s" % e)
+        return
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            zf.extractall(dest_dir)
+    except zipfile.BadZipFile:
+        raise ValueError("下载到的不是有效的 zip / tar.gz 压缩包（可能被网络代理改写，请检查下载地址）")
+
+
+def _find_local_exe(dest_dir: str, kind: str) -> str:
+    """在解压目录里找内核可执行文件；在子目录里找到时复制到 dest_dir 根下，保证路径稳定。"""
+    if kind == "sing-box":
+        want = ("sing-box", "sing-box.exe")
+    else:
+        want = ("xray", "xray.exe", "v2ray", "v2ray.exe")
+    for name in want:
+        p = os.path.join(dest_dir, name)
+        if os.path.isfile(p):
+            return p
+    for root, _dirs, files in os.walk(dest_dir):
+        for f in files:
+            if f not in want:
+                continue
+            src = os.path.join(root, f)
+            dst = os.path.join(dest_dir, f)
+            if os.path.abspath(src) == os.path.abspath(dst):
+                return src
+            try:
+                shutil.copy2(src, dst)
+                return dst
+            except OSError:
+                return src
+    return ""
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """禁用自动跳转：用来从 releases/latest 的 302 里取 tag（GitHub API 不通时的兜底）。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_FETCH_UA = "Mozilla/5.0 (compatible; FileFlask-V2Ray/1.0)"
+
+# 直连 / 镜像全部失败后用于重试的兜底代理（由 v2raymgr 注入：订阅拉取代理 + 当前节点的本机 socks）
+_EXTRA_PROXIES = ()
+
+
+def set_fallback_proxies(proxies=()):
+    """设置「直连 / 镜像都失败后」用于重试的代理列表（去重、去空）。"""
+    global _EXTRA_PROXIES
+    seen = []
+    for p in proxies or ():
+        p = str(p or "").strip()
+        if p and p not in seen:
+            seen.append(p)
+    _EXTRA_PROXIES = tuple(seen)
+
+
+def get_fallback_proxies() -> tuple:
+    """当前生效的兜底代理（调试 / 日志用）。"""
+    return _EXTRA_PROXIES
+
+
+def _proxy_alive(proxy: str, timeout: float = 1.5) -> bool:
+    """TCP 探一下代理端口是否在监听（只看连通性，不做协议握手）。"""
+    raw = str(proxy or "").strip()
+    if not raw:
+        return False
+    if "://" not in raw:
+        raw = "http://" + raw
+    try:
+        u = urllib.parse.urlsplit(raw)
+        port = u.port or (1080 if (u.scheme or "").lower().startswith("socks") else 8080)
+    except ValueError:
+        return False
+    if not u.hostname or not port:
+        return False
+    s = None
+    try:
+        s = socket.create_connection((u.hostname, int(port)), timeout)
+        return True
+    except OSError:
+        return False
+    finally:
+        if s is not None:
+            try:
+                s.close()
+            except OSError:
+                pass
+
+
+def _attempts(url: str) -> list:
+    """(代理, 目标地址) 的尝试序列。
+
+    探测到可达代理时优先走代理（国内直连 GitHub 经常又慢又容易断），
+    否则先直连 + 各加速镜像，最后再试那些探测不通的代理。
+    """
+    usable = [p for p in _EXTRA_PROXIES if _proxy_alive(p)]
+    out = [(p, url) for p in usable]              # 走代理时不再套镜像，代理本身就能出去
+    out += [("", m + url) for m in _MIRRORS]
+    out += [(p, url) for p in _EXTRA_PROXIES if p not in usable]
+    return out
+
+
+def _proxy_opener(proxy: str, follow_redirects: bool = True):
+    """按代理构建 opener（延迟导入：本模块单独加载时不依赖包上下文）。"""
+    from ..common import proxyutil          # noqa: PLC0415
+    return proxyutil.build_opener(proxy=proxy, follow_redirects=follow_redirects)
+
+
+def _open(url: str, proxy: str = "", timeout: int = 12, follow_redirects: bool = True,
+          accept: str = "*/*", headers: dict = None):
+    """打开 URL 返回响应对象。
+
+    proxy 为空 → 沿用系统 / 环境变量代理（与原行为一致）；
+    非空 → 显式用该代理（http / https / socks5 / socks5h 都支持）。
+    headers 用于断点续传的 Range / If-Range。
+    """
+    if proxy:
+        opener = _proxy_opener(proxy, follow_redirects)
+    elif follow_redirects:
+        opener = urllib.request.build_opener()
+    else:
+        opener = urllib.request.build_opener(_NoRedirect)
+    h = {"User-Agent": _FETCH_UA, "Accept": accept}
+    if headers:
+        h.update(headers)
+    req = urllib.request.Request(url, headers=h)
+    return opener.open(req, timeout=timeout)
+
+
+def _fetch_text(url: str, timeout: int = 12) -> str:
+    """抓一段文本（直连 → 镜像 → 兜底代理依次试）；全失败抛 ValueError。"""
+    last_err = ""
+    for proxy, target in _attempts(url):
+        try:
+            with _open(target, proxy, timeout) as resp:
+                return resp.read(4 * 1024 * 1024).decode("utf-8", "replace")
+        except Exception as e:                 # noqa: BLE001
+            last_err = str(e) or e.__class__.__name__
+    raise ValueError(last_err or "请求失败")
+
+
+def _redirect_target(url: str) -> str:
+    """取 3xx 的 Location（不跟随跳转），直连 / 镜像 / 兜底代理依次试；全失败返回空串。"""
+    for proxy, target in _attempts(url):
+        try:
+            with _open(target, proxy, 15, follow_redirects=False) as resp:
+                return resp.geturl()
+        except urllib.error.HTTPError as e:
+            if 300 <= e.code < 400:
+                return str(e.headers.get("Location") or "")
+        except Exception:                      # noqa: BLE001
+            pass
+    return ""
+
+
+def official_url(kind: str = "xray", version: str = "") -> str:
+    """官方压缩包直链（sing-box 的资产名带版本号，需要先定版本）。"""
+    if str(kind or "") == "sing-box":
+        return release_url(version or latest_version("sing-box"), "sing-box")
+    plat, arch = _plat_arch()
+    return _XRAY_RELEASE.format(plat=plat, arch=arch)
+
+
+def resolve_source(src: str, kind: str = "xray") -> list:
+    """把用户填的「下载源」展开成实际要请求的地址列表。
+
+    支持三种写法（都能直接填官网 releases 总目录，不用记资产文件名）：
+      1. 完整压缩包地址      https://.../sing-box-1.13.19-linux-amd64.tar.gz
+      2. 镜像前缀            https://ghfast.top/     （拼上官方地址，其余镜像继续兜底）
+      3. releases 页面/标签  https://github.com/SagerNet/sing-box/releases[/tag/v1.13.19]
+    """
+    src = str(src or "").strip()
+    if not src:
+        return []
+    if re.search(r"\.(zip|tar\.gz|tgz)$", src, re.I) or "/releases/download/" in src:
+        return [src]                       # 已经是具体的下载链接（可能带查询串），原样用
+    if src.endswith("/"):
+        official = official_url(kind)
+        return [src + official] + [m + official for m in _MIRRORS if m and m != src]
+    m = re.search(r"/releases(?:/tag/(v?[0-9][^/?#]*))?", src, re.I)
+    if m:
+        ver = str(m.group(1) or "").strip().lstrip("vV") or latest_version(kind)
+        return [release_url(ver, kind)]
+    return [src]          # 认不出的地址原样试一次
+
+
+# --- 断点续传：下到一半的包先落在 dest_dir 下的临时文件，失败后再点就接着下 ---
+
+_PART_FILE = "_download.part"
+_PART_META = "_download.json"
+_PART_CHUNK = 64 * 1024
+
+
+def _part_paths(dest_dir: str) -> tuple:
+    return os.path.join(dest_dir, _PART_FILE), os.path.join(dest_dir, _PART_META)
+
+
+def _part_remove(path: str):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _part_load(part: str, meta: str, key: str) -> tuple:
+    """读断点，返回 (已下载字节, 总字节, ETag)。
+
+    与当前下载目标（key = 压缩包的正式地址）不一致时，说明换过版本 / 换过包，
+    残留文件直接清掉，避免把两个版本的数据拼在一起。
+    """
+    data = {}
+    try:
+        with open(meta, "r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict) or str(data.get("key") or "") != key:
+        _part_remove(part)
+        _part_remove(meta)
+        return 0, 0, ""
+    size = os.path.getsize(part) if os.path.isfile(part) else 0
+    try:
+        total = int(data.get("total") or 0)
+    except (TypeError, ValueError):
+        total = 0
+    if total and size and size > total:        # 残留比目标还大，肯定不对
+        _part_remove(part)
+        _part_remove(meta)
+        return 0, 0, ""
+    return size, total, str(data.get("etag") or "")
+
+
+def _part_save_meta(meta: str, key: str, total: int, etag: str = ""):
+    try:
+        with open(meta, "w", encoding="utf-8") as f:
+            json.dump({"key": key, "total": int(total or 0), "etag": etag or ""}, f)
+    except OSError:
+        pass
+
+
+def _resp_total(resp, offset: int) -> int:
+    """算「整个文件」的大小：206 看 Content-Range，200 用 Content-Length。"""
+    m = re.search(r"/(\d+)\s*$", str(resp.headers.get("Content-Range") or ""))
+    if m:
+        return int(m.group(1))
+    try:
+        cl = int(resp.headers.get("Content-Length") or 0)
+    except (TypeError, ValueError):
+        cl = 0
+    return (cl + int(offset or 0)) if cl else 0
+
+
+def _fetch_into(part: str, meta: str, key: str, target: str, proxy: str, offset: int,
+                etag: str = "", progress=None, on_phase=None) -> tuple:
+    """下载一次到临时文件（带 Range 续传），返回 (已下载字节, 文件总字节, 新 ETag)。"""
+    headers = {}
+    if offset:
+        headers["Range"] = "bytes=%d-" % offset
+        if etag:
+            headers["If-Range"] = etag     # 内容变了就让服务端整份重发，避免拼出坏包
+    with _open(target, proxy, 45, headers=headers or None) as resp:
+        code = int(getattr(resp, "status", 0) or resp.getcode() or 200)
+        if offset and code != 206:          # 对方不支持续传 / 资源已变 → 从头下
+            offset = 0
+        total = _resp_total(resp, offset)
+        new_etag = str(resp.headers.get("ETag") or resp.headers.get("Last-Modified") or "")
+        _part_save_meta(meta, key, total, new_etag)   # 先存，异常退出也能续
+        _notify(on_phase, "download")
+        got = offset
+        with open(part, "ab" if offset else "wb") as f:
+            while True:
+                chunk = resp.read(_PART_CHUNK)
+                if not chunk:
+                    break
+                f.write(chunk)
+                got += len(chunk)
+                _notify(progress, got, total)
+    return got, total, new_etag
+
+
+def download_core(dest_dir: str, url: str = "", progress=None, on_phase=None, on_log=None,
+                  kind: str = "xray") -> str:
     """下载官方内核并解压到 dest_dir，返回可执行文件路径。
 
-    url 留空则按当前平台 / 架构拼官方 Release 直链，并在直连失败时自动切换加速镜像；
-    url 非空则只用用户给的地址（不再额外回退）。
+    kind 指定内核类型（xray / sing-box），决定默认下载地址与包内可执行文件名。
+    url 留空则按当前平台 / 架构拼官方 Release 直链（自动取最新版），
+    并在直连失败时自动切换加速镜像；url 非空则按 resolve_source() 的规则解析
+    （完整压缩包地址 / 镜像前缀 / releases 页面或标签页）。
     progress 为可选回调 (已收字节, 总字节)；on_phase 为可选回调 (阶段名)，
     阶段依次为 download → extract → done；on_log 为可选回调 (日志行)。
+
+    支持断点续传：已下载的字节存在 dest_dir/_download.part，本次所有源都失败时保留，
+    下次点下载会带 Range 从断点继续（换源 / 换包会自动丢弃旧残留）。
     失败抛 ValueError（中文说明）。
     """
-    plat, arch = _plat_arch()
+    kind = "sing-box" if str(kind or "") == "sing-box" else "xray"
     url = str(url or "").strip()
-    if url:
-        targets = [url]
+    srcs = resolve_source(url, kind)
+    if srcs:
+        official = srcs[0]
+        pairs = [("", s) for s in srcs]
     else:
-        official = _XRAY_RELEASE.format(plat=plat, arch=arch)
-        targets = [m + official for m in _MIRRORS]
+        official = official_url(kind)
+        pairs = [("", m + official) for m in _MIRRORS]
+    # 代理优先级：探测到「可达」的代理就直接优先走它——直连 GitHub 往往能连上但
+    # 速度极慢、下到一半断流，白白浪费时间；一个都不通才退回「直连 + 镜像 + 代理兜底」
+    if _EXTRA_PROXIES:
+        usable = [p for p in _EXTRA_PROXIES if _proxy_alive(p)]
+        if usable:
+            pairs = [(p, official) for p in usable] + pairs
+            _notify(on_log, "检测到可用代理，优先经代理下载：" + "、".join(usable))
+        else:
+            pairs += [(p, official) for p in _EXTRA_PROXIES]
     os.makedirs(dest_dir, exist_ok=True)
 
-    buf = None
+    part, meta = _part_paths(dest_dir)
+    offset, total, etag = _part_load(part, meta, official)
+    if offset:
+        _notify(on_log, "发现未完成的下载：已有 %s，从断点继续" % _size_text(offset))
+
     last_err = ""
-    for target in targets:
+    for proxy, target in pairs:
         host = urllib.parse.urlsplit(target).netloc
-        label = "GitHub 官方直连" if host == "github.com" else "加速镜像 " + host
+        if proxy:
+            label = "经代理 " + proxy
+        elif host == "github.com":
+            label = "GitHub 官方直连"
+        elif srcs and target in srcs:
+            label = "自定义下载地址"
+        else:
+            label = "加速镜像 " + host
+        if offset:
+            label += "（续传，从 %s 起）" % _size_text(offset)
         _notify(on_log, "尝试下载源：" + label)
         try:
-            req = urllib.request.Request(target, headers={"User-Agent": "FileFlask-V2Ray/1.0"})
-            with urllib.request.urlopen(req, timeout=45) as resp:
-                total = int(resp.headers.get("Content-Length") or 0)
-                _notify(on_phase, "download")
-                buf = io.BytesIO()
-                got = 0
-                while True:
-                    chunk = resp.read(64 * 1024)
-                    if not chunk:
-                        break
-                    buf.write(chunk)
-                    got += len(chunk)
-                    _notify(progress, got, total)
-            if got < 1024:
+            got, t, new_etag = _fetch_into(part, meta, official, target, proxy, offset,
+                                           etag, progress, on_phase)
+            offset, total = got, (t or total)
+            etag = new_etag or etag
+            if total and got < total:
+                raise ValueError("连接提前结束（已下 %s / %s）"
+                                 % (_size_text(got), _size_text(total)))
+            if got < 1024 and not total:
+                # 长度未知又只有几百字节：多半是错误页而不是内核包
                 raise ValueError("响应内容只有 %s 字节，不像内核压缩包" % got)
+            with open(part, "rb") as f:
+                head = f.read(2)
+            # 镜像偶尔会把 404 页面当成功返回：只认 zip / gzip 的文件头
+            if head not in (b"PK", b"\x1f\x8b"):
+                _part_remove(part)
+                _part_remove(meta)
+                offset, total = 0, 0
+                raise ValueError("响应不是压缩包（多半是镜像返回的错误页），换下一个源")
             _notify(on_log, "下载完成：%s 字节（来自 %s）" % (got, label))
             break
         except Exception as e:             # noqa: BLE001
-            buf = None
             last_err = str(e) or e.__class__.__name__
             _notify(on_log, "该源下载失败：" + last_err)
+            # 已经落盘的字节留着，换下一个源接着续
+            offset, total, etag = _part_load(part, meta, official)
             continue
-    if buf is None:
-        raise ValueError("所有下载源都失败了（最后错误：%s）。可检查网络，"
-                         "或在设置里改下载地址 / 手动指定内核路径" % last_err)
+
+    size = os.path.getsize(part) if os.path.isfile(part) else 0
+    if not size or (total and size < total):
+        raise ValueError("所有下载源都失败了（最后错误：%s）。已下载 %s，"
+                         "重新点「一键下载」会从断点继续"
+                         % (last_err or "未知", _size_text(size)))
 
     _notify(on_phase, "extract")
     try:
-        with zipfile.ZipFile(buf) as zf:
-            zf.extractall(dest_dir)
-    except zipfile.BadZipFile:
-        raise ValueError("下载到的不是有效的 zip 压缩包（可能被网络代理改写，请检查下载地址）")
+        with open(part, "rb") as f:
+            _extract_archive(f.read(), dest_dir)
+    except ValueError:
+        _part_remove(part)                 # 包本身坏了就别留着继续续传
+        _part_remove(meta)
+        raise
+    _part_remove(part)
+    _part_remove(meta)
 
-    # 官方包内可执行文件名固定为 xray（Windows 为 xray.exe）
-    exe = os.path.join(dest_dir, "xray.exe" if os.name == "nt" else "xray")
-    if not os.path.isfile(exe):
-        for root, _dirs, files in os.walk(dest_dir):
-            for f in files:
-                if f in ("xray", "xray.exe", "v2ray", "v2ray.exe"):
-                    exe = os.path.join(root, f)
-                    break
-    if not os.path.isfile(exe):
-        raise ValueError("压缩包内没有找到 xray 可执行文件")
+    exe = _find_local_exe(dest_dir, kind)
+    if not exe:
+        raise ValueError("压缩包内没有找到 %s 可执行文件" % kind)
     try:
         os.chmod(exe, os.stat(exe).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     except OSError:
@@ -236,43 +676,119 @@ def download_core(dest_dir: str, url: str = "", progress=None, on_phase=None, on
     return exe
 
 
-def list_versions(limit: int = 30) -> list:
-    """拉取 Xray-core 近期发布版本列表（GitHub Releases API）。
+def _size_text(n) -> str:
+    """字节数 → 「13.9 MB」这样的可读文本（日志 / 错误提示用）。"""
+    try:
+        n = float(n or 0)
+    except (TypeError, ValueError):
+        return "0 B"
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return ("%d %s" % (n, unit)) if unit == "B" else ("%.1f %s" % (n, unit))
+        n /= 1024.0
+    return "%.1f GB" % n
 
-    api.github.com 直连失败时自动换加速镜像前缀重试；全部失败抛 ValueError。
-    返回 [{tag, version, published}]，最新在前。
+
+def _gh_api(url: str):
+    """GET 一个 GitHub API 地址（直连 → 镜像 → 兜底代理依次试），返回解析后的 JSON。"""
+    last_err = ""
+    for proxy, target in _attempts(url):
+        try:
+            with _open(target, proxy, 12, accept="application/vnd.github+json") as resp:
+                return json.loads(resp.read(4 * 1024 * 1024).decode("utf-8", "replace"))
+        except Exception as e:                 # noqa: BLE001
+            last_err = str(e) or e.__class__.__name__
+    raise ValueError(last_err or "GitHub API 暂时不可达")
+
+
+def list_versions(limit: int = 30, kind: str = "xray") -> list:
+    """拉取内核近期发布版本列表。
+
+    kind: xray / sing-box。优先走 GitHub Releases API（带加速镜像重试）；
+    API 不可达时退回抓 releases 总目录的 HTML（此时 published 为空）；
+    两条路都失败才抛 ValueError。返回 [{tag, version, published}]，最新在前。
     """
     n = max(1, min(int(limit or 30), 100))
-    api = "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=" + str(n)
+    repo = _REPOS.get(str(kind or "xray"), _REPOS["xray"])
     last_err = ""
-    for base in _MIRRORS:
-        try:
-            req = urllib.request.Request(base + api, headers={
-                "User-Agent": "FileFlask-V2Ray/1.0",
-                "Accept": "application/vnd.github+json"})
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                data = json.loads(resp.read().decode("utf-8", "replace"))
-            out = []
-            for r in data if isinstance(data, list) else []:
-                tag = str((r or {}).get("tag_name") or "").strip()
-                if not tag:
-                    continue
-                out.append({"tag": tag, "version": tag.lstrip("v"),
-                            "published": str((r or {}).get("published_at") or "")[:10]})
-            if out:
-                return out
-            last_err = "API 响应中没有版本信息"
-        except Exception as e:             # noqa: BLE001
-            last_err = str(e) or e.__class__.__name__
+    try:
+        data = _gh_api("https://api.github.com/repos/%s/releases?per_page=%d" % (repo, n))
+    except ValueError as e:
+        last_err = str(e)
+        data = None
+    out = []
+    for r in data if isinstance(data, list) else []:
+        tag = str((r or {}).get("tag_name") or "").strip()
+        if not tag:
             continue
-    raise ValueError("获取版本列表失败（最后错误：%s）。GitHub API 可能暂时不可达，请稍后重试" % last_err)
+        out.append({"tag": tag, "version": tag.lstrip("v"),
+                    "published": str((r or {}).get("published_at") or "")[:10]})
+    if not out:
+        out = _versions_from_page(repo, n)      # API 不通：直接抓 releases 总目录
+    if not out:
+        raise ValueError("获取版本列表失败（最后错误：%s）。GitHub API / 网页都不可达，"
+                         "可直接把 releases 页面地址填进下载源" % (last_err or "未知"))
+    return out
 
 
-def release_url(version: str) -> str:
-    """指定版本的官方内核 zip 下载地址；版本号非法抛 ValueError。"""
+def _versions_from_page(repo: str, n: int) -> list:
+    """GitHub API 不可达时，从 releases 的 Atom 订阅 / 总目录里抓 tag 兜底。
+
+    拿不到发布日期（published 留空）。超时压到 6 秒，避免接口被拖住几十秒。
+    """
+    for url in ("https://github.com/%s/releases.atom" % repo,
+                "https://github.com/%s/releases" % repo):
+        try:
+            text = _fetch_text(url, timeout=6)     # 内部已按「直连 → 镜像 → 兜底代理」尝试
+        except ValueError:
+            continue
+        tags = []
+        for m in re.finditer(r"/releases/tag/([^\"'?#<>\s]+)", text or ""):
+            tag = m.group(1).strip()
+            if tag and tag not in tags:
+                tags.append(tag)
+        if tags:
+            return [{"tag": t, "version": t.lstrip("vV"), "published": ""} for t in tags[:n]]
+    return []
+
+
+def latest_version(kind: str = "xray") -> str:
+    """取最新正式版版本号（用于拼 sing-box 的下载地址）；失败抛 ValueError。
+
+    先走 GitHub API；API 不可达（被墙 / 限流）时退回 `releases/latest` 的 302 跳转拿 tag。
+    """
+    repo = _REPOS.get(str(kind or "xray"), _REPOS["xray"])
+    tag = ""
+    try:
+        data = _gh_api("https://api.github.com/repos/%s/releases/latest" % repo)
+        if isinstance(data, dict):
+            tag = str(data.get("tag_name") or "").strip()
+    except ValueError:
+        tag = ""
+    if not tag:
+        for base in _MIRRORS:
+            try:
+                loc = _redirect_target(base + "https://github.com/%s/releases/latest" % repo)
+            except Exception:                  # noqa: BLE001
+                continue
+            m = re.search(r"/releases/tag/([^/?#]+)", loc or "")
+            if m:
+                tag = m.group(1).strip()
+                break
+    if not tag:
+        raise ValueError("获取最新版本号失败（GitHub API 与 releases 页面都不可达）。"
+                         "可在设置里把 releases 页面地址或完整压缩包地址填进下载源")
+    return tag.lstrip("vV")
+
+
+def release_url(version: str, kind: str = "xray") -> str:
+    """指定版本的官方内核下载地址；版本号非法抛 ValueError。"""
     ver = str(version or "").strip().lstrip("vV")
     if not re.fullmatch(r"[0-9][0-9A-Za-z.\-]*", ver):
         raise ValueError("无效的版本号：%s" % version)
+    if str(kind or "") == "sing-box":
+        osname, arch, ext = _sb_plat_arch()
+        return _SINGBOX_RELEASE.format(ver=ver, os=osname, arch=arch, ext=ext)
     plat, arch = _plat_arch()
     return "https://github.com/XTLS/Xray-core/releases/download/v%s/Xray-%s-%s.zip" % (ver, plat, arch)
 
@@ -613,15 +1129,24 @@ def build_outbound(node: dict) -> dict:
 
 
 def build_config(node: dict, opts: dict) -> dict:
-    """生成完整 Xray 配置。
+    """生成完整内核配置：按 opts['core_path'] 的内核类型分派到 Xray / sing-box。
 
     opts（均由模块设置给出）：
-        socks_port  SOCKS5 入站端口（默认 10808）
-        socks_listen  入站监听地址（0.0.0.0 = 供局域网其他用户使用）
+        core_path    选定的内核可执行文件（决定生成哪种配置格式）
+        socks_port   SOCKS5 入站端口（默认 10808）
+        socks_listen 入站监听地址（0.0.0.0 = 供局域网其他用户使用）
         socks_user / socks_pass  非空则要求用户名密码认证
         http_port    HTTP 入站端口（0 = 不开启）
+        api_port     统计接口端口（0 = 不开启）
         log_level    日志级别
     """
+    if core_kind(str(opts.get("core_path") or "")) == "sing-box":
+        return build_singbox_config(node, opts)
+    return _build_xray_config(node, opts)
+
+
+def _build_xray_config(node: dict, opts: dict) -> dict:
+    """生成完整 Xray / V2Ray 配置（入参说明见 build_config）。"""
     port = _as_int(opts.get("socks_port") or 10808) or 10808
     listen = str(opts.get("socks_listen") or "0.0.0.0")
     user = str(opts.get("socks_user") or "").strip()
@@ -690,6 +1215,158 @@ def build_config(node: dict, opts: dict) -> dict:
                                 "settings": {"address": "127.0.0.1"}})
         cfg["routing"]["rules"].insert(0, {"type": "field", "inboundTag": ["api-in"],
                                            "outboundTag": "api"})
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+# sing-box 配置生成
+# ---------------------------------------------------------------------------
+
+# Xray 的日志级别 → sing-box 的级别（sing-box 没有 none，用 error 顶上）
+_SB_LOG_LEVELS = {"debug": "debug", "info": "info", "warning": "warn", "warn": "warn",
+                  "error": "error", "none": "error", "fatal": "fatal", "panic": "panic"}
+
+
+def _sb_tls(node: dict) -> dict:
+    """节点 → sing-box 的 tls 段（未启用 TLS 返回空 dict，调用方不要写进配置）。"""
+    sec = str(node.get("tls") or "none").lower()
+    if sec not in ("tls", "reality"):
+        return {}
+    tls = {"enabled": True,
+           "server_name": node.get("sni") or node.get("host") or node.get("server") or "",
+           "insecure": bool(node.get("insecure"))}
+    if node.get("alpn"):
+        tls["alpn"] = list(node["alpn"])
+    fp = str(node.get("fp") or "")
+    if sec == "reality":
+        # reality 必须带 utls；指纹留空时按 chrome 处理（服务端一般按 chrome 下发参数）
+        tls["utls"] = {"enabled": True, "fingerprint": fp or "chrome"}
+        tls["reality"] = {"enabled": True,
+                          "public_key": str(node.get("pbk") or ""),
+                          "short_id": str(node.get("sid") or "")}
+    elif fp:
+        tls["utls"] = {"enabled": True, "fingerprint": fp}
+    return tls
+
+
+def _sb_transport(node: dict) -> dict:
+    """节点 → sing-box 的 transport 段（tcp 裸连返回空 dict）。"""
+    net = str(node.get("net") or "tcp").lower()
+    path = str(node.get("path") or "")
+    host = str(node.get("host") or "")
+    if net == "ws":
+        tr = {"type": "ws", "path": path or "/"}
+        if host:
+            tr["headers"] = {"Host": host}
+        return tr
+    if net == "grpc":
+        return {"type": "grpc", "service_name": path}
+    if net == "h2":
+        tr = {"type": "http", "path": path or "/"}
+        if host:
+            tr["host"] = [host]
+        return tr
+    if net == "tcp" and str(node.get("header") or "").lower() == "http":
+        # 注意 sing-box 的 http transport 里 path 只能是字符串（不能像 Xray 那样用数组）
+        tr = {"type": "http", "method": "GET", "path": path or "/"}
+        if host:
+            tr["host"] = [host]
+        return tr
+    return {}
+
+
+def build_singbox_outbound(node: dict) -> dict:
+    """按节点生成一条 sing-box outbound。"""
+    proto = str(node.get("proto") or "").lower()
+    addr, port = node.get("server"), _as_int(node.get("port"))
+    if not addr or not port:
+        raise ValueError("节点缺少服务器地址或端口")
+    ob = {"tag": "proxy", "server": addr, "server_port": port}
+    if proto == "vmess":
+        ob["type"] = "vmess"
+        ob["uuid"] = str(node.get("uuid") or "")
+        ob["security"] = str(node.get("scy") or "auto") or "auto"
+        aid = _as_int(node.get("aid"))
+        if aid:
+            ob["alter_id"] = aid
+    elif proto == "vless":
+        ob["type"] = "vless"
+        ob["uuid"] = str(node.get("uuid") or "")
+        if node.get("flow"):
+            ob["flow"] = str(node["flow"])
+    elif proto == "trojan":
+        ob["type"] = "trojan"
+        ob["password"] = str(node.get("password") or "")
+    elif proto == "ss":
+        ob["type"] = "shadowsocks"
+        ob["method"] = str(node.get("method") or "")
+        ob["password"] = str(node.get("password") or "")
+    else:
+        raise ValueError("不支持的协议：%s" % (proto or "(空)"))
+    tls = _sb_tls(node)
+    if tls:
+        ob["tls"] = tls
+    tr = _sb_transport(node)
+    if tr:
+        ob["transport"] = tr
+    return ob
+
+
+def build_singbox_config(node: dict, opts: dict) -> dict:
+    """生成完整的 sing-box 配置。
+
+    与 Xray 配置的差异要点：
+      · 入站是 type + listen_port，认证用 users 数组；
+      · 只有 proxy / direct 两条出站，默认出口由 route.final 指定；
+      · 统计走 experimental.clash_api（Xray 那边是 StatsService + api）。
+    """
+    port = _as_int(opts.get("socks_port") or 10808) or 10808
+    listen = str(opts.get("socks_listen") or "0.0.0.0")
+    user = str(opts.get("socks_user") or "").strip()
+    pwd = str(opts.get("socks_pass") or "")
+    hp = _as_int(opts.get("http_port") or 0)
+    api_port = _as_int(opts.get("api_port") or 0)
+    if api_port:
+        used = {port, hp}
+        while api_port in used:
+            api_port += 1
+
+    socks = {"type": "socks", "tag": "socks-in", "listen": listen, "listen_port": port}
+    if user:
+        socks["users"] = [{"username": user, "password": pwd}]
+    inbounds = [socks]
+
+    if hp:
+        http = {"type": "http", "tag": "http-in", "listen": listen, "listen_port": hp}
+        if user:
+            http["users"] = [{"username": user, "password": pwd}]
+        inbounds.append(http)
+
+    level = _SB_LOG_LEVELS.get(str(opts.get("log_level") or "warning").lower(), "warn")
+
+    cfg = {
+        "log": {"level": level, "timestamp": True},
+        "inbounds": inbounds,
+        "outbounds": [
+            build_singbox_outbound(node),
+            {"type": "direct", "tag": "direct"},
+        ],
+        "route": {
+            "rules": [
+                # 局域网 / 本机地址直连，避免把内网访问也绕进代理。
+                # 这里只用 ip_cidr（不依赖 sing-box 1.11 才有的 action 写法）。
+                {"ip_cidr": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12",
+                             "192.168.0.0/16", "169.254.0.0/16",
+                             "::1/128", "fc00::/7", "fe80::/10"],
+                 "outbound": "direct"},
+            ],
+            "final": "proxy",
+            "auto_detect_interface": True,
+        },
+    }
+    if api_port:
+        # 实时网速 / 流量统计的数据源：clash_api 的 /connections 里带累计上下行
+        cfg["experimental"] = {"clash_api": {"external_controller": "127.0.0.1:%d" % api_port}}
     return cfg
 
 

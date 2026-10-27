@@ -44,6 +44,7 @@ _CONFIG_FILE = os.path.join(_DIR, "config.json")
 _LOG_FILE = os.path.join(_DIR, "xray.log")
 _STATE_FILE = os.path.join(_DIR, "state.json")
 _CORE_DIR = os.path.join(_DIR, "core")
+_VERSIONS_DIR = os.path.join(_DIR, "versions")   # 多版本共存：data/v2ray/versions/v<版本号>/
 
 _LOG_MAX = 512 * 1024          # 运行日志超过此大小就截断（保留末尾）
 _lock = threading.RLock()
@@ -202,14 +203,21 @@ def _settings() -> dict:
     return st
 
 
+def _flag(v, default: int = 1) -> int:
+    """把设置值安全地解析成 0/1 开关；空值 / 非数字时用默认。
+    注意不能写 `v or ""`：v 为整数 0（=用户明确选了停用）时会被当成空值吞掉。"""
+    try:
+        s = str(v).strip()
+        return int(s) if s != "" else default
+    except (TypeError, ValueError):
+        return default
+
+
 def _auth_on(st: dict) -> bool:
     """SOCKS5 认证开关是否生效：0.0.0.0 监听强制启用，本机监听由 auth_enabled 决定。"""
     if (st.get("socks_listen") or "127.0.0.1") == "0.0.0.0":
         return True
-    try:
-        return int(st.get("auth_enabled") if str(st.get("auth_enabled") or "") != "" else 1) == 1
-    except (TypeError, ValueError):
-        return True
+    return _flag(st.get("auth_enabled"), 1) == 1
 
 
 def _apply_auth(st: dict) -> dict:
@@ -243,7 +251,7 @@ def _ensure_lan_auth(st: dict) -> None:
     """监听 0.0.0.0（局域网可用）时强制启用 SOCKS5 认证，避免裸奔代理被同网段任意使用。"""
     if (st.get("socks_listen") or "127.0.0.1") != "0.0.0.0":
         return
-    if int(st.get("auth_enabled") if str(st.get("auth_enabled") or "") != "" else 1) != 1:
+    if _flag(st.get("auth_enabled"), 1) != 1:
         st["auth_enabled"] = 1
         v2raydb.set_setting("auth_enabled", 1)
     if str(st.get("socks_user") or "").strip() and str(st.get("socks_pass") or "").strip():
@@ -339,6 +347,7 @@ def start(node_id: str) -> dict:
                       "core": core, "port": port})
         v2raydb.set_setting("active_node", _meta["node_id"])
         _log.info("V2Ray 内核已启动 pid=%s 节点=%s 端口=%s", _proc.pid, _meta["node_name"], port)
+        _ensure_failover_thread()          # 连上节点即确保自动切换看门狗在跑
         return status()
 
 
@@ -566,6 +575,120 @@ def reset_traffic() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# 节点失效自动切换（后台看门狗，与网页开关无关，关掉浏览器也持续运行）
+# ---------------------------------------------------------------------------
+_FAILOVER_INTERVAL = 60        # 探测间隔（秒）
+_failover_bad = 0              # 当前节点连续探测失败次数
+_failover_thread = None
+
+
+def _auto_failover_on() -> bool:
+    """是否开启「节点失效自动切换」（落库在设置表 auto_failover，0/1）。"""
+    try:
+        return int(v2raydb.all_settings().get("auto_failover") or 0) == 1
+    except Exception:                      # noqa: BLE001
+        return False
+
+
+def _node_reachable(host: str, port: int, timeout: float = 5) -> bool:
+    """TCP 握手探一次：能连上即认为节点可达（与前端 / 路由的 ping 同口径）。"""
+    if not host or not port:
+        return False
+    s = None
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((host, int(port)))
+        return True
+    except Exception:                      # noqa: BLE001
+        return False
+    finally:
+        if s is not None:
+            try:
+                s.close()
+            except Exception:              # noqa: BLE001
+                pass
+
+
+def _failover_pick(cur_id: str) -> dict | None:
+    """在当前节点之外挑一个最优候选：优先用测速数据里延迟最低的可用节点，
+    没测速数据时退而取列表里第一个「实际连通」的节点；都连不上就返回第一个（仍会尝试，但至少换了）。"""
+    nodes = [n for n in v2raydb.list_nodes() if n.get("id") != cur_id]
+    if not nodes:
+        return None
+    metrics = {}
+    try:
+        metrics = json.loads(v2raydb.all_settings().get("node_metrics") or "{}")
+    except Exception:                      # noqa: BLE001
+        metrics = {}
+    cands = []
+    for n in nodes:
+        m = metrics.get(n.get("id")) if isinstance(metrics, dict) else None
+        p = m.get("ping") if isinstance(m, dict) else None
+        cands.append((n, p if isinstance(p, int) and p >= 0 else None))
+    # 有测速数据的排前面、按延迟升序；没测速数据的排后面
+    cands.sort(key=lambda x: (x[1] is None, x[1] if x[1] is not None else 1e9))
+    for n, _ in cands:
+        if _node_reachable(n.get("server"), int(n.get("port") or 0), timeout=4):
+            return n
+    return cands[0][0] if cands else None
+
+
+def _failover_loop():
+    """看门狗主循环：每 60 秒探测当前节点，连续 2 次失败则自动切换。"""
+    global _failover_bad
+    while True:
+        if not _auto_failover_on():
+            time.sleep(3)
+            continue
+        try:
+            st = status()
+            if not st.get("running"):
+                _failover_bad = 0
+                time.sleep(_FAILOVER_INTERVAL)
+                continue
+            node = st.get("node") or {}
+            cid = node.get("id") or ""
+            if _node_reachable(node.get("server"), int(node.get("port") or 0), timeout=5):
+                _failover_bad = 0
+            else:
+                _failover_bad += 1
+                # 连续两次失败才切换，避免网络抖动误判
+                if _failover_bad >= 2:
+                    _failover_bad = 0
+                    cand = _failover_pick(cid)
+                    if cand:
+                        r = start(cand.get("id"))
+                        if r.get("error"):
+                            _log.warning("节点失效自动切换失败：%s", r.get("error"))
+                        else:
+                            _log.warning("节点失效自动切换：%s → %s",
+                                         node.get("name"), cand.get("name"))
+                    else:
+                        _log.warning("当前节点 %s 已失效，但没有其它节点可切换", node.get("name"))
+        except Exception as e:             # noqa: BLE001
+            _log.warning("节点失效自动切换异常：%s", e)
+        time.sleep(_FAILOVER_INTERVAL)
+
+
+def _ensure_failover_thread():
+    """确保看门狗线程在跑（守护线程，进程退出即结束）。"""
+    global _failover_thread
+    if _failover_thread is None or not _failover_thread.is_alive():
+        _failover_thread = threading.Thread(target=_failover_loop, daemon=True,
+                                           name="v2ray-failover")
+        _failover_thread.start()
+
+
+def set_auto_failover(on: bool) -> dict:
+    """开启 / 关闭「节点失效自动切换」；开启时立即拉起后台看门狗线程。"""
+    v2raydb.set_setting("auto_failover", 1 if on else 0)
+    if on:
+        _ensure_failover_thread()
+    return status()
+
+
+# ---------------------------------------------------------------------------
 # 订阅拉取
 # ---------------------------------------------------------------------------
 
@@ -710,8 +833,10 @@ def fetch_and_store(sub: dict) -> dict:
 
 def core_info() -> dict:
     """内核探测信息：已找到的候选 + 当前选用。"""
-    cores = v2raycfg.detect_cores()
     st = _settings()
+    manual = str(st.get("core_path") or "").strip()
+    extra = [_CORE_DIR] + ([manual] if manual else [])
+    cores = v2raycfg.detect_cores(extra=extra)
     cur = _core_path(st)
     plat, arch = v2raycfg.platform_arch()
     return {"found": cores, "current": cur,
@@ -787,7 +912,14 @@ def _run_detect(jid: str):
                 seen.append(path)
                 _job_log(jid, "检测 " + path)
 
-        cores = v2raycfg.detect_cores(progress=progress)
+        # 探测范围 = 系统目录 + 应用自带安装目录 data/v2ray/core + 用户手动指定的内核路径，
+        # 否则「一键下载装到 data/v2ray/core」的内核会被误报成「本机没有可用内核」
+        st_now = _settings()
+        extra = [_CORE_DIR]
+        manual = str(st_now.get("core_path") or "").strip()
+        if manual:
+            extra.append(manual)
+        cores = v2raycfg.detect_cores(progress=progress, extra=extra)
         for c in cores:
             _job_log(jid, "可用：%s · %s" % (c["version"], c["path"]))
         if not cores:
@@ -798,7 +930,7 @@ def _run_detect(jid: str):
         _job_patch(jid, phase="探测失败", done=True, ok=False, error=str(e))
 
 
-def _run_download(jid: str, url: str):
+def _run_download(jid: str, url: str, dest: str = "", auto_use: bool = True):
     _ensure_dir()
     last = {"t": 0.0, "pct": -1}
 
@@ -824,17 +956,18 @@ def _run_download(jid: str, url: str):
         def on_log(line):
             _job_log(jid, line)
 
-        exe = v2raycfg.download_core(_CORE_DIR, url=url, progress=progress,
+        exe = v2raycfg.download_core(dest or _CORE_DIR, url=url, progress=progress,
                                      on_phase=phase, on_log=on_log)
     except ValueError as e:
         _job_patch(jid, phase="下载失败", done=True, ok=False, error=str(e))
         return
-    v2raydb.set_setting("core_path", exe)
     ver = v2raycfg.core_version(exe)
+    if auto_use:
+        v2raydb.set_setting("core_path", exe)
     _log.info("已下载 V2Ray 内核：%s (%s)", exe, ver)
     _job_log(jid, "安装完成：%s %s" % (ver, exe))
     _job_patch(jid, phase="安装完成", pct=100, done=True, ok=True,
-               result={"path": exe, "version": ver})
+               result={"path": exe, "version": ver, "auto_use": auto_use})
 
 
 def core_detect_job() -> str:
@@ -849,3 +982,83 @@ def core_download_job(url: str = "") -> str:
     jid = job_new("download")
     threading.Thread(target=_run_download, args=(jid, str(url or "")), daemon=True).start()
     return jid
+
+
+# ---------------------------------------------------------------------------
+# 多版本管理：按版本安装 / 已安装列表 / 一键切换
+# ---------------------------------------------------------------------------
+
+def _dir_exe(d: str) -> str:
+    """在版本目录里找 xray 可执行文件（兼容解压出子目录的情况）。"""
+    exe = os.path.join(d, "xray.exe" if os.name == "nt" else "xray")
+    if os.path.isfile(exe):
+        return exe
+    for root, _ds, files in os.walk(d):
+        for f in files:
+            if f in ("xray", "xray.exe", "v2ray", "v2ray.exe"):
+                return os.path.join(root, f)
+    return ""
+
+
+def _safe_ver(version: str) -> str:
+    """版本号清洗（只留 0-9a-z.-，去掉首位的 v），非法则抛 ValueError。"""
+    ver = str(version or "").strip().lstrip("vV")
+    if not re.fullmatch(r"[0-9][0-9A-Za-z.\-]*", ver):
+        raise ValueError("无效的版本号：%s" % version)
+    return ver
+
+
+def installed_versions() -> list:
+    """扫描 data/v2ray/versions 下的多版本安装，返回 [{dir, version, path, ok}]，新版本在前。"""
+    out = []
+    try:
+        names = sorted(os.listdir(_VERSIONS_DIR), reverse=True)
+    except OSError:
+        names = []
+    for d in names:
+        full = os.path.join(_VERSIONS_DIR, d)
+        exe = _dir_exe(full)
+        if not exe:
+            continue
+        ver = v2raycfg.core_version(exe)
+        out.append({"dir": d, "version": ver or "", "path": exe, "ok": bool(ver)})
+    return out
+
+
+def core_versions_info() -> dict:
+    """多版本信息：已安装版本 + 当前选用内核及版本号。"""
+    st = _settings()
+    cur = _core_path(st)
+    return {"installed": installed_versions(), "current": cur,
+            "current_version": v2raycfg.core_version(cur) if cur else ""}
+
+
+def core_install_version_job(version: str) -> str:
+    """后台下载安装指定版本的内核到 data/v2ray/versions/v<版本>/（不自动切换）。"""
+    ver = _safe_ver(version)
+    url = v2raycfg.release_url(ver)          # 顺带校验版本号
+    jid = job_new("download")
+    threading.Thread(target=_run_download, args=(jid, url),
+                     kwargs={"dest": os.path.join(_VERSIONS_DIR, "v" + ver),
+                             "auto_use": False}, daemon=True).start()
+    return jid
+
+
+def core_use_version(version: str) -> dict:
+    """把当前使用的内核切换到已安装的指定版本；内核在跑就自动重启加载。"""
+    ver = _safe_ver(version)
+    exe = _dir_exe(os.path.join(_VERSIONS_DIR, "v" + ver))
+    if not exe:
+        return {"error": "版本 v%s 尚未安装，请先下载安装" % ver}
+    real_ver = v2raycfg.core_version(exe)
+    if not real_ver:
+        return {"error": "该版本内核不可用（无法执行 version 命令）"}
+    v2raydb.set_setting("core_path", exe)
+    _log.info("内核已切换到 %s (%s)", real_ver, exe)
+    running = status().get("running")
+    if running:
+        r = restart()                          # 沿用当前节点重启，加载新内核
+        if r.get("error"):
+            return {"ok": True, "version": real_ver, "path": exe,
+                    "restarted": False, "error": r["error"]}
+    return {"ok": True, "version": real_ver, "path": exe, "restarted": running}

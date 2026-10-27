@@ -49,15 +49,16 @@ _CORE_DIRS_HOME = (
 # 官方内核下载地址（GitHub Release 直链，可在模块设置里覆盖）
 _XRAY_RELEASE = "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-{plat}-{arch}.zip"
 
-# GitHub 直连慢 / 不可达时的加速镜像前缀（依次尝试，哪个通用哪个；留空项 = 官方直连）
+# GitHub 直连慢 / 不可达时的加速镜像前缀（依次尝试，哪个通用哪个；留空项 = 官方直连）。
+# 把用户实测最稳的 ghfast.top / gh-proxy.com 放在直连之后优先重试。
 _MIRRORS = (
     "",
-    "https://ghproxy.net/",
+    "https://ghfast.top/",
     "https://gh-proxy.com/",
+    "https://ghproxy.net/",
     "https://ghproxy.cc/",
     "https://gh.llkk.cc/",
     "https://github.moeyy.xyz/",
-    "https://ghfast.top/",
 )
 
 # 版本号取法：`xray version` 首行形如 "Xray 26.3.27 (Xray, Penetrates Everything.) ..."
@@ -111,18 +112,20 @@ def _probe(path: str) -> str:
     return ""
 
 
-def detect_cores(progress=None) -> list:
+def detect_cores(progress=None, extra=()) -> list:
     """探测本机可用的内核，返回 [{name, path, version, ok}]（按可用性优先排序）。
 
     progress 为可选回调 (已完成数, 总数, 当前路径)：探测点先收集再逐个校验，
     所以总数在开始前就确定，前端可以据此画出真实的进度。
+    extra 为额外候选目录（如应用自带的 data/v2ray/core 安装目录）——
+    内核装在这些地方时不会被视为「系统里没有可用内核」。
     """
     cands = []
     for name in ("xray", "v2ray"):
         w = shutil.which(name)
         if w:
             cands.append(w)
-    for d in _CORE_DIRS + _CORE_DIRS_HOME:
+    for d in tuple(_CORE_DIRS) + tuple(_CORE_DIRS_HOME) + tuple(extra):
         for name in ("xray", "v2ray"):
             p = os.path.join(d, name)
             if p not in cands:
@@ -231,6 +234,47 @@ def download_core(dest_dir: str, url: str = "", progress=None, on_phase=None, on
         pass
     _notify(on_phase, "done")
     return exe
+
+
+def list_versions(limit: int = 30) -> list:
+    """拉取 Xray-core 近期发布版本列表（GitHub Releases API）。
+
+    api.github.com 直连失败时自动换加速镜像前缀重试；全部失败抛 ValueError。
+    返回 [{tag, version, published}]，最新在前。
+    """
+    n = max(1, min(int(limit or 30), 100))
+    api = "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=" + str(n)
+    last_err = ""
+    for base in _MIRRORS:
+        try:
+            req = urllib.request.Request(base + api, headers={
+                "User-Agent": "FileFlask-V2Ray/1.0",
+                "Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+            out = []
+            for r in data if isinstance(data, list) else []:
+                tag = str((r or {}).get("tag_name") or "").strip()
+                if not tag:
+                    continue
+                out.append({"tag": tag, "version": tag.lstrip("v"),
+                            "published": str((r or {}).get("published_at") or "")[:10]})
+            if out:
+                return out
+            last_err = "API 响应中没有版本信息"
+        except Exception as e:             # noqa: BLE001
+            last_err = str(e) or e.__class__.__name__
+            continue
+    raise ValueError("获取版本列表失败（最后错误：%s）。GitHub API 可能暂时不可达，请稍后重试" % last_err)
+
+
+def release_url(version: str) -> str:
+    """指定版本的官方内核 zip 下载地址；版本号非法抛 ValueError。"""
+    ver = str(version or "").strip().lstrip("vV")
+    if not re.fullmatch(r"[0-9][0-9A-Za-z.\-]*", ver):
+        raise ValueError("无效的版本号：%s" % version)
+    plat, arch = _plat_arch()
+    return "https://github.com/XTLS/Xray-core/releases/download/v%s/Xray-%s-%s.zip" % (ver, plat, arch)
 
 
 def lan_ip() -> str:

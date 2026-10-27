@@ -91,6 +91,40 @@ def v2_core_download():
     return jsonify({"ok": True, "job": v2raymgr.core_download_job(str(data.get("url") or ""))})
 
 
+@bp.get("/api/v2ray/core/versions")
+def v2_core_versions():
+    """多版本管理：已安装版本 + 当前选用 + 官方近期发布列表（remote）。"""
+    data = v2raymgr.core_versions_info()
+    try:
+        data["remote"] = v2raycfg.list_versions(30)
+        data["remote_error"] = ""
+    except ValueError as e:
+        data["remote"] = []
+        data["remote_error"] = str(e)
+    return jsonify(data)
+
+
+@bp.post("/api/v2ray/core/install-version")
+def v2_core_install_version():
+    """后台下载安装指定版本（不自动切换），返回 job id。"""
+    data = request.get_json(silent=True) or {}
+    try:
+        job = v2raymgr.core_install_version_job(str(data.get("version") or ""))
+    except ValueError as e:
+        return _fail(str(e))
+    return jsonify({"ok": True, "job": job})
+
+
+@bp.post("/api/v2ray/core/use-version")
+def v2_core_use_version():
+    """切换当前使用的内核版本；内核在跑会自动重启加载。"""
+    data = request.get_json(silent=True) or {}
+    r = v2raymgr.core_use_version(str(data.get("version") or ""))
+    if r.get("error"):
+        return _fail(r["error"])
+    return jsonify(r)
+
+
 @bp.get("/api/v2ray/core/job/<jid>/stream")
 def v2_core_job_stream(jid):
     """SSE：把后台任务（探测 / 下载）的进度实时推给前端。"""
@@ -496,6 +530,13 @@ def _tcp_ping(host: str, port: int):
         return -1, proxyutil.friendly_error(e, host)
     finally:
         s.close()
+
+
+@bp.post("/api/v2ray/auto-failover")
+def v2_auto_failover():
+    """开启 / 关闭「节点失效自动切换」：状态落库，并由后端看门狗线程（与网页无关）执行。"""
+    data = request.get_json(silent=True) or {}
+    return jsonify(v2raymgr.set_auto_failover(bool(data.get("on"))))
 
 
 @bp.post("/api/v2ray/ping")

@@ -440,6 +440,16 @@
 }
 .v2v-btn:disabled { opacity: .42; cursor: not-allowed; }
 .v2v-btn.ico { width: 32px; padding: 0; }
+/* 版本管理行内的小号按钮：普通按钮 32px 高太笨重，ico 变体是 32px 方块放不下文字 */
+.v2v-btn.sm {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 11px;
+  border-radius: 7px;
+  gap: 4px;
+  flex: none;
+}
+.v2v-btn.sm .bi { font-size: 12px; }
 
 /* --- 分段标签（下划线指示器） --- */
 .v2v-tabs {

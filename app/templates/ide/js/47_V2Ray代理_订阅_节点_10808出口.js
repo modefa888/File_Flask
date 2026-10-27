@@ -117,6 +117,14 @@
     toast(msg, "err");
   }
 
+  /** 拉取多版本信息（已安装 + 官方发布列表），存 V2.vers 供设置页渲染。 */
+  function v2VersLoad() {
+    return api("/api/v2ray/core/versions").then(r => {
+      if (r && !r.error) { V2.vers = r; if (v2vActive()) v2vRender(); }
+      return r;
+    });
+  }
+
   /** 启动一个内核后台任务，并用 SSE 实时刷新进度条。 */
   function v2JobRun(kind, path, body) {
     if (v2JobBusy()) return toast("已有任务在进行中，请稍候", "warn");
@@ -139,6 +147,7 @@
           toast(j.kind === "detect" ? ("探测完成，找到 " + found + " 个可用内核")
                                     : ("内核已就绪：" + ((j.result || {}).version || "")), "ok");
           v2Reload().catch(() => {});
+          if (V2.vers) v2VersLoad().catch(() => {});   // 版本面板开着就同步刷新它
         } else {
           toast(j.error || "任务失败", "err");
         }
@@ -497,7 +506,11 @@
     let h = v2vBanner();
     h += '<div class="v2v-sec">' +
       v2vSecHead("bi-activity", "运行状态",
-        running ? "已稳定运行 " + esc(fmtUp(st.uptime)) : "内核未启动，点右上角「连接」即可启动") +
+        running ? "已稳定运行 " + esc(fmtUp(st.uptime)) : "内核未启动，点右上角「连接」即可启动",
+        '<span class="v2v-flex"></span>' +
+        '<button class="v2v-tab' + (v2FailOn() ? " on" : "") + '" data-act="auto-fail"' +
+        ' title="由后端持续守护：开启后每 60 秒探测当前节点，连续两次超时自动切换到最优可用节点（关掉网页也生效）">' +
+        '<i class="bi bi-shield-check"></i>失效自动切换</button>') +
       '<div class="v2v-stats">' +
       stat("bi-broadcast", "代理状态", running ? "运行中" : "未运行",
         running ? ("PID " + st.pid) : "等待连接", running ? "on" : "off") +
@@ -642,24 +655,42 @@
     tick();
   }
 
-  function v2vNodes() {
+  /* ---------- 节点失效自动切换（看门狗在后端运行，与网页是否打开无关） ----------
+     前端只负责开关 UI 与把开关同步给后端 /api/v2ray/auto-failover；
+     真正的定时探测 + 自动切换由后端 v2raymgr 的后台线程执行，关掉浏览器也持续运行。 */
+  function v2FailOn() {
+    // 当前开关状态以后端返回的 settings.auto_failover 为准
+    return !!(V2.st && V2.st.settings && V2.st.settings.auto_failover);
+  }
+
+  // 当前过滤条件（搜索词 + 分组 tab + 隐藏超时 + 延迟排序）下的节点列表。
+  // 节点页渲染与「全部测速」共用，保证测速范围和列表显示一致。
+  // opts.hideFail：显式传 false 可忽略「隐藏超时」（测速时要包含超时节点才有机会重测）
+  function v2NodeFilteredList(opts) {
+    const o = opts || {};
+    const hideF = ("hideFail" in o) ? o.hideFail : V2.hideFail;
     const kw = (V2.kw || "").trim().toLowerCase();
+    let list = V2.nodes.filter(n => !kw ||
+      String(n.name || "").toLowerCase().includes(kw) || String(n.server || "").toLowerCase().includes(kw));
+    if (V2.nodeTab.indexOf("sub:") === 0) list = list.filter(n => n.sub_id === V2.nodeTab.slice(4));
+    else if (V2.nodeTab.indexOf("grp:") === 0) list = list.filter(n => (n.grp || "").trim() === V2.nodeTab.slice(4));
+    if (hideF) list = list.filter(n => !(V2.ping[n.id] && !V2.ping[n.id].ok));   // 隐藏超时节点
+    if (V2.sortPing) list = list.slice().sort((a, b) => {   // 按延迟升序，未测的排最后
+      const va = (V2.ping[a.id] && V2.ping[a.id].ok) ? V2.ping[a.id].ms : 9e9;
+      const vb = (V2.ping[b.id] && V2.ping[b.id].ok) ? V2.ping[b.id].ms : 9e9;
+      return va - vb;
+    });
+    return list;
+  }
+
+  function v2vNodes() {
     // tab 分组：全部 / 按订阅名 / 自定义分组（节点编辑里填的 grp）
     const grpNames = [...new Set(V2.nodes.map(n => (n.grp || "").trim()).filter(Boolean))];
     const tabs = [{ k: "__all__", label: "全部" }]
       .concat((V2.subs || []).map(s => ({ k: "sub:" + s.id, label: s.name || s.id })))
       .concat(grpNames.map(g => ({ k: "grp:" + g, label: g })));
     if (!tabs.some(t => t.k === V2.nodeTab)) V2.nodeTab = "__all__";
-    let list = V2.nodes.filter(n => !kw ||
-      String(n.name || "").toLowerCase().includes(kw) || String(n.server || "").toLowerCase().includes(kw));
-    if (V2.nodeTab.indexOf("sub:") === 0) list = list.filter(n => n.sub_id === V2.nodeTab.slice(4));
-    else if (V2.nodeTab.indexOf("grp:") === 0) list = list.filter(n => (n.grp || "").trim() === V2.nodeTab.slice(4));
-    if (V2.hideFail) list = list.filter(n => !(V2.ping[n.id] && !V2.ping[n.id].ok));   // 隐藏超时节点
-    if (V2.sortPing) list = list.slice().sort((a, b) => {   // 按延迟升序，未测的排最后
-      const va = (V2.ping[a.id] && V2.ping[a.id].ok) ? V2.ping[a.id].ms : 9e9;
-      const vb = (V2.ping[b.id] && V2.ping[b.id].ok) ? V2.ping[b.id].ms : 9e9;
-      return va - vb;
-    });
+    const list = v2NodeFilteredList();
     // 大量节点（上千条）时一次性 innerHTML 全量渲染会严重卡顿：
     // 只渲染前 V2.nodeShow 条，列表末尾放「加载更多」，点一次补一批
     if (!V2.nodeShow) V2.nodeShow = 60;
@@ -706,14 +737,15 @@
     h += '<div class="v2v-sec">' +
       v2vSecHead("bi-diagram-3", "节点列表",
         (V2.pingProg ? "并发测速中 " + V2.pingProg.done + "/" + V2.pingProg.total + " · " : "") +
-        (list.length ? ("共 " + list.length + " 个节点" + (kw ? "（已过滤）" : "")) : "还没有可用的节点"),
+        (list.length ? ("共 " + list.length + " 个节点" + ((V2.kw || "").trim() ? "（已过滤）" : "")) : "还没有可用的节点"),
         '<span class="v2v-flex"></span>' +
         '<input type="text" id="v2vKw" class="v2v-kw" placeholder="搜索名称 / 地址" value="' + escA(V2.kw || "") + '">' +
         '<button class="v2v-tab' + (V2.sortPing ? " on" : "") + '" data-act="sort-ping" title="按延迟从低到高排序">' +
         '<i class="bi bi-sort-down"></i>延迟</button>' +
         '<button class="v2v-tab' + (V2.hideFail ? " on" : "") + '" data-act="hide-fail" title="隐藏测速超时的节点">' +
         '<i class="bi bi-eye-slash"></i>隐藏超时</button>' +
-        '<button class="v2v-btn" data-act="ping-all"' + (list.length && !V2.pingProg ? "" : " disabled") +
+        '<button class="v2v-btn" data-act="ping-all" title="测速当前列表下的全部节点（当前 tab + 搜索过滤）"' +
+        (list.length && !V2.pingProg ? "" : " disabled") +
         '><i class="bi bi-lightning-charge"></i>' + (V2.pingProg ? "测速中…" : "全部测速") + "</button>" +
         '<button class="v2v-btn danger" data-act="del-timeout"' + (failN && !V2.pingProg ? "" : " disabled") +
         ' title="删除所有测速超时的节点"><i class="bi bi-trash"></i>删除超时' + (failN ? " " + failN : "") + "</button>" + tabHtml);
@@ -845,6 +877,10 @@
       '><i class="bi bi-cloud-arrow-down"></i>一键下载 Xray-core</button>' +
       '<button class="v2v-btn" data-act="detect-core"' + (busy ? " disabled" : "") +
       '><i class="bi bi-search"></i>重新探测</button>' +
+      '<button class="v2v-btn" data-act="ver-list"' + (busy || V2.versBusy ? " disabled" : "") +
+      '><i class="bi ' + (V2.versBusy ? "bi-arrow-repeat spin"
+        : (V2.vers ? "bi-chevron-up" : "bi-list-stars")) + '"></i>' +
+      (V2.vers ? "收起版本列表" : "查看其他版本") + "</button>" +
       '<span class="v2v-plat"><i class="bi bi-pc-display"></i>当前平台 · ' + esc(plat) + "</span>" +
       "</div>" + v2ProgHtml();
     if (cores.length) {
@@ -857,6 +893,39 @@
     } else {
       h += '<div class="v2v-hint warn"><i class="bi bi-exclamation-triangle"></i><div>' +
         "系统里没有探测到 xray / v2ray，请点上面的「一键下载 Xray-core」（会装到 data/v2ray/core）。</div></div>";
+    }
+    // —— 版本管理：已安装多版本切换 + 官方发布版本按需安装 ——
+    if (V2.vers) {
+      const vs = V2.vers;
+      const curV = vs.current_version || "";
+      h += '<div class="v2v-subhead"><span>版本管理</span>' +
+        '<em class="v2v-sub-note">当前使用：' + esc(curV || "未知") +
+        " · 安装到 data/v2ray/versions/，切换后若内核在跑会自动重启</em></div>";
+      if (vs.installed && vs.installed.length) {
+        h += '<div class="v2v-cores">' + vs.installed.map(v =>
+          '<div class="v2v-core' + (v.ok ? " ok" : "") + '">' +
+          '<span class="v2v-core-nm"><i class="bi bi-box-seam"></i>' + esc(v.version || v.dir) + "</span>" +
+          '<span class="v2v-core-v">' + (v.version && v.version === curV ? "使用中" : (v.ok ? "就绪" : "不可用")) + "</span>" +
+          '<span class="v2v-core-p" title="' + escA(v.path) + '">' + esc(v.path) + "</span>" +
+          (v.ok && v.version !== curV
+            ? '<button class="v2v-btn sm" data-act="ver-use" data-ver="' + escA(v.version || v.dir) +
+              '" title="切换到该版本"><i class="bi bi-arrow-left-right"></i>使用</button>'
+            : "") +
+          "</div>").join("") + "</div>";
+      }
+      if (vs.remote_error) {
+        h += '<div class="v2v-hint warn"><i class="bi bi-exclamation-triangle"></i><div>' + esc(vs.remote_error) + "</div></div>";
+      } else if (vs.remote && vs.remote.length) {
+        h += '<div class="v2v-cores">' + vs.remote.slice(0, 15).map(v =>
+          '<div class="v2v-core' + (v.version === curV ? " ok" : "") + '">' +
+          '<span class="v2v-core-nm"><i class="bi bi-tag"></i>' + esc(v.version) + "</span>" +
+          '<span class="v2v-core-v">' + esc(v.published || "") + "</span>" +
+          '<span class="v2v-core-p">' + (v.version === curV ? "当前版本" : "") + "</span>" +
+          '<button class="v2v-btn sm" data-act="ver-install" data-ver="' + escA(v.version) +
+          '"' + (busy ? " disabled" : "") + ' title="下载安装该版本（不自动切换）">' +
+          '<i class="bi bi-cloud-arrow-down"></i>安装</button>' +
+          "</div>").join("") + "</div>";
+      }
     }
     h += "</div>";
 
@@ -1176,6 +1245,17 @@
         if (sc) sc.scrollTop = stTop;
         break;
       }
+      case "auto-fail": {
+        // 开关交给后端看门狗：前端只发状态，后端落库并启动/停止后台守护线程
+        const next = !v2FailOn();
+        const r = await post("/api/v2ray/auto-failover", { on: next });
+        if (r.error) { toast(r.error, "err"); break; }
+        // 后端返回完整 status（含最新 settings）：同步进本地缓存，按钮 on 态立即切换
+        if (r.settings) V2.st = r;
+        toast(next ? "已开启节点失效自动切换（后端后台守护，关掉网页也生效）" : "已关闭节点失效自动切换", next ? "ok" : "info");
+        if (v2vActive()) v2vRender();
+        break;
+      }
       case "restart": {
         const r = await post("/api/v2ray/restart");
         if (r.error) toast(r.error, "err"); else { toast("已重启", "ok"); await v2Reload(); }
@@ -1274,8 +1354,10 @@
       }
       case "ping-all": {
         if (V2.pingProg) break;                 // 已在进行中，防止重复触发
-        const ids = V2.nodes.map(n => n.id);
-        if (!ids.length) { toast("还没有节点", "warn"); break; }
+        // 只测当前列表（当前 tab + 搜索过滤）下的节点；忽略「隐藏超时」，
+        // 否则开了隐藏超时后超时节点永远没机会重测
+        const ids = v2NodeFilteredList({ hideFail: false }).map(n => n.id);
+        if (!ids.length) { toast("当前列表没有节点", "warn"); break; }
         V2.pingProg = { done: 0, total: ids.length };
         if (v2vActive()) v2vRender();
         // 分批走后端并发测速（每批 100、后端内部 40 线程），每批只重绘一次，
@@ -1411,6 +1493,38 @@
       case "download-core": {
         V2.pendingUrl = val("v2vSetCoreUrl");
         v2JobRun("download", "/api/v2ray/core/download", { url: V2.pendingUrl });
+        break;
+      }
+      case "ver-list": {
+        // 开关：再点收起；拉取期间按钮禁用转圈（防止重复请求）
+        if (V2.versBusy) break;
+        if (V2.vers) {
+          V2.vers = null;
+          if (v2vActive()) v2vRender();
+          break;
+        }
+        V2.versBusy = true;
+        if (v2vActive()) v2vRender();
+        try {
+          const rv = await v2VersLoad();
+          if (rv && rv.error) toast(rv.error, "err");
+        } finally {
+          V2.versBusy = false;
+          if (v2vActive()) v2vRender();
+        }
+        break;
+      }
+      case "ver-install": {
+        if (v2JobBusy()) return toast("已有任务在进行中，请稍候", "warn");
+        v2JobRun("download", "/api/v2ray/core/install-version", { version: ds.ver });
+        break;
+      }
+      case "ver-use": {
+        const ru = await post("/api/v2ray/core/use-version", { version: ds.ver });
+        if (ru.error) return toast(ru.error, "err");
+        toast("已切换到 " + (ru.version || ds.ver) + (ru.restarted ? "，内核已自动重启" : ""), "ok");
+        await v2Reload().catch(() => {});
+        await v2VersLoad().catch(() => {});
         break;
       }
       case "save-settings": {

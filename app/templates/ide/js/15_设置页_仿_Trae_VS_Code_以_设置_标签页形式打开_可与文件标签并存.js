@@ -843,7 +843,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
       if (e.ctrlKey || e.metaKey) parts.push("Mod");
       if (e.altKey) parts.push("Alt");
       if (e.shiftKey) parts.push("Shift");
-      let k = e.key;
+      let k = e.key || "";
       if (k === "+") k = "=";
       if (k === "~") k = "`";
       parts.push(k.toLowerCase());
@@ -966,17 +966,17 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     if (chordK) {   // Ctrl+K 两段式的第二段
       chordK = false;
       if (mod || e.altKey) return;
-      const ccmd = kbMap.get("mod k " + e.key.toLowerCase());
+      const ccmd = kbMap.get("mod k " + (e.key || "").toLowerCase());
       if (ccmd) { e.preventDefault(); ccmd.run(); }
       return;
     }
-    if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); chordK = true; return; }
+    if (mod && (e.key || "").toLowerCase() === "k") { e.preventDefault(); chordK = true; return; }
     // 通用命令分发（组合键签名 → 设置页可自定义）
     const parts = [];
     if (mod) parts.push("mod");
     if (e.altKey) parts.push("alt");
     if (e.shiftKey) parts.push("shift");
-    let kk = e.key;
+    let kk = e.key || "";
     if (kk === "+") kk = "=";   // Ctrl+= 与 Ctrl++ 视为同一组合
     if (kk === "~") kk = "`";   // Shift+` 在多数键盘布局产生 ~
     parts.push(kk.toLowerCase());

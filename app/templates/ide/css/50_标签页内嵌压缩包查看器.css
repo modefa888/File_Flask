@@ -1,0 +1,329 @@
+/* ================================================================
+ * 标签页内嵌压缩包查看器（配合 50_压缩包查看器 js 使用）
+ * 上方面包屑 + 工具条，左侧成员列表，右侧预览区；窄屏时预览区落到下方
+ * ================================================================ */
+
+.azv-wrap {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #1e1e1e;
+  color: #cccccc;
+}
+
+/* ---------- 顶部：面包屑 + 工具条 ---------- */
+.azv-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: #252526;
+  border-bottom: 1px solid #2b2b2b;
+}
+.azv-crumbs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.azv-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #cfcfcf;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.azv-crumb:hover { background: #37373d; }
+.azv-crumb:last-child { color: #f0f0f0; font-weight: 600; }
+.azv-crumb-sep { flex: none; font-size: 10px; color: #6b6b6b; }
+
+.azv-tools { flex: none; display: flex; align-items: center; gap: 6px; }
+.azv-filter {
+  width: 150px;
+  padding: 3px 8px;
+  background: #3c3c3c;
+  border: 1px solid #4a4a4a;
+  border-radius: 5px;
+  color: #dddddd;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.azv-filter:focus { border-color: #0a6aa8; }
+.azv-filter::placeholder { color: #8a8a8a; }
+
+.azv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: #333333;
+  border: 1px solid #454545;
+  border-radius: 5px;
+  color: #cccccc;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.azv-btn:hover { background: #3f3f3f; color: #ffffff; }
+.azv-btn:disabled { opacity: .5; cursor: default; }
+.azv-btn:disabled:hover { background: #333333; color: #cccccc; }
+/* 开关型按钮（自动换行）：开启时高亮，与 IDE 其它工具条保持一致 */
+.azv-btn.on { color: #4fc1ff; border-color: #0a6aa8; }
+.azv-btn.on:hover { color: #7fd1ff; }
+
+/* ---------- 主体：列表 + 预览 ---------- */
+.azv-body { flex: 1; min-height: 0; display: flex; }
+
+.azv-list {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.azv-rows { flex: 1; overflow: auto; }
+
+.azv-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, .03);
+  cursor: pointer;
+}
+.azv-row:hover { background: #2a2d2e; }
+.azv-row.cur { background: #04395e; color: #ffffff; }
+.azv-row-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #252526;
+  color: #8a8a8a;
+  font-size: 11px;
+  cursor: default;
+}
+.azv-row-head:hover { background: #252526; }
+.azv-row-head.hidden { display: none; }
+
+.azv-c-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.azv-nm { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.azv-c-size, .azv-c-comp {
+  flex: none;
+  width: 86px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #9a9a9a;
+}
+.azv-row.cur .azv-c-size, .azv-row.cur .azv-c-comp { color: #cfe6ff; }
+/* 图标位：与资源管理器同款（seti 字体图标或 bootstrap 兜底），固定宽度保证名称左对齐 */
+.azv-ico {
+  flex: none;
+  width: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+}
+.azv-ico-dir { color: #c09553; }
+.azv-ico-file { color: #8ab4d8; }
+
+.azv-empty, .azv-load {
+  padding: 30px 20px;
+  text-align: center;
+  color: #888888;
+  font-size: 12.5px;
+  line-height: 1.9;
+}
+.azv-empty i, .azv-load i { display: block; margin-bottom: 8px; font-size: 22px; color: #666666; }
+.azv-empty-sub { color: #6f6f6f; font-size: 11.5px; }
+
+/* ---------- 右侧预览 ---------- */
+.azv-preview {
+  flex: none;
+  width: 42%;
+  max-width: 620px;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #1b1b1c;
+  border-left: 1px solid #2b2b2b;
+}
+.azv-pv-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #2b2b2b;
+  font-size: 12px;
+  color: #dddddd;
+}
+.azv-pv-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.azv-pv-size { flex: none; color: #8a8a8a; font-size: 11px; }
+.azv-pv-act { flex: none; display: flex; align-items: center; gap: 6px; }
+
+.azv-pv-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+.azv-pv-empty {
+  padding: 20px;
+  text-align: center;
+  color: #777777;
+  font-size: 12.5px;
+  line-height: 1.9;
+}
+.azv-pv-empty i { display: block; margin-bottom: 10px; font-size: 26px; color: #5a5a5a; }
+.azv-pv-err {
+  padding: 18px;
+  text-align: center;
+  color: #e08a8a;
+  font-size: 12.5px;
+  line-height: 1.8;
+}
+.azv-pv-err i { display: block; margin-bottom: 8px; font-size: 22px; }
+.azv-pv-load { color: #8a8a8a; font-size: 12.5px; }
+
+/* 文本预览（CodeMirror 只读）：撑满预览区，行号栏带分隔线 */
+.azv-pv-cm {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.azv-pv-cm .CodeMirror {
+  height: 100%;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.azv-pv-cm .CodeMirror-gutters { border-right: 1px solid #2b2b2b; }
+
+/* 文本预览兜底（CodeMirror 不可用）：行号列 + 正文共用一个滚动容器，横向滚动时行号吸附在左侧 */
+.azv-pv-code {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  overflow: auto;
+  background: #1b1b1c;
+}
+.azv-gutter {
+  position: sticky;
+  left: 0;
+  flex: none;
+  padding: 12px 8px 12px 10px;
+  text-align: right;
+  color: #6f7681;
+  background: #1b1b1c;
+  border-right: 1px solid #2b2b2b;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.azv-pv-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 12px 14px;
+  background: transparent;
+  color: #d4d4d4;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre;
+  tab-size: 4;
+}
+/* 兜底渲染下的自动换行（CodeMirror 可用时走 lineWrapping 选项，不依赖这里） */
+.azv-pv-text.wrap { white-space: pre-wrap; word-break: break-all; overflow-wrap: anywhere; }
+.azv-pv-img {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: repeating-conic-gradient(#262626 0 25%, #1e1e1e 0 50%) 0 0 / 18px 18px;
+}
+.azv-pv-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.azv-pv-media {
+  width: 100%;
+  padding: 18px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: #8fb8dd;
+  font-size: 30px;
+}
+.azv-pv-media audio { width: 100%; }
+.azv-pv-media video { max-width: 100%; max-height: 100%; }
+.azv-pv-pdf { width: 100%; height: 100%; border: none; background: #ffffff; }
+
+/* ---------- 底部轻提示 ---------- */
+.azv-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  z-index: 9;
+  max-width: 70%;
+  padding: 7px 14px;
+  border-radius: 6px;
+  background: rgba(30, 30, 30, .95);
+  border: 1px solid #454545;
+  color: #dddddd;
+  font-size: 12px;
+  line-height: 1.6;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(8px);
+  transition: opacity .18s, transform .18s;
+}
+.azv-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.azv-toast.ok { color: #7fd88f; border-color: #2f5c3a; }
+.azv-toast.err { color: #e08a8a; border-color: #5c2f2f; }
+
+/* ---------- 窄屏：预览区落到下方 ---------- */
+.azv-narrow .azv-body { flex-direction: column; }
+.azv-narrow .azv-preview {
+  width: auto;
+  max-width: none;
+  min-width: 0;
+  height: 42%;
+  border-left: none;
+  border-top: 1px solid #2b2b2b;
+}

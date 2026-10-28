@@ -1627,6 +1627,12 @@
           setupAudioView(tab, host, path, name);
           return;
         }
+        // 压缩包：标签页内嵌查看器（zip / rar 可浏览，其它格式只给下载，实现见 50_）
+        if (!forceText && (window.IDE_ARCHIVE_EXTS || []).includes(ext) && typeof window.setupArchiveView === "function") {
+          activate(tab);
+          window.setupArchiveView(tab, host, path, name);
+          return;
+        }
         // 只等文件内容；语言模式脚本改为异步套用（见下方），避免它的脚本事件没来时编辑器永久卡在「正在加载」
         const res = await loadFileText(path, name);
         // 不支持 / 打开失败：同样要走激活（否则只有内容切了、标签不高亮、面包屑还是旧文件）；
@@ -1767,6 +1773,12 @@
     if (active === tab) { renderBreadcrumbs(tab.displayPath || tab.path); updateStatus(); revealInTree(tab.path); }
     sessionSaveTabs();
   };
+  // 文件图标（seti + 后台自定义图标）：导出给 IIFE 关闭后才加载的模块复用（50_ 压缩包查看器等），
+  // 保证标签页里的列表图标与左侧资源管理器完全一致
+  window.ideIconFor = iconFor;
+  // 语法高亮模式加载 + 主题判定：供 IIFE 外的只读代码预览（50_ 压缩包查看器）复用同一套 CodeMirror 模式
+  window.ideEnsureMode = ensureMode;
+  window.ideThemeLight = ideThemeLight;
 
   /* 没有打开任何标签页时，把面包屑栏（含底部那条分隔线）整条藏起来 ——
      否则欢迎页上方会留一条空横线，像是标签栏没画完。有标签（含设置 / 后台任务等

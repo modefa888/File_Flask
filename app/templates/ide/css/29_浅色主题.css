@@ -336,6 +336,36 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .ipv-sep { background: #cecece; }
 :where(html.theme-light) .ipv-count { color: #6b7280; }
 
+/* ---------- 压缩包查看器（50） ---------- */
+:where(html.theme-light) .azv-wrap { background: #ffffff; color: #333333; }
+:where(html.theme-light) .azv-head { background: #f3f3f3; border-bottom-color: #e0e0e0; }
+:where(html.theme-light) .azv-crumb { color: #5a5a5a; }
+:where(html.theme-light) .azv-crumb:hover { background: #e6e6e6; }
+:where(html.theme-light) .azv-crumb:last-child { color: #1f2328; }
+:where(html.theme-light) .azv-filter { background: #ffffff; border-color: #cecece; color: #333333; }
+:where(html.theme-light) .azv-btn { background: #ececec; border-color: #cecece; color: #333333; }
+:where(html.theme-light) .azv-btn:hover { background: #e0e0e0; color: #000000; }
+:where(html.theme-light) .azv-btn.on { color: #005fb8; border-color: #9ec8ec; }
+:where(html.theme-light) .azv-btn.on:hover { color: #004e96; }
+:where(html.theme-light) .azv-row { border-bottom-color: #f0f0f0; }
+:where(html.theme-light) .azv-row:hover { background: #eef2f7; }
+:where(html.theme-light) .azv-row.cur { background: #dbeafe; color: #1d4ed8; }
+:where(html.theme-light) .azv-row.cur .azv-c-size,
+:where(html.theme-light) .azv-row.cur .azv-c-comp { color: #3b5b9a; }
+:where(html.theme-light) .azv-row-head { background: #f3f3f3; color: #8a8a8a; }
+:where(html.theme-light) .azv-row-head:hover { background: #f3f3f3; }
+:where(html.theme-light) .azv-c-size, :where(html.theme-light) .azv-c-comp { color: #7a7a7a; }
+:where(html.theme-light) .azv-preview { background: #fafafa; border-left-color: #e0e0e0; }
+:where(html.theme-light) .azv-pv-head { border-bottom-color: #e0e0e0; color: #333333; }
+:where(html.theme-light) .azv-pv-code { background: #ffffff; }
+:where(html.theme-light) .azv-pv-text { background: transparent; color: #333333; }
+:where(html.theme-light) .azv-gutter { background: #f7f7f7; color: #9a9a9a; border-right-color: #e0e0e0; }
+:where(html.theme-light) .azv-pv-cm .CodeMirror { background: #ffffff; color: #333333; }
+:where(html.theme-light) .azv-pv-cm .CodeMirror-gutters { background: #f7f7f7; border-right-color: #e0e0e0; }
+:where(html.theme-light) .azv-pv-img { background: repeating-conic-gradient(#f0f0f0 0 25%, #ffffff 0 50%) 0 0 / 18px 18px; }
+:where(html.theme-light) .azv-narrow .azv-preview { border-top-color: #e0e0e0; }
+:where(html.theme-light) .azv-toast { background: rgba(248, 248, 248, .97); border-color: #cecece; color: #333333; }
+
 :where(html.theme-light) .set-nav { background: #f6f6f6; border-right-color: #e0e0e0; }
 :where(html.theme-light) .set-nav h1 { color: #1f2328; }
 :where(html.theme-light) .set-search { background: #ffffff; border-color: #cecece; color: #1f2328; }

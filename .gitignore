@@ -31,3 +31,5 @@ dist/
 *.flac
 
 *.jpg
+m3u/
+txt/

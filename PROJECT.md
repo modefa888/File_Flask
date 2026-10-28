@@ -105,6 +105,7 @@ File_Flask/
 | 23 | `ide/termai.py` | `termai` | 终端 AI 助手：自然语言 → 命令建议（含风险说明）、执行后流式解读输出 |
 | 24 | `adm/update.py` | `update` | 在线更新：后台管理 SPA 模块（`/admin#update`），GitHub 检查更新、拉取代码、装依赖、重启；另支持初始化 Git 仓库、上传 ZIP 包覆盖更新、备份记录列表与一键回滚 |
 | 25 | `ide/sshfile.py` | `sshfile` | SSH 远程文件管理（paramiko SFTP）：`/api/ssh/fs/*` 列目录 / 读写 / 建删改 / 上传 / 下载 / 缩略图；SFTP 客户端按连接缓存（15 分钟 TTL），复用 sshconn 的连接存储与凭据解密 |
+| 26 | `ide/iptv.py` | `iptv` | IPTV 播放列表：`/api/iptv/playlist` 解析 m3u（频道 / 分组 / 台标，POST 可直接吃编辑器缓冲区），`/api/iptv/proxy` 转发 HLS（改写子播放列表 / 分片 / 密钥 URI，解决跨域与 http 混合内容） |
 
 ### 4.1 AI 助手（`ide/ai.py`）
 
@@ -245,6 +246,29 @@ File_Flask/
     `markSessionBody()` 在 MOTD 结束（提示符出现或停顿 5 秒）时用 `term.registerMarker(0)`
     锚住提示符行，`sshTranscript()` 从 `bodyMark.line` 开始回读；marker 随 buffer 滚动
     自动前移，被 scrollback 挤出（`isDisposed`）说明欢迎信息早已滚掉，直接从 0 读。
+
+### 4.7 IPTV 播放列表（`ide/iptv.py` + `js/51_IPTV播放列表_m3u_内嵌播放.js`）
+
+- 打开 `.m3u` / `.m3u8` 仍是普通文本编辑（方便改台标、换源），编辑器右上角多一个
+  **「▶ 播放」** 按钮（`.m3u-tb`）。点它 → 同一个标签页内切换成播放器：左侧画面，
+  右侧「播放列表」（按 `group-title` 分组、可搜索、点台即切、Logo 懒加载）。
+  点播放列表头部的「编辑」按钮回到文本，编辑器 DOM 只是 `display:none`，
+  未保存内容 / 撤销历史都在，回来时 `cm.refresh()` 修正尺寸。
+- 端点：
+  - `GET  /api/iptv/playlist?path=` —— 读磁盘解析；
+  - `POST /api/iptv/playlist` `{path, text?}` —— 优先用请求里带来的文本，
+    因此「编辑器里改了还没保存」的内容点播放也立刻生效；
+  - `GET  /api/iptv/proxy?url=http(s)://…` —— HLS 转发。
+- 解析：`#EXTINF` 的 `tvg-name` / `tvg-logo` / `group-title`，兼容老格式 `#EXTGRP:`；
+  频道名取「最后一个引号外的逗号」之后的部分（名字里可能带逗号）；相对地址按播放列表
+  所在目录解析成本地文件（走 `/api/stream`），`rtmp/rtsp` 等浏览器放不了的地址直接丢弃。
+- 播放：远端 m3u8 → `/api/iptv/proxy` → `hls.js`（`static/vendor/hls/hls.min.js`，按需懒加载）。
+  代理会把 m3u8 里的子播放列表、分片、`EXT-X-KEY` / `EXT-X-MAP` 的 `URI` 全部改写成
+  代理地址，多级 m3u8 也能嵌套播放；分片按 64KB 分块流式转发，不占内存。
+  代理只放行 http / https。
+- 播放器复用 22_ 视频播放器的 `.vpv-*` 皮肤与主题判定（`vpvThemeIsLight`），
+  白天 / 黑夜跟随「设置 → 外观 → 播放器主题」；音量 / 静音与视频播放器共用
+  `localStorage["ide.videoPlayer"]`。网络抖动自动重连 3 次，媒体错误走 `recoverMediaError`。
 
 ---
 
@@ -424,6 +448,7 @@ Client ◀─响应─
 | pip 安装 / 环境探测 | `app/routes/ide/pip.py` + `services/ide/envprobe.py`、`envinstall.py` |
 | 定时任务（cron） | `app/routes/ide/cron.py` + `services/ide/cronutil.py`、`crondb.py`、`cronsvc.py`；前端 `js/36_定时任务…js` + `css/36_定时任务.css` |
 | 终端 AI 助手（自然语言转命令 / 输出解读） | `app/routes/ide/termai.py`；前端 `js/44_终端AI助手…js` + `css/42_终端AI助手.css`（浅色配色在 `css/29_浅色主题.css` 末尾） |
+| IPTV 播放列表（.m3u 解析 / HLS 播放） | 后端 `app/routes/ide/iptv.py`；前端 `js/51_IPTV播放列表_m3u_内嵌播放.js` + `css/52_IPTV播放列表.css`（皮肤复用 `css/28_标签页内嵌视频播放器.css`） |
 | 在线更新（检查 / 拉取 / 重启） | `app/routes/adm/update.py` + `services/adm/updater.py` + `templates/adm/js/17_在线更新.js`（配置存 store_meta 的 `update_cfg`） |
 | 打包脚本 | `FileManager.spec` |
 | 启动参数 | `run.py` 的 `argparse` |

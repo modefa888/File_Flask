@@ -147,6 +147,9 @@ html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacit
 {% include 'ide/css/50_标签页内嵌压缩包查看器.css' %}
 </style>
 <style>
+{% include 'ide/css/52_IPTV播放列表.css' %}
+</style>
+<style>
 {% include 'ide/css/30_环境变量可视化编辑.css' %}
 </style>
 <style>
@@ -287,6 +290,8 @@ try { if (localStorage.getItem('ide.sidebar.collapsed') === '1') document.docume
 {% include 'ide/js/22_视频播放器_标签页内嵌_参考文件管理器桌面版.js' %}
 {# 标签页内嵌音频播放器：openFile 的音频分支调用 setupAudioView（同样是 IIFE 关闭后的全局函数） #}
 {% include 'ide/js/48_音频播放器_标签页内嵌_播放列表_进度_音量_倍速.js' %}
+{# IPTV 播放列表（.m3u）：编辑器右上角「▶ 播放」→ 标签内切成频道播放器，复用 22_ 的 .vpv-* 皮肤与主题判定 #}
+{% include 'ide/js/51_IPTV播放列表_m3u_内嵌播放.js' %}
 {# 标签页内嵌图片查看器：openFile 的图片分支调用 setupImageView（缩放 / 拖拽 / 旋转 / 同目录切换） #}
 {% include 'ide/js/49_图片查看器_缩放_拖拽_旋转_同目录切换.js' %}
 {# 标签页内嵌压缩包查看器：openFile 的压缩包分支调用 setupArchiveView（zip/rar 浏览 + 预览 + 解压） #}

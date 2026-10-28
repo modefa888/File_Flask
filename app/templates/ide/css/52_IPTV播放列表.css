@@ -1,0 +1,226 @@
+/* ================================================================
+ * IPTV 播放列表（.m3u）播放器 —— 配合 js/51_ 使用
+ * 播放器主体完全复用 28_ 视频播放器的 .vpv-* 皮肤（舞台 / 控制条 / 右侧列表），
+ * 这里只补它没有的部分：编辑器右上角的「播放」按钮、频道搜索、分组小标题、返回编辑。
+ * ================================================================ */
+
+/* 播放器铺满整个编辑区（编辑器 DOM 只是被 display:none 藏起来，没有销毁） */
+.iptv-root { position: absolute; inset: 0; z-index: 6; }
+
+/* ---------- 文本编辑页右上角「▶ 播放」按钮 ----------
+   位置与 .json-toolbar 一致（编辑器右上角），但常显且用播放绿强调，
+   一眼能看出「这个文件可以播」 */
+.m3u-tb {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+}
+.m3u-tb button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #cccccc;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.m3u-tb button i { color: #4ade80; font-size: 14px; }
+.m3u-tb button:hover { background: #2f6f4a; color: #ffffff; }
+.m3u-tb button:hover i { color: #a7f3c0; }
+
+/* ---------- 播放列表头部：返回文本编辑 ---------- */
+.iptv-back {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-family: inherit;
+  font-size: .72rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 5px;
+  transition: background .15s ease, color .15s ease;
+}
+.iptv-back:hover { background: rgba(255, 255, 255, .1); color: #e5e7eb; }
+
+/* ---------- 频道搜索框 ---------- */
+.iptv-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+}
+.iptv-search > i { color: #64748b; font-size: .78rem; }
+.iptv-search input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, .06);
+  border: 1px solid rgba(255, 255, 255, .12);
+  color: #dbe2ea;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: .75rem;
+  font-family: inherit;
+  outline: none;
+}
+.iptv-search input::placeholder { color: #64748b; }
+.iptv-search input:focus { border-color: #3b82f6; }
+
+/* ---------- 分组小标题（滚动时吸附在列表顶部） ---------- */
+.iptv-grp {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 10px 4px;
+  font-size: .7rem;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: .02em;
+  background: #11151c;
+}
+
+/* ---------- 频道标题：比共用皮肤更贴近顶部 ---------- */
+.iptv-root .vpv-title { top: 3px; }
+
+/* 台标缩略图完整显示：共用皮肤是 cover（裁边填满），台标是 logo 不该被裁，改 contain */
+.iptv-root .vpv-pl-thumb img { object-fit: contain; }
+
+/* ---------- 直播指示灯：跟在「直播中」后面的绿色小圆点，呼吸 + 闪烁 ---------- */
+.iptv-live-dot {
+  display: none;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: iptv-live-blink 1.4s ease-in-out infinite;
+}
+.iptv-live-dot.on { display: inline-block; }
+@keyframes iptv-live-blink {
+  0% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, .7); }
+  60% { opacity: .45; box-shadow: 0 0 0 5px rgba(34, 197, 94, 0); }
+  100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+/* 系统开了「减少动态效果」就只留常亮绿点 */
+@media (prefers-reduced-motion: reduce) {
+  .iptv-live-dot { animation: none; }
+}
+
+/* ---------- 音量百分比（滑杆右侧实时显示） ---------- */
+.vpv-vol-pct {
+  min-width: 36px;
+  margin-left: 2px;
+  font-size: 0.72rem;
+  color: #cbd5e1;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.vpv-wrap.vpv-light .vpv-vol-pct { color: #333333; }
+
+/* ---------- 侧栏页签：列表 / 记录 ---------- */
+.iptv-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 5px;
+  transition: background .15s ease, color .15s ease;
+  white-space: nowrap;
+}
+.iptv-tab:hover { background: rgba(255, 255, 255, .1); color: #e5e7eb; }
+.iptv-tab.active { color: #93c5fd; }
+.iptv-tab.active > i { color: #60a5fa; }
+.iptv-his-count { color: #64748b; font-size: 0.72rem; }
+
+/* 清空记录按钮：常驻占位（visibility），只在「记录」页签下可点 —— 避免切换时挤动「编辑」 */
+.iptv-his-clear {
+  display: flex;
+  visibility: hidden;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.82rem;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: background .15s ease, color .15s ease;
+}
+.iptv-his-clear:hover { background: rgba(220, 38, 38, .18); color: #f87171; }
+.iptv-root.hist-mode .iptv-his-clear { visibility: visible; }
+
+/* 两个视图互斥：搜索框共用常驻，只有下方列表区域在切换 */
+.iptv-history { display: none; flex: 1; min-height: 0; overflow: auto; padding: 4px 0; }
+.iptv-root.hist-mode .iptv-history { display: block; }
+.iptv-root.hist-mode .vpv-pl-list { display: none; }
+
+/* 记录条目右侧的观看时间 */
+.iptv-his-time {
+  flex: none;
+  font-size: 0.66rem;
+  color: #7d8794;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- 白天皮肤（与 28_ 的 .vpv-light 同一套开关） ---------- */
+.vpv-wrap.vpv-light .iptv-grp { background: #f3f3f3; color: #8a8a8a; }
+.vpv-wrap.vpv-light .iptv-search { border-bottom-color: #e4e4e4; }
+.vpv-wrap.vpv-light .iptv-search > i { color: #9a9a9a; }
+.vpv-wrap.vpv-light .iptv-search input {
+  background: #ffffff;
+  border-color: #d6d6d6;
+  color: #1f2328;
+}
+.vpv-wrap.vpv-light .iptv-search input::placeholder { color: #9a9a9a; }
+.vpv-wrap.vpv-light .iptv-back { color: #5a5a5a; }
+.vpv-wrap.vpv-light .iptv-back:hover { background: #e4e4e4; color: #1f2328; }
+
+/* 记录页签在浅色下的配色 */
+.vpv-wrap.vpv-light .iptv-tab { color: #5a5a5a; }
+.vpv-wrap.vpv-light .iptv-tab:hover { background: #e8e8e8; color: #1f2328; }
+.vpv-wrap.vpv-light .iptv-tab.active { color: #005fb8; }
+.vpv-wrap.vpv-light .iptv-tab.active > i { color: #005fb8; }
+.vpv-wrap.vpv-light .iptv-his-count,
+.vpv-wrap.vpv-light .iptv-his-time { color: #8a8a8a; }
+.vpv-wrap.vpv-light .iptv-his-clear { color: #5a5a5a; }
+.vpv-wrap.vpv-light .iptv-his-clear:hover { background: #fde8e8; color: #c0392b; }
+
+/* 浅色界面下的「播放」按钮 */
+:where(html.theme-light) .m3u-tb {
+  background: #ffffff;
+  border-color: #d6d6d6;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .14);
+}
+:where(html.theme-light) .m3u-tb button { color: #1f2328; }
+:where(html.theme-light) .m3u-tb button i { color: #1a7f37; }
+:where(html.theme-light) .m3u-tb button:hover { background: #e7f6ec; color: #0b6b2f; }
+:where(html.theme-light) .m3u-tb button:hover i { color: #0b6b2f; }

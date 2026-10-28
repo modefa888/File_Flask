@@ -1707,6 +1707,9 @@
         else if (typeof RUN_LABELS !== "undefined" && RUN_LABELS[ext]) setupRunButtonView(tab);
         // .env / .env.local / .env.example 等：可视化编辑浮框（setupEnvView 见 23_ 文件）
         else if (/^\.env(\.[A-Za-z0-9_-]+)?$/.test(name)) setupEnvView(tab);
+        // IPTV 播放列表（m3u / m3u8）：右上角挂「▶ 播放」按钮，
+        // 点击在当前标签页内切成频道播放器（实现见 51_IPTV播放列表_m3u_内嵌播放.js）
+        else if ((window.IDE_IPTV_EXTS || []).includes(ext) && typeof window.setupM3uView === "function") window.setupM3uView(tab);
         // 竞态防护：加载期间用户又点了其它文件（activate 过别的标签 / 又发起新打开），
         // 则本次不抢焦点，只把内容挂好留在后台标签里（用户最后一次点击优先）
         if (active === tab) { scheduleRefresh(tab); }

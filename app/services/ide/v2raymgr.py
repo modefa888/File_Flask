@@ -467,6 +467,150 @@ def _kill(pid: int) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# 单节点「真延迟」探测（临时独立内核实例，不影响主实例）
+# ---------------------------------------------------------------------------
+
+_probe_lock = threading.Lock()
+_probe_ports = set()           # 并发探测时已占用的临时端口（防撞）
+
+
+def _probe_port() -> int:
+    """申请一个空闲回环端口给临时探测实例（登记防并发冲突，用完释放）。"""
+    with _probe_lock:
+        st = _settings()
+        used = _probe_ports | {int(st.get("socks_port") or 0),
+                               int(st.get("http_port") or 0),
+                               int(st.get("api_port") or 0)}
+        for _ in range(50):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.bind(("127.0.0.1", 0))
+            p = s.getsockname()[1]
+            s.close()
+            if p not in used:
+                _probe_ports.add(p)
+                return p
+    raise OSError("无法分配探测用端口")
+
+
+def _temp_instance(node: dict) -> dict:
+    """为节点起一个临时独立内核实例（回环端口、独立配置文件、无认证/HTTP/统计API）。
+    成功返回 {"proc", "port", "cfg"}，失败返回 {"error"}。调用方在 finally 里调 _temp_cleanup。"""
+    st = _settings()
+    core = pick_core(st)
+    if not core:
+        return {"error": "没有找到可用的 Xray / V2Ray / sing-box 内核，请先安装或手动指定路径"}
+    port = _probe_port()
+    cfg_path = os.path.join(_DIR, "probe-%d.json" % port)
+    try:
+        try:
+            cfg = v2raycfg.build_config(node, dict(st, core_path=core, socks_port=port,
+                                                   socks_listen="127.0.0.1", http_port=0,
+                                                   api_port=0, socks_user="", socks_pass=""))
+        except ValueError as e:
+            return {"error": "生成配置失败：%s" % e}
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False)
+        proc = subprocess.Popen([core, "run", "-c", cfg_path], cwd=_DIR,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, start_new_session=True)
+        time.sleep(0.9)                 # 等内核完成启动
+        if proc.poll() is not None:
+            _temp_cleanup({"proc": proc, "cfg": cfg_path, "port": port})
+            return {"error": "内核启动失败（退出码 %s）" % proc.returncode}
+        return {"proc": proc, "port": port, "cfg": cfg_path}
+    except Exception:                   # noqa: BLE001
+        _temp_cleanup({"proc": proc, "cfg": cfg_path, "port": port})
+        raise
+
+
+def _temp_cleanup(ti: dict) -> None:
+    """杀掉临时实例进程、删除临时配置、释放端口（可重复调用）。"""
+    proc = ti.get("proc")
+    if proc is not None and proc.poll() is None:
+        try:
+            proc.kill()
+            proc.wait(timeout=3)
+        except Exception:               # noqa: BLE001
+            pass
+    try:
+        os.unlink(ti.get("cfg") or "")
+    except OSError:
+        pass
+    with _probe_lock:
+        _probe_ports.discard(ti.get("port"))
+
+
+def real_ping(node_id: str, timeout: float = 8.0) -> dict:
+    """单节点「真延迟」：为该节点起一个临时独立内核实例，
+    经它请求 204 探测地址——真的能出网（账号可用、没被墙）才返回毫秒延迟；
+    出不去一律判「不可用」。不触碰正在运行的主实例（不切换当前节点）。
+    返回 {"ok": True, "ms": int} 或 {"ok": False, "error": 中文原因}。"""
+    node = v2raydb.get_node(node_id)
+    if not node:
+        return {"ok": False, "error": "节点不存在"}
+    ti = _temp_instance(node)
+    if ti.get("error"):
+        return {"ok": False, "error": ti["error"]}
+    try:
+        opener = proxyutil.build_opener(proxy="socks5://127.0.0.1:%d" % ti["port"])
+        req = urllib.request.Request("http://www.gstatic.com/generate_204",
+                                     headers={"User-Agent": "FileFlask-V2Ray/1.0"})
+        t0 = time.time()
+        with opener.open(req, timeout=timeout) as resp:
+            resp.read(64)
+        return {"ok": True, "ms": int((time.time() - t0) * 1000)}
+    except urllib.error.HTTPError as e:
+        return {"ok": False, "error": proxyutil.http_status_text(e.code)}
+    except Exception as e:              # noqa: BLE001
+        return {"ok": False, "error": proxyutil.friendly_error(e, "http://www.gstatic.com/generate_204")}
+    finally:
+        _temp_cleanup(ti)
+
+
+def real_dl(node_id: str, urls, timeout: float = 25.0) -> dict:
+    """单节点「真下载测速」：临时独立内核实例 + curl 经该节点拉测速文件，返回 Mbps。
+    与 real_ping 一样不影响主实例（不切换当前节点）。urls 依次回退。"""
+    node = v2raydb.get_node(node_id)
+    if not node:
+        return {"ok": False, "error": "节点不存在"}
+    ti = _temp_instance(node)
+    if ti.get("error"):
+        return {"ok": False, "error": ti["error"]}
+    errs = []
+    try:
+        for url in urls:
+            tag = url.split("//", 1)[1].split("/", 1)[0]
+            try:
+                p = subprocess.run(
+                    ["curl", "-x", "socks5h://127.0.0.1:%d" % ti["port"], "-sS", "-L",
+                     "-o", "/dev/null", "-w", "%{speed_download} %{http_code}",
+                     "--max-time", str(int(timeout)), url],
+                    capture_output=True, text=True, timeout=timeout + 5)
+            except FileNotFoundError:
+                return {"ok": False, "error": "系统缺少 curl，无法下载测速"}
+            except subprocess.TimeoutExpired:
+                errs.append(tag + "：超时")
+                continue
+            out = (p.stdout or "").strip().split()
+            if p.returncode != 0 or not out:
+                errs.append(tag + "：" + ((p.stderr or "").strip()[:120] or "curl 退出码 %s" % p.returncode))
+                continue
+            try:
+                speed = float(out[0])
+            except ValueError:
+                errs.append(tag + "：无法解析测速结果")
+                continue
+            code = out[1] if len(out) > 1 else ""
+            if not code.startswith("2"):
+                errs.append(tag + "：HTTP " + code)
+                continue
+            return {"ok": True, "mbps": round(speed * 8 / 1e6, 2)}
+        return {"ok": False, "error": "下载测速失败（所有测速源均不可用）：" + "；".join(errs[:3])}
+    finally:
+        _temp_cleanup(ti)
+
+
 def restart() -> dict:
     with _lock:
         st = _read_state()

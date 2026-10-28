@@ -761,17 +761,24 @@
     // tab 分组：全部 / 按订阅名 / 自定义分组（节点编辑里填的 grp + 「+」手动新建的空分组）
     const grpNames = [...new Set(V2.nodes.map(n => (n.grp || "").trim()).filter(Boolean))];
     const customGrps = (V2.groups || []).filter(g => grpNames.indexOf(g) < 0);   // 还没有节点的空分组
-    const tabs = [{ k: "__all__", label: "全部", n: V2.nodes.length }]
+    const tabs = [{ k: "__all__", label: "全部", ids: V2.nodes.map(n => n.id) }]
       .concat((V2.subs || []).map(s => ({
         k: "sub:" + s.id, label: s.name || s.id,
-        n: V2.nodes.filter(n => n.sub_id === s.id).length,
+        ids: V2.nodes.filter(n => n.sub_id === s.id).map(n => n.id),
       })))
       .concat(grpNames.map(g => ({
         k: "grp:" + g, label: g, grp: true,
-        n: V2.nodes.filter(n => (n.grp || "").trim() === g).length,
+        ids: V2.nodes.filter(n => (n.grp || "").trim() === g).map(n => n.id),
       })))
-      .concat(customGrps.map(g => ({ k: "grp:" + g, label: g, grp: true, n: 0 })));
+      .concat(customGrps.map(g => ({ k: "grp:" + g, label: g, grp: true, ids: [] })));
     if (!tabs.some(t => t.k === V2.nodeTab)) V2.nodeTab = "__all__";
+    // 每个分组 tab 显示「可用/总数」：组内延迟测速可用的节点数 / 组内节点总数；
+    // 整组一个都没测过时只显示总数（避免没测速就满屏 0/408 误导）
+    const tabCnt = t => {
+      const n = t.ids.length;
+      if (!n || !t.ids.some(id => V2.ping[id] !== undefined)) return String(n);
+      return t.ids.reduce((s, id) => s + ((V2.ping[id] && V2.ping[id].ok) ? 1 : 0), 0) + "/" + n;
+    };
     const list = v2NodeFilteredList();
     // 大量节点（上千条）时一次性 innerHTML 全量渲染会严重卡顿：
     // 只渲染前 V2.nodeShow 条，列表末尾放「加载更多」，点一次补一批
@@ -781,7 +788,7 @@
     // 自定义分组 tab 内还有一个「×」删分组（组内节点保留，回到「全部」）
     const tabHtml = '<div class="v2v-tabs">' + tabs.map(t =>
       '<button class="v2v-tab' + (V2.nodeTab === t.k ? " on" : "") + '" data-act="node-tab" data-tab="' +
-      escA(t.k) + '">' + esc(t.label) + " " + t.n +
+      escA(t.k) + '">' + esc(t.label) + " " + tabCnt(t) +
       (t.grp ? '<span class="v2v-tab-x" data-act="node-grp-del" data-grp="' + escA(t.label) +
         '" title="删除该分组（组内节点保留，回到全部）"><i class="bi bi-x-lg"></i></span>' : "") +
       "</button>").join("") +
@@ -833,6 +840,7 @@
     h += '<div class="v2v-sec">' +
       v2vSecHead("bi-diagram-3", "节点列表",
         (V2.pingProg ? "并发测速中 " + V2.pingProg.done + "/" + V2.pingProg.total + " · " : "") +
+        (V2.dlProg ? "下载测速中 " + V2.dlProg.done + "/" + V2.dlProg.total + " · " : "") +
         (list.length ? ("共 " + list.length + " 个节点" + ((V2.kw || "").trim() ? "（已过滤）" : "")) : "还没有可用的节点"),
         // 导入面板默认收起，入口紧贴标题，行内其余按钮换行时它也不会跑丢
         '<button class="v2v-btn' + (V2.nodeForm ? "" : " primary") + '" data-act="node-import" title="' +
@@ -846,8 +854,11 @@
         '<button class="v2v-tab' + (V2.hideFail ? " on" : "") + '" data-act="hide-fail" title="隐藏测速超时的节点">' +
         '<i class="bi bi-eye-slash"></i>隐藏超时</button>' +
         '<button class="v2v-btn" data-act="ping-all" title="测速当前列表下的全部节点（当前 tab + 搜索过滤）"' +
-        (list.length && !V2.pingProg ? "" : " disabled") +
+        (list.length && !V2.pingProg && !V2.dlProg ? "" : " disabled") +
         '><i class="bi bi-lightning-charge"></i>' + (V2.pingProg ? "测速中…" : "全部测速") + "</button>" +
+        '<button class="v2v-btn" data-act="dl-all" title="逐个实测当前列表里「测速可用」节点的下载速度（每个节点起临时内核实测，耗时较长）"' +
+        (list.length && !V2.pingProg && !V2.dlProg ? "" : " disabled") +
+        '><i class="bi bi-cloud-download"></i>' + (V2.dlProg ? ("测速中 " + V2.dlProg.done + "/" + V2.dlProg.total) : "测下载") + "</button>" +
         '<button class="v2v-btn danger" data-act="del-timeout"' + (failN && !V2.pingProg ? "" : " disabled") +
         ' title="删除所有测速超时的节点"><i class="bi bi-trash"></i>删除超时' + (failN ? " " + failN : "") + "</button>" +
         tabHtml);
@@ -1624,10 +1635,35 @@
         break;
       }
       case "ping": {
-        toast("测速中…", "info");
-        V2.ping[ds.id] = await post("/api/v2ray/ping", { id: ds.id });
+        toast("可用性测试中…（会临时切到该节点实测出网，几秒钟）", "info");
+        const pr = await post("/api/v2ray/ping", { id: ds.id, real: true });
+        V2.ping[ds.id] = pr;                    // {ok,ms} 或 {ok:false}，不可用即按超时处理
         if (v2vActive()) v2vRender();
         v2SideRender();
+        toast(pr.error ? ("节点不可用：" + pr.error)
+          : ("可用，真延迟 " + pr.ms + " ms"), pr.error ? "err" : "ok");
+        break;
+      }
+      case "dl-all": {
+        if (V2.dlProg || V2.pingProg) break;    // 已在进行中，防止重复触发
+        // 只测当前列表（当前 tab + 搜索过滤）里「延迟可用」的节点
+        const dlIds = v2NodeFilteredList({ hideFail: false })
+          .filter(n => V2.ping[n.id] && V2.ping[n.id].ok).map(n => n.id);
+        if (!dlIds.length) { toast("当前列表没有「测速可用」的节点，请先全部测速", "warn"); break; }
+        V2.dlProg = { done: 0, total: dlIds.length };
+        if (v2vActive()) v2vRender();
+        toast("下载测速中：逐个实测 " + dlIds.length + " 个可用节点（每个起临时内核，较耗时）", "info");
+        for (const nid of dlIds) {
+          const r = await post("/api/v2ray/dl-temp", { id: nid }).catch(() => null);
+          if (r && r.ok) V2.dl[nid] = r.mbps;
+          if (V2.dlProg) V2.dlProg.done++;
+          if (v2vActive()) v2vRender();
+          v2SideRender();
+        }
+        V2.dlProg = null;
+        if (v2vActive()) v2vRender();
+        v2SideRender();
+        toast("下载测速完成", "ok");
         break;
       }
       case "ping-all": {
@@ -1643,7 +1679,7 @@
         const CHUNK = 100;
         for (let i = 0; i < ids.length; i += CHUNK) {
           const batch = ids.slice(i, i + CHUNK);
-          const r = await post("/api/v2ray/ping-batch", { ids: batch }).catch(() => null);
+          const r = await post("/api/v2ray/ping-batch", { ids: batch, real: true }).catch(() => null);
           const res = (r && r.results) || {};
           for (const k of Object.keys(res)) V2.ping[k] = res[k];
           if (V2.pingProg) V2.pingProg.done += batch.length;

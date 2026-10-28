@@ -598,19 +598,63 @@ def v2_auto_failover():
 
 @bp.post("/api/v2ray/ping")
 def v2_ping():
-    """节点连通性测试：直接对 服务器:端口 建 TCP 连接，返回延迟毫秒。"""
+    """节点延迟测试。
+    - 普通模式（real 不为真）：TCP 握手，只测 server:port 可达（快，批量测速用）。
+      缺点：端口通 ≠ 节点可用（账号过期 / 被墙也会返回延迟）。
+    - 真延迟模式（real=true）：临时把内核切到该节点，经 socks 出口请求探测地址，
+      真的能出网才返回延迟；出不去一律判「不可用」并持久化 -1。"""
     data = request.get_json(silent=True) or {}
-    node = v2raydb.get_node(str(data.get("id") or ""))
+    nid = str(data.get("id") or "")
+    node = v2raydb.get_node(nid)
     if not node:
         return _fail("节点不存在", 404)
-    host, port = node.get("server"), _int(node.get("port"))
-    if not host or not port:
-        return _fail("节点缺少地址或端口")
-    ms, err = _tcp_ping(host, port)
-    _metric_save(node.get("id"), "ping", ms)          # 持久化：-1 表示超时
-    if err:
-        return jsonify({"ok": False, "error": err})
-    return jsonify({"ok": True, "ms": ms})
+
+    if not data.get("real"):
+        host, port = node.get("server"), _int(node.get("port"))
+        if not host or not port:
+            return _fail("节点缺少地址或端口")
+        ms, err = _tcp_ping(host, port)
+        _metric_save(nid, "ping", ms)          # 持久化：-1 表示超时
+        if err:
+            return jsonify({"ok": False, "error": err})
+        return jsonify({"ok": True, "ms": ms})
+
+    # ---- 真延迟：临时切换节点 → 经代理探测 204 地址 ----
+    probe = "http://www.gstatic.com/generate_204"
+    st0 = v2raymgr.status()
+    was_running = bool(st0.get("running"))
+    prev_id = ((st0.get("node") or {}) or {}).get("id") if was_running else None
+    try:
+        if (not was_running) or (prev_id != nid):
+            r = v2raymgr.start(nid)
+            if r.get("error"):
+                return _fail("启动该节点失败：" + r["error"])
+        st = v2raymgr.status()
+        inb = st.get("inbound") or {}
+        port = int(inb.get("socks_port") or 10808)
+        user = str(v2raydb.all_settings().get("socks_user") or "").strip()
+        pwd = secret.decrypt(v2raydb.all_settings().get("socks_pass"))
+        proxy = "socks5://%s127.0.0.1:%d" % (("%s:%s@" % (user, pwd)) if user else "", port)
+        opener = proxyutil.build_opener(proxy=proxy)
+        req = urllib.request.Request(probe, headers={"User-Agent": "FileFlask-V2Ray/1.0"})
+        t0 = time.time()
+        with opener.open(req, timeout=12) as resp:
+            resp.read(64)
+        ms = int((time.time() - t0) * 1000)
+        _metric_save(nid, "ping", ms)
+        return jsonify({"ok": True, "ms": ms, "real": True})
+    except urllib.error.HTTPError as e:
+        _metric_save(nid, "ping", -1)
+        return jsonify({"ok": False, "error": proxyutil.http_status_text(e.code)})
+    except Exception as e:                      # noqa: BLE001
+        _metric_save(nid, "ping", -1)
+        return jsonify({"ok": False, "error": proxyutil.friendly_error(e, probe)})
+    finally:
+        if not was_running:
+            v2raymgr.stop()
+        elif prev_id and prev_id != nid:
+            v2raymgr.stop()
+            v2raymgr.start(prev_id)
 
 
 @bp.post("/api/v2ray/ping-batch")
@@ -623,6 +667,16 @@ def v2_ping_batch():
     if not isinstance(ids, list) or not ids:
         return _fail("ids 不能为空")
     ids = [str(x) for x in ids[:500]]
+
+    if data.get("real"):
+        # 真延迟批量：每个节点起临时独立内核实例实测出网（并行 6 路，不碰主实例）
+        from concurrent.futures import ThreadPoolExecutor
+        results = {}
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            for nid, res in zip(ids, ex.map(lambda x: v2raymgr.real_ping(x, timeout=6), ids)):
+                _metric_save(nid, "ping", res["ms"] if res.get("ok") else -1)
+                results[nid] = res
+        return jsonify({"ok": True, "results": results})
 
     def ping_one(nid):
         node = v2raydb.get_node(nid)
@@ -749,6 +803,19 @@ def v2_dl_test():
         elif prev_id and prev_id != nid:
             v2raymgr.stop()
             v2raymgr.start(prev_id)
+
+
+@bp.post("/api/v2ray/dl-temp")
+def v2_dl_temp():
+    """单节点下载测速（临时独立内核实例，不切换 / 不中断当前连接）。"""
+    data = request.get_json(silent=True) or {}
+    nid = str(data.get("id") or "")
+    if not v2raydb.get_node(nid):
+        return _fail("节点不存在", 404)
+    r = v2raymgr.real_dl(nid, _DL_URLS)
+    if r.get("ok"):
+        _metric_save(nid, "dl", r["mbps"])          # 持久化：覆盖上次下载速度
+    return jsonify(r)
 
 
 @bp.post("/api/v2ray/exit-test")

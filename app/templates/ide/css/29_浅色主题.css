@@ -326,6 +326,16 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .img-preview img { box-shadow: 0 4px 24px rgba(0, 0, 0, .2); }
 :where(html.theme-light) .img-preview .ip-err { color: #8a8a8a; }
 
+/* ---------- 图片查看器工具栏（49） ---------- */
+:where(html.theme-light) .ipv-toolbar {
+  background: rgba(243, 243, 243, .96); border-color: #cecece; box-shadow: 0 6px 18px rgba(0, 0, 0, .18);
+}
+:where(html.theme-light) .ipv-btn { color: #5a5a5a; }
+:where(html.theme-light) .ipv-btn:hover { background: #e0e0e0; color: #000000; }
+:where(html.theme-light) .ipv-btn.on { color: #005fb8; }
+:where(html.theme-light) .ipv-sep { background: #cecece; }
+:where(html.theme-light) .ipv-count { color: #6b7280; }
+
 :where(html.theme-light) .set-nav { background: #f6f6f6; border-right-color: #e0e0e0; }
 :where(html.theme-light) .set-nav h1 { color: #1f2328; }
 :where(html.theme-light) .set-search { background: #ffffff; border-color: #cecece; color: #1f2328; }

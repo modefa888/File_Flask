@@ -27,3 +27,7 @@ dist/
 
 # 构建环境 / PyInstaller 运行时生成的虚拟环境
 .buildenv/
+
+*.flac
+
+*.jpg

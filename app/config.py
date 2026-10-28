@@ -310,11 +310,14 @@ _TEXT_EXTS = {
     "go", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php", "sql", "log", "csv", "toml",
     "lrc", "spec", "lock", "properties", "srt", "vtt", "m3u", "m3u8",
 }
-# 无扩展名但应按文本打开的文件名（小写）
+# 无扩展名 / 扩展名不通用但应按文本打开的文件名（小写）
 _TEXT_FILENAMES = {
     ".gitignore", ".editorconfig", ".dockerignore",
     "makefile", "dockerfile", "dockerfile.dev", "dockerfile.prod",
     "readme", "license", "copying", "changelog", "changes",
+    # Go 模块文件：内容是纯文本（module / require / 校验和），但 .mod / .sum 作为扩展名
+    # 不通用（.mod 本身还是音轨二进制格式），所以按完整文件名放行，不往 _TEXT_EXTS 里加
+    "go.mod", "go.sum", "go.work", "go.work.sum",
 }
 # 点开头文件（.env / .env.example / .npmrc 等）：splitext 对它们取不到扩展名，
 # 按首段名（去掉开头点后的第一段）匹配此集合即视为文本，可打开编辑

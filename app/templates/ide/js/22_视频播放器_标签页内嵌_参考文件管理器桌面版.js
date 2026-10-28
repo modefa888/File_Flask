@@ -39,6 +39,8 @@
   function applyVideoPlayerTheme() {
     var light = vpvThemeIsLight();
     document.querySelectorAll(".vpv-wrap").forEach(function (w) { w.classList.toggle("vpv-light", light); });
+    // 音频播放器（48_）同一套主题偏好：加载顺序在 22_ 之后，这里按需调用
+    if (typeof window.applyAudioPlayerTheme === "function") window.applyAudioPlayerTheme(light);
   }
 
   // 全局唯一播放器：切换视频时复用同一标签页重跑 setupVideoView，
@@ -235,6 +237,10 @@
     video.addEventListener("dblclick", () => $(".vpv-full").click());
     video.addEventListener("play", setPlayIcon);
     video.addEventListener("pause", setPlayIcon);
+    // 与 48_ 音频播放器互斥：视频开始播放时暂停正在试听的音频，避免两处同时出声
+    video.addEventListener("play", () => {
+      document.querySelectorAll(".apv-wrap audio").forEach(a => { try { a.pause(); } catch (_) {} });
+    });
     setPlayIcon();
 
     /* ---------- 进度条 + 时间 + 缓冲 ---------- */

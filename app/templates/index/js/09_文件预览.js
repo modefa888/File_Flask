@@ -178,7 +178,11 @@
             const applyPreviewData = (data) => {
                     if (data.error) {
                         body.className = 'preview-body preview-error';
-                        body.innerHTML = `<i class="bi bi-exclamation-circle"></i><span>${data.error}</span>`;
+                        // 后端统一提示：error=结论、hint=怎么处理（二进制 / 超大 / 无权限…）
+                        const errHint = data.hint
+                            ? `<div style="display:block;margin-top:8px;font-size:0.78rem;font-weight:400;line-height:1.7;opacity:0.8;">${_escapeHtml(data.hint)}</div>`
+                            : '';
+                        body.innerHTML = `<i class="bi bi-exclamation-circle"></i><span>${_escapeHtml(data.error)}${errHint}</span>`;
                         document.getElementById('previewCopyBtn').style.display = 'none';
                         return;
                     }

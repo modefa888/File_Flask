@@ -1,0 +1,164 @@
+/* ================================================================
+ * 标签页内嵌图片查看器（配合 49_图片查看器 js 使用）
+ * 舞台居中显示图片，右上角悬浮工具栏，左下角信息条，右下角操作提示
+ * ================================================================ */
+
+.ipv-wrap {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---------- 舞台与三种背景 ---------- */
+.ipv-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  user-select: none;
+}
+.ipv-stage.ipv-zoomable { cursor: grab; }
+.ipv-stage.ipv-dragging { cursor: grabbing; }
+
+.ipv-bg-checker .ipv-stage {
+  background: repeating-conic-gradient(#262626 0 25%, #1e1e1e 0 50%) 0 0 / 20px 20px;
+}
+.ipv-bg-dark .ipv-stage { background: #111417; }
+.ipv-bg-light .ipv-stage { background: #f2f4f7; }
+
+/* ---------- 图片本体 ---------- */
+.ipv-img {
+  display: block;
+  max-width: none;
+  max-height: none;
+  transform-origin: center center;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-drag: none;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.45);
+  background: transparent;
+}
+.ipv-bg-light .ipv-img { box-shadow: 0 6px 22px rgba(0, 0, 0, 0.18); }
+/* 没有内联宽高的 SVG：交给 CSS 自适应（此时缩放/拖拽不生效） */
+.ipv-img.ipv-img-auto {
+  max-width: 94%;
+  max-height: 94%;
+  object-fit: contain;
+  transform: none !important;
+}
+
+/* ---------- 右上角悬浮工具栏 ---------- */
+.ipv-toolbar {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 3px;
+  background: rgba(37, 37, 38, 0.92);
+  border: 1px solid #454545;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.ipv-toolbar:hover, .ipv-toolbar:focus-within { opacity: 1; }
+
+.ipv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: #c8c8c8;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.ipv-btn:hover { background: #3a3d41; color: #fff; }
+.ipv-btn:disabled { opacity: 0.35; cursor: default; background: transparent; }
+.ipv-btn.on { color: #4fc1ff; }
+
+.ipv-count {
+  min-width: 42px;
+  text-align: center;
+  font-size: 11px;
+  color: #9aa0a6;
+  font-variant-numeric: tabular-nums;
+}
+.ipv-btn.ipv-zoom {
+  min-width: 52px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ipv-btn.ipv-one-t { font-size: 11px; }
+.ipv-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: #4a4a4a;
+}
+
+/* ---------- 左下角信息 / 右下角提示 / 居中错误 ---------- */
+.ipv-info {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  z-index: 7;
+  max-width: 62%;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.66);
+  color: #d0d0d0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ipv-tip {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  z-index: 7;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.55);
+  color: #9aa0a6;
+  font-size: 11px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.ipv-wrap:hover .ipv-tip { opacity: 1; }
+
+.ipv-err {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: min(560px, 86%);
+  padding: 14px 18px;
+  border-radius: 8px;
+  background: rgba(30, 30, 30, 0.9);
+  border: 1px solid #4a3a3a;
+  color: #e08a8a;
+  font-size: 13px;
+  line-height: 1.8;
+  text-align: center;
+}
+
+/* 浅色背景 + 浅色界面时，提示条改成浅底深字，避免糊在背景里 */
+.ipv-bg-light .ipv-info { background: rgba(255, 255, 255, 0.85); color: #3a3f45; }
+.ipv-bg-light .ipv-tip { background: rgba(255, 255, 255, 0.8); color: #6b7280; }
+.ipv-bg-light .ipv-err { background: rgba(255, 255, 255, 0.95); border-color: #e0c4c4; color: #b23b3b; }

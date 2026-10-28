@@ -1389,9 +1389,16 @@
       } catch (_) {}
       return { unsupported: true };
     }
-    let msg = "服务器响应异常 (HTTP " + r.status + ")";
-    try { const d = JSON.parse(body); if (d && d.error) msg = d.error; } catch (_) {}
-    return { error: msg };
+    // 后端统一提示结构：error=结论、code=原因、hint=怎么处理、detail=原始错误
+    let msg = "服务器响应异常 (HTTP " + r.status + ")", code = "", hint = "", detail = "";
+    try {
+      const d = JSON.parse(body);
+      if (d) {
+        if (d.error) msg = d.error;
+        code = d.code || ""; hint = d.hint || ""; detail = d.detail || "";
+      }
+    } catch (_) {}
+    return { error: msg, code: code, hint: hint, detail: detail };
   }
 
   // 多次延迟重绘：字体/CSS 延迟就绪或容器刚显示时，避免编辑器空白或行号错位
@@ -1435,6 +1442,75 @@
     }
     return s;
   }
+  /* ---------- 打不开的文件：权限类错误给「一键获取访问权限」 ----------
+     典型报错：无法读取文件: [Errno 13] Permission denied: '/opt/xxx/INSTALL.md'
+     原因：运行服务的用户对该文件没有读权限。点按钮由服务端补读权限（chmod，必要时免密 sudo），
+     成功后关掉失败标签并按原编辑组重新打开；失败则给出可复制的修复命令。 */
+  const PERM_ERR_RE = /permission\s*denied|errno\s*13|eacces|无法读取文件|没有权限|读取权限|权限不足/i;
+  function permFixCmd(path) {
+    return "sudo chmod a+r '" + String(path || "").replace(/'/g, "'\\''") + "'";
+  }
+  // msg/code/hint 来自后端统一提示结构（/api/preview）：
+  // code=denied 时才给「补权限」按钮；其余（二进制、超大、读取失败）只展示结论 + 处理建议
+  function renderOpenError(host, tab, path, name, msg, code, hint) {
+    const perm = code === "denied" || PERM_ERR_RE.test(String(msg || ""));
+    if (!perm) {
+      host.innerHTML = '<div style="padding:30px;color:#c66;">无法打开：' + esc(msg) +
+        (hint ? '<div style="margin-top:8px;font-size:12px;color:#888;line-height:1.8;">' + esc(hint) + '</div>' : '') +
+        '</div>';
+      return;
+    }
+    host.innerHTML =
+      '<div style="padding:30px;">' +
+        '<div style="color:#c66;">无法打开：' + esc(msg) + '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">' +
+          '<button class="env-btn primary" data-oe="grant"><i class="bi bi-shield-lock"></i> 一键获取访问权限</button>' +
+          '<button class="env-btn" data-oe="copy"><i class="bi bi-clipboard"></i> 复制修复命令</button>' +
+          '<button class="env-btn" data-oe="retry"><i class="bi bi-arrow-clockwise"></i> 重新打开</button>' +
+        '</div>' +
+        '<div data-oe="tip" style="margin-top:10px;font-size:12px;color:#888;line-height:1.8;">' +
+          '当前运行服务的用户没有该文件的读取权限。点「一键获取访问权限」会自动补上读权限并重新打开；' +
+          '若服务器未配置免密 sudo，请复制命令到服务器终端执行后点「重新打开」。' +
+        '</div>' +
+      '</div>';
+    // 摘掉失败标签，按原编辑组重新走一遍正常打开流程（语法高亮 / 专属视图等照旧）
+    const reopen = () => {
+      const g = tab.group;
+      if (typeof closeTabSilent === "function") closeTabSilent(tab);
+      else { tab.host.remove(); const i = tabs.indexOf(tab); if (i >= 0) tabs.splice(i, 1); renderTabsAll(); }
+      openFile(path, name, g, true);
+    };
+    host.querySelector('[data-oe="retry"]').onclick = reopen;
+    const tip = host.querySelector('[data-oe="tip"]');
+    const btnGrant = host.querySelector('[data-oe="grant"]');
+    const btnCopy = host.querySelector('[data-oe="copy"]');
+    btnCopy.onclick = () => copyText(permFixCmd(path));
+    btnGrant.onclick = async () => {
+      if (btnGrant.disabled) return;
+      btnGrant.disabled = true;
+      const oldHtml = btnGrant.innerHTML;
+      btnGrant.innerHTML = '<i class="bi bi-hourglass-split"></i> 正在授权…';
+      try {
+        const r = await fetch("/api/file/grant-access", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: path })
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok) throw new Error(d.error || ("HTTP " + r.status));
+        toast("已获取访问权限（权限 " + (d.mode || "—") + "），正在重新打开…", "ok");
+        reopen();
+      } catch (e) {
+        btnGrant.disabled = false;
+        btnGrant.innerHTML = oldHtml;
+        const cmd = permFixCmd(path);
+        if (tip) {
+          tip.innerHTML = '<span style="color:#c66;">' + esc(e.message || e) + '</span>' +
+            '<br>可在服务器终端执行：<code style="color:#4fc1ff;">' + esc(cmd) + '</code>';
+        }
+        toast("授权失败，请按提示手动执行命令", "err");
+      }
+    };
+  }
   async function openFile(path, name, forceGroup, forceText) {
     // SSH 终端的虚拟路径（\u0000ssh:<连接 id>）不是文件：误走 openFile 会生成一个
     // 图标是私有区字形（显示成方框）、名字是路径的假标签。这里直接拦下。
@@ -1464,6 +1540,21 @@
         return;
       }
     }
+    // 音频播放器同理：全局只留一个音频标签页，换歌时复用（播放列表由 48_ 音频播放器负责）
+    if (!forceText && (window.IDE_AUDIO_EXTS || []).includes(getExt(name)) && typeof window.setupAudioView === "function") {
+      const at = tabs.find(t => t.isAudio);
+      if (at) {
+        if (at.path !== path) {
+          at.path = path; at.name = name; at.dirty = false; at.big = false; at.cm = null;
+          renderTabsAll();
+          activate(at);
+          setupAudioView(at, at.host, path, name);
+        } else {
+          activate(at);
+        }
+        return;
+      }
+    }
     if (!tab) {
       const host = document.createElement("div");
       host.className = "cm-host";
@@ -1480,9 +1571,18 @@
       host.innerHTML = '<div style="padding:30px;color:#888;">正在加载 ' + esc(name) + ' …</div>';
       try {
         const ext = getExt(name);
-        // 图片类型：内嵌图片预览（后端 raw=1 直接返回图片字节），点击图片切换 1:1 / 适应窗口
-        if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"].includes(ext)) {
+        // 图片类型：标签页内嵌图片查看器（缩放 / 拖拽 / 旋转 / 镜像 / 同目录切换，实现见 49_）
+        if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg", "avif"].includes(ext)) {
           tab.isImage = true;
+          activate(tab);   // 先挂载到编辑组，查看器才能拿到容器尺寸做「适应窗口」
+          if (typeof window.setupImageView === "function") {
+            window.setupImageView(tab, host, path, name, {
+              // 加载失败：后端会给出统一提示（没权限 / 超大 / 不是有效图片），交给统一错误面板
+              onError: d => renderOpenError(host, tab, path, name, d.error, d.code, d.hint),
+            });
+            return;
+          }
+          // 兜底：49_ 未加载时用旧的简单预览（点击图片切换 1:1 / 适应窗口）
           const url = "/api/preview?path=" + encodeURIComponent(path) + "&raw=1";
           host.innerHTML =
             '<div class="img-preview"><img alt="' + esc(name) + '" src="' + url + '">' +
@@ -1491,9 +1591,16 @@
           im.addEventListener("error", () => {
             im.style.display = "none";
             host.querySelector(".ip-err").style.display = "block";
+            fetch("/api/preview?path=" + encodeURIComponent(path))
+              .then(r => r.json().catch(() => null))
+              .then(d => {
+                if (d && d.error) { renderOpenError(host, tab, path, name, d.error, d.code, d.hint); return; }
+                const tip = host.querySelector(".ip-err");
+                if (tip) tip.textContent = "图片解析失败：文件可能已损坏，或不是浏览器支持的图片格式";
+              })
+              .catch(() => {});
           });
           im.addEventListener("click", () => im.classList.toggle("zoom"));
-          activate(tab);   // 挂载编辑组容器并高亮标签（与文本文件打开行为一致）
           return;
         }
         // SQLite 数据库：只读表格查看器（表列表 + 分页数据），不做文本编辑
@@ -1514,14 +1621,23 @@
           setupVideoView(tab, host, path, name);
           return;
         }
+        // 音频类型：标签页内嵌音频播放器（实现见 48_音频播放器 js）
+        if (!forceText && (window.IDE_AUDIO_EXTS || []).includes(ext) && typeof window.setupAudioView === "function") {
+          activate(tab);
+          setupAudioView(tab, host, path, name);
+          return;
+        }
         // 只等文件内容；语言模式脚本改为异步套用（见下方），避免它的脚本事件没来时编辑器永久卡在「正在加载」
         const res = await loadFileText(path, name);
         // 不支持 / 打开失败：同样要走激活（否则只有内容切了、标签不高亮、面包屑还是旧文件）；
         // 竞态防护与正常路径一致：用户已切走就不抢焦点，提示信息留在后台标签里
         if (res.unsupported || res.error) {
-          host.innerHTML = res.unsupported
-            ? '<div style="padding:30px;color:#888;">该文件类型（' + ext + '）不支持文本编辑，预览请用文件管理器。</div>'
-            : '<div style="padding:30px;color:#c66;">无法打开：' + esc(res.error) + '</div>';
+          if (res.unsupported) {
+            host.innerHTML = '<div style="padding:30px;color:#888;">该文件类型（' + ext + '）不支持文本编辑，预览请用文件管理器。</div>';
+          } else {
+            // 统一提示：结论 + 处理建议；权限类错误附带「一键获取访问权限」
+            renderOpenError(host, tab, path, name, res.error, res.code, res.hint);
+          }
           if (active === tab) return;
           if (seq === openSeq && active === wasActive) activate(tab);
           return;
@@ -1651,6 +1767,7 @@
     if (active === tab) { renderBreadcrumbs(tab.displayPath || tab.path); updateStatus(); revealInTree(tab.path); }
     sessionSaveTabs();
   };
+
   /* 没有打开任何标签页时，把面包屑栏（含底部那条分隔线）整条藏起来 ——
      否则欢迎页上方会留一条空横线，像是标签栏没画完。有标签（含设置 / 后台任务等
      虚拟标签）时照常显示，内容由 renderBreadcrumbs 填。 */

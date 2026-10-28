@@ -815,6 +815,8 @@
       pop.querySelector(".upc-ok").onclick = () => { if (!opts.okDisabled) done(true); };
     });
   }
+  // 导出给 IIFE 关闭后才加载的模块（48_ 音频 / 49_ 图片查看器）复用同一套二次确认悬浮框
+  window.uiConfirmPop = uiConfirmPop;
 
   /* ---------- 菜单栏动作 ---------- */
   function cmCmd(name) {
@@ -1256,28 +1258,20 @@
       items.push({ label: "复制", sc: "Ctrl+C", act: () => copyText(selText) });
       items.push({ divider: true });
     }
-    items.push({ label: "全选", sc: "Ctrl+A", disabled: !cm, act: () => { cm.execCommand("selectAll"); cm.focus(); } });
     items.push({ label: "查找", sc: "Ctrl+F", act: () => { activate(tab); ffOpen(false); } });
     items.push({ label: "替换", sc: "Ctrl+H", disabled: ro, act: () => { activate(tab); ffOpen(true); } });
-    items.push({ label: "转到行…", sc: "Ctrl+G", act: () => { activate(tab); gotoLine(); } });
     items.push({ divider: true });
     // 选中代码 → 作为「代码片段芯片」加到 AI 对话输入框（未选中时置灰）
     items.push({ label: "添加到 AI 对话", disabled: !hasSel, act: () => aiAddSelectionToChat(tab) });
-    items.push({ divider: true });
     items.push({ label: "查找所有引用", sc: "Shift+Alt+F12", disabled: ro,
       act: () => { activate(tab); findReferencesOf(tab); } });
-    // 文件级操作：与资源管理器右键菜单能力对齐（编辑器内文件定位/重命名/复制路径/历史）
+    // 文件级操作：只保留最高频的「复制路径」（重命名 F2、时间线、相对路径等低频项走资源管理器右键）
     if (!tab.diff && !tab.displayPath) {
-      const p = tab.path, n = tab.name;
       items.push({ divider: true });
-      items.push({ label: "打开时间线", act: () => openFileTimeline(p, n) });
-      items.push({ label: "复制路径", sc: "Ctrl+Alt+C", act: () => copyText(p) });
-      items.push({ label: "复制相对路径", sc: "Ctrl+Shift+Alt+C", act: () => copyText(relPathOf(p)) });
-      items.push({ divider: true });
-      items.push({ label: "重命名…", sc: "F2", act: () => renameCurrentFile(p, n) });
+      items.push({ label: "复制路径", sc: "Ctrl+Alt+C", act: () => copyText(tab.path) });
     }
     if (!ro) {
-      items.push({ label: "保存", sc: "Ctrl+S", act: () => saveTab(tab) });
+      items.push({ divider: true });
       items.push({ label: "运行当前文件", sc: "F5", act: () => { activate(tab); runCurrentFile(); } });
     }
     if (isMd && !ro) {
@@ -1285,8 +1279,6 @@
       items.push({ label: "Markdown 预览", sc: "Ctrl+Shift+V", act: () => { activate(tab); mdTogglePreview(); } });
       items.push({ label: "Markdown 分屏预览", sc: "Ctrl+Shift+M", act: () => { activate(tab); mdSetMode("split"); } });
     }
-    items.push({ divider: true });
-    items.push({ label: "键盘快捷方式…", act: showShortcuts });
     renderDrop(items, null, "editor-ctx", { x, y });
   }
   /* ---------- 标签右键菜单（仿 VS Code 标签页菜单：关闭系列 / 保存 / 复制路径 / 拆分等） ---------- */

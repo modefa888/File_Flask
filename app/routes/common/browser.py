@@ -477,13 +477,73 @@ def api_files():
     })
 
 
+_TEXT_SNIFF_BYTES = 8192        # 嗅探只读前 8KB：足以判定二进制/文本，大文件也不慢
+_TEXT_SNIFF_CTRL_RATIO = 0.30   # 控制字符占比超过 30% 视为二进制
+
+
+# ======================================================================
+# 预览接口统一返回提示
+#
+# 所有失败响应都是同一套结构，前端只负责展示，不再各自拼文案：
+#   { "error": 一句话结论, "code": 机器可读原因, "hint": 怎么处理/能做什么,
+#     "detail": 原始错误（可选）, ...业务附加字段 }
+# code 取值固定为下面 7 种，新增提示只需在表里加一行。
+# ======================================================================
+_PREVIEW_HINTS = {
+    "bad_path": ("文件不存在或不是文件",
+                 "目标可能已被删除、重命名，或路径指向的是目录；刷新文件树后再试。"),
+    "denied": ("没有读取权限",
+               "运行服务的用户无法读取该文件。可在服务器执行 sudo chmod a+r '<路径>'，"
+               "或在 IDE 里点「一键获取访问权限」。"),
+    "too_large": ("文件太大，无法在线预览",
+                  "文本上限 20MB、图片上限 50MB；超大文件请用命令行工具查看或下载到本地。"),
+    "binary": ("这是二进制文件，不支持在线预览",
+               "可执行文件、压缩包、图片、音视频容器等请下载后用本地工具打开；"
+               "IDE 支持文本、图片、视频、SQLite、表格的预览与编辑。"),
+    "unsupported": ("暂不支持预览该类型",
+                    "IDE 目前支持文本、图片、视频、SQLite 与表格文件的预览与编辑。"),
+    "read_failed": ("读取文件失败",
+                    "文件可能正被其它程序占用，或磁盘 / 网络存储异常，稍后重试。"),
+    "db_failed": ("无法读取数据库",
+                  "文件可能已损坏、被加密，或不是有效的 SQLite 数据库。"),
+}
+
+
+def _preview_err(code, status=400, title="", hint="", **extra):
+    """按统一的提示表返回预览失败信息（error / code / hint [+ detail]）。"""
+    t, h = _PREVIEW_HINTS.get(code, ("预览失败", "请稍后重试，或换个方式打开该文件。"))
+    payload = {"error": title or t, "code": code, "hint": hint or h}
+    payload.update({k: v for k, v in extra.items() if v})
+    return jsonify(payload), status
+
+
+def _looks_like_text(target_path: str) -> bool:
+    """按内容判断是不是文本文件（扩展名不在白名单时用）。
+
+    判定沿用 git / file 的经典做法：
+      · 空文件 → 文本（可打开手工写内容）；
+      · 样本里出现 NUL 字节 → 二进制（可执行文件、图片、压缩包等几乎必含 NUL）；
+      · 否则统计控制字符占比，超过阈值才算二进制。
+    高位字节（>=0x80）不当作控制字符，UTF-8 / GBK 中文照常认作文本。
+    读不了（没权限等）直接抛出 OSError，由调用方按「没有读取权限 / 读取失败」提示。
+    """
+    with open(target_path, "rb") as f:
+        sample = f.read(_TEXT_SNIFF_BYTES)
+    if not sample:
+        return True
+    if b"\x00" in sample:
+        return False
+    ctrl = sum(1 for b in sample if b < 0x09 or 0x0E <= b < 0x20 or b == 0x7F)
+    return (ctrl / len(sample)) <= _TEXT_SNIFF_CTRL_RATIO
+
+
 @bp.route("/api/preview")
 def api_preview():
     _log.info("GET /api/preview")
     rel_path = request.args.get("path", "")
     target_path = os.path.abspath(os.path.normpath(rel_path))
     if not os.path.isfile(target_path):
-        return jsonify({"error": "路径不存在或不是文件"}), 400
+        return _preview_err("bad_path", 400)
     try:
         stat = os.stat(target_path)
         ext = os.path.splitext(target_path)[1].lower().lstrip(".")
@@ -498,6 +558,12 @@ def api_preview():
                    or any(seg in _TEXT_EXTS for seg in segments[1:])
                    or is_dotfile_text)
         is_image = ext in _IMAGE_EXTS or any(seg in _IMAGE_EXTS for seg in segments[1:])
+        # 扩展名没命中任何名单（go.mod / .sum / 自定义后缀 / 无后缀的普通文本…）：
+        # 不再直接判「不支持」，改为按文件内容嗅探 —— 能当文本读就照常返回文本，
+        # 只有真正的二进制（含 NUL 或大量控制字符）才判不支持。白名单退化为「快速通道」。
+        if (not is_text and not is_image and ext not in _VIDEO_EXTS
+                and ext not in _AUDIO_EXTS and ext not in _SQLITE_EXTS):
+            is_text = _looks_like_text(target_path)
         mime_type, _ = mimetypes.guess_type(target_path)
         if not mime_type:
             mime_type = "application/octet-stream"
@@ -506,7 +572,7 @@ def api_preview():
             try:
                 tables, stat2 = _sqlite_read_tables(target_path)
             except Exception as e:
-                return jsonify({"error": f"无法读取数据库: {str(e)}"}), 500
+                return _preview_err("db_failed", 500, detail=str(e))
             return jsonify({
                 "type": "sqlite",
                 "ext": ext,
@@ -516,8 +582,23 @@ def api_preview():
             })
         # 文本/图片限制：文本 20MB，图片 50MB
         _limit = _TEXT_PREVIEW_MAX_BYTES if is_text else _PREVIEW_MAX_BYTES
-        if ext not in _VIDEO_EXTS and stat.st_size > _limit:
-            return jsonify({"error": f"文件过大，最大支持 {format_size(_limit)}"}), 413
+        if ext not in _VIDEO_EXTS and ext not in _AUDIO_EXTS and stat.st_size > _limit:
+            return _preview_err("too_large", 413,
+                                title=f"文件太大，无法在线预览（上限 {format_size(_limit)}）",
+                                size=stat.st_size, size_str=format_size(stat.st_size),
+                                limit=format_size(_limit))
+        # 音频：不限制大小，走 /api/stream（支持 Range，可拖进度）；IDE 用标签页内音频播放器。
+        # 放在视频分支之前：ogg 既是音频容器也是视频容器，按 mimetypes 判出的主类型决定走哪边
+        if ext in _AUDIO_EXTS and not (mime_type or "").startswith("video/"):
+            return jsonify({
+                "type": "audio",
+                "ext": ext,
+                "name": os.path.basename(target_path),
+                "stream_url": f"/api/stream?path={quote(target_path)}",
+                "content_type": mime_type or f"audio/{ext}",
+                "size": stat.st_size,
+                "size_str": format_size(stat.st_size),
+            })
         # 视频：不限制大小，用流式传输，返回 stream URL
         if ext in _VIDEO_EXTS:
             return jsonify({
@@ -566,9 +647,95 @@ def api_preview():
                 "content_type": mime_type,
             })
         else:
-            return jsonify({"error": f"不支持的预览类型: {ext}"}), 400
-    except (OSError, PermissionError) as e:
-        return jsonify({"error": f"无法读取文件: {str(e)}"}), 500
+            # 走到这里说明内容嗅探已判定为二进制（含 NUL / 大量控制字符），
+            # 提示语带上具体类型标记，避免笼统的「不支持的预览类型」
+            tip = ("." + ext) if ext else "无扩展名"
+            return _preview_err("binary", 400, title=f"这是二进制文件（{tip}），不支持在线预览",
+                                ext=ext, size=stat.st_size, size_str=format_size(stat.st_size))
+    except PermissionError as e:
+        return _preview_err("denied", 403, detail=str(e))
+    except OSError as e:
+        return _preview_err("read_failed", 500, detail=str(e))
+
+
+# ======================================================================
+# 一键获取访问权限（文件因 Permission denied 打不开时使用）
+#
+# 场景：IDE 里点开某个文件提示「无法打开：无法读取文件: [Errno 13] Permission denied」，
+# 原因是运行服务的用户对该文件没有读权限（典型：root 创建的 600 文件）。
+# 这里由服务端尝试补上「读」权限（只加不减，不动执行/写入位）：
+#   1) 服务进程是文件属主 → 直接 chmod a+r；
+#   2) 不是属主 → 尝试免密 sudo（sudo -n，未配置免密时会立刻失败，不会卡住请求）；
+#   3) 都不行 → 返回可在服务器上手动执行的命令，前端提供「复制修复命令」。
+# ======================================================================
+def _file_readable(target_path: str) -> bool:
+    try:
+        with open(target_path, "rb") as f:
+            f.read(1)
+        return True
+    except (OSError, PermissionError):
+        return False
+
+
+def _file_mode_str(target_path: str) -> str:
+    try:
+        return oct(os.stat(target_path).st_mode & 0o777)[-3:]
+    except OSError:
+        return ""
+
+
+def _grant_read_bits(target_path: str) -> str:
+    """给文件补上读权限，返回生效方式（"chmod" / "sudo"），失败返回空串。"""
+    try:
+        st = os.stat(target_path)
+        if (st.st_mode & 0o444) != 0o444:
+            os.chmod(target_path, st.st_mode | 0o444)      # 属主是自己时直接生效
+        if _file_readable(target_path):
+            return "chmod"
+    except OSError:
+        pass
+    from ... import config
+    if not getattr(config, "ENABLE_EXEC", True):
+        return ""
+    try:
+        r = subprocess.run(["sudo", "-n", "chmod", "a+r", "--", target_path],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8)
+        if r.returncode == 0 and _file_readable(target_path):
+            return "sudo"
+        err = (r.stderr or b"").decode("utf-8", "replace").strip()
+        _log.info("grant-access sudo 失败 %s: %s", target_path, err or r.returncode)
+    except (OSError, subprocess.SubprocessError) as e:
+        _log.info("grant-access sudo 异常 %s: %s", target_path, e)
+    return ""
+
+
+@bp.route("/api/file/grant-access", methods=["POST"])
+def api_file_grant_access():
+    """一键获取访问权限：把打不开的文件补上读权限，成功后前端自动重新打开。"""
+    data = request.get_json(silent=True) or {}
+    raw = str(data.get("path") or "").strip()
+    if not raw:
+        return jsonify({"error": "缺少 path 参数"}), 400
+    target_path = os.path.abspath(os.path.normpath(raw))
+    if not os.path.exists(target_path):
+        return jsonify({"error": "文件不存在（可能已被删除或重命名）"}), 404
+    if os.path.isdir(target_path):
+        return jsonify({"error": "这是一个目录，不是文件"}), 400
+    cmd = "sudo chmod a+r '%s'" % target_path.replace("'", "'\\''")
+    if _file_readable(target_path):
+        return jsonify({"ok": True, "already": True, "mode": _file_mode_str(target_path),
+                        "cmd": cmd, "message": "该文件本来就可读，请重试打开"})
+    via = _grant_read_bits(target_path)
+    if not via:
+        _log.warning("grant-access 失败 %s（当前用户无权限且 sudo 不可用）", target_path)
+        return jsonify({
+            "error": "自动授权失败：服务进程不是该文件的属主，且服务器未配置免密 sudo。"
+                     "请在服务器执行下面的命令后重试。",
+            "cmd": cmd,
+        }), 403
+    _log.info("grant-access 成功 %s via=%s mode=%s", target_path, via, _file_mode_str(target_path))
+    return jsonify({"ok": True, "via": via, "mode": _file_mode_str(target_path), "cmd": cmd,
+                    "message": "已获取读取权限"})
 
 
 # ======================================================================
@@ -1142,13 +1309,13 @@ def api_imagesize():
 
 @bp.route("/api/video_duration")
 def api_video_duration():
-    """获取视频时长（秒），供播放列表异步显示；服务端内存缓存，文件未变时秒回"""
+    """获取音视频时长（秒），供播放列表异步显示；服务端内存缓存，文件未变时秒回"""
     target_path = _get_file_path_from_request(request)
     if target_path is None:
         return jsonify({"error": "文件不存在"}), 404
     ext = os.path.splitext(target_path)[1].lower().lstrip(".")
-    if ext not in _VIDEO_EXTS:
-        return jsonify({"error": "不是视频文件"}), 400
+    if ext not in _VIDEO_EXTS and ext not in _AUDIO_EXTS:
+        return jsonify({"error": "不是音视频文件"}), 400
     dur = get_video_duration(target_path)
     if dur is None:
         return jsonify({"error": "无法获取时长"}), 404

@@ -611,6 +611,50 @@ def real_dl(node_id: str, urls, timeout: float = 25.0) -> dict:
         _temp_cleanup(ti)
 
 
+def inbound_clients() -> dict:
+    """实时连接到代理入站端口（SOCKS5 / HTTP）的客户端列表。
+    读系统 ss 的 TCP 连接表里「对端 = 本机入站端口」的已建立连接，按来源 IP 聚合。
+    返回 {"ok": True, "items": [...], "total": 总连接数}；内核未运行时 items 为空。"""
+    st = _settings()
+    ports = {}
+    if st.get("socks_port"):
+        ports[int(st["socks_port"])] = "SOCKS5"
+    if st.get("http_port"):
+        ports[int(st["http_port"])] = "HTTP"
+    if not ports:
+        return {"ok": True, "items": [], "total": 0, "hint": "未启用入站端口"}
+    try:
+        p = subprocess.run(["ss", "-tnp"], capture_output=True, text=True, timeout=5)
+    except FileNotFoundError:
+        return {"ok": False, "error": "系统缺少 ss 命令，无法统计连接"}
+    items = {}
+    for line in (p.stdout or "").splitlines()[1:]:
+        tk = line.split()
+        # ESTAB  RecvQ SendQ Local Peer [users:(("xray",pid=...,fd=...))]
+        if len(tk) < 5 or tk[0] != "ESTAB":
+            continue
+        try:
+            lport = int(tk[3].rsplit(":", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        if lport not in ports:
+            continue
+        ip = tk[4].rpartition(":")[0].strip("[]")
+        it = items.setdefault(ip, {"ip": ip, "conns": 0, "inbound": ports[lport],
+                                   "lports": set(), "procs": set()})
+        it["conns"] += 1
+        it["lports"].add(str(lport))
+        m = re.search(r'\(\("([^"]+)"', " ".join(tk[5:]))
+        if m:
+            it["procs"].add(m.group(1))
+    out = [{"ip": it["ip"], "conns": it["conns"],
+            "inbound": it["inbound"] + " :" + " :".join(sorted(it["lports"])),
+            "procs": sorted(it["procs"])}
+           for it in items.values()]
+    out.sort(key=lambda x: -x["conns"])
+    return {"ok": True, "items": out, "total": sum(i["conns"] for i in out)}
+
+
 def restart() -> dict:
     with _lock:
         st = _read_state()

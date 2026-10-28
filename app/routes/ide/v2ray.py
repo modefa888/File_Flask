@@ -73,6 +73,12 @@ def v2_status():
     return jsonify(v2raymgr.status())
 
 
+@bp.route("/api/v2ray/clients", methods=["GET", "POST"])
+def v2_clients():
+    """实时连接到代理入站端口的客户端列表（按来源 IP 聚合）。"""
+    return jsonify(v2raymgr.inbound_clients())
+
+
 @bp.get("/api/v2ray/core")
 def v2_core():
     return jsonify(v2raymgr.core_info())
@@ -357,10 +363,38 @@ def v2_nodes_update():
 
 @bp.post("/api/v2ray/nodes/delete")
 def v2_nodes_delete():
+    """软删除节点（进回收站，可恢复）。流量统计保留，恢复后不丢。"""
     data = request.get_json(silent=True) or {}
     ids = data.get("ids") or ([data["id"]] if data.get("id") else [])
     n = v2raydb.delete_nodes(ids)
-    _metric_drop([str(i) for i in ids])
+    return jsonify({"ok": True, "deleted": n})
+
+
+@bp.post("/api/v2ray/nodes/trash")
+def v2_nodes_trash():
+    """回收站列表（软删除的节点）。"""
+    items = v2raydb.trash_nodes()
+    return jsonify({"ok": True, "items": items, "count": len(items)})
+
+
+@bp.post("/api/v2ray/nodes/restore")
+def v2_nodes_restore():
+    """从回收站恢复节点 {ids:[...]}。"""
+    data = request.get_json(silent=True) or {}
+    n = v2raydb.restore_nodes(data.get("ids") or [])
+    return jsonify({"ok": True, "restored": n})
+
+
+@bp.post("/api/v2ray/nodes/purge")
+def v2_nodes_purge():
+    """彻底删除（真删库）{ids?}：不传 ids = 清空整个回收站。"""
+    data = request.get_json(silent=True) or {}
+    ids = [str(x) for x in (data.get("ids") or []) if x]
+    if not ids:
+        ids = [str(n["id"]) for n in v2raydb.trash_nodes()]     # 清空：先取全部回收站 id
+    n = v2raydb.purge_nodes(ids or None)
+    if ids:
+        _metric_drop(ids)                                       # 彻底删除才清流量统计
     return jsonify({"ok": True, "deleted": n})
 
 

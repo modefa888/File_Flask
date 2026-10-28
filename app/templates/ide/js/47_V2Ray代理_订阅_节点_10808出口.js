@@ -95,8 +95,18 @@
     if (!co.error) { V2.cores = co.found || []; V2.coreInfo = co; }
     return V2.st;
   }
+  /* ---------- 回收站（软删除的节点） ---------- */
+  function v2TrashFetch() {
+    return post("/api/v2ray/nodes/trash", {}).then(r => {
+      V2.trash = (r && r.items) || [];
+      V2.trashN = V2.trash.length;
+      if (v2vActive() && V2.sec === "nodes" && V2.trashOpen) v2vRender();
+    });
+  }
+
   async function v2Reload() {
     await v2FetchAll();
+    v2TrashFetch().catch(() => {});     // 回收站数量角标（不阻塞主流程）
     v2SideRender();
     // 标签存在就渲染（包括后台标签）：会话恢复时可能先开标签又被别的标签抢走焦点，
     // 若只在「激活中」才渲染，竞态会让大页内容永远空白
@@ -461,6 +471,7 @@
         v2Reload().catch(() => {});
         if (V2.autoLog) v2LogStart();
         if (V2.sec === "overview") v2TrafStart();
+        if (V2.sec === "clients") v2ClientsStart();
       };
       tabs.push(tab);
       renderTabsAll();
@@ -483,7 +494,7 @@
     const box = $("v2View"); if (!box) return;
     const secs = [["overview", "概览", "bi-speedometer2"], ["nodes", "节点", "bi-diagram-3"],
                   ["subs", "订阅", "bi-rss"], ["settings", "设置", "bi-sliders"],
-                  ["log", "日志", "bi-journal-text"]];
+                  ["clients", "连接", "bi-people"], ["log", "日志", "bi-journal-text"]];
     const st = V2.st || {}, running = !!st.running;
     const inb = st.inbound || {}, c = st.core || {}, n = st.node;
     // 页头副标题：把「节点 / 订阅 / 内核」的关键信息压成一行胶囊
@@ -515,7 +526,12 @@
       '<button class="v2v-btn" data-act="refresh" title="刷新状态、节点与订阅"><i class="bi bi-arrow-clockwise"></i>刷新</button>' +
       "</div></div>";
     const tabbar = '<div class="v2v-tabs">' + secs.map(s => {
-      const num = s[0] === "nodes" ? V2.nodes.length : (s[0] === "subs" ? V2.subs.length : 0);
+      const num = s[0] === "nodes"
+        ? (V2.nodes.length && V2.nodes.some(n => V2.ping[n.id] !== undefined)
+          ? (V2.nodes.reduce((s, n) => s + ((V2.ping[n.id] && V2.ping[n.id].ok) ? 1 : 0), 0) + "/" + V2.nodes.length)
+          : V2.nodes.length)
+        : (s[0] === "subs" ? V2.subs.length :
+          (s[0] === "clients" && V2.clients && V2.clients.items ? V2.clients.items.length : 0));
       return '<button class="v2v-tab' + (V2.sec === s[0] ? " on" : "") + '" data-sec="' + s[0] + '">' +
         '<i class="bi ' + s[2] + '"></i><span>' + s[1] + "</span>" +
         (num ? '<span class="v2v-num">' + num + "</span>" : "") + "</button>";
@@ -525,6 +541,7 @@
     else if (V2.sec === "nodes") body = v2vNodes();
     else if (V2.sec === "subs") body = v2vSubs();
     else if (V2.sec === "settings") body = v2vSettings(st);
+    else if (V2.sec === "clients") body = v2vClients();
     else body = v2vLog();
     box.innerHTML = head + tabbar + body;
     v2ProgPaint();
@@ -721,6 +738,51 @@
     tick();
   }
 
+  /* ---------- 实时连接：连到代理入站端口（SOCKS5 / HTTP）的客户端 ---------- */
+  function v2ClientsFetch() {
+    return post("/api/v2ray/clients", {}).then(r => {
+      V2.clients = r || null;
+      if (v2vActive() && V2.sec === "clients") v2vRender();
+    });
+  }
+  function v2ClientsStop() { clearTimeout(V2.clientsTimer); V2.clientsTimer = null; }
+  function v2ClientsStart() {
+    v2ClientsStop();
+    const tick = async () => {
+      if (!v2vActive() || V2.sec !== "clients") { V2.clientsTimer = null; return; }
+      await v2ClientsFetch().catch(() => {});
+      if (V2.clientsTimer === null) return;
+      V2.clientsTimer = setTimeout(tick, 3000);
+    };
+    tick();
+  }
+  function v2vClients() {
+    const d = V2.clients;
+    let inner = "";
+    if (!d) {
+      inner = '<div class="v2v-empty"><i class="bi bi-arrow-repeat"></i><b>加载中…</b></div>';
+    } else if (d.error) {
+      inner = '<div class="v2v-empty"><i class="bi bi-x-circle"></i><b>' + esc(d.error) + "</b></div>";
+    } else if (!d.items || !d.items.length) {
+      inner = '<div class="v2v-empty"><i class="bi bi-people"></i><b>暂无客户端连接</b><span>' +
+        esc(d.hint || "还没有客户端连到代理入站端口；有新连接后 3 秒内会出现在这里") + "</span></div>";
+    } else {
+      inner = '<div class="v2v-list">' + d.items.map(it =>
+        '<div class="v2v-item"><span class="v2v-ico" style="background:rgba(59,130,246,.12);color:#3b82f6">' +
+        '<i class="bi bi-person"></i></span>' +
+        '<div style="min-width:0;flex:1"><b style="font-size:13px">' + esc(it.ip) + "</b>" +
+        '<div style="font-size:11.5px;opacity:.65;margin-top:2px">入站 ' + esc(it.inbound) +
+        (it.procs && it.procs.length ? " · 内核进程 " + esc(it.procs.join(", ")) : "") + "</div></div>" +
+        '<span class="v2v-ping good"><i class="bi bi-arrow-left-right"></i>' + it.conns + " 连接</span></div>"
+      ).join("") + "</div>";
+    }
+    return '<div class="v2v-sec">' +
+      v2vSecHead("bi-people", "实时连接",
+        (d && d.items && d.items.length ? ("客户端 " + d.items.length + " · 连接 " + d.total + " · ") : "") +
+        "每 3 秒自动刷新") +
+      inner + "</div>";
+  }
+
   /* ---------- 节点失效自动切换（看门狗在后端运行，与网页是否打开无关） ----------
      前端只负责开关 UI 与把开关同步给后端 /api/v2ray/auto-failover；
      真正的定时探测 + 自动切换由后端 v2raymgr 的后台线程执行，关掉浏览器也持续运行。 */
@@ -860,8 +922,39 @@
         (list.length && !V2.pingProg && !V2.dlProg ? "" : " disabled") +
         '><i class="bi bi-cloud-download"></i>' + (V2.dlProg ? ("测速中 " + V2.dlProg.done + "/" + V2.dlProg.total) : "测下载") + "</button>" +
         '<button class="v2v-btn danger" data-act="del-timeout"' + (failN && !V2.pingProg ? "" : " disabled") +
-        ' title="删除所有测速超时的节点"><i class="bi bi-trash"></i>删除超时' + (failN ? " " + failN : "") + "</button>" +
+        ' title="删除所有测速超时的节点（进回收站，可恢复）"><i class="bi bi-trash"></i>删除超时' + (failN ? " " + failN : "") + "</button>" +
+        '<button class="v2v-btn' + (V2.trashOpen ? " on" : "") + '" data-act="trash" title="回收站：删除的节点可在这里恢复">' +
+        '<i class="bi bi-archive"></i>回收站' + (V2.trashN ? " " + V2.trashN : "") + "</button>" +
         tabHtml);
+    // 回收站面板：软删除的节点，可恢复 / 彻底删除
+    if (V2.trashOpen) {
+      const tr = V2.trash || [];
+      h += '<div class="v2v-sec">' +
+        v2vSecHead("bi-archive", "回收站",
+          tr.length ? ("已删除 " + tr.length + " 个节点 · 可恢复或彻底清除") : "空",
+          '<span class="v2v-flex"></span>' +
+          '<button class="v2v-btn danger" data-act="trash-clear"' + (tr.length ? "" : " disabled") +
+          '><i class="bi bi-x-circle"></i>清空</button>' +
+          '<button class="v2v-btn ico" data-act="trash" title="收起回收站"><i class="bi bi-x-lg"></i></button>');
+      if (!tr.length) {
+        h += '<div class="v2v-empty"><i class="bi bi-archive"></i><b>回收站是空的</b></div>';
+      } else {
+        h += '<div class="v2v-list">' + tr.map(n =>
+          '<div class="v2v-item"><span class="v2v-ico ' + protoCls(n.proto) +
+          '"><i class="bi ' + protoIcon(n.proto) + '"></i></span>' +
+          '<div class="v2v-info"><div class="v2v-nm">' + esc(n.name || "(未命名)") + "</div>" +
+          '<div class="v2v-meta"><span class="v2v-pill proto">' + esc(n.proto || "") + "</span>" +
+          "<em>" + esc(n.server || "") + ":" + esc(n.port || "") + "</em>" +
+          (n.deleted_at ? "<span>" + fmtTime(n.deleted_at) + " 删除</span>" : "") + "</div></div>" +
+          '<div class="v2v-ops">' +
+          '<button class="v2v-btn" data-act="trash-restore" data-id="' + escA(n.id) +
+          '"><i class="bi bi-arrow-counterclockwise"></i>恢复</button>' +
+          '<button class="v2v-btn ico danger" data-act="trash-purge" data-id="' + escA(n.id) +
+          '" title="彻底删除（真删库，不可恢复）"><i class="bi bi-trash"></i></button>' +
+          "</div></div>").join("") + "</div>";
+      }
+      h += "</div>";
+    }
     if (!list.length) {
       h += '<div class="v2v-empty"><i class="bi bi-inbox"></i><b>' +
         (V2.nodes.length ? "没有匹配的节点" : "还没有节点") + "</b><span>" +
@@ -1279,6 +1372,7 @@
         v2SaveView();
         if (V2.sec === "log") { v2LogFetch().catch(() => {}); if (V2.autoLog) v2LogStart(); } else v2LogStop();
         if (V2.sec === "overview") v2TrafStart(); else v2TrafStop();
+        if (V2.sec === "clients") { v2ClientsFetch().catch(() => {}); v2ClientsStart(); } else v2ClientsStop();
         v2vRender();
         return;
       }
@@ -1711,11 +1805,13 @@
       }
       case "del-node": {
         const n = nodeOf(ds.id);
-        const ok = await uiConfirm("删除节点", "确定删除「" + ((n && n.name) || ds.id) + "」？", "删除", true);
+        const ok = await uiConfirm("删除节点", "确定删除「" + ((n && n.name) || ds.id) +
+          "」？删除后进入回收站，可随时恢复。", "删除", true);
         if (!ok) return;
         const r = await post("/api/v2ray/nodes/delete", { ids: [ds.id] });
         if (r.error) return toast(r.error, "err");
-        toast("已删除", "ok");
+        toast("已删除（可在回收站恢复）", "ok");
+        v2TrashFetch().catch(() => {});
         await v2Reload();
         break;
       }
@@ -1726,12 +1822,50 @@
           .map(n => n.id);
         if (!ids.length) { toast("没有测速超时的节点", "warn"); break; }
         const ok = await uiConfirm("删除超时节点",
-          "确定删除 " + ids.length + " 个测速超时的节点？该操作不可恢复。", "删除", true);
+          "确定删除 " + ids.length + " 个测速超时的节点？删除后进入回收站，可随时恢复。", "删除", true);
         if (!ok) break;
         const r = await post("/api/v2ray/nodes/delete", { ids: ids });
         if (r.error) return toast(r.error, "err");
-        toast("已删除 " + ids.length + " 个超时节点", "ok");
+        toast("已删除 " + ids.length + " 个超时节点（可在回收站恢复）", "ok");
+        v2TrashFetch().catch(() => {});
         await v2Reload();
+        break;
+      }
+
+      /* -------- 回收站 -------- */
+      case "trash": {
+        V2.trashOpen = !V2.trashOpen;
+        if (V2.trashOpen) v2TrashFetch().catch(() => {});
+        v2vRender();
+        break;
+      }
+      case "trash-restore": {
+        const r = await post("/api/v2ray/nodes/restore", { ids: [ds.id] });
+        if (r.error) return toast(r.error, "err");
+        toast("已恢复 " + (r.restored || 0) + " 个节点", "ok");
+        v2TrashFetch().catch(() => {});
+        await v2Reload();
+        break;
+      }
+      case "trash-purge": {
+        const ok = await uiConfirm("彻底删除",
+          "从数据库彻底删除该节点？此操作不可恢复。", "彻底删除", true);
+        if (!ok) break;
+        const r = await post("/api/v2ray/nodes/purge", { ids: [ds.id] });
+        if (r.error) return toast(r.error, "err");
+        toast("已彻底删除", "ok");
+        v2TrashFetch().catch(() => {});
+        break;
+      }
+      case "trash-clear": {
+        const ok = await uiConfirm("清空回收站",
+          "彻底删除回收站里的全部节点？此操作不可恢复。", "清空", true);
+        if (!ok) break;
+        const r = await post("/api/v2ray/nodes/purge", {});
+        if (r.error) return toast(r.error, "err");
+        toast("已清空回收站（" + (r.deleted || 0) + " 个）", "ok");
+        V2.trash = []; V2.trashN = 0;
+        v2vRender();
         break;
       }
 

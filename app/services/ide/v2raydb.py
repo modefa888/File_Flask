@@ -98,6 +98,13 @@ def init_db():
             conn.execute("ALTER TABLE v2ray_nodes ADD COLUMN grp TEXT DEFAULT ''")
     except Exception:
         pass
+    # 旧库迁移：v2ray_nodes 补 deleted / deleted_at（回收站软删除）列，已存在则忽略
+    try:
+        with store_tx() as conn:
+            conn.execute("ALTER TABLE v2ray_nodes ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE v2ray_nodes ADD COLUMN deleted_at REAL NOT NULL DEFAULT 0")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -306,9 +313,10 @@ def list_nodes(sub_id=None) -> list:
     conn = store_conn()
     try:
         if sub_id is None:
-            rows = conn.execute("SELECT * FROM v2ray_nodes ORDER BY sort ASC, created_at ASC").fetchall()
+            rows = conn.execute("SELECT * FROM v2ray_nodes WHERE deleted=0"
+                                " ORDER BY sort ASC, created_at ASC").fetchall()
         else:
-            rows = conn.execute("SELECT * FROM v2ray_nodes WHERE sub_id=? ORDER BY sort ASC,"
+            rows = conn.execute("SELECT * FROM v2ray_nodes WHERE deleted=0 AND sub_id=? ORDER BY sort ASC,"
                                 " created_at ASC", (str(sub_id),)).fetchall()
     finally:
         conn.close()
@@ -318,7 +326,8 @@ def list_nodes(sub_id=None) -> list:
 def get_node(nid) -> dict:
     conn = store_conn()
     try:
-        rows = conn.execute("SELECT * FROM v2ray_nodes WHERE id=?", (str(nid or ""),)).fetchall()
+        rows = conn.execute("SELECT * FROM v2ray_nodes WHERE id=? AND deleted=0",
+                            (str(nid or ""),)).fetchall()
     finally:
         conn.close()
     return _node_dict(rows[0]) if rows else None
@@ -438,12 +447,49 @@ def update_node(nid, name=None, remark=None, server=None, port=None, fields=None
 
 
 def delete_nodes(ids):
+    """软删除：标记 deleted=1 进回收站，可恢复。返回条数。"""
     ids = [str(x) for x in (ids or []) if x]
     if not ids:
         return 0
     with store_tx() as conn:
-        cur = conn.execute("DELETE FROM v2ray_nodes WHERE id IN (%s)"
+        cur = conn.execute("UPDATE v2ray_nodes SET deleted=1, deleted_at=? WHERE id IN (%s)"
+                           % ",".join("?" * len(ids)), tuple([time.time()] + ids))
+        return cur.rowcount or 0
+
+
+def trash_nodes() -> list:
+    """回收站列表：已软删除的节点，按删除时间倒序。"""
+    conn = store_conn()
+    try:
+        rows = conn.execute("SELECT * FROM v2ray_nodes WHERE deleted=1"
+                            " ORDER BY deleted_at DESC").fetchall()
+    finally:
+        conn.close()
+    return [_node_dict(r) for r in rows]
+
+
+def restore_nodes(ids):
+    """从回收站恢复节点，返回条数。"""
+    ids = [str(x) for x in (ids or []) if x]
+    if not ids:
+        return 0
+    with store_tx() as conn:
+        cur = conn.execute("UPDATE v2ray_nodes SET deleted=0, deleted_at=0 WHERE id IN (%s)"
                            % ",".join("?" * len(ids)), tuple(ids))
+        return cur.rowcount or 0
+
+
+def purge_nodes(ids=None):
+    """彻底删除（真删库）：ids 为空 = 清空整个回收站。返回条数。"""
+    with store_tx() as conn:
+        if ids:
+            ids = [str(x) for x in ids if x]
+            if not ids:
+                return 0
+            cur = conn.execute("DELETE FROM v2ray_nodes WHERE deleted=1 AND id IN (%s)"
+                               % ",".join("?" * len(ids)), tuple(ids))
+        else:
+            cur = conn.execute("DELETE FROM v2ray_nodes WHERE deleted=1")
         return cur.rowcount or 0
 
 

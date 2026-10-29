@@ -1,6 +1,21 @@
         // ========== 自定义弹窗 ==========
         const _toastIcons = { success: '✅', danger: '❌', warning: '⚠️', info: 'ℹ️' };
 
+        /* 记录顶部导航栏的真实高度到 CSS 变量 --fm-navbar-h：
+           提示气泡据此贴在导航栏下方弹出，导航栏换行变高也不会被遮挡 */
+        (function () {
+            const nav = document.querySelector('nav.navbar.sticky-top');
+            if (!nav) return;
+            const sync = () => document.documentElement.style.setProperty(
+                '--fm-navbar-h', nav.offsetHeight + 'px');
+            sync();
+            window.addEventListener('resize', sync);
+            // 导航栏高度变化（窗口缩放换行、徽章内容变化）时同步更新
+            if (window.ResizeObserver) {
+                try { new ResizeObserver(sync).observe(nav); } catch (e) { }
+            }
+        })();
+
         function showToast(title, message, type = 'info') {
             const container = document.getElementById('customToastContainer');
             const icon = _toastIcons[type] || _toastIcons.info;

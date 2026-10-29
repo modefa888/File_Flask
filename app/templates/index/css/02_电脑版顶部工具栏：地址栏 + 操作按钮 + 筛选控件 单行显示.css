@@ -124,12 +124,14 @@
             }
         }
 
-        /* 自定义弹窗 */
+        /* 自定义弹窗：贴着顶部导航栏下沿往下弹，不遮挡导航栏
+           （--fm-navbar-h 由 js/30_自定义弹窗.js 按导航栏实际高度写入，窄屏换行也不会压住） */
         #customToastContainer {
             position: fixed;
-            top: 24px;
+            top: calc(var(--fm-navbar-h, 60px) + 12px);
             right: 24px;
-            z-index: 10000;
+            /* 通知永远在最顶层：要盖过弹窗遮罩（10003 / 10005）与各类浮层 */
+            z-index: 999999;
             display: flex;
             flex-direction: column;
             align-items: flex-end;
@@ -291,6 +293,77 @@
 
         .custom-modal .modal-footer .btn-ok:hover {
             background: #1d4ed8;
+        }
+
+        /* ===== 通用输入对话框（新建文件 / 新建文件夹 / 重命名 …）=====
+           关键：.modal-body 全局是 pre-wrap（为了保留消息换行），会把模板里的
+           缩进和空行原样渲染出来 —— 这里必须改回 normal，否则上下都是大片空白 */
+        .custom-modal.input-modal {
+            width: 460px;
+            max-width: 92vw;
+            padding: 18px 20px 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(226, 232, 240, .9);
+        }
+
+        .custom-modal.input-modal .modal-title {
+            font-size: 0.92rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 14px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #eef2f7;
+            gap: 8px;
+        }
+
+        .custom-modal.input-modal .modal-title i {
+            color: #2563eb;
+            font-size: 0.95rem;
+        }
+
+        .custom-modal.input-modal .modal-body {
+            white-space: normal;
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }
+
+        .custom-modal.input-modal .input-modal-label {
+            display: block;
+            font-size: 0.78rem;
+            color: #64748b;
+            margin-bottom: 6px;
+        }
+
+        .custom-modal.input-modal input.form-control {
+            font-family: "SF Mono", "Menlo", "Consolas", monospace;
+            font-size: 0.85rem;
+            padding: 8px 10px;
+            border-radius: 9px;
+            border: 1px solid #d7dee8;
+            color: #1e293b;
+            transition: border-color .15s ease, box-shadow .15s ease;
+        }
+
+        .custom-modal.input-modal input.form-control:focus {
+            border-color: #60a5fa;
+            box-shadow: 0 0 0 3px rgba(96, 165, 250, .18);
+            outline: none;
+        }
+
+        .custom-modal.input-modal .input-modal-error {
+            display: none;
+            font-size: 0.75rem;
+            color: #dc2626;
+            margin-top: 6px;
+        }
+
+        .custom-modal.input-modal .modal-footer {
+            gap: 8px;
+        }
+
+        .custom-modal.input-modal .modal-footer .btn {
+            padding: 7px 20px;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, .08);
         }
 
         @media (max-width: 768px) {
@@ -1632,6 +1705,12 @@
         .img-toolbar .img-del:hover {
             background: rgba(220, 38, 38, .85);
             color: #fff;
+        }
+
+        /* 顶部「新建」下拉按钮：它包在 .btn-group 里且没有 .dropdown-toggle 类，
+           Bootstrap 的 .btn-group > .btn:not(:last-child) 会把右侧圆角抹平 —— 这里补回完整圆角 */
+        #createNewBtn.btn-select-mode {
+            border-radius: 6px;
         }
 
 

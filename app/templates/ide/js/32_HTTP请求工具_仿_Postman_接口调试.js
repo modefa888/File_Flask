@@ -15,7 +15,7 @@
   const API_RES_MIN_H = 140;                   // 响应区最小高度：状态栏 + 页签 + 几行内容
   const API_PANE_KEY = "ide.http.pane";        // 请求区当前页签：参数 / 请求头 / 请求体 / 认证
   const API_RTAB_KEY = "ide.http.resTab";      // 响应区当前页签：响应体 / 响应头 / 原始数据
-  const API_PANES = ["params", "headers", "body", "auth"];
+  const API_PANES = ["params", "headers", "body", "auth", "proxy"];
   const API_RTABS = ["body", "headers", "raw"];
 
   let API_REQS = null;
@@ -41,7 +41,22 @@
   function apiBlank(name, gid) {
     return { id: apiNewId(), name: name || "新建请求", method: "GET", url: "", params: [], headers: [],
       body: { mode: "none", raw: "", form: [] }, auth: { type: "none", token: "", username: "", password: "" },
+      // 每个请求可单独指定代理（「代理」页签）；inherit = 跟随「设置 → 网络/代理」
+      proxy: { mode: "inherit", proxy: "", noProxy: "", timeout: 30, insecure: false },
       gid: gid || "" };
+  }
+
+  /* 请求级代理设置：老请求没有 proxy 字段时按「跟随设置」处理 */
+  function apiProxyOf(req) {
+    const p = (req && req.proxy) || {};
+    const modes = ["inherit", "manual", "system", "none"];
+    return {
+      mode: modes.indexOf(p.mode) >= 0 ? p.mode : "inherit",
+      proxy: p.proxy || "",
+      noProxy: p.noProxy || "",
+      timeout: Math.max(1, Math.min(120, parseInt(p.timeout, 10) || 30)),
+      insecure: !!p.insecure,
+    };
   }
 
   /* ---------------- 分组 ----------------
@@ -1050,12 +1065,14 @@
             '<button class="api-tab" data-t="headers">请求头 <span class="api-badge" data-b="headers">0</span></button>' +
             '<button class="api-tab" data-t="body">请求体</button>' +
             '<button class="api-tab" data-t="auth">认证</button>' +
+            '<button class="api-tab" data-t="proxy">代理 <span class="api-badge" data-b="proxy"></span></button>' +
           '</div>' +
           '<div class="api-panes scroll-thin">' +
             '<div class="api-pane" data-p="params"></div>' +
             '<div class="api-pane" data-p="headers"></div>' +
             '<div class="api-pane" data-p="body"></div>' +
             '<div class="api-pane" data-p="auth"></div>' +
+            '<div class="api-pane" data-p="proxy"></div>' +
           '</div>' +
         '</div>' +
         '<div class="api-res">' +
@@ -1080,7 +1097,8 @@
       root: h.querySelector(".api"), req: h.querySelector(".api-req"),
       method: h.querySelector(".api-method"), url: h.querySelector(".api-url"),
       panes: { params: h.querySelector('[data-p="params"]'), headers: h.querySelector('[data-p="headers"]'),
-        body: h.querySelector('[data-p="body"]'), auth: h.querySelector('[data-p="auth"]') },
+        body: h.querySelector('[data-p="body"]'), auth: h.querySelector('[data-p="auth"]'),
+        proxy: h.querySelector('[data-p="proxy"]') },
       res: h.querySelector(".api-res-body"), meta: h.querySelector(".api-res-meta"),
       copy: h.querySelector("#apiCopyRes"), view: h.querySelector(".api-res-view"),
     };
@@ -1104,7 +1122,8 @@
     h.querySelectorAll(".api-rtab").forEach(function (b) { b.addEventListener("click", function () { apiShowRes(tab, b.dataset.rt); }); });
     apiWireResView(tab);      // 响应体视图工具条：容器常驻，只绑一次（内容由 apiPaintRes 重绘）
 
-    apiRenderPane(tab, "params"); apiRenderPane(tab, "headers"); apiRenderPane(tab, "body"); apiRenderPane(tab, "auth");
+    apiRenderPane(tab, "params"); apiRenderPane(tab, "headers"); apiRenderPane(tab, "body");
+    apiRenderPane(tab, "auth"); apiRenderPane(tab, "proxy");
     // 刷新 / 重开标签后接上上次看的页签（请求区 + 响应区），和高度一样属于工具级偏好
     apiShowPane(tab, apiPrefGet(API_PANE_KEY, API_PANES, "params"));
     apiShowRes(tab, apiPrefGet(API_RTAB_KEY, API_RTABS, "body"));
@@ -1369,6 +1388,13 @@
     const set = function (k, v) { const b = tab.host.querySelector('.api-badge[data-b="' + k + '"]'); if (b) b.textContent = v; };
     set("params", (req.params || []).filter(function (r) { return r.on && r.k.trim(); }).length);
     set("headers", (req.headers || []).filter(function (r) { return r.on && r.k.trim(); }).length);
+    // 「代理」页签角标：显示当前请求显式设置的代理模式（跟随设置时留空）
+    const pb = tab.host.querySelector('.api-badge[data-b="proxy"]');
+    if (pb) {
+      const m = apiProxyOf(req).mode;
+      pb.textContent = m === "manual" ? "自定义" : (m === "system" ? "系统" : (m === "none" ? "直连" : ""));
+      pb.classList.toggle("on", m !== "inherit");
+    }
   }
   function apiRenderPane(tab, t) {
     const req = tab.api.req, box = tab.api.el.panes[t];
@@ -1393,6 +1419,56 @@
       });
       const fmt = box.querySelector(".api-fmt");
       if (fmt) fmt.addEventListener("click", function () { apiFmtJson(tab); });
+    }
+    else if (t === "proxy") {
+      const px = apiProxyOf(req);
+      const opt = function (v, label) {
+        return '<option value="' + v + '"' + (px.mode === v ? " selected" : "") + '>' + label + '</option>';
+      };
+      box.innerHTML =
+        '<div class="api-proxy">' +
+          '<div class="api-proxy-hd"><i class="bi bi-shield-shaded"></i> 本请求的代理（只影响这一个请求，不改全局设置）</div>' +
+          '<div class="api-auth-row"><label class="api-lb">模式</label><select class="api-px-mode">' +
+            opt("inherit", "跟随设置（设置 → 网络/代理）") +
+            opt("manual", "使用下面的代理地址") +
+            opt("system", "跟随系统环境变量（http_proxy 等）") +
+            opt("none", "不使用代理（直连）") +
+          '</select></div>' +
+          '<div class="api-auth-row"><label class="api-lb">代理地址</label>' +
+            '<input class="api-px-url" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080" value="' + apiAttr(px.proxy) + '"></div>' +
+          '<div class="api-auth-row"><label class="api-lb">不走代理</label>' +
+            '<input class="api-px-noproxy" spellcheck="false" autocomplete="off" placeholder="localhost,127.0.0.1,*.internal" value="' + apiAttr(px.noProxy) + '"></div>' +
+          '<div class="api-auth-row"><label class="api-lb">超时（秒）</label>' +
+            '<input class="api-px-timeout" type="number" min="1" max="120" value="' + px.timeout + '"></div>' +
+          '<div class="api-auth-row"><label class="api-lb">证书</label>' +
+            '<label class="api-radio"><input type="checkbox" class="api-px-insecure"' + (px.insecure ? " checked" : "") + '> 跳过 SSL 证书校验（自签名 / 内网证书）</label></div>' +
+          '<div class="api-proxy-tip">支持 <code>http</code> / <code>https</code> / <code>socks5</code> / <code>socks5h</code>；需认证写成 <code>socks5://用户:密码@主机:端口</code>。' +
+            '服务端转发，不受浏览器跨域限制。</div>' +
+        '</div>';
+      const patch = function (obj) {
+        req.proxy = Object.assign(apiProxyOf(req), obj);
+        apiPersist();
+        apiUpdateBadges(tab);
+      };
+      box.querySelector(".api-px-mode").addEventListener("change", function (e) {
+        patch({ mode: e.target.value });
+        apiRenderPane(tab, "proxy");            // 切换模式后重绘（地址输入框禁用态随模式变化）
+      });
+      const uEl = box.querySelector(".api-px-url");
+      if (uEl) {
+        uEl.addEventListener("input", function () { patch({ proxy: uEl.value }); });
+        uEl.disabled = px.mode !== "manual";
+        uEl.style.opacity = px.mode === "manual" ? "" : ".55";
+      }
+      const npEl = box.querySelector(".api-px-noproxy");
+      if (npEl) npEl.addEventListener("input", function () { patch({ noProxy: npEl.value }); });
+      const toEl = box.querySelector(".api-px-timeout");
+      if (toEl) toEl.addEventListener("change", function () {
+        const v = Math.max(1, Math.min(120, parseInt(toEl.value, 10) || 30));
+        toEl.value = v; patch({ timeout: v });
+      });
+      const insEl = box.querySelector(".api-px-insecure");
+      if (insEl) insEl.addEventListener("change", function () { patch({ insecure: insEl.checked }); });
     }
     else if (t === "auth") {
       const a = req.auth;
@@ -1442,16 +1518,25 @@
       const payload = { method: req.method, url: url, headers: headers,
         body: (req.method === "GET" || req.method === "HEAD") ? "" : body,
         timeout: 30, followRedirects: true, verifySsl: true };
-      // 设置 → 网络/代理 里勾了「「API 调试」也走此代理」→ 套用同一套代理与出站策略
+      // 代理优先级：本请求「代理」页签里单独设置的 > 「设置 → 网络/代理」的全局配置
+      const px = apiProxyOf(req);
       if (typeof IDE_SETTINGS !== "undefined" && typeof httpProxySettings === "function") {
         const cfg = httpProxySettings();
         // 网站过滤属于全局策略：不受「API 调试也走此代理」开关影响，始终生效
         payload.filterMode = cfg.filterMode; payload.filterList = cfg.filterList;
-        // 代理与出站策略只在开关打开时套用
-        if (IDE_SETTINGS.httpForApiDebug) {
+        // 「跟随设置」时才套用全局代理；全局开关没勾则直连
+        if (px.mode === "inherit" && IDE_SETTINGS.httpForApiDebug) {
           payload.mode = cfg.mode; payload.proxy = cfg.proxy; payload.noProxy = cfg.noProxy;
           payload.timeout = cfg.timeout; payload.verifySsl = !cfg.insecure;
         }
+      }
+      // 请求级代理：显式选了直连 / 自定义 / 系统环境变量，直接覆盖全局
+      if (px.mode !== "inherit") {
+        payload.mode = px.mode;
+        payload.proxy = px.proxy;
+        payload.noProxy = px.noProxy;
+        payload.timeout = px.timeout;
+        payload.verifySsl = !px.insecure;
       }
       const res = await fetch("/api/http/send", {
         method: "POST", headers: { "Content-Type": "application/json" },

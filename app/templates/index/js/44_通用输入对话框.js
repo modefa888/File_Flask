@@ -10,20 +10,20 @@
             const overlay = document.createElement('div');
             overlay.className = 'custom-modal-overlay';
             overlay.innerHTML = `
-            <div class="custom-modal">
-                <div class="modal-title"><i class="bi bi-pencil"></i> ${title}</div>
-                <div class="modal-body">
-                    <label style="display:block;font-size:0.8rem;color:#718096;margin-bottom:6px;">${label}</label>
-                    <input type="text" class="form-control" id="inputDialogValue" style="font-family:monospace;font-size:0.85rem;" value="${_escapeHtml(defaultVal)}" />
-                    ${suggHtml}
-                    <div id="inputDialogError" style="font-size:0.78rem;color:#dc2626;margin-top:6px;display:none;"></div>
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-cancel" id="inputCancel">取消</button>
-                    <button class="btn btn-ok" id="inputOk">确定</button>
-                </div>
-            </div>
-        `;
+           <div class="custom-modal input-modal">
+               <div class="modal-title"><i class="bi bi-pencil-square"></i><span>${title}</span></div>
+               <div class="modal-body">
+                   <label class="input-modal-label">${label}</label>
+                   <input type="text" class="form-control" id="inputDialogValue" value="${_escapeHtml(defaultVal)}" />
+                   ${suggHtml}
+                   <div id="inputDialogError" class="input-modal-error"></div>
+               </div>
+               <div class="modal-footer">
+                   <button class="btn btn-cancel" id="inputCancel">取消</button>
+                   <button class="btn btn-ok" id="inputOk">确定</button>
+               </div>
+           </div>
+       `;
             document.body.appendChild(overlay);
             const input = overlay.querySelector('#inputDialogValue');
             const okBtn = overlay.querySelector('#inputOk');

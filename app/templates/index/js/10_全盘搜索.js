@@ -274,7 +274,7 @@
                 }
                 html += `<tr class="search-row" data-abs-path="${_escAttr(absPath)}" data-parent-path="${_escAttr(parentPath)}">
                 <td><input type="checkbox" class="search-checkbox search-item-cb" data-path="${_escAttr(absPath)}"/></td>
-                <td>${_getSearchIconHtml(item)} <span class="search-name" title="${_escAttr(displayName)}">${_escHtml(displayName)}</span></td>
+                <td><div class="search-name-cell">${_getSearchIconHtml(item)}<span class="search-name" title="${_escAttr(displayName)}">${_escHtml(displayName)}</span></div></td>
                 <td><span class="search-path" data-full-path="${_escAttr(displayPath)}" title="点击复制路径">${_escHtml(displayPath)}</span></td>
                 <td class="text-end search-size">${_escHtml(sizeStr)}</td>
                 <td><span class="${badgeClass}">${_escHtml(typeText)}</span></td>

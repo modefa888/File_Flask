@@ -67,7 +67,7 @@
                 <div class="zip-modal">
                     <div class="zip-header">
                         <div class="zip-title-row">
-                            <div class="zip-title"><i class="bi bi-file-zip"></i><span id="zipTitleName">${_escHtml(displayName)}</span>${nestedHint}</div>
+                            <div class="zip-title">${fileIconHtml({ is_dir: false, name: displayName, ext: (displayName.split('.').pop() || '') }, 'zip-title-icon')}<span id="zipTitleName">${_escHtml(displayName)}</span>${nestedHint}</div>
                             <div class="zip-actions">
                                 <button class="btn btn-extract" id="zipExtractBtn"><i class="bi bi-box-arrow-up"></i> 解压</button>
                                 <button class="btn btn-close-zip" id="zipCloseBtn"><i class="bi bi-x-lg"></i></button>
@@ -203,7 +203,8 @@
         </tr></thead><tbody>`;
             for (const e of sorted) {
                 const isDir = !!e.is_dir;
-                const icon = isDir ? '<i class="bi bi-folder-fill text-warning"></i>' : `<i class="${e.icon || 'bi bi-file-earmark'}"></i>`;
+                // 图标与文件管理器同一套（Seti / 自定义规则 / 彩色兜底）
+                const icon = fileIconHtml({ is_dir: isDir, name: e.name, ext: e.ext || '' }, 'zip-item-icon');
                 const sizeStr = e.size != null ? _humanSize(e.size) : '-';
                 const compStr = e.compressed != null ? _humanSize(e.compressed) : '-';
                 // 显示名是相对于当前目录的，拼接为完整相对路径

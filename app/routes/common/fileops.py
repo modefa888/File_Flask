@@ -3,6 +3,7 @@ import os
 import json
 import shutil
 import mimetypes
+import stat as statmod
 import threading
 import time
 import uuid
@@ -812,31 +813,131 @@ def api_new_folder():
     return jsonify({"success": True})
 
 
+_PROP_TEXT_EXTS = {
+    "txt", "md", "log", "json", "xml", "yml", "yaml", "csv", "ini", "conf", "toml",
+    "py", "js", "ts", "css", "html", "sh", "java", "c", "cpp", "h", "go", "rs",
+    "php", "rb", "sql", "m3u", "m3u8", "srt", "vtt", "gitignore",
+}
+_PROP_IMG_EXTS = {
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "ico", "tiff", "tif", "svg", "avif",
+}
+_PROP_HASH_MAX = 8 * 1024 * 1024        # 超过这个大小不计算 MD5（避免打开信息面板卡住）
+_PROP_TEXT_MAX = 2 * 1024 * 1024        # 超过这个大小不统计行数
+
+
+def _prop_time(ts):
+    """时间戳 → 本地时间字符串（异常值返回 -）。"""
+    try:
+        return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+    except (OSError, ValueError, OverflowError):
+        return "-"
+
+
+def _prop_owner_group(st):
+    """所有者 / 所属组名字，取不到就退回数字 ID。"""
+    owner, group = str(st.st_uid), str(st.st_gid)
+    try:
+        import pwd
+        owner = pwd.getpwuid(st.st_uid).pw_name
+    except Exception:
+        pass
+    try:
+        import grp
+        group = grp.getgrgid(st.st_gid).gr_name
+    except Exception:
+        pass
+    return owner, group
+
+
+def _prop_common(target_path, st):
+    """文件与文件夹共用的基础信息（权限 / 归属 / 时间 / inode 等）。"""
+    owner, group = _prop_owner_group(st)
+    try:
+        mode_str = statmod.filemode(st.st_mode)
+    except Exception:
+        mode_str = "-"
+    parent = os.path.dirname(target_path)
+    return {
+        "name": os.path.basename(target_path) or target_path,
+        "path": target_path,
+        "parent": parent,
+        "parent_name": os.path.basename(parent) or parent,
+        # 创建时间：Linux 上没有 birthtime，用 ctime（元数据变更时间）代替
+        "created": _prop_time(st.st_ctime),
+        "modified": _prop_time(st.st_mtime),
+        "accessed": _prop_time(st.st_atime),
+        "permissions": oct(st.st_mode)[-3:],
+        "mode_str": mode_str,
+        "owner": owner,
+        "group": group,
+        "uid": st.st_uid,
+        "gid": st.st_gid,
+        "inode": getattr(st, "st_ino", 0),
+        "links": getattr(st, "st_nlink", 0),
+        # 实际占用磁盘空间（稀疏文件 / 小文件对齐后与逻辑大小不同）
+        "disk_size": getattr(st, "st_blocks", 0) * 512,
+        "disk_size_str": _human_size(getattr(st, "st_blocks", 0) * 512),
+        "is_symlink": os.path.islink(target_path),
+        "link_target": os.readlink(target_path) if os.path.islink(target_path) else "",
+    }
+
+
+def _prop_file_extras(target_path, ext, size):
+    """文件专属的补充信息：图片宽高 / 文本行数 / 小文件 MD5。"""
+    extra = {}
+    if ext in _PROP_IMG_EXTS:
+        try:
+            from PIL import Image
+            with Image.open(target_path) as im:
+                extra["image"] = {"width": im.width, "height": im.height, "mode": im.mode}
+        except Exception:
+            pass
+    if ext in _PROP_TEXT_EXTS and 0 < size <= _PROP_TEXT_MAX:
+        try:
+            lines = 0
+            chars = 0
+            with open(target_path, "rb") as f:
+                for chunk in iter(lambda: f.read(256 * 1024), b""):
+                    lines += chunk.count(b"\n")
+                    chars += len(chunk)
+            extra["text"] = {"lines": lines + (0 if chars == 0 else 1), "chars": chars}
+        except OSError:
+            pass
+    if 0 < size <= _PROP_HASH_MAX:
+        try:
+            h = hashlib.md5()
+            with open(target_path, "rb") as f:
+                for chunk in iter(lambda: f.read(512 * 1024), b""):
+                    h.update(chunk)
+            extra["md5"] = h.hexdigest()
+        except OSError:
+            pass
+    return extra
+
+
 @bp.route("/api/properties")
 def api_properties():
     rel_path = request.args.get("path", "")
     target_path = os.path.abspath(os.path.normpath(rel_path))
     if not os.path.exists(target_path):
         return jsonify({"error": "路径不存在"}), 404
-    stat = os.stat(target_path)
+    st = os.stat(target_path)
     ext = os.path.splitext(target_path)[1].lower().lstrip(".")
-    mime_type, _ = mimetypes.guess_type(target_path)
+    mime_type, _enc = mimetypes.guess_type(target_path)
     is_dir = os.path.isdir(target_path)
+    info = _prop_common(target_path, st)
 
     if is_dir:
         if request.args.get("light"):
             # 轻量模式：不做目录大小统计，用于存在性/基本信息的快速探测
             return jsonify({
-                "name": os.path.basename(target_path),
-                "path": target_path,
-                "parent": os.path.dirname(target_path),
+                "name": info["name"],
+                "path": info["path"],
+                "parent": info["parent"],
                 "is_dir": True,
             })
         dir_info = _get_dir_info(target_path)
-        return jsonify({
-            "name": os.path.basename(target_path),
-            "path": target_path,
-            "parent": os.path.dirname(target_path),
+        info.update({
             "size": dir_info["size"],
             "size_str": _human_size(dir_info["size"]),
             "total_files": dir_info["total_files"],
@@ -844,34 +945,40 @@ def api_properties():
             "sub_dirs": dir_info["sub_dirs"],
             "sub_files": dir_info["sub_files"],
             "is_dir": True,
-            "created": datetime.fromtimestamp(stat.st_ctime).strftime("%Y-%m-%d %H:%M:%S"),
-            "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-            "permissions": oct(stat.st_mode)[-3:],
             "mime_type": "folder",
+            # 目录内最新一次改动 / 最大的文件
+            "newest": dir_info.get("newest", ""),
+            "largest": dir_info.get("largest", ""),
+            "largest_size_str": _human_size(dir_info.get("largest_size", 0)),
+            "hidden": dir_info.get("hidden", 0),
+            "ext": "",
         })
+        return jsonify(info)
 
-    return jsonify({
-        "name": os.path.basename(target_path),
-        "path": target_path,
-        "parent": os.path.dirname(target_path),
-        "size": stat.st_size,
-        "size_str": _human_size(stat.st_size),
+    info.update({
+        "size": st.st_size,
+        "size_str": _human_size(st.st_size),
         "ext": ext,
         "is_dir": False,
-        "created": datetime.fromtimestamp(stat.st_ctime).strftime("%Y-%m-%d %H:%M:%S"),
-        "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-        "permissions": oct(stat.st_mode)[-3:],
         "mime_type": mime_type or "unknown",
+        "extras": _prop_file_extras(target_path, ext, st.st_size),
     })
+    return jsonify(info)
 
 
 def _get_dir_info(dir_path):
-    """获取目录信息：总大小、递归文件数、递归目录数、直接子目录数、直接文件数"""
+    """获取目录信息：总大小、递归文件数、递归目录数、直接子目录数、直接文件数、
+    最新改动时间、最大文件、隐藏条目数。"""
     total_size = 0
     total_files = 0
     total_dirs = 0
     sub_dirs = 0
     sub_files = 0
+    hidden = 0
+    newest_ts = 0
+    newest_path = ""
+    largest_size = 0
+    largest_path = ""
     try:
         for root, dirs, files in os.walk(dir_path):
             # 跳过 proc/sysfs/tmpfs 等伪文件系统，别把 /proc/kcore 的 128TB 算进总和
@@ -879,16 +986,32 @@ def _get_dir_info(dir_path):
             for f in files:
                 fp = os.path.join(root, f)
                 try:
-                    total_size += os.stat(fp).st_size
+                    fst = os.stat(fp)
+                    total_size += fst.st_size
                     total_files += 1
+                    if fst.st_mtime > newest_ts:
+                        newest_ts = fst.st_mtime
+                        newest_path = os.path.relpath(fp, dir_path)
+                    if fst.st_size > largest_size:
+                        largest_size = fst.st_size
+                        largest_path = os.path.relpath(fp, dir_path)
                 except (OSError, PermissionError):
                     pass
             for d in dirs:
                 total_dirs += 1
+                dp = os.path.join(root, d)
+                try:
+                    dm = os.stat(dp).st_mtime
+                    if dm > newest_ts:
+                        newest_ts = dm
+                        newest_path = os.path.relpath(dp, dir_path) + "/"
+                except (OSError, PermissionError):
+                    pass
             # 直接子项
             if root == dir_path:
                 sub_dirs = len([d for d in dirs if not d.startswith('.')])
                 sub_files = len(files)
+                hidden = len([x for x in (dirs + files) if x.startswith('.')])
     except (OSError, PermissionError):
         pass
     return {
@@ -897,4 +1020,8 @@ def _get_dir_info(dir_path):
         "total_dirs": total_dirs,
         "sub_dirs": sub_dirs,
         "sub_files": sub_files,
+        "hidden": hidden,
+        "newest": newest_path,
+        "largest": largest_path,
+        "largest_size": largest_size,
     }

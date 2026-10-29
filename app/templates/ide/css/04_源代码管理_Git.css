@@ -29,8 +29,11 @@
      font-size: 13px; line-height: 1;
   }
   .g-ai-split #gitGenMsg { width: 30px; border-radius: 3px 0 0 3px; }
-  /* 星星图标：金→粉→蓝渐变彩色，悬浮/生成中不变色 */
-  .g-ai-split #gitGenMsg i {
+  /* 星星图标：金→粉→蓝渐变彩色，悬浮/生成中不变色。
+     渐变必须挂在 ::before（字形自己所在的盒子）上：挂在 <i> 上做 background-clip:text 时，
+     一旦字形变成独立的 inline-block 盒子（旋转需要），裁剪就失效 —— 表现为整个图标变空白 */
+  .g-ai-split #gitGenMsg i::before {
+    display: inline-block; line-height: 1;
     background: linear-gradient(135deg, #ffd76e, #ff8fb1 45%, #7fd0ff);
     -webkit-background-clip: text; background-clip: text;
     -webkit-text-fill-color: transparent; color: transparent;

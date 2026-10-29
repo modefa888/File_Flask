@@ -364,6 +364,31 @@
 <script>
 (function () {
   "use strict";
+  /* 单设备登录：接口返回 401（login_required）统一跳登录页；
+     账号被其它设备顶掉时带上 kicked=1，登录页会说明原因。 */
+  (function () {
+    if (window.__kickedGuardInstalled || typeof window.fetch !== "function") return;
+    window.__kickedGuardInstalled = true;
+    var _fetch = window.fetch;
+    window.fetch = function (input, init) {
+      var p = _fetch.apply(this, arguments);
+      try {
+        var url = typeof input === "string" ? input : ((input && input.url) || "");
+        if (url.indexOf("/api/") < 0) return p;
+      } catch (e) { return p; }
+      p.then(function (res) {
+        if (!res || res.status !== 401) return;
+        res.clone().json().then(function (d) {
+          if (d && d.login_required) {
+            var nxt = encodeURIComponent(location.pathname + location.search);
+            location.href = "/login?" + (d.kicked ? "kicked=1&" : "") + "next=" + nxt;
+          }
+        }).catch(function () { });
+      }).catch(function () { });
+      return p;
+    };
+  })();
+
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {

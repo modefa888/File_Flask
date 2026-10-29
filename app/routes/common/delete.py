@@ -564,9 +564,22 @@ def api_trash_raw():
     if not rec:
         return jsonify({"error": "回收站中找不到该项目"}), 404
     path = rec.get("trash_path", "")
+    if not os.path.exists(path):
+        return jsonify({"error": "文件已丢失"}), 404
+    # 子路径支持：查看被删文件夹内部的文件（rel 相对 trash_path，防目录穿越）
+    rel = (request.args.get("rel") or "").replace("\\", "/").strip("/")
+    if rel:
+        base = os.path.realpath(path)
+        full = os.path.realpath(os.path.join(path, rel))
+        if full != base and not full.startswith(base + os.sep):
+            return jsonify({"error": "非法路径"}), 400
+        path = full
     if not os.path.isfile(path):
         return jsonify({"error": "文件已丢失"}), 404
-    mime, _ = mimetypes.guess_type(rec.get("name", ""))
+    # MIME 按实际文件名判断：根条目在回收站里没有扩展名，用记录里的原始名；
+    # 子路径文件则用自身文件名
+    guess_name = os.path.basename(path) if rel else rec.get("name", "")
+    mime, _ = mimetypes.guess_type(guess_name)
     if not mime:
         mime = "application/octet-stream"
     try:
@@ -575,6 +588,142 @@ def api_trash_raw():
         return resp
     except (OSError, PermissionError) as e:
         return jsonify({"error": f"无法读取文件: {str(e)}"}), 500
+
+
+@bp.route("/api/trash/list")
+def api_trash_list():
+    """回收站文件夹的内容清单（供「删除历史 → 查看」列出被删文件夹里的文件）。"""
+    _log.info("GET /api/trash/list")
+    rec = _find_trash_record(request.args.get("id", ""))
+    if not rec:
+        return jsonify({"error": "回收站中找不到该项目"}), 404
+    path = rec.get("trash_path", "")
+    if not os.path.exists(path):
+        return jsonify({"error": "文件夹已丢失"}), 404
+    # 子路径支持：列出被删文件夹里某个子文件夹的内容（防目录穿越）
+    rel = (request.args.get("rel") or "").replace("\\", "/").strip("/")
+    if rel:
+        base = os.path.realpath(path)
+        full = os.path.realpath(os.path.join(path, rel))
+        if full != base and not full.startswith(base + os.sep):
+            return jsonify({"error": "非法路径"}), 400
+        path = full
+    if not os.path.isdir(path):
+        return jsonify({"error": "该条目不是文件夹"}), 400
+    try:
+        limit = max(1, min(2000, int(request.args.get("limit", 500))))
+    except (TypeError, ValueError):
+        limit = 500
+    files = []
+    total = 0
+    for root, dirs, fnames in os.walk(path, onerror=lambda e: None):
+        dirs.sort()
+        for d in sorted(dirs):
+            total += 1
+            if len(files) >= limit:
+                continue
+            full = os.path.join(root, d)
+            try:
+                st = os.stat(full)
+                mtime = int(st.st_mtime)
+            except OSError:
+                mtime = 0
+            files.append({"name": d, "rel": os.path.relpath(full, path),
+                          "is_dir": True, "size": 0, "mtime": mtime})
+        for f in sorted(fnames):
+            total += 1
+            if len(files) >= limit:
+                continue
+            full = os.path.join(root, f)
+            try:
+                st = os.stat(full)
+                size, mtime = st.st_size, int(st.st_mtime)
+            except OSError:
+                size, mtime = 0, 0
+            files.append({"name": f, "rel": os.path.relpath(full, path),
+                          "is_dir": False, "size": size, "mtime": mtime})
+    return jsonify({
+        "name": rec.get("name", ""),
+        "total": total,
+        "count": len(files),
+        "truncated": total > len(files),
+        "files": files,
+    })
+
+
+_ZIP_ARCHIVE_EXTS = ("zip", "jar", "war", "apk")
+_TAR_NAME_SUFFIXES = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
+
+
+@bp.route("/api/trash/archive")
+def api_trash_archive():
+    """回收站压缩包的内容清单（zip / tar 系，供「删除历史 → 查看」使用）。"""
+    _log.info("GET /api/trash/archive")
+    rec = _find_trash_record(request.args.get("id", ""))
+    if not rec:
+        return jsonify({"error": "回收站中找不到该项目"}), 404
+    path = rec.get("trash_path", "")
+    if not os.path.exists(path):
+        return jsonify({"error": "文件已丢失"}), 404
+    rel = (request.args.get("rel") or "").replace("\\", "/").strip("/")
+    if rel:
+        base = os.path.realpath(path)
+        full = os.path.realpath(os.path.join(path, rel))
+        if full != base and not full.startswith(base + os.sep):
+            return jsonify({"error": "非法路径"}), 400
+        path = full
+    if not os.path.isfile(path):
+        return jsonify({"error": "文件已丢失"}), 404
+    try:
+        limit = max(1, min(2000, int(request.args.get("limit", 500))))
+    except (TypeError, ValueError):
+        limit = 500
+
+    real_name = os.path.basename(path) if rel else rec.get("name", "")
+    lower = real_name.lower()
+    ext = os.path.splitext(lower)[1].lstrip(".")
+
+    entries = []
+    total = 0
+    try:
+        if ext in _ZIP_ARCHIVE_EXTS:
+            import zipfile
+            from .zip import _decode_zip_name
+            with zipfile.ZipFile(path) as zf:
+                infos = zf.infolist()
+                total = len(infos)
+                for info in infos[:limit]:
+                    n = _decode_zip_name(info).replace("\\", "/").rstrip("/")
+                    if not n:
+                        continue
+                    entries.append({"name": os.path.basename(n) or n, "path": n,
+                                    "is_dir": info.is_dir(),
+                                    "size": 0 if info.is_dir() else info.file_size})
+        elif lower.endswith(_TAR_NAME_SUFFIXES) or ext == "tar":
+            import tarfile
+            with tarfile.open(path, "r:*") as tf:
+                members = tf.getmembers()
+                total = len(members)
+                for m in members[:limit]:
+                    n = m.name.replace("\\", "/").rstrip("/")
+                    if not n:
+                        continue
+                    entries.append({"name": os.path.basename(n) or n, "path": n,
+                                    "is_dir": m.isdir(),
+                                    "size": 0 if m.isdir() else m.size})
+        else:
+            return jsonify({"error": "该压缩包格式暂不支持在线查看（支持 zip / tar 系），可先恢复再打开"}), 400
+    except Exception as e:
+        return jsonify({"error": "无法读取压缩包内容: " + str(e)}), 500
+
+    entries.sort(key=lambda x: (not x["is_dir"], x["path"].lower()))
+    return jsonify({
+        "name": real_name,
+        "total": total,
+        "count": len(entries),
+        "truncated": total > len(entries),
+        "files": entries,
+    })
 
 
 def _row_match(row, q):

@@ -1,5 +1,30 @@
 (function () {
   "use strict";
+  /* 单设备登录：账号在其它设备登录后，本页后续接口会返回 401 + kicked，
+     统一跳回登录页并说明原因（IDE 各模块的轮询请求很多，不接管就会满屏 401）。 */
+  (function () {
+    if (window.__kickedGuardInstalled || typeof window.fetch !== "function") return;
+    window.__kickedGuardInstalled = true;
+    const _fetch = window.fetch;
+    window.fetch = function (input, init) {
+      const p = _fetch.apply(this, arguments);
+      try {
+        const url = typeof input === "string" ? input : ((input && input.url) || "");
+        if (url.indexOf("/api/") < 0) return p;
+      } catch (e) { return p; }
+      p.then(res => {
+        if (!res || res.status !== 401) return;
+        res.clone().json().then(d => {
+          if (d && d.login_required) {
+            const nxt = encodeURIComponent(location.pathname + location.search);
+            location.href = "/login?" + (d.kicked ? "kicked=1&" : "") + "next=" + nxt;
+          }
+        }).catch(() => { });
+      }).catch(() => { });
+      return p;
+    };
+  })();
+
   /* 组装编辑器左侧 gutters：自动并入「代码折叠」列。
      背景：requirements.txt / package.json / 可运行文件等模块会用自己的 setOption("gutters", …)
      整份覆盖 gutters；若这里不带上折叠列，行号旁的折叠三角会整列消失。

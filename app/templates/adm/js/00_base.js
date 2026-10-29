@@ -1,4 +1,30 @@
 /* 后台管理：基础框架（工具函数 / 请求封装 / 表格 / 弹窗 / Toast）。 */
+
+/* 单设备登录：后台各模块的轮询 / 原生 fetch 请求遇到 401（login_required）时
+   统一跳回登录页；账号被其它设备顶掉时带上 kicked=1，登录页会说明原因。 */
+(function () {
+    if (window.__kickedGuardInstalled || typeof window.fetch !== 'function') return;
+    window.__kickedGuardInstalled = true;
+    var _fetch = window.fetch;
+    window.fetch = function (input, init) {
+        var p = _fetch.apply(this, arguments);
+        try {
+            var url = typeof input === 'string' ? input : ((input && input.url) || '');
+            if (url.indexOf('/api/') < 0) return p;
+        } catch (e) { return p; }
+        p.then(function (res) {
+            if (!res || res.status !== 401) return;
+            res.clone().json().then(function (d) {
+                if (d && d.login_required) {
+                    var nxt = encodeURIComponent(location.pathname + location.search);
+                    location.href = '/login?' + (d.kicked ? 'kicked=1&' : '') + 'next=' + nxt;
+                }
+            }).catch(function () { });
+        }).catch(function () { });
+        return p;
+    };
+})();
+
 var ADM = window.ADM = {
     user: window.ADM_USER || '',
     modules: [],
@@ -26,8 +52,13 @@ var ADM = window.ADM = {
             throw new Error('网络请求失败：' + (e && e.message ? e.message : e));
         }
         if (res.status === 401) {
-            location.href = '/login?next=/admin';
-            throw new Error('登录已过期，请重新登录');
+            var kicked = false;
+            try {
+                var j401 = await res.clone().json();
+                kicked = !!(j401 && j401.kicked);
+            } catch (e) { }
+            location.href = '/login?' + (kicked ? 'kicked=1&' : '') + 'next=/admin';
+            throw new Error(kicked ? '账号已在其他设备登录，当前会话已退出' : '登录已过期，请重新登录');
         }
         var text = await res.text();
         var data = {};

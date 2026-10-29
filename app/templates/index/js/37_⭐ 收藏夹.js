@@ -476,6 +476,8 @@
         const _delhistItemMap = new Map();
         const _TRASH_IMG_EXT = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp', 'ico'];
         const _TRASH_VIDEO_EXT = ['mp4', 'webm', 'mkv', 'avi', 'mov', 'm4v', 'ogg', 'flv', 'wmv', 'rmvb'];
+        // 压缩包：zip 系 + tar 系（.tar.gz 这类双扩展名靠正则兜）
+        const _TRASH_ARCHIVE_EXTS = ['zip', 'jar', 'war', 'apk', 'tar', 'tgz', 'tbz2', 'txz'];
 
         function _trashExt(name) {
             return (String(name || '').split('.').pop() || '').toLowerCase();
@@ -507,11 +509,14 @@
             if (item.exists === false) { showToast('提示', '文件已丢失，无法查看', 'warning'); return; }
             const name = item.name || '';
             const ext = _trashExt(name);
-            const url = '/api/trash/raw?id=' + encodeURIComponent(item.id);
+            // sub：被删文件夹内部的相对路径（文件夹清单点进去的条目）
+            const url = '/api/trash/raw?id=' + encodeURIComponent(item.id) +
+                (item.sub ? '&rel=' + encodeURIComponent(item.sub) : '');
             const isImg = _TRASH_IMG_EXT.includes(ext);
             const isVideo = _TRASH_VIDEO_EXT.includes(ext);
             const isAudio = ['mp3', 'wav', 'flac', 'aac', 'm4a', 'opus', 'wma', 'ape'].includes(ext);
-            const isText = ['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'csv', 'ini', 'conf', 'py', 'js', 'ts', 'css', 'html', 'sh'].includes(ext);
+            const isText = ['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'csv', 'ini', 'conf', 'py', 'js', 'ts', 'css', 'html', 'sh', 'm3u', 'm3u8', 'srt', 'vtt', 'ass', 'ssa'].includes(ext);
+            const isArchive = _TRASH_ARCHIVE_EXTS.includes(ext) || /\.tar\.(gz|bz2|xz)$/.test(name.toLowerCase());
 
             const container = document.getElementById('customModalContainer');
             if (!container) return;
@@ -520,7 +525,7 @@
             overlay.innerHTML = `
                 <div class="trash-view-modal">
                     <div class="tvm-header">
-                        <span class="tvm-title"><i class="bi ${_trashIconClass(item)}"></i> ${_escHtml(name)}</span>
+                        <span class="tvm-title">${_favIconHtml({ is_dir: item.is_dir }, name, 'tvm-title-ico')} ${_escHtml(name)}</span>
                         <button class="tvm-close" title="关闭"><i class="bi bi-x-lg"></i></button>
                     </div>
                     <div class="tvm-body"><div class="tvm-loading"><i class="bi bi-hourglass-split"></i> 加载中...</div></div>
@@ -531,7 +536,70 @@
             overlay.querySelector('.tvm-close').addEventListener('click', close);
 
             const bodyEl = overlay.querySelector('.tvm-body');
-            if (isImg) {
+            // 深色底只给图片/视频预览用；文本/音频/清单/不支持类型都用浅色，和整体界面一致
+            if (!isImg && !isVideo) bodyEl.classList.add('tvm-body-light');
+            if (item.is_dir) {
+                // 文件夹：列出回收站里这个文件夹被删时的文件清单
+                fetch('/api/trash/list?id=' + encodeURIComponent(item.id) +
+                    (item.sub ? '&rel=' + encodeURIComponent(item.sub) : ''))
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d.error) {
+                            bodyEl.innerHTML = '<div class="tvm-loading"><i class="bi bi-exclamation-circle"></i> ' + _escHtml(d.error) + '</div>';
+                            return;
+                        }
+                        const rows = (d.files || []).map(f => {
+                            const fullRel = (item.sub ? item.sub + '/' : '') + f.rel;
+                            return '<div class="tvm-dir-row" data-rel="' + _escHtml(fullRel) + '" data-name="' + _escHtml(f.name) + '" data-dir="' + (f.is_dir ? 1 : 0) + '">' +
+                                _favIconHtml({ is_dir: f.is_dir }, f.name, 'tvm-dir-ico') +
+                                '<span class="tvm-dir-path" title="' + _escHtml(f.rel) + '">' + _escHtml(f.rel) + '</span>' +
+                                '<span class="tvm-dir-size">' + (f.is_dir ? '文件夹' : formatSize(f.size || 0)) + '</span>' +
+                            '</div>';
+                        }).join('');
+                        const note = d.truncated
+                            ? '清单过长，仅显示前 ' + (d.files || []).length + ' 项，共 ' + d.total + ' 项'
+                            : '共 ' + d.total + ' 个文件 / 文件夹';
+                        bodyEl.innerHTML = '<div class="tvm-dirlist"><div class="tvm-dir-note">' +
+                            '<i class="bi bi-folder2-open"></i> ' + _escHtml(note) + '</div>' + rows + '</div>';
+                        // 点条目继续查看：子文件夹进下一级清单，文件直接打开预览
+                        bodyEl.querySelectorAll('.tvm-dir-row').forEach(row => {
+                            row.addEventListener('click', () => {
+                                _viewTrashItem({
+                                    id: item.id,
+                                    name: row.dataset.name,
+                                    is_dir: row.dataset.dir === '1',
+                                    sub: row.dataset.rel,
+                                    exists: true,
+                                });
+                            });
+                        });
+                    })
+                    .catch(() => { bodyEl.innerHTML = '<div class="tvm-loading">读取失败</div>'; });
+            } else if (isArchive) {
+                // 压缩包：列出包内条目（zip / tar 系）
+                fetch('/api/trash/archive?id=' + encodeURIComponent(item.id) +
+                    (item.sub ? '&rel=' + encodeURIComponent(item.sub) : ''))
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d.error) {
+                            bodyEl.innerHTML = '<div class="tvm-loading"><i class="bi bi-exclamation-circle"></i> ' + _escHtml(d.error) + '</div>';
+                            return;
+                        }
+                        const rows = (d.files || []).map(f =>
+                            '<div class="tvm-dir-row tvm-arc-row">' +
+                                _favIconHtml({ is_dir: f.is_dir }, f.name, 'tvm-dir-ico') +
+                                '<span class="tvm-dir-path" title="' + _escHtml(f.path) + '">' + _escHtml(f.path) + '</span>' +
+                                '<span class="tvm-dir-size">' + (f.is_dir ? '文件夹' : formatSize(f.size || 0)) + '</span>' +
+                            '</div>'
+                        ).join('');
+                        const note = d.truncated
+                            ? '条目过多，仅显示前 ' + (d.files || []).length + ' 项，共 ' + d.total + ' 项'
+                            : '共 ' + d.total + ' 个条目';
+                        bodyEl.innerHTML = '<div class="tvm-dirlist"><div class="tvm-dir-note">' +
+                            '<i class="bi bi-file-zip"></i> ' + _escHtml(note) + '</div>' + rows + '</div>';
+                    })
+                    .catch(() => { bodyEl.innerHTML = '<div class="tvm-loading">读取失败</div>'; });
+            } else if (isImg) {
                 bodyEl.innerHTML = `<img class="tvm-img" alt="" src="${url}">`;
                 bodyEl.querySelector('img').addEventListener('error', () => {
                     bodyEl.innerHTML = '<div class="tvm-loading">图片加载失败</div>';

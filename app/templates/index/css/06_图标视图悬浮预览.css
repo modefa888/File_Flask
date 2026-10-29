@@ -1524,6 +1524,90 @@
             font-size: 0.85rem;
         }
 
+        /* 回收站文件夹查看：被删文件夹的内容清单（浅色底，与整体浅色界面一致） */
+        .trash-view-modal .tvm-body.tvm-body-light {
+            background: #ffffff;
+        }
+
+        .trash-view-modal .tvm-dirlist {
+            align-self: stretch;
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px 14px 20px;
+        }
+
+        .trash-view-modal .tvm-dir-note {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 6px 10px;
+            color: #64748b;
+            font-size: 0.78rem;
+        }
+
+        .trash-view-modal .tvm-dir-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 8px;
+            border-radius: 6px;
+            color: #1e293b;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+
+        .trash-view-modal .tvm-dir-row:hover {
+            background: #f1f5f9;
+        }
+
+        /* 压缩包清单行：仅展示不可点进 */
+        .trash-view-modal .tvm-arc-row {
+            cursor: default;
+        }
+
+        /* 行内文件图标：与文件管理器同一套（Seti / 彩色兜底），尺寸与基线对齐行高 */
+        .trash-view-modal .tvm-dir-row .tvm-dir-ico {
+            flex: none;
+            font-size: 1.05rem;
+            line-height: 1;
+        }
+
+        .trash-view-modal .tvm-dir-row .seti-ic.tvm-dir-ico {
+            transform: none;
+            vertical-align: middle;
+        }
+
+        /* 查看弹窗标题图标：同样走文件管理器那套（Seti / 彩色兜底） */
+        .trash-view-modal .tvm-title {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .trash-view-modal .tvm-title .tvm-title-ico {
+            font-size: 1rem;
+            line-height: 1;
+        }
+
+        .trash-view-modal .tvm-title .seti-ic.tvm-title-ico {
+            transform: none;
+        }
+
+        .trash-view-modal .tvm-dir-path {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .trash-view-modal .tvm-dir-size {
+            flex: none;
+            color: #94a3b8;
+            font-size: 0.72rem;
+            font-variant-numeric: tabular-nums;
+        }
+
         .delhist-btn-clear {
             flex: 1;
             padding: 8px 16px;

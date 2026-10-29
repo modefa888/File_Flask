@@ -144,6 +144,7 @@
     root.innerHTML =
       '<div class="vpv-stage">' +
         '<video playsinline preload="none"></video>' +
+        '<div class="iptv-loading"><span class="iptv-spin"></span><span class="iptv-loading-txt">加载中…</span></div>' +
         '<div class="vpv-title"></div>' +
         '<div class="vpv-seek-tip"></div>' +
         '<button class="vpv-side-toggle" title="收起播放列表"><i class="bi bi-chevron-right"></i></button>' +
@@ -185,6 +186,8 @@
 
     var stage = root.querySelector(".vpv-stage");
     var video = root.querySelector("video");
+    var loadingEl = root.querySelector(".iptv-loading");
+    var loadingTxt = root.querySelector(".iptv-loading-txt");
     var titleEl = root.querySelector(".vpv-title");
     var tipEl = root.querySelector(".vpv-seek-tip");
     var stateEl = root.querySelector(".iptv-state");
@@ -263,13 +266,20 @@
     video.addEventListener("pause", setPlayIcon);
     /* 直播中指示灯：只有真的在出画面才闪（缓冲 / 暂停 / 出错都灭掉） */
     function setLive(on) { liveDot.classList.toggle("on", !!on); }
-    video.addEventListener("playing", function () { stateEl.textContent = "直播中"; setLive(true); });
-    video.addEventListener("waiting", function () { stateEl.textContent = "缓冲中…"; setLive(false); });
+    /* 舞台居中加载指示：切台 / 缓冲期间盖住空白画面 */
+    function setLoading(txt) {
+      if (!txt) { loadingEl.classList.remove("show"); return; }
+      loadingTxt.textContent = txt;
+      loadingEl.classList.add("show");
+    }
+    video.addEventListener("playing", function () { stateEl.textContent = "直播中"; setLive(true); setLoading(null); });
+    video.addEventListener("waiting", function () { stateEl.textContent = "缓冲中…"; setLive(false); setLoading("缓冲中…"); });
     video.addEventListener("error", function () {
       // hls.js 自己会走 fatal 回调；这里只兜底直连媒体（mp4 等）的失败
       if (hls) return;
       stateEl.textContent = "播放出错";
       setLive(false);
+      setLoading(null);
       showTip("无法播放该地址（源可能已失效）", "bi-exclamation-circle");
     });
     setPlayIcon();
@@ -308,7 +318,7 @@
     stage.addEventListener("mouseleave", function () {
       if (!video.paused) stage.classList.add("idle");
     });
-    video.addEventListener("pause", function () { stage.classList.remove("idle"); setLive(false); });
+    video.addEventListener("pause", function () { stage.classList.remove("idle"); setLive(false); setLoading(null); });
     video.addEventListener("play", wake);
     wake();
 
@@ -461,6 +471,7 @@
     function onFatal(d) {
       var type = d && d.type;
       setLive(false);
+      setLoading(null);
       if (type === "networkError") {
         if (retry < 3) {
           retry++;
@@ -495,6 +506,7 @@
       titleEl.textContent = it.name + (it.group && it.group !== "未分组" ? " · " + it.group : "");
       stateEl.textContent = "加载中…";
       setLive(false);
+      setLoading("加载中…");
       recordHis(it);
       markCur();
       stopHls();

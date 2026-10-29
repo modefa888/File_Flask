@@ -101,6 +101,66 @@
 /* ---------- 频道标题：比共用皮肤更贴近顶部 ---------- */
 .iptv-root .vpv-title { top: 3px; }
 
+/* 舞台始终纯黑：浅色皮肤下共用皮肤会把舞台改成浅灰，
+   切台清空画面时就成了一片「白屏」，直播画面区保持黑色才正常 */
+.iptv-root .vpv-stage { background: #000; }
+
+/* ---------- 切台 / 缓冲的居中加载指示 ---------- */
+.iptv-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: none;
+}
+.iptv-loading.show { display: flex; }
+
+/* 转圈：静止底环 + 旋转亮弧两层，比单层描边更醒目 */
+.iptv-spin {
+  position: relative;
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+}
+.iptv-spin::before,
+.iptv-spin::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, .16);
+}
+.iptv-spin::after {
+  border-color: transparent transparent transparent #60a5fa;
+  filter: drop-shadow(0 0 4px rgba(96, 165, 250, .55));
+  animation: iptv-spin-rot .8s linear infinite;
+}
+
+/* 文案：深色胶囊底衬托，压在亮画面上也看得清 */
+.iptv-loading-txt {
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .55);
+  border: 1px solid rgba(255, 255, 255, .14);
+  color: #f1f5f9;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
+
+@keyframes iptv-spin-rot { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .iptv-spin::after { animation-duration: 2s; }
+}
+
 /* 台标缩略图完整显示：共用皮肤是 cover（裁边填满），台标是 logo 不该被裁，改 contain */
 .iptv-root .vpv-pl-thumb img { object-fit: contain; }
 

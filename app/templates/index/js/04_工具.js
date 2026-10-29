@@ -1,4 +1,29 @@
         // ========== 工具 ==========
+        /* 单设备登录：账号在其它设备登录后，本页后续接口会返回 401 + kicked，
+           这里统一跳回登录页并说明原因，避免旧页面继续「静默失败」。 */
+        (function () {
+            if (window.__kickedGuardInstalled || typeof window.fetch !== 'function') return;
+            window.__kickedGuardInstalled = true;
+            const _fetch = window.fetch;
+            window.fetch = function (input, init) {
+                const p = _fetch.apply(this, arguments);
+                try {
+                    const url = typeof input === 'string' ? input : ((input && input.url) || '');
+                    if (url.indexOf('/api/') < 0) return p;
+                } catch (e) { return p; }
+                p.then(res => {
+                    if (!res || res.status !== 401) return;
+                    res.clone().json().then(d => {
+                        if (d && d.login_required) {
+                            const nxt = encodeURIComponent(location.pathname + location.search);
+                            location.href = '/login?' + (d.kicked ? 'kicked=1&' : '') + 'next=' + nxt;
+                        }
+                    }).catch(() => { });
+                }).catch(() => { });
+                return p;
+            };
+        })();
+
         function formatSize(bytes) {
             if (bytes < 1024) return bytes + ' B';
             if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';

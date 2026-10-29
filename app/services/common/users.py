@@ -75,6 +75,12 @@ def _ensure_table():
                 # last_api / last_api_at：最近一次调用的接口（"GET /api/xxx"）及其时间戳
                 ("last_api", "TEXT NOT NULL DEFAULT ''"),
                 ("last_api_at", "INTEGER NOT NULL DEFAULT 0"),
+                # 单设备登录：sess_sid = 当前唯一有效的会话 ID，sess_at 最近活跃时间，
+                # sess_ua 登录设备（User-Agent）。新登录会覆盖，旧设备下次请求即失效。
+                ("sess_sid", "TEXT NOT NULL DEFAULT ''"),
+                ("sess_at", "INTEGER NOT NULL DEFAULT 0"),
+                ("sess_ua", "TEXT NOT NULL DEFAULT ''"),
+                ("sess_ip", "TEXT NOT NULL DEFAULT ''"),
             ):
                 if col in cols:
                     continue
@@ -355,6 +361,154 @@ def touch_login(username: str):
                          (int(time.time()), username))
     except Exception as e:
         _log.warning("记录最近登录时间失败：%s", e)
+
+
+# ------------------------------------------------------------------ 单设备登录
+# 每个账号在 users 表里只保留一个「当前有效会话 ID」。新设备登录写入新 ID，
+# 旧设备的会话 ID 对不上 -> 下次请求即被判定失效、退回登录页。
+_SESSION_IDLE = 30 * 60          # 另一处超过 30 分钟没有动静，视为已离线（登录时不再要求确认）
+_SESSION_TOUCH_GAP = 60          # 活跃时间落库节流：同一账号 60 秒最多写一次
+_sess_touch = {}
+_sess_touch_lock = threading.Lock()
+
+
+def new_session_id() -> str:
+    """生成随机的会话 ID（登录时写入 session 与用户表，作为「唯一在线设备」凭据）。"""
+    import secrets
+    return secrets.token_hex(16)
+
+
+def get_session_info(username: str):
+    """该账号「另一处正在登录」的会话信息；没有 / 已闲置超时返回 None。"""
+    username = (username or "").strip()
+    if not username:
+        return None
+    _ensure_table()
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT sess_sid, sess_at, sess_ua, sess_ip FROM users WHERE username = ?", (username,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    sid = row["sess_sid"] if "sess_sid" in row.keys() else ""
+    at = int((row["sess_at"] if "sess_at" in row.keys() else 0) or 0)
+    ua = (row["sess_ua"] if "sess_ua" in row.keys() else "") or ""
+    ip = (row["sess_ip"] if "sess_ip" in row.keys() else "") or ""
+    if not sid:
+        return None
+    if time.time() - at > _SESSION_IDLE:
+        return None
+    return {"sid": sid, "at": at, "ua": ua, "ip": ip}
+
+
+def set_session(username: str, sid: str, ua: str = "", ip: str = ""):
+    """登记该账号当前唯一有效的会话（登录成功 / 抢占登录时调用）。"""
+    username = (username or "").strip()
+    if not username or not sid:
+        return
+    try:
+        _ensure_table()
+        with store_tx() as conn:
+            conn.execute(
+                "UPDATE users SET sess_sid = ?, sess_at = ?, sess_ua = ?, sess_ip = ?"
+                " WHERE username = ?",
+                (sid, int(time.time()), (ua or "")[:200], (ip or "")[:64], username),
+            )
+        with _sess_touch_lock:
+            _sess_touch[username] = int(time.time())
+    except Exception as e:
+        _log.warning("登记登录会话失败：%s", e)
+
+
+def clear_session(username: str, sid: str = ""):
+    """登出时清掉会话；带 sid 时只在仍是自己那一份时清（不误伤新设备）。"""
+    username = (username or "").strip()
+    if not username:
+        return
+    try:
+        _ensure_table()
+        with store_tx() as conn:
+            if sid:
+                conn.execute(
+                    "UPDATE users SET sess_sid = '', sess_at = 0, sess_ua = ''"
+                    " WHERE username = ? AND sess_sid = ?",
+                    (username, sid),
+                )
+            else:
+                conn.execute(
+                    "UPDATE users SET sess_sid = '', sess_at = 0, sess_ua = '' WHERE username = ?",
+                    (username,),
+                )
+        with _sess_touch_lock:
+            _sess_touch.pop(username, None)
+    except Exception as e:
+        _log.warning("清除登录会话失败：%s", e)
+
+
+def check_session(username: str, sid: str) -> bool:
+    """会话是否仍为「当前唯一在线」的那一份。
+
+    用户表里没有该账号（仅靠 config 凭据兜底登录）时不做限制，返回 True。
+    命中时顺带刷新活跃时间（节流），闲置超时判定才准确。
+    """
+    username = (username or "").strip()
+    if not username or not sid:
+        return True
+    try:
+        _ensure_table()
+        conn = _conn()
+        try:
+            row = conn.execute(
+                "SELECT sess_sid FROM users WHERE username = ?", (username,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return True
+        cur = (row["sess_sid"] if "sess_sid" in row.keys() else "") or ""
+        if not cur:
+            return True                      # 库里没登记（升级前的老会话）：放行
+        if cur != sid:
+            return False                     # 已被别处登录顶掉
+        now = int(time.time())
+        with _sess_touch_lock:
+            last = _sess_touch.get(username, 0)
+            if now - last < _SESSION_TOUCH_GAP:
+                return True
+            _sess_touch[username] = now
+        with store_tx() as conn:
+            conn.execute("UPDATE users SET sess_at = ? WHERE username = ? AND sess_sid = ?",
+                         (now, username, sid))
+        return True
+    except Exception as e:
+        _log.warning("校验登录会话失败（按通过处理）：%s", e)
+        return True
+
+
+def get_user(username: str):
+    """按用户名取账号信息（不校验密码）；不存在返回 None。"""
+    username = (username or "").strip()
+    if not username:
+        return None
+    _ensure_table()
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT username, role, banned, pw_ver FROM users WHERE username = ?", (username,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return {
+        "username": row["username"],
+        "role": row["role"],
+        "banned": bool(int(row["banned"] or 0)),
+        "pw_ver": int((row["pw_ver"] if "pw_ver" in row.keys() else 0) or 0),
+    }
 
 
 def touch_api(username: str, api: str):

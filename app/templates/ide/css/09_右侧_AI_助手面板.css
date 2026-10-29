@@ -726,7 +726,8 @@
   .ai-todo-row .ic { flex: none; font-size: 12px; margin-top: 1px; color: #6e6e76; }
   .ai-todo-row .tx { min-width: 0; word-break: break-word; overflow-wrap: anywhere; }
   .ai-todo-row.in_progress { color: #cfe3f7; }
-  .ai-todo-row.in_progress .ic { color: #7fb3e0; animation: aiTodoSpin 1s linear infinite; }
+  .ai-todo-row.in_progress .ic { color: #7fb3e0; }
+  .ai-todo-row.in_progress .ic::before { display: inline-block; line-height: 1; animation: aiTodoSpin 1s linear infinite; }
   .ai-todo-row.completed { color: #7d8a80; }
   .ai-todo-row.completed .ic { color: #7fd88f; }
   .ai-todo-row.completed .tx { text-decoration: line-through; text-decoration-color: #46564b; }

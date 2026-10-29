@@ -87,6 +87,14 @@
   .ide-modal .m-foot .m-extra:hover { background: #45494e; }
   .ide-modal .m-foot .m-ok { background: #0d7ec4; color: #ffffff; }
   .ide-modal .m-foot .m-ok:hover { background: #0a6aa8; }
+  /* 参数没填全：按钮仍是主色（可点、点了会说清楚缺什么），
+     缺哪几项用左侧的脚注文字提示，不再靠「变灰 / 变暗」误导 */
+  .ide-modal .m-foot .np-need {
+    margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; font-size: 11.5px; color: #d7ba7d;
+  }
+  .ide-modal .m-foot .np-need:empty { display: none; }
+  .ide-modal .m-foot button:disabled { opacity: .6; cursor: not-allowed; }
   .ide-modal .m-foot .m-gen { background: #2d8a4e; color: #ffffff; }
   .ide-modal .m-foot .m-gen:hover { background: #237240; }
   .ide-modal .m-foot .m-gen:disabled { background: #3d5c47; color: #a0a0a0; cursor: not-allowed; }
@@ -130,7 +138,9 @@
   .gr-status-warn { background: #4a3b1a; color: #ffd166; }
   .gr-status-err { background: #4a1e1e; color: #ff7b72; }
   @keyframes grSpin { to { transform: rotate(360deg); } }
-  .gr-status .spin { display: inline-block; animation: grSpin 1s linear infinite; }
+  /* 转的是字形（::before）而不是 <i> 盒子：Bootstrap Icons 给 ::before 加了
+     vertical-align:-.125em，转盒子会绕一个偏下的点转，看起来在「摇」 */
+  .gr-status .spin::before { display: inline-block; line-height: 1; animation: grSpin 1s linear infinite; }
 
   /* 设置远程仓库弹窗：跳转到 Git 认证设置 */
   .gr-creds-btn {
@@ -230,12 +240,14 @@
   .np-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
   .np-lb { flex: none; width: 56px; white-space: nowrap; font-size: 12.5px; color: #b8b8b8; }
   .np-loc { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .np-loc-input, .np-name-input, .np-brief {
+  .np-loc-input, .np-name-input {
     flex: 1; min-width: 0; box-sizing: border-box; height: 30px;
     background: #1b1b1b; color: #e6e6e6; border: 1px solid #3a3a3a; border-radius: 5px;
     padding: 0 9px; font-size: 12.5px; font-family: inherit; outline: none;
   }
-  .np-loc-input:focus, .np-name-input:focus, .np-brief:focus { border-color: #0e639c; }
+  .np-loc-input:focus, .np-name-input:focus, .ide-modal .np-brief:focus { border-color: #0e639c; }
+  /* 必填项为空 / 不合法：点「创建」时直接把出问题的输入框标红 */
+  .np-loc-input.bad, .np-name-input.bad, .ide-modal .np-brief.bad { border-color: #e08a8a !important; }
   /* 初始框架：一行可选的 chips，选中高亮 */
   .np-row-tpl { align-items: flex-start; }
   .np-row-tpl .np-lb { line-height: 28px; }
@@ -251,35 +263,443 @@
   .np-tpl-i.on { background: #0e4a75; border-color: #0e639c; color: #ffffff; }
   .np-tpl-i.on .bi { color: #4fc1ff; }
   .np-brief-row[hidden] { display: none; }
-  /* 创建进度：逐条列出框架里的文件，边写边点亮 */
-  .np-prog {
-    margin-top: 10px; max-height: 170px; overflow: auto;
-    border: 1px solid #3a3a3a; border-radius: 6px; background: #1b1b1b;
+  .np-row-brief { align-items: flex-start; }
+  .np-row-brief .np-lb { line-height: 22px; }
+  /* 「AI 生成」的描述输入：多行 + 常用描述速填 + 字数上限提示 */
+  .np-brief-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+  .ide-modal .np-brief {
+    width: 100%; box-sizing: border-box; min-height: 50px; height: 50px; resize: vertical;
+    margin-top: 0; padding: 6px 9px; line-height: 1.55; font-size: 12.5px; font-family: inherit;
+    background: #1b1b1b; color: #e6e6e6; border: 1px solid #3a3a3a; border-radius: 5px; outline: none;
   }
-  .np-prog[hidden] { display: none; }
+  .np-brief-foot { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+  .np-egs { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+  .np-eg {
+    height: 20px; padding: 0 8px; border-radius: 10px; cursor: pointer; white-space: nowrap;
+    background: transparent; border: 1px dashed #3f3f3f; color: #9a9a9a;
+    font-size: 11px; font-family: inherit; line-height: 1;
+  }
+  .np-eg:hover { border-color: #0e639c; color: #4fc1ff; }
+  .np-brief-cnt { margin-left: auto; flex: none; font-size: 11px; color: #777; }
+  .np-brief-cnt.over { color: #e08a8a; }
+  /* AI 命名：AI 分析描述后给出的候选项目名，点一下选用。
+     注意 .np-row 自带 display:flex，会盖掉 [hidden] 的 UA 样式，所以显式补一条 */
+  .np-row-name[hidden] { display: none; }
+  .np-row-names { align-items: flex-start; }
+  .np-row-names[hidden] { display: none; }
+  .np-row-names .np-lb { line-height: 24px; }
+  .np-names { flex: 1; min-width: 0; }
+  .np-names-hint { display: inline-block; font-size: 11.5px; color: #7f7f7f; line-height: 1.6; }
+  .np-names-sum {
+    display: flex; align-items: flex-start; gap: 5px;
+    margin-bottom: 7px; font-size: 11.5px; line-height: 1.6; color: #9fc7e8;
+  }
+  .np-names-sum .bi { flex: none; margin-top: 1px; color: #4fc1ff; }
+  /* 「选名字」页上的项目规划摘要：先看规划，再挑名字 */
+  .np-plan {
+    margin-bottom: 10px; padding: 8px 10px; border-radius: 6px;
+    background: #1b1b1b; border: 1px solid #333333;
+  }
+  .np-plan:empty { display: none; }
+  .np-plan-sum { display: flex; gap: 5px; margin-bottom: 5px; font-size: 12px; color: #cfe3f2; }
+  .np-plan-sum .bi { flex: none; margin-top: 1px; color: #4fc1ff; }
+  .np-plan-kv { display: flex; gap: 8px; font-size: 11.5px; line-height: 1.7; }
+  .np-plan-kv .k { flex: none; width: 52px; color: #7f7f7f; }
+  .np-plan-kv .v { min-width: 0; color: #b9b9b9; word-break: break-all; }
+  .np-plan-kv .v.mono {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px; color: #a8b8c4;
+  }
+  .np-name-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .np-name-i {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer; max-width: 100%;
+    padding: 5px 10px; border-radius: 6px; font-family: inherit; font-size: 12px;
+    background: #2d2d2d; border: 1px solid #3a3a3a; color: #d0d0d0; text-align: left;
+  }
+  .np-name-i:hover { background: #3a3d41; border-color: #4a4a4a; color: #ffffff; }
+  .np-name-i .bi { flex: none; font-size: 12px; color: #8a8a8a; }
+  .np-name-i .np-name-t { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600; }
+  .np-name-i .np-name-w { font-size: 11px; color: #8e8e8e; }
+  .np-name-i.on { background: #0e4a75; border-color: #0e639c; color: #ffffff; }
+  .np-name-i.on .bi { color: #4fc1ff; }
+  .np-name-i.on .np-name-w { color: #a8d4f0; }
+  .np-name-i.exists { opacity: .5; cursor: not-allowed; }
+  .np-name-i .np-name-x { font-size: 10.5px; color: #d7ba7d; }
+  /* AI 思考过程（新建项目的「AI 分析」阶段） */
+  .np-think {
+    margin-top: 12px; border: 1px solid #333333; border-radius: 6px;
+    background: #1b1b1b; overflow: hidden;
+  }
+  .np-think[hidden] { display: none; }
+  .np-think-hd {
+    display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+    background: #232323; border-bottom: 1px solid #333333;
+    font-size: 11.5px; color: #9fc7e8;
+  }
+  .np-think-hd .bi { color: #4fc1ff; }
+  .np-think-ms {
+    margin-left: auto; font-size: 11px; color: #8a8a8a;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .np-think-body {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 7px 10px; max-height: 150px; overflow: auto;
+  }
+  .np-think-i { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; color: #8f8f8f; }
+  .np-think-i > .bi { flex: none; font-size: 10px; color: #5a5a5a; }
+  .np-think-lb { flex: none; color: #c9c9c9; }
+  .np-think-dt {
+    min-width: 0; color: #8a8a8a;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .np-think-i.ok > .bi { color: #7fc98a; }
+  .np-think-i.run > .bi { color: #4fc1ff; }
+  .np-think-i.run > .bi::before { display: inline-block; line-height: 1; animation: npSpin .9s linear infinite; }
+  .np-think-i.err > .bi { color: #e08a8a; }
+  .np-think-i.err .np-think-lb { color: #e08a8a; }
+
+  /* 新建项目：固定尺寸（构建页要左右分栏，高度翻倍），切换步骤时窗口不再忽大忽小 */
+  .ide-modal.np-modal {
+    position: relative;                 /* 二次确认层的定位基准 */
+    display: flex; flex-direction: column;
+    width: min(78vw, 1120px); height: 90vh;
+    min-width: 640px; min-height: 460px;
+    max-width: 96vw; max-height: 94vh;
+  }
+  /* 关闭二次确认：盖住整个弹窗的一层（只由关闭按钮 / Esc 触发） */
+  .np-confirm {
+    position: absolute; inset: 0; z-index: 6;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, .55);
+  }
+  .np-confirm[hidden] { display: none; }
+  .np-cf {
+    width: 360px; max-width: 86%; box-sizing: border-box;
+    padding: 16px 18px 14px; border-radius: 8px;
+    background: #2b2b2b; border: 1px solid #4a4a4a;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .6);
+  }
+  .np-cf-t {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 9px; font-size: 13px; font-weight: 600; color: #ffffff;
+  }
+  .np-cf-t .bi { color: #d7ba7d; font-size: 13px; }
+  .np-cf-d { font-size: 12.5px; line-height: 1.7; color: #b9b9b9; }
+  .np-cf-f { display: flex; justify-content: flex-end; gap: 8px; margin-top: 15px; }
+  .np-cf-f button {
+    height: 28px; padding: 0 15px; border-radius: 5px; cursor: pointer;
+    font-size: 12.5px; font-family: inherit; border: 1px solid transparent;
+  }
+  .np-cf-no { background: #3a3d41; color: #d0d0d0; }
+  .np-cf-no:hover { background: #45494e; color: #ffffff; }
+  .np-cf-no:focus { outline: none; border-color: #0e639c; }
+  .np-cf-yes { background: #a13131; color: #ffffff; }
+  .np-cf-yes:hover { background: #b93a3a; }
+  .ide-modal.np-modal .m-title,
+  .ide-modal.np-modal .np-info,
+  .ide-modal.np-modal .m-foot { flex: none; }
+  .ide-modal.np-modal .m-body {
+    flex: 1 1 auto; min-height: 0; max-height: none; overflow: auto;
+    display: flex; flex-direction: column;
+  }
+  .ide-modal.np-modal .np-wiz-steps,
+  .ide-modal.np-modal .np-msg { flex: none; }
+  .ide-modal.np-modal .np-page { flex: 1 1 auto; min-height: 0; overflow: auto; }
+  /* 构建页：步骤条下面左右分栏 —— 左「可视化文件夹列表」，右「AI 任务单 + 思考过程」 */
+  .ide-modal.np-modal .np-page[data-p="run"]:not([hidden]) {
+    display: flex; flex-direction: column; gap: 8px; overflow: hidden;
+  }
+  .ide-modal.np-modal .np-page[data-p="run"] .np-steps { flex: none; }
+  .np-split { display: flex; gap: 8px; flex: 1 1 auto; min-height: 0; }
+  .np-split .np-tree-wrap {
+    flex: 1.15 1 0; min-width: 0; display: flex; flex-direction: column;
+  }
+  .np-split .np-tree { flex: 1 1 auto; min-height: 0; max-height: none; }
+  .np-side {
+    flex: 1 1 0; min-width: 0; min-height: 0;
+    display: flex; flex-direction: column; gap: 8px; overflow: hidden;
+  }
+  .np-tasks, .np-live {
+    flex: 1 1 0; min-height: 0; display: flex; flex-direction: column;
+    box-sizing: border-box; border: 1px solid #333333; border-radius: 6px;
+    background: #1b1b1b; overflow: hidden;
+  }
+  /* 右栏高度分配：任务单固定占 38%，思考过程吃掉剩余。
+     必须用 .np-side > 提高优先级 —— 别处的 .np-live{flex:1 1 auto}
+     会把任务单挤成 0 高（表现为「任务清单被顶没了」） */
+  .np-side > .np-tasks { flex: 0 0 38%; min-height: 84px; }
+  .np-side > .np-live { flex: 1 1 0; min-height: 84px; }
+  .np-side-hd {
+    flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+    background: #232323; border-bottom: 1px solid #333333;
+    font-size: 11.5px; color: #cfcfcf;
+  }
+  .np-side-hd .bi { color: #4fc1ff; }
+  .np-tasks-n {
+    margin-left: auto; font-size: 11px; color: #8f8f8f;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .np-tasks-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 6px 8px; }
+  .np-task {
+    display: flex; align-items: baseline; gap: 6px;
+    font-size: 11px; line-height: 1.75; color: #8f8f8f;
+  }
+  .np-task > .bi { flex: none; display: inline-block; font-size: 10px; color: #5a5a5a; }
+  .np-task > span {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .np-task.ok { color: #d8d8d8; }
+  .np-task.ok > .bi { color: #7fc98a; }
+  .np-task-hint { color: #6f6f6f; font-style: italic; }
+  /* 「项目名」这一步：候选 + 可编辑输入 */
+  .np-row-name2 { align-items: center; margin-top: 14px; }
+  .ide-modal .np-name2 {
+    flex: 1 1 auto; min-width: 0; height: 30px; box-sizing: border-box; padding: 0 9px;
+    background: #1b1b1b; color: #e6e6e6; border: 1px solid #3a3a3a; border-radius: 5px;
+    font-size: 12.5px; font-family: inherit; outline: none;
+  }
+  .ide-modal .np-name2:focus { border-color: #0e639c; }
+
+  /* ===== 新建项目向导：一屏一步，顶部步骤条 ===== */
+  .np-wiz-steps {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid #333333;
+  }
+  .np-ws { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+  .np-ws.can-back { cursor: pointer; }
+  .np-ws.can-back:hover .np-ws-t { color: #ffffff; }
+  .np-ws-n {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #2d2d2d; border: 1px solid #3a3a3a; color: #8a8a8a;
+    font-size: 11px; line-height: 1;
+  }
+  .np-ws-t { font-size: 12px; color: #8a8a8a; white-space: nowrap; }
+  .np-ws.cur .np-ws-n { background: #0d7ec4; border-color: #0d7ec4; color: #ffffff; }
+  .np-ws.cur .np-ws-t { color: #ffffff; font-weight: 600; }
+  .np-ws.done .np-ws-n { background: #1d3f2a; border-color: #2f5b3d; color: #8bd39a; }
+  .np-ws.done .np-ws-t { color: #b9d8c1; }
+  .np-ws.err .np-ws-n { background: #3a2020; border-color: #6a3232; color: #e08a8a; }
+  .np-ws.err .np-ws-t { color: #e08a8a; }
+  .np-ws-line { flex: 1 1 8px; min-width: 8px; height: 1px; background: #3a3a3a; }
+  .np-ws-line.done { background: #2f5b3d; }
+  .np-page[hidden] { display: none; }
+  .np-pg-t { font-size: 13px; font-weight: 600; color: #e6e6e6; margin-bottom: 6px; }
+  /* 构建页标题行：左边标题，右边总耗时 */
+  .np-run-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .np-run-hd .np-pg-t { margin-bottom: 0; }
+  .np-run-time {
+    margin-left: auto; flex: none; font-size: 11px; color: #8f8f8f;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .np-pg-d { font-size: 11.5px; line-height: 1.6; color: #8a8a8a; margin-bottom: 12px; }
+  .np-page .np-row { margin-top: 14px; }
+  .ide-modal .np-page[data-p="brief"] .np-brief { height: 86px; min-height: 86px; }
+  /* 底部信息条：左边「即将创建」路径，右边 AI 模型下拉 */
+  .np-info { display: flex; align-items: center; gap: 12px; padding: 0 16px 10px; }
+  .np-path {
+    flex: 1 1 auto; min-width: 0; padding: 0;
+    font-size: 11.5px; color: #8a8a8a; word-break: break-all;
+  }
+  .np-model {
+    flex: none; display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11.5px; color: #8a8a8a; cursor: pointer;
+  }
+  .np-model[hidden] { display: none; }
+  .np-model .bi { color: #4fc1ff; font-size: 12px; }
+  .np-model-sel {
+    max-width: 230px; height: 24px; padding: 0 6px; border-radius: 5px;
+    background: #1b1b1b; color: #d8d8d8; border: 1px solid #3a3a3a;
+    font-size: 11.5px; font-family: inherit; outline: none; cursor: pointer;
+  }
+  .np-model-sel:focus { border-color: #0e639c; }
+  .np-preview-path.dim { color: #8a8a8a; font-weight: 400; }
+  /* 标题栏右上角的「关闭」×（比底部的取消更容易找到） */
+  .ide-modal .m-title .m-x {
+    margin-left: auto; flex: none; width: 22px; height: 22px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; border: none; border-radius: 4px;
+    color: #9a9a9a; font-size: 12px; line-height: 1; cursor: pointer; font-family: inherit;
+  }
+  .ide-modal .m-title .m-x:hover { background: #3a3d41; color: #ffffff; }
+  .ide-modal .m-foot .m-back {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #3a3d41; color: #cccccc;
+  }
+  .ide-modal .m-foot .m-back:hover { background: #45494e; }
+  .ide-modal .m-foot .m-back[hidden] { display: none; }
+
+  /* 执行思考链：AI 生成阶段实时输出，文件树准备好后自动切回目录树 */
+  .np-live {
+    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+    box-sizing: border-box;
+    border: 1px solid #333333; border-radius: 6px; background: #1b1b1b; overflow: hidden;
+  }
+  .np-live[hidden] { display: none; }
+  .np-live-hd {
+    flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+    background: #232323; border-bottom: 1px solid #333333;
+    font-size: 11.5px; color: #cfcfcf;
+  }
+  .np-live-hd .bi { color: #d7ba7d; }
+  .np-live-n {
+    margin-left: auto; font-size: 11px; color: #8f8f8f;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .np-live-body {
+    flex: 1 1 auto; min-height: 0;
+    /* border-box：否则 padding 会把内容撑出容器，出现横向滚动条、末行被挤掉 */
+    box-sizing: border-box;
+    overflow-y: auto; overflow-x: hidden; padding: 8px 10px;
+    font-size: 11.5px; line-height: 1.7; color: #a8b4bf;
+    white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  /* ===== 思考过程：Markdown 渲染（模型输出的是带标题 / 列表 / 代码块的 MD，
+     直接 textContent 会满屏 ** 和 #）===== */
+  .np-live-body > .np-md {
+    white-space: normal;                    /* 父级是 pre-wrap，会把块级排版搞乱 */
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 12px; line-height: 1.78; color: #b6c2ce;
+    word-break: break-word; overflow-wrap: anywhere;
+  }
+  .np-md > :first-child { margin-top: 0; }
+  .np-md > :last-child { margin-bottom: 0; }
+  .np-md h1, .np-md h2, .np-md h3, .np-md h4, .np-md h5, .np-md h6 {
+    margin: 14px 0 6px; font-weight: 600; line-height: 1.45; color: #ffffff;
+  }
+  .np-md h1 {
+    font-size: 15px;
+    background: linear-gradient(90deg, #4fc1ff, #7fe0c0 55%, #d7ba7d);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+  }
+  .np-md h2 {
+    font-size: 13.5px; padding-left: 8px; color: #e8f2fa;
+    border-left: 3px solid #0e639c;
+  }
+  .np-md h3 { font-size: 12.5px; color: #8fd3ff; }
+  .np-md h4, .np-md h5, .np-md h6 { font-size: 12px; color: #9fc7e8; }
+  .np-md p { margin: 7px 0; }
+  .np-md ul, .np-md ol { margin: 6px 0; padding-left: 20px; }
+  .np-md li { margin: 2.5px 0; }
+  .np-md li::marker { color: #4fc1ff; }
+  .np-md li > ul, .np-md li > ol { margin: 2px 0; }
+  .np-md strong { color: #ffffff; font-weight: 600; }
+  .np-md em { color: #d7ba7d; font-style: italic; }
+  .np-md del { color: #7d7d7d; }
+  .np-md a { color: #4fc1ff; text-decoration: underline dotted; }
+  .np-md hr { border: none; border-top: 1px solid #333333; margin: 12px 0; }
+  .np-md code {
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px;
+    background: #2c2c2c; color: #e8c07d; border-radius: 3px; padding: 1px 4px;
+  }
+  .np-md pre {
+    margin: 8px 0; padding: 8px 10px; overflow: auto;
+    background: #141414; border: 1px solid #303030; border-radius: 5px;
+  }
+  .np-md pre code {
+    background: transparent; color: #cfd8dc; padding: 0; border-radius: 0;
+    font-size: 11px; line-height: 1.65; white-space: pre;
+  }
+  .np-md blockquote {
+    margin: 8px 0; padding: 5px 10px; color: #9fc7e8;
+    background: rgba(79, 193, 255, .07);
+    border-left: 3px solid #2b5f80; border-radius: 0 4px 4px 0;
+  }
+  .np-md table { border-collapse: collapse; margin: 8px 0; font-size: 11.5px; }
+  .np-md th, .np-md td { border: 1px solid #343434; padding: 4px 8px; }
+  .np-md th { background: #262626; color: #e6e6e6; font-weight: 600; }
+  .np-md img { max-width: 100%; border-radius: 4px; }
+  .np-md input[type="checkbox"] { margin-right: 5px; vertical-align: -1px; }
+  /* 逐文件生成时的等待占位（还没吐任何思考/正文） */
+  .np-live-body > .np-wait {
+    color: #7f8c99; font-size: 11.5px; line-height: 1.7;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  /* 流式输出时末尾闪烁光标，表示「还在写」 */
+  .np-live-body.np-stream .np-md > :last-child::after {
+    content: ""; display: inline-block; width: 6px; height: 12px; margin-left: 3px;
+    background: #4fc1ff; vertical-align: -2px;
+    animation: npCaret 1s steps(1) infinite;
+  }
+  @keyframes npCaret { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+
+  /* 创建过程：步骤条 + 文件树（目录/文件逐个点亮） */
+  .np-run { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .np-run[hidden] { display: none; }
+  .np-steps { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding-bottom: 2px; }
+  /* 每步等宽 + 耗时靠右对齐：各步耗时数字才会排成一列（否则跟着标签长度左飘） */
+  .np-step {
+    flex: 1 1 0; min-width: 0; display: inline-flex; align-items: center; gap: 5px; height: 22px;
+    padding: 0 9px 0 7px; border-radius: 11px; white-space: nowrap;
+    background: #232323; border: 1px solid #333333; color: #7d7d7d; font-size: 11.5px;
+    transition: color .15s ease, background .15s ease, border-color .15s ease;
+  }
+  .np-step-lb { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .np-step-d { display: inline-flex; font-size: 11px; }
+  /* <i> 默认是 inline，transform / animation 对 inline 元素不生效（表现为图标不转），
+     所以所有会转圈的图标都要显式设成 inline-block */
+  .np-step-d i, .np-tr-st, .np-prog-ic .bi {
+    display: inline-block; line-height: 1; transform-origin: 50% 50%;
+  }
+  .np-step-t {
+    flex: none; margin-left: auto; min-width: 38px; text-align: right;
+    font-size: 10px; color: #7a7a7a;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;   /* 数字等宽，0.0s / 114.1s 位数不同也对齐 */
+  }
+  .np-step.ok .np-step-t { color: #9fe0b0; }
+  .np-step.err .np-step-t { color: #e08a8a; }
+  .np-step.pending { color: #6b6b6b; }
+  .np-step.run { color: #8fd3ff; background: #16323f; border-color: #2b5f80; }
+  .np-step.run .np-step-d i::before { display: inline-block; line-height: 1; animation: npSpin .9s linear infinite; }
+  .np-step.ok { color: #9fe0b0; background: #1c2f24; border-color: #2f5b3d; }
+  .np-step.err { color: #f0b8b8; background: #332020; border-color: #6a3232; }
+  .np-step-line { flex: 0 0 10px; height: 1px; background: #3a3a3a; }
+  @keyframes npSpin { to { transform: rotate(360deg); } }
+  .np-tree-wrap {
+    border: 1px solid #3a3a3a; border-radius: 6px; background: #1b1b1b; overflow: hidden;
+  }
   .np-prog-hd {
-    position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 7px;
+    display: flex; align-items: center; gap: 7px;
     padding: 6px 10px; background: #232323; border-bottom: 1px solid #3a3a3a;
     font-size: 12px; color: #cfcfcf;
   }
   .np-prog-ic { display: inline-flex; color: #4fc3f7; }
   .np-prog-ic .bi { display: inline-block; }
-  .np-prog-ic.loading .bi { animation: npSpin .9s linear infinite; }
+  .np-prog-ic.loading .bi::before { display: inline-block; line-height: 1; animation: npSpin .9s linear infinite; }
   .np-prog-ic.ok { color: #7fc98a; }
   .np-prog-ic.err { color: #e08a8a; }
-  @keyframes npSpin { to { transform: rotate(360deg); } }
   .np-prog-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .np-prog-list { padding: 4px 0; }
-  .np-prog-i {
-    display: flex; align-items: center; gap: 7px; padding: 3px 10px;
-    font-size: 12px; color: #8f8f8f;
+  .np-prog-num {
+    flex: none; margin-left: auto; font-size: 11px; color: #8f8f8f;
     font-family: ui-monospace, Menlo, Consolas, monospace;
   }
-  .np-prog-i .bi { flex: none; font-size: 11px; color: #5a5a5a; }
-  .np-prog-i span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .np-prog-i.ok { color: #d8d8d8; }
-  .np-prog-i.ok .bi { color: #7fc98a; }
-  .np-prog-i.bad .bi { color: #e08a8a; }
+  .np-tree { max-height: 196px; overflow: auto; padding: 4px 0; }
+  .np-tr {
+    display: flex; align-items: center; gap: 5px; height: 21px; padding-right: 10px;
+    font-size: 12px; color: #8f8f8f; cursor: default; user-select: none;
+  }
+  .np-tr:hover { background: #262626; }
+  .np-tr.dir { cursor: pointer; }
+  .np-tr-car { flex: none; width: 10px; font-size: 9px; color: #7a7a7a; transition: transform .12s ease; }
+  .np-tr.collapsed .np-tr-car { transform: rotate(-90deg); }
+  .np-tr-ic { flex: none; display: inline-flex; font-size: 13px; }
+  .np-tr-nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .np-tr-sz { flex: none; margin-left: auto; padding-left: 8px; font-size: 10.5px; color: #6f6f6f;
+    font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .np-tr-st { flex: none; font-size: 11px; color: #4a4a4a; }
+  .np-tr.pending { color: #6f6f6f; }
+  .np-tr.run { color: #d6ecff; background: rgba(79, 193, 255, .10); }
+  .np-tr.run .np-tr-st { color: #4fc1ff; }
+  .np-tr.run .np-tr-st::before { display: inline-block; line-height: 1; animation: npSpin .9s linear infinite; }
+  .np-tr.ok { color: #d8d8d8; }
+  .np-tr.ok .np-tr-st { color: #7fc98a; }
+  .np-tr.bad { color: #f0b8b8; }
+  .np-tr.bad .np-tr-st { color: #e08a8a; }
+  .np-tr.dir .np-tr-nm { color: #d7ba7d; font-weight: 600; }
   .np-pick {
     flex: none; width: 30px; height: 30px; border-radius: 5px; cursor: pointer;
     background: #2d2d2d; border: 1px solid #3a3a3a; color: #e0e0e0;

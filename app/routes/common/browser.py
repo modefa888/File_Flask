@@ -153,11 +153,368 @@ def api_recent_folders_remove():
 
 
 _PROJECT_BRIEF_MAX = 500         # 「AI 生成」时项目描述的字符上限
-_PROJECT_AI_TIMEOUT = 90         # 调 AI 生成脚手架的超时秒数
+_PROJECT_AI_TIMEOUT = 300        # 调 AI 生成脚手架的超时秒数（写整个项目较慢，给足 5 分钟）
+
+# 「AI 接口超时」的提示统一在一处：告诉用户可以换更快的模型
+_TIMEOUT_HINT = ("AI 响应超时（超过 %ds 没有返回）。可以在弹窗底部把模型换成更快的，"
+                 "或者把项目描述写短一点再试。" % _PROJECT_AI_TIMEOUT)
 
 
-def _ai_generate_files(brief, name):
+def _is_timeout(e):
+    s = str(e).lower()
+    return "timed out" in s or "timeout" in s
+
+
+def _ai_stream_text(req, emit=None, on_text=None, meta=None):
+    """读上游 SSE 流：reasoning 实时抛出，正文片段交给 on_text，最后返回完整正文。
+
+    emit 收到两种事件：
+      {"stage":"think","kind":"reason","text":"..."}  模型的 reasoning_content 片段
+      {"stage":"think","kind":"body","n":已接收字数}   正文进度（模型没给思考时也能看到在动）
+    on_text(chunk) 用于「边生成边解析」（Agent 构建时按 <write> 块逐个落盘）。
+    meta（可选 dict）：回填 finish（finish_reason）与 reason_chars（思考总字数）——
+    用来区分「模型没按协议写」和「思考把 token 吃光了、正文被截断」这两种失败。
+    """
+    import urllib.request
+    resp = urllib.request.urlopen(req, timeout=_PROJECT_AI_TIMEOUT)
+    parts, n, last_n, rn = [], 0, 0, 0
+    for raw in resp:
+        line = raw.decode("utf-8", "ignore").strip()
+        if not line or not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            break
+        try:
+            obj = json.loads(data)
+        except Exception:
+            continue
+        ch = (obj.get("choices") or [{}])[0] or {}
+        fr = ch.get("finish_reason")
+        if fr and meta is not None:
+            meta["finish"] = fr
+        delta = ch.get("delta") or {}
+        think = delta.get("reasoning_content") or delta.get("reasoning") or ""
+        if think:
+            rn += len(think)
+            if meta is not None:
+                meta["reason_chars"] = rn
+            if emit:
+                emit({"stage": "think", "kind": "reason", "text": think})
+        chunk = delta.get("content") or ""
+        if chunk:
+            parts.append(chunk)
+            n += len(chunk)
+            if on_text is not None:
+                try:
+                    on_text(chunk)
+                except Exception:
+                    pass
+            if emit and n - last_n >= 400:     # 正文进度节流，别把 SSE 刷爆
+                last_n = n
+                emit({"stage": "think", "kind": "body", "n": n})
+    return "".join(parts)
+
+
+def _ai_stream_once(req, emit):
+    """兼容旧调用：只取完整正文。"""
+    return _ai_stream_text(req, emit)
+
+
+# 从模型输出里抠出 <plan> / <write path="..."> 两种块。
+# path 后的引号放宽：模型很爱写成 path=app.py、path='app.py'，严格匹配会整单 0 文件。
+_RE_PLAN = re.compile(r"<plan>(.*?)</plan>", re.S)
+_RE_WRITE = re.compile(r"""<write\s+path\s*=\s*["']?([^"'\s>]+)["']?\s*>(.*?)</write>""", re.S)
+
+
+def _ai_plan_files(provider, model, brief, name, emit=None):
+    """构建前的「快速规划」：只让模型给文件清单（不写内容），返回 ([{path,role}], error)。
+
+    同样走流式：规划阶段也要能看到模型的思考在动，否则前几十秒一片空白像卡死。
+    """
+    from ..ide.ai import _log_ai_call
+    import urllib.error
+    import urllib.request
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    user = f"[项目名]\n{name}\n\n[项目描述]\n{brief}"
+    body = json.dumps({"model": model, "stream": True, "messages": [
+        {"role": "system", "content": scaffold.AI_PLAN_SYS},
+        {"role": "user", "content": user}]}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST", headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+    t0 = time.time()
+    text, err = "", ""
+    try:
+        text = _ai_stream_text(req, emit)
+    except urllib.error.HTTPError as e:
+        err = f"AI 接口返回 {e.code}：{e.read().decode('utf-8', 'ignore')[:160]}"
+    except Exception as e:
+        err = "规划超时" if _is_timeout(e) else f"规划失败：{str(e)}"
+
+    items = scaffold.parse_plan(text) if text else []
+    _log_ai_call("scaffold", bool(items), int((time.time() - t0) * 1000),
+                 err or ("" if items else "规划没有返回文件清单"), model, 0, 0, True,
+                 req=user[:600], resp=text[:900])
+    if not items:
+        return [], err or "规划没有返回文件清单"
+    return items, ""
+
+
+def _ai_file_content(provider, model, brief, name, plan, path, role, done, emit=None):
+    """逐文件生成：一次请求只写一个文件，写完立刻落盘（不用等整个项目吐完）。
+
+    用流式请求：思考片段 / 正文进度都能实时推给前端，等一个文件时不会像卡死。
+    返回 (内容, 错误)。内容会去掉模型套在外面的 ``` 围栏。
+    """
+    lines = ["[项目名] " + name, "[项目描述] " + brief, "", "[完整文件清单]"]
+    for x in plan:
+        lines.append("- " + x["path"] + ("（" + x["role"] + "）" if x.get("role") else ""))
+    lines.append("")
+    lines.append("[本次要写] " + path + ("（" + role + "）" if role else ""))
+    if done:
+        lines.append("")
+        lines.append("[已经写好的文件，注意与它们风格一致、接口对得上] " + "、".join(done))
+    lines.append("")
+    lines.append("只输出这个文件的完整内容，不要任何解释与围栏。")
+
+    import urllib.error
+    import urllib.request
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    body = json.dumps({"model": model, "stream": True, "messages": [
+        {"role": "system", "content": scaffold.AI_FILE_SYS},
+        {"role": "user", "content": "\n".join(lines)}]}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST", headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+    try:
+        text = _ai_stream_text(req, emit)
+        return scaffold.strip_fences(text), ""
+    except urllib.error.HTTPError as e:
+        return "", f"AI 接口返回 {e.code}：{e.read().decode('utf-8', 'ignore')[:160]}"
+    except Exception as e:
+        return "", ("AI 响应超时" if _is_timeout(e) else f"调用 AI 接口失败：{str(e)}")
+
+
+def _ai_agent_build(info, sel=None, emit=None):
+    """Agent 式构建：模型边生成，我们边按 <write path> 落盘，目录树实时生长。
+
+    与「一次性返回整个 JSON」相比：不用等全部输出完才动笔，也不会因为 JSON 被截断
+    就整单失败；单个文件写完立刻可见、可校验。
+
+    返回 {"written","dirs","skipped","items","bytes","error"}。
+    """
+    from ..ide.ai import _load_cfg, _sys_pick, _log_ai_call   # 函数内导入，避免模块循环依赖
+    cfg = _load_cfg()
+    provider, model, err = _sys_pick(cfg, "scaffold")
+    if err:
+        return {"error": err}
+    provider, model = _apply_ai_pick(cfg, provider, model, sel)
+
+    import urllib.request
+    target, brief, name = info["target"], info["brief"], info["name"]
+    try:
+        os.makedirs(target, exist_ok=True)
+    except Exception as e:
+        return {"error": f"创建项目目录失败：{e}"}
+
+    def _cleanup_empty():
+        """失败时别留一堆空目录：规划阶段已经把目录建出来了，全空比没有更像“卡住了”。"""
+        try:
+            if not os.path.isdir(target):
+                return
+            for d in sorted(st["dirs"], key=lambda x: x.count("/"), reverse=True):
+                p = os.path.join(target, d)
+                try:
+                    if os.path.isdir(p) and not os.listdir(p):
+                        os.rmdir(p)
+                except Exception:
+                    pass
+            if not os.listdir(target):
+                os.rmdir(target)
+        except Exception:
+            pass
+
+    t0 = time.time()
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+
+    st = {"buf": "", "plan": [], "plan_sent": False, "written": [], "dirs": [],
+          "skipped": [], "items": [], "bytes": 0}
+
+    def _send_plan(paths):
+        if st["plan_sent"] or not paths:
+            return
+        st["plan_sent"] = True
+        st["plan"] = paths
+        dirs = scaffold.plan_dirs([{"path": p} for p in paths])
+        for d in dirs:
+            if d not in st["dirs"]:
+                st["dirs"].append(d)
+        if emit:
+            emit({"stage": "plan",
+                  "items": [{"path": p, "size": 0} for p in paths],
+                  "files": paths, "dirs": dirs, "skipped": [],
+                  "n": len(paths), "nd": len(dirs), "bytes": 0,
+                  "msg": f"已规划 {len(paths)} 个文件，正在逐个生成…"})
+
+    # ① 先做一次「只出清单」的轻量规划：几秒内就把目录树画出来、目录先建好。
+    #    规划失败（模型抽风 / 接口报错）就直接跳过，退回「边写边长树」的老路径。
+    plan_items = []
+    if emit and brief:
+        plan_items, _plan_err = _ai_plan_files(provider, model, brief, name, emit)
+        if plan_items:
+            _send_plan([x["path"] for x in plan_items])
+            for i, d in enumerate(st["dirs"], 1):
+                try:
+                    os.makedirs(os.path.join(target, d), exist_ok=True)
+                except Exception:
+                    pass
+                emit({"stage": "dir", "path": d, "i": i, "n": len(st["dirs"])})
+
+    def _write(path, content):
+        # 单次调用没法累计总量，这里自己兜住「文件数 / 总体量」上限，防止模型刷屏
+        if len(st["written"]) >= scaffold.MAX_FILES or st["bytes"] >= scaffold.MAX_TOTAL_BYTES:
+            st["skipped"].append(path)
+            return
+        prepared, sk = scaffold.prepare_manifest(target, [{"path": path, "content": content}])
+        if sk:
+            st["skipped"].extend(sk)
+        if not prepared:
+            return
+        written, failed = scaffold.write_prepared(prepared)
+        if failed:
+            st["skipped"].extend(failed)
+        if not written:
+            return
+        it = prepared[0]
+        st["written"].append(it["path"])
+        st["items"].append({"path": it["path"], "size": it["bytes"]})
+        st["bytes"] += it["bytes"]
+        for d in scaffold.plan_dirs([{"path": it["path"]}]):
+            if d not in st["dirs"]:
+                st["dirs"].append(d)
+        if emit:
+            emit({"stage": "file", "path": it["path"], "i": len(st["written"]),
+                  "n": max(len(st["plan"]), len(st["written"])), "ok": True,
+                  "size": it["bytes"]})
+
+    def _feed(chunk):
+        st["buf"] += chunk
+        # <plan> 块不管有没有提前发过，都要从缓冲里摘掉，否则它会挡住后面 <write> 的匹配
+        m = _RE_PLAN.search(st["buf"])
+        if m:
+            paths = []
+            for line in m.group(1).splitlines():
+                line = line.strip().lstrip("-*+ ").strip()
+                if not line:
+                    continue
+                # 模型常写成 `- app.py`、`**app.py**`、反引号包裹，统一剥掉修饰符
+                p = line.split("|")[0].strip().strip("`*_\"' \t").strip()
+                if p:
+                    paths.append(p)
+            st["buf"] = st["buf"][m.end():]
+            if not st["plan_sent"]:
+                _send_plan(paths)
+        while True:
+            m = _RE_WRITE.search(st["buf"])
+            if not m:
+                break
+            path, content = m.group(1).strip(), m.group(2)
+            st["buf"] = st["buf"][m.end():]
+            if not st["plan_sent"]:            # 模型没给 <plan>：先用第一个文件占个位
+                st["plan"] = [path]
+                _send_plan([path])
+            _write(path, content)
+
+    text, aerr = "", ""
+    meta = {}                                  # finish / reason_chars，用于区分失败原因
+    if plan_items:
+        # ② 逐文件生成：一个文件一次请求，写完立刻落盘 → 目录树逐个点亮。
+        #    不再赌「模型会不会一口气把整个项目吐完」—— 思考型模型经常吐到一半就断了。
+        total = len(plan_items)
+        last_err = ""
+        for i, it in enumerate(plan_items, 1):
+            p = it["path"]
+            if emit:
+                emit({"stage": "gen", "path": p, "i": i, "n": total})
+            content, ferr = _ai_file_content(provider, model, brief, name, plan_items,
+                                             p, it.get("role", ""), st["written"], emit)
+            if not (content or "").strip():
+                last_err = ferr or "模型没有返回这个文件的内容"
+                st["skipped"].append(p)
+                if emit:
+                    emit({"stage": "file", "path": p, "i": i, "n": total,
+                          "ok": False, "size": 0})
+                continue
+            _write(p, content)
+        if not st["written"]:
+            aerr = last_err or "所有文件都没生成出来，换个模型再试"
+    else:
+        # ② 老路：一次流式请求，模型边吐 <plan>/<write> 边落盘（拿不到清单时兜底）
+        # 刻意不传 max_tokens：思考型模型会把额度几乎全花在 reasoning 上，正文没开始就被截断。
+        body = json.dumps({"model": model, "stream": True, "messages": [
+            {"role": "system", "content": scaffold.AI_AGENT_SYS},
+            {"role": "user", "content": f"[项目名]\n{name}\n\n[项目描述]\n{brief}"}]}).encode("utf-8")
+        req = urllib.request.Request(url, data=body, method="POST", headers={
+            "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+        import urllib.error
+        try:
+            text = _ai_stream_text(req, emit, on_text=_feed, meta=meta)
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "ignore")[:200]
+            aerr = f"AI 接口返回 {e.code}：{detail}"
+        except Exception as e:
+            aerr = _TIMEOUT_HINT if _is_timeout(e) else f"调用 AI 接口失败：{str(e)}"
+
+        # 兜底：模型没按 <write> 协议写（比如回了老格式的 JSON），再用通用解析试一次
+        if not st["written"] and not aerr:
+            files = scaffold.parse_manifest(text)
+            if files:
+                st["plan"] = [f["path"] for f in files]
+                _send_plan(st["plan"])
+                for f in files:
+                    _write(f["path"], f["content"])
+
+    if aerr and not st["written"]:
+        _cleanup_empty()
+        _log_ai_call("scaffold", False, int((time.time() - t0) * 1000), aerr, model)
+        return {"error": aerr}
+    if not st["written"]:
+        _cleanup_empty()
+        if meta.get("finish") == "length":
+            # 思考型模型的典型翻车：token 预算被 reasoning 吃光，正文没开始就截断了
+            msg = ("模型的输出被截断了：它把 token 预算几乎全用在思考上（已思考 %d 字），"
+                   "还没开始写文件就停了。请把底部模型换成不思考的（如 gpt-4o-mini / "
+                   "deepseek-chat），或把项目描述写短一点再试。" % (meta.get("reason_chars") or 0))
+        else:
+            msg = "Agent 没有写出任何文件，请换个说法或换个模型"
+        _log_ai_call("scaffold", False, int((time.time() - t0) * 1000), msg, model)
+        return {"error": msg}
+
+    _log_ai_call("scaffold", True, int((time.time() - t0) * 1000), "",
+                 model, 0, 0, True, req=brief[:600], resp=text[:1200])
+    return {"written": st["written"], "dirs": st["dirs"], "skipped": st["skipped"],
+            "items": st["items"], "bytes": st["bytes"], "error": ""}
+
+
+def _apply_ai_pick(cfg, provider, model, sel):
+    """请求里带了 provider_id / model 时临时改用这个模型（弹窗底部的模型下拉）。"""
+    if not isinstance(sel, dict) or not (sel.get("provider_id") or sel.get("model")):
+        return provider, model
+    try:
+        from ..ide.ai import _override_pick       # 与 AI 面板共用同一套覆盖逻辑
+        return _override_pick(cfg, provider, model, sel)
+    except Exception:
+        return provider, model
+
+
+def _ai_generate_files(brief, name, plan=None, sel=None, emit=None):
     """用系统 AI 按一句话描述生成项目文件清单。
+
+    plan 是可选的项目规划（{summary, stack, modules, tree}），带上会让生成更贴合规划。
+    sel 是可选的手动指定模型 {"provider_id","model"}（弹窗底部下拉选的）。
+    emit 是可选回调：给了就走流式，边生成边把思考过程推给前端（见 _ai_stream_once）。
 
     返回 (files, error)；error 非空时 files 为空、调用方应直接报错。
     统一走 _sys_pick：自动跟随「设置 → 系统 AI」选定的接口/模型，
@@ -168,6 +525,7 @@ def _ai_generate_files(brief, name):
     provider, model, err = _sys_pick(cfg, "scaffold")
     if err:
         return [], err
+    provider, model = _apply_ai_pick(cfg, provider, model, sel)
 
     t0 = time.time()
 
@@ -179,9 +537,114 @@ def _ai_generate_files(brief, name):
     base = provider["base_url"].rstrip("/")
     url = base if base.endswith("/chat/completions") else base + "/chat/completions"
     user = f"[项目名]\n{name}\n\n[项目描述]\n{brief}"
-    # max_tokens 给足：脚手架是一个较大的 JSON，太小会被截断成非法 JSON
-    payload = json.dumps({"model": model, "stream": False, "max_tokens": 8192, "messages": [
-        {"role": "system", "content": scaffold.AI_SYS},
+    if isinstance(plan, dict):
+        lines = []
+        if plan.get("summary"):
+            lines.append("概括：" + str(plan["summary"])[:120])
+        if plan.get("stack"):
+            lines.append("技术栈：" + "、".join(map(str, plan["stack"]))[:200])
+        if plan.get("modules"):
+            lines.append("功能模块：" + "、".join(map(str, plan["modules"]))[:200])
+        if plan.get("tree"):
+            lines.append("计划文件：" + "、".join(map(str, plan["tree"]))[:300])
+        if lines:
+            user += ("\n\n[已确认的项目规划]\n" + "\n".join(lines) +
+                     "\n请严格按这份规划生成文件：技术栈、功能模块、目录结构都要对得上。")
+    import urllib.error
+    import urllib.request
+
+    sys_text = scaffold.AI_SYS
+
+    def _post(stream):
+        # max_tokens 给足：脚手架是一个较大的 JSON，太小会被截断成非法 JSON
+        body = json.dumps({
+            "model": model, "stream": bool(stream), "max_tokens": 8192,
+            "messages": [{"role": "system", "content": sys_text},
+                         {"role": "user", "content": user}],
+        }).encode("utf-8")
+        return urllib.request.Request(url, data=body, method="POST", headers={
+            "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+
+    last_text = ""
+    for attempt in (1, 2):
+        sys_text = scaffold.AI_SYS
+        if attempt == 2:
+            # 第一次的输出解析不出来：再要一次，这次把格式要求说得更死
+            sys_text += ("\n\n注意：上一次的输出无法被解析。这次务必只输出一个合法的 JSON 对象，"
+                         "不要任何解释、不要 Markdown 代码块、不要在 JSON 前后加任何文字。")
+            if emit is not None:                 # 让前端知道「正在重试」，不是卡住了
+                try:
+                    emit({"stage": "think", "kind": "reason",
+                          "text": "\n\n—— 上一次输出无法解析，正在重试一次 ——\n"})
+                except Exception:
+                    pass
+        obj, text = {}, ""
+        try:
+            if emit is not None:
+                # 有回调就走流式：一边生成一边把思考过程推给前端
+                try:
+                    text = _ai_stream_once(_post(True), emit)
+                except urllib.error.HTTPError:
+                    raise
+                except Exception:
+                    text = ""              # 该模型不支持流式 → 退回一次性请求
+            if not text.strip():
+                resp = urllib.request.urlopen(_post(False), timeout=_PROJECT_AI_TIMEOUT)
+                obj = json.loads(resp.read().decode("utf-8"))
+                text = (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "ignore")[:200]
+            return _fail(f"AI 接口返回 {e.code}：{detail}")
+        except Exception as e:
+            return _fail(_TIMEOUT_HINT if _is_timeout(e) else f"调用 AI 接口失败：{str(e)}")
+
+        last_text = text
+        files = scaffold.parse_manifest(text)
+        if files:
+            u = obj.get("usage") or {}
+            tin, tout, est = u.get("prompt_tokens") or 0, u.get("completion_tokens") or 0, False
+            if not (tin or tout):                    # 没给 usage 就按字数兜底估算
+                from ..ide.ai import _estimate_msgs, _estimate_tokens
+                tin = _estimate_msgs([{"role": "system", "content": sys_text},
+                                      {"role": "user", "content": user}])
+                tout, est = _estimate_tokens(text), True
+            _log_ai_call("scaffold", True, int((time.time() - t0) * 1000), "",
+                         str(obj.get("model") or model), tin, tout, est, req=user, resp=text)
+            return files, ""
+
+    snippet = " ".join((last_text or "").split())[:160]
+    return _fail("AI 没有返回可解析的文件清单" +
+                 (f"（原始返回：{snippet}）" if snippet
+                  else "（返回为空，请检查模型是否可用、额度是否足够）"))
+
+
+def _ai_project_names(brief):
+    """「AI 生成」第一步：按一句话描述产出几个候选项目名，返回 (payload, error)。
+
+    payload = {"summary", "names", "ms", "out_tokens", "model"}，前端用它展示
+    「AI 思考过程」里的真实耗时 / token 数。
+
+    与 _ai_generate_files 分开调用：先让用户挑名字，再按定下的名字生成文件，
+    这样 README / 包名 / 目录名三者一致，不需要创建完再改名。
+    """
+    from ..ide.ai import _load_cfg, _sys_pick, _log_ai_call   # 函数内导入，避免模块循环依赖
+    cfg = _load_cfg()
+    provider, model, err = _sys_pick(cfg, "scaffold")
+    if err:
+        return None, err
+
+    t0 = time.time()
+
+    def _fail(msg):
+        _log_ai_call("scaffold", False, int((time.time() - t0) * 1000), msg, model)
+        return None, msg
+
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    user = f"[项目描述]\n{brief}"
+    # 这一步要「先规划再命名」，输出比单纯的名单大一些，token 给足避免被截断
+    payload = json.dumps({"model": model, "stream": False, "max_tokens": 1200, "messages": [
+        {"role": "system", "content": scaffold.AI_NAME_SYS},
         {"role": "user", "content": user}]}).encode("utf-8")
 
     import urllib.error
@@ -196,22 +659,115 @@ def _ai_generate_files(brief, name):
         detail = e.read().decode("utf-8", "ignore")[:200]
         return _fail(f"AI 接口返回 {e.code}：{detail}")
     except Exception as e:
-        return _fail(f"调用 AI 接口失败：{str(e)}")
+        return _fail(_TIMEOUT_HINT if _is_timeout(e) else f"调用 AI 接口失败：{str(e)}")
 
-    files = scaffold.parse_manifest(text)
-    if not files:
-        return _fail("AI 没有返回可用的文件清单，请换个说法或换个模型")
+    plan = scaffold.parse_plan(text)
+    if not plan["names"]:
+        snippet = (text or "").strip().replace("\n", " ")[:120]
+        return _fail("AI 没能给出可用的项目名" +
+                     (f"（原始返回：{snippet}）" if snippet else "（返回为空）"))
 
     u = obj.get("usage") or {}
     tin, tout, est = u.get("prompt_tokens") or 0, u.get("completion_tokens") or 0, False
-    if not (tin or tout):                            # 没给 usage 就按字数兜底估算
+    if not (tin or tout):
         from ..ide.ai import _estimate_msgs, _estimate_tokens
-        tin = _estimate_msgs([{"role": "system", "content": scaffold.AI_SYS},
+        tin = _estimate_msgs([{"role": "system", "content": scaffold.AI_NAME_SYS},
+                              {"role": "user", "content": user}])
+        tout, est = _estimate_tokens(text), True
+    ms = int((time.time() - t0) * 1000)
+    _log_ai_call("scaffold", True, ms, "",
+                 str(obj.get("model") or model), tin, tout, est, req=user, resp=text)
+    return {"summary": plan["summary"], "stack": plan["stack"], "modules": plan["modules"],
+            "tree": plan["tree"], "names": plan["names"], "ms": ms, "out_tokens": tout,
+            "model": str(obj.get("model") or model)}, ""
+
+
+def _temp_project_name():
+    """临时项目名：14 字节随机 → 28 位十六进制。
+
+    先落一个不会重名、不含中文的目录把项目建起来，等代码写完之后再由 AI
+    根据实际生成的内容起正式名（见 _ai_final_name），失败也还有这个名字兜底。
+    """
+    import secrets
+    return secrets.token_hex(14)
+
+
+def _pick_free_name(parent_abs, names):
+    """从候选里挑第一个在 parent 下不冲突的名字；都不行返回空串。"""
+    for it in names or []:
+        nm = str(it.get("name") if isinstance(it, dict) else it or "").strip()
+        if not nm or "/" in nm or nm in (".", ".."):
+            continue
+        if not os.path.exists(os.path.join(parent_abs, nm)):
+            return nm
+    return ""
+
+
+def _ai_final_name(brief, files, sel=None):
+    """项目写完后：根据实际生成出来的代码给项目起名，返回 (names, error)。
+
+    names 是候选列表（主名在前）；失败时调用方保留 28 位临时名即可，不算致命错误。
+    """
+    from ..ide.ai import _load_cfg, _sys_pick, _log_ai_call   # 函数内导入，避免模块循环依赖
+    cfg = _load_cfg()
+    provider, model, err = _sys_pick(cfg, "scaffold")
+    if err:
+        return [], err
+    provider, model = _apply_ai_pick(cfg, provider, model, sel)
+
+    t0 = time.time()
+
+    def _fail(msg):
+        _log_ai_call("scaffold", False, int((time.time() - t0) * 1000), msg, model)
+        return [], msg
+
+    paths = ["- " + str(f.get("path") or "") for f in (files or [])[:20]]
+    sample, used = [], 0
+    for f in (files or [])[:6]:
+        p = str(f.get("path") or "")
+        if not p.lower().endswith((".md", ".py", ".js", ".ts", ".html", ".json", ".txt", ".css")):
+            continue
+        sample.append(f"--- {p} ---\n" + str(f.get("content") or "")[:320])
+        used += len(sample[-1])
+        if used > 1200:
+            break
+    user = (f"[原始需求]\n{brief}\n\n[生成的文件]\n" + "\n".join(paths) +
+            ("\n\n[文件开头片段]\n" + "\n\n".join(sample) if sample else ""))
+
+    base = provider["base_url"].rstrip("/")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    payload = json.dumps({"model": model, "stream": False, "max_tokens": 400, "messages": [
+        {"role": "system", "content": scaffold.AI_FINAL_NAME_SYS},
+        {"role": "user", "content": user}]}).encode("utf-8")
+
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(url, data=payload, method="POST", headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
+    try:
+        resp = urllib.request.urlopen(req, timeout=_PROJECT_AI_TIMEOUT)
+        obj = json.loads(resp.read().decode("utf-8"))
+        text = (((obj.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")[:200]
+        return _fail(f"AI 接口返回 {e.code}：{detail}")
+    except Exception as e:
+        return _fail(_TIMEOUT_HINT if _is_timeout(e) else f"调用 AI 接口失败：{str(e)}")
+
+    names = scaffold.parse_final_name(text)
+    if not names:
+        return _fail("AI 没能给出可用的项目名")
+
+    u = obj.get("usage") or {}
+    tin, tout, est = u.get("prompt_tokens") or 0, u.get("completion_tokens") or 0, False
+    if not (tin or tout):
+        from ..ide.ai import _estimate_msgs, _estimate_tokens
+        tin = _estimate_msgs([{"role": "system", "content": scaffold.AI_FINAL_NAME_SYS},
                               {"role": "user", "content": user}])
         tout, est = _estimate_tokens(text), True
     _log_ai_call("scaffold", True, int((time.time() - t0) * 1000), "",
                  str(obj.get("model") or model), tin, tout, est, req=user, resp=text)
-    return files, ""
+    return names, ""
 
 
 def _project_prep(data):
@@ -262,6 +818,67 @@ def api_projects_templates():
     return jsonify({"ok": True, "templates": items, "brief_max": _PROJECT_BRIEF_MAX})
 
 
+@bp.route("/api/projects/ai/models")
+def api_projects_ai_models():
+    """新建项目弹窗底部的模型下拉：列出配置好的「接口 / 模型」以及当前默认用的那个。
+
+    只是读配置，不发请求；某个模型太慢导致超时时，用户可以在这里临时换一个。
+    """
+    from ..ide.ai import _load_cfg, _sys_pick
+    cfg = _load_cfg()
+    provider, model, err = _sys_pick(cfg, "scaffold")
+    if err:
+        from ..ide.ai import _sys_err_response          # 与其它系统 AI 模块一致
+        return _sys_err_response(err, need_config="尚未配置 AI" in err)
+    items = []
+    for p in (cfg.get("providers") or []):
+        for m in (p.get("models") or []):
+            items.append({"provider_id": p["id"], "provider": p.get("name") or p["id"], "model": m})
+    return jsonify({"ok": True, "items": items,
+                    "current": {"provider_id": provider["id"], "model": model}})
+
+
+@bp.route("/api/projects/ai/names", methods=["POST"])
+def api_projects_ai_names():
+    """「AI 生成」第一步：按一句话描述让 AI 给出几个候选项目名，交给用户挑。
+
+    选完名字后再调 /api/projects/create-stream，届时 AI 会按这个名字生成文件，
+    目录名 / README 标题 / 包名天然一致。同时回报每个候选在当前位置是否已存在。
+    """
+    data = request.get_json(silent=True) or {}
+    brief = (data.get("brief") or "").strip()
+    parent = (data.get("parent") or "").strip()
+    if not brief:
+        return jsonify({"error": "请先用一句话描述你的项目"}), 400
+    if len(brief) > _PROJECT_BRIEF_MAX:
+        return jsonify({"error": f"描述过长（上限 {_PROJECT_BRIEF_MAX} 字）"}), 400
+
+    payload, aerr = _ai_project_names(brief)
+    if aerr:
+        from ..ide.ai import _sys_err_response          # 与创建设置保持一致的处理
+        return _sys_err_response(aerr, need_config="尚未配置 AI" in aerr)
+
+    parent_abs = safe_path(parent) if parent.startswith("/") else ""
+    out = []
+    for it in payload["names"]:
+        exists = False
+        if parent_abs:
+            try:
+                target = os.path.abspath(os.path.normpath(os.path.join(parent_abs, it["name"])))
+                exists = os.path.exists(target)
+            except Exception:
+                exists = False
+        out.append({"name": it["name"], "why": it["why"], "exists": exists})
+    _log.info("AI 项目规划：%d 个候选（%s），耗时 %d ms", len(out),
+              "、".join(x["name"] for x in out), payload["ms"])
+    return jsonify({"ok": True, "summary": payload["summary"], "names": out,
+                    "stack": payload.get("stack") or [],
+                    "modules": payload.get("modules") or [],
+                    "tree": payload.get("tree") or [],
+                    "ms": payload["ms"], "out_tokens": payload.get("out_tokens") or 0,
+                    "model": payload.get("model") or ""})
+
+
 @bp.route("/api/projects/create", methods=["POST"])
 def api_projects_create():
     """新建项目：在「任意位置」创建项目目录，不受当前工作区限制。
@@ -296,65 +913,230 @@ def api_projects_create():
                     "template": template, "files": written, "skipped": skipped})
 
 
+# 新建项目的步骤条（后端是唯一来源，前端照着画，避免两边各维护一份顺序）
+# 「AI 生成代码 / 生成文件树 / 创建目录 / 写入文件」已合并成一步：
+# 由 Agent 边思考边建目录、边写文件，进度直接体现在下面的目录树里。
+_PROJECT_STEPS = [
+    ("check", "校验参数"),
+    ("ai", "Agent 构建"),
+    ("naming", "生成项目名"),
+    ("done", "完成"),
+]
+
+
 @bp.route("/api/projects/create-stream", methods=["POST"])
 def api_projects_create_stream():
-    """新建项目的流式版本：以 SSE 逐步回报「AI 规划 → 逐个写文件」的进度。
+    """新建项目的流式版本：按「步骤」逐步回报，供前端画步骤条 + 目录树生长动画。
 
-    参数与 /api/projects/create 完全一致；一次性接口保留给不需要进度的调用方，
-    前端用它做动态进度（哪个文件正在创建、创建到第几个、哪些被跳过）。
+    参数与 /api/projects/create 完全一致；一次性接口保留给不需要进度的调用方。
+    AI 模板不要求前端给项目名：这里先抽一个 28 位 hash 当临时目录名把项目建出来，
+    等文件写完再让 AI 按实际生成的内容起正式名并自动改名。
+
+    每帧都是 `data: {json}\\n\\n`，stage 取值：
+      steps  {"steps":[{"id","label"}]}                 本次要走的步骤（AI 模板才含 ai / naming）
+      step   {"id","state":"run|ok|err","msg"}          某一步的状态变化
+      plan   {"items":[{"path","size"}],"dirs":[...],"skipped":[...],
+              "n","nd","bytes","msg"}                   完整文件树（建目录前就能画出来）
+      dir    {"path","i","n"}                           建好一个目录
+      file   {"path","i","n","ok","size"}               写完一个文件
+      done   {"path","name","temp_name","naming_note","template",
+              "written","skipped","dirs","bytes"}       path 是最终（可能已改名）的目录
+      error  {"msg","code","need_config","disabled"}
     """
-    info, err = _project_prep(request.get_json(silent=True) or {})
+    data = request.get_json(silent=True) or {}
+    use_ai = str(data.get("template") or "blank") == scaffold.AI_KEY
+    plan = data.get("plan") if isinstance(data.get("plan"), dict) else None   # 前端可选传的规划
+    # 弹窗底部手动选的模型（不传就跟随「设置 → 系统 AI」）
+    sel = {"provider_id": str(data.get("provider_id") or ""),
+           "model": str(data.get("model") or "")}
+    # AI 模板不需要用户先想名字：先落一个 28 位 hash 临时目录，等代码写完再改成正式名。
+    if use_ai and not (data.get("name") or "").strip():
+        info, err = None, None
+        for _ in range(3):                       # 极小概率撞名，重抽几次
+            data["name"] = _temp_project_name()
+            info, err = _project_prep(data)
+            if not err:
+                break
+            try:
+                exists = bool((err[0].get_json(silent=True) or {}).get("exists"))
+            except Exception:
+                exists = False
+            if not exists:
+                break
+    else:
+        info, err = _project_prep(data)
+    steps = [{"id": k, "label": lb} for k, lb in _PROJECT_STEPS
+             if use_ai or k not in ("ai", "naming")]
 
     def ev(obj):
         return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
 
     def gen():
+        yield ev({"stage": "steps", "steps": steps})
+
+        def st(sid, state, msg=""):
+            return ev({"stage": "step", "id": sid, "state": state, "msg": msg})
+
+        yield st("check", "run", "正在校验创建参数…")
         if err:
             resp, code = err
             try:
                 msg = (resp.get_json(silent=True) or {}).get("error") or "参数有误"
             except Exception:
                 msg = "参数有误"
+            yield st("check", "err", msg)
             yield ev({"stage": "error", "msg": msg, "code": code})
             return
 
         name, target, template = info["name"], info["target"], info["template"]
+        yield st("check", "ok", "参数通过：" + target)
+
+        written, skipped, dirs, items, total_bytes = [], [], [], [], 0
+        naming_files = []
+
         if template == scaffold.AI_KEY:
-            yield ev({"stage": "ai", "msg": "正在让 AI 规划项目结构，请稍候…"})
-            files, aerr = _ai_generate_files(info["brief"], name)
-            if aerr:
+            # ── Agent 构建：模型边生成，这边边建目录、边写文件（原来的 4 步合成这 1 步）──
+            yield st("ai", "run", "Agent 正在规划并构建项目…")
+            import queue as _queue
+            q = _queue.Queue()
+            holder = {}
+
+            def _worker():
+                try:
+                    holder["res"] = _ai_agent_build(info, sel, emit=lambda e: q.put(e))
+                except Exception as exc:          # 线程里抛错也要让主流程能收到
+                    holder["res"] = {"error": f"Agent 构建失败：{exc}"}
+                q.put(None)                        # 结束标记
+
+            threading.Thread(target=_worker, daemon=True).start()
+            while True:
+                item = q.get()
+                if item is None:
+                    break
+                yield ev(item)
+            res = holder.get("res") or {"error": "Agent 构建异常结束（没有拿到结果）"}
+            if res.get("error"):
+                aerr = res["error"]
+                yield st("ai", "err", aerr)
                 yield ev({"stage": "error", "msg": aerr,
                           "need_config": "尚未配置 AI" in aerr,
                           "disabled": "已在「设置 → 系统 AI」中关闭" in aerr})
                 return
+            written = res["written"]
+            dirs = res["dirs"]
+            skipped = res["skipped"]
+            items = res["items"]
+            total_bytes = res["bytes"]
+            naming_files = [{"path": it["path"], "content": ""} for it in items]
+            yield st("ai", "ok", f"Agent 已建好 {len(written)} 个文件")
         else:
             files = scaffold.render(template, name)
-        total = len(files)
-        yield ev({"stage": "plan", "files": [f["path"] for f in files], "n": total,
-                  "msg": (f"已规划 {total} 个文件" if total else "空项目：不创建文件")})
+            naming_files = files
+            # 先把清单定下来（校验 + 体量上限 + 目录清单），再一次性把整棵树推给前端
+            yield st("tree", "run", "正在生成文件树…")
+            items, skipped = scaffold.prepare_manifest(target, files)
+            dirs = scaffold.plan_dirs(items)
+            total_bytes = sum(it["bytes"] for it in items)
+            yield ev({"stage": "plan",
+                      "items": [{"path": it["path"], "size": it["bytes"]} for it in items],
+                      "files": [it["path"] for it in items],
+                      "dirs": dirs, "skipped": skipped,
+                      "n": len(items), "nd": len(dirs), "bytes": total_bytes,
+                      "msg": (f"{len(dirs)} 个目录 / {len(items)} 个文件"
+                              if items else "空项目：不创建文件")})
+            yield st("tree", "ok", f"已规划 {len(dirs)} 个目录、{len(items)} 个文件")
 
-        try:
-            os.makedirs(target)              # 父目录不存在时一并建出来
-        except PermissionError:
-            yield ev({"stage": "error", "msg": f"没有权限在此处创建：{target}"})
-            return
-        except Exception as e:
-            yield ev({"stage": "error", "msg": f"创建失败：{str(e)}"})
-            return
+            yield st("dirs", "run", "正在创建目录…")
+            try:
+                os.makedirs(target, exist_ok=True)   # 父目录不存在时一并建出来
+                for i, d in enumerate(dirs, 1):
+                    os.makedirs(os.path.join(target, d), exist_ok=True)
+                    yield ev({"stage": "dir", "path": d, "i": i, "n": len(dirs)})
+                    time.sleep(0.02)          # 本地建目录是毫秒级，稍作停留让前端逐个点亮
+            except PermissionError:
+                yield st("dirs", "err", f"没有权限在此处创建：{target}")
+                yield ev({"stage": "error", "msg": f"没有权限在此处创建：{target}"})
+                return
+            except Exception as e:
+                yield st("dirs", "err", f"创建目录失败：{str(e)}")
+                yield ev({"stage": "error", "msg": f"创建目录失败：{str(e)}"})
+                return
+            yield st("dirs", "ok", f"已创建 {len(dirs)} 个目录")
 
-        written, skipped = [], []
-        for i, f in enumerate(files, 1):
-            w, s = scaffold.write_manifest(target, [f])   # 一次一个文件，便于逐个回报
-            written += w
-            skipped += s
-            yield ev({"stage": "file", "path": f["path"], "i": i, "n": total, "ok": bool(w)})
-            time.sleep(0.05)          # 本地写文件是毫秒级，稍作停留让前端能逐条点亮
-        yield ev({"stage": "done", "path": target, "name": name, "template": template,
-                  "written": written, "skipped": skipped})
-        _log.info("新建项目（流式）：%s（框架=%s，写入 %d 个文件）", target, template, len(written))
+            yield st("files", "run", "正在写入文件…")
+            skipped2 = []
+            for i, it in enumerate(items, 1):
+                w, s = scaffold.write_prepared([it])      # 一次一个文件，便于逐个回报
+                written += w
+                skipped2 += s
+                yield ev({"stage": "file", "path": it["path"], "i": i, "n": len(items),
+                          "ok": bool(w), "size": it["bytes"]})
+                time.sleep(0.05)
+            skipped += skipped2
+            yield st("files", "ok", f"已写入 {len(written)} 个文件" +
+                     (f"，跳过 {len(skipped)} 个" if skipped else ""))
+
+        # 代码写完 → 根据实际生成的内容给出候选项目名。
+        # 注意：这里只「建议」，不自动改名 —— 前端会进入「项目名」这一步，
+        # 用户可挑选 / 修改，确认后再调 /api/projects/rename 完成重命名。
+        suggested, naming_note = [], ""
+        if template == scaffold.AI_KEY:
+            yield st("naming", "run", "正在根据生成的代码给项目起名…")
+            names, nerr = _ai_final_name(info["brief"], naming_files, sel)
+            free = [n for n in (names or []) if not os.path.exists(
+                os.path.join(info["parent_abs"], n["name"] if isinstance(n, dict) else n))]
+            if free:
+                suggested = free[:4]
+                first = suggested[0]["name"] if isinstance(suggested[0], dict) else suggested[0]
+                yield st("naming", "ok", f"AI 建议叫 {first}（下一步可改）")
+            else:
+                naming_note = nerr or "AI 给的名字都已被占用，可用临时目录名或自己起一个"
+                yield st("naming", "err", naming_note)
+
+        yield st("done", "ok", "项目创建完成")
+        yield ev({"stage": "done", "path": target, "temp_path": target,
+                  "suggested": suggested, "naming_note": naming_note,
+                  "template": template, "written": written, "skipped": skipped,
+                  "dirs": dirs, "bytes": total_bytes})
+        _log.info("新建项目（流式）：%s（框架=%s，目录 %d，写入 %d 个文件）",
+                  target, template, len(dirs), len(written))
 
     return FlaskResponse(gen(), mimetype="text/event-stream",
                          headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@bp.route("/api/projects/rename", methods=["POST"])
+def api_projects_rename():
+    """把新建出来的项目目录改成用户确认后的名字（在「项目名」这一步点完成时调用）。
+
+    name 传空表示「保持临时目录名」，直接返回原路径。
+    """
+    data = request.get_json(silent=True) or {}
+    path = (data.get("path") or "").strip()
+    name = (data.get("name") or "").strip()
+    if not path.startswith("/") or not os.path.isdir(path):
+        return jsonify({"error": "项目路径无效或不存在"}), 400
+    if not name:
+        return jsonify({"ok": True, "path": path, "renamed": False})
+    if name in (".", "..") or "/" in name or "\\" in name:
+        return jsonify({"error": "项目名不能包含路径分隔符"}), 400
+    if any(ch in name for ch in '<>:"|?*'):
+        return jsonify({"error": '项目名不能包含 < > : " | ? * 等字符'}), 400
+    if len(name) > 128:
+        return jsonify({"error": "项目名过长（上限 128 字符）"}), 400
+
+    parent = os.path.dirname(path)
+    dst = os.path.join(parent, name)
+    if os.path.abspath(dst) == os.path.abspath(path):
+        return jsonify({"ok": True, "path": path, "renamed": False})
+    if os.path.exists(dst):
+        return jsonify({"error": f"目录已存在：{name}"}), 409
+    try:
+        os.rename(path, dst)
+    except Exception as e:
+        return jsonify({"error": f"重命名失败：{e}"}), 500
+    _log.info("项目重命名：%s → %s", path, dst)
+    return jsonify({"ok": True, "path": dst, "renamed": True})
 
 
 @bp.route("/api/system")

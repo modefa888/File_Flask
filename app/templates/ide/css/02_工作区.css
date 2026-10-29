@@ -96,7 +96,9 @@
   /* 删除进行中：图标处显示旋转图标，文件名淡化 */
   .tree-row.tree-deleting .nm { color: #777; opacity: 0.6; }
   .tree-row.tree-deleting .twist { visibility: hidden; }
-  .tree-delete-spin { display: inline-block; animation: treeDelSpin 0.9s linear infinite; color: #e06c75; }
+  /* 转 ::before 字形而不是 <i> 盒子（盒子含行高，转起来会偏） */
+  .tree-delete-spin { color: #e06c75; }
+  .tree-delete-spin::before { display: inline-block; line-height: 1; animation: treeDelSpin 0.9s linear infinite; }
   @keyframes treeDelSpin { to { transform: rotate(360deg); } }
   .tree-children { display: none; }
   .tree-children.open { display: block; }

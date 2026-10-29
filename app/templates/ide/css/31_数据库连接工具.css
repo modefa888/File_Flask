@@ -206,9 +206,11 @@
   .dbc-sql-ai-input:focus { border-color: #0098ff; }
   .dbc-sql-ai-input:disabled { opacity: .6; }
   .dbc-sql-ai-run .bi { display: inline-block; }
-  /* AI 请求中：图标转圈 + 彩色流光（渐变作用在图标的 ::before 字形上） */
-  .dbc-sql-ai-run.loading .bi { animation: dbcSpin .9s linear infinite; }
+  /* AI 请求中：图标转圈 + 彩色流光（渐变作用在图标的 ::before 字形上）。
+     转圈也放在 ::before 上：字形带 vertical-align:-.125em，转 <i> 盒子会绕偏下的点转（摇晃） */
+  .dbc-sql-ai-run.loading .bi { display: inline-block; }
   .dbc-sql-ai-run.loading .bi::before {
+    display: inline-block; line-height: 1;
     background: linear-gradient(90deg, #22d3ee, #a855f7, #f472b6, #fbbf24, #22d3ee);
     background-size: 400% 100%;
     -webkit-background-clip: text;
@@ -216,7 +218,7 @@
     /* 只靠 -webkit-text-fill-color 置透明：不支持渐变文字的浏览器该属性同样无效，
        图标会保留原来的灰色而不是消失 */
     -webkit-text-fill-color: transparent;
-    animation: dbcFlow 2.4s linear infinite;
+    animation: dbcSpin .9s linear infinite, dbcFlow 2.4s linear infinite;
   }
   @keyframes dbcSpin { to { transform: rotate(360deg); } }
   @keyframes dbcFlow { from { background-position: 0 0; } to { background-position: 400% 0; } }

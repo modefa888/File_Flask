@@ -134,7 +134,10 @@
 
 /* 流式状态 */
 :is(.term-body, .tai-pop) .tai-live { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #8ba3b8; }
-:is(.term-body, .tai-pop) .tai-live .bi { animation: taiSpin 1.1s linear infinite; }
+/* 转 ::before 字形：字形带 vertical-align:-.125em，转 <i> 盒子会绕偏下的点转 */
+:is(.term-body, .tai-pop) .tai-live .bi::before {
+  display: inline-block; line-height: 1; animation: taiSpin 1.1s linear infinite;
+}
 @keyframes taiSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* 解读正文（复用 aiMd 的结构，这里补终端里的排版） */

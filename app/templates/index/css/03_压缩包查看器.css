@@ -157,11 +157,11 @@
             scrollbar-gutter: stable;
         }
 
-        /* 后台任务胶囊（左下角，同移动版） */
+        /* 后台任务胶囊（左下角，同移动版）：浅色玻璃胶囊 + 按任务类型着色的图标块 */
         #bgTaskDock {
             position: fixed;
-            left: 12px;
-            bottom: 44px;
+            left: 14px;
+            bottom: 46px;
             z-index: 10005;
             display: none;
             flex-direction: column;
@@ -173,32 +173,88 @@
         }
 
         .bg-task {
+            --task-c: #2563eb;          /* 主色（由 JS 按任务类型写入） */
+            --task-bg: #dbeafe;         /* 图标块底色 */
+            --task-progress: 0%;
+            position: relative;
             display: flex;
             align-items: center;
             gap: 8px;
-            background: rgba(20, 20, 24, .88);
-            color: #fff;
+            padding: 6px 14px 6px 7px;
             border-radius: 999px;
-            padding: 8px 14px;
+            background: rgba(255, 255, 255, .94);
+            border: 1px solid #e2e8f0;
+            color: #334155;
             font-size: 0.78rem;
-            box-shadow: 0 4px 14px rgba(0, 0, 0, .25);
+            box-shadow: 0 6px 18px rgba(15, 23, 42, .12), 0 1px 2px rgba(15, 23, 42, .06);
+            -webkit-backdrop-filter: blur(8px);
+            backdrop-filter: blur(8px);
             cursor: pointer;
             max-width: 360px;
+            overflow: hidden;
+            transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
         }
 
-        .bg-task.done {
-            background: rgba(22, 120, 70, .92);
+        .bg-task:hover {
+            transform: translateY(-1px);
+            border-color: var(--task-c);
+            box-shadow: 0 10px 22px rgba(15, 23, 42, .16), 0 1px 2px rgba(15, 23, 42, .06);
+        }
+
+        /* 底部细进度线：颜色跟任务类型一致 */
+        .bg-task::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            height: 2px;
+            width: var(--task-progress);
+            background: var(--task-c);
+            opacity: .75;
+            transition: width .3s ease;
+        }
+
+        .bg-task-ico {
+            flex: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--task-bg);
+            color: var(--task-c);
+            font-size: .74rem;
+        }
+
+        .bg-task-pct {
+            flex: none;
+            font-weight: 700;
+            color: var(--task-c);
+            font-variant-numeric: tabular-nums;
         }
 
         .bg-task .bg-task-txt {
+            color: #64748b;
+            font-variant-numeric: tabular-nums;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
-        .bg-task i {
-            flex-shrink: 0;
+        /* 完成态：整颗转绿，图标块也一起变 */
+        .bg-task.done {
+            border-color: #bbf7d0;
+            background: rgba(240, 253, 244, .96);
         }
+
+        .bg-task.done .bg-task-ico {
+            background: #dcfce7;
+            color: #16a34a;
+        }
+
+        .bg-task.done .bg-task-pct { color: #16a34a; }
+        .bg-task.done::after { background: #16a34a; }
 
         .zip-table {
             width: 100%;

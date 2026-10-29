@@ -186,7 +186,7 @@ html.theme-light .ssh-motd-acts button:hover { background: #eef1f4; color: #1f23
 #sshTest { flex: none; }
 #sshTest > i { display: inline-block; }
 #sshTest.loading { cursor: progress; opacity: .85; }
-#sshTest.loading > i { animation: ssh-spin .85s linear infinite; }
+#sshTest.loading > i::before { display: inline-block; line-height: 1; animation: ssh-spin .85s linear infinite; }
 @keyframes ssh-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .ssh-test-msg {
   display: none; align-items: center; gap: 5px;

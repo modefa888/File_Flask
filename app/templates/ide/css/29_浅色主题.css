@@ -463,15 +463,147 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .np-tip { background: #eef6fd; border-color: #cfe4f5; color: #2b6a94; }
 :where(html.theme-light) .np-msg { color: #6b6b6b; }
 :where(html.theme-light) .np-msg.err { color: #c0392b; }
-:where(html.theme-light) .np-prog { background: #ffffff; border-color: #d4d4d4; }
+:where(html.theme-light) .ide-modal .m-foot .np-need { color: #8a6a00; }
 :where(html.theme-light) .np-prog-hd { background: #f4f4f4; border-bottom-color: #e4e4e4; color: #3a3a3a; }
 :where(html.theme-light) .np-prog-ic { color: #0098ff; }
 :where(html.theme-light) .np-prog-ic.ok { color: #1a7f37; }
 :where(html.theme-light) .np-prog-ic.err { color: #c0392b; }
-:where(html.theme-light) .np-prog-i { color: #9a9a9a; }
-:where(html.theme-light) .np-prog-i.ok { color: #1f2328; }
-:where(html.theme-light) .np-prog-i.ok .bi { color: #1a7f37; }
-:where(html.theme-light) .np-prog-i.bad .bi { color: #c0392b; }
+:where(html.theme-light) .np-prog-num { color: #8a8a8a; }
+/* 构建页右栏：AI 任务单 + 思考过程 */
+:where(html.theme-light) .np-tasks { background: #ffffff; border-color: #d4d4d4; }
+:where(html.theme-light) .np-side-hd { background: #f4f4f4; border-bottom-color: #e4e4e4; color: #3a3a3a; }
+:where(html.theme-light) .np-side-hd .bi { color: #005fb8; }
+:where(html.theme-light) .np-tasks-n { color: #8a8a8a; }
+:where(html.theme-light) .np-task { color: #8a8a8a; }
+:where(html.theme-light) .np-task.ok { color: #1f2328; }
+:where(html.theme-light) .np-task-hint { color: #9a9a9a; }
+:where(html.theme-light) .ide-modal .m-title .m-x { color: #7a7a7a; }
+:where(html.theme-light) .ide-modal .m-title .m-x:hover { background: #e8e8e8; color: #1f2328; }
+:where(html.theme-light) .np-task.ok > .bi { color: #1a7f37; }
+:where(html.theme-light) .np-name2 { background: #ffffff; color: #1f2328; border-color: #cecece; }
+/* 执行思考链（构建页） */
+:where(html.theme-light) .np-live { background: #ffffff; border-color: #d4d4d4; }
+:where(html.theme-light) .np-live-hd { background: #f4f4f4; border-bottom-color: #e4e4e4; color: #3a3a3a; }
+:where(html.theme-light) .np-live-body { color: #4a4a4a; }
+:where(html.theme-light) .np-live-n { color: #8a8a8a; }
+/* 思考过程的 Markdown 渲染 */
+:where(html.theme-light) .np-live-body > .np-md { color: #3a3a3a; }
+:where(html.theme-light) .np-live-body > .np-wait { color: #8a8a8a; }
+:where(html.theme-light) .np-md h1 {
+  background: linear-gradient(90deg, #005fb8, #1a7f37 55%, #8a6a00);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+:where(html.theme-light) .np-md h2 { color: #1f2328; border-left-color: #0098ff; }
+:where(html.theme-light) .np-md h3 { color: #005fb8; }
+:where(html.theme-light) .np-md h4,
+:where(html.theme-light) .np-md h5,
+:where(html.theme-light) .np-md h6 { color: #2b6a94; }
+:where(html.theme-light) .np-md strong { color: #111111; }
+:where(html.theme-light) .np-md em { color: #8a6a00; }
+:where(html.theme-light) .np-md li::marker { color: #0098ff; }
+:where(html.theme-light) .np-md a { color: #005fb8; }
+:where(html.theme-light) .np-md hr { border-top-color: #e0e0e0; }
+:where(html.theme-light) .np-md code { background: #f0f0f0; color: #a1260d; }
+:where(html.theme-light) .np-md pre { background: #f7f7f7; border-color: #e0e0e0; }
+:where(html.theme-light) .np-md pre code { color: #2f2f2f; }
+:where(html.theme-light) .np-md blockquote {
+  color: #2b6a94; background: rgba(0, 152, 255, .07); border-left-color: #a8c8e8;
+}
+:where(html.theme-light) .np-md th { background: #f2f2f2; color: #1f2328; }
+:where(html.theme-light) .np-md th,
+:where(html.theme-light) .np-md td { border-color: #e0e0e0; }
+:where(html.theme-light) .np-live-body.np-stream .np-md > :last-child::after { background: #0098ff; }
+/* AI 思考过程面板 */
+:where(html.theme-light) .np-think { background: #ffffff; border-color: #d4d4d4; }
+:where(html.theme-light) .np-think-hd { background: #f4f4f4; border-bottom-color: #e4e4e4; color: #2b6a94; }
+:where(html.theme-light) .np-think-ms { color: #8a8a8a; }
+:where(html.theme-light) .np-think-lb { color: #1f2328; }
+:where(html.theme-light) .np-think-dt { color: #6b6b6b; }
+:where(html.theme-light) .np-think-i.err .np-think-lb { color: #c0392b; }
+/* 「选名字」页的项目规划摘要 */
+:where(html.theme-light) .np-plan { background: #f8fafc; border-color: #dcdcdc; }
+:where(html.theme-light) .np-plan-sum { color: #0b3d63; }
+:where(html.theme-light) .np-plan-sum .bi { color: #005fb8; }
+:where(html.theme-light) .np-plan-kv .k { color: #8a8a8a; }
+:where(html.theme-light) .np-plan-kv .v { color: #333333; }
+:where(html.theme-light) .np-plan-kv .v.mono { color: #0b3d63; }
+/* 新建项目向导：步骤条 / 分页标题 / 路径预览 */
+:where(html.theme-light) .np-wiz-steps { border-bottom-color: #e4e4e4; }
+:where(html.theme-light) .np-ws-n { background: #f2f2f2; border-color: #d4d4d4; color: #8a8a8a; }
+:where(html.theme-light) .np-ws-t { color: #8a8a8a; }
+:where(html.theme-light) .np-ws.cur .np-ws-n { background: #005fb8; border-color: #005fb8; color: #ffffff; }
+:where(html.theme-light) .np-ws.cur .np-ws-t { color: #1f2328; }
+:where(html.theme-light) .np-ws.done .np-ws-n { background: #e9f6ed; border-color: #bfe3c9; color: #1a7f37; }
+:where(html.theme-light) .np-ws.done .np-ws-t { color: #1a7f37; }
+:where(html.theme-light) .np-ws.err .np-ws-n { background: #fdecec; border-color: #efc4c4; color: #c0392b; }
+:where(html.theme-light) .np-ws.err .np-ws-t { color: #c0392b; }
+:where(html.theme-light) .np-ws-line { background: #dcdcdc; }
+:where(html.theme-light) .np-ws-line.done { background: #bfe3c9; }
+:where(html.theme-light) .np-pg-t { color: #1f2328; }
+:where(html.theme-light) .np-pg-d { color: #6b6b6b; }
+:where(html.theme-light) .np-path { color: #6b6b6b; }
+:where(html.theme-light) .np-model { color: #6b6b6b; }
+:where(html.theme-light) .np-model .bi { color: #005fb8; }
+:where(html.theme-light) .np-model-sel { background: #ffffff; color: #1f2328; border-color: #cecece; }
+:where(html.theme-light) .np-preview-path.dim { color: #8a8a8a; }
+:where(html.theme-light) .ide-modal .m-foot .m-back { background: #f2f2f2; color: #3a3a3a; }
+:where(html.theme-light) .ide-modal .m-foot .m-back:hover { background: #e8e8e8; }
+/* 新建项目：描述速填 + 步骤条 + 文件树 */
+:where(html.theme-light) .np-eg { border-color: #d4d4d4; color: #6b6b6b; }
+:where(html.theme-light) .np-eg:hover { border-color: #0098ff; color: #005fb8; }
+:where(html.theme-light) .np-brief-cnt { color: #8a8a8a; }
+:where(html.theme-light) .np-brief-cnt.over { color: #c0392b; }
+/* AI 命名候选 */
+:where(html.theme-light) .np-names-hint { color: #6b6b6b; }
+:where(html.theme-light) .np-names-sum { color: #2b6a94; }
+:where(html.theme-light) .np-names-sum .bi { color: #005fb8; }
+:where(html.theme-light) .np-name-i { background: #f2f2f2; border-color: #d4d4d4; color: #3a3a3a; }
+:where(html.theme-light) .np-name-i:hover { background: #e8e8e8; border-color: #c0c0c0; color: #1f2328; }
+:where(html.theme-light) .np-name-i .bi { color: #7a7a7a; }
+:where(html.theme-light) .np-name-i .np-name-w { color: #777777; }
+:where(html.theme-light) .np-name-i.on { background: #cde3f8; border-color: #a8c8e8; color: #0b3d63; }
+:where(html.theme-light) .np-name-i.on .bi { color: #005fb8; }
+:where(html.theme-light) .np-name-i.on .np-name-w { color: #2b6a94; }
+:where(html.theme-light) .np-name-i .np-name-x { color: #8a6a00; }
+/* 新建项目：关闭二次确认 */
+:where(html.theme-light) .np-confirm { background: rgba(0, 0, 0, .32); }
+:where(html.theme-light) .np-cf {
+  background: #ffffff; border-color: #d4d4d4;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .22);
+}
+:where(html.theme-light) .np-cf-t { color: #1f2328; }
+:where(html.theme-light) .np-cf-t .bi { color: #b06f00; }
+:where(html.theme-light) .np-cf-d { color: #4a4a4a; }
+:where(html.theme-light) .np-cf-no { background: #f0f0f0; color: #3a3a3a; border-color: #dcdcdc; }
+:where(html.theme-light) .np-cf-no:hover { background: #e4e4e4; color: #1f2328; }
+:where(html.theme-light) .np-cf-yes { background: #c0392b; }
+:where(html.theme-light) .np-cf-yes:hover { background: #d04535; }
+:where(html.theme-light) .np-step { background: #f4f4f4; border-color: #dcdcdc; color: #9a9a9a; }
+:where(html.theme-light) .np-step.pending { color: #9a9a9a; }
+:where(html.theme-light) .np-step.run { color: #005fb8; background: #e6f2fd; border-color: #b6d8f5; }
+:where(html.theme-light) .np-step.ok { color: #1a7f37; background: #e9f6ed; border-color: #bfe3c9; }
+:where(html.theme-light) .np-step.err { color: #c0392b; background: #fdecec; border-color: #efc4c4; }
+:where(html.theme-light) .np-step-line { background: #dcdcdc; }
+:where(html.theme-light) .np-step-t { color: #9a9a9a; }
+:where(html.theme-light) .np-step.ok .np-step-t { color: #1a7f37; }
+:where(html.theme-light) .np-step.err .np-step-t { color: #c0392b; }
+:where(html.theme-light) .np-run-time { color: #8a8a8a; }
+:where(html.theme-light) .np-tree-wrap { background: #ffffff; border-color: #d4d4d4; }
+:where(html.theme-light) .np-tr { color: #6b6b6b; }
+:where(html.theme-light) .np-tr:hover { background: #f0f4f8; }
+:where(html.theme-light) .np-tr-car { color: #9a9a9a; }
+:where(html.theme-light) .np-tr-sz { color: #9a9a9a; }
+:where(html.theme-light) .np-tr-st { color: #c8c8c8; }
+:where(html.theme-light) .np-tr.pending { color: #9a9a9a; }
+:where(html.theme-light) .np-tr.run { color: #0b3d63; background: #e8f4fd; }
+:where(html.theme-light) .np-tr.run .np-tr-st { color: #0098ff; }
+:where(html.theme-light) .np-tr.ok { color: #1f2328; }
+:where(html.theme-light) .np-tr.ok .np-tr-st { color: #1a7f37; }
+:where(html.theme-light) .np-tr.bad { color: #a1260d; }
+:where(html.theme-light) .np-tr.bad .np-tr-st { color: #c0392b; }
+:where(html.theme-light) .np-tr.dir .np-tr-nm { color: #8a6a00; }
+:where(html.theme-light) .ide-modal .np-brief { background: #ffffff; color: #1f2328; border-color: #cecece; }
 :where(html.theme-light) .sysai-mod .sysai-model { background: #ffffff; color: #1f2328; border-color: #cecece; }
 :where(html.theme-light) .sysai-mod .sysai-model:hover { border-color: #a8a8a8; }
 :where(html.theme-light) .sysai-mod .sysai-model:focus { border-color: #0098ff; }

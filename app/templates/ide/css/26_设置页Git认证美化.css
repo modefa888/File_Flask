@@ -105,7 +105,8 @@
 #sec-git-creds .gc-tip-ok   { background: #1e3f2a; color: #7ee787; }
 #sec-git-creds .gc-tip-warn { background: #4a3b1a; color: #ffd166; }
 #sec-git-creds .gc-tip-err  { background: #4a1e1e; color: #ff7b72; }
-#sec-git-creds .gc-tip .spin { display: inline-block; animation: grSpin 1s linear infinite; }
+/* 转 ::before 字形而不是 <i> 盒子（详见 18_通用弹窗 里的说明） */
+#sec-git-creds .gc-tip .spin::before { display: inline-block; line-height: 1; animation: grSpin 1s linear infinite; }
 
 #sec-git-creds .gc-summary {
   margin-bottom: 14px; padding: 8px 12px; border-radius: 6px; font-size: 12px; line-height: 1.5;

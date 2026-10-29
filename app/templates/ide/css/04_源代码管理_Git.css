@@ -40,7 +40,7 @@
     background: #33363a; border-left: 1px solid #4a4a4a; }
   .g-ai-split #gitGenMsgMore:hover { background: #45494e; }
   .g-ai-split button:disabled { opacity: .55; cursor: default; }
-  .g-ai-split.busy #gitGenMsg i { animation: gspin .9s linear infinite; }
+  .g-ai-split.busy #gitGenMsg i::before { display: inline-block; line-height: 1; animation: gspin .9s linear infinite; }
   @keyframes gspin { to { transform: rotate(360deg); } }
   .g-btn.block { display: block; width: 100%; padding: 8px 12px; margin-top: 6px; font-size: 13px; }
   .g-btn {

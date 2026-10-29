@@ -6,6 +6,14 @@
 
         function _bgVerb(kind) { return { zip: '压缩', uz: '解压', del: '删除', mv: '移动', cp: '复制' }[kind] || '处理'; }
         function _bgIco(kind) { return { zip: 'bi-file-zip-fill', uz: 'bi-folder2-open', del: 'bi-trash3', mv: 'bi-arrows-move', cp: 'bi-files' }[kind] || 'bi-arrow-repeat'; }
+        // 左下角胶囊配色：主色 + 图标块底色（浅色系，和整体亮色界面一致）
+        const _bgTone = {
+            zip: { c: '#d97706', bg: '#fef3c7' },
+            uz: { c: '#2563eb', bg: '#dbeafe' },
+            del: { c: '#dc2626', bg: '#fee2e2' },
+            mv: { c: '#7c3aed', bg: '#ede9fe' },
+            cp: { c: '#0891b2', bg: '#cffafe' },
+        };
 
         function _bgFmt(n) {
             if (!n) return '0 B';
@@ -296,10 +304,20 @@
             dock.classList.add('show');
             dock.innerHTML = ids.map(id => {
                 const t = _bgTasks[id], d = t.last;
-                const txt = d ? (Math.round(d.percent || 0) + '% · ' + _bgFmt(d.done_bytes)
-                    + (d.total_bytes ? ' / ' + _bgFmt(d.total_bytes) : '')) : '准备中…';
+                const tone = _bgTone[t.kind] || _bgTone.cp;
+                const pct = d ? Math.round(d.percent || 0) : 0;
+                const pctTxt = d ? (pct + '%') : '…';
+                const byteTxt = d
+                    ? (_bgFmt(d.done_bytes) + (d.total_bytes ? ' / ' + _bgFmt(d.total_bytes) : ''))
+                    : '准备中…';
                 const fin = d && d.status !== 'running';
-                return `<div class="bg-task${fin ? ' done' : ''}" data-task="${id}" title="${_escAttr(t.title)}（点击查看进度）"><i class="bi ${_bgIco(t.kind)}"></i><span class="bg-task-txt">${_escHtml(txt)}</span></div>`;
+                return `<div class="bg-task${fin ? ' done' : ''}" data-task="${id}"
+                    style="--task-c:${tone.c};--task-bg:${tone.bg};--task-progress:${pct}%"
+                    title="${_escAttr(t.title)}（点击查看进度）">
+                    <span class="bg-task-ico"><i class="bi ${_bgIco(t.kind)}"></i></span>
+                    <span class="bg-task-pct">${pctTxt}</span>
+                    <span class="bg-task-txt">${_escHtml(byteTxt)}</span>
+                </div>`;
             }).join('');
         }
 

@@ -1133,8 +1133,10 @@
     const v = ideSettingGet("extraRoots", []);
     // 只接受绝对路径：早期「打开文件夹」支持手输，可能存进了相对路径（如 "m3u8_web"），
     // 那种路径会失效并被后端回退，表现为「子项目里显示的是别的项目内容」，这里顺手清掉。
+    // 同时排除当前主项目 ROOT：历史记录里可能残留同路径，会让资源管理器里
+    // 同一个目录既当主项目又当附加项目显示两次。
     const raw = Array.isArray(v) ? v : [];
-    const list = raw.filter(x => typeof x === "string" && x.startsWith("/"));
+    const list = raw.filter(x => typeof x === "string" && x.startsWith("/") && x !== ROOT);
     if (list.length !== raw.length) ideSettingSet("extraRoots", list);
     return list;
   })();

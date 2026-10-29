@@ -8,6 +8,7 @@
   const API_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
   const API_METHOD_CLS = { GET: "get", POST: "post", PUT: "put", PATCH: "patch", DELETE: "delete", HEAD: "head", OPTIONS: "options" };
   const API_REQ_H_KEY = "ide.http.reqHeight";  // 拖过响应状态栏后的「请求区」高度（px）；没拖过就没有这个键
+  const API_ZOOM_KEY = "ide.http.resZoom";     // 响应区放大状态（1 = 收起请求参数区，响应独占整页）
   const API_RES_VIEW_KEY = "ide.http.resView";  // 响应体视图偏好：美化/原始/预览/可视化 + 语言 + 是否自动换行
   const API_RES_VIEWS = ["pretty", "raw", "preview", "visualize"];
   const API_RES_LANGS = ["auto", "json", "xml", "html", "javascript", "text"];
@@ -30,19 +31,49 @@
     if (!Array.isArray(API_REQS)) API_REQS = [];
     return API_REQS;
   }
-  function apiPersist() {
-    try { localStorage.setItem(API_STORE_KEY, JSON.stringify(API_REQS || [])); } catch (_) {}
+  /* markDirty === false：只把结果落本地缓存（例如清理指向已删分组的孤立 gid），
+     这类「本地自愈」不算用户改动，绝不能置「未保存」标记 —— 否则刷新时就会误弹草稿确认框。
+     写入时只落「可保存」的请求：新建还没填 URL 的草稿不写缓存（刷新即消失）。 */
+  function apiPersist(markDirty) {
+    try { localStorage.setItem(API_STORE_KEY, JSON.stringify(apiSavable(API_REQS || []))); } catch (_) {}
+    if (markDirty === false) return;
     apiCloudPush();
   }
   function apiList() { return apiLoad(); }
+  /* 可保存的请求：新建后还没填 URL 的「草稿」只留在当前会话里编辑，
+     不写本地缓存、不推服务端数据库 —— 刷新后自然消失，也不会在列表里堆一堆空请求。
+     一旦填了 URL 就自动转正（见 url 输入框的 input 处理）。 */
+  function apiSavable(list) {
+    return (list || []).filter(function (r) {
+      if (!r) return false;
+      // 草稿要等到填了合法的 http(s) 地址才算「进行中」的请求，否则不落库
+      if (r.draft && !apiIsHttpUrl(r.url)) return false;
+      return true;
+    });
+  }
+  /* 合法请求地址：只接受 http:// 或 https://（大小写不敏感）。
+     "123"、"/api/x"、file://… 这类一律不算，既不能发送，也不会被当成「已填写 URL」自动保存。 */
+  function apiIsHttpUrl(u) {
+    const s = String(u || "").trim();
+    if (!/^https?:\/\//i.test(s)) return false;
+    try {
+      const url = new URL(s);
+      if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+      return !!url.hostname;                 // "http://" 这种没有主机名的不算
+    } catch (_) { return false; }
+  }
+
   function apiFind(id) { return apiLoad().filter(function (r) { return r.id === id; })[0] || null; }
   function apiNewId() { return "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
-  function apiAdd(req) { apiLoad(); API_REQS.push(req); apiPersist(); }
+  // 新建草稿（还没填 URL）只加进当前会话，不置「未保存」标记（本来也没什么可保存的）
+  function apiAdd(req) { apiLoad(); API_REQS.push(req); apiPersist(req && req.draft ? false : undefined); }
   function apiBlank(name, gid) {
     return { id: apiNewId(), name: name || "新建请求", method: "GET", url: "", params: [], headers: [],
       body: { mode: "none", raw: "", form: [] }, auth: { type: "none", token: "", username: "", password: "" },
       // 每个请求可单独指定代理（「代理」页签）；inherit = 跟随「设置 → 网络/代理」
       proxy: { mode: "inherit", proxy: "", noProxy: "", timeout: 30, insecure: false },
+      // draft：新建还没填 URL 的临时草稿。填了 URL 就删掉这个标记，转为正式请求（才会自动保存）
+      draft: true,
       gid: gid || "" };
   }
 
@@ -90,6 +121,56 @@
     } catch (_) {}
   }
   function apiCloudPush() { _cloudDirty = true; apiDirtyFlag(true); apiSavePaint(); }   // 旧调用点：只标记「有未保存改动」
+  /* ---------------- 上次响应结果（按请求缓存） ----------------
+     每发送一次就覆盖保存该请求的结果，刷新页面 / 重新打开请求时直接回显上次结果。
+     只存 localStorage（不进云集合，避免响应体把请求集合撑爆），单条文本上限 400KB，
+     最多保留最近 30 个请求的结果；超配额时优先丢最旧的。 */
+  const API_RES_CACHE_KEY = "ide.http.lastRes";
+  const API_RES_CACHE_MAX_TEXT = 400000;
+  const API_RES_CACHE_MAX_ITEMS = 30;
+
+  function apiResCacheAll() {
+    try {
+      const v = JSON.parse(localStorage.getItem(API_RES_CACHE_KEY) || "{}");
+      return (v && typeof v === "object" && !Array.isArray(v)) ? v : {};
+    } catch (_) { return {}; }
+  }
+  function apiResCacheFlush(all) {
+    try { localStorage.setItem(API_RES_CACHE_KEY, JSON.stringify(all)); return true; } catch (_) { return false; }
+  }
+  function apiResCachePut(id, res) {
+    if (!id || !res) return;
+    const all = apiResCacheAll();
+    const copy = Object.assign({}, res);
+    if (typeof copy.text === "string" && copy.text.length > API_RES_CACHE_MAX_TEXT) {
+      copy.text = copy.text.slice(0, API_RES_CACHE_MAX_TEXT);
+      copy.cached_truncated = true;
+    }
+    if (copy.encoding === "base64") { delete copy.body_b64; copy.cached_omit = true; }
+    all[id] = { at: Date.now(), res: copy };
+    // 只留最近若干条
+    Object.keys(all)
+      .sort(function (a, b) { return (all[b].at || 0) - (all[a].at || 0); })
+      .slice(API_RES_CACHE_MAX_ITEMS)
+      .forEach(function (k) { delete all[k]; });
+    if (!apiResCacheFlush(all)) {
+      // 配额爆了：再丢掉一半最旧的试一次
+      const keys = Object.keys(all).sort(function (a, b) { return (all[a].at || 0) - (all[b].at || 0); });
+      keys.slice(0, Math.max(1, Math.ceil(keys.length / 2))).forEach(function (k) { delete all[k]; });
+      apiResCacheFlush(all);
+    }
+  }
+  function apiResCacheGet(id) {
+    if (!id) return null;
+    const e = apiResCacheAll()[id];
+    return (e && e.res) ? { res: e.res, at: e.at || 0 } : null;
+  }
+  function apiResCacheDel(id) {
+    if (!id) return;
+    const all = apiResCacheAll();
+    if (all[id]) { delete all[id]; apiResCacheFlush(all); }
+  }
+
   function apiSavePaint(saving) {
     document.querySelectorAll(".api-save").forEach(function (b) {
       if (saving) { b.disabled = true; b.innerHTML = '<i class="pa-spin"></i> 保存中'; return; }
@@ -99,15 +180,28 @@
     });
   }
   function apiSaveCloud() {
-    if (!_cloudDirty) { toast("没有需要保存的改动", "info"); return; }
+    if (!_cloudDirty) {
+      apiDirtyFlag(false);      // 没有未保存改动 → 顺手清掉可能残留的草稿标记，避免下次刷新误弹
+      apiSavePaint();
+      toast("没有需要保存的改动", "info");
+      return;
+    }
     apiSavePaint(true);
+    // 记下这次提交的内容：请求返回时若本地又变了，说明保存期间还有新改动，不能标记成「已保存」
+    const snapshot = apiCanonJson(apiSavable(apiLoad())) + "||" + apiGroupsKey(apiLoadGroups());
     fetch("/api/http/collection", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reqs: apiLoad(), groups: apiLoadGroups() }),
+      body: JSON.stringify({ reqs: apiSavable(apiLoad()), groups: apiLoadGroups() }),
     }).then(function (r) { return r.json(); })
       .then(function (d) {
-        if (d && d.ok) { _cloudDirty = false; apiDirtyFlag(false); toast("已保存到数据库", "ok"); }
-        else { toast("保存失败：" + ((d && d.error) || "未知错误"), "err"); }
+        if (!d || !d.ok) { toast("保存失败：" + ((d && d.error) || "未知错误"), "err"); return; }
+        const now = apiCanonJson(apiSavable(apiLoad())) + "||" + apiGroupsKey(apiLoadGroups());
+        if (now === snapshot) {
+          _cloudDirty = false; apiDirtyFlag(false);
+          toast("已保存到数据库", "ok");
+        } else {
+          toast("已保存，但保存期间又有新的改动，请再保存一次", "warn");
+        }
       })
       .catch(function () { toast("保存失败：网络错误", "err"); })
       .finally(function () { apiSavePaint(); });
@@ -117,7 +211,7 @@
   function apiPushNow() {
     fetch("/api/http/collection", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reqs: apiLoad(), groups: apiLoadGroups() }),
+      body: JSON.stringify({ reqs: apiSavable(apiLoad()), groups: apiLoadGroups() }),
     }).then(function (r) { return r.json(); })
       .then(function (d) { if (d && d.ok) { _cloudDirty = false; apiDirtyFlag(false); apiSavePaint(); } })
       .catch(function () {});
@@ -142,17 +236,40 @@
       toast("已放弃草稿，以数据库为准", "info");
     });
   }
+  /* 集合内容比对：忽略「键顺序」与「分组折叠状态」（纯本地视图偏好），只比真实数据。
+     以前直接 JSON.stringify 逐字节比较，分组折叠 / 字段顺序变化都会被判成差异，
+     再叠加本地脏标记，就出现「明明保存过了，刷新却弹未保存」的误报。 */
+  function apiCanonJson(v) {
+    const walk = function (x) {
+      if (x === null || typeof x !== "object") return x;
+      if (Array.isArray(x)) return x.map(walk);
+      const o = {};
+      Object.keys(x).sort().forEach(function (k) { o[k] = walk(x[k]); });
+      return o;
+    };
+    return JSON.stringify(walk(v));
+  }
+  function apiGroupsKey(groups) {
+    return (groups || []).map(function (g) {
+      return apiCanonJson({ id: g && g.id, name: g && g.name });
+    }).sort().join("|");
+  }
+  function apiCollectionSame(lReqs, lGroups, sReqs, sGroups) {
+    return apiCanonJson(lReqs || []) === apiCanonJson(sReqs || []) &&
+      apiGroupsKey(lGroups) === apiGroupsKey(sGroups);
+  }
+
   (function apiCloudInit() {
     fetch("/api/http/collection").then(function (r) { return r.json(); }).then(function (d) {
       if (_cloudDirty) return;                 // 拉取期间用户已改过本地 → 本地草稿为准（仍未保存）
       const sReqs = (d && Array.isArray(d.reqs)) ? d.reqs : [];
       const sGroups = (d && Array.isArray(d.groups)) ? d.groups : [];
-      const lReqs = apiLoad(), lGroups = apiLoadGroups();
+      // 只比「可保存」的请求：没填 URL 的新建草稿本来就不进库，不能算成差异
+      const lReqs = apiSavable(apiLoad()), lGroups = apiLoadGroups();
       let flag = false;
       try { flag = localStorage.getItem(API_DIRTY_KEY) === "1"; } catch (_) {}
       if (sReqs.length || sGroups.length) {
-        const same = JSON.stringify(lReqs) === JSON.stringify(sReqs) &&
-                     JSON.stringify(lGroups) === JSON.stringify(sGroups);
+        const same = apiCollectionSame(lReqs, lGroups, sReqs, sGroups);
         if (flag && !same && (lReqs.length || lGroups.length)) {
           // 真正编辑过且没保存（草稿标记还在）→ 草稿继续作为工作副本，弹自定义悬浮框确认
           _cloudDirty = true; apiSavePaint(); apiRenderList();
@@ -176,7 +293,7 @@
         // 服务端为空、本地有旧数据 → 一次性迁移上云（历史版本只存本地，迁完以后全靠手动保存）
         apiDirtyFlag(false);
         fetch("/api/http/collection", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reqs: apiLoad(), groups: apiLoadGroups() }) }).catch(function () {});
+          body: JSON.stringify({ reqs: apiSavable(apiLoad()), groups: apiLoadGroups() }) }).catch(function () {});
       }
     }).catch(function () { /* 服务端不可用：继续用本地 */ });
   })();
@@ -236,10 +353,11 @@
     const tab = findTab(API_VIEW_PREFIX + r.id);
     const open = !!tab;
     const act = !!(tab && tab.host && tab.host.classList.contains("active"));
-    return '<div class="api-item' + (open ? " open" : "") + (act ? " active" : "") + '" draggable="true" data-api-id="' + apiAttr(r.id) + '" title="' + apiAttr(r.url || "（未填写 URL）") + '">' +
+    const isDraft = r.draft && !apiIsHttpUrl(r.url);   // 没填合法 http(s) 地址前都算草稿
+    return '<div class="api-item' + (open ? " open" : "") + (act ? " active" : "") + (isDraft ? " api-draft" : "") + '" draggable="true" data-api-id="' + apiAttr(r.id) + '" title="' + apiAttr(isDraft ? "草稿：填写 URL 后才会自动保存" : (r.url || "（未填写 URL）")) + '">' +
       '<span class="api-m api-m-' + (API_METHOD_CLS[m] || "get") + '">' + esc(m) + '</span>' +
       '<span class="api-main"><span class="api-name">' + esc(r.name || "未命名") + '</span>' +
-      '<span class="api-sub">' + esc(r.url || "（未填写 URL）") + '</span></span>' +
+      '<span class="api-sub">' + esc(isDraft ? "（草稿：填写 URL 后自动保存）" : (r.url || "（未填写 URL）")) + '</span></span>' +
       '<button class="api-act api-ren" title="重命名"><i class="bi bi-pencil"></i></button>' +
       '<button class="api-act api-del" title="删除"><i class="bi bi-trash3"></i></button>' +
       '</div>';
@@ -253,7 +371,7 @@
     groups.forEach(function (g) { known[g.id] = true; });
     let fixed = false;
     list.forEach(function (r) { if (r.gid && !known[r.gid]) { r.gid = ""; fixed = true; } });
-    if (fixed) apiPersist();
+    if (fixed) apiPersist(false);
     if (!list.length && !groups.length) { box.innerHTML = '<div class="api-empty">还没有请求，点上方「新建请求」开始。</div>'; return; }
     let html = "";
     list.filter(function (r) { return !r.gid; }).forEach(function (r) { html += apiItemHtml(r); });
@@ -1042,7 +1160,11 @@
     // bulk 记录各面板（params / headers / body）是否正处在「批量编辑」纯文本模式
     if (tab.api && tab.api.hObs) { tab.api.hObs.disconnect(); }   // 重建视图前先停掉上一轮的高度观察
     apiPendReqH.delete(tab);                                     // 旧视图的「待落高度」作废，避免落到新面板上
-    tab.api = { req: req, sending: false, err: "", res: null, el: null, curPane: "params", curRes: "body", bulk: {}, hObs: null, hPend: 0 };
+    tab.api = { req: req, sending: false, err: "", res: null, el: null, curPane: "params", curRes: "body", bulk: {}, hObs: null, hPend: 0,
+      find: { kw: "", idx: 0 } };   // 响应区关键字查找状态（不持久化，只跟当前标签页走）
+    // 上次发送的结果：刷新页面 / 重新打开请求时直接回显（标记为缓存，发送后即被覆盖）
+    const _cachedRes = apiResCacheGet(req.id);
+    if (_cachedRes) { tab.api.res = _cachedRes.res; tab.api.resAt = _cachedRes.at; tab.api.resCached = true; }
     tab.name = req.name; if (tab.el) renderTab(tab);
     const h = tab.host;
     h.innerHTML =
@@ -1080,6 +1202,7 @@
             '<span class="api-res-meta">尚未发送</span>' +
             '<span class="api-bar-sp"></span>' +
             '<button class="api-mini" id="apiCopyRes" title="复制响应体" disabled><i class="bi bi-clipboard"></i></button>' +
+            '<button class="api-mini" id="apiZoom" title="放大响应区（再次点击还原）"><i class="bi bi-arrows-angle-expand"></i></button>' +
           '</div>' +
           '<div class="api-res-tabs">' +
             '<button class="api-rtab active" data-rt="body">响应体</button>' +
@@ -1103,8 +1226,18 @@
       copy: h.querySelector("#apiCopyRes"), view: h.querySelector(".api-res-view"),
     };
     tab.api.el.method.addEventListener("change", function () { req.method = tab.api.el.method.value; apiPersist(); apiRenderList(); });
-    tab.api.el.url.addEventListener("input", function () { req.url = tab.api.el.url.value; apiPersist(); apiRenderList(); });
+    tab.api.el.url.addEventListener("input", function () {
+      req.url = tab.api.el.url.value;
+      const val = String(req.url || "").trim();
+      // 只有合法 http(s) 地址才算填好 URL：草稿转正、之后才会写缓存 / 进数据库
+      if (apiIsHttpUrl(val)) delete req.draft;
+      // 非空但不是合法地址：输入框标红提示（空值不标红，避免刚打开就一片红）
+      tab.api.el.url.classList.toggle("api-url-invalid", !!val && !apiIsHttpUrl(val));
+      apiPersist(); apiRenderList();
+    });
     tab.api.el.url.addEventListener("keydown", function (e) { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); apiSend(tab); } });
+    // 打开时若已存的是非法地址（历史数据），同样标红提示
+    if (String(req.url || "").trim() && !apiIsHttpUrl(req.url)) tab.api.el.url.classList.add("api-url-invalid");
     h.querySelector(".api-send").addEventListener("click", function () { apiSend(tab); });
     h.querySelector(".api-save").addEventListener("click", function () { apiSaveCloud(); });
     h.addEventListener("keydown", function (e) {
@@ -1118,6 +1251,7 @@
     h.querySelector("#apiCodeBtn").addEventListener("click", function (e) { e.stopPropagation(); apiToggleCode(tab); });
     h.querySelector("#apiDupBtn").addEventListener("click", function () { const c = JSON.parse(JSON.stringify(req)); c.id = apiNewId(); c.name = req.name + " 副本"; apiAdd(c); apiRenderList(); apiOpen(c.id); toast("已另存为副本", "ok"); });
     h.querySelector("#apiCopyRes").addEventListener("click", function () { apiCopyResponse(tab); });
+    h.querySelector("#apiZoom").addEventListener("click", function () { apiToggleZoom(tab); });
     h.querySelectorAll(".api-tab").forEach(function (b) { b.addEventListener("click", function () { apiShowPane(tab, b.dataset.t); }); });
     h.querySelectorAll(".api-rtab").forEach(function (b) { b.addEventListener("click", function () { apiShowRes(tab, b.dataset.rt); }); });
     apiWireResView(tab);      // 响应体视图工具条：容器常驻，只绑一次（内容由 apiPaintRes 重绘）
@@ -1128,6 +1262,7 @@
     apiShowPane(tab, apiPrefGet(API_PANE_KEY, API_PANES, "params"));
     apiShowRes(tab, apiPrefGet(API_RTAB_KEY, API_RTABS, "body"));
     apiWireResize(tab);        // 响应状态栏可上下拖动：调整请求区 / 响应区的高度
+    apiApplyZoom(tab);         // 接上上次的「放大响应区」状态
     apiSavePaint();            // 新标签页的「保存」按钮对齐当前未保存状态
   }
 
@@ -1209,7 +1344,8 @@
       try { localStorage.setItem(API_REQ_H_KEY, String(parseInt(el.req.style.height || "0", 10) || 0)); } catch (_) {}
     };
     head.addEventListener("mousedown", function (e) {
-      if (e.target.closest("button")) return;             // 「复制响应体」按钮照常可点
+      if (e.target.closest("button")) return;             // 「复制响应体 / 放大」按钮照常可点
+      if (apiZoomOn()) return;                            // 放大状态下请求区已收起，别拖（拖了也看不见）
       e.preventDefault();                                 // 免得拖动时把状态文字选蓝
       dragging = true;
       startY = e.clientY;
@@ -1223,6 +1359,41 @@
       if (!e.target.closest("button")) apiResetReqH(tab);  // 双击恢复默认高度
     });
   }
+  /* ---------------- 放大 / 还原响应区 ----------------
+     放大时把「请求参数区」（.api-req）整块收起，响应区独占标签页高度；
+     再点一次还原。状态存 localStorage，换请求 / 重开标签页都保持。 */
+  function apiZoomOn() {
+    try { return localStorage.getItem(API_ZOOM_KEY) === "1"; } catch (_) { return false; }
+  }
+  function apiApplyZoom(tab) {
+    const el = tab.api && tab.api.el;
+    if (!el || !el.root) return;
+    const on = apiZoomOn();
+    el.root.classList.toggle("api-zoom", on);
+    const btn = el.root.querySelector("#apiZoom");
+    if (btn) {
+      btn.innerHTML = '<i class="bi ' + (on ? "bi-arrows-angle-contract" : "bi-arrows-angle-expand") + '"></i>';
+      btn.title = on ? "还原（显示请求参数区）" : "放大响应区";
+      btn.classList.toggle("active", on);
+    }
+    const head = el.root.querySelector(".api-res-head");
+    if (head) {
+      head.title = on ? "已放大响应区：点右上角按钮还原（双击无效）"
+        : "按住上下拖动，调整请求区 / 响应区高度（双击恢复默认）";
+    }
+    // 布局变了：把拖出来的请求区高度重新收敛一次，避免还原后高度不合法
+    const saved = apiSavedReqH();
+    if (saved) apiApplyReqH(tab, saved);
+  }
+  function apiToggleZoom(tab) {
+    try { localStorage.setItem(API_ZOOM_KEY, apiZoomOn() ? "0" : "1"); } catch (_) {}
+    apiApplyZoom(tab);
+    setTimeout(function () {
+      const saved = apiSavedReqH();
+      if (saved) apiApplyReqH(tab, saved);
+    }, 0);
+  }
+
   /* 窗口变小：已锁定的请求区跟着收敛，否则会把响应区挤到看不见 */
   let apiRszRaf = 0;
   window.addEventListener("resize", function () {
@@ -1509,9 +1680,15 @@
     const req = tab.api.req;
     const url = apiBuildUrl(req);
     if (!url) { toast("请先填写请求 URL", "warn"); return; }
+    if (!apiIsHttpUrl(url)) {
+      toast("地址不合法：只能请求 http:// 或 https:// 开头的 URL", "warn");
+      const inp = tab.host.querySelector(".api-url");
+      if (inp) { inp.classList.add("api-url-invalid"); inp.focus(); }
+      return;
+    }
     const headers = apiBuildHeaders(req);
     const body = apiBuildBody(req);
-    tab.api.sending = true; tab.api.err = ""; apiPaintRes(tab);
+    tab.api.sending = true; tab.api.err = ""; tab.api.resCached = false; apiPaintRes(tab);
     const sendBtn = tab.host.querySelector(".api-send");
     if (sendBtn) { sendBtn.disabled = true; }
     try {
@@ -1545,6 +1722,9 @@
       const d = await res.json();
       if (d && d.error) throw new Error(d.error);
       tab.api.res = d;
+      tab.api.resAt = Date.now();
+      tab.api.resCached = false;
+      apiResCachePut(req.id, d);          // 每次成功发送都覆盖保存上次结果
     } catch (e) {
       tab.api.res = null; tab.api.err = (e && e.message) || String(e);
     } finally {
@@ -1783,8 +1963,98 @@
         }).join("") +
       "</select>" +
       '<button class="api-mini api-wrapbtn' + (V.wrap ? " active" : "") + '" title="自动换行：' +
-        (V.wrap ? "已开启（点击关闭）" : "已关闭（点击开启）") + '"><i class="bi bi-text-wrap"></i></button>';
+        (V.wrap ? "已开启（点击关闭）" : "已关闭（点击开启）") + '"><i class="bi bi-text-wrap"></i></button>' +
+      // 关键字查找：高亮全部命中 + 上下跳转（Enter / Shift+Enter）
+      '<span class="api-find">' +
+        '<i class="bi bi-search"></i>' +
+        '<input class="api-find-in" placeholder="查找关键字" spellcheck="false" autocomplete="off" value="' +
+          apiAttr((tab.api.find && tab.api.find.kw) || "") + '">' +
+        '<span class="api-find-count"></span>' +
+        '<button class="api-find-prev" title="上一个（Shift+Enter）"><i class="bi bi-chevron-up"></i></button>' +
+        '<button class="api-find-next" title="下一个（Enter）"><i class="bi bi-chevron-down"></i></button>' +
+      '</span>';
     el.view.classList.add("on");
+  }
+
+  /* ---------------- 响应区关键字查找 ----------------
+     直接在渲染好的 DOM 上做文本高亮（JSON 树 / 美化 / 原始 / 表格都适用）；
+     清空查找时把 mark 拆回纯文本，避免反复查找把 DOM 越套越深。 */
+  const API_FIND_MAX = 600000;       // 正文超过这个长度不做高亮（几 MB 的响应逐节点标记会卡）
+
+  function apiFindClear(root) {
+    if (!root) return;
+    const marks = root.querySelectorAll("mark.api-hit");
+    for (let i = marks.length - 1; i >= 0; i--) {
+      const m = marks[i];
+      const parent = m.parentNode;
+      if (!parent) continue;
+      parent.replaceChild(document.createTextNode(m.textContent), m);
+      parent.normalize();
+    }
+  }
+
+  function apiFindCount(tab, total) {
+    const el = tab.api.el;
+    const box = el.view ? el.view.querySelector(".api-find-count") : null;
+    if (!box) return;
+    const st = tab.api.find || {};
+    if (!st.kw) { box.textContent = ""; return; }
+    box.textContent = total ? (st.idx + 1) + "/" + total : "无结果";
+    box.classList.toggle("none", !total);
+  }
+
+  /* move: 0 = 重新高亮（关键字变了 / 视图重绘）；±1 = 跳到上/下一个 */
+  function apiFindApply(tab, move) {
+    const el = tab.api.el;
+    if (!el || !el.res) return;
+    const st = tab.api.find || (tab.api.find = { kw: "", idx: 0 });
+    apiFindClear(el.res);
+    const kw = (st.kw || "").trim();
+    if (!kw) { apiFindCount(tab, 0); return; }
+
+    const marks = [];
+    const bodyLen = el.res.textContent ? el.res.textContent.length : 0;
+    if (bodyLen <= API_FIND_MAX) {
+      const lower = kw.toLowerCase();
+      const walker = document.createTreeWalker(el.res, NodeFilter.SHOW_TEXT, {
+        acceptNode: function (n) {
+          if (!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+          const p = n.parentNode;
+          if (p && (p.tagName === "SCRIPT" || p.tagName === "STYLE" || p.tagName === "MARK")) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      nodes.forEach(function (node) {
+        const text = node.nodeValue, low = text.toLowerCase();
+        let i = low.indexOf(lower);
+        if (i < 0) return;
+        const frag = document.createDocumentFragment();
+        let last = 0;
+        while (i >= 0) {
+          if (i > last) frag.appendChild(document.createTextNode(text.slice(last, i)));
+          const m = document.createElement("mark");
+          m.className = "api-hit";
+          m.textContent = text.slice(i, i + kw.length);
+          frag.appendChild(m);
+          marks.push(m);
+          last = i + kw.length;
+          i = low.indexOf(lower, last);
+        }
+        if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+      });
+    }
+
+    if (move && marks.length) st.idx = (st.idx + (move > 0 ? 1 : -1) + marks.length) % marks.length;
+    if (st.idx >= marks.length) st.idx = 0;
+    marks.forEach(function (m, i) { m.classList.toggle("cur", i === st.idx); });
+    const cur = marks[st.idx];
+    if (cur && cur.scrollIntoView) {
+      try { cur.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) { cur.scrollIntoView(); }
+    }
+    apiFindCount(tab, marks.length);
   }
   function apiHideResView(el) { if (el && el.view) { el.view.classList.remove("on"); el.view.innerHTML = ""; } }
 
@@ -1800,6 +2070,11 @@
     if (eff === "visualize") { el.res.innerHTML = apiResVisualHtml(r); return; }
     if (r.encoding === "base64") {          // 二进制又没有可预览的形态：只能给下载
       const base = String(r.content_type || "").split(";")[0].trim().toLowerCase();
+      if (r.cached_omit || !r.body_b64) {   // 缓存里不存二进制正文（太占空间）
+        el.res.innerHTML = '<div class="api-res-hint">二进制响应（' + esc(r.content_type || "?") + "，" + sizeTxt +
+          '）。上次的结果未缓存二进制内容，重新发送后可查看 / 下载。</div>';
+        return;
+      }
       el.res.innerHTML = '<div class="api-res-hint">二进制响应（' + esc(r.content_type || "?") + "，" + sizeTxt +
         '）。<button class="api-mini" id="apiDl">下载</button></div>';
       const dl = el.res.querySelector("#apiDl");
@@ -1833,10 +2108,31 @@
     el.view._apiWired = true;
     el.view.addEventListener("click", function (e) {
       const V = apiResView();
+      if (e.target.closest(".api-find-next")) { apiFindApply(tab, 1); return; }
+      if (e.target.closest(".api-find-prev")) { apiFindApply(tab, -1); return; }
       if (e.target.closest(".api-wrapbtn")) { V.wrap = !V.wrap; apiSaveResView(); apiPaintRes(tab); return; }
       const b = e.target.closest(".api-rview");
       if (!b || b.disabled || b.dataset.v === V.view) return;
       V.view = b.dataset.v; apiSaveResView(); apiPaintRes(tab);
+    });
+    // 关键字查找：容器常驻，同样只绑一次
+    el.view.addEventListener("input", function (e) {
+      if (!e.target.classList.contains("api-find-in")) return;
+      const st = tab.api.find || (tab.api.find = { kw: "", idx: 0 });
+      st.kw = e.target.value; st.idx = 0;
+      apiFindApply(tab, 0);
+    });
+    el.view.addEventListener("keydown", function (e) {
+      if (!e.target.classList.contains("api-find-in")) return;
+      e.stopPropagation();               // 别触发编辑器 / 全局快捷键
+      if (e.key === "Enter") { e.preventDefault(); apiFindApply(tab, e.shiftKey ? -1 : 1); }
+      else if (e.key === "Escape") {
+        e.preventDefault();
+        e.target.value = "";
+        const st = tab.api.find || (tab.api.find = { kw: "", idx: 0 });
+        st.kw = ""; st.idx = 0;
+        apiFindApply(tab, 0);
+      }
     });
     el.view.addEventListener("change", function (e) {
       if (!e.target.classList.contains("api-res-lang")) return;
@@ -1857,6 +2153,13 @@
       (r.elapsed_ms / 1000).toFixed(2) + " 秒 · " + sizeTxt +
       (r.redirected ? ' · <i class="bi bi-arrow-right"></i> 已重定向' : "") +
       (r.truncated ? ' · 截断(>5MB)' : "");
+    // 回显的是上次保存的结果（刷新 / 重开请求）：标一下时间，避免误以为是刚发出来的
+    if (tab.api.resCached && tab.api.resAt) {
+      const dt = new Date(tab.api.resAt);
+      const pad = function (n) { return (n < 10 ? "0" : "") + n; };
+      el.meta.innerHTML += ' · <span class="api-res-cached" title="上次发送的结果（本地缓存），再次发送会覆盖">' +
+        '<i class="bi bi-clock-history"></i> 上次结果 ' + pad(dt.getHours()) + ":" + pad(dt.getMinutes()) + "</span>";
+    }
     const rt = tab.api.curRes;
     if (rt === "headers") {
       el.res.innerHTML = '<table class="api-hdrs">' + r.headers.map(function (p) {
@@ -1869,6 +2172,8 @@
     } else {
       apiPaintBody(tab, r, sizeTxt);
     }
+    // 重绘后把当前查找关键字重新高亮（切视图 / 换响应都保留查找词）
+    apiFindApply(tab, 0);
   }
   function apiDownload(tab, ct) {
     const r = tab.api.res; if (!r || r.encoding !== "base64") return;
@@ -1963,6 +2268,7 @@
         const t = findTab(API_VIEW_PREFIX + id);
         if (t) closeTab(t);          // 标签还在的话一并关闭
         API_REQS = apiLoad().filter(function (r) { return r.id !== id; }); apiPersist(); apiPushNow(); apiRenderList();
+        apiResCacheDel(id);          // 请求删了，顺手丢掉它的上次结果缓存
         toast("已删除", "ok");
         return;
       }
@@ -2072,7 +2378,7 @@
      口令留空 = 用服务端 .env 里配的默认口令（EXPORT_PASSWORD，没配就回退 SECRET_SALT）——
      日常备份不用记口令，本机导入时也免输；填了口令则只有该口令能解开。 */
   async function apiExportAll() {
-    const list = apiList();
+    const list = apiSavable(apiList());     // 没填 URL 的草稿不导出
     if (!list.length) { toast("还没有请求可导出", "warn"); return; }
     let pw = apiPwGet();                 // 上次这个标签页里输过的口令，预填上省事
     let warn = "";

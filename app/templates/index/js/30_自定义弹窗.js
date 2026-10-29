@@ -37,7 +37,7 @@
             }, 3000);
         }
 
-        function showConfirm(message) {
+        function showConfirm(message, okText) {
             return new Promise((resolve) => {
                 const container = document.getElementById('customModalContainer');
                 const overlay = document.createElement('div');
@@ -48,7 +48,7 @@
                     <div class="modal-body">${message}</div>
                     <div class="modal-footer">
                         <button class="btn btn-cancel" data-result="false">取消</button>
-                        <button class="btn btn-confirm" data-result="true">确认删除</button>
+                        <button class="btn btn-confirm" data-result="true">${okText || '确认删除'}</button>
                     </div>
                 </div>
             `;

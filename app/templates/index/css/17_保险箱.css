@@ -1,0 +1,219 @@
+/* ================================================================
+   保险箱：右侧抽屉 + 加密文件列表（配合 js/55_保险箱.js）
+   文件以密文存于 data/vault，密码解锁后才能查看。
+   ================================================================ */
+
+        /* 抽屉不遮罩页面：打开保险箱时仍可继续操作左侧文件管理器（便于连续查看多个文件） */
+        #vaultPanel { position: fixed; inset: 0; z-index: 10020; pointer-events: none; }
+        #vaultPanel .vault-panel { pointer-events: auto; }
+
+        .vault-mask { display: none; }
+
+        .vault-panel {
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 620px;
+            max-width: 96vw;
+            background: #ffffff;
+            border-left: 1px solid #e2e8f0;
+            box-shadow: -18px 0 46px rgba(15, 23, 42, .16);
+            display: flex;
+            flex-direction: column;
+            transform: translateX(102%);
+            transition: transform .24s ease;
+        }
+        #vaultPanel.show .vault-panel { transform: translateX(0); }
+
+        /* 头部 */
+        .vault-hd {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 16px;
+            border-bottom: 1px solid #eef2f7;
+            background: #f8fafc;
+            flex: none;
+        }
+        .vault-title {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: .95rem;
+            font-weight: 600;
+            color: #0f172a;
+        }
+        .vault-title i { color: #2563eb; }
+        .vault-state { margin-left: 6px; font-size: .72rem; color: #94a3b8; }
+        .vault-close {
+            margin-left: auto;
+            width: 26px;
+            height: 26px;
+            border: none;
+            background: transparent;
+            color: #94a3b8;
+            border-radius: 7px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .vault-close:hover { background: #eef2f7; color: #1e293b; }
+
+        .vault-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px; }
+
+        /* 顶部说明块 */
+        .vault-hero {
+            display: flex;
+            gap: 12px;
+            padding: 14px;
+            background: linear-gradient(180deg, #f5f9ff, #f8fafc);
+            border: 1px solid #e6eefb;
+            border-radius: 12px;
+            margin-bottom: 16px;
+        }
+        .vault-hero > i { font-size: 1.5rem; color: #2563eb; flex: none; }
+        .vault-hero-t { font-size: .88rem; font-weight: 600; color: #0f172a; margin-bottom: 4px; }
+        .vault-hero-d { font-size: .76rem; color: #64748b; line-height: 1.6; }
+
+        /* 表单 */
+        .vault-form { display: flex; flex-direction: column; gap: 8px; }
+        .vault-lb { font-size: .76rem; color: #64748b; }
+        .vault-in {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #d7dee8;
+            border-radius: 9px;
+            padding: 9px 11px;
+            font-size: .84rem;
+            color: #1e293b;
+            outline: none;
+            transition: border-color .15s ease, box-shadow .15s ease;
+        }
+        .vault-in:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(96, 165, 250, .18); }
+        .vault-err { min-height: 16px; font-size: .75rem; color: #dc2626; }
+        .vault-form-row { display: flex; gap: 8px; }
+
+        /* 按钮 */
+        .vault-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            border: 1px solid #dbe3ee;
+            background: #ffffff;
+            color: #475569;
+            font-size: .8rem;
+            padding: 7px 12px;
+            border-radius: 9px;
+            cursor: pointer;
+            transition: background .15s ease, color .15s ease, border-color .15s ease;
+        }
+        .vault-btn:hover { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+        .vault-btn.primary {
+            background: #2563eb;
+            border-color: #2563eb;
+            color: #fff;
+        }
+        .vault-btn.primary:hover { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+        .vault-btn:disabled { opacity: .6; cursor: default; }
+
+        /* 工具条 */
+        .vault-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+        .vault-bar-sp { flex: 1; }
+
+        .vault-tip {
+            display: flex;
+            gap: 6px;
+            padding: 8px 10px;
+            background: #f8fafc;
+            border: 1px dashed #e2e8f0;
+            border-radius: 9px;
+            font-size: .72rem;
+            color: #64748b;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+        .vault-tip code {
+            background: #eef2f7;
+            border-radius: 4px;
+            padding: 0 4px;
+            color: #0b5ea8;
+            font-family: Consolas, Menlo, monospace;
+        }
+
+        /* 文件列表 */
+        .vault-list { display: flex; flex-direction: column; gap: 6px; }
+        .vault-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid #eef2f7;
+            border-radius: 10px;
+            background: #fff;
+            transition: background .12s ease, border-color .12s ease;
+        }
+        .vault-row:hover { background: #f8fafc; border-color: #dbe7f5; }
+
+        /* 受保护路径：整行可点击，跳转到文件管理器里的实际位置 */
+        .vault-row-link { cursor: pointer; }
+        .vault-row-link:hover { background: #f2f7fe; border-color: #cfe2f7; }
+        .vault-row-link:hover .vault-row-name { color: #1d4ed8; }
+        .vault-row-ico { color: #f59e0b; font-size: 1rem; flex: none; }
+        .vault-row-ico.dir { color: #eab308; }
+        .vault-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+        .vault-row-name {
+            min-width: 0;
+            font-size: .82rem;
+            color: #1e293b;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        /* 受保护路径：第二行显示完整路径，方便确认保护的是哪个位置 */
+        .vault-row-path {
+            font-size: .68rem;
+            color: #94a3b8;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-family: Consolas, Menlo, monospace;
+        }
+        .vault-row-size { flex: none; font-size: .72rem; color: #64748b; font-variant-numeric: tabular-nums; }
+        .vault-row-time { flex: none; font-size: .7rem; color: #94a3b8; }
+        .vault-act {
+            flex: none;
+            width: 24px;
+            height: 24px;
+            border: none;
+            background: transparent;
+            color: #94a3b8;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: .8rem;
+            opacity: .75;
+        }
+        .vault-row:hover .vault-act { opacity: 1; }
+        .vault-act:hover { background: #eef2f7; color: #2563eb; }
+        .vault-act.del:hover { background: #fef2f2; color: #dc2626; }
+
+        .vault-empty {
+            padding: 40px 16px;
+            text-align: center;
+            color: #94a3b8;
+            font-size: .78rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        .vault-empty i { font-size: 1.6rem; }
+
+        .vault-hint { margin-top: 10px; font-size: .74rem; color: #64748b; min-height: 16px; }
+        .vault-hint.busy { color: #b45309; }
+        .vault-hint.bad { color: #dc2626; }

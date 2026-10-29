@@ -30,6 +30,9 @@
 .api-main { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
 .api-name { font-size: 12.5px; color: #e6e6e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .api-sub { font-size: 11px; color: #808080; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 新建草稿（还没填 URL）：副标题用暖色斜体，提示「填了 URL 才会自动保存」 */
+.api-item.api-draft .api-sub { color: #c08a5a; font-style: italic; }
+:where(html.theme-light) .api-item.api-draft .api-sub { color: #a2612c; }
 .api-act { flex: none; border: none; background: transparent; color: #9a9a9a; cursor: pointer; padding: 3px 4px; border-radius: 4px; opacity: 0; }
 .api-item:hover .api-act { opacity: 1; }
 .api-act:hover { background: rgba(255,255,255,.1); color: #fff; }
@@ -71,8 +74,16 @@
 .api-method { flex: none; width: 96px; background: #2d2d2d; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 5px; padding: 7px 8px; font-weight: 700; outline: none; }
 .api-url { flex: 1; min-width: 0; background: #2d2d2d; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 5px; padding: 7px 10px; font-family: var(--mono, ui-monospace, Consolas, monospace); outline: none; }
 .api-url:focus, .api-method:focus { border-color: #0e6cc4; }
+/* 非法地址（不是 http/https）：输入框标红，发送时也会被拦下 */
+.api-url.api-url-invalid {
+  border-color: #c94f4f;
+  box-shadow: 0 0 0 2px rgba(201, 79, 79, .16);
+}
+.api-url.api-url-invalid:focus { border-color: #c94f4f; }
+:where(html.theme-light) .api-url.api-url-invalid { border-color: #d14343; box-shadow: 0 0 0 2px rgba(209, 67, 67, .14); }
 .api-bar-sp { flex: 1; }
-.api-mini { flex: none; border: 1px solid #3c3c3c; background: #2d2d2d; color: #bdbdbd; border-radius: 5px; padding: 6px 9px; cursor: pointer; font-size: 12px; }
+.api-mini { flex: none; border: 1px solid #3c3c3c; background: #2d2d2d; color: #bdbdbd; border-radius: 5px; padding: 6px 9px; cursor: pointer; font-size: 12px;
+  transition: background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease; }
 .api-mini:hover { background: #383838; color: #fff; }
 .api-mini:disabled { opacity: .4; cursor: not-allowed; }
 .api-mini:disabled:hover { background: #2d2d2d; color: #bdbdbd; }
@@ -90,6 +101,21 @@
 .api-tab:hover { color: #e6e6e6; }
 .api-tab.active { color: #fff; border-bottom-color: #0e6cc4; }
 .api-badge { display: inline-block; min-width: 16px; text-align: center; font-size: 10px; background: #3c3c3c; color: #cfcfcf; border-radius: 8px; padding: 0 5px; margin-left: 4px; }
+
+/* 放大响应区：收起请求参数区，响应区吃掉整个高度 */
+.api.api-zoom .api-req { display: none !important; }
+/* 按钮激活态：柔和的蓝色渐变 + 内描边，比原来那块生硬的半透明蓝干净得多 */
+.api-mini.active {
+  background: linear-gradient(180deg, rgba(46, 144, 226, .32), rgba(14, 108, 196, .22));
+  border-color: #2f8ed6;
+  color: #dbeafe;
+  box-shadow: inset 0 0 0 1px rgba(120, 190, 255, .22), 0 1px 3px rgba(0, 0, 0, .28);
+}
+.api-mini.active:hover {
+  background: linear-gradient(180deg, rgba(58, 158, 240, .42), rgba(20, 120, 210, .30));
+  color: #ffffff;
+}
+.api-mini.active > i { color: #9ed2ff; }
 .api-panes { padding: 12px; }
 /* 请求面板默认隐藏，只显示当前选中的那个。
    注意：apiShowPane 用内联 style 控制显隐，激活时把 style 置空（""），
@@ -114,6 +140,15 @@
   font-size: 11.5px; font-weight: 600; color: #8a8a8a; text-align: left; }
 .api-kv input { width: 100%; box-sizing: border-box; background: #2d2d2d; color: #e6e6e6; border: 1px solid #3c3c3c; border-radius: 4px; padding: 6px 8px; outline: none; font-family: var(--mono, ui-monospace, Consolas, monospace); }
 .api-kv-wrap { max-height: 236px; overflow-y: auto; overflow-x: hidden; }
+
+/* 滚动条占位常驻：这些容器都是「行数一变就出/收滚动条」的类型，
+   不预留滚动条宽度时内容宽度会跟着变，表格列宽与右侧「批量编辑」按钮会左右乱跳。
+   scrollbar-gutter: stable 让滚动条空间始终保留，出现 / 消失都不再挤动内容。
+   （不支持该属性的老浏览器保持原样，不会更糟） */
+.api-kv-wrap,
+.api-panes,
+.api-req.fixed > .api-panes,
+.api-res-body { scrollbar-gutter: stable; }
 .api-kv input:focus { border-color: #0e6cc4; }
 .api-kv-x { width: 28px; text-align: center; }
 .api-kv-del { border: none; background: transparent; color: #888; cursor: pointer; padding: 4px; border-radius: 4px; }
@@ -199,6 +234,11 @@
 .api-img { max-width: 100%; border-radius: 6px; }
 /* 响应体视图工具条（美化 / 原始 / 预览 / 可视化 + 语言 + 换行），对标 Postman 的 Body 工具条。
    默认隐藏、由 .on 显示：不能只靠内联 style.display=""（会回落到这里的 none，同 .api-pane 的坑） */
+/* 响应状态栏里的「上次结果」标记（刷新后回显缓存结果时出现） */
+.api-res-cached { color: #7fa8c9; font-size: 11.5px; white-space: nowrap; }
+.api-res-cached .bi { font-size: 11px; }
+:where(html.theme-light) .api-res-cached { color: #2b6cb0; }
+
 .api-res-view { display: none; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #2a2a2a; }
 .api-res-view.on { display: flex; }
 .api-rviews { display: flex; gap: 2px; }
@@ -211,6 +251,57 @@
 .api-res-lang { background: #2d2d2d; color: #bdbdbd; border: 1px solid #3c3c3c; border-radius: 5px; padding: 4px 6px; font-size: 12px; outline: none; }
 .api-wrapbtn { padding: 5px 8px; }
 .api-wrapbtn.active { color: #fff; background: rgba(0,105,184,.22); border-color: #0e6cc4; }
+
+/* 响应区关键字查找：输入框 + 命中计数 + 上下跳转 */
+.api-find {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #2d2d2d;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  padding: 0 4px 0 7px;
+  height: 26px;
+}
+.api-find > i { color: #8a8a8a; font-size: 11.5px; flex: none; }
+.api-find-in {
+  width: 132px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e6e6e6;
+  font-size: 12px;
+  padding: 0 2px;
+}
+.api-find-in::placeholder { color: #6f6f6f; }
+.api-find-count {
+  min-width: 34px;
+  text-align: center;
+  font-size: 11px;
+  color: #9a9a9a;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.api-find-count.none { color: #e08a8a; }
+.api-find-prev, .api-find-next {
+  border: none;
+  background: transparent;
+  color: #9a9a9a;
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex: none;
+}
+.api-find-prev:hover, .api-find-next:hover { background: rgba(255,255,255,.1); color: #fff; }
+/* 命中高亮 */
+mark.api-hit { background: rgba(255, 200, 60, .35); color: inherit; border-radius: 2px; padding: 0 1px; }
+mark.api-hit.cur { background: #ffb020; color: #1a1a1a; box-shadow: 0 0 0 1px rgba(255, 176, 32, .6); }
 /* 预览：给外面的 HTML 一块自己的画布（沙箱由 JS 设，这里只管尺寸和底色） */
 .api-prev { width: 100%; min-height: 360px; border: 0; border-radius: 6px; background: #fff; }
 .api-pre-nowrap { white-space: pre; word-break: normal; }
@@ -336,6 +427,14 @@
 :where(html.theme-light) .api-list.drop-on { background: #f2f7fc; }
 :where(html.theme-light) .api-mv-row select { background: #ffffff; color: #1f2328; border-color: #cecece; }
 :where(html.theme-light) .api-mini:disabled:hover { background: #ffffff; color: #1f2328; }
+:where(html.theme-light) .api-mini.active {
+  background: linear-gradient(180deg, #e6f1fd, #d5e8fb);
+  border-color: #93c0e6;
+  color: #0b5ea8;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .8);
+}
+:where(html.theme-light) .api-mini.active > i { color: #0b5ea8; }
+:where(html.theme-light) .api-mini.active:hover { background: linear-gradient(180deg, #dcecfd, #c9e2f9); color: #084a86; }
 :where(html.theme-light) .api-res-head.dragging { background: rgba(0,95,184,.07); }
 :where(html.theme-light) .api-kv thead th { background: #ffffff; color: #6a6a6a; }
 :where(html.theme-light) .api-kv-hint { color: #8a8a8a; }
@@ -345,6 +444,14 @@
 :where(html.theme-light) .api-rview.active { background: #dceaf8; color: #005fb8; }
 :where(html.theme-light) .api-res-lang { background: #ffffff; color: #1f2328; border-color: #cecece; }
 :where(html.theme-light) .api-wrapbtn.active { background: #dceaf8; color: #005fb8; border-color: #005fb8; }
+:where(html.theme-light) .api-find { background: #ffffff; border-color: #cecece; }
+:where(html.theme-light) .api-find-in { color: #1f2328; }
+:where(html.theme-light) .api-find-in::placeholder { color: #9a9a9a; }
+:where(html.theme-light) .api-find-count { color: #6a6a6a; }
+:where(html.theme-light) .api-find-count.none { color: #c0392b; }
+:where(html.theme-light) .api-find-prev:hover, :where(html.theme-light) .api-find-next:hover { background: #eeeeee; color: #000; }
+:where(html.theme-light) mark.api-hit { background: rgba(255, 196, 0, .35); }
+:where(html.theme-light) mark.api-hit.cur { background: #f5a623; color: #1a1a1a; }
 :where(html.theme-light) .api-vz th { background: #ffffff; color: #6a6a6a; }
 :where(html.theme-light) .api-vz td { color: #1f2328; }
 :where(html.theme-light) .api-vz tbody tr:hover { background: #f6f6f6; }

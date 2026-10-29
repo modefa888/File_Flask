@@ -50,16 +50,69 @@ def _mc_count_tree(path):
     return total_files, total_bytes
 
 
-def _mc_copy_file_progress(src, dst, task):
-    """复制单个文件，按字节实时上报进度"""
+_MC_DETAIL_MAX = 800       # 详情列表最多展开的文件数（再多只记总数，避免几万行塞满弹窗）
+
+
+def _mc_scan_tree(path, budget=0):
+    """统计文件数 / 总字节数，并按 budget 顺便收集前若干个文件（相对路径 + 大小）。
+
+    详情列表需要「每个文件一行」，但几十万个文件不可能全塞进前端；
+    这里只在预算内收集名称，超出预算仍然照常统计总数，前端会提示「其余 N 个未展开」。
+    """
+    if os.path.islink(path) or os.path.isfile(path):
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        names = [(os.path.basename(path), size)] if budget > 0 else []
+        return 1, size, names
+    total_files, total_bytes = 0, 0
+    names = []
+    for root, _dirs, files in os.walk(path, onerror=lambda e: None):
+        for f in files:
+            total_files += 1
+            fp = os.path.join(root, f)
+            try:
+                size = os.path.getsize(fp)
+            except OSError:
+                size = 0
+            total_bytes += size
+            if len(names) < budget:
+                rel = os.path.relpath(fp, path).replace(os.sep, "/")
+                names.append((rel, size))
+    return total_files, total_bytes, names
+
+
+def _mc_rec(task, key):
+    """按「顶层条目|相对路径」取详情行记录；没收集到（超出预算）返回 None。"""
+    m = task.get("_file_map")
+    return m.get(key) if (m and key) else None
+
+
+def _mc_item(task, idx):
+    """取任务里第 idx 个顶层条目（用于逐条进度）；越界返回 None。"""
+    items = task.get("items") or []
+    return items[idx] if 0 <= idx < len(items) else None
+
+
+def _mc_copy_file_progress(src, dst, task, idx=-1, delete_src=False, key=None):
+    """复制单个文件，按字节实时上报进度（同时更新所属顶层条目与详情行）。"""
     try:
         size = os.path.getsize(src)
     except OSError:
         size = 0
+    item = _mc_item(task, idx)
+    rec = _mc_rec(task, key)
     with _MOVE_COPY_LOCK:
         base = task["done_bytes"]
+        item_base = item["done_bytes"] if item else 0
         task["current"] = os.path.basename(src)
+        if item:
+            item["current"] = os.path.basename(src)
+        if rec:
+            rec["status"] = "running"
     copied = 0
+    ok = True
     try:
         with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
             while True:
@@ -70,15 +123,57 @@ def _mc_copy_file_progress(src, dst, task):
                 copied += len(chunk)
                 with _MOVE_COPY_LOCK:
                     task["done_bytes"] = base + copied
+                    if item:
+                        item["done_bytes"] = item_base + copied
+                    if rec:
+                        rec["done"] = copied
         try:
             shutil.copystat(src, dst)
         except OSError:
             pass
     except Exception:
-        pass
+        ok = False
     with _MOVE_COPY_LOCK:
         task["done_files"] += 1
         task["done_bytes"] = base + size
+        if item:
+            item["done_files"] += 1
+            item["done_bytes"] = item_base + size
+        if rec:
+            rec["done"] = size if ok else copied
+            rec["status"] = "done" if ok else "error"
+            if not ok:
+                rec["error"] = "复制失败"
+    if delete_src and ok:
+        try:
+            os.remove(src)
+        except OSError:
+            pass
+
+
+def _mc_copy_tree_progress(src, dst, task, idx=-1, delete_src=False, base_name=None):
+    """递归复制目录，逐文件上报进度（可选复制完删除源文件，用于跨盘移动）。"""
+    os.makedirs(dst, exist_ok=True)
+    base = base_name or os.path.basename(src)
+    try:
+        for root, _dirs, files in os.walk(src, onerror=lambda e: None):
+            rel_dir = os.path.relpath(root, src)
+            target_dir = dst if rel_dir == "." else os.path.join(dst, rel_dir)
+            os.makedirs(target_dir, exist_ok=True)
+            for fn in files:
+                fp = os.path.join(root, fn)
+                rel = os.path.relpath(fp, src).replace(os.sep, "/")
+                _mc_copy_file_progress(fp, os.path.join(target_dir, fn), task, idx, delete_src,
+                                       key=base + "|" + rel)
+        if delete_src:
+            shutil.rmtree(src, ignore_errors=True)
+        else:
+            try:
+                shutil.copystat(src, dst)
+            except OSError:
+                pass
+    except Exception:
+        raise
 
 
 def _mc_worker(task_id, mode, paths, dest_dir):
@@ -86,35 +181,75 @@ def _mc_worker(task_id, mode, paths, dest_dir):
     if not task:
         return
     errors = []
+
+    def _item_set(idx, **kw):
+        with _MOVE_COPY_LOCK:
+            it = _mc_item(task, idx)
+            if it:
+                it.update(kw)
+
+    def _bump(idx, files, bytes_):
+        with _MOVE_COPY_LOCK:
+            task["done_files"] += files
+            task["done_bytes"] += bytes_
+            it = _mc_item(task, idx)
+            if it:
+                it["done_files"] += files
+                it["done_bytes"] += bytes_
+
     try:
-        for src in paths:
+        for idx, src in enumerate(paths):
             s = os.path.abspath(os.path.normpath(src))
-            f, b = _mc_count_tree(s)  # 先统计（操作后源会被移动/删除）
+            it = _mc_item(task, idx) or {}
+            f, b = int(it.get("files") or 0), int(it.get("size") or 0)
             try:
                 _guard_protected_path(s)
             except PermissionError as e:
                 errors.append(f"{os.path.basename(s)}: {e}")
+                _item_set(idx, status="error", error=str(e))
                 continue
             dest = os.path.join(dest_dir, os.path.basename(s))
             if os.path.exists(dest):
                 errors.append(f"{os.path.basename(s)}: 目标已存在")
+                _item_set(idx, status="error", error="目标已存在")
                 continue
+            _item_set(idx, status="running")
+            with _MOVE_COPY_LOCK:
+                task["current"] = os.path.basename(s)
+            base_name = os.path.basename(s)
             try:
                 if mode == "copy":
-                    if os.path.isdir(s):
-                        shutil.copytree(s, dest)
+                    if os.path.isdir(s) and not os.path.islink(s):
+                        _mc_copy_tree_progress(s, dest, task, idx, base_name=base_name)
                     else:
-                        _mc_copy_file_progress(s, dest, task)
-                else:  # move
-                    shutil.move(s, dest_dir)
+                        _mc_copy_file_progress(s, dest, task, idx,
+                                               key=base_name + "|" + base_name)
+                else:
+                    # 同盘 move 只是一次 rename：直接按条目大小记满进度
+                    try:
+                        os.rename(s, dest)
+                        _bump(idx, f, b)
+                        # 详情列表里属于这个条目的文件一并标成完成
+                        with _MOVE_COPY_LOCK:
+                            for rec in task.get("files") or []:
+                                if rec.get("item") == idx and rec.get("status") != "error":
+                                    rec["status"] = "done"
+                                    rec["done"] = rec.get("size") or 0
+                    except OSError:
+                        # 跨盘：逐文件复制并删除源，顺便上报进度
+                        if os.path.isdir(s) and not os.path.islink(s):
+                            _mc_copy_tree_progress(s, dest, task, idx, delete_src=True,
+                                                   base_name=base_name)
+                        else:
+                            _mc_copy_file_progress(s, dest, task, idx, delete_src=True,
+                                                   key=base_name + "|" + base_name)
                 _invalidate_list_cache(os.path.dirname(s))
                 _invalidate_list_cache(dest_dir)
             except Exception as e:
                 errors.append(f"{os.path.basename(s)}: {e}")
+                _item_set(idx, status="error", error=str(e))
                 continue
-            with _MOVE_COPY_LOCK:
-                task["done_files"] += f
-                task["done_bytes"] += b
+            _item_set(idx, status="done")
         with _MOVE_COPY_LOCK:
             task["status"] = "done_with_errors" if errors else "done"
             task["errors"] = errors
@@ -138,6 +273,9 @@ def _mc_start(mode):
     if not os.path.isdir(dest_dir):
         return jsonify({"error": "目标目录不存在"}), 400
     valid, total_files, total_bytes = [], 0, 0
+    items_meta = []          # 每个顶层条目的文件数 / 总大小，供弹窗「详情」展示与逐条进度
+    detail = []              # 详情列表：每个文件一行（受 _MC_DETAIL_MAX 限制）
+    budget = _MC_DETAIL_MAX
     for rel in paths:
         p = os.path.abspath(os.path.normpath(rel))
         if not os.path.exists(p):
@@ -146,15 +284,31 @@ def _mc_start(mode):
             _guard_protected_path(p)
         except PermissionError:
             return jsonify({"error": f"禁止对服务运行目录及其上级目录执行{mode == 'move' and '移动' or '复制'}: {rel}"}), 403
-        f, b = _mc_count_tree(p)
+        is_dir = os.path.isdir(p)
+        base_name = os.path.basename(p.rstrip(os.sep)) or p
+        f, b, names = _mc_scan_tree(p, budget)
+        budget = max(0, budget - len(names))
         total_files += f
         total_bytes += b
         valid.append(p)
+        idx = len(items_meta)
+        items_meta.append({"name": base_name, "files": f, "size": b,
+                           "done_files": 0, "done_bytes": 0,
+                           "status": "pending", "current": "", "error": ""})
+        for nm, sz in names:
+            detail.append({
+                "key": base_name + "|" + nm, "item": idx,
+                "name": (base_name + "/" + nm) if is_dir else base_name,
+                "size": sz, "done": 0, "status": "pending", "error": "",
+            })
     if not valid:
         return jsonify({"error": "没有可处理的文件"}), 400
     task_id = uuid.uuid4().hex[:16]
     task = {"status": "running", "total_files": total_files, "total_bytes": total_bytes,
-            "done_files": 0, "done_bytes": 0, "current": "", "errors": [], "started_at": time.time()}
+            "done_files": 0, "done_bytes": 0, "current": "", "errors": [],
+            "items": items_meta, "files": detail, "detail_total": total_files,
+            "_file_map": {r["key"]: r for r in detail},
+            "started_at": time.time()}
     with _MOVE_COPY_LOCK:
         now = time.time()
         for k in [k for k, v in _MOVE_COPY_TASKS.items() if now - v.get("started_at", 0) > 1800]:
@@ -171,6 +325,8 @@ def _mc_progress():
         if not task:
             return jsonify({"error": "任务不存在或已过期"}), 404
         snap = dict(task)
+        # 详情列表在这里复制一份，避免序列化时正被 worker 改写
+        files_snap = [dict(f) for f in (task.get("files") or [])]
     total_bytes = snap.get("total_bytes") or 0
     done_bytes = min(snap.get("done_bytes") or 0, total_bytes)
     total_files = snap.get("total_files") or 0
@@ -182,11 +338,24 @@ def _mc_progress():
     else:
         percent = 100 if snap["status"] != "running" else 0
     errors = snap.get("errors") or []
+    items = [{
+        "name": it.get("name", ""), "files": it.get("files", 0), "size": it.get("size", 0),
+        "done_files": it.get("done_files", 0), "done_bytes": it.get("done_bytes", 0),
+        "status": it.get("status", "pending"), "current": it.get("current", ""),
+        "error": it.get("error", ""),
+    } for it in (snap.get("items") or [])]
+    files = [{
+        "name": f.get("name", ""), "size": f.get("size", 0), "done": f.get("done", 0),
+        "status": f.get("status", "pending"), "error": f.get("error", ""),
+    } for f in files_snap]
     return jsonify({
         "status": snap["status"], "current": snap.get("current", ""),
         "done_files": done_files, "total_files": total_files,
         "done_bytes": done_bytes, "total_bytes": total_bytes,
         "percent": round(percent, 1), "errors": errors, "result": snap.get("result"),
+        "items": items,
+        "files": files,
+        "detail_total": snap.get("detail_total", total_files),
     })
 
 

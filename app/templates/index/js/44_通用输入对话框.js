@@ -14,7 +14,7 @@
                <div class="modal-title"><i class="bi bi-pencil-square"></i><span>${title}</span></div>
                <div class="modal-body">
                    <label class="input-modal-label">${label}</label>
-                   <input type="text" class="form-control" id="inputDialogValue" value="${_escapeHtml(defaultVal)}" />
+                   <input type="${opts.password ? "password" : "text"}" class="form-control" id="inputDialogValue" value="${_escapeHtml(defaultVal)}" />
                    ${suggHtml}
                    <div id="inputDialogError" class="input-modal-error"></div>
                </div>
@@ -60,12 +60,22 @@
                 const val = input.value;
                 const ret = onConfirm(val);
                 if (ret && typeof ret.then === 'function') {
-                    // 异步确认：等待 Promise 结果，false 保持弹窗打开
+                    // 异步确认：false / 错误信息字符串 → 保持弹窗打开
                     okBtn.disabled = true;
                     ret.then(ok => {
-                        if (ok === false) { okBtn.disabled = false; return; }
+                        okBtn.disabled = false;
+                        if (ok === false) return;
+                        // 返回字符串 = 失败原因：直接显示在弹窗里（比 toast 更贴近输入框）
+                        if (typeof ok === 'string' && ok) {
+                            errEl.textContent = ok;
+                            errEl.style.display = 'block';
+                            return;
+                        }
                         overlay.remove();
-                    }).catch(() => { okBtn.disabled = false; });
+                    }).catch(e => {
+                        okBtn.disabled = false;
+                        if (e && e.message) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+                    });
                     return;
                 }
                 if (ret === false) return;

@@ -448,6 +448,12 @@ def api_files():
     items = list_directory(target_path, get_sizes=False, show_hidden=show_hidden,
                            counts=counts, size_budget_ms=1200)
     target_abs_dir = abs_path = os.path.abspath(target_path)
+    # 保险箱：锁定期间把「受保护」的条目从列表里隐藏（源文件仍在磁盘上，只是不显示）
+    try:
+        from .vault import filter_hidden as _vault_filter
+        items = _vault_filter(items, abs_path)
+    except Exception:
+        pass
     for it in items:
         if it.get("is_dir") and it.get("size_pending"):
             _ensure_dir_size_async(os.path.join(target_abs_dir, it["name"]))

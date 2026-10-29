@@ -26,6 +26,9 @@
                 label: _favs.some(f => f.path === absPath) ? '取消收藏' : '收藏', action: 'fav', cls: ''
             });
 
+            // 加入保险箱：加密搬进保险箱（原位置删除），下次查看需输入密码
+            items.push({ icon: 'bi bi-shield-lock', label: '加入保险箱', action: 'vault-add', cls: '' });
+
             if (!isDir) {
                 const ext = _menuExt;
                 items.push({ icon: 'bi bi-folder-symlink', label: '打开所在文件夹', action: 'open-parent', cls: '' });
@@ -132,6 +135,9 @@
                 case 'zip-view': previewFile(absPath); break;
                 case 'new-folder': showNewFolderDialog(absPath); break;
                 case 'properties': showPropertiesDialog(absPath); break;
+                case 'vault-add':
+                    if (typeof window.fmAddToVault === 'function') window.fmAddToVault(absPath);
+                    break;
                 case 'move': showMoveCopyDialog(absPath, 'move'); break;
                 case 'copy-to': showMoveCopyDialog(absPath, 'copy'); break;
                 case 'delete': deleteFiles([absPath]); break;

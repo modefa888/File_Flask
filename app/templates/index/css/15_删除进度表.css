@@ -38,3 +38,136 @@
 /* 最新删的那一条置顶高亮 */
 .zpl-row:first-child { background: #eef4ff; color: #1d4ed8; }
 .zpl-row:first-child i { color: #1d4ed8; }
+
+/* ========== 进度弹窗顶部：文件计数 + 详情展开按钮 ========== */
+.zip-prog-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: #475569;
+    margin-bottom: 6px;
+}
+
+.zip-prog-detail {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex: none;
+    border: 1px solid #dbe3ee;
+    background: #ffffff;
+    color: #475569;
+    font-size: 0.72rem;
+    padding: 3px 9px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.zip-prog-detail:hover { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.zip-prog-detail[hidden] { display: none; }
+.zip-prog-detail i { font-size: 0.68rem; transition: transform .15s ease; }
+.zip-prog-detail.open i { transform: rotate(180deg); }
+
+/* ========== 移动 / 复制：逐条详情（每个文件的大小 + 进度条） ========== */
+.zip-prog-list:has(.bgp-item) { max-height: 240px; }
+
+/* 详情多了也不超出屏幕：弹窗整体限高，内容区滚动 */
+#zipProgOverlay .zip-modal { max-height: 86vh; }
+#zipProgOverlay .zip-modal > div:last-child { max-height: calc(86vh - 58px); overflow-y: auto; }
+
+.bgp-head {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 6px 6px;
+    font-size: .72rem;
+    color: #94a3b8;
+    border-bottom: 1px dashed #eef2f7;
+    margin-bottom: 4px;
+}
+
+.bgp-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 6px;
+    border-radius: 7px;
+    transition: background .12s ease;
+}
+
+.bgp-item + .bgp-item { border-top: 1px solid #f4f7fb; }
+
+.bgp-ico { flex: none; font-size: .8rem; color: #9aa4b2; }
+.bgp-item.run { background: #f5f9ff; }
+.bgp-item.done .bgp-ico { color: #16a34a; }
+.bgp-item.err { background: #fef6f6; }
+.bgp-item.err .bgp-ico { color: #dc2626; }
+
+/* 进行中的转圈：自绘圆环（不用图标旋转，避免断口箭头转起来像被切掉） */
+.bgp-spin {
+    flex: none;
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    box-sizing: border-box;
+    border: 2px solid #c7d9f7;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: bgp-spin .75s linear infinite;
+}
+
+@keyframes bgp-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+    .bgp-spin { animation-duration: 2s; }
+}
+
+.bgp-main { flex: 1; min-width: 0; }
+.bgp-top { display: flex; align-items: baseline; gap: 8px; }
+.bgp-name {
+    flex: 1;
+    min-width: 0;
+    font-size: .78rem;
+    color: #1e293b;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.bgp-size { flex: none; font-size: .7rem; color: #64748b; font-variant-numeric: tabular-nums; }
+
+.bgp-bar {
+    height: 4px;
+    margin: 4px 0 3px;
+    background: #e8eef7;
+    border-radius: 3px;
+    overflow: hidden;
+}
+.bgp-fill {
+    height: 100%;
+    width: 0;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #3b82f6, #2563eb);
+    transition: width .25s ease;
+}
+.bgp-item.done .bgp-fill { background: linear-gradient(90deg, #34d399, #16a34a); }
+.bgp-item.err .bgp-fill { background: #f87171; }
+
+.bgp-sub {
+    font-size: .68rem;
+    color: #94a3b8;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.bgp-item.err .bgp-sub { color: #dc2626; }
+
+.bgp-pct {
+    flex: none;
+    min-width: 34px;
+    text-align: right;
+    font-size: .72rem;
+    color: #475569;
+    font-variant-numeric: tabular-nums;
+}

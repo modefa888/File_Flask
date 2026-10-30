@@ -80,13 +80,14 @@ def _register_blueprints(app: Flask) -> None:
     from .routes.ide.collab import bp as collab_bp
     from .routes.ide.v2ray import bp as v2ray_bp
     from .routes.ide.iptv import bp as iptv_bp
+    from .routes.ide.downloads import bp as downloads_bp
     from .routes.adm.admin import bp as adm_bp
     from .routes.adm.update import bp as update_bp
     for bp in (auth_bp, pages_bp, browser_bp, zip_bp, delete_bp, vault_bp, archive_history_bp,
                fileops_bp, index_bp, progress_stream_bp, grep_bp, git_bp, run_bp, port_bp,
                term_bp, termai_bp, env_bp, proc_bp, shares_bp, ai_bp, agent_bp, chat_history_bp, pip_bp, npm_bp,
                plugins_bp, dbconn_bp, httpreq_bp, cron_bp, sshconn_bp, sshfile_bp, hints_bp, collab_bp,
-               v2ray_bp, iptv_bp, adm_bp, update_bp):
+               v2ray_bp, iptv_bp, downloads_bp, adm_bp, update_bp):
         app.register_blueprint(bp)
 
 

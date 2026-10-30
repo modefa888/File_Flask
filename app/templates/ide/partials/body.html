@@ -33,6 +33,9 @@
       <div class="act" data-panel="sshconn" title="终端连接工具（SSH 远程主机，仿 Xshell）"><i class="bi bi-hdd-network"></i><span class="runner-badge ssh-badge" id="actSshBadge" style="display:none">0</span></div>
       <div class="act" data-panel="fm" title="文件夹管理器（可视化浏览服务器文件系统）"><i class="bi bi-folder2-open"></i></div>
       <div class="act" data-panel="v2ray" title="V2Ray 代理（订阅 / 节点 / 10808 出口）"><i class="bi bi-shield-shaded"></i><span class="runner-badge v2-badge" id="actV2Badge" style="display:none">0</span></div>
+      {# 下载中心：不在侧边栏开面板，点一下直接在编辑器区域打开「下载中心」标签页；
+         data-panel 让它可以参与「设置 → 外观」的图标排序 / 启停，点击时在 JS 里拦掉默认的侧栏切换 #}
+      <div class="act" data-panel="downloads" id="actDownloads" title="下载中心（多文件打包 / 可视化选目录 / 断点续传 / 下载记录）"><i class="bi bi-cloud-arrow-down"></i><span class="runner-badge" id="actDlBadge" style="display:none">0</span></div>
       <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
       {# 底部两个图标：进程资源管理器在设置之上，设置永远在最底下。
          act-spacer 让「组内第一个」吸收上方全部空白，把整组顶到活动栏最底部（若两个都写 margin-top:auto，
@@ -212,6 +215,17 @@
         </div>
         <div class="v2-hint" id="v2Hint">连接后同网段的其他设备把「本机IP:10808」填成 SOCKS5 代理即可共用出口。</div>
         <button class="v2-btn v2-btn-ghost" id="v2OpenView" title="在右侧编辑区打开完整的 V2Ray 管理面板（订阅 / 节点 / 设置 / 日志）"><i class="bi bi-window-stack"></i><span>打开管理面板</span></button>
+      </div>
+      {# 下载中心（侧栏）：任务进度速览 + 新建下载；完整功能（记录 / 设置）在编辑区标签页 #}
+      <div class="side-panel" id="downloadsPanel">
+        <div class="dls-tools">
+          <button class="g-btn block" id="dlsNew" title="可视化选择文件 / 文件夹，打包下载"><i class="bi bi-plus-lg"></i> 新建下载</button>
+          <button class="g-ico" id="dlsOpen" title="在编辑区打开完整面板（任务 / 记录 / 设置）"><i class="bi bi-window-stack"></i></button>
+          <button class="g-ico" id="dlsRefresh" title="刷新任务状态"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+        <div class="dls-sum" id="dlsSum">正在加载…</div>
+        <div class="dls-list scroll-thin" id="dlsList"></div>
+        <div class="dls-foot" id="dlsFoot"></div>
       </div>
     </div>
 

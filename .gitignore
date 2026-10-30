@@ -33,3 +33,8 @@ dist/
 *.jpg
 m3u/
 txt/
+
+*.ts
+
+*.m3u8
+.hlstest3/

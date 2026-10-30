@@ -321,6 +321,49 @@ CREATE TABLE IF NOT EXISTS upload_history (
 CREATE INDEX IF NOT EXISTS idx_upload_hist ON upload_history(id DESC);
 CREATE INDEX IF NOT EXISTS idx_upload_hist_ts ON upload_history(ts);
 
+-- 下载中心：一行一个下载任务（同时兼作「下载记录」）
+-- kind：file（单个文件直传）/ zip（多文件或文件夹打包）/ text（文本另存）
+-- status：pending 排队 / building 打包中 / ready 就绪待下 / downloading 下载中
+--         paused 已暂停 / done 已完成 / failed 失败 / canceled 已取消
+-- done：断点续传的进度游标（已传输字节）；size：产物总字节
+-- artifact：真正下发的文件（zip 产物，或单文件的源路径）
+CREATE TABLE IF NOT EXISTS dl_tasks (
+    id        TEXT PRIMARY KEY,
+    ts        TEXT NOT NULL DEFAULT '',   -- 创建时间（YYYY-MM-DD HH:MM:SS）
+    updated   REAL NOT NULL DEFAULT 0,    -- 最后更新时间（epoch 秒）
+    kind      TEXT DEFAULT 'file',
+    name      TEXT DEFAULT '',            -- 下载时的文件名
+    src       TEXT DEFAULT '[]',          -- 来源路径（JSON 数组）
+    src_dir   TEXT DEFAULT '',            -- 来源目录（可视化选择的位置）
+    save_dir  TEXT DEFAULT '',            -- 打包产物落地目录
+    artifact  TEXT DEFAULT '',            -- 产物绝对路径
+    size      INTEGER DEFAULT 0,
+    done      INTEGER DEFAULT 0,
+    status    TEXT DEFAULT 'pending',
+    phase     TEXT DEFAULT '',            -- 阶段说明（统计中 / 压缩中 …）
+    error     TEXT DEFAULT '',
+    user      TEXT DEFAULT '',
+    ip        TEXT DEFAULT '',
+    hits      INTEGER DEFAULT 0,          -- 成功下载次数
+    note      TEXT DEFAULT '',            -- 备注（打包选项摘要等）
+    opts      TEXT DEFAULT '{}',          -- 打包选项 JSON
+    url       TEXT DEFAULT '',            -- 网络下载的来源链接（http/https/ftp/magnet）
+    threads   INTEGER DEFAULT 0,          -- 服务端多线程连接数
+    segs      TEXT DEFAULT '[]',          -- 分段状态 JSON（断点续传用）
+    meta      TEXT DEFAULT '{}',          -- 链接探测信息（大小 / 是否支持 Range / 类型 …）
+    srv_done  INTEGER DEFAULT 0,          -- 服务端已下载字节
+    srv_size  INTEGER DEFAULT 0,          -- 服务端总字节（0 = 未知）
+    speed     INTEGER DEFAULT 0           -- 服务端最近速度（字节/秒，节流落库）
+);
+CREATE INDEX IF NOT EXISTS idx_dl_tasks_ts ON dl_tasks(updated DESC);
+CREATE INDEX IF NOT EXISTS idx_dl_tasks_status ON dl_tasks(status);
+
+-- 下载中心模块设置（一行一个键，JSON 标量文本；见 services/common/downloads.py 的 _DEFAULTS）
+CREATE TABLE IF NOT EXISTS dl_cfg (
+    key   TEXT PRIMARY KEY,
+    value TEXT DEFAULT ''
+);
+
 -- AI 对话历史（原独立库 data/.file_manager_ai_chat.db，表结构保持一致以便直接搬运）
 -- root：对话所属的项目根目录（IDE 的 ROOT）。空串 = 还没绑定项目（旧数据），
 -- 首次进入某个项目时由 chatdb.adopt_unassigned() 一次性划归该项目，
@@ -657,6 +700,14 @@ def _migrate_ai_columns(conn):
         ("git_push_history", "commits", "TEXT DEFAULT ''"),
         # 上传记录：文件已不在原位置的标记（老库补列）
         ("upload_history", "missing", "INTEGER DEFAULT 0"),
+        # 下载中心：网络下载（多线程 / 磁力）扩展列（老库补列）
+        ("dl_tasks", "url", "TEXT DEFAULT ''"),
+        ("dl_tasks", "threads", "INTEGER DEFAULT 0"),
+        ("dl_tasks", "segs", "TEXT DEFAULT '[]'"),
+        ("dl_tasks", "meta", "TEXT DEFAULT '{}'"),
+        ("dl_tasks", "srv_done", "INTEGER DEFAULT 0"),
+        ("dl_tasks", "srv_size", "INTEGER DEFAULT 0"),
+        ("dl_tasks", "speed", "INTEGER DEFAULT 0"),
     ):
         try:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}

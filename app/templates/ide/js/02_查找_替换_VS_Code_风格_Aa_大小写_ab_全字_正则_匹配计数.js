@@ -292,6 +292,12 @@
     if (!tab || !tab.cm) return;
     if (tab.diff) { toast("差异视图为只读，不能保存", "warn"); return; }
     if (!tab.dirty) { toast("没有改动", "warn"); return; }
+    // 插件内容文档（IDE.editors.open 的 content 模式）：不走 /api/files/save，
+    // 由插件自己的 onSave 钩子决定内容写到哪里（可能根本不落盘）。
+    if (typeof tab.pluginSave === "function") {
+      try { await tab.pluginSave(tab); } catch (e) { toast("保存失败：" + (e.message || e), "err"); }
+      return;
+    }
     if (!(await showSaveConfirm(tab))) return;
     try {
       const r = await fetch("/api/files/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: tab.path, content: tab.cm.getValue() }) });

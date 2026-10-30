@@ -63,6 +63,37 @@
     padding: 12px 16px; font-size: 13px; font-weight: 600; color: #ffffff;
     border-bottom: 1px solid #333333; display: flex; align-items: center; gap: 8px;
   }
+  /* ===== 插件宿主弹窗扩展：标题栏拖动 / 放大还原 / 右下角缩放 ===== */
+  .ide-modal.draggable .m-title { cursor: move; user-select: none; }
+  .ide-modal.dragging { animation: none !important; transition: none !important; }
+  .ide-modal .m-title .m-tbtn {
+    margin-left: auto; flex: none; width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; background: transparent; color: #9a9a9a; border-radius: 5px;
+    cursor: pointer; font-size: 12.5px;
+  }
+  .ide-modal .m-title .m-tbtn:hover { background: #3a3d41; color: #ffffff; }
+  .ide-modal.maximized {
+    position: fixed !important; left: 14px !important; top: 14px !important; margin: 0 !important;
+    width: calc(100vw - 28px) !important; height: calc(100vh - 28px) !important; max-width: none !important;
+    display: flex; flex-direction: column;
+  }
+  /* 显式定宽高（拖动/缩放/放大）后改为纵向 flex，让正文吃掉剩余高度并滚动 */
+  .ide-modal.sized { display: flex; flex-direction: column; }
+  .ide-modal.sized .m-body { flex: 1 1 auto; overflow: auto; max-height: none !important; }
+  .ide-modal .m-foot { flex: none; }
+  .ide-modal .m-resize {
+    position: absolute; right: 0; bottom: 0; width: 17px; height: 17px;
+    cursor: nwse-resize; color: #7a7a7a;
+  }
+  .ide-modal .m-resize::before {
+    content: ""; position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px;
+    border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; border-radius: 1px; opacity: .65;
+  }
+  .ide-modal .m-resize:hover { color: #c2c6cc; }
+  :where(html.theme-light) .ide-modal .m-title .m-tbtn:hover { background: #e4e6e8; color: #1f2328; }
+  :where(html.theme-light) .ide-modal .m-resize { color: #9a9a9a; }
+  :where(html.theme-light) .ide-modal .m-resize:hover { color: #555555; }
   .ide-modal .m-title .bi { color: #4fc1ff; }
   .ide-modal.danger .m-title .bi { color: #f48771; }
   .ide-modal .m-body { padding: 16px; font-size: 13px; color: #cccccc; }

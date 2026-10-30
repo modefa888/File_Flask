@@ -1126,8 +1126,9 @@
     const c = active.cm.getCursor();
     $("sbPos").textContent = "行 " + (c.line + 1) + ", 列 " + (c.ch + 1);
     const ext = getExt(active.name);
-    const names = { js: "JavaScript", py: "Python", html: "HTML", htm: "HTML", css: "CSS", scss: "SCSS", json: "JSON", md: "Markdown", xml: "XML", c: "C", cpp: "C++", h: "C/C++", java: "Java", go: "Go", rs: "Rust", php: "PHP", rb: "Ruby", sh: "Shell", yml: "YAML", sql: "SQL", lua: "Lua" };
-    $("sbLang").textContent = names[ext] || (ext ? ext.toUpperCase() : "纯文本");
+    const names = { js: "JavaScript", py: "Python", html: "HTML", htm: "HTML", css: "CSS", scss: "SCSS", json: "JSON", md: "Markdown", xml: "XML", c: "C", cpp: "C/C++", h: "C/C++", java: "Java", go: "Go", rs: "Rust", php: "PHP", rb: "Ruby", sh: "Shell", yml: "YAML", sql: "SQL", lua: "Lua" };
+    // 插件内容文档（IDE.editors.open 的 content 模式）自带语言标签，优先显示
+    $("sbLang").textContent = active.langLabel || names[ext] || (ext ? ext.toUpperCase() : "纯文本");
   }
   function refreshTreeDirty() {
     document.querySelectorAll(".tree-row").forEach(r => {

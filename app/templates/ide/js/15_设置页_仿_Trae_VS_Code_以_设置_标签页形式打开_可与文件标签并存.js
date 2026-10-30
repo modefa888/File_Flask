@@ -49,6 +49,8 @@
     document.body.classList.toggle("hide-nm-hints", !IDE_SETTINGS.hints);
     // 界面主题：在 <html> 上加 theme-light 类，浅色样式表 (29_浅色主题.css) 据此覆盖
     document.documentElement.classList.toggle("theme-light", ideIsLight());
+    // 广播给插件：iframe 插件页面的主题跟随（20_ 会同步 pl-light/pl-dark 类）
+    if (typeof ideEmit === "function") ideEmit("themeChanged", { light: ideIsLight() });
     tabs.forEach(t => {
       if (!t.cm) return;
       t.cm.setOption("lineWrapping", IDE_SETTINGS.lineWrap);

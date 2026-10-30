@@ -80,6 +80,17 @@
   const $ = (id) => document.getElementById(id);
   const explorerPanel = $("explorerPanel");
   const welcome = $("welcome");
+  /* 宿主动作 → 插件事件总线的广播入口。
+     编辑器切换标签、打开/关闭文件都会广播，插件可用 IDE.events.on(...) 订阅。
+     用 try 包裹：插件系统（20_）未加载 / 出错时不影响编辑区本身。 */
+  function ideEmit(name, data) {
+    try {
+      if (typeof window !== "undefined" && window.IDE && window.IDE.events &&
+          typeof window.IDE.events.emit === "function") {
+        window.IDE.events.emit(name, data || {});
+      }
+    } catch (_) {}
+  }
   // 欢迎页（空编辑器占位）里的常用操作：点击即触发对应动作。
   // 目标函数均为同 IIFE 内的函数声明（整段 <script> 解析时已提升），点击时调用安全。
   if (welcome) {
@@ -95,7 +106,102 @@
       else if (act === "run" && typeof runCurrentFile === "function") runCurrentFile();
       else if (act === "terminal" && typeof toggleBottom === "function") toggleBottom(undefined, "terminal");
       else if (act === "shortcuts" && typeof showShortcuts === "function") showShortcuts();
+      else if (act === "recentClear") {
+        try { localStorage.setItem("ide.recentFiles", "[]"); } catch (_) {}
+        renderWelcomeExtra();
+      }
     });
+    // 最近打开的文件 / 扩展命令入口（委托到 welcome 容器，内容每次重绘不用重绑）
+    welcome.addEventListener("click", (e) => {
+      const rc = e.target.closest("[data-recent]");
+      if (rc && welcome.contains(rc)) {
+        const p = rc.dataset.recent;
+        if (p && typeof openFile === "function") openFile(p, baseName(p));
+        return;
+      }
+      const cb = e.target.closest("[data-cmd]");
+      if (cb && welcome.contains(cb)) {
+        if (window.IDE && typeof window.IDE.executeCommand === "function") window.IDE.executeCommand(cb.dataset.cmd);
+        return;
+      }
+      const pp = e.target.closest("[data-panel]");
+      if (pp && welcome.contains(pp)) {
+        if (typeof showPanel === "function" && panels && panels[pp.dataset.panel]) showPanel(pp.dataset.panel);
+      }
+    });
+  }
+
+  /* ---------- 欢迎页扩展区块：最近打开 + 扩展（插件）入口 ----------
+     无打开标签时欢迎页不只是快捷键列表：
+     - 「最近打开」读 localStorage ide.recentFiles（openFile 维护），点击直接打开；
+     - 「扩展入口」列已启用插件及其注册的命令（点命令执行）与侧栏面板（点打开面板）。
+     渲染时机：启动、打开/关闭标签、插件激活/停用。 */
+  let _wcRenderSeq = 0;
+  function renderWelcomeExtra() {
+    const box = $("welcomeExtra");
+    if (!box) return;
+    const seq = ++_wcRenderSeq;
+    // ---- 最近打开（同步读 localStorage，先渲染）----
+    let recents = [];
+    try { recents = JSON.parse(localStorage.getItem("ide.recentFiles") || "[]"); } catch (_) { recents = []; }
+    recents = Array.isArray(recents) ? recents.filter(r => r && r.path).slice(0, 8) : [];
+    let html = "";
+    if (recents.length) {
+      html += '<div class="wc-sec">' +
+        '<div class="wc-sec-head"><span class="wc-sec-title">最近打开</span>' +
+          '<button class="wc-sec-act" data-act="recentClear" title="清空最近打开记录">清空</button></div>' +
+        '<div class="wc-recent-list">' +
+        recents.map(r => {
+          const dir = dirName(r.path);
+          return '<button class="wc-recent-row" data-recent="' + esc(r.path) + '" title="' + esc(r.path) + '">' +
+            '<span class="wc-recent-ic">' + iconFor(r.name || baseName(r.path), false) + '</span>' +
+            '<span class="wc-recent-name">' + esc(r.name || baseName(r.path)) + '</span>' +
+            '<span class="wc-recent-path">' + esc(dir) + '</span>' +
+            '</button>';
+        }).join("") +
+        '</div></div>';
+    }
+    // ---- 扩展入口（异步拉插件列表，带竞态防护：期间重渲染则丢弃本次结果）----
+    box.innerHTML = html;
+    if (window.IDE && typeof IDE.api === "object" && IDE.api.get) {
+      IDE.api.get("/api/plugins").then(list => {
+        if (seq !== _wcRenderSeq) return;                 // 已有更新一次的渲染，丢弃本次
+        const plugs = (list || []).filter(p => p.enabled);
+        if (!plugs.length) { if (!html) box.innerHTML = ""; return; }
+        let ph = '<div class="wc-sec">' +
+          '<div class="wc-sec-head"><span class="wc-sec-title">扩展入口</span>' +
+            '<span class="wc-sec-act wc-sec-hint">' + plugs.length + ' 个已启用</span></div>' +
+          '<div class="wc-plug-list">';
+        plugs.forEach(p => {
+          const cmds = (typeof IDE.getCommands === "function") ? IDE.getCommands(p.id).slice(0, 4) : [];
+          const extra = Math.max(0, ((IDE.getCommands ? IDE.getCommands(p.id).length : 0)) - cmds.length);
+          const chips = cmds.map(c =>
+            '<button class="wc-cmd-chip" data-cmd="' + esc(c.id) + '" title="执行命令：' + esc(c.title) + '">' +
+            esc(c.title.replace(/^Demo:\s*/, "")) + '</button>').join("");
+          const panelChip = (p.contributes && Array.isArray(p.contributes.panels) && p.contributes.panels[0])
+            ? '<button class="wc-cmd-chip wc-cmd-panel" data-panel="' + esc(p.contributes.panels[0].id) + '" title="打开侧栏面板：' + esc(p.contributes.panels[0].title || p.contributes.panels[0].id) + '">' +
+              '<i class="bi bi-layout-sidebar-inset"></i> ' + esc(p.contributes.panels[0].title || "面板") + '</button>'
+            : "";
+          ph += '<div class="wc-plug-row">' +
+            '<span class="wc-plug-ic"><i class="bi ' + esc(_plIconFor(p) || "bi-puzzle") + '"></i></span>' +
+            '<span class="wc-plug-name">' + esc(p.name || p.id) + '</span>' +
+            '<span class="wc-plug-cmds">' + panelChip + chips +
+            (extra > 0 ? '<span class="wc-plug-more" title="更多命令在命令面板 Ctrl+Shift+P">+' + extra + '</span>' : "") +
+            '</span></div>';
+        });
+        ph += '</div></div>';
+        box.innerHTML = html + ph;
+      }).catch(() => {});
+    }
+  }
+  // 插件图标（renderWelcomeExtra 在 00_ 中，无法直接访问 20_ 的 _plIcons，走 window.IDE 上的公开映射）
+  function _plIconFor(p) {
+    if (!p) return "";
+    if (typeof p.icon === "string" && p.icon) return p.icon;
+    if (p.contributes && Array.isArray(p.contributes.panels) && p.contributes.panels[0] && p.contributes.panels[0].icon) {
+      return p.contributes.panels[0].icon;
+    }
+    return "";
   }
   // 分屏：动态多组。tab.group 为组 id（递增不复用），组按 id 升序横向排列，空组自动消失
   const edGroups = $("edGroups");
@@ -1765,6 +1871,8 @@
       localStorage.setItem("ide.recentFiles", JSON.stringify(rec.slice(0, 12)));
     } catch (_) {}
     sessionSaveTabs();
+    renderWelcomeExtra();   // 最近打开列表跟随变化（欢迎页可见与否由 rebuildGroups 决定，刷新无副作用）
+    ideEmit("fileOpened", { path: path, name: name });   // 广播给插件
     return tab;   // 调用方（如 openFileAt 定位行）可直接拿到标签，避免再按路径查一遍
   }
   // 把标签的编辑器容器挂到所属编辑组；组布局重建时的兜底挂载也走这里
@@ -2069,6 +2177,10 @@
     revealInTree(tab.path);          // 树列表跟随当前打开的文件高亮
     scrollTabIntoView(tab);
     sessionSaveTabs();
+    // 广播「当前标签已切换」给插件（状态栏自定义项、面板等据此刷新）
+    ideEmit("activeTabChanged", {
+      path: tab.path, name: tab.name, group: tab.group, pluginView: !!tab.pluginView
+    });
     if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏高亮跟随当前标签
     if (typeof apiSyncOpenMarks === "function") apiSyncOpenMarks();   // API 调试侧栏高亮跟随当前标签
     if (typeof fmSyncOpenMarks === "function") fmSyncOpenMarks();     // 文件夹管理器侧栏高亮跟随当前标签
@@ -2099,5 +2211,7 @@
       else { active = null; groupActive.delete(g); curGroup = 0; $("breadcrumbs").innerHTML = ""; updateStatus(); ffClose(); }
     }
     sessionSaveTabs();
+    renderWelcomeExtra();   // 空编辑器时欢迎页重新可见，刷新最近打开 / 扩展入口
+    ideEmit("fileClosed", { path: tab.path, name: tab.name });   // 广播给插件
   }
 

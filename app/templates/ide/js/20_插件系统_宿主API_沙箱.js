@@ -62,19 +62,53 @@
     "::-webkit-scrollbar-thumb:active{background:rgba(190,192,205,.95);border:2px solid transparent;background-clip:content-box}" +
     "::-webkit-scrollbar-corner{background:transparent}" +
     "::-webkit-scrollbar-button{display:none;height:0;width:0}";
+  // 插件 iframe 主题变量：跟随「界面主题」（html.pl-dark / html.pl-light 由宿主切换）
+  const _PL_THEME_CSS =
+    "html.pl-dark{--pl-fg:#c9ced6;--pl-strong:#e8eaed;--pl-dim:#8a9098;--pl-border:rgba(127,127,127,.28);--pl-card:rgba(127,127,127,.07);--pl-hover:rgba(127,127,127,.12)}" +
+    "html.pl-light{--pl-fg:#30363d;--pl-strong:#1f2328;--pl-dim:#6b7078;--pl-border:rgba(0,0,0,.16);--pl-card:rgba(0,0,0,.045);--pl-hover:rgba(0,0,0,.05)}";
   function _plInjectScrollbar(f) {
     const inject = () => {
       try {
         const d = f.contentDocument;
-        if (!d || d.getElementById("__pl_scrollbar__")) return;
-        const st = d.createElement("style");
-        st.id = "__pl_scrollbar__";
-        st.textContent = _PL_SCROLLBAR_CSS;
-        (d.head || d.documentElement).appendChild(st);
+        if (!d) return;
+        if (!d.getElementById("__pl_scrollbar__")) {
+          const st = d.createElement("style");
+          st.id = "__pl_scrollbar__";
+          st.textContent = _PL_SCROLLBAR_CSS;
+          (d.head || d.documentElement).appendChild(st);
+        }
+        // 主题变量：插件页面用 var(--pl-fg) 等取色即可随「界面主题」变化
+        if (!d.getElementById("__pl_theme__")) {
+          const th = d.createElement("style");
+          th.id = "__pl_theme__";
+          th.textContent = _PL_THEME_CSS;
+          (d.head || d.documentElement).appendChild(th);
+        }
+        _plSyncFrameTheme(f);
       } catch (e) { /* 非同源/被禁止访问时忽略 */ }
     };
     f.addEventListener("load", inject);
     if (f.contentDocument && f.contentDocument.readyState === "complete") inject();
+  }
+
+  // 把当前「界面主题」同步到某个插件 iframe：<html> 上挂 pl-light / pl-dark 类，
+  // 配合 _PL_THEME_CSS 的变量与插件页面的 html.pl-light 样式实现主题跟随
+  function _plSyncFrameTheme(f) {
+    try {
+      const light = (typeof ideThemeLight === "function") ? ideThemeLight() : false;
+      const html = f.contentDocument && f.contentDocument.documentElement;
+      if (html) {
+        html.classList.toggle("pl-light", light);
+        html.classList.toggle("pl-dark", !light);
+      }
+    } catch (e) { /* 非同源时忽略 */ }
+  }
+  // 主题切换（themeChanged）时同步全部插件 iframe：侧栏面板 + 编辑区视图
+  function _plApplyThemeAll() {
+    const list = [];
+    _plPanels.forEach(h => { if (h.iframe) list.push(h.iframe); });
+    _plViews.forEach(v => { if (v.iframe) list.push(v.iframe); });
+    list.forEach(_plSyncFrameTheme);
   }
 
   function _plMountIndex(el, pid, indexFile, cssFile) {
@@ -231,6 +265,72 @@
     return null;
   }
 
+  // 语言名 → 扩展名（IDE.editors.open 的 language 可传扩展名 md/js/py，也可传语言名 markdown/python）
+  const _PL_LANG2EXT = {
+    javascript: "js", typescript: "ts", python: "py", markdown: "md", gfm: "md",
+    html: "html", css: "css", json: "json", xml: "xml", yaml: "yml", yml: "yml",
+    shell: "sh", bash: "sh", sql: "sql", c: "c", cpp: "cpp", clike: "c", go: "go",
+    rust: "rs", ruby: "rb", php: "php", lua: "lua", properties: "ini",
+  };
+
+  // 内容文档模式：把一个 CodeMirror 编辑器挂进标签页容器。
+  // 与 openFile 打开真实文件同款体验：行号 / 语法高亮（异步套用）/ 脏标记 / 光标位置进状态栏 /
+  // Ctrl+S 保存（走 tab.pluginSave → spec.onSave 钩子，而非 /api/files/save）。
+  function _plMountDoc(tab, view) {
+    const spec = view.spec;
+    const text = String(spec.content);
+    const readOnly = !!spec.readOnly;
+    const cm = CodeMirror(tab.host, {
+      value: text, mode: "text/plain",
+      theme: (typeof ideThemeLight === "function" && ideThemeLight()) ? "default" : "material-darker",
+      lineNumbers: true, lineWrapping: (typeof IDE_SETTINGS !== "undefined") ? !!IDE_SETTINGS.lineWrap : false,
+      indentUnit: (typeof IDE_SETTINGS !== "undefined") ? IDE_SETTINGS.indent : 4,
+      tabSize: (typeof IDE_SETTINGS !== "undefined") ? IDE_SETTINGS.indent : 4,
+      readOnly: readOnly, matchBrackets: true, autoCloseBrackets: !readOnly,
+      phrases: (typeof CM_PHRASES !== "undefined") ? CM_PHRASES : undefined,
+    });
+    tab.cm = cm;
+    tab.original = text;
+    tab.dirty = !!spec.dirty;                          // 允许插件声明初始脏标记（如 AI 生成的未保存内容）
+    if (tab.dirty && tab.el) tab.el.classList.add("dirty");
+    // 语言标签：状态栏右侧显示（updateStatus 优先读 langLabel）
+    const langRaw = String(spec.language || (spec.filename ? String(spec.filename).split(".").pop() : "") || "").toLowerCase();
+    if (langRaw) tab.langLabel = langRaw.charAt(0).toUpperCase() + langRaw.slice(1);
+    // 语法高亮异步套用：与 openFile 同策略，内容先可见，模式脚本慢/失败只退化为纯文本
+    const ext = _PL_LANG2EXT[langRaw] || langRaw;
+    if (ext && typeof ideEnsureMode === "function") {
+      ideEnsureMode(ext).then(m => {
+        if (m && tab.cm === cm) { cm.setOption("mode", m); if (typeof scheduleRefresh === "function") scheduleRefresh(tab); }
+      }).catch(() => {});
+    }
+    if (!readOnly) {
+      cm.on("change", () => {
+        tab.dirty = cm.getValue() !== tab.original;
+        if (tab.el) tab.el.classList.toggle("dirty", tab.dirty);
+        if (typeof refreshTreeDirty === "function") refreshTreeDirty();
+        if (typeof active !== "undefined" && active === tab && typeof updateStatus === "function") updateStatus();
+      });
+      // Ctrl+S 保存通道：02_ 的 saveTab 检测到 tab.pluginSave 后改走插件自己的保存钩子
+      tab.pluginSave = async function () {
+        const now = cm.getValue();
+        if (typeof spec.onSave === "function") {
+          const r = await spec.onSave(now, view);
+          if (r === false) return;                     // 钩子返回 false：保存失败/取消，保持脏标记
+        }
+        tab.original = now; tab.dirty = false;
+        if (tab.el) tab.el.classList.remove("dirty");
+        if (typeof refreshTreeDirty === "function") refreshTreeDirty();
+        IDE.events.emit("viewSaved", { id: view.id, view: view, text: now });
+        if (typeof toast === "function") toast("已保存：" + tab.name, "ok");
+      };
+    }
+    cm.on("cursorActivity", () => {
+      if (typeof active !== "undefined" && active === tab && typeof updateStatus === "function") updateStatus();
+    });
+    cm.on("focus", () => { if (typeof curGroup !== "undefined") curGroup = tab.group; });
+    if (typeof scheduleRefresh === "function") scheduleRefresh(tab);
+  }
+
   function _plOpenEditor(spec) {
     if (typeof spec === "string") spec = { title: spec };
     spec = spec || {};
@@ -242,7 +342,7 @@
     // 去重：指定 group 时同 id 同组、未指定 group 时同 id 任一实例已打开 → 刷新内容并聚焦（不重复开标签）
     const opened = _plFindView(id, spec.group == null ? null : spec.group);
     if (opened) {
-      if (typeof spec.render === "function") {
+      if (opened.body && typeof spec.render === "function") {
         try { spec.render(opened.body, opened); }
         catch (e) { console.error("[IDE] view render 失败:", id, e); }
       }
@@ -258,17 +358,24 @@
     // 默认标签图标：未指定 icon/iconHtml 时，用打开该视图的插件在插件列表中的图标，兜底为通用拼图图标
     const _ownerIcon = (_plCurrentId && _plIcons.get(_plCurrentId)) || "";
     const _defIconHtml = _ownerIcon ? ('<i class="bi ' + _ownerIcon + '"></i>') : PL_DEFAULT_ICON;
+    // 内容文档模式：spec.content 为字符串时，标签页内直接挂 CodeMirror（等同打开真实文件的体验）；
+    // 未传 content 时仍是插件自绘视图（render 自定义渲染 / iframe 加载 index.html）。
+    const isDoc = typeof spec.content === "string";
     const host = document.createElement("div");
     host.className = "cm-host pl-view-host";
-    const body = document.createElement("div");
-    body.className = "pl-view-body";
-    host.appendChild(body);
+    let body = null;
+    if (!isDoc) {
+      body = document.createElement("div");
+      body.className = "pl-view-body";
+      host.appendChild(body);
+    }
 
     const tab = {
       path: PL_VIEW_PREFIX + key, displayPath: spec.title || id, name: spec.title || id,
       host, cm: null, original: "", dirty: false, big: false,
       group: spec.group != null ? spec.group : curGroup,
       pluginView: true, pluginViewId: id, pluginOwner: _plCurrentId || "",
+      pluginDoc: isDoc, langLabel: "",
       noSplit: !!spec.noSplit,   // 插件声明禁止拆分
       iconHtml: spec.iconHtml || (spec.icon ? '<i class="bi ' + spec.icon + '"></i>' : _defIconHtml),
     };
@@ -295,6 +402,13 @@
       focus() { activate(tab); return view; },
       onClose(fn) { view._onClose = fn; return view; },
       close() { return closeTab(tab); },
+      // ---- 内容文档模式专用（isDoc 时才有意义）----
+      getDocument() { return tab.cm; },                    // CodeMirror 实例（可注册快捷键/取光标等）
+      getText() { return tab.cm ? tab.cm.getValue() : ""; },
+      setText(text) { if (tab.cm) tab.cm.setValue(String(text == null ? "" : text)); return view; },
+      isDirty() { return !!tab.dirty; },
+      // 与 Ctrl+S 同一条保存通道（onSave 钩子 → 清脏标记 → viewSaved 事件）
+      save() { if (typeof saveTab === "function") return saveTab(tab); return Promise.resolve(); },
     };
     // 关闭钩子（closeTab 统一调用）：插件可先清理，返回 false 可取消关闭；
     // 关闭后从注册表移除并广播 viewClosed
@@ -311,7 +425,10 @@
     renderTabsAll();
     _plViews.set(key, view);
     activate(tab);                                       // 与打开文件一致：创建即激活
-    if (spec.index) {
+    if (isDoc) {
+      // 内容文档：挂 CodeMirror 编辑器（行号 / 高亮 / 脏标记 / Ctrl+S onSave）
+      _plMountDoc(tab, view);
+    } else if (spec.index) {
       // 以 iframe 加载插件的 index.html（+ css），渲染富页面视图
       view.iframe = _plMountIndex(body, _plCurrentId, spec.index, spec.css);
     } else if (typeof spec.render === "function") {
@@ -334,7 +451,9 @@
     split(id, group) {
       const v = _plFindView(id, null);
       if (!v || v.noSplit) return null;   // 禁止拆分的视图不创建新实例（splitEditor 会给出提示）
-      return _plOpenEditor(Object.assign({}, v.spec, { id: v.id, group: group, title: v.tab.name }));
+      const spec2 = Object.assign({}, v.spec, { id: v.id, group: group, title: v.tab.name });
+      if (typeof v.getText === "function" && v.spec.content != null) spec2.content = v.getText();   // 内容文档：复制当前文本
+      return _plOpenEditor(spec2);
     },
     list() {
       return [..._plViews.values()].filter(v => tabs.indexOf(v.tab) >= 0).map(v => ({ id: v.id, title: v.tab.name }));
@@ -485,6 +604,7 @@
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
   // opts: { title, icon?, message?, html?, buttons?[{text,value,primary,gen}], danger?, wide?,
+  //        draggable?, maximizable?, resizable?,      ← 拖动 / 放大还原 / 右下角缩放
   //        dismissible?, cancelValue?, onMount?({box, el, close, q, qa}) }
   // 返回 Promise，resolve 为被点击按钮的 value（点遮罩/Esc 解析 cancelValue 或最后一个按钮 value）
   IDE.dialog = function (opts) {
@@ -514,6 +634,90 @@
           '<div class="m-body">' + bodyHtml + '</div>' +
           '<div class="m-foot">' + foot + '</div>' +
         '</div>';
+      const box = ov.querySelector(".ide-modal");
+      const tEl = ov.querySelector(".m-title");
+      /* ---- 放大 / 还原（maximizable）---- */
+      if (opts.maximizable) {
+        const maxBtn = document.createElement("button");
+        maxBtn.type = "button"; maxBtn.className = "m-tbtn m-max";
+        maxBtn.title = "放大 / 还原";
+        maxBtn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
+        maxBtn.addEventListener("click", () => {
+          if (box.classList.contains("maximized")) {
+            box.classList.remove("maximized", "sized");
+            box.style.cssText = box._prevStyle || "";   // 还原拖动/缩放前的位置与尺寸
+          } else {
+            box._prevStyle = box.style.cssText;
+            box.classList.add("maximized", "sized");
+            box.style.cssText = "";                     // 交给 .maximized 全屏样式
+          }
+        });
+        tEl.appendChild(maxBtn);
+      }
+      /* ---- 标题栏拖动（draggable）---- */
+      if (opts.draggable) {
+        box.classList.add("draggable");
+        tEl.addEventListener("mousedown", (e) => {
+          if (e.target.closest(".m-tbtn") || box.classList.contains("maximized")) return;
+          const r = box.getBoundingClientRect();
+          box._prevStyle = box._prevStyle || box.style.cssText;
+          box.classList.add("sized", "dragging");
+          // 关掉 pop 动画：否则松开移除 .dragging 时 animation 会重新触发一次（表现为松手“抖动/闪一下”）
+          box.style.animation = "none";
+          box.style.position = "fixed"; box.style.margin = "0";
+          box.style.left = r.left + "px"; box.style.top = r.top + "px";
+          box.style.width = r.width + "px"; box.style.height = r.height + "px";
+          box.style.maxWidth = "none";
+          const sx = e.clientX - r.left, sy = e.clientY - r.top;
+          let moved = false;
+          const move = (ev) => {
+            const w = box.offsetWidth, h = box.offsetHeight;
+            box.style.left = Math.min(window.innerWidth - 60, Math.max(60 - w, ev.clientX - sx)) + "px";
+            box.style.top = Math.min(window.innerHeight - 40, Math.max(0, ev.clientY - sy)) + "px";
+            if (!moved && Math.abs(ev.clientX - (r.left + sx)) + Math.abs(ev.clientY - (r.top + sy)) > 3) {
+              moved = true; box._plDragged = true;   // 标记发生过拖动：mouseup 落在遮罩上的 click 不应关闭弹窗
+            }
+          };
+          const up = () => {
+            box.classList.remove("dragging");
+            document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+          };
+          document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+          e.preventDefault();
+        });
+      }
+      /* ---- 右下角缩放（resizable）---- */
+      if (opts.resizable) {
+        box.classList.add("resizable");
+        const hnd = document.createElement("div");
+        hnd.className = "m-resize"; hnd.title = "拖动调整大小";
+        box.appendChild(hnd);
+        hnd.addEventListener("mousedown", (e) => {
+          if (box.classList.contains("maximized")) return;
+          e.stopPropagation(); e.preventDefault();
+          const r = box.getBoundingClientRect();
+          box._prevStyle = box._prevStyle || box.style.cssText;
+          box.classList.add("sized", "dragging");
+          box.style.animation = "none";
+          box.style.position = "fixed"; box.style.margin = "0";
+          box.style.left = r.left + "px"; box.style.top = r.top + "px";
+          box.style.maxWidth = "none";
+          const sx = e.clientX, sy = e.clientY, w0 = r.width, h0 = r.height;
+          let moved = false;
+          const move = (ev) => {
+            box.style.width = Math.max(320, Math.min(window.innerWidth - 24, w0 + ev.clientX - sx)) + "px";
+            box.style.height = Math.max(200, Math.min(window.innerHeight - 24, h0 + ev.clientY - sy)) + "px";
+            if (!moved && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) > 3) {
+              moved = true; box._plDragged = true;
+            }
+          };
+          const up = () => {
+            box.classList.remove("dragging");
+            document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+          };
+          document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+        });
+      }
       ov.classList.add("show");
       let closed = false;
       const onKey = (e) => {
@@ -535,7 +739,11 @@
         btn.addEventListener("click", () => close(btn.dataset.val));
       });
       ov.addEventListener("click", (e) => {
-        if (e.target === ov && opts.dismissible !== false) {
+        // 拖动/缩放结束时鼠标常落在遮罩上：mousedown 与 mouseup 的共同祖先是 ov，
+        // 会派发一次 target===ov 的 click —— 不能把它当成「点遮罩关闭」
+        const wasDragged = box._plDragged;
+        box._plDragged = false;
+        if (e.target === ov && !wasDragged && opts.dismissible !== false) {
           close(opts.cancelValue != null ? opts.cancelValue : null);
         }
       });
@@ -551,6 +759,73 @@
         } catch (_) {}
       }
     });
+  };
+
+
+
+  // 二次确认弹窗：IDE.confirm({ title?, message?, html?, okText?, cancelText?, danger?, icon? })
+  // → Promise<boolean>（点「确定」resolve true；取消 / Esc / 点遮罩 resolve false）
+  IDE.confirm = function (opts) {
+    opts = opts || {};
+    const danger = !!opts.danger;
+    return IDE.dialog({
+      title: opts.title || "确认操作",
+      icon: opts.icon || (danger ? "bi-exclamation-triangle" : "bi-question-circle"),
+      danger: danger,
+      wide: !!opts.wide,
+      html: opts.html || ('<div class="m-msg">' + _escHtml(opts.message || "确定执行该操作吗？") + '</div>'),
+      buttons: [
+        { text: opts.okText || "确定", value: "ok", primary: !danger, gen: danger },
+        { text: opts.cancelText || "取消", value: "cancel" }
+      ]
+    }).then(v => v === "ok");
+  };
+
+  // ---------- 状态栏自定义项 ----------
+  // IDE.statusBar.set(id, { text, icon?, title?, onClick?, align?("left"|"right"), visible? })
+  // 插件可往底部状态栏放自定义按钮/指示器；停用/卸载插件时自动随 _plRemovePluginUI 移除。
+  const _plSbItems = new Map();
+  IDE.statusBar = {
+    set(id, opts) {
+      id = String(id); opts = opts || {};
+      let it = _plSbItems.get(id);
+      if (!it) {
+        const span = document.createElement("span");
+        span.className = "sb-item";
+        span.id = "plsb-" + id;
+        const right = document.querySelector(".statusbar .sb-right");
+        const anchor = document.getElementById("sbBranch");   // 左侧默认插在 Git 指示器后面
+        if (opts.align === "right" && right) right.insertBefore(span, right.firstChild);
+        else if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(span, anchor.nextSibling);
+        else if (right && right.parentNode) right.parentNode.insertBefore(span, right);
+        span.addEventListener("click", () => {
+          const o = _plSbItems.get(id);
+          if (o && typeof o.onClick === "function") o.onClick();
+        });
+        it = { span: span, onClick: null, _owner: _plCurrentId || "" };
+        _plSbItems.set(id, it);
+      }
+      it.onClick = opts.onClick || null;
+      it.span.innerHTML = (opts.icon ? '<i class="bi ' + _esc(opts.icon) + '"></i> ' : "") + _esc(opts.text != null ? opts.text : "");
+      if (opts.title != null) it.span.title = opts.title;
+      it.span.style.display = opts.visible === false ? "none" : "";
+      return it.span;
+    },
+    remove(id) {
+      const it = _plSbItems.get(String(id));
+      if (it) { try { it.span.remove(); } catch (_) {} _plSbItems.delete(String(id)); }
+    }
+  };
+
+  // 已注册命令列表（插件详情弹窗展示用；pluginId 省略时返回全部）
+  IDE.getCommands = function (pluginId) {
+    const out = [];
+    _plCommands.forEach((c, cid) => {
+      if (pluginId == null || String(c._owner) === String(pluginId)) {
+        out.push({ id: cid, title: c.title || cid, owner: c._owner || "" });
+      }
+    });
+    return out;
   };
 
 
@@ -615,6 +890,12 @@
         }
       }
     }
+    // 该插件的状态栏自定义项一并移除
+    for (const [sid, it] of [..._plSbItems.entries()]) {
+      if (String(it._owner) !== pid) continue;
+      try { it.span.remove(); } catch (_) {}
+      _plSbItems.delete(sid);
+    }
   }
 
   function _plDeactivate(id) {
@@ -629,10 +910,13 @@
     try { _plRemovePluginUI(id); } catch (e) { console.error(e); }
     if (typeof window.applyActOrder === "function") window.applyActOrder();   // 图标已移除，重排剩余图标
     IDE.events.emit("pluginDeactivated", id);
+    // 停用后命令/面板已移除：同步刷新欢迎页「扩展入口」
+    try { if (typeof renderWelcomeExtra === "function") renderWelcomeExtra(); } catch (_) {}
   }
 
   IDE.activate = _plActivate;
   IDE.deactivate = _plDeactivate;
+  IDE.reload = _plReload;   // 重载插件（清理旧实例 → 重新拉清单 → 重新激活），无需刷新页面
 
   // ---------- 启动：加载所有 enabled 插件 ----------
   IDE.start = async function () {
@@ -656,6 +940,10 @@
     } catch (e) { console.error("[IDE] 恢复插件面板失败:", e); }
     if (typeof window.applyActOrder === "function") window.applyActOrder();   // 插件图标纳入「活动栏图标顺序」
     _plRenderPanel();
+    // 主题切换 → 同步全部插件 iframe 的 pl-light / pl-dark 类（含之后新开的 iframe，注入时也会取当前主题）
+    IDE.events.on("themeChanged", function () { _plApplyThemeAll(); });
+    // 插件激活后命令/面板已注册：刷新欢迎页「扩展入口」（空编辑器起始页）
+    try { if (typeof renderWelcomeExtra === "function") renderWelcomeExtra(); } catch (_) {}
   };
 
   // ---------- 扩展面板 UI ----------
@@ -666,6 +954,70 @@
   // 插件列表始终取最新（禁用浏览器缓存，避免刚上传/切换启用状态后读到旧数据）
   function _plFetchList() {
     return fetch("/api/plugins", { cache: "no-store" }).then(r => r.json());
+  }
+
+  // 重载插件：停用（清理面板/命令/视图/状态栏项）→ 重新拉清单 → 重新激活（无需刷新页面）
+  async function _plReload(id) {
+    _plDeactivate(id);
+    let meta = null;
+    try {
+      const list = await _plFetchList();
+      meta = (list || []).find(p => String(p.id) === String(id)) || null;
+    } catch (e) { /* 拉取失败时至少旧实例已清理 */ }
+    if (meta && meta.enabled) await _plActivate(meta);
+    IDE.notifications.show("已重载「" + ((meta && meta.name) || id) + "」", "ok");
+    _plRenderPanel();
+  }
+
+  // 插件详情弹窗：元信息 + 贡献的面板/命令（命令可点击直接执行）
+  function _plOpenDetail(p) {
+    const cmds = (typeof IDE.getCommands === "function") ? IDE.getCommands(p.id) : [];
+    const panels = (p.contributes && Array.isArray(p.contributes.panels)) ? p.contributes.panels : [];
+    const row = (k, v) =>
+      '<div style="display:flex;gap:10px;padding:2px 0;font-size:13px">' +
+        '<span style="color:#888;min-width:64px;flex:none">' + k + '</span>' +
+        '<span style="flex:1;word-break:break-all">' + v + '</span>' +
+      '</div>';
+    let html =
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">' +
+        '<i class="bi ' + _esc(_plResolveIcon(p) || "bi-puzzle") + '" style="font-size:28px"></i>' +
+        '<div>' +
+          '<div style="font-size:15px;font-weight:600">' + _esc(p.name || p.id) +
+            ' <span style="color:#8a8;font-size:12px">v' + _esc(p.version || "0.0.0") + '</span></div>' +
+          '<div style="color:#888;font-size:12px">' + _esc(p.id) + (p.author ? " · " + _esc(p.author) : "") + '</div>' +
+        '</div>' +
+      '</div>';
+    if (p.description) html += '<div style="margin:6px 0 10px;line-height:1.6">' + _esc(p.description) + '</div>';
+    html += row("状态", p.enabled
+      ? '<span style="color:#7bd88f">已启用</span>'
+      : '<span style="color:#888">已禁用</span>');
+    if (p.installed_at) html += row("安装时间", _esc(_plFmtTime(p.installed_at)));
+    if (p.updated_at) html += row("更新时间", _esc(_plFmtTime(p.updated_at)));
+    if (panels.length) {
+      html += '<div style="margin-top:10px;font-weight:600">侧边栏面板（' + panels.length + '）</div>' +
+        panels.map(x =>
+          '<div style="padding:2px 0;color:#aaa;font-size:13px">· ' + _esc(x.title || x.id) +
+          (x.icon ? ' <i class="bi ' + _esc(x.icon) + '"></i>' : '') + '</div>').join("");
+    }
+    html += '<div style="margin-top:10px;font-weight:600">命令（' + cmds.length + '）</div>';
+    html += cmds.length
+      ? '<div style="max-height:180px;overflow:auto;margin-top:4px">' + cmds.map(c =>
+          '<button class="g-btn outline" data-cmd="' + _esc(c.id) + '" title="点击执行该命令" ' +
+          'style="display:block;width:100%;text-align:left;margin:3px 0;padding:3px 8px;font-size:12px">' +
+          _esc(c.title) + ' <span style="color:#8a8;font-size:11px">' + _esc(c.id) + '</span></button>').join("") + '</div>'
+      : '<div style="color:#888;font-size:12px">该插件未注册命令。</div>';
+    IDE.dialog({
+      title: "扩展详情",
+      icon: "bi-puzzle",
+      wide: true,
+      html: html,
+      buttons: [{ text: "关闭", value: "close", primary: true }],
+      onMount: ({ qa, close }) => {
+        qa("[data-cmd]").forEach(b => {
+          b.addEventListener("click", () => { close("run"); IDE.executeCommand(b.dataset.cmd); });
+        });
+      }
+    });
   }
 
   function _plRenderPanel() {
@@ -681,16 +1033,26 @@
             '<button class="g-btn outline" id="plUpload" style="padding:2px 8px;font-size:12px">上传插件(zip)</button>' +
           '</span>' +
         '</div>';
+      if (list.length) {
+        html += '<div style="padding:0 8px 6px">' +
+          '<input id="plSearch" placeholder="搜索已安装的扩展…" ' +
+          'style="width:100%;box-sizing:border-box;padding:3px 8px;font-size:12px;background:rgba(127,127,127,.1);border:1px solid rgba(127,127,127,.25);border-radius:6px;color:inherit;outline:none">' +
+          '</div>';
+      }
       if (!list.length) html += '<div class="ph" style="color:#888">暂无插件。把插件目录打包成 zip 上传即可。</div>';
       for (const p of list) {
         _plIcons.set(p.id, _plResolveIcon(p));   // 同步插件图标（视图标签默认图标即取自此）
+        const search = ((p.name || "") + " " + p.id + " " + (p.description || "") + " " + (p.author || "")).toLowerCase();
         html +=
-          '<div class="pl-card" data-id="' + _esc(p.id) + '">' +
-            '<div class="pl-row"><i class="bi ' + _esc(_plResolveIcon(p) || "bi-puzzle") + '"></i> <b>' + _esc(p.name || p.id) + '</b> <span class="pl-ver">v' + _esc(p.version || "0.0.0") + '</span></div>' +
+          '<div class="pl-card" data-id="' + _esc(p.id) + '" data-search="' + _esc(search) + '" style="cursor:pointer" title="点击查看详情">' +
+            '<div class="pl-row"><i class="bi ' + _esc(_plResolveIcon(p) || "bi-puzzle") + '"></i> <b>' + _esc(p.name || p.id) + '</b> <span class="pl-ver">v' + _esc(p.version || "0.0.0") + '</span>' +
+              '<span style="margin-left:auto;font-size:11px;color:' + (p.enabled ? "#7bd88f" : "#888") + '">' + (p.enabled ? "已启用" : "已禁用") + '</span></div>' +
             (p.description ? '<div class="pl-desc">' + _esc(p.description) + '</div>' : '') +
             (p.author ? '<div class="pl-author">作者：' + _esc(p.author) + '</div>' : '') +
             '<div class="pl-acts">' +
               '<label class="pl-sw"><input type="checkbox" data-act="toggle" ' + (p.enabled ? "checked" : "") + '> 启用</label>' +
+              '<span style="flex:1"></span>' +
+              '<button class="g-btn outline" data-act="reload" title="重新加载插件代码（无需刷新页面）" style="padding:1px 6px;font-size:11px">重载</button>' +
               '<button class="g-btn outline" data-act="uninstall" style="padding:1px 6px;font-size:11px">卸载</button>' +
             '</div>' +
           '</div>';
@@ -700,8 +1062,22 @@
       if (up) up.addEventListener("click", _plOpenUpload);
       const hi = box.querySelector("#plHistory");
       if (hi) hi.addEventListener("click", _plOpenHistory);
+      // 搜索过滤：按名称 / id / 描述 / 作者实时筛选卡片
+      const sInp = box.querySelector("#plSearch");
+      if (sInp) sInp.addEventListener("input", () => {
+        const kw = sInp.value.trim().toLowerCase();
+        box.querySelectorAll(".pl-card").forEach(c => {
+          c.style.display = (!kw || (c.dataset.search || "").indexOf(kw) >= 0) ? "" : "none";
+        });
+      });
       box.querySelectorAll(".pl-card").forEach(card => {
         const id = card.dataset.id;
+        // 点卡片（按钮 / 开关除外）→ 详情弹窗
+        card.addEventListener("click", (e) => {
+          if (e.target.closest("button") || e.target.closest("label") || e.target.closest("input")) return;
+          const meta = (list || []).find(p => String(p.id) === String(id));
+          if (meta) _plOpenDetail(meta);
+        });
         const tog = card.querySelector('[data-act="toggle"]');
         if (tog) tog.addEventListener("change", async (e) => {
           const on = e.target.checked;
@@ -709,19 +1085,26 @@
           try {
             await IDE.api.post("/api/plugins/" + encodeURIComponent(id) + "/toggle", { enabled: on });
             if (on) {
-              const list = await _plFetchList();
-              const meta = (list || []).find(p => String(p.id) === String(id)) || { id: id, enabled: true };
+              const list2 = await _plFetchList();
+              const meta = (list2 || []).find(p => String(p.id) === String(id)) || { id: id, enabled: true };
               await _plActivate(meta);           // 立即激活，无需刷新
             } else {
               _plDeactivate(id);                 // 立即停用并移除其面板 / 命令 / 视图
             }
             IDE.notifications.show("已" + (on ? "启用" : "禁用"), "ok");
+            _plRenderPanel();                    // 重绘以刷新「已启用 / 已禁用」徽标
           } catch (err) {
             e.target.checked = !on;              // 失败回滚开关状态
             IDE.notifications.show("操作失败：" + ((err && err.message) || err), "err");
           } finally {
             e.target.disabled = false;
           }
+        });
+        const rl = card.querySelector('[data-act="reload"]');
+        if (rl) rl.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          rl.disabled = true;
+          try { await _plReload(id); } finally { rl.disabled = false; }
         });
         const un = card.querySelector('[data-act="uninstall"]');
         if (un) un.addEventListener("click", async (e) => {

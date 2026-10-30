@@ -38,3 +38,6 @@ txt/
 
 *.m3u8
 .hlstest3/
+plugins/
+.ide-workspace-tools/
+.ide-ai-chat/

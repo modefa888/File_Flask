@@ -142,6 +142,21 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .welcome .wc-chips kbd { background: #ececec; border-color: #d6d6d6; color: #333333; }
 :where(html.theme-light) .welcome .wc-more { color: #8a8a8a; }
 :where(html.theme-light) .welcome .wc-more:hover { color: #333333; }
+:where(html.theme-light) .welcome .wc-sec-head { border-bottom-color: rgba(0, 0, 0, .08); }
+:where(html.theme-light) .welcome .wc-sec-title { color: #6b7078; }
+:where(html.theme-light) .welcome .wc-sec-act { color: #8a8a8a; }
+:where(html.theme-light) .welcome .wc-sec-act:hover { color: #1f2328; background: rgba(0, 0, 0, .06); }
+:where(html.theme-light) .welcome .wc-sec-hint:hover { color: #8a8a8a; background: transparent; }
+:where(html.theme-light) .welcome .wc-recent-row:hover { background: rgba(0, 0, 0, .05); }
+:where(html.theme-light) .welcome .wc-recent-name { color: #30363d; }
+:where(html.theme-light) .welcome .wc-recent-row:hover .wc-recent-name { color: #000000; }
+:where(html.theme-light) .welcome .wc-recent-path { color: #9a9a9a; }
+:where(html.theme-light) .welcome .wc-plug-row:hover { background: rgba(0, 0, 0, .04); }
+:where(html.theme-light) .welcome .wc-plug-ic { color: #8a8a8a; }
+:where(html.theme-light) .welcome .wc-plug-name { color: #30363d; }
+:where(html.theme-light) .welcome .wc-cmd-chip { background: #f0f1f3; border-color: #d6d6d6; color: #333333; }
+:where(html.theme-light) .welcome .wc-cmd-chip:hover { background: #0d7ec4; border-color: #0d7ec4; color: #ffffff; }
+:where(html.theme-light) .welcome .wc-plug-more { color: #9a9a9a; }
 
 :where(html.theme-light) .cm-host .CodeMirror-selected { background: #cde3f8; }
 :where(html.theme-light) .cm-host .CodeMirror-activeline-background { background: rgba(0, 0, 0, .045); }

@@ -196,6 +196,12 @@ def _list_plugins():
     out = []
     if not os.path.isdir(PLUGINS_DIR):
         return out
+    # 登记簿里的安装/更新时间并入列表（扩展详情弹窗展示用），读取失败不影响插件列举
+    reg = {}
+    try:
+        reg = _load_registry().get("plugins", {}) or {}
+    except Exception:
+        reg = {}
     for name in sorted(os.listdir(PLUGINS_DIR)):
         meta = _load_meta(name)
         if meta is None:
@@ -207,6 +213,11 @@ def _list_plugins():
         meta.setdefault("name", name)
         meta.setdefault("version", "0.0.0")
         meta.setdefault("enabled", True)
+        e = reg.get(name) or {}
+        if e.get("installed_at"):
+            meta["installed_at"] = e["installed_at"]
+        if e.get("updated_at"):
+            meta["updated_at"] = e["updated_at"]
         out.append(meta)
     return out
 

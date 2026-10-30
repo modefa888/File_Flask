@@ -34,6 +34,7 @@ import urllib.request
 
 from ...log import get_logger
 from . import downloads as dl
+from . import proxyutil
 
 _log = get_logger()
 
@@ -99,6 +100,59 @@ def env_info():
     return {"aria2": aria2_path(), "ffmpeg": ffmpeg_path(),
             "curl": shutil.which("curl") or "",
             "wget": shutil.which("wget") or "", "ftp": True, "python": True}
+
+
+# ----------------------------------------------------------------------
+# 代理兜底：任务级 opts.proxy 优先，其次下载设置里的「网络下载代理」，
+# 最后自动检测内置 v2ray / xray 的 HTTP 入站（本机某些站点直连会被重置，
+# 浏览器走代理能播、服务器直连下载失败，就是这种情况）。
+# ----------------------------------------------------------------------
+def _host_local(url):
+    """目标是否本机 / 局域网地址（这类地址不该走代理）。"""
+    try:
+        h = urllib.parse.urlsplit(url or "").hostname or ""
+    except ValueError:
+        return False
+    if not h or h in ("localhost", "::1") or h.endswith(".local"):
+        return True
+    try:
+        import ipaddress
+        return ipaddress.ip_address(h).is_private
+    except ValueError:
+        return False
+
+
+def _v2ray_http_proxy():
+    """内置 v2ray / xray 正在跑且开了 HTTP 入站时，返回 http://127.0.0.1:端口。"""
+    try:
+        from ..ide import v2raymgr
+        st = v2raymgr.status()
+        if st.get("running"):
+            port = int((st.get("inbound") or {}).get("http_port") or 0)
+            if port:
+                return "http://127.0.0.1:%d" % port
+    except Exception:
+        pass
+    return ""
+
+
+def _effective_proxy(opts, url=""):
+    """算出该任务最终应使用的代理：任务级 > 下载设置 > 内置 v2ray HTTP 入站。"""
+    opts = opts or {}
+    if opts.get("direct"):
+        return ""
+    p = str(opts.get("proxy") or "").strip()
+    if p:
+        return p
+    if _host_local(url):
+        return ""
+    try:
+        p = str(dl.get_settings().get("proxy") or "").strip()
+        if p:
+            return p
+    except Exception:
+        pass
+    return _v2ray_http_proxy()
 
 
 def _opener(opts):
@@ -217,6 +271,12 @@ def _fetch_text(url, opts, timeout=30):
         return r.read(4 * 1024 * 1024).decode("utf-8", "replace"), (r.geturl() or url)
 
 
+def _fetch_bytes(url, opts, timeout=30):
+    req = urllib.request.Request(url, headers=_headers(opts))
+    with _opener(opts).open(req, timeout=timeout) as r:
+        return r.read(16 * 1024 * 1024)
+
+
 def _hls_playlist(url, opts=None, depth=0):
     """解析 m3u8：master 自动挑最高码率的子列表，直到拿到媒体播放列表。
 
@@ -243,6 +303,7 @@ def _hls_playlist(url, opts=None, depth=0):
         return _hls_playlist(urllib.parse.urljoin(final, best_uri), opts, depth + 1)
 
     segs, enc, init, duration, endlist = [], None, None, 0.0, False
+    key_line = ""
     for ln in lines:
         if ln.startswith("#EXT-X-KEY") or ln.startswith("#EXT-X-SESSION-KEY"):
             m = re.search(r"METHOD=([A-Za-z0-9-]+)", ln)
@@ -252,6 +313,8 @@ def _hls_playlist(url, opts=None, depth=0):
             else:
                 u = re.search(r'URI="([^"]+)"', ln)
                 enc = urllib.parse.urljoin(final, u.group(1)) if u else "?"
+                if not key_line:
+                    key_line = ln          # 原样保留 KEY 行，拼接解密时要用
         elif ln.startswith("#EXT-X-MAP"):
             m = re.search(r'URI="([^"]+)"', ln)
             if m:
@@ -268,7 +331,7 @@ def _hls_playlist(url, opts=None, depth=0):
         elif not ln.startswith("#"):
             segs.append(urllib.parse.urljoin(final, ln))
     return {"media": final, "segs": segs, "enc": enc, "init": init,
-            "duration": duration, "endlist": endlist}
+            "duration": duration, "endlist": endlist, "key_line": key_line}
 
 
 def _hls_stem(url):
@@ -396,6 +459,9 @@ def create_task(url, save_dir="", filename="", threads=0, opts=None, user="", ip
         n = 8
     n = max(1, min(_MAX_THREADS, n))
     opts = dict(opts or {})
+    px = _effective_proxy(opts, url)
+    if px and not str(opts.get("proxy") or "").strip():
+        opts["proxy"] = px
     if filename:
         opts["filename"] = dl._safe_name(filename)
 
@@ -488,6 +554,16 @@ def _run(tid):
         t = dl.get(tid)
         if not t:
             return
+        # 兜底代理：老任务 / 失败重试时若任务里没填代理，按「设置 → 下载」补上并落库
+        opts0 = dict(t.get("opts") or {})
+        px = _effective_proxy(opts0, t.get("url") or "")
+        if px and not str(opts0.get("proxy") or "").strip():
+            opts0["proxy"] = px
+            try:
+                dl._update(tid, opts=opts0)
+            except Exception:
+                pass
+            t["opts"] = opts0
         scheme = urllib.parse.urlsplit(t.get("url") or "").scheme.lower()
         if scheme == "magnet":
             _run_torrent(tid, t)
@@ -585,13 +661,17 @@ def _seg_worker(tid, url, opts, seg, parts_dir, errors, stop_evt):
                 return                          # 这一段已经是完整的
             attempt += 1
             if attempt > retries:
-                errors.append("分片 %d：HTTP %s" % (seg["i"], e.code))
+                msg = proxyutil.http_status_text(e.code)
+                if e.code == 403:
+                    msg += ("（链接可能已过期，或站点校验 Referer / Cookie / IP；"
+                            "请回网站重新复制新链接，必要时在高级选项里填写 Referer）")
+                errors.append("分片 %d：%s" % (seg["i"], msg))
                 return
             time.sleep(min(5, attempt))
         except Exception as e:
             attempt += 1
             if attempt > retries:
-                errors.append("分片 %d：%s" % (seg["i"], e))
+                errors.append("分片 %d：%s" % (seg["i"], proxyutil.friendly_error(e, url)))
                 return
             time.sleep(min(5, attempt))
 
@@ -666,6 +746,7 @@ def _run_http(tid, t):
         ths.append(th)
 
     last_done, last_t = base, time.time()
+    spd = 0
     while any(th.is_alive() for th in ths):
         time.sleep(0.5)
         c = _ctrl(tid)
@@ -677,7 +758,9 @@ def _run_http(tid, t):
         dt = now - last_t
         speed = int((done - last_done) / dt) if dt > 0.05 else 0
         last_done, last_t = done, now
-        dl._update(tid, srv_done=done, speed=max(0, speed), segs=segs)
+        # 平滑：瞬时 0（分片间隙 / 采样错位）按指数衰减，避免速度和剩余时间忽隐忽现
+        spd = speed if speed > 0 else int(spd * 0.5)
+        dl._update(tid, srv_done=done, speed=max(0, spd), segs=segs)
 
     for th in ths:
         th.join(timeout=5)
@@ -780,8 +863,13 @@ def segs_view(tid):
     with _SEGS_STAT_LOCK:
         v = _SEGS_STAT.get(tid)
         if v is not None:
-            return {"mode": v.get("mode"), "total": v.get("total") or 0,
-                    "segs": {str(k): dict(x) for k, x in (v.get("segs") or {}).items()}}
+            out = {"mode": v.get("mode"), "total": v.get("total") or 0,
+                   "segs": {str(k): dict(x) for k, x in (v.get("segs") or {}).items()}}
+            # ffmpeg 模式的整体拉流指标（弹窗的进度条 / 已处理时长 / 速度等）
+            for k in ("percent", "out_time", "speed", "bitrate", "size", "ts"):
+                if k in v:
+                    out[k] = v[k]
+            return out
     p = _hls_segs_path(tid)
     if os.path.isfile(p):
         try:
@@ -792,19 +880,44 @@ def segs_view(tid):
     return None
 
 
-def _ff_head_args(opts):
-    """把 Referer / Cookie / UA 变成 ffmpeg 的 -headers 参数。"""
+def _ff_head_args(opts, url=""):
+    """把 Referer / Cookie / UA 变成 ffmpeg 的 -headers 参数。
+    没填 Referer 时自动补同源地址（https://host/）——多数 CDN 防盗链只校验 Referer 是否同源。"""
+    opts = opts or {}
+    ref = str(opts.get("referer") or "").strip()
+    if not ref and url:
+        try:
+            u = urllib.parse.urlsplit(url)
+            if u.scheme and u.netloc:
+                ref = "%s://%s/" % (u.scheme, u.netloc)
+        except Exception:
+            ref = ""
+    cookie = str(opts.get("cookie") or "").strip()
     args = []
-    if (opts or {}).get("referer") or (opts or {}).get("cookie"):
+    if ref or cookie:
         parts = []
-        if (opts or {}).get("referer"):
-            parts.append("Referer: %s\r\n" % opts["referer"])
-        if (opts or {}).get("cookie"):
-            parts.append("Cookie: %s\r\n" % opts["cookie"])
+        if ref:
+            parts.append("Referer: %s\r\n" % ref)
+        if cookie:
+            parts.append("Cookie: %s\r\n" % cookie)
         args += ["-headers", "".join(parts)]
-    if (opts or {}).get("user_agent"):
+    if opts.get("user_agent"):
         args += ["-user_agent", str(opts["user_agent"])]
     return args
+
+
+def _ff_err_text(tail):
+    """从 ffmpeg stderr 里挑出真正有信息量的那句（去掉 [hls @ 0x55...] 之类的地址噪音）。"""
+    lines = [l.strip() for l in str(tail or "").splitlines() if l.strip()]
+    clean = []
+    for l in lines:
+        l2 = re.sub(r"\[[^\]]*@\s*0x[0-9a-fA-F]+\]\s*", "", l).strip()
+        clean.append(l2 or l)
+    keys = ("error", "failed", "forbidden", "403", "404", "401", "invalid",
+            "denied", "timed out", "not found", "cannot", "unsupported", "decrypt")
+    hits = [l for l in clean if any(k in l.lower() for k in keys)]
+    pick = hits[-1] if hits else (clean[-1] if clean else "")
+    return pick[:180]
 
 
 def _ff_env(opts):
@@ -838,8 +951,6 @@ def _run_hls(tid, t):
             raise RuntimeError("m3u8 中没有可用分片（可能是直播流或链接已失效）")
         if not pl.get("endlist"):
             raise RuntimeError("疑似直播流（HLS 无 ENDLIST），暂不支持下载")
-        if pl.get("enc") and not ff:
-            raise RuntimeError("该 m3u8 为加密流（AES-128），需要服务器安装 ffmpeg 才能下载拼接")
         try:
             os.makedirs(parts_dir, exist_ok=True)
             with open(_hls_playlist_path(tid), "w", encoding="utf-8") as f:
@@ -858,9 +969,24 @@ def _run_hls(tid, t):
                    status="downloading", phase="", error="",
                    srv_done=0, srv_size=0, speed=0)
         t = dl.get(tid) or t
-        if pl.get("enc"):
-            return _run_hls_ffmpeg(tid, t, pl)
-    elif pl.get("enc"):
+    elif pl.get("enc") and not pl.get("key_line"):
+        # 旧版本断点播放列表没保存 KEY 行（没法本地解密）→ 重新解析一次
+        try:
+            pl2 = _hls_playlist(url, opts)
+            if pl2.get("segs"):
+                pl = pl2
+                try:
+                    os.makedirs(parts_dir, exist_ok=True)
+                    with open(_hls_playlist_path(tid), "w", encoding="utf-8") as f:
+                        json.dump(pl, f)
+                except OSError:
+                    pass
+        except Exception:
+            pass
+
+    # 加密流（AES-128）：有 ffmpeg 且拿到了 KEY 行 → 自己多线程下载分片（可断点续传），
+    # 最后用本地播放列表让 ffmpeg 解密拼接；否则退回 ffmpeg 整体拉流（不可续传）
+    if pl.get("enc") and (not ff or not pl.get("key_line")):
         return _run_hls_ffmpeg(tid, t, pl)
 
     segs = pl["segs"]
@@ -949,6 +1075,7 @@ def _run_hls(tid, t):
 
     last_bytes, last_t = state["bytes"], time.time()
     last_save = 0.0
+    spd = 0
     while any(th.is_alive() for th in ths):
         time.sleep(0.5)
         c = _ctrl(tid)
@@ -959,10 +1086,11 @@ def _run_hls(tid, t):
         dt = now - last_t
         speed = int((state["bytes"] - last_bytes) / dt) if dt > 0.05 else 0
         last_bytes, last_t = state["bytes"], now
+        spd = speed if speed > 0 else int(spd * 0.5)      # 同 HTTP：瞬时 0 平滑衰减
         fin = state["done_cnt"]
         est = hls_est_total()
         rt = _segs_stat_retries(tid)
-        dl._update(tid, srv_done=state["bytes"], srv_size=est, speed=max(0, speed),
+        dl._update(tid, srv_done=state["bytes"], srv_size=est, speed=max(0, spd),
                    note="HLS · 分片 %d/%d" % (fin, total) + (" · 重试 %d 片" % rt if rt else ""))
         if now - last_save > 2:
             last_save = now
@@ -993,10 +1121,12 @@ def _run_hls(tid, t):
     dl._update(tid, status="merging", speed=0, srv_size=state["bytes"],
                srv_done=state["bytes"], note="HLS · %d 分片" % total,
                phase="正在拼接封装…" if ff else "正在拼接 TS…")
-    final_path = _hls_merge(parts_dir, total, init_path, out_path, ff)
+    final_path = _hls_merge(parts_dir, total, init_path, out_path, ff,
+                            key_line=pl.get("key_line") or "", opts=opts, src_url=url)
     if not final_path:
         dl._update(tid, status="failed", phase="", speed=0,
-                   error="分片拼接失败（ffmpeg 返回错误，且 TS 兜底也未成功）")
+                   error="分片拼接失败（ffmpeg 返回错误" +
+                         ("，且密钥获取或解密未成功）" if pl.get("key_line") else "，且 TS 兜底也未成功）"))
         return
     if final_path != out_path:                      # ffmpeg 失败兜底成了 .ts
         out_path = final_path
@@ -1058,7 +1188,7 @@ def _hls_fetch(tid, seg_url, opts, path, state, lock, stop_evt, retries=3, stat=
                 pass
             if attempt >= retries:
                 with lock:
-                    state["errs"].append("分片下载失败：%s" % e)
+                    state["errs"].append("分片下载失败：%s" % proxyutil.friendly_error(e, seg_url))
                     if stat is not None:
                         stat["st"] = "fail"
                         stat["tries"] = attempt
@@ -1073,23 +1203,68 @@ def _hls_fetch(tid, seg_url, opts, path, state, lock, stop_evt, retries=3, stat=
     return False
 
 
-def _hls_merge(parts_dir, total, init_path, out_path, ff):
-    """拼接：优先 ffmpeg -f concat 无损封装 MP4，失败退回二进制拼 TS。"""
+def _hls_merge(parts_dir, total, init_path, out_path, ff, key_line="", opts=None, src_url=""):
+    """拼接：优先 ffmpeg 无损封装 MP4，失败退回二进制拼 TS。
+    key_line 非空表示分片是 AES-128 加密的：写一个指向本地分片的 m3u8（带上原 KEY 行），
+    交给 ffmpeg 的 HLS demuxer 一边取密钥一边解密拼接（必须成功，加密分片没法二进制直拼）。"""
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     entries = ([init_path] if init_path and os.path.exists(init_path) else []) + \
               [os.path.join(parts_dir, "seg_%05d.ts" % i) for i in range(total)]
     entries = [p for p in entries if os.path.exists(p)]
     if not entries:
         return ""
+    stem, ext = os.path.splitext(out_path)
+    tmp_out = stem + ".dlmerge" + (ext or ".mp4")
+    fmt = ["-f", "mp4"] if ext.lower() in ("", ".mp4", ".mov") else []
+
+    if ff and key_line:
+        # 密钥自己下载到本地（带请求头 / 代理），ffmpeg 全程只读本地文件：
+        # 避免 -headers 等 HTTP 选项作用在本地文件输入上导致「Option not found」
+        km = re.search(r'URI="([^"]+)"', key_line)
+        if not km:
+            return ""
+        try:
+            key_url = urllib.parse.urljoin(src_url or "", km.group(1))
+            key_path = os.path.join(parts_dir, "enc.key")
+            with open(key_path, "wb") as kf:
+                kf.write(_fetch_bytes(key_url, opts))
+            key_line = key_line[:km.start(1)] + key_path + key_line[km.end(1):]
+        except Exception as e:
+            _log.warning("下载解密密钥失败：%s", e)
+            return ""
+        lst = os.path.join(parts_dir, "decrypt.m3u8")
+        with open(lst, "w", encoding="utf-8") as f:
+            f.write("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n"
+                    "#EXT-X-MEDIA-SEQUENCE:0\n")
+            f.write(key_line + "\n")
+            if init_path and os.path.exists(init_path):
+                f.write('#EXT-X-MAP:URI="%s"\n' % init_path.replace('"', "%22"))
+            for p in entries:
+                f.write("#EXTINF:6.0,\n%s\n" % p)
+            f.write("#EXT-X-ENDLIST\n")
+        cmd = [ff, "-y", "-nostdin", "-loglevel", "error",
+               "-protocol_whitelist", "file,crypto,data",
+               "-allowed_extensions", "ALL", "-i", lst, "-c", "copy",
+               "-bsf:a", "aac_adtstoasc"] + fmt + ["-movflags", "+faststart", tmp_out]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, env=_ff_env(opts))
+            if r.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+                os.replace(tmp_out, out_path)
+                return out_path
+            _log.warning("ffmpeg 解密拼接失败：%s", (r.stderr or "")[-300:])
+        except Exception:
+            pass
+        try:
+            os.remove(tmp_out)
+        except OSError:
+            pass
+        return ""          # 加密分片没法二进制直拼，也没有 TS 兜底
 
     if ff:
         lst = os.path.join(parts_dir, "concat.txt")
         with open(lst, "w", encoding="utf-8") as f:
             for p in entries:
                 f.write("file '%s'\n" % p.replace("'", "'\\''"))
-        stem, ext = os.path.splitext(out_path)
-        tmp_out = stem + ".dlmerge" + (ext or ".mp4")
-        fmt = ["-f", "mp4"] if ext.lower() in ("", ".mp4", ".mov") else []
         for extra in (["-bsf:a", "aac_adtstoasc"], []):
             cmd = [ff, "-y", "-nostdin", "-loglevel", "error",
                    "-f", "concat", "-safe", "0", "-i", lst,
@@ -1127,6 +1302,10 @@ def _hls_merge(parts_dir, total, init_path, out_path, ff):
 def _run_hls_ffmpeg(tid, t, pl):
     """加密 HLS（AES-128）：直接交给 ffmpeg 整体下载解密 + 封装 MP4。"""
     ff = ffmpeg_path()
+    if not ff:
+        dl._update(tid, status="failed", phase="", speed=0,
+                   error="服务器未安装 ffmpeg，无法下载加密 HLS（请先安装 ffmpeg）")
+        return
     opts = dict(t.get("opts") or {})
     url = t.get("url") or ""
     out_path = t.get("artifact") or _unique_path(
@@ -1146,14 +1325,28 @@ def _run_hls_ffmpeg(tid, t, pl):
                            "bitrate": "", "size": "", "ts": 0.0}
 
     # -headers / -user_agent 必须放在 -i 之前才对输入生效
-    head = _ff_head_args(opts)
+    head = _ff_head_args(opts, url)
     cmd = [ff, "-y", "-nostdin", "-loglevel", "error", "-progress", "pipe:1"] + head + \
-          ["-i", url, "-c", "copy", "-bsf:a", "aac_adtstoasc"] + fmt + \
+          ["-allowed_extensions", "ALL",      # 分片扩展名五花八门（.ts/.m4s/.jpg…）时不至于被拒
+           "-http_persistent", "0",           # 部分 CDN 长连接复用会 403
+           "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+           "-i", url, "-c", "copy", "-bsf:a", "aac_adtstoasc"] + fmt + \
           ["-movflags", "+faststart", tmp_out]
 
     dl._update(tid, status="downloading", phase="正在下载加密 HLS 流（ffmpeg）…", speed=0,
                srv_done=0, srv_size=(10000 if duration > 0 else 0))   # 万分比：让主进度条动起来
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    # stderr 落到临时文件：失败时把 ffmpeg 的真实报错回填到任务上（PIPE 不读会阻塞/丢信息）
+    err_path = os.path.join(dl.ARTIFACT_ROOT, tid + ".fferr.log")
+    try:
+        os.makedirs(os.path.dirname(err_path) or ".", exist_ok=True)
+    except OSError:
+        pass
+    try:
+        err_f = open(err_path, "w+", encoding="utf-8", errors="replace")
+    except OSError:
+        err_f = None
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                            stderr=(err_f if err_f is not None else subprocess.DEVNULL),
                             text=True, bufsize=1, errors="replace", env=_ff_env(opts))
     _PROCS[tid] = proc
     last = [0]
@@ -1226,6 +1419,11 @@ def _run_hls_ffmpeg(tid, t, pl):
             except Exception:
                 pass
         try:
+            if err_f is not None:
+                err_f.close()
+        except Exception:
+            pass
+        try:
             proc.stderr.close()
         except Exception:
             pass
@@ -1237,12 +1435,20 @@ def _run_hls_ffmpeg(tid, t, pl):
             os.remove(tmp_out)
         except OSError:
             pass
+        try:
+            os.remove(err_path)
+        except OSError:
+            pass
         _segs_stat_pop(tid)
         dl._update(tid, status="canceled", phase="", speed=0)
         return
     if c == "pause":
         try:
             os.remove(tmp_out)
+        except OSError:
+            pass
+        try:
+            os.remove(err_path)
         except OSError:
             pass
         dl._update(tid, status="paused", phase="", speed=0,
@@ -1255,9 +1461,44 @@ def _run_hls_ffmpeg(tid, t, pl):
             os.remove(tmp_out)
         except OSError:
             pass
-        dl._update(tid, status="failed", phase="", speed=0,
-                   error="ffmpeg 下载加密流失败（流可能已失效或不被支持）")
+        # 把 ffmpeg 的真实报错回填到任务，前端卡片 / 记录里可直接看到失败原因
+        tail = ""
+        try:
+            with open(err_path, "r", encoding="utf-8", errors="replace") as f:
+                tail = f.read()[-1200:].strip()
+        except OSError:
+            pass
+        low = tail.lower()
+        msg = "ffmpeg 下载加密流失败"
+        if "reset" in low or "broken pipe" in low or "eof" in low:
+            msg += ("：密钥 / 分片连接被服务器重置，通常是播放链接的签名已过期，"
+                    "请回网站重新复制新链接后再新建任务；"
+                    "若浏览器能播放而服务器始终被重置，多为直连被网络拦截，"
+                    "请在下载中心设置里配置可用代理后再重试")
+        elif "403" in low or "forbidden" in low:
+            msg += "：服务器拒绝访问（403），链接可能已过期或需要 Referer / Cookie"
+        elif "404" in low or "not found" in low:
+            msg += "：链接或分片已失效（404），请重新获取链接"
+        elif "cannot decrypt" in low or "invalid data" in low or "decrypt" in low:
+            msg += ("：解密失败（密钥没取到 / 链接已过期）或流不受支持（DRM）；"
+                    "旧链接重试无效，请重新复制播放链接")
+        elif "timed out" in low or "timeout" in low:
+            msg += "：网络超时"
+        detail = _ff_err_text(tail)
+        if detail:
+            msg += "｜" + detail
+        elif not tail:
+            msg += "（流可能已失效或不被支持）"
+        try:
+            os.remove(err_path)
+        except OSError:
+            pass
+        dl._update(tid, status="failed", phase="", speed=0, error=msg[:300])
         return
+    try:
+        os.remove(err_path)
+    except OSError:
+        pass
     os.replace(tmp_out, out_path)
     try:
         final = os.path.getsize(out_path)
@@ -1298,17 +1539,21 @@ def _run_ftp(tid, t):
     dl._update(tid, name=name, artifact=out_path, srv_size=size, srv_done=done,
                status="downloading", phase="", error="", threads=1, speed=0)
     last = [time.time(), done]
+    spd = 0
 
     try:
         with open(part, "ab" if done else "wb") as f:
             def _cb(buf):
+                nonlocal spd
                 if _ctrl(tid) in ("pause", "cancel"):
                     raise _Stopped()
                 f.write(buf)
                 done += len(buf)
                 now = time.time()
                 if now - last[0] >= 1.0:
-                    dl._update(tid, srv_done=done, speed=int((done - last[1]) / (now - last[0])))
+                    raw = int((done - last[1]) / (now - last[0]))
+                    spd = raw if raw > 0 else int(spd * 0.5)   # 瞬时 0 平滑衰减
+                    dl._update(tid, srv_done=done, speed=max(0, spd))
                     last[0], last[1] = now, done
             ftp.retrbinary("RETR " + path, _cb, blocksize=_CHUNK, rest=(done or None))
     except _Stopped:
@@ -1345,23 +1590,44 @@ def _run_torrent(tid, t):
     os.makedirs(folder, exist_ok=True)
     threads = max(1, int(t.get("threads") or 8))
     opts = dict(t.get("opts") or {})
+    meta = dict(t.get("meta") or {})
+
+    def _find_meta_torrent():
+        """aria2 --bt-save-metadata 保存的种子元数据文件（取最新的一个）。"""
+        try:
+            tors = [os.path.join(folder, f) for f in os.listdir(folder)
+                    if f.endswith(".torrent") and os.path.isfile(os.path.join(folder, f))]
+        except OSError:
+            return ""
+        return max(tors, key=os.path.getmtime) if tors else ""
+
+    # 断点续传：优先用上次保存的种子元数据（跳过磁力元数据重新获取），
+    # 已下载数据由 aria2 依据 .aria2 控制文件 / 分片哈希校验接续
+    meta_tor = str(meta.get("torrent") or "")
+    if meta_tor and not os.path.isfile(meta_tor):
+        meta_tor = ""
+    resumed = bool(meta_tor)
     before = set(os.listdir(folder))
 
     cmd = [aria, "--seed-time=0", "--summary-interval=1", "--console-log-level=notice",
-           "--show-console-readout=true", "--file-allocation=none", "--auto-file-renaming=true",
+           "--show-console-readout=true", "--file-allocation=none",
+           "--auto-file-renaming=false", "--allow-overwrite=true", "--check-integrity=true",
+           "--bt-save-metadata=true",
            "--max-connection-per-server=%d" % min(16, threads), "--split=%d" % min(16, threads),
            "--dir", folder]
     if opts.get("proxy"):
         cmd.append("--all-proxy=" + str(opts["proxy"]))
     if opts.get("user_agent"):
         cmd.append("--user-agent=" + str(opts["user_agent"]))
-    cmd.append(t.get("url") or "")
+    cmd.append(meta_tor or (t.get("url") or ""))
 
-    dl._update(tid, status="downloading", phase="正在连接节点…", error="", speed=0)
+    dl._update(tid, status="downloading", error="", speed=0,
+               phase="正在校验已下载数据…" if resumed else "正在连接节点…")
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1, errors="replace")
     _PROCS[tid] = proc
     final_path = ""
+    last_meta_chk = 0.0
 
     try:
         for line in proc.stdout:
@@ -1377,6 +1643,15 @@ def _run_torrent(tid, t):
             md = re.search(r"Download complete:\s*(.+?)\s*$", line)
             if md:
                 final_path = md.group(1).strip()
+            # 元数据落地后及时记到任务上，下次继续就不必重新获取
+            now = time.time()
+            if now - last_meta_chk > 5:
+                last_meta_chk = now
+                if not meta.get("torrent"):
+                    tor = _find_meta_torrent()
+                    if tor:
+                        meta["torrent"] = tor
+                        dl._update(tid, meta=meta)
         proc.wait(timeout=10)
     except Exception as e:
         _log.warning("aria2 任务 %s 异常：%s", tid, e)
@@ -1392,13 +1667,23 @@ def _run_torrent(tid, t):
         dl._update(tid, status="canceled", phase="", speed=0)
         return
     if c == "pause":
-        dl._update(tid, status="paused", phase="", speed=0)
+        if not meta.get("torrent"):
+            tor = _find_meta_torrent()
+            if tor:
+                meta["torrent"] = tor
+        dl._update(tid, meta=meta, status="paused", phase="", speed=0,
+                   note="磁力 / BT · 已暂停（继续将从断点接续）")
         return
 
-    # 产物：优先用 aria2 报告的完成路径，否则取目录里新增的最大文件
+    # 产物：优先用 aria2 报告的完成路径；继续下载时文件不是本次新增的，
+    # 退而取目录里最大的数据文件（排除 .aria2 控制文件与 .torrent 元数据）
     if not final_path or not os.path.exists(final_path):
         after = [f for f in os.listdir(folder) if f not in before and not f.endswith(".aria2")]
         cands = [os.path.join(folder, f) for f in after if os.path.isfile(os.path.join(folder, f))]
+        if not cands:
+            allf = [f for f in os.listdir(folder)
+                    if not f.endswith(".aria2") and not f.endswith(".torrent")]
+            cands = [os.path.join(folder, f) for f in allf if os.path.isfile(os.path.join(folder, f))]
         final_path = max(cands, key=os.path.getsize) if cands else ""
     if not final_path or not os.path.exists(final_path):
         dl._update(tid, status="failed", phase="", speed=0,

@@ -223,6 +223,24 @@ def api_dl_url_create():
     url = (data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "请输入下载链接"}), 400
+    # 同一链接只保留一个任务：默认先查重，由前端弹框确认是否删掉旧任务；
+    # 确认后带 force=1 再来一次，这里负责删除旧任务并重新创建
+    force = bool(data.get("force"))
+    dups = dl.find_by_url(url)
+    if dups and not force:
+        return jsonify({
+            "error": "已存在相同链接的下载任务",
+            "need_confirm": True,
+            "count": len(dups),
+            "items": [{"id": t.get("id"), "name": t.get("name"),
+                       "status": t.get("status"), "ts": t.get("ts")} for t in dups],
+        }), 409
+    if dups and force:
+        for t in dups:
+            try:
+                dl.delete_task(t.get("id"), purge=True)
+            except Exception as e:
+                _log.warning("删除重复任务 %s 失败：%s", t.get("id"), e)
     try:
         task = remote_dl.create_task(
             url,

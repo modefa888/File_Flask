@@ -131,6 +131,23 @@ def get(tid):
     return _task_conn_get(str(tid or ""))
 
 
+def find_by_url(url):
+    """找出链接完全相同的任务（「同一链接只保留一个任务」的查重用）。"""
+    u = str(url or "").strip()
+    if not u:
+        return []
+    try:
+        conn = store_conn()
+        try:
+            rows = conn.execute("SELECT * FROM dl_tasks WHERE url=? ORDER BY ts DESC", (u,)).fetchall()
+        finally:
+            conn.close()
+        return [_row(r) for r in rows]
+    except Exception as e:
+        _log.warning("按链接查询任务失败：%s", e)
+        return []
+
+
 def _update(tid, **kw):
     """按需更新若干列（列名来自代码内部，不接受外部拼接）。"""
     cols = [k for k in kw if k]
@@ -599,7 +616,8 @@ def list_tasks(q="", status="", page=1, page_size=50, kind=""):
         try:
             total = conn.execute("SELECT COUNT(1) FROM dl_tasks " + w, args).fetchone()[0]
             rows = conn.execute(
-                "SELECT * FROM dl_tasks " + w + " ORDER BY updated DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM dl_tasks " + w +
+                " ORDER BY ts DESC, updated DESC LIMIT ? OFFSET ?",
                 args + [page_size, (page - 1) * page_size]).fetchall()
         finally:
             conn.close()
@@ -659,6 +677,18 @@ def _purge_artifact(task):
     art = (task or {}).get("artifact") or ""
     if not art or not os.path.exists(art):
         return
+    # 同一个产物文件被多条任务引用时（同名文件 / 重试任务）绝不能删，否则会误删别人下好的文件
+    try:
+        conn = store_conn()
+        try:
+            shared = conn.execute("SELECT COUNT(1) FROM dl_tasks WHERE artifact=? AND id<>?",
+                                  (art, (task or {}).get("id") or "")).fetchone()[0]
+        finally:
+            conn.close()
+        if shared:
+            return
+    except Exception:
+        return
     try:
         roots = [os.path.abspath(ARTIFACT_ROOT),
                  os.path.abspath(get_settings().get("artifact_dir") or ARTIFACT_ROOT)]
@@ -688,7 +718,9 @@ def delete_task(tid, purge=True):
     if not task:
         return False
     _stop_remote(tid)
-    if purge:
+    # 只有真正完成的任务才清理产物：失败 / 取消任务的 artifact 可能只是探测时占的路径，
+    # 甚至和别的任务同名重合，删了会把别人下好的文件带走
+    if purge and task.get("status") in ("ready", "done"):
         _purge_artifact(task)
     try:
         with store_tx() as conn:

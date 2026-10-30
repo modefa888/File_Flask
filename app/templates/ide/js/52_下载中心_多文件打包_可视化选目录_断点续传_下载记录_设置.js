@@ -139,6 +139,16 @@ async function dlProgress(id, offset, status) {
 
 /* ---------------- 标签页 ---------------- */
 function openDownloadCenter(view) {
+  // 去重：会话恢复 / 外部重复调用可能残留多个下载中心标签，留一个，避免两份内容叠在一起
+  const dups = tabs.filter(function (t) { return t.path === DL_VIEW_PATH; });
+  if (dups.length > 1) {
+    dups.slice(1).forEach(function (t) {
+      try { t.host.remove(); } catch (_) { }
+      const i = tabs.indexOf(t);
+      if (i >= 0) tabs.splice(i, 1);
+    });
+    renderTabsAll();
+  }
   let tab = findTab(DL_VIEW_PATH);
   if (!tab) {
     const host = document.createElement("div");
@@ -150,6 +160,7 @@ function openDownloadCenter(view) {
       path: DL_VIEW_PATH, host: host, cm: null, original: "", dirty: false,
       group: curGroup, name: "下载中心", displayPath: "下载中心", relPath: "",
       iconHtml: '<i class="bi bi-cloud-arrow-down" style="color:#4fc1ff"></i>',
+      isDownloads: true,           // 会话恢复：刷新页面后按此标记重开（见 00_preamble sessionRestore）
     };
     tab.onBeforeClose = function () { dlStopAll(); dlPollStop(); return true; };
     tabs.push(tab);
@@ -157,8 +168,11 @@ function openDownloadCenter(view) {
     dlBuild();
   }
   activate(tab);
-  if (view) DL.view = view;
-  dlRender();
+  // 清掉不在当前标签里的孤儿宿主（历史会话/重复打开残留，会导致两份内容上下叠在一起）
+  document.querySelectorAll(".dlc-host").forEach(function (h) {
+    if (h !== tab.host) { try { h.remove(); } catch (_) { } }
+  });
+  dlView(view || DL.view);     // 统一入口：同时同步左侧导航高亮 + 顶部工具行 + 内容区
   dlPollStart();
   dlReload(true);
   return tab;
@@ -238,7 +252,7 @@ async function dlLoadRecords(silent) {
   const d = await dlReq("/api/dl/tasks?q=" + encodeURIComponent(DL.kw) +
     "&status=" + encodeURIComponent(DL.status) + "&page=" + DL.page + "&page_size=30");
   if (!d.ok) { if (!silent) toast("读取下载记录失败", "err"); return; }
-  DL.items = d.items || [];
+  DL.items = (d.items || []).sort(dlByTsDesc);   // 记录页同样按创建时间稳定排序
   DL.total = d.total || 0;
   DL.pages = Math.max(1, Math.ceil(DL.total / 30));
   if (d.stats) DL.stats = d.stats;
@@ -307,8 +321,8 @@ function dlSideRender() {
   const list = document.getElementById("dlsList");
   if (!list) return;
   const isAct = dlIsActive;
-  const act = (DL.tasks || []).filter(isAct);
-  const fin = (DL.tasks || []).filter(function (t) { return !isAct(t); });
+  const act = (DL.tasks || []).filter(isAct).sort(dlByTsDesc);
+  const fin = (DL.tasks || []).filter(function (t) { return !isAct(t); }).sort(dlByTsDesc);
   const st = DL.stats || {};
 
   const sum = document.getElementById("dlsSum");
@@ -357,15 +371,18 @@ function dlSideItem(t) {
   } else if (st === "building" || st === "pending" || st === "probing" || st === "merging") {
     acts = '<span class="dls-tag">' + dlStatusText(st, t) + '</span>';
   } else {
-    if (t.exists) {
-      // 产物还在 → 打开（视频/音频/图片走内置播放器，其它走内置编辑器）
-      acts = '<button class="dls-ico" data-dls="view" data-id="' + dlA(t.id) +
-        '" title="用内置播放器 / 编辑器打开"><i class="bi bi-play-circle"></i></button>';
-    } else {
-      // 产物已被清理 → 重新根据链接下载到服务器
-      acts = '<button class="dls-ico" data-dls="start" data-id="' + dlA(t.id) +
+    // 操作按钮鼠标划过才显示（CSS 控制 opacity）；打开/重新下载 + 删除
+    // 只有真正完成的任务才给「播放 / 打开」：失败任务的 artifact 可能和别的任务同名，
+    // 单看文件是否存在会把别人的产物当成自己的
+    const finished = st === "ready" || st === "done";
+    const main = (finished && t.exists && t.artifact)
+      ? '<button class="dls-ico" data-dls="view" data-id="' + dlA(t.id) +
+        '" title="用内置播放器 / 编辑器打开"><i class="bi bi-play-circle"></i></button>'
+      : '<button class="dls-ico" data-dls="start" data-id="' + dlA(t.id) +
         '" title="重新根据链接下载到服务器"><i class="bi bi-arrow-repeat"></i></button>';
-    }
+    acts = main +
+      '<button class="dls-ico" data-dls="del" data-id="' + dlA(t.id) +
+      '" title="删除任务（记录同时移除）"><i class="bi bi-trash3"></i></button>';
   }
   return '<div class="dls-item ' + dlTaskClass(st, t) + '" data-id="' + dlA(t.id) + '" title="' +
     dlA(dlIsRemote(t) ? (t.url || t.name) : t.name) + '">' +
@@ -415,20 +432,33 @@ function dlRender() {
 function dlIsWaiting(t) {
   return ["pending", "building", "probing", "merging"].indexOf(t.status) >= 0;
 }
+/* 按创建时间倒序的稳定排序：进度高频刷新不改变列表顺序（多任务同下时来回换位的根治） */
+function dlByTsDesc(a, b) {
+  return String(b.ts || "").localeCompare(String(a.ts || ""));
+}
 function dlRenderTasks() {
   const box = $("dlScroll");
   if (!box) return;
   box.classList.remove("rec-mode");
   const st = DL.stats || {};
-  // 「正在下载」包含一切进行中的任务：真正在传输的 + 排队 / 解析 / 打包 / 合并中
+  // 「正在下载」包含一切进行中的任务：真正在传输的 + 排队 / 解析 / 打包 / 合并 / 已暂停
   const run = DL.tasks.filter(function (t) {
-    return !!DL.running[t.id] || t.status === "downloading" || dlIsWaiting(t);
+    return !!DL.running[t.id] || t.status === "downloading" || t.status === "paused" || dlIsWaiting(t);
   });
   const wait = DL.tasks.filter(dlIsWaiting).length;
-  const fin = DL.tasks.filter(function (t) {
-    return !DL.running[t.id] && t.status !== "downloading" && !dlIsWaiting(t);
+  // 失败 / 取消单独一个 tab；fin 只留真正完成的
+  const fail = DL.tasks.filter(function (t) {
+    return !DL.running[t.id] && (t.status === "failed" || t.status === "canceled");
   });
-  if (DL.tab !== "fin") DL.tab = "act";
+  const fin = DL.tasks.filter(function (t) {
+    return !DL.running[t.id] && t.status !== "downloading" && t.status !== "paused" && !dlIsWaiting(t) &&
+      t.status !== "failed" && t.status !== "canceled";
+  });
+  // 各分组内按创建时间稳定排序：下载进度高频刷新不影响卡片位置
+  run.sort(dlByTsDesc);
+  fin.sort(dlByTsDesc);
+  fail.sort(dlByTsDesc);
+  if (DL.tab !== "fin" && DL.tab !== "fail") DL.tab = "act";
   const sub = $("dlQueSub");
   if (sub) sub.textContent = " · " + run.length + " 个正在下载 / 共 " + (st.total || 0) + " 条记录";
 
@@ -444,8 +474,20 @@ function dlRenderTasks() {
         '<i class="bi bi-arrow-down-circle"></i>正在下载<em>' + run.length + '</em></button>' +
       '<button class="dlc-tab' + (DL.tab === "fin" ? " on" : "") + '" data-act="tab-fin">' +
         '<i class="bi bi-check2-circle"></i>下载完成<em>' + fin.length + '</em></button>' +
+      '<button class="dlc-tab' + (DL.tab === "fail" ? " on" : "") + '" data-act="tab-fail">' +
+        '<i class="bi bi-x-circle"></i>下载失败<em' +
+        (fail.length ? ' class="bad"' : '') + '>' + fail.length + '</em></button>' +
+      '<span style="flex:1"></span>' +
+      (run.length
+        ? '<button class="dlc-btn sm" data-act="pause-all" title="暂停所有正在传输的任务">' +
+          '<i class="bi bi-pause-fill"></i>全部暂停</button>'
+        : '') +
+      (DL.tasks.some(function (t) { return t.status === "paused"; })
+        ? '<button class="dlc-btn sm" data-act="resume-all" title="继续所有已暂停的任务">' +
+          '<i class="bi bi-play-fill"></i>全部继续</button>'
+        : '') +
     '</div>';
-  const show = DL.tab === "act" ? run : fin;
+  const show = DL.tab === "act" ? run : (DL.tab === "fail" ? fail : fin);
   if (!show.length) {
     html += DL.tab === "act"
       ? '<div class="dlc-empty"><div class="dlc-ebox"><i class="bi bi-cloud-arrow-down"></i></div>' +
@@ -453,6 +495,9 @@ function dlRenderTasks() {
         '<p>点「新建下载」打开可视化目录选择器，勾选任意数量的文件与文件夹，' +
         '系统打包成 zip 后下载，全程可暂停并从断点继续。</p>' +
         '<button class="dlc-btn primary" data-act="new"><i class="bi bi-plus-lg"></i>新建下载</button></div>'
+      : DL.tab === "fail"
+      ? '<div class="dlc-empty"><div class="dlc-ebox"><i class="bi bi-emoji-smile"></i></div>' +
+        '<b>没有失败的下载</b><p>下载失败 / 已取消的任务会出现在这里，可一键重试。</p></div>'
       : '<div class="dlc-empty"><div class="dlc-ebox"><i class="bi bi-check2-circle"></i></div>' +
         '<b>还没有已完成的下载</b><p>任务结束后会出现在这里，可随时重新下载到本机。</p></div>';
   } else {
@@ -479,7 +524,9 @@ function dlTaskCard(t) {
       '<div class="dlc-trow1">' +
         '<span class="dlc-tname" data-act="copy" title="' + dlA(t.name) + '">' + esc(t.name) + '</span>' +
         '<span class="dlc-pill ' + st + '">' + dlStatusText(st, t) + '</span>' +
-        (dlIsRemote(t) && t.threads ? '<span class="dlc-tsize" title="服务器端并发连接数"><i class="bi bi-diagram-3"></i>' + t.threads + '</span>' : '') +
+        (t.opts && t.opts.proxy
+          ? '<span class="dlc-pill proxy" title="经代理下载：' + dlA(t.opts.proxy) + '">' +
+            '<i class="bi bi-hdd-network" style="font-size:10px"></i>代理</span>' : '') +
         (t.hits > 0 ? '<span class="dlc-tsize" title="下载次数"><i class="bi bi-arrow-repeat"></i>' + t.hits + '</span>' : '') +
         (noSize
           ? '<span class="dlc-tsize" title="该类型需下载完成后才能确定总大小">大小未知</span>'
@@ -494,9 +541,11 @@ function dlTaskCard(t) {
         '<span class="dlc-pct">' + pct.toFixed(1) + '%</span>' +
         '<span class="dlc-bytes">' + (noSize
           ? dlSize(done) + ' 已下载'
-          : dlSize(done) + ' / ' + dlSize(size)) + '</span>' +
+          : (st === "ready" || st === "done")
+            ? dlSize(size || done)                       // 已完成：只显示一个存储大小
+            : dlSize(done) + ' / ' + dlSize(size)) + '</span>' +
         '<span class="dlc-sp"></span>' +
-        (t.error ? '<span style="color:var(--dlc-bad)" title="' + dlA(t.error) + '">' + esc(String(t.error).slice(0, 40)) + '</span>' : '') +
+        (t.error ? '<span class="dlc-terr" title="' + dlA(t.error) + '">' + esc(String(t.error)) + '</span>' : '') +
         '<span class="dlc-speed">' + dlSpeed(speed) + '</span>' +
         '<span class="dlc-eta">' + (speed > 0 ? dlEta((size - done) / speed) : "") + '</span>' +
       '</div>' +
@@ -515,32 +564,44 @@ function dlTaskActs(t, st) {
   if (dlIsRemote(t)) {
     if (st === "probing" || st === "merging" || st === "pending") {
       return '<span class="dlc-tsize">' + (st === "merging" ? "合并中…" : "连接中…") + '</span>' +
+        dlInfoBtn() +
         '<button class="dlc-iconbtn bad" data-act="cancel" title="取消"><i class="bi bi-x-lg"></i></button>';
     }
     if (st === "downloading") {
       return (dlHasSegs(t) ? dlSegsBtn() : "") +
         '<button class="dlc-iconbtn" data-act="pause" title="暂停（分片进度已保存，可续传）"><i class="bi bi-pause-fill"></i></button>' +
+        dlInfoBtn() +
         '<button class="dlc-iconbtn bad" data-act="cancel" title="取消下载"><i class="bi bi-x-lg"></i></button>';
     }
     if (st === "paused" || st === "failed" || st === "canceled") {
+      const retry = st === "failed";
       return (dlHasSegs(t) ? dlSegsBtn() : "") +
-        '<button class="dlc-iconbtn" data-act="start" title="继续下载（按分片断点续传）"><i class="bi bi-play-fill"></i></button>' +
+        '<button class="dlc-iconbtn" data-act="start" title="' +
+        (retry ? "重试下载" : "继续下载（按分片断点续传）") +
+        '"><i class="bi ' + (retry ? "bi-arrow-repeat" : "bi-play-fill") + '"></i></button>' +
+        dlInfoBtn() +
         '<button class="dlc-iconbtn bad" data-act="delete" title="删除任务"><i class="bi bi-trash3"></i></button>';
     }
     // ready：产物还在 → 拉到本机；产物被清理 → 重新让服务器抓一遍（不再开空标签页）
     if (t.exists === false) {
       return '<button class="dlc-iconbtn" data-act="start" title="产物已被清理，点击重新下载"><i class="bi bi-arrow-repeat"></i></button>' +
+        dlInfoBtn() +
         '<button class="dlc-iconbtn bad" data-act="delete" title="删除任务"><i class="bi bi-trash3"></i></button>';
     }
     return dlOpenBtn(t) +
       '<button class="dlc-iconbtn" data-act="native" title="下载到本机（支持续传）"><i class="bi bi-download"></i></button>' +
       '<button class="dlc-iconbtn" data-act="copy" title="复制下载链接"><i class="bi bi-link-45deg"></i></button>' +
+      dlInfoBtn() +
       '<button class="dlc-iconbtn bad" data-act="delete" title="删除任务"><i class="bi bi-trash3"></i></button>';
   }
   if (st === "building" || st === "pending") {
     a += '<button class="dlc-iconbtn bad" data-act="cancel" title="取消打包"><i class="bi bi-x-lg"></i></button>';
   } else if (st === "downloading") {
     a += '<button class="dlc-iconbtn" data-act="pause" title="暂停（保留进度，可续传）"><i class="bi bi-pause-fill"></i></button>';
+  } else if (st === "done") {
+    // 本地任务已下载到浏览器：只留 复制链接 / 删除
+    return '<button class="dlc-iconbtn" data-act="copy" title="复制下载链接"><i class="bi bi-link-45deg"></i></button>' +
+      '<button class="dlc-iconbtn bad" data-act="delete" title="删除任务（记录同时移除）"><i class="bi bi-trash3"></i></button>';
   } else {
     const tip = (t.done > 0 && t.done < (t.size || 0)) ? "继续下载（从 " + dlSize(t.done) + " 续传）" : "开始下载";
     a += '<button class="dlc-iconbtn" data-act="start" title="' + dlA(tip) + '"><i class="bi bi-play-fill"></i></button>';
@@ -551,6 +612,7 @@ function dlTaskActs(t, st) {
     a += '<button class="dlc-iconbtn" data-act="native" title="浏览器 / 下载工具直链下载（支持续传）"><i class="bi bi-box-arrow-up-right"></i></button>';
     a += '<button class="dlc-iconbtn" data-act="copy" title="复制下载链接"><i class="bi bi-link-45deg"></i></button>';
   }
+  a += dlInfoBtn();
   a += '<button class="dlc-iconbtn bad" data-act="delete" title="删除任务（记录同时移除）"><i class="bi bi-trash3"></i></button>';
   return a;
 }
@@ -631,14 +693,14 @@ function dlRenderRecords() {
         esc((t.src || []).join(" | ") || t.artifact || "") + '</div></td>' +
       '<td>' + (({ zip: "zip 包", text: "文本", url: "链接", torrent: "磁力" })[t.kind] || "单文件") + '</td>' +
       '<td class="dlc-num">' + dlSize(size) + '</td>' +
-      '<td class="dlc-num">' + (size ? pct.toFixed(0) + "% · " + dlSize(done) : "-") + '</td>' +
+      '<td class="dlc-num">' + (size ? pct.toFixed(0) + "%" : "-") + '</td>' +
       '<td><span class="dlc-pill ' + st + '">' + dlStatusText(st, t) + '</span></td>' +
       '<td>' +
         dlOpenBtn(t) +
-        (!t.exists && dlIsRemote(t)
-          ? '<button class="dlc-iconbtn" data-act="start" title="产物已清理 · 重新根据链接下载到服务器"><i class="bi bi-arrow-repeat"></i></button>'
+        (!(st === "ready" || st === "done") && dlIsRemote(t)
+          ? '<button class="dlc-iconbtn" data-act="start" title="重新根据链接下载到服务器（支持续传）"><i class="bi bi-arrow-repeat"></i></button>'
           : '') +
-        (t.exists && dlIsRemote(t)
+        ((st === "ready" || st === "done") && t.exists && dlIsRemote(t)
           ? '<button class="dlc-iconbtn" data-act="native" title="下载到本机"><i class="bi bi-download"></i></button>'
           : '') +
         '<button class="dlc-iconbtn" data-act="copy" title="复制下载链接"><i class="bi bi-link-45deg"></i></button>' +
@@ -757,6 +819,8 @@ function dlFindTask(id) {
  * /api/preview 均支持任意绝对路径，openFile 能正确按扩展名分发。 */
 function dlOpenBtn(t) {
   if (!t || !t.exists || !t.artifact) return "";
+  // 未完成（失败 / 取消 / 暂停 / 进行中）的任务不给打开：产物路径可能是同名任务的文件
+  if (t.status !== "ready" && t.status !== "done") return "";
   const ext = String(t.name || t.artifact || "").split(".").pop().toLowerCase();
   const media = ["mp4", "mkv", "webm", "avi", "mov", "flv", "m4v", "ts", "wmv",
     "mp3", "wav", "flac", "aac", "m4a", "ogg", "opus",
@@ -771,6 +835,119 @@ function dlOpenArtifact(id) {
   if (typeof openFile !== "function") { toast("编辑器未就绪，请刷新页面", "err"); return; }
   openFile(t.artifact, t.name || String(t.artifact).split("/").pop());
 }
+/* ---------------- 任务详情（悬浮框，展示全部字段 + 完整报错） ---------------- */
+function dlInfoBtn() {
+  return '<button class="dlc-iconbtn" data-act="info" title="查看详情（全部信息 / 报错）">' +
+    '<i class="bi bi-info-circle"></i></button>';
+}
+function dlCopyText(txt, okMsg) {
+  const done = function () { toast(okMsg || "已复制", "ok"); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done).catch(function () { window.prompt("复制", txt); });
+  } else if (typeof copyText === "function") {
+    try { copyText(txt); done(); } catch (_) { window.prompt("复制", txt); }
+  } else {
+    window.prompt("复制", txt);
+  }
+}
+function dlInfoRow(k, v, cls) {
+  if (v === undefined || v === null || v === "") v = "-";
+  return '<div class="dlc-ifrow' + (cls ? " " + cls : "") + '">' +
+    '<span class="dlc-ifk">' + k + '</span><span class="dlc-ifv">' + v + '</span></div>';
+}
+function dlInfoOpen(id) {
+  const t = dlFindTask(id);
+  if (!t) { toast("任务信息已过期，请刷新", "warn"); return; }
+  const live = DL.running[t.id];
+  const st = live ? "downloading" : t.status;
+  const pr = dlCalcProg(t, live, st);
+  const meta = t.meta || {};
+  const lines = [];                        // 「复制全部」用的纯文本
+  const push = function (k, raw, html) {
+    lines.push(k + "：" + (raw === undefined || raw === null ? "-" : raw));
+    return dlInfoRow(k, html === undefined ? esc(String(raw === undefined || raw === null ? "-" : raw)) : html);
+  };
+  let body = "";
+  body += push("任务 ID", t.id, '<code>' + esc(t.id) + '</code>');
+  body += push("文件名", t.name);
+  body += push("状态", dlStatusText(st, t),
+    '<span class="dlc-pill ' + st + '">' + dlStatusText(st, t) + '</span>');
+  body += push("类型", t.kind);
+  body += push("创建时间", t.ts);
+  body += push("大小", pr.noSize ? "未知（ffmpeg 拉流中）" : dlSize(pr.size));
+  body += push("已下载", dlSize(pr.done) + (pr.noSize ? "" : " · " + pr.pct.toFixed(1) + "%"));
+  if (dlIsRemote(t)) {
+    body += push("服务器进度",
+      (t.srv_size ? dlSize(t.srv_done || 0) + " / " + dlSize(t.srv_size) : dlSize(t.srv_done || 0)));
+    body += push("并发线程", t.threads);
+  }
+  body += push("下载次数", t.hits || 0);
+  const srcTxt = dlIsRemote(t) ? (t.url || "")
+    : ((t.src || []).join("\n") || t.src_dir || "");
+  body += push("来源" + (dlIsRemote(t) ? "链接" : "路径"), srcTxt,
+    '<span class="dlc-iflong">' + esc(srcTxt || "-") + '</span>' +
+    (srcTxt ? ' <button class="dlc-mini" data-a="copy-src">复制</button>' : ''));
+  body += push("保存目录", t.save_dir,
+    '<span class="dlc-iflong">' + esc(t.save_dir || "-") + '</span>');
+  body += push("产物文件", t.artifact,
+    '<span class="dlc-iflong">' + esc(t.artifact || "-") + '</span>' +
+    (t.exists ? ' <em class="dlc-ifok">存在</em>' : ' <em class="dlc-ifbad">已清理</em>'));
+  body += push("备注", t.note);
+  if (t.opts && t.opts.proxy)
+    body += push("代理", t.opts.proxy,
+      '<span class="dlc-iflong">' + esc(t.opts.proxy) + '</span>');
+  if (meta && meta.ok) {
+    body += push("HLS 信息",
+      "分片 " + (meta.total || 0) + " 个 · 时长 " + Math.round(meta.duration || 0) + " 秒" +
+      (meta.enc ? " · AES-128 加密（分片下载 · ffmpeg 解密拼接）" : " · 未加密"),
+      esc("分片 " + (meta.total || 0) + " 个 · 时长 " + Math.round(meta.duration || 0) + " 秒" +
+        (meta.enc ? " · AES-128 加密（分片下载 · ffmpeg 解密拼接）" : " · 未加密")));
+  }
+  if (Array.isArray(t.segs) && t.segs.length) {
+    const doneSeg = t.segs.filter(function (s) { return s && s.done > 0; }).length;
+    body += push("分段进度", doneSeg + " / " + t.segs.length,
+      doneSeg + " / " + t.segs.length + " 段已下载");
+  }
+  const errTxt = String(t.error || "").trim();
+  if (errTxt) {
+    lines.push("错误信息：" + errTxt);
+    body += '<div class="dlc-ifrow col"><span class="dlc-ifk">错误信息</span>' +
+      '<div class="dlc-iferr" id="dlInfoErr">' + esc(errTxt) + '</div>' +
+      '<button class="dlc-mini" data-a="copy-err"><i class="bi bi-clipboard"></i>复制报错</button></div>';
+  }
+  const m = document.createElement("div");
+  m.className = "dlc-mask";
+  m.innerHTML =
+    '<div class="dlc-info">' +
+      '<div class="dlc-info-hd"><i class="bi bi-info-circle"></i><b>任务详情</b>' +
+        '<span class="dlc-info-nm" title="' + dlA(t.name || "") + '">' + esc(t.name || "") + '</span>' +
+        '<button class="dlc-info-x" data-a="close" title="关闭"><i class="bi bi-x-lg"></i></button></div>' +
+      '<div class="dlc-info-bd">' + body + '</div>' +
+      '<div class="dlc-info-ft">' +
+        '<button class="dlc-btn sm" data-a="copy-all"><i class="bi bi-clipboard-check"></i>复制全部信息</button>' +
+        '<button class="dlc-btn sm" data-a="close">关闭</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(m);
+  requestAnimationFrame(function () { m.classList.add("show"); });
+  const close = function () {
+    m.classList.remove("show");
+    setTimeout(function () { m.remove(); }, 180);
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = function (ev) { if (ev.key === "Escape") { ev.stopPropagation(); close(); } };
+  document.addEventListener("keydown", onKey, true);
+  m.addEventListener("click", function (ev) {
+    if (ev.target === m) return close();
+    const b = ev.target.closest("[data-a]");
+    if (!b) return;
+    const a = b.dataset.a;
+    if (a === "close") return close();
+    if (a === "copy-all") return dlCopyText(lines.join("\n"), "任务信息已复制");
+    if (a === "copy-err") return dlCopyText(errTxt, "报错信息已复制");
+    if (a === "copy-src") return dlCopyText(srcTxt, "来源已复制");
+  });
+}
 function dlOnClick(e) {
   const el = e.target.closest("[data-act]");
   if (!el) return;
@@ -779,8 +956,8 @@ function dlOnClick(e) {
   const id = row ? row.dataset.id : "";
   const t = id ? dlFindTask(id) : null;
   if (act === "new") return dlPickOpen({});
-  if (act === "tab-act" || act === "tab-fin") {
-    DL.tab = act === "tab-act" ? "act" : "fin";
+  if (act === "tab-act" || act === "tab-fin" || act === "tab-fail") {
+    DL.tab = act === "tab-act" ? "act" : (act === "tab-fail" ? "fail" : "fin");
     return dlRender();
   }
   if (act === "refresh") return dlReload();
@@ -795,6 +972,8 @@ function dlOnClick(e) {
   if (act === "p-next") { if (DL.page < DL.pages) { DL.page++; dlLoadRecords(); } return; }
   if (act === "sel-del") return dlDeleteSelected();
   if (act === "sel-clear") { DL.sel = {}; return dlSelRefresh(); }
+  if (act === "pause-all") return dlPauseAll();
+  if (act === "resume-all") return dlResumeAll();
   if (!t && (act === "start" || act === "retry")) { toast("任务信息已过期，请刷新", "warn"); return; }
   if (act === "start") return dlStartTask(t);
   if (act === "pause") return dlStopTask(id);
@@ -803,6 +982,7 @@ function dlOnClick(e) {
   if (act === "delete") return dlDeleteTask(id);
   if (act === "native") return dlConfirmNative(el, id);
   if (act === "open") return dlOpenArtifact(id);
+  if (act === "info") return dlInfoOpen(id);
   if (act === "copy") return dlCopyLink(id);
   if (act === "segs") return dlSegsOpen(id);
 }
@@ -975,12 +1155,29 @@ async function dlSegsPaint(id) {
   box.innerHTML = head + '<div class="dlc-segs-body">' + body + '</div>';
 }
 
+/* 任务创建至今多少分钟（ts 形如 "2026-10-30 18:23:09"）；解析不了返回 0 */
+function dlTaskAgeMin(t) {
+  const s = String((t && t.ts) || "").trim();
+  if (!s) return 0;
+  const ms = Date.parse(s.replace(" ", "T"));
+  if (!ms) return 0;
+  return Math.max(0, (Date.now() - ms) / 60000);
+}
 async function dlStartTask(t) {
   if (!t || DL.running[t.id]) return;
   if (dlIsRemote(t)) {
     // 网络下载由服务器完成；已就绪且产物还在 → 直接拉到本机
     // 产物已被清理（重启清理 / 手动清理）→ 不开新标签页，改为让服务器重新抓一遍
     if ((t.status === "ready" || t.status === "done") && t.exists !== false) return dlNative(t.id);
+    // 播放链接是带时效签名的临时地址：任务放置过久后旧的 URL 基本已失效，
+    // 重试只会再失败一次，这里先提示用户重新复制链接
+    const ageMin = dlTaskAgeMin(t);
+    if (ageMin > 20) {
+      const ok = await uiConfirm("链接可能已过期",
+        "这条任务创建于 " + Math.round(ageMin) + " 分钟前，播放链接的签名有效期通常只有 20~30 分钟，" +
+        "继续重试大概率仍会失败。\n建议回网站重新复制一条新的播放链接新建任务。仍要重试吗？", "仍要重试", false);
+      if (!ok) return;
+    }
     await dlTaskAction(t.id, "start");
     return dlReload(true);
   }
@@ -1011,6 +1208,35 @@ function dlStopAll() {
   Object.keys(DL.running).forEach(function (id) {
     try { DL.running[id].ctrl.abort(); } catch (_) { }
   });
+}
+/* 全部暂停：正在传输的远程任务交给服务器暂停（保存分片进度），本地任务中断客户端请求 */
+async function dlPauseAll() {
+  const targets = (DL.tasks || []).filter(function (t) {
+    return !!DL.running[t.id] || t.status === "downloading";
+  });
+  if (!targets.length) { toast("没有正在传输的任务", "info"); return; }
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i];
+    try {
+      if (dlIsRemote(t)) await dlTaskAction(t.id, "pause");
+      else {
+        const st = DL.running[t.id];
+        if (st) { try { st.ctrl.abort(); } catch (_) { } }
+      }
+    } catch (_) { }
+  }
+  toast("已暂停 " + targets.length + " 个任务", "ok");
+  dlReload(true);
+}
+/* 全部继续：把所有已暂停的任务重新入队（服务器按并发数逐个恢复，断点续传） */
+async function dlResumeAll() {
+  const targets = (DL.tasks || []).filter(function (t) { return t.status === "paused"; });
+  if (!targets.length) { toast("没有已暂停的任务", "info"); return; }
+  for (let i = 0; i < targets.length; i++) {
+    try { await dlTaskAction(targets[i].id, "start"); } catch (_) { }
+  }
+  toast("已继续 " + targets.length + " 个任务", "ok");
+  dlReload(true);
 }
 
 async function dlDeleteTask(id) {
@@ -1137,6 +1363,7 @@ function dlCtxOpen(e, id) {
       items.push({ label: "重新下载到服务器", icon: "bi-arrow-repeat", act: () => dlStartTask(t) });
     items.push({ label: "复制下载链接", icon: "bi-link-45deg", act: () => dlCopyLink(id) });
     items.push({ divider: true });
+    items.push({ label: "查看详情", icon: "bi-info-circle", act: () => dlInfoOpen(id) });
     items.push({ label: "删除记录", icon: "bi-trash3", danger: true, act: () => dlDeleteTask(id) });
   } else {
     items.push({ label: "全选 / 全不选", icon: "bi-check2-all", act: () => {
@@ -1526,8 +1753,8 @@ function dlPickOpen(opts) {
     if (headEl) {
       headEl.insertAdjacentHTML("afterend",
         '<div class="dlc-pick-tabs">' +
-          '<div class="dlc-tab on" data-pk="tab" data-tab="files"><i class="bi bi-hdd"></i>本机文件</div>' +
-          '<div class="dlc-tab" data-pk="tab" data-tab="url"><i class="bi bi-globe2"></i>链接 / 磁力</div>' +
+          '<div class="dlc-tab on" data-pk="tab" data-tab="url"><i class="bi bi-globe2"></i>链接 / 磁力</div>' +
+          '<div class="dlc-tab" data-pk="tab" data-tab="files"><i class="bi bi-hdd"></i>本机文件</div>' +
           '<span style="flex:1"></span>' +
           '<span class="dlc-tab-hint">本机文件 = 打包下载；链接 = 服务器多线程抓取</span>' +
         '</div>');
@@ -1592,7 +1819,8 @@ function dlPickOpen(opts) {
     }, true);
   }
   dlLoadEnv();                       // 刷新 aria2 检测状态（磁力 / BT 用）
-  if (P.tab === "url") dlPickTabSet("url");
+  if (!isDir) dlPickTabSet("url");   // 打开默认停在「链接 / 磁力」
+  else if (P.tab === "url") dlPickTabSet("url");
   dlPickLoad(P.path || (typeof ROOT !== "undefined" ? ROOT : ""));
 }
 
@@ -1747,16 +1975,37 @@ async function dlUrlConfirm() {
   if (!P) return;
   const raw = (P.url || "").trim();
   if (!raw) { toast("请先粘贴下载链接", "warn"); return; }
-  const urls = raw.split(/[\r\n,]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+  // 按行拆分批量；逗号只在后面紧跟新链接协议头时才算分隔符——
+  // 很多直链签名里带逗号（如 cdn77 的 secure=哈希,过期时间），不能见逗号就拆
+  const urls = [];
+  raw.split(/[\r\n]+/).forEach(function (line) {
+    line.split(/,(?=\s*(?:https?|ftp|magnet):)/).forEach(function (s) {
+      const t = s.trim();
+      if (t) urls.push(t);
+    });
+  });
   if (urls.length > 20) { toast("一次最多 20 个链接", "warn"); return; }
   const btn = document.querySelector('#dlcPickMask [data-pk="url-ok"]');
   if (btn) btn.disabled = true;
   let ok = 0, errMsg = "";
   for (let k = 0; k < urls.length; k++) {
     const u = urls[k];
-    const d = await dlReq("/api/dl/url", { method: "POST", body: JSON.stringify({
-      url: u, save_dir: P.saveDir, filename: urls.length === 1 ? P.urlName : "",
-      threads: P.threads, opts: { referer: P.referer, cookie: P.cookie, proxy: P.proxy } }) });
+    const body = function (force) {
+      return JSON.stringify({
+        url: u, save_dir: P.saveDir, filename: urls.length === 1 ? P.urlName : "",
+        threads: P.threads, force: !!force,
+        opts: { referer: P.referer, cookie: P.cookie, proxy: P.proxy } });
+    };
+    let d = await dlReq("/api/dl/url", { method: "POST", body: body(false) });
+    // 同一链接只允许一个任务：已存在时弹框确认是否删掉旧任务重新下载
+    if (d && d.need_confirm) {
+      const old = (d.items && d.items[0]) || {};
+      const stTxt = old.status ? ("（" + dlStatusText(old.status, old) + "）") : "";
+      const ask = "该链接已存在下载任务" + (d.count > 1 ? "（共 " + d.count + " 个）" : "") + "：\n\n" +
+        (old.name || u) + stTxt + "\n\n是否删除旧任务，并开始一个新的下载任务？";
+      if (!window.confirm(ask)) { errMsg = "已跳过重复链接"; continue; }
+      d = await dlReq("/api/dl/url", { method: "POST", body: body(true) });
+    }
     if (d && d.ok) ok++; else errMsg = (d && d.error) || "创建失败";
   }
   if (btn) btn.disabled = false;
@@ -2051,6 +2300,7 @@ function dlPickNetDir() {
         const id = b.dataset.id || "";
         if (act === "open") return openDownloadCenter();
         if (act === "view") return dlOpenArtifact(id);
+        if (act === "del") return dlDeleteTask(id);
         if (act === "start") {
           const tt = id ? dlFindTask(id) : null;
           return dlStartTask(tt);
@@ -2077,6 +2327,7 @@ function dlPickNetDir() {
   dlSideRender();
   dlPollStart();          // 轮询本身很轻：两个界面都没显示时直接 return
   window.openDownloadCenter = openDownloadCenter;
+  window.dlCurrentView = function () { return DL.view; };   // 会话恢复时记下子视图（任务 / 记录 / 设置）
   window.openDownloadsPanel = function () {
     if (typeof showPanel === "function") showPanel("downloads");
     setTimeout(dlSideRender, 0);

@@ -170,6 +170,7 @@
           o.isSettings = true;
           try { o.settingsSec = localStorage.getItem("ide.session.settingsSec") || ""; } catch (_) {}
         }
+        if (t.isDownloads && typeof window.dlCurrentView === "function") o.view = window.dlCurrentView();
         return o;
       });
       localStorage.setItem("ide.session.tabs", JSON.stringify(list));
@@ -225,6 +226,11 @@
         if (t.path === "\u0000runner" && typeof openRunnerView === "function") { openRunnerView(); continue; }
         // 文件夹管理器可视化查看（虚拟路径 \u0000fm）：直接重开，当前目录由模块自己记在 localStorage
         if (t.path === "\u0000fm" && typeof openFolderManagerView === "function") { openFolderManagerView(); continue; }
+        // 下载中心（虚拟路径 \u0000downloads）：直接重开，子视图（任务 / 记录 / 设置）由会话快照带上
+        if (t.path === "\u0000downloads" && typeof window.openDownloadCenter === "function") {
+          window.openDownloadCenter(t.view);
+          continue;
+        }
         // 远程文件管理器（虚拟路径 \u0000sshfm:<连接id>）：按 id 找回 SSH 连接后重开。
         // 必须 await：内部要等连接列表返回再建标签并 activate 自己，不 await 的话它会晚于
         // 下面的「恢复上次活动标签」，刷新后焦点就被远程标签抢走（当前页被切走）。

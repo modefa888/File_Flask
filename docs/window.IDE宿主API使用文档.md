@@ -380,19 +380,23 @@ IDE 左侧活动栏的「扩展」按钮打开插件管理面板，用于查看�
 
 ### 安装 / 卸载历史查看
 
-点面板顶部的 **历史** 按钮，弹窗展示插件安装 / 卸载的历史记录（**新 → 旧**）：每条含 **动作（安装 / 卸载）**、**插件名 + 版本**、**时间**（本地时区），底部显示总条数；无记录时提示「暂无」。历史最多保留最近 **500** 条。
+点面板顶部的 **历史** 按钮，弹窗展示插件安装 / 卸载的历史记录（**新 → 旧**）：每条含 **动作（安装 / 卸载）**、**插件名 + 版本**、**插件代码状态**（`代码在` / `代码已删除` / `运行中`）、**时间**（本地时区），底部显示总条数；无记录时提示「暂无」。历史最多保留最近 **500** 条。
+
+**重新安装热部署**：卸载只是停用并从 `data/plugins/` 移除安装副本，`plugins/` 里的开发源码不会被删。对「代码仍在且未运行」的记录，历史弹窗提供 **重新安装热部署** 按钮：后端用保留的代码重新激活插件（拉取不带缓存的 `main.js`），立即生效并刷新扩展列表，无需重新上传 zip。
 
 数据由后端登记簿接口提供，插件内也可自行读取：
 
 ### `GET /api/plugins/registry` → `{ plugins, history }`
 - `plugins`：`{ <id>: { id, name, version, status, installed_at, uninstalled_at, updated_at } }` —— 各插件最新状态（`status` 为 `installed` | `uninstalled`）。
-- `history`：`[{ action: "install" | "uninstall", id, name, version, at }]` —— 按时间正序追加的事件流。
+- `history`：`[{ action: "install" | "uninstall", id, name, version, at, exists, meta }]` —— 按时间正序追加的事件流。其中：
+  - `exists`：`boolean`，`data/plugins/<id>` 代码目录当前是否仍存在（卸载后代码可能被保留，如开发源码目录 / 软链）；
+  - `meta`：代码仍存在时的 `plugin.json` 内容（对象），供前端「重新安装热部署」直接激活；代码已删除时为 `null`。
 - 存储位置：`data/plugins/registry.json`。
 
 ```js
 // 插件内也可读取登记簿，自行展示或统计
 const reg = await IDE.api.get("/api/plugins/registry");
-console.log(reg.history.slice(-10));   // 最近 10 条安装 / 卸载记录
+console.log(reg.history.slice(-10));   // 最近 10 条安装 / 卸载记录（含 exists / meta）
 ```
 
 ---
@@ -413,3 +417,75 @@ console.log(reg.history.slice(-10));   // 最近 10 条安装 / 卸载记录
 - 加载失败会有 `toast` 提示，并 `console.error` 具体原因。
 - 在控制台可直接调用 `window.IDE` 验证 API：`IDE.editors.list()`、`IDE.plugins` 等。
 - `registerPanel` / `registerCommand` 重复注册同 id 会被忽略或复用，确保插件能被多次 activate 而不报错。
+
+---
+
+## 16. 其它宿主 API（confirm / statusBar / settings / actions / getCommands / reload）
+
+### `IDE.confirm(opts)` → `Promise<boolean>`
+二次确认弹窗（基于 `IDE.dialog` 封装）：点「确定」resolve `true`；取消 / `Esc` / 点遮罩 resolve `false`。
+- `opts`：`{ title?, message?, html?, okText?, cancelText?, danger?, icon? }`（均可省略）。
+
+```js
+if (await IDE.confirm({ title: "删除文件", message: "确定删除吗？", danger: true })) {
+  IDE.notifications.show("已删除", "ok");
+}
+```
+
+### `IDE.statusBar.set(id, opts)` / `IDE.statusBar.remove(id)`
+往底部状态栏放自定义项（按钮 / 指示器）；插件停用 / 卸载时自动随之移除。
+- `id`：唯一标识。
+- `opts`：`{ text, icon?, title?, onClick?, align?("left"|"right"), visible? }`；`left` 缺省插在 Git 分支指示器之后。
+
+```js
+IDE.statusBar.set("my.timer", { icon: "bi-clock", text: "25:00", align: "right", onClick() { /* ... */ } });
+IDE.statusBar.remove("my.timer");
+```
+
+### `IDE.settings.get(key, def)` / `IDE.settings.set(key, value)`
+与「设置」页同源的持久化读写（`localStorage ide.settings`）。`set` 会立即应用外观类设置（主题 / 字号 / 换行 / 缩进等）并广播 `settingChanged` 事件。
+
+### `IDE.actions.*`（触发宿主动作）
+| 方法 | 说明 |
+|---|---|
+| `quickOpen(pre)` | 快速打开（Ctrl+P）；`pre` 以 `>` 开头即命令面板 |
+| `commandPalette()` | 等价 `quickOpen(">")` |
+| `searchInProject()` | 全局内容搜索（搜索面板 · 内容模式） |
+| `gotoLine()` | 跳转到行 |
+| `newFile() / newFolder() / refreshTree()` | 文件树操作 |
+| `openTerminal() / toggleTerminal() / runFile()` | 终端与运行当前文件 |
+| `splitEditor(dir)` / `showShortcuts()` | 拆分编辑器 / 快捷键面板 |
+| `openSettings(section)` | 打开设置页指定节 |
+| `openFileAt(path, line, col)` | 打开文件并定位到行 / 列 |
+| `saveActive() / recentFiles() / clearRecent()` | 保存 / 最近打开记录 |
+| `getTheme() / setTheme(light)` | 读取（`true`=浅色）/ 切换主题（广播 `themeChanged`） |
+
+宿主功能未就绪时这些方法返回 `false` 并弹提示，不会抛错。
+
+### `IDE.getCommands(pluginId?)` / `IDE.reload(pluginId)`
+- `getCommands(pluginId?)` → `[{ id, title, owner }]`，已注册命令列表（`owner` 为注册来源插件 id）。
+- `reload(pluginId)` → 热重载插件：清理旧实例 → 重新读目录 / 清单 → 重新激活，无需刷新页面。
+
+---
+
+## 17. 内置扩展：API 管理面板
+
+扩展面板顶部有一张**内置卡片「API 管理面板」**（始终可用、不可卸载），也可用命令 `IDE.extConsole.open(tab)` 打开。它会在编辑区打开一个全尺寸视图（视图 id `builtin-console`，已打开时再次调用只聚焦并切换标签），包含四个标签页：
+
+| 标签 | 内容 |
+|---|---|
+| **API 总览** | 静态精选目录（按命名空间分组）+ 运行时实时反射 `window.IDE` 实际结构，顶部搜索框实时过滤 |
+| **API 测试** | 端到端用例（宿主元信息 / 命令注册 / 通知状态栏 / 工作区读写 / 编辑区开合 / 动作主题 / 设置读写 / 事件总线 / 网络请求），单条或全部运行，显示通过徽标 + 耗时 + 详情 |
+| **AI 开发插件** | 需求描述 → 走「设置 → 系统 AI」流式生成 `plugin.json` + `main.js` → 预览 / 复制 / 写入工作区 / **安装并热部署**（经 `POST /api/plugins/install-files` 直装激活）。支持**二次开发**：从下拉框选择已安装插件并「载入现有代码」，AI 会以现有源码为基线按需求升级，`id` 保持不变、`version` 递增，生成后一键覆盖热部署 |
+| **文档** | 内置查看 `docs/window.IDE宿主API使用文档.md`（即本文档）：轻量 Markdown 渲染 + 目录跳转 + 刷新 / 在编辑器打开，主题随界面深浅自动跟随 |
+
+插件侧可通过 `IDE.extConsole.open("tests")` / `open("ai")` / `open("docs")` 直达指定标签（常用于自己的「帮助」按钮）。
+
+```js
+IDE.registerCommand("my.help", {
+  title: "My: 打开 API 文档",
+  run: () => IDE.extConsole.open("docs")
+});
+```
+
+> AI 生成插件一键安装用的是 `POST /api/plugins/install-files`：`{ files: { "plugin.json": "...", "main.js": "..." } }` → `{ plugin }`，写入插件目录后由前端热部署激活。

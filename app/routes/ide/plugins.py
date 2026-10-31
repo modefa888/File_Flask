@@ -243,8 +243,19 @@ def list_plugins_paged():
 
 @bp.route("/api/plugins/registry", methods=["GET"])
 def plugin_registry():
-    """查看插件登记簿：已安装 / 已卸载历史（store.db 的 plugin_registry / plugin_history 表）。"""
-    return jsonify(_load_registry())
+    """查看插件登记簿：已安装 / 已卸载历史（store.db 的 plugin_registry / plugin_history 表）。
+
+    每条历史记录附加：
+        exists  data/plugins/<id> 代码目录是否仍然存在（卸载只停用；代码可能保留）
+        meta    代码仍存在时的 plugin.json（供前端「重新安装热部署」直接激活）
+    """
+    data = _load_registry()
+    for it in data.get("history", []):
+        pid = str(it.get("id", "")).strip()
+        d = _plugin_dir(pid) if _ID_RE.match(pid) else ""
+        it["exists"] = bool(d) and os.path.isdir(d)
+        it["meta"] = _load_meta(pid) if it["exists"] else None
+    return jsonify(data)
 
 
 @bp.route("/api/plugins/install", methods=["POST"])
@@ -291,6 +302,64 @@ def install_plugin():
             _remove_path(dest)
         shutil.copytree(src, dest)
         # 规范化 manifest
+        meta.setdefault("name", pid)
+        meta.setdefault("enabled", True)
+        meta["installed"] = True
+        _save_meta(pid, meta)
+        _registry_record("install", meta)
+        return jsonify({"success": True, "plugin": meta})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+@bp.route("/api/plugins/install-files", methods=["POST"])
+def install_plugin_files():
+    """以 JSON 文件字典直接安装插件（AI 生成插件一键安装 / 热部署用，免去打包 zip）。
+
+    body: {files: {"plugin.json": "<json 文本>", "main.js": "<源码>", ...}}
+    校验与 /install 一致：必须有 plugin.json、id 合法、文件名无穿越、入口文件存在。
+    返回 {success, plugin}，前端随后自行停用旧实例并激活新代码（热部署）。
+    """
+    data = request.get_json(silent=True) or {}
+    files = data.get("files")
+    if not isinstance(files, dict) or not files:
+        return jsonify({"error": "缺少 files 文件字典"}), 400
+    meta_raw = files.get("plugin.json")
+    if meta_raw is None:
+        return jsonify({"error": "缺少 plugin.json"}), 400
+    try:
+        meta = json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+        if not isinstance(meta, dict):
+            raise ValueError("plugin.json 顶层必须是对象")
+    except Exception as e:
+        return jsonify({"error": "plugin.json 解析失败：" + str(e)}), 400
+    pid = str(meta.get("id", "")).strip()
+    if not _ID_RE.match(pid):
+        return jsonify({"error": "plugin.json 的 id 非法（仅限字母数字 _ -，1-64 位）"}), 400
+    tmp = tempfile.mkdtemp(prefix="plgf_")
+    try:
+        for name, content in files.items():
+            rel = str(name).replace("\\", "/").strip("/")
+            if (not rel or rel.startswith(".") or ".." in rel.split("/")
+                    or rel.lower().endswith((".py", ".sh", ".exe", ".bat"))):
+                return jsonify({"error": "非法文件名：" + str(name)[:64]}), 400
+            fp = os.path.join(tmp, rel)
+            parent = os.path.dirname(fp)
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent, exist_ok=True)
+            with open(fp, "w", encoding="utf-8") as fh:
+                fh.write(content if isinstance(content, str) else str(content))
+        main = str(meta.get("main", "main.js")).strip()
+        if not main or "/" in main or "\\" in main or main.startswith("."):
+            return jsonify({"error": "main 字段非法"}), 400
+        if not os.path.isfile(os.path.join(tmp, main)):
+            return jsonify({"error": "入口文件缺失：" + main}), 400
+        dest = _plugin_dir(pid)
+        if os.path.islink(dest) or os.path.exists(dest):
+            _remove_path(dest)
+        shutil.copytree(tmp, dest)
         meta.setdefault("name", pid)
         meta.setdefault("enabled", True)
         meta["installed"] = True

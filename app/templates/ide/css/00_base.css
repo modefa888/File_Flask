@@ -34,7 +34,9 @@
 .set-nav { width: 240px; flex: none; background: #1f1f20; border-right: 1px solid #2c2c2d; padding: 22px 18px; overflow-y: auto; }
 .set-nav h1 { font-size: 15px; color: #e8e8e8; margin: 0 0 14px; }
 .set-search { width: 100%; box-sizing: border-box; background: #2a2a2b; border: 1px solid #3c3c3d; border-radius: 6px;
-  color: #d6d6d6; font-size: 12px; padding: 6px 10px; outline: none; margin-bottom: 16px; }
+  color: #d6d6d6; font-size: 12px; padding: 6px 10px; outline: none; margin-bottom: 16px;
+  -webkit-appearance: none; appearance: none; }
+.set-search::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
 .set-search:focus { border-color: #0a6aa8; }
 .set-navitem { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px;
   color: #b8b8b8; font-size: 13px; cursor: pointer; margin-bottom: 2px; }

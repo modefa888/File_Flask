@@ -115,7 +115,7 @@ function v2admRender(el, st, nd, sb) {
             '<label style="font-size:12.5px">用户名 <input class="adm-input" id="v2AuthUser" style="width:150px" value="' +
                 ADM.esc(sst.socks_user || '') + '" autocomplete="off"></label>' +
             '<label style="font-size:12.5px">密码 <input class="adm-input" id="v2AuthPass" type="password" style="width:180px" value="" placeholder="' +
-                (st.has_pass ? '••••••（留空不修改）' : '可选') + '" autocomplete="new-password"></label>' +
+                (st.has_pass ? '••••••（留空不修改）' : '可选') + '" autocomplete="new-password" data-lpignore="true" data-1p-ignore></label>' +
             '<button class="adm-btn sm" data-v2act="pass-eye" title="显示 / 隐藏密码"><i class="bi bi-eye"></i></button>' +
             '<button class="adm-btn sm" data-v2act="pass-copy" title="复制密码"><i class="bi bi-clipboard"></i></button>' +
             '<button class="adm-btn sm" data-v2act="gen-auth" title="随机生成一组账号密码"><i class="bi bi-magic"></i> 自动生成</button>' +

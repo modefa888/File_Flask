@@ -1,3 +1,10 @@
+  <!-- 诱饵字段：浏览器密码管理器的登录表单启发式会把「文档里第一个文本框」当成用户名，
+       从而把已保存的账号自动填进 IDE 的搜索框 / 接口地址等输入框。这里放一对离屏的诱饵
+       用户名 + 密码框，让自动填充落在诱饵上，不污染真实输入框。 -->
+  <div class="pwd-decoy" aria-hidden="true" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;">
+    <input type="text" name="pwd-decoy-username" tabindex="-1" autocomplete="username" style="width:1px;height:1px;">
+    <input type="password" name="pwd-decoy-password" tabindex="-1" autocomplete="current-password" style="width:1px;height:1px;">
+  </div>
   <div class="titlebar">
     <div class="traffic"><span class="r"></span><span class="y"></span><span class="g"></span></div>
     <div class="menubar" id="menubar"><span data-menu="file">文件</span><span data-menu="edit">编辑</span><span data-menu="sel">选择</span><span data-menu="view">查看</span><span data-menu="goto">转到</span><span data-menu="run">运行</span><span data-menu="term">终端</span><span data-menu="help">帮助</span></div>

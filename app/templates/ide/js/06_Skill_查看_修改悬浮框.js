@@ -353,13 +353,13 @@
       card.className = "ai-prov";
       card.dataset.pid = p.id;
       card.innerHTML =
-        '<div class="ai-prov-hd"><input class="nm" placeholder="接口名称" value="">' +
+        '<div class="ai-prov-hd"><input class="nm" name="ai-provider-name" placeholder="接口名称" value="" autocomplete="off" data-lpignore="true" data-1p-ignore>' +
         '<button class="ai-prov-del" title="删除该接口"><i class="bi bi-trash3"></i></button></div>' +
         '<div class="lbl">接口地址（OpenAI 兼容）</div>' +
-        '<input class="u" placeholder="https://api.deepseek.com" spellcheck="false">' +
+        '<input class="u" name="ai-provider-base-url" placeholder="https://api.deepseek.com" spellcheck="false" autocomplete="off" data-lpignore="true" data-1p-ignore>' +
         '<div class="lbl">API Key（留空沿用已保存的）</div>' +
         '<form class="ai-pwd-form" autocomplete="off" onsubmit="return false">' +
-          '<input class="k" type="password" placeholder="' + (p.api_key ? "已保存 " + p.api_key : "sk-...") + '" spellcheck="false" autocomplete="off">' +
+          '<input class="k" type="password" name="ai-provider-key" placeholder="' + (p.api_key ? "已保存 " + p.api_key : "sk-...") + '" spellcheck="false" autocomplete="new-password" data-lpignore="true" data-1p-ignore>' +
         '</form>' +
         '<div class="lbl ai-lbl-row"><span>模型列表（可手动填写或自动获取）</span>' +
         '<button class="ai-prov-fetch" type="button" title="从接口拉取可用模型列表"><i class="bi bi-arrow-repeat"></i> 自动获取</button></div>' +

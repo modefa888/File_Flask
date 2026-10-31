@@ -1304,7 +1304,7 @@
       '<input type="text" id="v2vSetUser" value="' + escA(s.socks_user || "") + '" autocomplete="off"></label>' +
       '<label class="v2v-field"><span>SOCKS5 密码' + (st.has_pass ? "（已设置，留空不修改）" : "（可选）") + "</span>" +
       '<div class="v2v-pass-row">' +
-      '<input type="password" id="v2vSetPass" value="" placeholder="' + (st.has_pass ? "••••••（留空保持不变）" : "") +
+      '<input type="password" id="v2vSetPass" value="" autocomplete="new-password" data-lpignore="true" data-1p-ignore placeholder="' + (st.has_pass ? "••••••（留空保持不变）" : "") +
       '" autocomplete="new-password">' +
       '<button type="button" class="v2v-btn ico" id="v2vPassEye" title="显示 / 隐藏密码"><i class="bi bi-eye"></i></button>' +
       '<button type="button" class="v2v-btn ico" id="v2vPassCopy" title="复制密码"><i class="bi bi-clipboard"></i></button>' +

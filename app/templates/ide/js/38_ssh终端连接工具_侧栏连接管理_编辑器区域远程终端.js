@@ -907,14 +907,14 @@
             '</select></div>' +
           '<div class="ssh-row ssh-pwd-row"><span class="ssh-lb">密码</span>' +
             '<div class="ssh-pwd-wrap">' +
-              '<input class="ssh-in" id="sshPwd" type="password" spellcheck="false" placeholder="' +
+              '<input class="ssh-in" id="sshPwd" type="password" spellcheck="false" autocomplete="new-password" data-lpignore="true" data-1p-ignore placeholder="' +
                 (isEdit && c.hasPassword ? "留空表示不修改（已保存 " + (c.hasPassword ? "●" : "") + "）" : "登录密码") + '">' +
               '<button type="button" class="ssh-eye" data-eye="sshPwd" title="查看密码" aria-label="查看密码"><i class="bi bi-eye"></i></button>' +
             '</div></div>' +
           '<div class="ssh-row ssh-key-row" style="display:none"><span class="ssh-lb">私钥</span>' +
             '<textarea class="ssh-in ssh-key" id="sshKey" spellcheck="false" placeholder="粘贴私钥内容（-----BEGIN ... PRIVATE KEY-----）">' + esc(c.key || "") + '</textarea></div>' +
           '<div class="ssh-row ssh-keypass-row" style="display:none"><span class="ssh-lb">私钥口令</span>' +
-            '<input class="ssh-in" id="sshKeypass" type="password" spellcheck="false" placeholder="留空表示不修改 / 私钥无口令"></div>' +
+            '<input class="ssh-in" id="sshKeypass" type="password" spellcheck="false" autocomplete="new-password" data-lpignore="true" data-1p-ignore placeholder="留空表示不修改 / 私钥无口令"></div>' +
           row("备注", '<input class="ssh-in" id="sshRemark" spellcheck="false" placeholder="可选" value="' + escAttr(c.remark || "") + '">') +
         '</div>' +
         '<div class="ssh-tip"><i class="bi bi-info-circle"></i> 密码 / 私钥经传输层加密后落库；编辑时留空表示沿用已保存的值。</div>' +

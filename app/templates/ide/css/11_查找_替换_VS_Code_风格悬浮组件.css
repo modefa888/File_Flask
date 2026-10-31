@@ -107,8 +107,21 @@
     font-family: inherit; text-align: left; transition: background .12s ease;
   }
   .welcome .wc-recent-row:hover { background: rgba(255, 255, 255, .07); }
-  .welcome .wc-recent-ic { flex: none; display: flex; align-items: center; font-size: 13px; }
-  .welcome .wc-recent-ic .cm-folder, .welcome .wc-recent-ic i, .welcome .wc-recent-ic img { font-size: 13px; }
+  /* 图标统一：固定 16px 图标框 + 同一字号。
+     原来只把 <i>（bootstrap 图标）压到 13px，seti 字体的 <span class="seti-ic"> 仍是全局的
+     1.4em（≈18px），于是 zip / js 这类 seti 图标比旁边的文件图标大一号，看着上下不齐；
+     这里把三种图标（.bi / .seti-ic / 自定义图片）都收敛到同一字号、同一图标框。 */
+  .welcome .wc-recent-ic {
+    flex: none; width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; line-height: 1;
+  }
+  .welcome .wc-recent-ic .bi,
+  .welcome .wc-recent-ic .seti-ic,
+  .welcome .wc-recent-ic .ai-ic,
+  .welcome .wc-recent-ic .cm-folder,
+  .welcome .wc-recent-ic i,
+  .welcome .wc-recent-ic img { font-size: 13px; line-height: 1; }
   .welcome .wc-recent-name { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c2c6cc; font-size: 13px; }
   .welcome .wc-recent-row:hover .wc-recent-name { color: #ffffff; }
   .welcome .wc-recent-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #6f747c; font-size: 11px; direction: rtl; text-align: left; }

@@ -292,7 +292,7 @@
               '<div class="notify-label-wrap"><div class="notify-label">授权码 / 密码</div>' +
               '<div class="notify-desc">保存后仅显示 ****。</div></div>' +
               '<form class="notify-pwd-form" autocomplete="off" onsubmit="return false">' +
-                '<input class="notify-input" id="notifyCronEmailPwd" type="password" placeholder="授权码" autocomplete="off">' +
+                '<input class="notify-input" id="notifyCronEmailPwd" type="password" placeholder="授权码" autocomplete="new-password" data-lpignore="true" data-1p-ignore>' +
               '</form>' +
             '</div>' +
             '<div class="notify-row stack set-row" data-kw="发件人 from 地址">' +
@@ -319,7 +319,7 @@
             '<div class="notify-label-wrap"><div class="notify-label">Bot Token</div>' +
             '<div class="notify-desc">@BotFather 创建 Bot 后获得；保存后仅显示 ****。</div></div>' +
             '<form class="notify-pwd-form" autocomplete="off" onsubmit="return false">' +
-              '<input class="notify-input" id="notifyCronTgToken" type="password" placeholder="123456:ABC-DEF…" autocomplete="off">' +
+              '<input class="notify-input" id="notifyCronTgToken" type="password" placeholder="123456:ABC-DEF…" autocomplete="new-password" data-lpignore="true" data-1p-ignore>' +
             '</form>' +
           '</div>' +
           '<div class="notify-grid-2">' +
@@ -552,7 +552,7 @@
           '<div class="notify-row stack set-row" data-kw="授权码 密码 password">' +
             '<div class="notify-label-wrap"><div class="notify-label">授权码 / 密码</div><div class="notify-desc">邮件服务商授权码，保存后仅显示 ****</div></div>' +
             '<form class="notify-pwd-form" autocomplete="off" onsubmit="return false">' +
-            '<input class="notify-input" id="notifyPassword" type="password" placeholder="授权码" autocomplete="off">' +
+            '<input class="notify-input" id="notifyPassword" type="password" placeholder="授权码" autocomplete="new-password" data-lpignore="true" data-1p-ignore>' +
           '</form>' +
           '</div>' +
         '</div>' +
@@ -567,7 +567,7 @@
         '<div class="notify-row stack set-row" data-kw="bot token 令牌 token">' +
           '<div class="notify-label-wrap"><div class="notify-label">Bot Token</div><div class="notify-desc">在 @BotFather 创建 Bot 后获得，形如 <code>123456:ABC-DEF…</code>；保存后仅显示 ****。</div></div>' +
           '<form class="notify-pwd-form" autocomplete="off" onsubmit="return false">' +
-            '<input class="notify-input" id="notifyTgToken" type="password" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" autocomplete="off">' +
+            '<input class="notify-input" id="notifyTgToken" type="password" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" autocomplete="new-password" data-lpignore="true" data-1p-ignore>' +
           '</form>' +
         '</div>' +
         '<div class="notify-grid-2">' +

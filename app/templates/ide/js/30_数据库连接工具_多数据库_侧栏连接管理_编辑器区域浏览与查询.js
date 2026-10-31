@@ -219,7 +219,7 @@
           '<div class="dbc-row dbc-host-row"><span class="dbc-lb">用户</span>' +
             '<input class="dbc-in dbc-user-in" spellcheck="false" placeholder="root"></div>' +
           '<div class="dbc-row dbc-host-row"><span class="dbc-lb">密码</span>' +
-            '<input class="dbc-in dbc-pwd-in" type="password" spellcheck="false" placeholder="留空表示不修改"></div>' +
+            '<input class="dbc-in dbc-pwd-in" type="password" spellcheck="false" autocomplete="new-password" data-lpignore="true" data-1p-ignore placeholder="留空表示不修改"></div>' +
           '<div class="dbc-row"><span class="dbc-lb dbc-db-lb">库名</span>' +
             '<input class="dbc-in dbc-db-in" spellcheck="false"></div>' +
           '<div class="dbc-tip"><i class="bi bi-info-circle"></i><span class="dbc-tip-t"></span></div>' +

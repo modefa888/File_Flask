@@ -146,8 +146,15 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
   }
   function buildSettingsContent(host) {
     host.innerHTML =
+    // 诱饵字段：Chrome / Edge 的密码管理器会把「文档里第一个文本框」当成登录表单的用户名，
+    // 从而把已保存的账号（如 admin）自动填进下面的「搜索设置项」甚至 AI 接口地址里。
+    // 这里放一对离屏的诱饵用户名 + 密码框，让自动填充落到诱饵上，不污染真实输入框。
+    '<div class="pwd-decoy" aria-hidden="true" style="position:fixed;left:0;top:0;width:1px;height:1px;opacity:.01;overflow:hidden;pointer-events:none;z-index:-1;">' +
+      '<input type="text" name="pwd-decoy-username" tabindex="-1" autocomplete="username">' +
+      '<input type="password" name="pwd-decoy-password" tabindex="-1" autocomplete="current-password">' +
+    '</div>' +
     '<div class="set-layout">' +
-      '<div class="set-nav"><h1>设置</h1><input class="set-search" placeholder="搜索设置项" autocomplete="off" spellcheck="false">' +
+      '<div class="set-nav"><h1>设置</h1><input class="set-search" type="search" name="ide-settings-filter" placeholder="搜索设置项" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore>' +
         '<div class="set-navitem" data-sec="sec-appearance"><i class="bi bi-palette"></i>外观</div>' +
         '<div class="set-navitem" data-sec="sec-editor"><i class="bi bi-sliders"></i>编辑器</div>' +
         '<div class="set-navitem" data-sec="sec-files"><i class="bi bi-folder2"></i>文件</div>' +
@@ -322,7 +329,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
             '</div>' +
             '<div class="gc-row gc-field" id="gcTokenWrap">' +
               '<label>Personal Access Token</label>' +
-              '<input type="password" id="gcToken" placeholder="输入 Token" autocomplete="off" spellcheck="false">' +
+              '<input type="password" id="gcToken" name="git-access-token" placeholder="输入 Token" autocomplete="new-password" spellcheck="false" data-lpignore="true" data-1p-ignore>' +
               '<div class="gc-hint">' +
                 'GitHub 推荐使用 classic token，至少勾选 repo 权限。' +
                 '<a class="gc-link" href="https://github.com/settings/tokens/new?scopes=repo&description=File_Flask_IDE" target="_blank" rel="noopener">' +

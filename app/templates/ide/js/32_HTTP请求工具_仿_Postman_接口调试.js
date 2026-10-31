@@ -1651,7 +1651,7 @@
         (a.type === "bearer" ? '<div class="api-auth-row"><label class="api-lb">Token</label><input class="api-auth-token" placeholder="粘贴令牌" value="' + apiAttr(a.token) + '"></div>' : "") +
         (a.type === "basic" ?
           '<div class="api-auth-row"><label class="api-lb">用户名</label><input class="api-auth-u" placeholder="用户名" value="' + apiAttr(a.username) + '"></div>' +
-          '<div class="api-auth-row"><label class="api-lb">密码</label><input class="api-auth-p" type="password" placeholder="密码" value="' + apiAttr(a.password) + '"></div>' : "");
+          '<div class="api-auth-row"><label class="api-lb">密码</label><input class="api-auth-p" type="password" placeholder="密码" autocomplete="new-password" data-lpignore="true" data-1p-ignore value="' + apiAttr(a.password) + '"></div>' : "");
       box.querySelector(".api-auth-type").addEventListener("change", function () { a.type = box.querySelector(".api-auth-type").value; apiPersist(); apiRenderPane(tab, "auth"); });
       const tk = box.querySelector(".api-auth-token"); if (tk) tk.addEventListener("input", function () { a.token = tk.value; apiPersist(); });
       const uu = box.querySelector(".api-auth-u"); if (uu) uu.addEventListener("input", function () { a.username = uu.value; apiPersist(); });

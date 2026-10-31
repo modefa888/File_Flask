@@ -379,7 +379,8 @@
   gap: 8px;
 }
 .notify-preset,
-.notify-preset-cron {
+.notify-preset-cron,
+.notify-preset-dl {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -392,9 +393,9 @@
   cursor: pointer;
   transition: background .15s, border-color .15s, color .15s;
 }
-.notify-preset .bi, .notify-preset-cron .bi { font-size: 13px; color: #4fc1ff; }
-.notify-preset:hover, .notify-preset-cron:hover { background: #3a3a3b; border-color: #4a4a4b; }
-.notify-preset.active, .notify-preset-cron.active {
+.notify-preset .bi, .notify-preset-cron .bi, .notify-preset-dl .bi { font-size: 13px; color: #4fc1ff; }
+.notify-preset:hover, .notify-preset-cron:hover, .notify-preset-dl:hover { background: #3a3a3b; border-color: #4a4a4b; }
+.notify-preset.active, .notify-preset-cron.active, .notify-preset-dl.active {
   background: rgba(10,106,168,.22);
   border-color: #0a6aa8;
   color: #cfe8ff;
@@ -762,6 +763,16 @@
 :where(html.theme-light) .nacc-miss input,
 :where(html.theme-light) .nacc-miss select { border-color: #dcb45c !important; background: #fffdf7; }
 :where(html.theme-light) .nacc-block-hint { color: #9a6700; }
+
+/* ================= 下载中心 → 通知（复用同一套账号勾选样式） ================= */
+.dlc-ta { width: 420px; max-width: 100%; min-height: 62px; padding: 8px 10px;
+  border: 1px solid var(--dlc-line, #3a3a3c); border-radius: 8px;
+  background: var(--dlc-card2, #242425); color: var(--dlc-fg, #d6d6d6);
+  font-size: 12px; font-family: inherit; line-height: 1.65;
+  resize: vertical; outline: none; box-sizing: border-box; }
+.dlc-ta:focus { border-color: var(--dlc-acc, #0a6aa8); }
+.dlc-ta::placeholder { color: var(--dlc-dim, #7c7c7c); }
+.dlc-input::placeholder { color: var(--dlc-dim, #7c7c7c); }
 
 /* ================= 账号勾选（通知 / 定时任务通知） ================= */
 .notify-targets { display: flex; flex-direction: column; gap: 10px; position: relative; z-index: 1; }

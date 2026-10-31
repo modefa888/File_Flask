@@ -18,6 +18,7 @@ const DL = {
   handles: {},          // id -> FileSystemFileHandle（本页会话内有效）
   sel: {},              // 记录多选：id -> 1（仅当前列表内的选中项有效）
   pendingAuto: [],      // 新建后待自动开始的任务 id
+  notify: null,         // 下载通知配置（/api/dl/notify）
   poll: null, view: "tasks", pick: null,
 };
 
@@ -793,14 +794,21 @@ function dlRenderSettings() {
         '<input class="dlc-input" type="text" data-cfg="proxy" data-kind="str" ' +
         'placeholder="http://127.0.0.1:7890" value="' + dlA(c.proxy || "") + '" style="width:220px">') +
     '</div>' +
+    '<div class="dlc-sec"><h3><i class="bi bi-bell"></i>通知' +
+      '<small>下载完成 / 失败时推送到桌面 · 邮件 · 群机器人</small></h3>' +
+      dlSRow("启用通知",
+        "一键开关；触发事件、推送账号与文案在「设置 → 下载通知」里配置",
+        '<label class="dlc-sw"><input type="checkbox" id="dcNotifySw"><span></span></label>' +
+        '<button class="dlc-btn sm" data-act="dln-open"><i class="bi bi-sliders2"></i> 详细设置</button>') +
+    '</div>' +
     '<div class="dlc-sec"><h3><i class="bi bi-hdd-stack"></i>存储' +
       '<small>产物与记录占用</small></h3>' +
       '<div class="dlc-srow"><div class="dlc-sinfo"><div class="dlc-slabel">当前占用</div>' +
         '<div class="dlc-sdesc">产物目录里未被清理的 zip / 文本文件</div>' +
         '<div class="dlc-usage">' +
-          '<div><span>产物文件</span><b>' + (u.artifacts || 0) + ' 个</b></div>' +
-          '<div><span>磁盘占用</span><b>' + dlSize(u.artifact_bytes || 0) + '</b></div>' +
-          '<div><span>记录条数</span><b>' + (u.records || 0) + ' 条</b></div>' +
+          '<div><span>产物文件</span><b id="dlUArt">' + (u.artifacts || 0) + ' 个</b></div>' +
+          '<div><span>磁盘占用</span><b id="dlUBytes">' + dlSize(u.artifact_bytes || 0) + '</b></div>' +
+          '<div><span>记录条数</span><b id="dlURec">' + (u.records || 0) + ' 条</b></div>' +
         '</div></div>' +
         '<div class="dlc-sctl"><button class="dlc-btn sm danger" data-act="clean">' +
           '<i class="bi bi-eraser"></i>清理产物</button></div></div>' +
@@ -808,7 +816,27 @@ function dlRenderSettings() {
         '提示：单文件下载直接读源文件，不复制；只有「多文件 / 文件夹」才生成 zip 产物。' +
         '清理产物后记录仍在，重新下载会提示「请重新创建任务」。</div>' +
     '</div>';
+  dlLoadNotify();          // 通知分区：拉配置 + 渲染可勾选的渠道账号
 }
+
+/* ---------------- 下载通知（详情在「设置 → 下载通知」，这里只放一个总开关） ---------------- */
+async function dlLoadNotify() {
+  const d = await dlReq("/api/dl/notify");
+  if (d && d.ok && d.cfg) DL.notify = d.cfg;
+  const sw = $("dcNotifySw");
+  if (sw && DL.notify) sw.checked = !!DL.notify.enabled;
+}
+async function dlSaveNotify(patch) {
+  const d = await dlReq("/api/dl/notify", { method: "POST", body: JSON.stringify(patch || {}) });
+  if (!d.ok) {
+    toast("下载通知设置保存失败：" + (d.error || ""), "err");
+    return false;
+  }
+  DL.notify = d.cfg;
+  toast(patch && patch.enabled ? "已开启下载通知" : "已关闭下载通知", "ok");
+  return true;
+}
+
 /* ---------------- 事件 ---------------- */
 function dlFindTask(id) {
   return (DL.tasks || []).filter(function (x) { return x.id === id; })[0] ||
@@ -956,6 +984,11 @@ function dlOnClick(e) {
   const id = row ? row.dataset.id : "";
   const t = id ? dlFindTask(id) : null;
   if (act === "new") return dlPickOpen({});
+  // 「详细设置」→ 设置页的下载通知分区
+  if (act === "dln-open") {
+    if (typeof window.openSettingsTab === "function") window.openSettingsTab("sec-dl-notify");
+    return;
+  }
   if (act === "tab-act" || act === "tab-fin" || act === "tab-fail") {
     DL.tab = act === "tab-act" ? "act" : (act === "tab-fail" ? "fail" : "fin");
     return dlRender();
@@ -1011,6 +1044,10 @@ function dlOnChange(e) {
     DL.status = e.target.value || "all";
     DL.page = 1;
     return dlLoadRecords();
+  }
+  // 下载通知：只有总开关（详细设置在「设置 → 下载通知」）
+  if (e.target.id === "dcNotifySw") {
+    return dlSaveNotify({ enabled: !!e.target.checked });
   }
   const el = e.target.closest("[data-cfg]");
   if (!el) return;

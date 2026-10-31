@@ -163,7 +163,9 @@
     const end = typeof el.selectionEnd === "number" ? el.selectionEnd : el.value.length;
     el.value = el.value.slice(0, start) + v + el.value.slice(end);
     try { el.focus(); el.setSelectionRange(start + v.length, start + v.length); } catch (_) {}
-    notifyPreviewRefresh();
+    // 插到哪个分区的输入框，就刷新哪个分区的预览
+    if (_notifyLastField === "dlNotifyTitle" || _notifyLastField === "dlNotifyBody") dlNotifyPreviewRefresh();
+    else notifyPreviewRefresh();
   }
 
   /* 通知分区 HTML：由设置页 buildSettingsContent() 调用。
@@ -544,7 +546,11 @@
   }
 
   async function notifyChannelsLoad(force) {
-    if (!document.getElementById("notifyChannelsBox")) return;
+    // 设置页没打开、也没有别的地方要渲染账号（如下载中心的「通知」分区）时就不拉
+    if (!document.getElementById("notifyChannelsBox") &&
+        !document.getElementById("notifyTargets") &&
+        !document.getElementById("cronNotifyTargets") &&
+        !document.getElementById("dlNotifyTargets")) return;
     // 先把还在防抖队列里的改动落库，否则下面拉回来的服务端快照会把它覆盖掉
     // （表现就是「刚填的内容切个分区就没了」）
     await notifyChannelsFlush();
@@ -723,10 +729,13 @@
   /* ---------- 账号勾选（「通知」/「定时任务通知」共用） ----------
      整行都可点击：账号做成一枚「可勾选的胶囊」，鼠标落在行内任意位置都能切换，
      不用去瞄那个 15px 的小方框。 */
-  function notifyTargetsRender(boxId, targets) {
+  function notifyTargetsRender(boxId, targets, attrName) {
     const box = document.getElementById(boxId);
     if (!box) return;
     if (!_nacc) { box.innerHTML = '<div class="notify-history-empty">账号加载中…</div>'; return; }
+    // 默认用 data-nch-target（AI 通知 / 定时任务通知 共用）；
+    // 其它模块（如下载中心）传自己的属性名，避免和这两个分区的委托事件串台
+    const attr = attrName || "data-nch-target";
     const t = targets || {};
     const groups = NOTIFY_CH_ORDER.map(ch => {
       const all = _nacc[ch] || [];
@@ -740,7 +749,7 @@
         opts = items.map(a => {
           const on = picked.indexOf(a.id) >= 0;
           return '<label class="nt-opt' + (on ? " on" : "") + '" title="点击勾选 / 取消">' +
-            '<input type="checkbox" data-nch-target="' + ch + '" value="' + naccEsc(a.id) + '"' +
+            '<input type="checkbox" ' + attr + '="' + ch + '" value="' + naccEsc(a.id) + '"' +
             (on ? " checked" : "") + '>' +
             '<span class="nt-name">' + naccEsc(a.name || a.id) + '</span></label>';
         }).join("");
@@ -772,12 +781,13 @@
     if (chip) chip.classList.toggle("on", !!cb.checked);
   }
 
-  function notifyTargetsCollect(boxId) {
+  function notifyTargetsCollect(boxId, attrName) {
     const box = document.getElementById(boxId);
     const out = {};
     if (!box) return out;
-    box.querySelectorAll("input[data-nch-target]").forEach(el => {
-      const ch = el.dataset.nchTarget;
+    const attr = attrName || "data-nch-target";
+    box.querySelectorAll("input[" + attr + "]").forEach(el => {
+      const ch = el.getAttribute(attr);
       out[ch] = out[ch] || [];
       if (el.checked) out[ch].push(el.value);
     });
@@ -791,18 +801,23 @@
     notifyCronTestDesktop: "desktop", notifyCronTestEmail: "email",
     notifyCronTestTelegram: "telegram", notifyCronTestDingtalk: "dingtalk",
     notifyCronTestPushplus: "pushplus", notifyCronTestWeb: "web",
+    dlNotifyTestDesktop: "desktop", dlNotifyTestEmail: "email",
+    dlNotifyTestTelegram: "telegram", dlNotifyTestDingtalk: "dingtalk",
+    dlNotifyTestPushplus: "pushplus", dlNotifyTestWeb: "web",
   };
   const NOTIFY_TEST_BTN_TIP = "先在「推送账号」里勾选该渠道的账号，才能发送测试";
 
   function notifyTestButtonsRefresh() {
     const aiTg = notifyTargetsCollect("notifyTargets");
     const cronTg = notifyTargetsCollect("cronNotifyTargets");
+    const dlTg = notifyTargetsCollect("dlNotifyTargets", "data-dln-target");
     const hasAny = tg => NOTIFY_CH_ORDER.some(ch => (tg[ch] || []).length > 0);
     Object.keys(NOTIFY_TEST_BTN_CH).forEach(id => {
       const btn = document.getElementById(id);
       if (!btn) return;
       const ch = NOTIFY_TEST_BTN_CH[id];
-      const tg = id.indexOf("notifyCron") === 0 ? cronTg : aiTg;
+      const tg = id.indexOf("notifyCron") === 0 ? cronTg
+               : id.indexOf("dlNotify") === 0 ? dlTg : aiTg;
       const on = ch === "all" ? hasAny(tg) : (tg[ch] || []).length > 0;
       btn.disabled = !on;
       if (on) btn.removeAttribute("title");
@@ -997,6 +1012,343 @@
         '<div id="notifyCronHistory" class="notify-history">加载中…</div>' +
       '</div>' +
     '</div>';
+  }
+
+  /* ---------- 下载通知：模板变量 / 预设 / 预览 ----------
+     变量与后端 download_notify._vars_of() 保持一致；未知变量后端会原样输出。 */
+  const DL_NOTIFY_VARS = [
+    { key: "name",   desc: "文件 / 文件夹名" },
+    { key: "event",  desc: "结果：完成 / 失败" },
+    { key: "status", desc: "原始状态：done / failed" },
+    { key: "size",   desc: "大小（自动 B / KB / MB / GB）" },
+    { key: "error",  desc: "失败原因（完成时为空）" },
+    { key: "date",   desc: "触发日期 YYYY-MM-DD" },
+    { key: "time",   desc: "触发时间 HH:MM" },
+  ];
+  const DL_TPL_PRESETS = {
+    std: {
+      name: "标准", icon: "bi-check2-circle", desc: "标题带结果 + 文件名，正文分行列详情，各渠道都合适",
+      title: "下载{event} · {name}",
+      body: "任务「{name}」{event}。\n大小：{size}\n时间：{date} {time}",
+    },
+    mini: {
+      name: "极简", icon: "bi-circle", desc: "一行摘要，适合桌面 / Telegram 一扫而过的场景",
+      title: "⬇️ {name} {event}",
+      body: "{name} {event}（{size}）· {date} {time}",
+    },
+    fail: {
+      name: "失败告警", icon: "bi-exclamation-triangle", desc: "带 ⚠️ 前缀并突出失败原因，适合钉钉群 / 告警群醒目提醒",
+      title: "⚠️ 下载{event}：{name}",
+      body: "文件：{name}\n结果：{event}\n大小：{size}\n原因：{error}\n时间：{date} {time}",
+    },
+    plain: {
+      name: "纯文本", icon: "bi-fonts", desc: "无表情符号，兼容老系统通知中心 / 老邮箱",
+      title: "[下载] {name} {event}",
+      body: "{name} 于 {date} {time} {event}，大小 {size}。",
+    },
+    detail: {
+      name: "详细报告", icon: "bi-clipboard-data", desc: "带状态码与全部字段，适合邮件归档",
+      title: "📥 {name} · {date}",
+      body: "🕒 时间：{date} {time}\n📦 文件：{name}\n📏 大小：{size}\n🚦 结果：{event}（{status}）\n❗ 错误：{error}",
+    },
+  };
+  // 标题留空 = 后端回退用 {name}；正文留空 = 后端回退「任务「xx」完成。」，预览按这份回退渲染
+  const DL_TPL_DEFAULTS = { title: "{name}", body: "任务「{name}」{event}。" };
+
+  function dlNotifySubVars(tpl, vars) {
+    return String(tpl == null ? "" : tpl).replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, key) =>
+      Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : m);
+  }
+
+  function dlNotifyPreviewVars() {
+    const d = new Date(), p2 = n => String(n).padStart(2, "0");
+    return {
+      name: "ubuntu-24.04-desktop-amd64.iso",
+      event: "完成",
+      status: "done",
+      size: "4.2 GB",
+      error: "",
+      date: d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()),
+      time: p2(d.getHours()) + ":" + p2(d.getMinutes()),
+    };
+  }
+
+  function dlNotifyPreviewRefresh() {
+    const tOut = document.getElementById("dlNotifyPreviewTitle");
+    const bOut = document.getElementById("dlNotifyPreviewBody");
+    if (!tOut || !bOut) return;
+    const vars = dlNotifyPreviewVars();
+    const tEl = document.getElementById("dlNotifyTitle");
+    const bEl = document.getElementById("dlNotifyBody");
+    const title = (tEl && tEl.value.trim()) ? tEl.value : DL_TPL_DEFAULTS.title;
+    const body = (bEl && bEl.value.trim()) ? bEl.value : DL_TPL_DEFAULTS.body;
+    tOut.textContent = dlNotifySubVars(title, vars);
+    bOut.textContent = dlNotifySubVars(body, vars);
+    // 当前标题 + 正文与哪个快速模板一致，就高亮哪个（与其它通知分区的预设交互一致）
+    document.querySelectorAll(".notify-preset-dl").forEach(el => {
+      const p = DL_TPL_PRESETS[el.dataset.dlpreset];
+      el.classList.toggle("active", !!p && p.title === title.trim() && p.body === body.trim());
+    });
+    // 未知变量提示：写了后端不认识的变量，会原样显示
+    const used = (title + "\n" + body).match(/\{[A-Za-z_][A-Za-z0-9_]*\}/g) || [];
+    const unknown = Array.from(new Set(used.map(x => x.slice(1, -1))))
+      .filter(k => !Object.prototype.hasOwnProperty.call(vars, k));
+    const note = document.getElementById("dlNotifyPreviewNote");
+    if (note) {
+      note.style.display = unknown.length ? "" : "none";
+      note.innerHTML = unknown.length
+        ? '<i class="bi bi-exclamation-triangle"></i> 未知变量 ' +
+          unknown.map(k => "<code>{" + k + "}</code>").join(" ") + " 会原样显示"
+        : "";
+    }
+  }
+
+  function dlApplyPreset(id) {
+    const p = DL_TPL_PRESETS[id];
+    if (!p) return;
+    const tEl = document.getElementById("dlNotifyTitle");
+    const bEl = document.getElementById("dlNotifyBody");
+    if (tEl) tEl.value = p.title;
+    if (bEl) bEl.value = p.body;
+    dlNotifyPreviewRefresh();
+    dlNotifyAutoSave();
+  }
+
+  /* ---------- 独立分区：下载通知（设置 → 下载通知） ----------
+     配置存 store.db 的 dl_cfg（key='dl_notify'），由下载中心「完成 / 失败」事件触发；
+     与「AI 通知」「定时任务通知」共用同一套渠道账号，这里只做开关 / 事件 / 勾选 / 文案。 */
+  function dlNotifyBuildSectionHTML() {
+    return '<div class="set-sec" id="sec-dl-notify" data-kw="下载通知 dl download 下载 完成 失败 账号">' +
+      '<h2 data-kw="下载通知 dl download 下载 完成 失败 账号"><i class="bi bi-cloud-arrow-down"></i> 下载通知</h2>' +
+      '<div class="set-desc" data-kw="下载通知 dl download 下载 完成 失败 账号">' +
+        '下载任务<b>完成 / 失败</b>时推送。推送账号统一在「<b>通知渠道</b>」里配置，这里只勾选要发到哪些账号；' +
+        '与 AI 通知、定时任务通知互不影响。</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title"><i class="bi bi-power"></i> 总开关与触发事件</div>' +
+        '<div class="notify-row inline set-row" data-kw="启用下载通知 enabled 开关">' +
+          '<div class="notify-label-wrap"><div class="notify-label">启用下载通知</div>' +
+          '<div class="notify-desc">总开关；关闭后所有账号均不推送。</div></div>' +
+          '<label class="set-switch"><input type="checkbox" id="dlNotifyEnabled"><span></span></label>' +
+        '</div>' +
+        '<div class="notify-row inline set-row" data-kw="触发事件 完成 失败 done failed">' +
+          '<div class="notify-label-wrap"><div class="notify-label">触发事件</div>' +
+          '<div class="notify-desc">勾选哪些结果需要推送；手动取消的任务不推送。</div></div>' +
+          '<div class="notify-cron-evs">' +
+            '<label class="notify-check"><input type="checkbox" id="dlNotifyEvDone"> 下载完成</label>' +
+            '<label class="notify-check"><input type="checkbox" id="dlNotifyEvFail"> 下载失败</label>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title"><i class="bi bi-broadcast"></i> 推送账号</div>' +
+        '<div class="notify-desc" style="margin:0 0 10px;">勾选发到哪些账号；没配置过就先去「通知渠道」添加。</div>' +
+        '<div id="dlNotifyTargets" class="notify-targets">加载中…</div>' +
+      '</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title"><i class="bi bi-pencil-square"></i> 通知文案</div>' +
+        '<div class="notify-row stack set-row" data-kw="下载通知 快速模板 预设 preset 模板 template">' +
+          '<div class="notify-label-wrap"><div class="notify-label">快速模板</div>' +
+          '<div class="notify-desc">点一下同时套用标题 + 正文，下面的预览即时生效；套用后仍可自由修改。</div></div>' +
+          '<div class="notify-presets">' +
+            Object.keys(DL_TPL_PRESETS).map(id => {
+              const p = DL_TPL_PRESETS[id];
+              return '<button type="button" class="notify-preset-dl" data-dlpreset="' + id + '" title="' + p.desc + '">' +
+                '<i class="bi ' + p.icon + '"></i> ' + p.name + '</button>';
+            }).join("") +
+          '</div>' +
+        '</div>' +
+        '<div class="notify-preview set-row" data-kw="下载通知 效果预览 预览 preview 通知示例">' +
+          '<div class="notify-preview-head"><span><i class="bi bi-eye"></i> 效果预览</span>' +
+          '<span class="notify-preview-tag">示例数据</span></div>' +
+          '<div class="notify-preview-card">' +
+            '<div class="notify-preview-app"><i class="bi bi-cloud-arrow-down-fill"></i> File_Flask<span>刚刚</span></div>' +
+            '<div class="notify-preview-title" id="dlNotifyPreviewTitle">—</div>' +
+            '<div class="notify-preview-body" id="dlNotifyPreviewBody">—</div>' +
+          '</div>' +
+          '<div class="notify-preview-note" id="dlNotifyPreviewNote" style="display:none;"></div>' +
+        '</div>' +
+        '<div class="notify-row stack set-row" data-kw="下载通知 标题模板 title">' +
+          '<div class="notify-label-wrap"><div class="notify-label">标题模板</div>' +
+          '<div class="notify-desc">留空 = 使用系统默认文案（文件名）。</div></div>' +
+          '<input class="notify-input" id="dlNotifyTitle" placeholder="下载{event} · {name}">' +
+        '</div>' +
+        '<div class="notify-vars set-row" data-kw="下载通知 变量 variable 可用变量">' +
+          '<span class="notify-vars-tip">可用变量（点击插入）</span>' +
+          DL_NOTIFY_VARS.map(x =>
+            '<button type="button" class="notify-var" data-var="{' + x.key + '}" title="' + x.desc + '">{' + x.key + '}</button>').join("") +
+        '</div>' +
+        '<div class="notify-row stack set-row" data-kw="下载通知 正文模板 body">' +
+          '<div class="notify-label-wrap"><div class="notify-label">正文模板</div>' +
+          '<div class="notify-desc">支持换行；钉钉 / PushPlus 等渠道按纯文本发送。</div></div>' +
+          '<textarea class="notify-input notify-textarea" id="dlNotifyBody" rows="4" ' +
+            'placeholder="任务「{name}」{event}。&#10;大小：{size}"></textarea>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title"><i class="bi bi-gear-wide-connected"></i> 操作</div>' +
+        '<div class="notify-desc" style="margin:0 0 12px;">保存后立即生效；测试会按该渠道已勾选的账号各发一条真实通知。</div>' +
+        '<div class="notify-actions" data-kw="下载通知 测试 保存 test save 桌面 邮件 telegram 钉钉 pushplus 网页">' +
+          '<button class="notify-btn" id="dlNotifyTestDesktop"><i class="bi bi-bell"></i> 测试桌面</button>' +
+          '<button class="notify-btn" id="dlNotifyTestEmail"><i class="bi bi-envelope"></i> 测试邮件</button>' +
+          '<button class="notify-btn" id="dlNotifyTestTelegram"><i class="bi bi-telegram"></i> 测试 Telegram</button>' +
+          '<button class="notify-btn" id="dlNotifyTestDingtalk"><i class="bi bi-chat-dots"></i> 测试钉钉</button>' +
+          '<button class="notify-btn" id="dlNotifyTestPushplus"><i class="bi bi-wechat"></i> 测试 PushPlus</button>' +
+          '<button class="notify-btn" id="dlNotifyTestWeb"><i class="bi bi-globe2"></i> 测试网页</button>' +
+          '<button class="notify-btn primary" id="dlNotifySaveBtn" style="margin-left:auto;"><i class="bi bi-save"></i> 保存</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title" style="justify-content:space-between;">' +
+          '<span><i class="bi bi-clock-history"></i> 通知记录</span>' +
+          '<button class="notify-btn" id="dlNotifyHistoryRefresh"><i class="bi bi-arrow-clockwise"></i> 刷新</button>' +
+        '</div>' +
+        '<div class="notify-desc" style="margin:0 0 10px;">下载任务触发的推送记录（最新 30 条）。</div>' +
+        '<div id="dlNotifyHistory" class="notify-history">加载中…</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ---------- 下载通知：读写 / 测试 / 记录 ---------- */
+  let _dlNotifyCache = null;
+
+  async function dlNotifyLoad() {
+    if (!document.getElementById("dlNotifyEnabled")) return;
+    try {
+      const r = await fetch("/api/dl/notify");
+      const d = await r.json();
+      if (d && d.cfg) dlNotifyFill(d.cfg);
+    } catch (_) { /* 后端未重启时静默 */ }
+    dlNotifyLoadHistory();
+  }
+
+  function dlNotifyFill(n) {
+    const q = id => document.getElementById(id);
+    if (!q("dlNotifyEnabled")) return;
+    _dlNotifyCache = n;
+    q("dlNotifyEnabled").checked = !!n.enabled;
+    const ev = n.events || {};
+    if (q("dlNotifyEvDone")) q("dlNotifyEvDone").checked = ev.done !== false;
+    if (q("dlNotifyEvFail")) q("dlNotifyEvFail").checked = ev.failed !== false;
+    const tpl = n.template || {};
+    if (q("dlNotifyTitle")) q("dlNotifyTitle").value = tpl.title || "";
+    if (q("dlNotifyBody"))  q("dlNotifyBody").value = tpl.body || "";
+    dlNotifyPreviewRefresh();
+    notifyChannelsLoad().then(() => notifyTargetsRender("dlNotifyTargets", n.targets, "data-dln-target"));
+  }
+
+  function dlNotifyReadForm() {
+    const q = id => document.getElementById(id);
+    const c = id => { const el = q(id); return el ? el.checked : false; };
+    const v = id => { const el = q(id); return el ? el.value : ""; };
+    return {
+      enabled: c("dlNotifyEnabled"),
+      events: { done: c("dlNotifyEvDone"), failed: c("dlNotifyEvFail") },
+      targets: notifyTargetsCollect("dlNotifyTargets", "data-dln-target"),
+      template: { title: v("dlNotifyTitle").trim(), body: v("dlNotifyBody") },
+    };
+  }
+
+  async function dlNotifySave(silent, skipFill) {
+    try {
+      const r = await fetch("/api/dl/notify", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(dlNotifyReadForm()),
+      });
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || ("HTTP " + r.status));
+      if (d.cfg && !skipFill) dlNotifyFill(d.cfg);
+      if (!silent) notifyToast("下载通知设置已保存", "ok");
+      return true;
+    } catch (e) {
+      notifyToast("下载通知保存失败：" + e.message, "err");
+      return false;
+    }
+  }
+
+  let _dlNotifyTimer = null;
+  function dlNotifyAutoSave() {
+    clearTimeout(_dlNotifyTimer);
+    _dlNotifyTimer = setTimeout(() => dlNotifySave(true, true), 600);
+  }
+
+  async function dlNotifyTest(channel, btn) {
+    if (btn) { btn.disabled = true; btn.dataset._old = btn.innerHTML; btn.innerHTML = '<i class="bi bi-hourglass-split"></i> 发送中…'; }
+    try {
+      const saved = await dlNotifySave(true, true);      // 先落库，测试用的才是刚勾的账号
+      if (!saved) return;
+      const r = await fetch("/api/dl/notify/test", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: channel || "all" }),
+      });
+      const d = await r.json();
+      const res = (d && d.results) || {};
+      const keys = Object.keys(res);
+      if (!keys.length) {
+        notifyToast("还没有勾选任何通知账号", "warn");
+        return;
+      }
+      const okCh = keys.filter(k => res[k] && res[k].ok);
+      const badCh = keys.filter(k => !(res[k] && res[k].ok));
+      if (okCh.length) {
+        notifyToast("测试通知已发送（" + okCh.join(" / ") + "）", "ok");
+      } else {
+        const detail = keys.map(k => k + "：" + ((res[k] && res[k].detail) || "失败")).join("；");
+        notifyToast("测试失败：" + detail, "err");
+      }
+      if (badCh.length && okCh.length) {
+        notifyToast("部分渠道失败：" + badCh.join(" / "), "warn");
+      }
+      dlNotifyLoadHistory();
+    } catch (e) {
+      notifyToast("测试请求失败：" + e.message, "err");
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset._old || ""; }
+      notifyTestButtonsRefresh();   // 恢复按最新勾选的可点状态
+    }
+  }
+
+  async function dlNotifyLoadHistory() {
+    const box = document.getElementById("dlNotifyHistory");
+    if (!box) return;
+    try {
+      const r = await fetch("/api/dl/notify/history?limit=30");
+      const d = await r.json();
+      const list = (d && d.items) || [];
+      if (!list.length) {
+        box.innerHTML = '<div class="notify-history-empty"><i class="bi bi-inbox"></i>暂无通知记录' +
+          '<div>下载完成 / 失败触发推送（或点「发送测试」）后会出现在这里。</div></div>';
+        return;
+      }
+      box.innerHTML = list.map(r2 => {
+        const chats = notifyChannelsOf(r2);
+        const chips = chats.length
+          ? chats.map(c => '<span class="notify-hch ' + (c.ok ? "ok" : "fail") + '"' +
+              (c.detail ? ' title="' + notifyEsc(c.detail) + '"' : "") + '>' +
+              '<i class="bi ' + (c.ok ? "bi-check-circle" : "bi-x-circle") + '"></i>' +
+              notifyEsc(NOTIFY_CH_NAME[c.key] || c.key) + '</span>').join("")
+          : '<span class="notify-hch skip"><i class="bi bi-slash-circle"></i>未发送</span>';
+        const title = notifyEsc(String(r2.title || "下载通知").slice(0, 120));
+        const body = notifyEsc(String(r2.body || "").slice(0, 400));
+        const abs = notifyAbsTime(r2.ts);
+        const rel = notifyRelTime(r2.ts);
+        return '<div class="notify-hitem">' +
+          '<div class="notify-hicon" title="下载通知"><i class="bi bi-cloud-arrow-down"></i></div>' +
+          '<div class="notify-hbody">' +
+            '<div class="notify-htitle"><span>' + title + '</span>' +
+              '<span class="notify-hmeta" title="' + abs + '">' + (rel || abs) + '</span></div>' +
+            '<div class="notify-hchannels">' + chips + '</div>' +
+            (body ? '<div class="notify-hbodytext">' + body + '</div>' : "") +
+          '</div>' +
+        '</div>';
+      }).join("");
+    } catch (_) {
+      box.innerHTML = '<div class="notify-history-empty">记录加载失败</div>';
+    }
   }
 
   // toast 定义在 00_preamble.js 的 IIFE 闭包里，本文件必须在 16_自定义悬停提示 之前加载
@@ -1724,6 +2076,7 @@
           notifyChannelsAutoSave();
           return;
         }
+        if (t.id === "dlNotifyTitle" || t.id === "dlNotifyBody") dlNotifyPreviewRefresh();
         if (!t.id || !t.id.startsWith("notify")) return;
         notifyToggleOptVisibility();
         if (t.id === "notifyTitle" || t.id === "notifyBody") notifyPreviewRefresh();
@@ -1734,6 +2087,15 @@
       document.addEventListener("change", e => {
         const t = e.target;
         if (!t) return;
+        // 下载通知的账号勾选（用独立属性，避免和下面两个分区串台）
+        if (t.dataset && t.dataset.dlnTarget) {
+          notifyTargetsSyncChip(t);
+          notifyTestButtonsRefresh();   // 测试按钮的可点状态跟着勾选实时变
+          dlNotifyAutoSave();
+          return;
+        }
+        // 下载通知：开关 / 事件
+        if (t.id && t.id.indexOf("dlNotify") === 0) { dlNotifyAutoSave(); return; }
         // 账号勾选（「通知」/「定时任务通知」两个分区）
         if (t.dataset && t.dataset.nchTarget) {
           notifyTargetsSyncChip(t);          // 胶囊高亮跟着勾选状态走
@@ -1781,6 +2143,7 @@
           notifyChannelsAutoSave();
           return;
         }
+        if (t.id && t.id.indexOf("dlNotify") === 0) { dlNotifyAutoSave(); return; }
         if (!t.id || !t.id.startsWith("notify") || !t.isConnected) return;
         if (t.id.startsWith("notifyCron")) cronNotifyAutoSave();
         else notifyAutoSave();
@@ -1789,7 +2152,8 @@
       document.addEventListener("focusin", e => {
         const t = e.target;
         if (t && (t.id === "notifyTitle" || t.id === "notifyBody" ||
-                  t.id === "notifyCronTitle" || t.id === "notifyCronBody")) _notifyLastField = t.id;
+                  t.id === "notifyCronTitle" || t.id === "notifyCronBody" ||
+                  t.id === "dlNotifyTitle" || t.id === "dlNotifyBody")) _notifyLastField = t.id;
       }, true);
 
       document.addEventListener("click", e => {
@@ -1798,6 +2162,8 @@
         if (presetBtn) { notifyApplyPreset(presetBtn.dataset.preset); return; }
         const cronPresetBtn = e.target && e.target.closest ? e.target.closest(".notify-preset-cron") : null;
         if (cronPresetBtn) { cronApplyPreset(cronPresetBtn.dataset.cpreset); return; }
+        const dlPresetBtn = e.target && e.target.closest ? e.target.closest(".notify-preset-dl") : null;
+        if (dlPresetBtn) { dlApplyPreset(dlPresetBtn.dataset.dlpreset); return; }
         const varBtn = e.target && e.target.closest ? e.target.closest(".notify-var") : null;
         if (varBtn) { notifyInsertVar(varBtn.dataset.var); return; }
         // 历史记录里的「网页版」渠道：点一下新标签打开通知页
@@ -1852,6 +2218,14 @@
         else if (id === "notifyCronTestWeb") cronNotifyTest("web", btn);
         else if (id === "notifyCronSaveBtn") cronNotifySave();
         else if (id === "notifyCronHistoryRefresh") cronNotifyLoadHistory();
+        else if (id === "dlNotifyTestDesktop") dlNotifyTest("desktop", btn);
+        else if (id === "dlNotifyTestEmail") dlNotifyTest("email", btn);
+        else if (id === "dlNotifyTestTelegram") dlNotifyTest("telegram", btn);
+        else if (id === "dlNotifyTestDingtalk") dlNotifyTest("dingtalk", btn);
+        else if (id === "dlNotifyTestPushplus") dlNotifyTest("pushplus", btn);
+        else if (id === "dlNotifyTestWeb") dlNotifyTest("web", btn);
+        else if (id === "dlNotifySaveBtn") dlNotifySave();
+        else if (id === "dlNotifyHistoryRefresh") dlNotifyLoadHistory();
         else if (id === "notifyClearHistory") notifyClearHistory();
       });
 
@@ -1863,6 +2237,8 @@
           setTimeout(() => notifyLoad(), 100);
         } else if (nav.dataset.sec === "sec-cron-notify") {
           setTimeout(() => cronNotifyLoad(), 100);
+        } else if (nav.dataset.sec === "sec-dl-notify") {
+          setTimeout(() => dlNotifyLoad(), 100);
         } else if (nav.dataset.sec === "sec-channels") {
           setTimeout(() => notifyChannelsLoad(true), 100);
         }
@@ -1892,5 +2268,6 @@
       notifyPreviewRefresh();
       if (document.getElementById("notifyHistory")) notifyLoad();
       if (document.getElementById("notifyChannelsBox")) notifyChannelsLoad(true);
+      if (document.getElementById("dlNotifyEnabled")) dlNotifyLoad();
     }, 100);
   }

@@ -153,6 +153,19 @@ def _update(tid, **kw):
     cols = [k for k in kw if k]
     if not cols:
         return
+    # 状态真正变成 done / failed 时，落库后异步推一条下载通知
+    fire = None
+    if kw.get("status") in ("done", "failed"):
+        try:
+            conn = store_conn()
+            try:
+                row = conn.execute("SELECT status FROM dl_tasks WHERE id=?", (tid,)).fetchone()
+            finally:
+                conn.close()
+            if row and str(row["status"] or "") != kw["status"]:
+                fire = kw["status"]
+        except Exception:                              # noqa: BLE001
+            fire = None
     sets = ", ".join("%s=?" % c for c in cols)
     args = []
     for c in cols:
@@ -169,6 +182,13 @@ def _update(tid, **kw):
                          args[:-1] + [time.time(), args[-1]])
     except Exception as e:
         _log.warning("更新下载任务 %s 失败：%s", tid, e)
+        return
+    if fire:
+        try:
+            from . import download_notify
+            download_notify.fire(tid, fire)
+        except Exception:                              # noqa: BLE001
+            _log.exception("触发下载通知失败（%s / %s）", tid, fire)
 
 
 def _new_id():

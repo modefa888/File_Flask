@@ -28,6 +28,7 @@ from flask import Blueprint, Response, jsonify, request, session
 
 from ... import config
 from ...log import get_logger
+from ...services.common import download_notify
 from ...services.common import downloads as dl
 from ...services.common import remote_dl
 
@@ -495,6 +496,42 @@ def api_dl_settings_save():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"ok": True, "settings": cfg, "usage": dl.usage()})
+
+
+# ---------------------------------------------------------------- 通知
+@bp.route("/api/dl/notify", methods=["GET"])
+def api_dl_notify_get():
+    """下载通知配置（总开关 / 事件 / 勾选的渠道账号 / 文案模板）。"""
+    return jsonify({"ok": True, "cfg": download_notify.sanitize_cfg()})
+
+
+@bp.route("/api/dl/notify", methods=["POST"])
+def api_dl_notify_save():
+    """部分保存：{enabled, events:{done,failed}, targets:{channel:[id]}, template:{title,body}}。"""
+    data = request.get_json(silent=True) or {}
+    try:
+        cfg = download_notify.save_cfg(data)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True, "cfg": cfg})
+
+
+@bp.route("/api/dl/notify/test", methods=["POST"])
+def api_dl_notify_test():
+    """发一条测试通知：{channel: desktop|email|telegram|dingtalk|pushplus|web|all}。"""
+    data = request.get_json(silent=True) or {}
+    res = download_notify.test(data.get("channel") or "all")
+    return jsonify(res)
+
+
+@bp.route("/api/dl/notify/history", methods=["GET"])
+def api_dl_notify_history():
+    """下载通知历史（最新在前）。"""
+    try:
+        limit = int(request.args.get("limit") or 30)
+    except (TypeError, ValueError):
+        limit = 30
+    return jsonify({"ok": True, "items": download_notify.history(limit)})
 
 
 @bp.route("/api/dl/usage", methods=["GET"])

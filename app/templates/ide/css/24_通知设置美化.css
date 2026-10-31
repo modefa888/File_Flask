@@ -267,7 +267,10 @@
 .notify-btn:active { transform: translateY(1px); }
 .notify-btn.primary { background: #0a6aa8; border-color: #0a6aa8; color: #fff; }
 .notify-btn.primary:hover { background: #1177bb; border-color: #1177bb; }
-.notify-btn:disabled { opacity: .55; cursor: not-allowed; }
+.notify-btn:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.35); }
+.notify-btn:disabled:hover { background: #2f2f30; border-color: #3c3c3d; }
+.notify-btn:disabled:active { transform: none; }
+:where(html.theme-light) .notify-btn:disabled:hover { background: #e8e8e8; border-color: #cecece; }
 
 /* 密码框的 form 包裹层：仅为满足浏览器「密码字段需在 form 内」的检查，
    用 display:contents 不生成盒子，保持原有布局不变 */
@@ -616,3 +619,180 @@
 :where(html.theme-light) .ide-notify-card .nc-head { background: #f7f8fa; border-bottom-color: #e3e3e3; }
 :where(html.theme-light) .ide-notify-card .nc-title { color: #1f2328; }
 :where(html.theme-light) .ide-notify-card .nc-body { color: #3d4450; }
+
+/* ================= 通知渠道（一个渠道多个账号） ================= */
+.nacc-list { display: flex; flex-direction: column; gap: 14px; }
+
+/* 渠道分组：左标题 + 右数量/添加，标题与账号卡片之间有一条分隔线 */
+.nacc-group { border: 1px solid #313133; border-radius: 10px; padding: 13px 15px 15px;
+  background: linear-gradient(180deg, #262628 0%, #232324 100%); }
+.nacc-group-hd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding-bottom: 10px; border-bottom: 1px solid #2e2e30; }
+.nacc-group-tt { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1; flex-wrap: wrap; }
+.nacc-group-tt .bi { color: #7aa7ff; font-size: 13px; }
+.nacc-group-name { font-size: 13px; color: #e8e8e8; font-weight: 600; letter-spacing: .2px; }
+.nacc-group-desc { font-size: 11.5px; color: #828282; }
+.nacc-group-act { display: flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
+.nacc-group-n { font-size: 11px; color: #9c9c9c; background: #2c2c2e; border: 1px solid #38383a;
+  border-radius: 999px; padding: 1px 9px; white-space: nowrap; }
+
+/* 添加账号：虚线描边，弱化但不至于找不到 */
+.nacc-add { padding: 4px 11px; font-size: 12px; border-radius: 6px; border-style: dashed;
+  background: transparent; color: #b9b9b9; }
+.nacc-add:hover:not(:disabled) { border-color: #0a6aa8; color: #79c0ff; background: rgba(10, 106, 168, .12); }
+.nacc-add:disabled { opacity: .4; cursor: not-allowed; }
+
+/* 账号卡片：左色条区分「已配置 / 待完善」 */
+.nacc-card { position: relative; border: 1px solid #333335; border-left: 3px solid transparent;
+  border-radius: 9px; padding: 11px 13px; margin-top: 12px; background: #1b1b1c;
+  transition: border-color .15s ease, box-shadow .15s ease; }
+.nacc-card:hover { border-top-color: #3d3d40; border-right-color: #3d3d40;
+  border-bottom-color: #3d3d40; box-shadow: 0 2px 10px rgba(0, 0, 0, .18); }
+.nacc-card.done { border-left-color: #2f7a44; }
+.nacc-card.todo { border-left-color: #8a6a1f; }
+
+.nacc-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.nacc-ico-ch { color: #7aa7ff; font-size: 13px; flex: none; }
+/* 账号名做成「无框标题」：hover / focus 才显出输入框，减少一屏的框线噪音 */
+.nacc-name { flex: 1; min-width: 0; background: transparent; border: 1px solid transparent; color: #e4e4e4;
+  border-radius: 6px; padding: 4px 7px; font-size: 13px; font-weight: 600; outline: none;
+  transition: background .15s, border-color .15s; }
+.nacc-name::placeholder { color: #6f6f6f; font-weight: 400; }
+.nacc-name:hover { background: #262628; border-color: #343436; }
+.nacc-name:focus { background: #19191a; border-color: #0a6aa8; box-shadow: 0 0 0 2px rgba(10, 106, 168, .18); }
+
+/* 右侧操作：统一的方形图标按钮，删除仅 hover 时变红 */
+.nacc-ops { display: flex; align-items: center; gap: 4px; flex: none; margin-left: 4px; }
+.nacc-ico { width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid transparent; border-radius: 6px; color: #9a9a9a;
+  font-size: 12.5px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+.nacc-ico:hover { background: #303032; border-color: #3c3c3e; color: #e6e6e6; }
+.nacc-ico.danger:hover { background: rgba(224, 108, 117, .14); border-color: rgba(224, 108, 117, .4); color: #e06c75; }
+.nacc-ico:disabled { opacity: .5; cursor: not-allowed; }
+
+.nacc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+.nacc-f { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; color: #8f8f8f; min-width: 0; }
+.nacc-f.full { grid-column: 1 / -1; }
+.nacc-f input:not([type="checkbox"]), .nacc-f select { background: #242425; border: 1px solid #3a3a3c; color: #dcdcdc;
+  border-radius: 6px; padding: 0 9px; height: 32px; font-size: 12.5px; width: 100%; box-sizing: border-box;
+  outline: none; transition: border-color .15s, box-shadow .15s, background .15s; }
+.nacc-f input::placeholder { color: #6d6d6d; }
+.nacc-f input:not([type="checkbox"]):hover, .nacc-f select:hover { border-color: #464648; }
+.nacc-f input:not([type="checkbox"]):focus, .nacc-f select:focus { border-color: #0a6aa8; background: #1d1d1e;
+  box-shadow: 0 0 0 2px rgba(10, 106, 168, .18); }
+/* 勾选类字段：与输入框同高同宽，保证左右两列水平对齐 */
+.nacc-check { display: flex; align-items: center; gap: 8px; min-height: 32px; box-sizing: border-box;
+  background: #242425; border: 1px solid #3a3a3c; border-radius: 6px; padding: 0 10px;
+  cursor: pointer; color: #b5b5b5; font-size: 12.5px;
+  transition: border-color .15s, background .15s; }
+.nacc-check:hover { border-color: #464648; }
+.nacc-check input { width: auto; margin: 0; accent-color: #0a6aa8; cursor: pointer; flex: none; }
+.nacc-check-t .on { display: none; }
+.nacc-check input:checked ~ .nacc-check-t .on { display: inline; }
+.nacc-check input:checked ~ .nacc-check-t .off { display: none; }
+.nacc-empty { font-size: 12px; color: #7f7f7f; padding: 12px 2px 2px; }
+.nacc-tip { font-size: 12px; color: #8b8b8b; }
+/* 自动保存状态条：吸顶，改到哪里都能看到「正在保存 / 已自动保存」 */
+.nacc-status { position: sticky; top: 0; z-index: 6; display: flex; justify-content: flex-end;
+  padding: 2px 8px 6px; border-radius: 6px;
+  background: rgba(30, 30, 30, .82); backdrop-filter: blur(4px); }
+:where(html.theme-light) .nacc-status { background: rgba(255, 255, 255, .85); }
+
+/* 折叠 / 展开 */
+.nacc-toggle { flex: none; width: 22px; height: 22px; padding: 0; display: inline-flex;
+  align-items: center; justify-content: center; background: transparent; border: none;
+  color: #8f8f8f; cursor: pointer; border-radius: 5px; transition: background .15s, color .15s; }
+.nacc-toggle:hover { background: #303032; color: #e0e0e0; }
+.nacc-toggle-sp { flex: none; width: 22px; height: 22px; }
+.nacc-card.collapsed .nacc-grid { display: none; }
+.nacc-card.collapsed .nacc-hd { margin-bottom: 0; }
+.nacc-card.collapsed .nacc-need { display: none; }
+.nacc-sum { font-size: 11.5px; color: #8a8a8a; max-width: 300px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+
+/* 完成度徽标 */
+.nacc-badge { flex: none; font-size: 10.5px; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid transparent; line-height: 1.7; letter-spacing: .3px; white-space: nowrap; }
+.nacc-badge.ok { color: #7ddc9a; background: rgba(63, 185, 80, .12); border-color: rgba(63, 185, 80, .32); }
+.nacc-badge.warn { color: #dfae4a; background: rgba(210, 153, 34, .1); border-color: rgba(210, 153, 34, .3); }
+
+/* 未填完：琥珀色提示，比纯红边框克制 */
+.nacc-need { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: #c9a227;
+  margin: -4px 0 10px 2px; }
+.nacc-req { color: #d9a13a; font-style: normal; margin-left: 3px; font-size: 11px; }
+.nacc-miss > span { color: #c9a227; }
+.nacc-miss input, .nacc-miss select { border-color: rgba(201, 162, 39, .55) !important; }
+.nacc-miss input:focus, .nacc-miss select:focus { border-color: #d9a13a !important;
+  box-shadow: 0 0 0 2px rgba(201, 162, 39, .18); }
+.nacc-block-hint { font-size: 11.5px; color: #c9a227; display: flex; align-items: center; gap: 5px;
+  margin: 7px 0 2px 3px; }
+
+:where(html.theme-light) .nacc-group { background: #f7f8fa; border-color: #e2e5e9; }
+:where(html.theme-light) .nacc-group-hd { border-bottom-color: #e6e9ed; }
+:where(html.theme-light) .nacc-group-name { color: #1f2328; }
+:where(html.theme-light) .nacc-group-desc { color: #6b7280; }
+:where(html.theme-light) .nacc-group-n { background: #ffffff; border-color: #dde2e8; color: #5a6472; }
+:where(html.theme-light) .nacc-add { color: #4a5563; }
+:where(html.theme-light) .nacc-add:hover:not(:disabled) { border-color: #0969da; color: #0969da; background: #eaf3ff; }
+:where(html.theme-light) .nacc-card { background: #ffffff; border-color: #e3e6ea; }
+:where(html.theme-light) .nacc-card:hover { border-top-color: #cfd6de; border-right-color: #cfd6de;
+  border-bottom-color: #cfd6de; box-shadow: 0 2px 10px rgba(0, 0, 0, .06); }
+:where(html.theme-light) .nacc-card.done { border-left-color: #2da44e; }
+:where(html.theme-light) .nacc-card.todo { border-left-color: #d4a72c; }
+:where(html.theme-light) .nacc-name { color: #1f2328; }
+:where(html.theme-light) .nacc-name:hover { background: #f3f5f8; border-color: #e0e4e9; }
+:where(html.theme-light) .nacc-name:focus { background: #ffffff; border-color: #0969da; }
+:where(html.theme-light) .nacc-ico { color: #5a6472; }
+:where(html.theme-light) .nacc-ico:hover { background: #eef2f6; border-color: #dfe4ea; color: #1f2328; }
+:where(html.theme-light) .nacc-ico.danger:hover { background: #fdeced; border-color: #f3c1c5; color: #cf222e; }
+:where(html.theme-light) .nacc-f { color: #667085; }
+:where(html.theme-light) .nacc-f input:not([type="checkbox"]),
+:where(html.theme-light) .nacc-f select { background: #ffffff; border-color: #d6dbe1; color: #1f2328; }
+:where(html.theme-light) .nacc-f input:not([type="checkbox"]):focus,
+:where(html.theme-light) .nacc-f select:focus { border-color: #0969da; background: #ffffff;
+  box-shadow: 0 0 0 2px rgba(9, 105, 218, .14); }
+:where(html.theme-light) .nacc-check { background: #ffffff; border-color: #d6dbe1; color: #404a57; }
+:where(html.theme-light) .nacc-check:hover { border-color: #b9c2cc; }
+:where(html.theme-light) .nacc-toggle:hover { background: #eef2f6; color: #1f2328; }
+:where(html.theme-light) .nacc-badge.ok { color: #1a7f37; background: #e8f5ec; border-color: #b7e0c3; }
+:where(html.theme-light) .nacc-badge.warn { color: #9a6700; background: #fff6e2; border-color: #efdcb0; }
+:where(html.theme-light) .nacc-need { color: #9a6700; }
+:where(html.theme-light) .nacc-req { color: #b7791f; }
+:where(html.theme-light) .nacc-miss > span { color: #9a6700; }
+:where(html.theme-light) .nacc-miss input,
+:where(html.theme-light) .nacc-miss select { border-color: #dcb45c !important; background: #fffdf7; }
+:where(html.theme-light) .nacc-block-hint { color: #9a6700; }
+
+/* ================= 账号勾选（通知 / 定时任务通知） ================= */
+.notify-targets { display: flex; flex-direction: column; gap: 10px; position: relative; z-index: 1; }
+.nt-group { display: flex; align-items: center; gap: 12px; padding: 8px 10px;
+  border: 1px solid #2f2f30; border-radius: 8px; background: #232324;
+  position: relative; pointer-events: auto; }
+.nt-group.nt-single { cursor: pointer; }
+.nt-group.nt-single:hover { border-color: #45454a; background: #262628; }
+.nt-ch { flex: none; width: 158px; font-size: 12.5px; color: #cfcfcf; display: flex; align-items: center; gap: 6px;
+  pointer-events: none; }
+.nt-ch .bi { color: #7aa7ff; }
+.nt-opts { display: flex; flex-wrap: wrap; gap: 8px 10px; min-width: 0; flex: 1; }
+/* 账号胶囊：整枚都能点，视觉上也一眼看出是「可勾选项」 */
+.nt-opt { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: #c9c9c9;
+  padding: 4px 12px; border: 1px solid #3c3c3d; border-radius: 20px; background: #2a2a2b;
+  cursor: pointer; user-select: none; line-height: 1.4; max-width: 100%; }
+.nt-opt:hover { border-color: #4c4c4e; background: #313133; }
+.nt-opt.on { border-color: #2f6f3e; background: rgba(63, 185, 80, .14); color: #c4eccd; }
+/* 没配置完成的账号不算可选项，只提示去完善 */
+.nt-pending { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: #c9a227; }
+.nt-pending .bi { font-size: 11px; }
+.nt-opt input { margin: 0; cursor: pointer; flex: none; }
+.nt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nt-none { font-size: 12px; color: #8b8b8b; }
+.nt-go { color: #6cb6ff; }
+
+:where(html.theme-light) .nt-group { background: #f7f8fa; border-color: #e3e3e3; }
+:where(html.theme-light) .nt-ch { color: #1f2328; }
+:where(html.theme-light) .nt-go { color: #0969da; }
+:where(html.theme-light) .nt-group.nt-single:hover { background: #eef3f9; border-color: #c8d4e3; }
+:where(html.theme-light) .nt-opt { background: #ffffff; border-color: #d6dde6; color: #1f2328; }
+:where(html.theme-light) .nt-opt:hover { background: #f2f6fb; border-color: #b9c6d6; }
+:where(html.theme-light) .nt-opt.on { background: #e8f5ec; border-color: #9fd4b0; color: #1a7f37; }
+:where(html.theme-light) .nt-pending { color: #9a6700; }

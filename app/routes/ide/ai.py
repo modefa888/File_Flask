@@ -42,6 +42,7 @@ from ...log import get_logger
 from ...services.ide.web_search import search_web, format_results
 from ...services.common import undo
 from ...services.common import notifications as notify_svc
+from ...services.common import notify_channels
 
 _log = get_logger()
 bp = Blueprint("ai", __name__)
@@ -1105,6 +1106,47 @@ def api_ai_notify_test():
         return jsonify(res)
     except Exception as e:
         _log.exception("发送测试通知失败")
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+# ---------------------------------------------------------------- 通知渠道账号
+@bp.route("/api/notify/channels", methods=["GET"])
+def api_notify_channels_get():
+    """全部渠道账号（一个渠道可多个账号；密钥字段脱敏）。"""
+    return jsonify({
+        "ok": True,
+        "channels": notify_channels.sanitize_accounts(),
+        "meta": {
+            "names": notify_channels.CHANNEL_NAMES,
+            "order": list(notify_channels.CHANNELS),
+        },
+    })
+
+
+@bp.route("/api/notify/channels", methods=["POST"])
+def api_notify_channels_save():
+    """整份保存渠道账号：{channels: {email: [{id,name,cfg}...], ...}}。"""
+    try:
+        data = request.get_json(silent=True) or {}
+        res = notify_channels.save_accounts(data)
+        return jsonify({"ok": True, "channels": res})
+    except Exception as e:
+        _log.exception("保存通知渠道账号失败")
+        return jsonify({"error": str(e)}), 400
+
+
+@bp.route("/api/notify/channels/test", methods=["POST"])
+def api_notify_channels_test():
+    """给单个渠道账号发一条测试通知：{channel, id}。"""
+    data = request.get_json(silent=True) or {}
+    channel = str(data.get("channel") or "").strip().lower()
+    account_id = str(data.get("id") or "").strip()
+    if not channel or not account_id:
+        return jsonify({"ok": False, "error": "缺少 channel / id"}), 400
+    try:
+        return jsonify(notify_channels.test_account(channel, account_id))
+    except Exception as e:
+        _log.exception("测试通知渠道账号失败")
         return jsonify({"ok": False, "error": str(e)}), 400
 
 

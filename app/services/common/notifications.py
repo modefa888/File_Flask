@@ -75,6 +75,12 @@ DEFAULT_NOTIFY_CFG: Dict[str, Any] = {
         "smtp": False,
         "telegram": False,
     },
+    # 勾选的渠道账号 id（账号在「设置 → 通知渠道」维护，一个渠道可多个）
+    "targets": {
+        "desktop": [],
+        "email": [],
+        "telegram": [],
+    },
     "template": {
         "chat": "AI 助手 · 回复完成",
         "agent": "AI 智能体 · 任务完成",
@@ -127,6 +133,7 @@ def _read_cfg() -> Dict[str, Any]:
     if not isinstance(saved, dict):
         return cfg
     _merge(cfg, saved, "channels")
+    _merge(cfg, saved, "targets")
     _merge(cfg, saved, "template")
     _merge(cfg, saved, "desktop")
     _merge(cfg, saved, "smtp")
@@ -134,6 +141,10 @@ def _read_cfg() -> Dict[str, Any]:
     for k in _TOP_LEVEL_SCALARS:
         if k in saved:
             cfg[k] = saved[k]
+    # targets 每个渠道必须是 id 字符串数组（库里可能残缺 / 类型不对）
+    t = cfg.get("targets") if isinstance(cfg.get("targets"), dict) else {}
+    cfg["targets"] = {ch: ([str(x) for x in (t.get(ch) or [])] if isinstance(t.get(ch), list) else [])
+                      for ch in ("desktop", "email", "telegram")}
     # 正文模板为空会让通知正文变空（Telegram 会直接报错），这里兜底回默认
     if not str(cfg.get("template_body") or "").strip():
         cfg["template_body"] = DEFAULT_NOTIFY_CFG["template_body"]
@@ -219,6 +230,16 @@ def sanitize_notify_cfg(cfg: Optional[dict] = None) -> Dict[str, Any]:
     tg["api_base"] = str(tg.get("api_base") or "https://api.telegram.org")
     tg["proxy"] = str(tg.get("proxy") or "").strip()
     c["telegram"] = tg
+
+    # 账号模式下把 targets 推导回 channels 开关：旧界面（网页版后台）读 channels
+    # 判断「哪些渠道已启用」，不推导会显示成关闭或旧值。
+    t = c.get("targets") or {}
+    if isinstance(t, dict) and any(v for v in t.values() if isinstance(v, list)):
+        ch = dict(c.get("channels") or {})
+        ch["desktop"] = bool(t.get("desktop"))
+        ch["smtp"] = bool(t.get("email"))
+        ch["telegram"] = bool(t.get("telegram"))
+        c["channels"] = ch
     return c
 
 
@@ -241,13 +262,14 @@ def save_notify_cfg(user_cfg: dict) -> Dict[str, Any]:
     # 先用磁盘现值打底、再用入参覆盖（部分更新语义，Route 注释也是这么承诺的）。
     # 否则界面上没有控件的字段（smtp.subject_prefix、desktop.timeout_ms、template.agent 等）
     # 会在每次点保存时被悄悄重置回默认值。
-    for key in ("channels", "template", "desktop", "smtp", "telegram"):
+    for key in ("channels", "targets", "template", "desktop", "smtp", "telegram"):
         if isinstance(disk.get(key), dict):
             new.setdefault(key, {}).update(disk[key])
     for k in _TOP_LEVEL_SCALARS:
         if k in disk:
             new[k] = disk[k]
     _merge(new, user_cfg, "channels")
+    _merge(new, user_cfg, "targets")
     _merge(new, user_cfg, "template")
     _merge(new, user_cfg, "desktop")
     _merge(new, user_cfg, "smtp")
@@ -304,6 +326,35 @@ def save_notify_cfg(user_cfg: dict) -> Dict[str, Any]:
     tg["chat_id"] = str(tg.get("chat_id") or "").strip()
     # 代理地址：留空 = 直连；写法不对直接报错，免得发信时才失败
     tg["proxy"] = _normalize_proxy(tg.get("proxy"))
+
+    # 旧界面（如网页版后台）只提交 channels 开关、不带 targets：
+    # 据此同步账号勾选，让「开 / 关某渠道」在账号模式下同样生效
+    # （开 = 该渠道全部账号，关 = 一个都不发）。
+    if "targets" not in user_cfg and isinstance(user_cfg.get("channels"), dict):
+        try:
+            from . import notify_channels
+            for ch_key, acc_ch in (("desktop", "desktop"), ("smtp", "email"),
+                                   ("telegram", "telegram")):
+                if ch_key not in user_cfg["channels"]:
+                    continue
+                new.setdefault("targets", {})[acc_ch] = (
+                    [a["id"] for a in notify_channels.accounts_of(acc_ch)]
+                    if user_cfg["channels"].get(ch_key) else [])
+        except Exception:                              # noqa: BLE001
+            _log.exception("按 channels 开关同步通知账号失败")
+
+    # 勾选的渠道账号 id：去空、去重（账号本身在「设置 → 通知渠道」里维护）
+    raw_targets = new.get("targets") if isinstance(new.get("targets"), dict) else {}
+    new["targets"] = {}
+    for ch in ("desktop", "email", "telegram"):
+        vals = raw_targets.get(ch)
+        seen, ids = set(), []
+        for x in (vals if isinstance(vals, list) else []):
+            sid = str(x or "").strip()
+            if sid and sid not in seen:
+                seen.add(sid)
+                ids.append(sid)
+        new["targets"][ch] = ids
 
     _write_cfg_patch(new)
     return sanitize_notify_cfg(new)
@@ -495,6 +546,9 @@ def send_test(channel: str = "all") -> Dict[str, Any]:
 
     # 读取当前 notify cfg，临时启用
     orig_notify = _read_cfg()
+    # 账号模式：直接发到勾选的账号，不需要临时改配置
+    if _targets_mode(orig_notify):
+        return _send_test_accounts(orig_notify, ch, title, body)
     test_notify = json.loads(json.dumps(orig_notify))
     test_notify["enabled"] = True
     ch_map = dict(test_notify.get("channels") or {})
@@ -524,6 +578,44 @@ def send_test(channel: str = "all") -> Dict[str, Any]:
             "telegram": res.get("telegram"),
         },
     }
+
+
+def _send_test_accounts(cfg: Dict[str, Any], ch: str, title: str, body: str) -> Dict[str, Any]:
+    """账号模式下的测试：直接发到该渠道已勾选的账号（忽略总开关）。"""
+    from . import notify_channels
+
+    alias = {"all": "all", "local": "desktop", "desktop": "desktop",
+             "email": "email", "smtp": "email", "telegram": "telegram", "tg": "telegram"}
+    pick = alias.get(ch, ch)
+    chans = ["desktop", "email", "telegram"] if pick == "all" else [pick]
+    targets = cfg.get("targets") or {}
+    results: Dict[str, Any] = {}
+    for acc_ch in chans:
+        if acc_ch not in ("desktop", "email", "telegram"):
+            continue
+        accs = notify_channels.accounts_of(acc_ch, targets.get(acc_ch) or [])
+        if not accs:
+            continue
+        key = "smtp" if acc_ch == "email" else acc_ch
+        subs = []
+        for acc in accs:
+            ok, detail = notify_channels.send_account(acc_ch, acc, title, body)
+            subs.append({"id": acc.get("id"), "name": acc.get("name") or "",
+                         "ok": bool(ok), "detail": str(detail or "")[:300]})
+        results[key] = {
+            "ok": any(s["ok"] for s in subs),
+            "detail": "；".join("%s：%s" % (s["name"] or s["id"],
+                                           "已发送" if s["ok"] else s["detail"])
+                                for s in subs)[:600],
+            "accounts": subs,
+        }
+    try:
+        append_history({"kind": "test", "channel": "test", "source": "test",
+                        "title": title, "body": body, "ts": int(time.time()),
+                        "channels": results})
+    except Exception:                                   # noqa: BLE001
+        pass
+    return {"ok": any(bool(v.get("ok")) for v in results.values()), "results": results}
 
 
 # ---------------------------------------------------------------------------
@@ -1118,6 +1210,64 @@ def notify(title: str, body: str, channel: str = "chat",
     results["title"] = title
     results["body"] = body
 
+    if _targets_mode(cfg):
+        _send_to_accounts(cfg, title, body, results)
+    else:
+        _send_to_legacy(cfg, title, body, results, channel)
+
+    _record_history(results)
+    return results
+
+
+def _targets_mode(cfg: Dict[str, Any]) -> bool:
+    """是否使用「渠道账号」模式。
+
+    只要 targets 里勾了任意账号就用账号模式；全空时，如果旧 channels 还有开启的
+    渠道（说明是升级前的配置、尚未迁移），继续走旧逻辑，避免通知突然停掉。
+    """
+    t = cfg.get("targets")
+    if not isinstance(t, dict):
+        return False
+    if any(isinstance(v, list) and v for v in t.values()):
+        return True
+    ch = cfg.get("channels") or {}
+    return not (ch.get("desktop") or ch.get("smtp") or ch.get("telegram"))
+
+
+def _send_to_accounts(cfg: Dict[str, Any], title: str, body: str,
+                      results: Dict[str, Any]) -> None:
+    """按勾选的渠道账号逐个发送（一个渠道可多个账号）。"""
+    from . import notify_channels                      # 延迟导入，避免循环依赖
+
+    targets = cfg.get("targets") or {}
+    for acc_ch, res_key in (("desktop", "desktop"), ("email", "smtp"), ("telegram", "telegram")):
+        ids = targets.get(acc_ch) or []
+        if not ids:
+            continue
+        accounts = notify_channels.accounts_of(acc_ch, ids)
+        if not accounts:
+            continue                                  # 账号都被删了：静默跳过
+        subs = []
+        for acc in accounts:
+            ok, detail = notify_channels.send_account(acc_ch, acc, title, body)
+            subs.append({"id": acc.get("id"), "name": acc.get("name") or "",
+                         "ok": bool(ok), "detail": str(detail or "")[:300]})
+            if ok:
+                _log.info("[notify-%s] %s (%s)", acc_ch, title[:60], acc.get("name") or "")
+            else:
+                _log.warning("[notify-%s] failed: %s", acc_ch, detail)
+        results[res_key] = {
+            "ok": any(s["ok"] for s in subs),
+            "detail": "；".join("%s：%s" % (s["name"] or s["id"],
+                                           "已发送" if s["ok"] else s["detail"])
+                                for s in subs)[:600],
+            "accounts": subs,
+        }
+
+
+def _send_to_legacy(cfg: Dict[str, Any], title: str, body: str,
+                    results: Dict[str, Any], channel: str) -> None:
+    """升级前的单账号逻辑：按 channels 开关 + 顶层的 smtp / telegram / desktop 配置发送。"""
     if (cfg.get("channels") or {}).get("desktop"):
         try:
             r = notify_desktop(title, body)
@@ -1153,9 +1303,6 @@ def notify(title: str, body: str, channel: str = "chat",
         except Exception as e:
             results["telegram"] = {"ok": False, "detail": str(e)}
             _log.exception("notify_telegram 抛异常")
-
-    _record_history(results)
-    return results
 
 
 def _record_history(results: Dict[str, Any]) -> None:

@@ -2309,8 +2309,12 @@
      设置弹窗（日志自动清理 + 通知渠道）与备份 / 恢复
      ================================================================== */
   const CRON_CH_NAMES = {
-    desktop: "桌面通知", email: "邮件（全局 SMTP）", dingtalk: "钉钉机器人",
-    telegram: "Telegram（全局）", pushplus: "PushPlus", web: "网页版",
+    desktop: "桌面通知", email: "邮件（SMTP）", dingtalk: "钉钉机器人",
+    telegram: "Telegram", pushplus: "PushPlus", web: "网页版",
+  };
+  const CRON_CH_ICONS = {
+    desktop: "bi-bell", email: "bi-envelope", telegram: "bi-telegram",
+    dingtalk: "bi-chat-dots", pushplus: "bi-wechat", web: "bi-globe2",
   };
   const CRON_EV_NAMES = { fail: "执行失败", timeout: "执行超时", retry: "安排重试" };
 
@@ -2332,24 +2336,40 @@
     ov.querySelector(".cd-x").onclick = cronCloseModal;
     $("cronSetCancel").onclick = cronCloseModal;
     $("cronSetSave").onclick = cronSaveSettings;
-    fetch("/api/cron/settings").then(r => r.json()).then(d => {
+    Promise.all([
+      fetch("/api/cron/settings").then(r => r.json()),
+      fetch("/api/notify/channels").then(r => r.json()).catch(() => ({})),
+    ]).then(([d, acc]) => {
       if (d.error) { $("cronSetBody").innerHTML = '<div class="ph">' + esc(d.error) + '</div>'; return; }
-      cronRenderSettings(d);
+      cronRenderSettings(d, (acc && acc.channels) || {});
     }).catch(() => {
       $("cronSetBody").innerHTML = '<div class="ph">读取设置失败</div>';
     });
   }
 
-  function cronRenderSettings(d) {
+  function cronRenderSettings(d, accounts) {
     const n = d.notify || {};
-    const events = n.events || {}, chs = n.channels || {};
-    const ding = n.dingtalk || {}, pp = n.pushplus || {};
-    const chRow = (key) =>
-      '<div class="cs-ch">' +
-        '<label class="cd-check"><input type="checkbox" data-ch="' + key + '"' + (chs[key] ? " checked" : "") +
-          '> ' + esc(CRON_CH_NAMES[key]) + '</label>' +
-        '<button class="cd-btn cs-test" data-test="' + key + '" title="向该渠道发一条测试通知">测试</button>' +
+    const events = n.events || {};
+    const targets = n.targets || {};
+    const accs = accounts || {};
+    // 每个渠道一组账号勾选（账号在「设置 → 通知渠道」维护，可多选）
+    const chRows = Object.keys(CRON_CH_NAMES).map(ch => {
+      const items = accs[ch] || [];
+      const picked = Array.isArray(targets[ch]) ? targets[ch].map(String) : [];
+      const opts = items.length
+        ? items.map(a => '<label class="cd-check"><input type="checkbox" data-ctarget="' +
+            escAttr(a.id) + '" data-cch="' + ch + '"' +
+            (picked.indexOf(a.id) >= 0 ? " checked" : "") + '> ' +
+            esc(a.name || a.id) + '</label>').join("")
+        : '<span class="cd-hint" style="font-size:12px;color:#8b8b8b">未配置账号，' +
+          '请到「设置 → 通知渠道」添加</span>';
+      return '<div class="cs-ch" style="flex-direction:column;align-items:flex-start;gap:6px">' +
+        '<div class="cs-ch-hd" style="display:flex;align-items:center;gap:6px;font-size:12.5px">' +
+          '<i class="bi ' + (CRON_CH_ICONS[ch] || "bi-bell") + '"></i>' + esc(CRON_CH_NAMES[ch]) + '</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px 14px">' + opts + '</div>' +
+        '<button class="cd-btn cs-test" data-test="' + ch + '" title="向该渠道已勾选的账号各发一条测试通知">测试</button>' +
       '</div>';
+    }).join("");
     $("cronSetBody").innerHTML =
       '<div class="cs-sec">日志自动清理</div>' +
       '<div class="cd-row2">' +
@@ -2360,27 +2380,19 @@
       '</div>' +
       '<div class="cs-sec">通知推送</div>' +
       '<label class="cd-check"><input type="checkbox" id="csNotifyOn"' + (n.enabled ? " checked" : "") +
-        '> 启用通知（任务失败 / 超时时按下面的事件与渠道推送）</label>' +
+        '> 启用通知（任务失败 / 超时时按下面的事件与账号推送）</label>' +
       '<div class="cs-row-lbl">触发事件</div>' +
       '<div class="cs-ev">' + Object.keys(CRON_EV_NAMES).map(k =>
         '<label class="cd-check"><input type="checkbox" data-ev="' + k + '"' + (events[k] ? " checked" : "") +
           '> ' + esc(CRON_EV_NAMES[k]) + '</label>').join("") + '</div>' +
-      '<div class="cs-row-lbl">推送渠道（邮件 / Telegram 用「设置 → 通知」里的全局配置）</div>' +
-      '<div class="cs-chs">' + Object.keys(CRON_CH_NAMES).map(chRow).join("") + '</div>' +
-      '<div class="cd-row"><label>钉钉机器人 Webhook（含 access_token）</label>' +
-        '<input id="csDingWebhook" spellcheck="false" placeholder="https://oapi.dingtalk.com/robot/send?access_token=…" value="' +
-          escAttr(ding.webhook || "") + '"></div>' +
-      '<div class="cd-row"><label>钉钉加签密钥（SEC 开头，留空 = 不加签）</label>' +
-        '<input id="csDingSecret" spellcheck="false" placeholder="SEC…" value="' + escAttr(ding.secret || "") + '"></div>' +
-      '<div class="cd-row"><label>PushPlus Token（www.pushplus.plus 获取）</label>' +
-        '<input id="csPpToken" spellcheck="false" placeholder="推送 token" value="' + escAttr(pp.token || "") + '"></div>' +
-      '<div class="cd-row"><label>PushPlus 群组编码（可选，留空发给自己）</label>' +
-        '<input id="csPpTopic" spellcheck="false" value="' + escAttr(pp.topic || "") + '"></div>' +
+      '<div class="cs-row-lbl">推送账号（在「设置 → 通知渠道」里维护，同一渠道可多选）</div>' +
+      '<div class="cs-chs">' + chRows + '</div>' +
       '<div class="cd-err" id="cronSetErr"></div>';
+    const ov = cronEnsureModal();
     ov.querySelectorAll("[data-test]").forEach(b => {
       b.onclick = async () => {
         b.disabled = true; b.textContent = "发送中…";
-        await cronSaveSettings(true);                 // 先保存，测试用的才是刚填的配置
+        await cronSaveSettings(true);                 // 先保存，测试用的才是刚勾的账号
         const d2 = await cronAct("/api/cron/notify-test", { channel: b.dataset.test });
         b.disabled = false; b.textContent = "测试";
         const r = d2.results || {};
@@ -2393,23 +2405,18 @@
 
   async function cronSaveSettings(silent) {
     const err = $("cronSetErr");
-    const ev = {}, ch = {};
+    const ev = {}, targets = {};
     document.querySelectorAll("#cronModal [data-ev]").forEach(x => { ev[x.dataset.ev] = x.checked; });
-    document.querySelectorAll("#cronModal [data-ch]").forEach(x => { ch[x.dataset.ch] = x.checked; });
+    Object.keys(CRON_CH_NAMES).forEach(ch => { targets[ch] = []; });   // 取消全选也要能保存
+    document.querySelectorAll("#cronModal [data-ctarget]").forEach(x => {
+      const ch = x.dataset.cch;
+      targets[ch] = targets[ch] || [];
+      if (x.checked) targets[ch].push(x.dataset.ctarget);
+    });
     const body = {
       log_days: parseInt($("csLogDays").value, 10) || 0,
       keep_runs: parseInt($("csKeepRuns").value, 10) || 50,
-      notify: {
-        enabled: $("csNotifyOn").checked, events: ev, channels: ch,
-        dingtalk: {
-          webhook: $("csDingWebhook").value.trim(),
-          secret: $("csDingSecret").value.trim(),
-        },
-        pushplus: {
-          token: $("csPpToken").value.trim(),
-          topic: $("csPpTopic").value.trim(),
-        },
-      },
+      notify: { enabled: $("csNotifyOn").checked, events: ev, targets: targets },
     };
     const d = await cronAct("/api/cron/settings", body);
     if (d.error) { if (!silent && err) err.textContent = d.error; toast(d.error, "err"); return false; }

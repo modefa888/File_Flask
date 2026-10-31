@@ -215,6 +215,16 @@ CREATE TABLE IF NOT EXISTS notify_cfg (
     key   TEXT PRIMARY KEY,
     value TEXT DEFAULT ''
 );
+-- 通知渠道账号（设置 → 通知渠道）：一个渠道可配置多个账号，通知 / 定时任务通知按 id 勾选
+CREATE TABLE IF NOT EXISTS notify_accounts (
+    id         TEXT PRIMARY KEY,
+    channel    TEXT NOT NULL,
+    name       TEXT DEFAULT '',
+    cfg        TEXT DEFAULT '{}',
+    sort       INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_notify_accounts_ch ON notify_accounts(channel, sort);
 -- 命令安全设置（设置 → 命令安全）：单行 JSON，存总开关 / 分组开关 / 自定义正则
 CREATE TABLE IF NOT EXISTS cmd_guard (
     key   TEXT PRIMARY KEY,

@@ -26,7 +26,7 @@ import urllib.parse
 import urllib.request
 
 from ...log import get_logger
-from ..common import notifications
+from ..common import notifications, notify_channels
 from . import crondb
 
 _log = get_logger()
@@ -54,8 +54,15 @@ DEFAULT_CFG = {
         "pushplus": False,
         "web": False,
     },
+    # 勾选的渠道账号 id（「设置 → 通知渠道」里维护，一个渠道可多个账号）
+    # 空数组 = 该渠道不发送
+    "targets": {
+        "desktop": [], "email": [], "telegram": [],
+        "dingtalk": [], "pushplus": [], "web": [],
+    },
     # desktop / email / telegram 的「判断字段」use_global：
     # True = 复用「设置 → 通知」的全局通道配置；False = 用本模块独立填写的配置
+    # （新版本已由 targets 账号取代，这段仅为兼容升级前的配置保留）
     "desktop": {
         "use_global": True,
         "app_name": "",                             # 独立配置：通知中心显示的应用名（留空 = File_Flask）
@@ -120,6 +127,7 @@ def get_cfg():
     if isinstance(saved, dict):
         _merge_dict(cfg, saved, "events")
         _merge_dict(cfg, saved, "channels")
+        _merge_dict(cfg, saved, "targets")
         _merge_dict(cfg, saved, "desktop")
         _merge_dict(cfg, saved, "email")
         _merge_dict(cfg, saved, "telegram")
@@ -129,7 +137,16 @@ def get_cfg():
         _merge_dict(cfg, saved, "template")
         if "enabled" in saved:
             cfg["enabled"] = bool(saved.get("enabled"))
+    # targets 归一化：每个渠道必须是 id 字符串数组
+    t = cfg.get("targets") if isinstance(cfg.get("targets"), dict) else {}
+    cfg["targets"] = {ch: ([str(x) for x in (t.get(ch) or [])] if isinstance(t.get(ch), list) else [])
+                      for ch in _CHANNELS}
     return cfg
+
+
+def _write_cfg(cfg):
+    """整份写入（迁移 / 内部回写用）。"""
+    crondb.set_setting("notify", cfg)
 
 
 def save_cfg(patch):
@@ -144,6 +161,30 @@ def save_cfg(patch):
             for k, v in patch[key].items():
                 if k in (cfg.get(key) or {}):
                     cfg[key][k] = bool(v)
+    # 旧界面（如网页版后台）只提交 channels 开关、不带 targets：
+    # 据此同步账号勾选（开 = 该渠道全部账号，关 = 一个都不发），避免开关被 targets 覆盖成无效。
+    if "targets" not in patch and isinstance(patch.get("channels"), dict):
+        try:
+            for ch, on in patch["channels"].items():
+                if ch not in _CHANNELS:
+                    continue
+                cfg.setdefault("targets", {})[ch] = (
+                    [a["id"] for a in notify_channels.accounts_of(ch)] if on else [])
+        except Exception:                              # noqa: BLE001
+            _log.exception("按 channels 开关同步定时任务通知账号失败")
+    if isinstance(patch.get("targets"), dict):
+        tgt = cfg.setdefault("targets", {})
+        for ch in _CHANNELS:
+            if ch not in patch["targets"]:
+                continue
+            vals = patch["targets"].get(ch)
+            seen, ids = set(), []
+            for x in (vals if isinstance(vals, list) else []):
+                sid = str(x or "").strip()
+                if sid and sid not in seen:
+                    seen.add(sid)
+                    ids.append(sid)
+            tgt[ch] = ids
     for key in ("desktop", "email", "telegram", "dingtalk", "pushplus", "web"):
         if isinstance(patch.get(key), dict):
             for k, v in patch[key].items():
@@ -175,11 +216,18 @@ def save_cfg(patch):
 
 
 def sanitize_cfg(cfg=None):
-    """脱敏：密钥类字段替换为 ******（前端展示用）。"""
+    """脱敏：密钥类字段替换为 ******（前端展示用）。
+
+    新版渠道参数已移到「设置 → 通知渠道」的账号里，这里额外把 targets 推导成
+    channels 布尔表，供任务编辑弹窗、执行详情等旧界面继续判断「哪些渠道已启用」。
+    """
     cfg = json.loads(json.dumps(cfg or get_cfg()))
     for grp, key in _SECRET_PATHS:
         if cfg.get(grp, {}).get(key):
             cfg[grp][key] = _MASK
+    t = cfg.get("targets") or {}
+    if any(t.get(ch) for ch in _CHANNELS):
+        cfg["channels"] = {ch: bool(t.get(ch)) for ch in _CHANNELS}
     return cfg
 
 
@@ -331,6 +379,60 @@ def _send_one(cfg, channel, title, body, meta=None):
         return False, str(e)
 
 
+def send_with_account(channel, acc, title, body, meta=None):
+    """用「通知渠道」里的某个账号发一条；返回 (ok, detail)。"""
+    acc = acc or {}
+    cfg = acc.get("cfg") or {}
+    if not notify_channels.is_ready(channel, acc):
+        return False, "账号还没配置完成（缺必填项）"
+    try:
+        if channel in ("desktop", "email", "telegram"):
+            return notify_channels.send_account(channel, acc, title, body)
+        if channel == "dingtalk":
+            return _send_dingtalk({"dingtalk": cfg}, title, body)
+        if channel == "pushplus":
+            return _send_pushplus({"pushplus": cfg}, title, body)
+        if channel == "web":
+            return _send_web({"web": cfg}, title, body, meta)
+        return False, "未知渠道：%s" % channel
+    except Exception as e:                              # noqa: BLE001
+        _log.warning("定时任务通知（%s/%s）发送异常：%s", channel, acc.get("name") or "", e)
+        return False, str(e)
+
+
+def _targets_configured(cfg):
+    """是否走「渠道账号」模式（与旧版 channels 开关共存，见下方说明）。"""
+    t = cfg.get("targets") or {}
+    if any(t.get(ch) for ch in _CHANNELS):
+        return True
+    ch = cfg.get("channels") or {}
+    return not any(ch.get(k) for k in _CHANNELS)
+
+
+def _send_job(cfg, channel, acc, title, body, meta):
+    if acc is not None:
+        return send_with_account(channel, acc, title, body, meta)
+    return _send_one(cfg, channel, title, body, meta)
+
+
+def _collect_result(results, channel, acc, ok, detail):
+    """把同一渠道多个账号的结果合并成一条（accounts 里保留逐个结果）。"""
+    item = {"ok": bool(ok), "detail": str(detail or "")[:300]}
+    if acc:
+        item["account"] = acc.get("name") or acc.get("id") or ""
+    cur = results["results"].get(channel)
+    if not isinstance(cur, dict):
+        results["results"][channel] = item
+        return
+    accounts = cur.get("accounts")
+    if not accounts:
+        accounts = [dict(cur)]
+        cur["accounts"] = accounts
+    accounts.append(item)
+    cur["ok"] = bool(cur.get("ok")) or item["ok"]
+    cur["detail"] = (str(cur.get("detail") or "") + "；" + item["detail"])[:600]
+
+
 def _render_tpl(tpl, vars_):
     """渲染模板：{var} 用 vars_ 里的值替换，未知变量原样保留。"""
     def _sub(m):
@@ -408,29 +510,48 @@ def send(title, body, event="fail", source="cron", vars_=None, tpl=None, channel
         title = _render_tpl(use_title, vars_)
     if use_body:
         body = use_body if raw_body else _render_tpl(use_body, vars_)
-    enabled = cfg.get("channels") or {}
-    targets = [ch for ch in _CHANNELS if enabled.get(ch)]
-    wanted = crondb.norm_channels(channels)                # 任务级渠道（空 = 全局已启用的全部）
+    wanted = crondb.norm_channels(channels)                # 任务级渠道（空 = 跟随全局配置）
     if wanted:
-        picked = set(wanted.split(","))
-        targets = [ch for ch in targets if ch in picked]   # 取交集：全局没启用的发不出去
         results["channels"] = wanted
+    picked = set(wanted.split(",")) if wanted else None    # 取交集：全局没启用的发不出去
+
     send_meta = dict(meta or {})
     send_meta["event"] = event
+
+    # 组装本次要发的工作项：[(渠道, 账号配置或 None)]
+    jobs = []
+    if _targets_configured(cfg):
+        tg = cfg.get("targets") or {}
+        for ch in _CHANNELS:
+            if picked is not None and ch not in picked:
+                continue
+            for acc in notify_channels.accounts_of(ch, tg.get(ch) or []):
+                jobs.append((ch, acc))
+    else:                                                  # 旧版：按 channels 开关
+        enabled = cfg.get("channels") or {}
+        for ch in _CHANNELS:
+            if not enabled.get(ch):
+                continue
+            if picked is not None and ch not in picked:
+                continue
+            jobs.append((ch, None))
+
     # 网页版先发：拿到地址后才能给其它渠道的正文末尾追加「前往网页版通知」
-    web_url, web_res = "", None
-    if "web" in targets:
-        ok, detail = _send_one(cfg, "web", title, body, send_meta)
-        web_res = {"ok": bool(ok), "detail": detail}
-        if ok:
+    web_url = ""
+    web_jobs = [(ch, acc) for ch, acc in jobs if ch == "web"]
+    for ch, acc in web_jobs:
+        ok, detail = _send_job(cfg, ch, acc, title, body, send_meta)
+        _collect_result(results, ch, acc, ok, detail)
+        if ok and not web_url:
             web_url = _url_of(detail)
-        targets = [ch for ch in targets if ch != "web"]
-    foot = _web_link_foot(cfg, web_url) if web_url else ""
-    for ch in targets:
-        ok, detail = _send_one(cfg, ch, title, body + foot, send_meta)
-        results["results"][ch] = {"ok": bool(ok), "detail": detail}
-    if web_res is not None:
-        results["results"]["web"] = web_res              # 放最后，保持渠道展示顺序稳定
+    # 其它渠道正文末尾的网页入口：账号模式取第一个网页账号的配置
+    web_cfg = next((acc.get("cfg") or {} for ch, acc in web_jobs if acc), None)
+    foot = _web_link_foot({"web": web_cfg or (cfg.get("web") or {})}, web_url) if web_url else ""
+    for ch, acc in jobs:
+        if ch == "web":
+            continue
+        ok, detail = _send_job(cfg, ch, acc, title, body + foot, send_meta)
+        _collect_result(results, ch, acc, ok, detail)
     # 记录里也带上网页地址：浏览器通知弹窗、通知记录展开的正文都读这里
     rec_body = (body + foot) if foot else body
     results["body"] = rec_body                            # 供 cronsvc 写执行记录旁的通知记录
@@ -509,12 +630,22 @@ def test(channel):
     title = "定时任务通知测试"
     body = "这是一条来自 File_Flask 定时任务模块的测试通知。若收到，说明该渠道配置正确。"
     out = {}
-    targets = _CHANNELS if ch in ("all", "") else [ch]
-    for t in targets:
-        if t not in _CHANNELS:
-            continue
-        ok, detail = _send_one(cfg, t, title, body)
-        out[t] = {"ok": bool(ok), "detail": detail}
+    chans = _CHANNELS if ch in ("all", "") else [ch]
+    if _targets_configured(cfg):
+        tg = cfg.get("targets") or {}
+        bucket = {"results": out}
+        for t in chans:
+            if t not in _CHANNELS:
+                continue
+            for acc in notify_channels.accounts_of(t, tg.get(t) or []):
+                ok, detail = send_with_account(t, acc, title, body)
+                _collect_result(bucket, t, acc, ok, detail)
+    else:
+        for t in chans:
+            if t not in _CHANNELS:
+                continue
+            ok, detail = _send_one(cfg, t, title, body)
+            out[t] = {"ok": bool(ok), "detail": detail}
     try:                                                # 测试也留记录，便于确认渠道是否真的通了
         notifications.append_history({"source": "cron", "title": title, "body": body,
                                       "ts": int(time.time()), "channels": out})

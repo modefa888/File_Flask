@@ -171,429 +171,671 @@
   /* ---------- 独立分区：定时任务通知（设置页左侧导航单独一项） ----------
      配置与「定时任务管理 → 设置」弹窗共用同一份（store.db 的 cron_cfg.notify），
      桌面 / 邮件 / Telegram 复用「通知」分区的全局通道配置，这里只做开关与事件选择。 */
-  function cronNotifyBuildSectionHTML() {
-    const cronChCard = (icon, cls, kw, label, desc, id) =>
-      '<div class="notify-channel-card ' + cls + ' set-row" data-kw="定时任务 ' + kw + '">' +
-        '<div class="notify-icon"><i class="bi ' + icon + '"></i></div>' +
-        '<div class="notify-channel-info"><div class="notify-label">' + label + '</div>' +
-        '<div class="notify-desc">' + desc + '</div></div>' +
-        '<label class="set-switch"><input type="checkbox" id="' + id + '"><span></span></label>' +
-      '</div>';
-    return '<div class="set-sec" id="sec-cron-notify" data-kw="定时任务 通知 cron 钉钉 pushplus telegram 邮件">' +
-      '<h2 data-kw="定时任务 通知 cron 钉钉 pushplus telegram 邮件 桌面"><i class="bi bi-alarm"></i> 定时任务通知</h2>' +
-      '<div class="set-desc" data-kw="定时任务 通知 cron 钉钉 pushplus telegram 邮件 桌面">定时任务<b>失败 / 超时 / 安排重试</b>时向本机与外部渠道推送。' +
-      '桌面 / 邮件 / Telegram 可选择「复用全局配置」（「通知」分区里填的）或「独立配置」（在本分区单独填写，与 AI 通知互不影响）。</div>' +
+  /* ================================================================
+     通知渠道（设置 → 通知渠道）
+     一个渠道可以配置多个账号：邮件多个收件账号、Telegram 多个群、
+     钉钉多个机器人……「通知」与「定时任务通知」只勾选账号，不再各自填参数。
+     配置存服务端（/api/notify/channels），密钥字段脱敏返回。
+     ================================================================ */
+  const NOTIFY_CH_DEFS = {
+    desktop: {
+      name: "浏览器 / 桌面通知", icon: "bi-bell", desc: "服务器本机弹系统通知，网页端同时镜像到浏览器",
+      fields: [
+        { k: "app_name", label: "应用名", ph: "File_Flask" },
+        { k: "sound", label: "播放提示音", type: "bool" },
+      ],
+    },
+    email: {
+      name: "邮件（SMTP）", icon: "bi-envelope", desc: "QQ / 163 / Gmail / Outlook 等 SMTP 发信",
+      // 必填字段：没填完就不能再加下一个账号（避免一堆半成品账号）
+      required: ["to", "host", "username", "password"],
+      fields: [
+        { k: "to", label: "收件人", ph: "me@example.com", full: true, hint: "多个用英文逗号分隔" },
+        { k: "host", label: "SMTP 服务器", ph: "smtp.qq.com" },
+        { k: "port", label: "端口", type: "number", ph: "465" },
+        { k: "security", label: "加密方式", type: "select", options: [["ssl", "SSL（465）"], ["tls", "STARTTLS（587）"], ["none", "不加密"]] },
+        { k: "username", label: "发件人账号", ph: "me@example.com" },
+        { k: "password", label: "授权码 / 密码", type: "password", ph: "授权码" },
+        { k: "from_addr", label: "发件人地址", ph: "留空 = 用账号" },
+        { k: "from_name", label: "发件人显示名", ph: "File_Flask" },
+      ],
+    },
+    telegram: {
+      name: "Telegram", icon: "bi-telegram", desc: "Bot 推送到私聊 / 群组 / 话题",
+      required: ["bot_token", "chat_id"],
+      fields: [
+        { k: "bot_token", label: "Bot Token", type: "password", ph: "123456:ABC-DEF…", full: true },
+        { k: "chat_id", label: "Chat ID", ph: "-1001234567890" },
+        { k: "message_thread_id", label: "话题 ID", ph: "留空不指定" },
+        { k: "api_base", label: "API 地址", ph: "https://api.telegram.org" },
+        { k: "proxy", label: "代理", ph: "留空 = 直连" },
+        { k: "disable_notification", label: "静音发送", type: "bool" },
+      ],
+    },
+    dingtalk: {
+      name: "钉钉机器人", icon: "bi-chat-dots", desc: "群机器人 Webhook，支持加签",
+      required: ["webhook"],
+      fields: [
+        { k: "webhook", label: "Webhook 地址", ph: "https://oapi.dingtalk.com/robot/send?access_token=…", full: true },
+        { k: "secret", label: "加签密钥", ph: "SEC…（留空不加签）" },
+      ],
+    },
+    pushplus: {
+      name: "PushPlus", icon: "bi-wechat", desc: "推送到微信（www.pushplus.plus）",
+      required: ["token"],
+      fields: [
+        { k: "token", label: "Token", ph: "推送 token" },
+        { k: "topic", label: "群组编码", ph: "留空 = 发给自己" },
+      ],
+    },
+    web: {
+      name: "网页版", icon: "bi-globe2", desc: "生成 Markdown 渲染页，地址按任务唯一",
+      fields: [
+        { k: "base_url", label: "站点地址", ph: "留空自动推断" },
+        { k: "retention_days", label: "保留天数", type: "number", ph: "7" },
+        { k: "link_enabled", label: "在其它渠道附加网页入口", type: "bool" },
+        { k: "link_text", label: "入口文字", ph: "网页通知" },
+        { k: "link_url", label: "固定跳转地址", ph: "留空 = 各任务自己的 /n/…" },
+      ],
+    },
+  };
+  const NOTIFY_CH_ORDER = ["desktop", "email", "telegram", "dingtalk", "pushplus", "web"];
 
-      '<div class="notify-card">' +
-        '<div class="notify-card-title"><i class="bi bi-power"></i> 总开关与触发事件</div>' +
-        '<div class="notify-row inline set-row" data-kw="启用定时任务通知 enabled 开关 启用">' +
-          '<div class="notify-label-wrap"><div class="notify-label">启用定时任务通知</div>' +
-          '<div class="notify-desc">总开关；关闭后所有渠道均不推送。</div></div>' +
-          '<label class="set-switch"><input type="checkbox" id="notifyCronEnabled"><span></span></label>' +
-        '</div>' +
-        '<div class="notify-row inline set-row" data-kw="触发事件 失败 超时 重试 成功 fail timeout retry success">' +
-          '<div class="notify-label-wrap"><div class="notify-label">触发事件</div>' +
-          '<div class="notify-desc">勾选哪些事件时推送（任务里关掉「发送通知」的不推送，两者取交集）；' +
-            '「执行成功」默认关闭，开启后每次执行成功也会推送并留记录。</div></div>' +
-          '<div class="notify-cron-evs">' +
-            '<label class="notify-check"><input type="checkbox" id="notifyCronEvFail"> 执行失败</label>' +
-            '<label class="notify-check"><input type="checkbox" id="notifyCronEvTimeout"> 执行超时</label>' +
-            '<label class="notify-check"><input type="checkbox" id="notifyCronEvRetry"> 安排重试</label>' +
-            '<label class="notify-check"><input type="checkbox" id="notifyCronEvSuccess"> 执行成功</label>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
+  let _nacc = null;                 // {channel: [ {id,name,cfg} ]}
+  let _naccTimer = null;
+  let _naccSaving = false;
+  // 本地改动序号：每次增删改 +1。保存请求返回时若序号已变（期间又改过），
+  // 就不用服务端的旧快照覆盖内存，避免「刚删的账号又冒回来」。
+  let _naccVer = 0;
+  // 上次真正落库的内容（JSON）。内容没变就不发请求，
+  // 所以「点开一个空账号 / 什么都没填」不会写库、也不会显示「已自动保存」。
+  let _naccSavedJson = "";
 
-      '<div class="notify-card">' +
-        '<div class="notify-card-title"><i class="bi bi-broadcast"></i> 推送渠道</div>' +
-        '<div class="notify-grid-2">' +
-          cronChCard("bi-bell", "", "定时任务 桌面 系统 通知 desktop", "桌面通知",
-            "本机系统通知（来源可选复用全局或独立配置）。", "notifyCronChDesktop") +
-          cronChCard("bi-envelope", "email", "定时任务 邮件 smtp email", "邮件",
-            "SMTP 发送（来源可选复用全局或独立配置）。", "notifyCronChEmail") +
-          cronChCard("bi-chat-dots", "", "定时任务 钉钉 dingtalk 机器人 webhook", "钉钉机器人",
-            "群机器人 Webhook 推送，支持加签。", "notifyCronChDingtalk") +
-          cronChCard("bi-telegram", "tg", "定时任务 telegram tg 电报", "Telegram",
-            "Bot 推送（来源可选复用全局或独立配置）。", "notifyCronChTelegram") +
-          cronChCard("bi-wechat", "", "定时任务 pushplus 微信 推送", "PushPlus",
-            "推送到微信（www.pushplus.plus）。", "notifyCronChPushplus") +
-          cronChCard("bi-globe2", "", "定时任务 网页版 web 页面 markdown 渲染", "网页版",
-            "生成 Markdown 渲染页，地址按任务唯一，默认保留 7 天。", "notifyCronChWeb") +
-        '</div>' +
-      '</div>' +
-
-      '<div class="notify-card notifyCronDeskOpts">' +
-        '<div class="notify-card-title"><i class="bi bi-bell"></i> 桌面通知设置</div>' +
-        '<div class="notify-row inline set-row" data-kw="配置来源 复用 全局 独立 desktop">' +
-          '<div class="notify-label-wrap"><div class="notify-label">配置来源</div>' +
-          '<div class="notify-desc">复用全局 = 用「通知」分区的桌面通知设置；独立 = 下面单独填。</div></div>' +
-          '<div class="notify-cron-evs">' +
-            '<label class="notify-check"><input type="radio" name="cronDeskSrc" id="notifyCronDeskSrcG" value="global"> 复用全局</label>' +
-            '<label class="notify-check"><input type="radio" name="cronDeskSrc" id="notifyCronDeskSrcO" value="own"> 独立配置</label>' +
-          '</div>' +
-        '</div>' +
-        '<div class="notifyCronOwnOpts" id="notifyCronDeskOwnOpts">' +
-          '<div class="notify-grid-2">' +
-            '<div class="notify-row stack set-row" data-kw="应用名称 app name">' +
-              '<div class="notify-label-wrap"><div class="notify-label">应用名称（可选）</div>' +
-              '<div class="notify-desc">通知中心里显示的应用名，留空 = File_Flask。</div></div>' +
-              '<input class="notify-input" id="notifyCronDeskApp" placeholder="File_Flask" autocomplete="off" spellcheck="false">' +
-            '</div>' +
-            '<div class="notify-row inline set-row" data-kw="提示音 声音 sound">' +
-              '<div class="notify-label-wrap"><div class="notify-label">播放提示音</div></div>' +
-              '<label class="set-switch"><input type="checkbox" id="notifyCronDeskSound"><span></span></label>' +
-            '</div>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="notify-card notifyCronEmailOpts">' +
-        '<div class="notify-card-title"><i class="bi bi-envelope-at"></i> 邮件（SMTP）设置</div>' +
-        '<div class="notify-row inline set-row" data-kw="配置来源 复用 全局 独立 email smtp">' +
-          '<div class="notify-label-wrap"><div class="notify-label">配置来源</div>' +
-          '<div class="notify-desc">复用全局 = 用「通知」分区的 SMTP 设置；独立 = 下面单独填。</div></div>' +
-          '<div class="notify-cron-evs">' +
-            '<label class="notify-check"><input type="radio" name="cronEmailSrc" id="notifyCronEmailSrcG" value="global"> 复用全局</label>' +
-            '<label class="notify-check"><input type="radio" name="cronEmailSrc" id="notifyCronEmailSrcO" value="own"> 独立配置</label>' +
-          '</div>' +
-        '</div>' +
-        '<div class="notifyCronOwnOpts" id="notifyCronEmailOwnOpts">' +
-          '<div class="notify-row stack set-row" data-kw="收件人 to">' +
-            '<div class="notify-label-wrap"><div class="notify-label">收件人地址</div>' +
-            '<div class="notify-desc">接收通知的邮箱，多个用英文逗号分隔。</div></div>' +
-            '<input class="notify-input" id="notifyCronEmailTo" placeholder="me@example.com" autocomplete="off" spellcheck="false">' +
-          '</div>' +
-          '<div class="notify-grid-2">' +
-            '<div class="notify-row stack set-row" data-kw="smtp 服务器 host">' +
-              '<div class="notify-label-wrap"><div class="notify-label">SMTP 服务器</div></div>' +
-              '<input class="notify-input" id="notifyCronEmailHost" placeholder="smtp.qq.com" autocomplete="off" spellcheck="false">' +
-            '</div>' +
-            '<div class="notify-row stack set-row" data-kw="端口 port">' +
-              '<div class="notify-label-wrap"><div class="notify-label">端口</div></div>' +
-              '<input class="notify-input" id="notifyCronEmailPort" type="number" min="1" placeholder="465">' +
-            '</div>' +
-          '</div>' +
-          '<div class="notify-grid-2">' +
-            '<div class="notify-row stack set-row" data-kw="加密 ssl tls">' +
-              '<div class="notify-label-wrap"><div class="notify-label">加密方式</div></div>' +
-              '<select class="notify-input" id="notifyCronEmailSec">' +
-                '<option value="ssl">SSL（465）</option>' +
-                '<option value="tls">STARTTLS（587）</option>' +
-                '<option value="none">不加密</option>' +
-              '</select>' +
-            '</div>' +
-            '<div class="notify-row stack set-row" data-kw="用户名 账号 username">' +
-              '<div class="notify-label-wrap"><div class="notify-label">用户名</div></div>' +
-              '<input class="notify-input" id="notifyCronEmailUser" placeholder="邮箱账号" autocomplete="off" spellcheck="false">' +
-            '</div>' +
-          '</div>' +
-          '<div class="notify-grid-2">' +
-            '<div class="notify-row stack set-row" data-kw="授权码 密码 password">' +
-              '<div class="notify-label-wrap"><div class="notify-label">授权码 / 密码</div>' +
-              '<div class="notify-desc">保存后仅显示 ****。</div></div>' +
-              '<form class="notify-pwd-form" autocomplete="off" onsubmit="return false">' +
-                '<input class="notify-input" id="notifyCronEmailPwd" type="password" placeholder="授权码" autocomplete="new-password" data-lpignore="true" data-1p-ignore>' +
-              '</form>' +
-            '</div>' +
-            '<div class="notify-row stack set-row" data-kw="发件人 from 地址">' +
-              '<div class="notify-label-wrap"><div class="notify-label">发件人地址（可选）</div>' +
-              '<div class="notify-desc">留空 = 用用户名。</div></div>' +
-              '<input class="notify-input" id="notifyCronEmailFrom" placeholder="留空 = 用户名" autocomplete="off" spellcheck="false">' +
-            '</div>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="notify-card notifyCronTgOpts">' +
-        '<div class="notify-card-title"><i class="bi bi-telegram"></i> Telegram 设置</div>' +
-        '<div class="notify-row inline set-row" data-kw="配置来源 复用 全局 独立 telegram">' +
-          '<div class="notify-label-wrap"><div class="notify-label">配置来源</div>' +
-          '<div class="notify-desc">复用全局 = 用「通知」分区的 Bot 设置；独立 = 下面单独填。</div></div>' +
-          '<div class="notify-cron-evs">' +
-            '<label class="notify-check"><input type="radio" name="cronTgSrc" id="notifyCronTgSrcG" value="global"> 复用全局</label>' +
-            '<label class="notify-check"><input type="radio" name="cronTgSrc" id="notifyCronTgSrcO" value="own"> 独立配置</label>' +
-          '</div>' +
-        '</div>' +
-        '<div class="notifyCronOwnOpts" id="notifyCronTgOwnOpts">' +
-          '<div class="notify-row stack set-row" data-kw="bot token 令牌">' +
-            '<div class="notify-label-wrap"><div class="notify-label">Bot Token</div>' +
-            '<div class="notify-desc">@BotFather 创建 Bot 后获得；保存后仅显示 ****。</div></div>' +
-            '<form class="notify-pwd-form" autocomplete="off" onsubmit="return false">' +
-              '<input class="notify-input" id="notifyCronTgToken" type="password" placeholder="123456:ABC-DEF…" autocomplete="new-password" data-lpignore="true" data-1p-ignore>' +
-            '</form>' +
-          '</div>' +
-          '<div class="notify-grid-2">' +
-            '<div class="notify-row stack set-row" data-kw="chat id 会话 群组">' +
-              '<div class="notify-label-wrap"><div class="notify-label">Chat ID</div>' +
-              '<div class="notify-desc">可向 <code>@userinfobot</code> 获取。</div></div>' +
-              '<input class="notify-input" id="notifyCronTgChat" placeholder="-1001234567890" autocomplete="off" spellcheck="false">' +
-            '</div>' +
-            '<div class="notify-row stack set-row" data-kw="api base 反代 地址">' +
-              '<div class="notify-label-wrap"><div class="notify-label">API 地址（可选）</div>' +
-              '<div class="notify-desc">默认官方地址，可填自建 / 反代。</div></div>' +
-              '<input class="notify-input" id="notifyCronTgApiBase" placeholder="https://api.telegram.org" autocomplete="off" spellcheck="false">' +
-            '</div>' +
-          '</div>' +
-          '<div class="notify-row stack set-row" data-kw="代理 proxy socks5">' +
-            '<div class="notify-label-wrap"><div class="notify-label">代理（只给这个 Bot 用）</div>' +
-            '<div class="notify-desc">如 <code>http://127.0.0.1:7890</code>；留空 = 直连。</div></div>' +
-            '<input class="notify-input" id="notifyCronTgProxy" placeholder="留空 = 直连" autocomplete="off" spellcheck="false">' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="notify-card notifyCronDingOpts">' +
-        '<div class="notify-card-title"><i class="bi bi-chat-dots"></i> 钉钉机器人设置</div>' +
-        '<div class="notify-row stack set-row" data-kw="钉钉 webhook 加签 secret 地址">' +
-          '<div class="notify-label-wrap"><div class="notify-label">钉钉 Webhook</div>' +
-          '<div class="notify-desc">群设置里添加「自定义机器人」后获得的 Webhook 地址（含 access_token）；保存后仅显示 ****。</div></div>' +
-          '<input class="notify-input" id="notifyCronDingWebhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=…" autocomplete="off" spellcheck="false">' +
-        '</div>' +
-        '<div class="notify-row stack set-row" data-kw="钉钉 加签 密钥 secret sec 安全">' +
-          '<div class="notify-label-wrap"><div class="notify-label">钉钉加签密钥</div>' +
-          '<div class="notify-desc">机器人安全设置选「加签」时的 SEC 密钥；留空 = 不加签。</div></div>' +
-          '<input class="notify-input" id="notifyCronDingSecret" placeholder="SEC…" autocomplete="off" spellcheck="false">' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="notify-card notifyCronPpOpts">' +
-        '<div class="notify-card-title"><i class="bi bi-wechat"></i> PushPlus 设置</div>' +
-        '<div class="notify-grid-2">' +
-          '<div class="notify-row stack set-row" data-kw="pushplus token 令牌 微信">' +
-            '<div class="notify-label-wrap"><div class="notify-label">PushPlus Token</div>' +
-            '<div class="notify-desc">在 www.pushplus.plus 微信登录后获取；保存后仅显示 ****。</div></div>' +
-            '<input class="notify-input" id="notifyCronPpToken" placeholder="推送 token" autocomplete="off" spellcheck="false">' +
-          '</div>' +
-          '<div class="notify-row stack set-row" data-kw="pushplus 群组 topic 编码">' +
-            '<div class="notify-label-wrap"><div class="notify-label">群组编码（可选）</div>' +
-            '<div class="notify-desc">留空发给自己；填了发到指定群组。</div></div>' +
-            '<input class="notify-input" id="notifyCronPpTopic" placeholder="留空 = 发给自己" autocomplete="off" spellcheck="false">' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="notify-card notifyCronWebOpts">' +
-        '<div class="notify-card-title"><i class="bi bi-globe2"></i> 网页版设置</div>' +
-        '<div class="notify-row stack set-row" data-kw="网页 web 站点 地址 base url 域名">' +
-          '<div class="notify-label-wrap"><div class="notify-label">站点地址（可选）</div>' +
-          '<div class="notify-desc">通知里的链接前缀，例如 <code>http://192.168.1.10:5001</code>；' +
-            '留空自动按本机 IP + 端口推断（反向代理 / 域名访问时建议填）。</div></div>' +
-          '<input class="notify-input" id="notifyCronWebBase" placeholder="http://192.168.1.10:5001" autocomplete="off" spellcheck="false">' +
-        '</div>' +
-        '<div class="notify-row stack set-row" data-kw="网页 web 保留 天数 retention days 过期">' +
-          '<div class="notify-label-wrap"><div class="notify-label">每条通知保留天数</div>' +
-          '<div class="notify-desc">到期后自动失效（数据库假删除，不物理删除），页面不再展示。' +
-            '网页渠道开启时，其它渠道的正文末尾会自动附上这个页面地址。</div></div>' +
-          '<input class="notify-input" id="notifyCronWebDays" type="number" min="1" max="365" placeholder="7">' +
-        '</div>' +
-        '<div class="notify-row inline set-row" data-kw="网页 web 入口 链接 附加 按钮 link enabled">' +
-          '<div class="notify-label-wrap"><div class="notify-label">在其它渠道附加网页通知入口</div>' +
-          '<div class="notify-desc">桌面 / 邮件 / 钉钉 / Telegram / PushPlus 的正文末尾会多一行链接，' +
-            '点开就是网页通知页（IDE 预览里是可点的文字链接）。</div></div>' +
-          '<label class="set-switch"><input type="checkbox" id="notifyCronWebLinkOn"><span></span></label>' +
-        '</div>' +
-        '<div class="notify-row stack set-row" data-kw="网页 web 入口 文字 文案 link text 名称">' +
-          '<div class="notify-label-wrap"><div class="notify-label">入口文字</div>' +
-          '<div class="notify-desc">纯文本渠道显示「文字 + 下一行地址」；留空用「网页通知」。</div></div>' +
-          '<input class="notify-input" id="notifyCronWebLinkText" placeholder="网页通知" autocomplete="off" spellcheck="false">' +
-        '</div>' +
-        '<div class="notify-row stack set-row" data-kw="网页 web 固定 跳转 地址 统一 link url 域名">' +
-          '<div class="notify-label-wrap"><div class="notify-label">固定跳转地址（可选）</div>' +
-          '<div class="notify-desc">填了就统一跳到这个地址（比如你自己的通知中心）；' +
-            '留空 = 跳该任务自己的 /n/&lt;令牌&gt; 页面。</div></div>' +
-          '<input class="notify-input" id="notifyCronWebLinkUrl" placeholder="留空 = 各任务自己的 /n/… 地址" autocomplete="off" spellcheck="false">' +
-        '</div>' +
-        '<div class="notify-row inline set-row" data-kw="网页 web 地址 预览 link 任务">' +
-          '<div class="notify-label-wrap"><div class="notify-label">查看测试页</div>' +
-          '<div class="notify-desc">先保存并开启网页渠道，再点「测试网页」生成一条测试通知；' +
-            '这里可直接打开测试页（地址 <code>/n/test</code>）。</div></div>' +
-          '<a class="notify-btn" id="notifyCronWebOpen" target="_blank" rel="noopener" style="text-decoration:none;">' +
-            '<i class="bi bi-box-arrow-up-right"></i> 打开测试页</a>' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="notify-card">' +
-        '<div class="notify-card-title"><i class="bi bi-pencil-square"></i> 通知模板</div>' +
-        '<div class="notify-row stack set-row" data-kw="定时任务 快速模板 预设 preset 模板 template">' +
-          '<div class="notify-label-wrap"><div class="notify-label">快速模板</div>' +
-          '<div class="notify-desc">点一下同时套用标题 + 正文，下面的预览即时生效；套用后仍可自由修改。清空两个字段则使用系统默认文案。</div></div>' +
-          '<div class="notify-presets">' +
-            Object.keys(CRON_TPL_PRESETS).map(id => {
-              const p = CRON_TPL_PRESETS[id];
-              return '<button type="button" class="notify-preset-cron" data-cpreset="' + id + '" title="' + p.desc + '">' +
-                '<i class="bi ' + p.icon + '"></i> ' + p.name + '</button>';
-            }).join("") +
-          '</div>' +
-        '</div>' +
-        '<div class="notify-preview set-row" data-kw="定时任务 效果预览 预览 preview">' +
-          '<div class="notify-preview-head"><span><i class="bi bi-eye"></i> 效果预览</span>' +
-          '<span class="notify-preview-tag">示例数据</span></div>' +
-          '<div class="notify-preview-card">' +
-            '<div class="notify-preview-app"><i class="bi bi-alarm-fill"></i> File_Flask<span>刚刚</span></div>' +
-            '<div class="notify-preview-title" id="notifyCronPreviewTitle">—</div>' +
-            '<div class="notify-preview-body" id="notifyCronPreviewBody">—</div>' +
-          '</div>' +
-        '</div>' +
-        '<div class="notify-row stack set-row" data-kw="定时任务 标题模板 title">' +
-          '<div class="notify-label-wrap"><div class="notify-label">标题模板</div>' +
-          '<div class="notify-desc">留空 = 使用系统默认文案。</div></div>' +
-          '<input class="notify-input" id="notifyCronTitle" placeholder="定时任务{event} · {task}">' +
-        '</div>' +
-        '<div class="notify-vars set-row" data-kw="定时任务 变量 variable 可用变量">' +
-          '<span class="notify-vars-tip">可用变量（点击插入）</span>' +
-          CRON_NOTIFY_VARS.map(x =>
-            '<button type="button" class="notify-var" data-var="{' + x.key + '}" title="' + x.desc + '">{' + x.key + '}</button>').join("") +
-        '</div>' +
-        '<div class="notify-row stack set-row" data-kw="定时任务 正文模板 body">' +
-          '<div class="notify-label-wrap"><div class="notify-label">正文模板</div>' +
-          '<div class="notify-desc">支持换行；钉钉 / PushPlus 等渠道按纯文本发送。</div></div>' +
-          '<textarea class="notify-input notify-textarea" id="notifyCronBody" rows="4" placeholder="任务「{task}」{event}。&#10;退出码：{exit}"></textarea>' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="notify-card">' +
-        '<div class="notify-card-title" style="justify-content:space-between;">' +
-          '<span><i class="bi bi-clock-history"></i> 通知记录</span>' +
-          '<button class="notify-btn" id="notifyCronHistoryRefresh"><i class="bi bi-arrow-clockwise"></i> 刷新</button>' +
-        '</div>' +
-        '<div class="notify-desc" style="margin:0 0 10px;">定时任务触发的推送记录（最新 50 条；全部记录见「通知」分区）。</div>' +
-        '<div id="notifyCronHistory" class="notify-history">加载中…</div>' +
-      '</div>' +
-
-      '<div class="notify-card">' +
-        '<div class="notify-card-title"><i class="bi bi-gear-wide-connected"></i> 操作</div>' +
-        '<div class="notify-desc" style="margin:0 0 12px;">保存后立即生效；测试会按对应渠道发一条真实通知（会先用当前表单里的配置发送）。</div>' +
-        '<div class="notify-actions" data-kw="测试 保存 test save 钉钉 pushplus 邮件 桌面 telegram">' +
-          '<button class="notify-btn" id="notifyCronTestDesktop"><i class="bi bi-bell"></i> 测试桌面</button>' +
-          '<button class="notify-btn" id="notifyCronTestEmail"><i class="bi bi-envelope"></i> 测试邮件</button>' +
-          '<button class="notify-btn" id="notifyCronTestTelegram"><i class="bi bi-telegram"></i> 测试 Telegram</button>' +
-          '<button class="notify-btn" id="notifyCronTestDingtalk"><i class="bi bi-chat-dots"></i> 测试钉钉</button>' +
-          '<button class="notify-btn" id="notifyCronTestPushplus"><i class="bi bi-wechat"></i> 测试 PushPlus</button>' +
-          '<button class="notify-btn" id="notifyCronTestWeb"><i class="bi bi-globe2"></i> 测试网页</button>' +
-          '<button class="notify-btn primary" id="notifyCronSaveBtn" style="margin-left:auto;"><i class="bi bi-save"></i> 保存</button>' +
-        '</div>' +
-      '</div>' +
+  function notifyChannelsBuildSectionHTML() {
+    return '<div class="set-sec" id="sec-channels" data-kw="通知渠道 账号 邮箱 smtp telegram 钉钉 pushplus 网页版 桌面">' +
+      '<h2 data-kw="通知渠道 账号 邮箱 smtp telegram 钉钉 pushplus 网页版 桌面"><i class="bi bi-hdd-network"></i> 通知渠道</h2>' +
+      '<div class="set-desc" data-kw="通知渠道 账号 邮箱 smtp telegram 钉钉 pushplus 网页版 桌面">' +
+        '统一维护「发到哪里」：同一个渠道可以添加多个账号（多个邮箱、多个 Telegram 群、多个钉钉机器人）。' +
+        '「AI 通知」与「定时任务通知」只负责勾选账号。密钥只保存在服务器本地。</div>' +
+      // 不再需要「保存」按钮：改动自动落库；这行状态跟着滚动吸顶，滚到哪都能看到存没存
+      '<div class="nacc-status"><span class="nacc-tip" id="notifyChannelsTip">改动会自动保存</span></div>' +
+      '<div id="notifyChannelsBox" class="nacc-list"><div class="notify-history-empty">加载中…</div></div>' +
     '</div>';
   }
 
+  function naccEsc(v) {
+    return String(v == null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function naccBlank(channel) {
+    const out = {};
+    (NOTIFY_CH_DEFS[channel] || { fields: [] }).fields.forEach(f => {
+      out[f.k] = f.type === "bool" ? (f.k === "link_enabled" || f.k === "sound") : "";
+    });
+    return out;
+  }
+
+  /* 提交给服务端的结构：只保留 id / name / cfg，
+     并且**丢掉用户还没动过的草稿账号**（新加但一个字没填的空账号不落库） */
+  function naccPayload() {
+    const out = {};
+    NOTIFY_CH_ORDER.forEach(ch => {
+      out[ch] = (_nacc && _nacc[ch] || [])
+        .filter(a => !a._draft || a._touched)
+        .map(a => ({ id: a.id, name: a.name || "", cfg: a.cfg || {} }));
+    });
+    return out;
+  }
+
+  /* ---------- 完成度：必填字段都填了才算「已配置」 ---------- */
+  function naccFieldDef(channel, k) {
+    return ((NOTIFY_CH_DEFS[channel] || {}).fields || []).find(f => f.k === k) || null;
+  }
+
+  function naccFieldFilled(channel, acc, k) {
+    const cfg = (acc && acc.cfg) || {};
+    const f = naccFieldDef(channel, k);
+    // 服务端对密钥类字段（邮箱授权码、TG Token、钉钉 Webhook…）会回传掩码 + *_set 标志，
+    // 有标志就说明早就存过了，算已填
+    if (cfg[k + "_set"]) return true;
+    if (!f) return !!String(cfg[k] == null ? "" : cfg[k]).trim();
+    if (f.type === "bool") return true;                       // 勾选项永远算已填
+    return !!String(cfg[k] == null ? "" : cfg[k]).trim();
+  }
+
+  function naccMissing(channel, acc) {
+    return (((NOTIFY_CH_DEFS[channel] || {}).required) || [])
+      .filter(k => !naccFieldFilled(channel, acc, k));
+  }
+
+  function naccComplete(channel, acc) {
+    return naccMissing(channel, acc).length === 0;
+  }
+
+  function naccMissingLabels(channel, acc) {
+    return naccMissing(channel, acc)
+      .map(k => (naccFieldDef(channel, k) || {}).label || k).join("、");
+  }
+
+  /* 折叠状态：按 渠道:id 记住用户的选择；没记录过的账号「配置完整就默认收起」，
+     没填完的默认展开，省得一进页面就是一屏表单。 */
+  const _naccCollapsed = {};
+  function naccCollapsedOf(channel, acc) {
+    if (!naccComplete(channel, acc)) return false;   // 没填完的一律展开，别把必填项藏起来
+    const key = channel + ":" + acc.id;
+    if (Object.prototype.hasOwnProperty.call(_naccCollapsed, key)) return !!_naccCollapsed[key];
+    return false;                       // 没记录过的账号默认展开
+  }
+
+  /* 载入时给「已配置完成」的账号设默认收起（之后跟随用户的手动展开 / 收起） */
+  function naccSeedCollapsed() {
+    NOTIFY_CH_ORDER.forEach(ch => {
+      (_nacc[ch] || []).forEach(a => {
+        const key = ch + ":" + a.id;
+        if (!Object.prototype.hasOwnProperty.call(_naccCollapsed, key)) {
+          _naccCollapsed[key] = naccComplete(ch, a);
+        }
+      });
+    });
+  }
+
+  /* 是否正在编辑渠道账号的某个字段：是则先不重绘，免得输入法组词被打断 */
+  function naccIsEditing() {
+    const el = document.activeElement;
+    return !!(el && el.dataset && (el.dataset.f || el.dataset.nchName) &&
+              el.closest && el.closest("#notifyChannelsBox"));
+  }
+
+  /* 重绘会重建输入框：把焦点和光标位置还回去，避免「填完一格就被踢出输入」 */
+  function naccFocusSig(el) {
+    if (!el || !el.dataset || !(el.dataset.f || el.dataset.nchName)) return null;
+    return { nch: el.dataset.nch, id: el.dataset.id,
+             f: el.dataset.f || "", name: el.dataset.nchName || "" };
+  }
+  function naccRestoreFocus(sig) {
+    if (!sig) return;
+    let sel;
+    try {
+      sel = sig.name
+        ? '.nacc-name[data-id="' + sig.id + '"]'
+        : 'input[data-nch="' + sig.nch + '"][data-id="' + sig.id + '"][data-f="' + sig.f + '"]';
+      const el = document.querySelector("#notifyChannelsBox " + sel);
+      if (!el || el.offsetParent === null) return;     // 卡片收起时跳过
+      el.focus();
+      if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length);
+    } catch (_) { /* 忽略：焦点恢复失败不影响保存 */ }
+  }
+
+  function naccToggleCard(channel, id, btn) {
+    const key = channel + ":" + id;
+    const acc = naccFind(channel, id);
+    const cur = btn && btn.dataset ? btn.dataset.collapsed === "1" : naccCollapsedOf(channel, acc || { id: id });
+    _naccCollapsed[key] = !cur;
+    notifyChannelsRender();
+  }
+
+  /* 输入时就地刷新这一张卡的状态（徽标 / 还缺什么 / 必填高亮），
+     不用整块重绘，既能即时反馈也不打断输入 */
+  function naccRefreshCardStatus(channel, id) {
+    const acc = naccFind(channel, id);
+    const card = document.querySelector('#notifyChannelsBox .nacc-card[data-ch="' + channel +
+      '"][data-id="' + id + '"]');
+    if (!acc || !card) return;
+    const done = naccComplete(channel, acc);
+    card.classList.toggle("done", done);
+    card.classList.toggle("todo", !done);
+
+    const badge = card.querySelector(".nacc-badge");
+    if (badge) {
+      badge.classList.toggle("ok", done);
+      badge.classList.toggle("warn", !done);
+      badge.textContent = done ? "已配置" : "待完善";
+      if (done) badge.removeAttribute("title");
+      else badge.title = "还缺：" + naccMissingLabels(channel, acc);
+    }
+    const need = card.querySelector(".nacc-need");
+    if (need) {
+      if (done) need.remove();
+      else need.innerHTML = '<i class="bi bi-info-circle"></i> 还缺：' + naccEsc(naccMissingLabels(channel, acc));
+    }
+    // 必填项漏填高亮
+    card.querySelectorAll("[data-f]").forEach(el => {
+      const k = el.dataset.f;
+      const isReq = (((NOTIFY_CH_DEFS[channel] || {}).required) || []).indexOf(k) >= 0;
+      const miss = isReq && !naccFieldFilled(channel, acc, k);
+      const lab = el.closest(".nacc-f");
+      if (lab) lab.classList.toggle("nacc-miss", miss);
+    });
+    // 这一张卡填完了，它下面的「填完才能继续添加」提示也该收起来
+    if (done) {
+      const nxt = card.nextElementSibling;
+      if (nxt && nxt.classList && nxt.classList.contains("nacc-block-hint")) nxt.remove();
+    }
+  }
+
+  function naccFieldHtml(channel, acc, f) {
+    const cfg = acc.cfg || {};
+    const raw = cfg[f.k];
+    const idAttr = ' data-nch="' + channel + '" data-id="' + naccEsc(acc.id) + '" data-f="' + f.k + '"';
+    const isReq = (((NOTIFY_CH_DEFS[channel] || {}).required) || []).indexOf(f.k) >= 0;
+    const miss = isReq && !naccFieldFilled(channel, acc, f.k);
+    const cls = "nacc-f" + (f.full ? " full" : "") + (miss ? " nacc-miss" : "");
+    const star = isReq ? '<i class="nacc-req" title="必填">*</i>' : "";
+    if (f.type === "bool") {
+      // 与其他字段同样的「标签 + 控件」两行结构，勾选框才能和左边的输入框水平对齐
+      return '<div class="nacc-f"><span>' + naccEsc(f.label) + star + '</span>' +
+        '<label class="nacc-check"><input type="checkbox"' + idAttr +
+          (raw === false ? "" : " checked") + '>' +
+          '<span class="nacc-check-t"><span class="on">已开启</span><span class="off">已关闭</span></span>' +
+        '</label></div>';
+    }
+    if (f.type === "select") {
+      const opts = (f.options || []).map(o =>
+        '<option value="' + naccEsc(o[0]) + '"' + (String(raw || o[0]) === o[0] ? " selected" : "") + '>' +
+        naccEsc(o[1]) + '</option>').join("");
+      return '<label class="' + cls + '"><span>' + naccEsc(f.label) + star + '</span>' +
+        '<select' + idAttr + '>' + opts + '</select></label>';
+    }
+    if (f.type === "password") {
+      const saved = !!cfg[f.k + "_set"];
+      const val = saved ? "" : naccEsc(raw || "");
+      const ph = saved ? "已保存（留空保持不变）" : (f.ph || "");
+      return '<label class="' + cls + '"><span>' + naccEsc(f.label) + star + '</span>' +
+        '<input type="password"' + idAttr + ' value="' + val + '" placeholder="' + naccEsc(ph) +
+        '" autocomplete="new-password" data-lpignore="true" data-1p-ignore spellcheck="false"></label>';
+    }
+    // 密钥类字段（如钉钉 Webhook）服务端只回传掩码：这里留空 + 提示已保存，
+    // 用户不填就保持原值（与密码框一致）
+    const savedSec = !!cfg[f.k + "_set"];
+    const tv = savedSec ? "" : naccEsc(raw == null ? "" : raw);
+    const tph = savedSec ? "已保存（留空保持不变）" : (f.ph || "");
+    return '<label class="' + cls + '"><span>' + naccEsc(f.label) + star + '</span>' +
+      '<input type="' + (f.type === "number" ? "number" : "text") + '"' + idAttr +
+      ' value="' + tv + '" placeholder="' + naccEsc(tph) +
+      '" autocomplete="off" spellcheck="false"></label>';
+  }
+
+  /* 折叠时显示的一行摘要，方便一眼看出这个账号发到哪 */
+  function naccSummary(channel, acc) {
+    const c = (acc && acc.cfg) || {};
+    let s = "";
+    if (channel === "desktop") s = c.app_name || "";
+    else if (channel === "email") s = c.to || "";
+    else if (channel === "telegram") s = c.chat_id ? "Chat ID " + c.chat_id : "";
+    else if (channel === "dingtalk") {
+      const m = String(c.webhook || "").match(/^https?:\/\/([^/]+)/);
+      s = m ? m[1] : (c.webhook_set ? "已配置 Webhook" : "");
+    } else if (channel === "pushplus") s = c.topic || "";
+    else if (channel === "web") s = c.base_url || "";
+    s = String(s).replace(/\s+/g, " ").trim();
+    return s.length > 42 ? s.slice(0, 42) + "…" : s;
+  }
+
+  function notifyChannelsRender() {
+    const box = document.getElementById("notifyChannelsBox");
+    if (!box) return;
+    if (!_nacc) { box.innerHTML = '<div class="notify-history-empty">读取失败</div>'; return; }
+    const focusSig = naccFocusSig(document.activeElement);
+    box.innerHTML = NOTIFY_CH_ORDER.map(ch => {
+      const def = NOTIFY_CH_DEFS[ch] || { name: ch, icon: "bi-bell", desc: "", fields: [] };
+      const items = _nacc[ch] || [];
+      // 第一个没填完的账号：提示直接贴在它下面，避免跑到组头让人误以为是别的问题
+      const firstBad = items.findIndex(a => !naccComplete(ch, a));
+      const cards = items.map((acc, idx) => {
+        const fields = def.fields.map(f => naccFieldHtml(ch, acc, f)).join("");
+        const done = naccComplete(ch, acc);
+        const collapsed = naccCollapsedOf(ch, acc);
+        const sum = collapsed ? naccSummary(ch, acc) : "";
+        return '<div class="nacc-card' + (collapsed ? " collapsed" : "") + (done ? " done" : " todo") +
+            '" data-ch="' + ch + '" data-id="' + naccEsc(acc.id) + '">' +
+          '<div class="nacc-hd">' +
+            // 只有「配置完整」的账号才有折叠按钮；没填完的保持展开，避免把必填项藏起来
+            (done
+              ? '<button class="nacc-toggle" data-nacc-act="toggle" data-ch="' + ch + '" data-id="' + naccEsc(acc.id) + '"' +
+                ' data-collapsed="' + (collapsed ? "1" : "0") + '" title="' + (collapsed ? "展开配置" : "收起配置") + '">' +
+                '<i class="bi ' + (collapsed ? "bi-chevron-right" : "bi-chevron-down") + '"></i></button>'
+              : '<span class="nacc-toggle-sp"></span>') +
+            '<i class="bi ' + def.icon + ' nacc-ico-ch"></i>' +
+            '<input class="nacc-name" data-nch-name="' + ch + '" data-id="' + naccEsc(acc.id) + '"' +
+              ' value="' + naccEsc(acc.name || "") + '" placeholder="账号名称，如 运维群" autocomplete="off" spellcheck="false">' +
+            (collapsed && sum ? '<span class="nacc-sum">' + naccEsc(sum) + '</span>' : '') +
+            '<span class="nacc-badge ' + (done ? "ok" : "warn") + '"' +
+              (done ? '' : ' title="还缺：' + naccEsc(naccMissingLabels(ch, acc)) + '"') + '>' +
+              (done ? '已配置' : '待完善') + '</span>' +
+            '<div class="nacc-ops">' +
+              '<button class="nacc-ico" data-nacc-act="test" data-ch="' + ch + '" data-id="' + naccEsc(acc.id) + '"' +
+                ' title="给这个账号发一条测试通知"><i class="bi bi-send"></i></button>' +
+              '<button class="nacc-ico danger" data-nacc-act="del" data-ch="' + ch + '" data-id="' + naccEsc(acc.id) + '"' +
+                ' title="删除该账号"><i class="bi bi-trash3"></i></button>' +
+            '</div>' +
+          '</div>' +
+          (done ? '' : '<div class="nacc-need"><i class="bi bi-info-circle"></i> 还缺：' +
+            naccEsc(naccMissingLabels(ch, acc)) + '</div>') +
+          '<div class="nacc-grid">' + fields + '</div>' +
+        '</div>' +
+        (idx === firstBad
+          ? '<div class="nacc-block-hint"><i class="bi bi-info-circle"></i> 填完这个账号的必填项，才能继续添加下一个</div>'
+          : '');
+      }).join("");
+      // 有没填完的账号时，禁止继续添加，避免一个渠道里全是半成品
+      const blocker = items.find(a => !naccComplete(ch, a));
+      const addBtn = '<button class="notify-btn nacc-add" data-nacc-act="add" data-ch="' + ch + '"' +
+        (blocker ? ' disabled title="请先填完「' + naccEsc(blocker.name || blocker.id) + '」的必填项（' +
+                   naccEsc(naccMissingLabels(ch, blocker)) + '）再添加"' : '') + '>' +
+        '<i class="bi bi-plus-lg"></i> 添加账号</button>';
+      return '<div class="nacc-group" data-ch="' + ch + '">' +
+        '<div class="nacc-group-hd">' +
+          '<div class="nacc-group-tt"><i class="bi ' + def.icon + '"></i>' +
+            '<span class="nacc-group-name">' + naccEsc(def.name) + '</span>' +
+            '<span class="nacc-group-desc">' + naccEsc(def.desc || "") + '</span>' +
+          '</div>' +
+          '<div class="nacc-group-act">' +
+            '<span class="nacc-group-n">' + items.length + ' 个账号</span>' +
+            addBtn +
+          '</div>' +
+        '</div>' +
+        (cards || '<div class="nacc-empty">该渠道还没有账号，点「添加账号」新建一个。</div>') +
+      '</div>';
+    }).join("");
+    naccRestoreFocus(focusSig);
+    notifyTargetsRefreshAll();     // 账号变了，两个分区的勾选列表同步刷新
+  }
+
+  async function notifyChannelsLoad(force) {
+    if (!document.getElementById("notifyChannelsBox")) return;
+    // 先把还在防抖队列里的改动落库，否则下面拉回来的服务端快照会把它覆盖掉
+    // （表现就是「刚填的内容切个分区就没了」）
+    await notifyChannelsFlush();
+    if (_nacc && !force) { notifyChannelsRender(); return; }
+    try {
+      const r = await fetch("/api/notify/channels");
+      const d = await r.json();
+      if (d && d.channels) {
+        _nacc = {};
+        NOTIFY_CH_ORDER.forEach(ch => { _nacc[ch] = (d.channels[ch] || []).slice(); });
+        _naccSavedJson = JSON.stringify({ channels: naccPayload() });   // 记住已落库的基线
+        naccSeedCollapsed();          // 配置完整的账号默认收起
+        notifyChannelsRender();
+      }
+    } catch (e) {
+      const box = document.getElementById("notifyChannelsBox");
+      if (box) box.innerHTML = '<div class="notify-history-empty">读取失败：' + naccEsc(e.message) + '</div>';
+    }
+  }
+
+  function naccFind(channel, id) {
+    return (_nacc && _nacc[channel] || []).find(a => a.id === id) || null;
+  }
+
+  function notifyChannelsAdd(channel) {
+    if (!_nacc) return;
+    // 前置校验：该渠道里还有没填完的账号时，不允许继续添加
+    const blocker = (_nacc[channel] || []).find(a => !naccComplete(channel, a));
+    if (blocker) {
+      notifyToast("请先填完「" + (blocker.name || blocker.id) + "」的必填项（" +
+        naccMissingLabels(channel, blocker) + "）再添加账号", "warn");
+      return;
+    }
+    const id = channel + "-" + Math.random().toString(16).slice(2, 10);
+    _nacc[channel] = _nacc[channel] || [];
+    const def = NOTIFY_CH_DEFS[channel] || { name: channel };
+    // _draft：还没填任何内容的草稿，只在界面上占个位，不落库
+    _nacc[channel].push({ id: id, channel: channel, _draft: true,
+      name: def.name + " " + (_nacc[channel].length + 1), cfg: naccBlank(channel) });
+    _naccVer++;
+    notifyChannelsRender();
+    // 空账号不保存：等用户真的填了内容，输入事件触发的自动保存才会把它写进去
+    const tip = document.getElementById("notifyChannelsTip");
+    if (tip) tip.textContent = "新账号填入内容后才会保存";
+  }
+
+  /* 删除前的二次确认：优先用全局的「贴着按钮弹出」悬浮框（02_查找替换 里导出），
+     拿不到时退回居中弹窗；都没有才直接放行，避免功能卡死。 */
+  function naccConfirmDelete(anchor, acc) {
+    const title = "删除通知账号";
+    const msg = "确定删除「" + (acc.name || acc.id) + "」吗？" +
+      "删除后「AI 通知」与「定时任务通知」里对该账号的勾选会一并失效。";
+    if (anchor && typeof window.uiConfirmPop === "function") {
+      return window.uiConfirmPop(anchor, { title: title, msg: msg, okText: "删除", danger: true });
+    }
+    if (typeof uiConfirm === "function") {
+      return uiConfirm(title, msg, "删除", true);
+    }
+    return Promise.resolve(true);
+  }
+
+  async function notifyChannelsDel(channel, id, btn) {
+    const acc = naccFind(channel, id);
+    if (!acc) return;
+    const ok = await naccConfirmDelete(btn || null, acc);
+    if (!ok) return;
+
+    _nacc[channel] = (_nacc[channel] || []).filter(a => a.id !== id);
+    _naccVer++;
+    notifyChannelsRender();
+    clearTimeout(_naccTimer);              // 取消防抖，改成「立即保存」再刷新
+    _naccTimer = null;
+    const saved = await notifyChannelsSave(true);
+    if (!saved) notifyToast("删除失败，已按服务端配置恢复", "err");
+    else notifyToast("已删除账号：" + (acc.name || acc.id), "ok");
+    await notifyChannelsLoad(true);        // 以服务端为准，同步两个通知分区的勾选
+  }
+
+  function notifyChannelsAutoSave() {
+    clearTimeout(_naccTimer);
+    const tip = document.getElementById("notifyChannelsTip");
+    if (tip) tip.textContent = "有改动，正在保存…";
+    _naccTimer = setTimeout(() => {
+      _naccTimer = null;
+      notifyChannelsSave(true);
+    }, 800);
+  }
+
+  /* 立刻把防抖队列里的改动存掉（切分区 / 关页面前调用） */
+  async function notifyChannelsFlush() {
+    if (!_naccTimer) return;
+    clearTimeout(_naccTimer);
+    _naccTimer = null;
+    await notifyChannelsSave(true);
+  }
+
+  async function notifyChannelsSave(silent) {
+    if (!_nacc) return false;
+    // 同一时间只跑一个保存：后来的调用排队等前一个结束。
+    // 否则「删除后马上刷新」这类操作会被在途的旧快照覆盖，表现为删不掉。
+    for (let i = 0; _naccSaving && i < 100; i++) {
+      await new Promise(r => setTimeout(r, 40));
+    }
+    // 提交内容没变就直接跳过：空草稿、只是点开卡片、重复触发都不写库
+    const bodyStr = JSON.stringify({ channels: naccPayload() });
+    const tip = document.getElementById("notifyChannelsTip");
+    if (bodyStr === _naccSavedJson) {
+      if (tip) tip.textContent = "改动会自动保存";
+      return true;
+    }
+    _naccSaving = true;
+    // 发送时快照：请求往返期间用户可能继续输入 / 删除，不能拿旧对象当请求体，
+    // 也不能用服务端返回的旧快照覆盖内存里的新改动。
+    const ver = _naccVer;
+    if (tip) tip.textContent = "保存中…";
+    try {
+      const r = await fetch("/api/notify/channels", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: bodyStr,
+      });
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || ("HTTP " + r.status));
+      if (ver === _naccVer) {                 // 期间没有新改动才回填
+        // 服务端只返回已落库的账号；界面上还没填内容的草稿要保留住，不能凭空消失
+        const drafts = {};
+        NOTIFY_CH_ORDER.forEach(ch => {
+          drafts[ch] = (_nacc[ch] || []).filter(a => a._draft && !a._touched);
+        });
+        _nacc = {};
+        NOTIFY_CH_ORDER.forEach(ch => {
+          _nacc[ch] = ((d.channels || {})[ch] || []).slice().concat(drafts[ch] || []);
+        });
+        _naccSavedJson = JSON.stringify({ channels: naccPayload() });
+        // 正在输入时不重绘（避免输入法组词被打断），离开输入框后自然会再存一次并刷新状态
+        if (!naccIsEditing()) notifyChannelsRender();
+      }
+      if (tip) {
+        const t = new Date();
+        const hh = String(t.getHours()).padStart(2, "0");
+        const mm = String(t.getMinutes()).padStart(2, "0");
+        const ss = String(t.getSeconds()).padStart(2, "0");
+        tip.textContent = "已自动保存 " + hh + ":" + mm + ":" + ss;
+      }
+      if (!silent) notifyToast("通知渠道已保存", "ok");
+      return true;
+    } catch (e) {
+      // 没有保存按钮了，失败必须明确提示，否则用户以为已经存上了
+      if (tip) tip.textContent = "保存失败：" + e.message;
+      notifyToast("通知渠道保存失败：" + e.message, "err");
+      return false;
+    } finally {
+      _naccSaving = false;
+    }
+  }
+
+  async function notifyChannelTest(channel, id, btn) {
+    if (btn) { btn.disabled = true; btn.dataset._old = btn.innerHTML; btn.innerHTML = '<i class="bi bi-hourglass-split"></i>'; }
+    try {
+      await notifyChannelsSave(true);          // 先落盘，测试用的才是最新配置
+      const r = await fetch("/api/notify/channels/test", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: channel, id: id }),
+      });
+      const d = await r.json();
+      const acc = naccFind(channel, id);
+      const name = (acc && acc.name) || channel;
+      if (d.ok) notifyToast("测试通知已发送（" + name + "）", "ok");
+      else notifyToast("测试失败（" + name + "）：" + (d.detail || d.error || "未知错误"), "err");
+    } catch (e) {
+      notifyToast("测试请求失败：" + e.message, "err");
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset._old || "测试"; }
+    }
+  }
+
+  /* ---------- 账号勾选（「通知」/「定时任务通知」共用） ----------
+     整行都可点击：账号做成一枚「可勾选的胶囊」，鼠标落在行内任意位置都能切换，
+     不用去瞄那个 15px 的小方框。 */
+  function notifyTargetsRender(boxId, targets) {
+    const box = document.getElementById(boxId);
+    if (!box) return;
+    if (!_nacc) { box.innerHTML = '<div class="notify-history-empty">账号加载中…</div>'; return; }
+    const t = targets || {};
+    const groups = NOTIFY_CH_ORDER.map(ch => {
+      const all = _nacc[ch] || [];
+      // 只列出「已落库且必填项填完」的账号：空账号 / 没填完的不能勾选
+      const items = all.filter(a => !a._draft && naccComplete(ch, a));
+      const pending = all.length - items.length;
+      const def = NOTIFY_CH_DEFS[ch] || { name: ch, icon: "bi-bell" };
+      const picked = Array.isArray(t[ch]) ? t[ch].map(String) : [];
+      let opts = "";
+      if (items.length) {
+        opts = items.map(a => {
+          const on = picked.indexOf(a.id) >= 0;
+          return '<label class="nt-opt' + (on ? " on" : "") + '" title="点击勾选 / 取消">' +
+            '<input type="checkbox" data-nch-target="' + ch + '" value="' + naccEsc(a.id) + '"' +
+            (on ? " checked" : "") + '>' +
+            '<span class="nt-name">' + naccEsc(a.name || a.id) + '</span></label>';
+        }).join("");
+        if (pending > 0) {
+          opts += '<span class="nt-pending"><i class="bi bi-exclamation-circle"></i>' +
+            pending + ' 个账号没配置完 <a href="javascript:void(0)" class="nt-go" data-go="' + ch + '">去完善</a></span>';
+        }
+      } else if (pending > 0) {
+        opts = '<span class="nt-none">' + pending + ' 个账号未配置完成 <a href="javascript:void(0)" class="nt-go" data-go="' +
+          ch + '">去完善</a></span>';
+      } else {
+        opts = '<span class="nt-none">未配置账号 <a href="javascript:void(0)" class="nt-go" data-go="' + ch + '">去配置</a></span>';
+      }
+      return '<div class="nt-group' + (items.length === 1 ? " nt-single" : "") + '" data-nt-group="' + ch + '"' +
+        (items.length === 1 ? ' title="点击整行即可勾选 / 取消"' : '') + '>' +
+        '<div class="nt-ch"><i class="bi ' + def.icon + '"></i>' + naccEsc(def.name) + '</div>' +
+        '<div class="nt-opts">' + opts + '</div>' +
+      '</div>';
+    }).join("");
+    box.innerHTML = groups ||
+      '<div class="notify-history-empty">还没有配置任何渠道账号，请先到「通知渠道」添加。</div>';
+    notifyTestButtonsRefresh();      // 没勾账号的渠道，对应的「测试」按钮置灰
+  }
+
+  /* 勾选状态变化后同步胶囊的高亮（不整体重绘，避免打断点击） */
+  function notifyTargetsSyncChip(cb) {
+    if (!cb) return;
+    const chip = cb.closest ? cb.closest(".nt-opt") : null;
+    if (chip) chip.classList.toggle("on", !!cb.checked);
+  }
+
+  function notifyTargetsCollect(boxId) {
+    const box = document.getElementById(boxId);
+    const out = {};
+    if (!box) return out;
+    box.querySelectorAll("input[data-nch-target]").forEach(el => {
+      const ch = el.dataset.nchTarget;
+      out[ch] = out[ch] || [];
+      if (el.checked) out[ch].push(el.value);
+    });
+    return out;
+  }
+
+  /* ---------- 测试按钮：只有「上面勾选了该渠道的账号」才能点 ---------- */
+  const NOTIFY_TEST_BTN_CH = {
+    notifyTestLocal: "desktop", notifyTestEmail: "email",
+    notifyTestTelegram: "telegram", notifyTestAll: "all",
+    notifyCronTestDesktop: "desktop", notifyCronTestEmail: "email",
+    notifyCronTestTelegram: "telegram", notifyCronTestDingtalk: "dingtalk",
+    notifyCronTestPushplus: "pushplus", notifyCronTestWeb: "web",
+  };
+  const NOTIFY_TEST_BTN_TIP = "先在「推送账号」里勾选该渠道的账号，才能发送测试";
+
+  function notifyTestButtonsRefresh() {
+    const aiTg = notifyTargetsCollect("notifyTargets");
+    const cronTg = notifyTargetsCollect("cronNotifyTargets");
+    const hasAny = tg => NOTIFY_CH_ORDER.some(ch => (tg[ch] || []).length > 0);
+    Object.keys(NOTIFY_TEST_BTN_CH).forEach(id => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      const ch = NOTIFY_TEST_BTN_CH[id];
+      const tg = id.indexOf("notifyCron") === 0 ? cronTg : aiTg;
+      const on = ch === "all" ? hasAny(tg) : (tg[ch] || []).length > 0;
+      btn.disabled = !on;
+      if (on) btn.removeAttribute("title");
+      else btn.title = NOTIFY_TEST_BTN_TIP;
+    });
+  }
+
+  function notifyTargetsRefreshAll() {
+    if (_notifyCache) notifyTargetsRender("notifyTargets", _notifyCache.targets);
+    if (_cronNotifyCache) notifyTargetsRender("cronNotifyTargets", _cronNotifyCache.targets);
+  }
+
+  /* ---------- 分区 HTML ---------- */
   function notifyBuildSectionHTML() {
-    return '<div class="set-sec" id="sec-notify" data-kw="通知 notify email 邮件 浏览器 桌面 toast 提示">' +
-      '<h2><i class="bi bi-bell"></i> 通知</h2>' +
-      '<div class="set-desc" data-kw="通知 notify 邮件 smtp telegram tg 机器人 浏览器">AI 消息完成后向"启动服务的本人"推送。<b>浏览器通知</b>通过浏览器通知 API 推送到当前浏览器（需授权），服务器本机系统通知作为兜底；<b>邮件</b>通过 SMTP 发送；<b>Telegram</b> 通过自建 Bot 推送。默认关闭。</div>' +
+    return '<div class="set-sec" id="sec-notify" data-kw="AI 通知 ai notify 通知 email 邮件 浏览器 桌面 账号">' +
+      '<h2><i class="bi bi-bell"></i> AI 通知</h2>' +
+      '<div class="set-desc" data-kw="AI 通知 ai notify 通知 邮件 smtp telegram 浏览器 账号">' +
+        'AI 助手 / 智能体回复完成后向「启动服务的本人」推送。推送账号统一在「<b>通知渠道</b>」里配置，' +
+        '这里只勾选要发到哪些账号（同一渠道可多选）。默认关闭。</div>' +
 
       '<div class="notify-card">' +
         '<div class="notify-card-title"><i class="bi bi-power"></i> 总开关</div>' +
         '<div class="notify-row inline set-row" data-kw="启用通知 enabled">' +
-          '<div class="notify-label-wrap"><div class="notify-label">启用通知</div><div class="notify-desc">关闭后所有通道均不触发。</div></div>' +
+          '<div class="notify-label-wrap"><div class="notify-label">启用通知</div>' +
+          '<div class="notify-desc">关闭后所有账号均不触发。</div></div>' +
           '<label class="set-switch"><input type="checkbox" id="notifyEnabled"><span></span></label>' +
         '</div>' +
       '</div>' +
 
       '<div class="notify-card">' +
-        '<div class="notify-card-title"><i class="bi bi-broadcast"></i> 通知通道</div>' +
-        '<div class="notify-grid-2">' +
-          '<div class="notify-channel-card set-row" data-kw="浏览器 browser desktop 本地">' +
-            '<div class="notify-icon"><i class="bi bi-bell"></i></div>' +
-            '<div class="notify-channel-info"><div class="notify-label">浏览器通知</div><div class="notify-desc">通过浏览器通知 API 推送到当前浏览器（需授权通知权限）。</div></div>' +
-            '<label class="set-switch"><input type="checkbox" id="notifyDesktop"><span></span></label>' +
-          '</div>' +
-          '<div class="notify-channel-card email set-row" data-kw="邮件 smtp email">' +
-            '<div class="notify-icon"><i class="bi bi-envelope"></i></div>' +
-            '<div class="notify-channel-info"><div class="notify-label">邮件通知（SMTP）</div><div class="notify-desc">QQ / 163 / Gmail / Outlook 等 SMTP 发送。</div></div>' +
-            '<label class="set-switch"><input type="checkbox" id="notifyEmail"><span></span></label>' +
-          '</div>' +
-          '<div class="notify-channel-card tg set-row" data-kw="telegram tg bot 机器人 电报">' +
-            '<div class="notify-icon"><i class="bi bi-telegram"></i></div>' +
-            '<div class="notify-channel-info"><div class="notify-label">Telegram（Bot）</div><div class="notify-desc">自建 Bot 推送到指定私聊 / 群组 / 话题。</div></div>' +
-            '<label class="set-switch"><input type="checkbox" id="notifyTelegram"><span></span></label>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="notify-card notifyDesktopOpts">' +
-        '<div class="notify-card-title"><i class="bi bi-bell"></i> 浏览器通知选项</div>' +
-        '<div class="notify-row stack set-row" data-kw="应用名 app name">' +
-          '<div class="notify-label-wrap"><div class="notify-label">应用名</div><div class="notify-desc">系统通知中心显示的来源名称（服务器本机系统通知兜底时使用）。</div></div>' +
-          '<input class="notify-input" id="notifyAppName" placeholder="文件管理器">' +
-        '</div>' +
-        '<div class="notify-row inline set-row" data-kw="提示音 sound 响铃">' +
-          '<div class="notify-label-wrap"><div class="notify-label">提示音</div><div class="notify-desc">浏览器通知是否响铃（最终以浏览器/系统设置为准）。</div></div>' +
-          '<label class="set-switch"><input type="checkbox" id="notifyDesktopSound"><span></span></label>' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="notify-card notifyEmailOpts">' +
-        '<div class="notify-card-title"><i class="bi bi-envelope-at"></i> SMTP 设置</div>' +
-        '<div class="notify-row stack set-row" data-kw="收件人 to">' +
-          '<div class="notify-label-wrap"><div class="notify-label">收件人地址</div><div class="notify-desc">接收通知的邮箱，多个用英文逗号分隔。</div></div>' +
-          '<input class="notify-input" id="notifyTo" placeholder="me@example.com">' +
-        '</div>' +
-        '<div class="notify-grid-2">' +
-          '<div class="notify-row stack set-row" data-kw="smtp 服务器 host">' +
-            '<div class="notify-label-wrap"><div class="notify-label">SMTP 服务器</div><div class="notify-desc">如 smtp.qq.com</div></div>' +
-            '<input class="notify-input" id="notifySmtpHost" placeholder="smtp.qq.com">' +
-          '</div>' +
-          '<div class="notify-row stack set-row" data-kw="端口 port">' +
-            '<div class="notify-label-wrap"><div class="notify-label">端口</div><div class="notify-desc">465 或 587</div></div>' +
-            '<input class="notify-input" id="notifySmtpPort" type="number" min="1" max="65535" placeholder="465">' +
-          '</div>' +
-        '</div>' +
-        '<div class="notify-row stack set-row" data-kw="加密 security">' +
-          '<div class="notify-label-wrap"><div class="notify-label">加密方式</div><div class="notify-desc">SSL (TLS) / STARTTLS / 无</div></div>' +
-          '<select class="notify-select" id="notifyEncryption">' +
-            '<option value="ssl">SSL (TLS)</option><option value="starttls">STARTTLS</option><option value="none">无</option>' +
-          '</select>' +
-        '</div>' +
-        '<div class="notify-grid-2">' +
-          '<div class="notify-row stack set-row" data-kw="发件人账号 username">' +
-            '<div class="notify-label-wrap"><div class="notify-label">发件人账号</div><div class="notify-desc">你的邮箱地址</div></div>' +
-            '<input class="notify-input" id="notifyUser" placeholder="me@example.com">' +
-          '</div>' +
-          '<div class="notify-row stack set-row" data-kw="授权码 密码 password">' +
-            '<div class="notify-label-wrap"><div class="notify-label">授权码 / 密码</div><div class="notify-desc">邮件服务商授权码，保存后仅显示 ****</div></div>' +
-            '<form class="notify-pwd-form" autocomplete="off" onsubmit="return false">' +
-            '<input class="notify-input" id="notifyPassword" type="password" placeholder="授权码" autocomplete="new-password" data-lpignore="true" data-1p-ignore>' +
-          '</form>' +
-          '</div>' +
-        '</div>' +
-        '<div class="notify-row stack set-row" data-kw="显示名 from name">' +
-          '<div class="notify-label-wrap"><div class="notify-label">发件人显示名</div><div class="notify-desc">收件箱里显示的名字（可选）</div></div>' +
-          '<input class="notify-input" id="notifyFromName" placeholder="文件管理器">' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="notify-card notifyTelegramOpts">' +
-        '<div class="notify-card-title"><i class="bi bi-telegram"></i> Telegram Bot 设置</div>' +
-        '<div class="notify-row stack set-row" data-kw="bot token 令牌 token">' +
-          '<div class="notify-label-wrap"><div class="notify-label">Bot Token</div><div class="notify-desc">在 @BotFather 创建 Bot 后获得，形如 <code>123456:ABC-DEF…</code>；保存后仅显示 ****。</div></div>' +
-          '<form class="notify-pwd-form" autocomplete="off" onsubmit="return false">' +
-            '<input class="notify-input" id="notifyTgToken" type="password" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" autocomplete="new-password" data-lpignore="true" data-1p-ignore>' +
-          '</form>' +
-        '</div>' +
-        '<div class="notify-grid-2">' +
-          '<div class="notify-row stack set-row" data-kw="chat id 会话 群组">' +
-            '<div class="notify-label-wrap"><div class="notify-label">Chat ID</div><div class="notify-desc">私聊 / 群组的会话 ID，可向 <code>@userinfobot</code> 获取。</div></div>' +
-            '<input class="notify-input" id="notifyTgChat" placeholder="-1001234567890">' +
-          '</div>' +
-          '<div class="notify-row stack set-row" data-kw="话题 thread topic">' +
-            '<div class="notify-label-wrap"><div class="notify-label">话题 ID（可选）</div><div class="notify-desc">群组开启「话题 / Topics」时，发送到指定话题。</div></div>' +
-            '<input class="notify-input" id="notifyTgThread" placeholder="留空则不指定">' +
-          '</div>' +
-        '</div>' +
-        '<div class="notify-row stack set-row" data-kw="api base 反代 地址">' +
-          '<div class="notify-label-wrap"><div class="notify-label">API 地址（可选）</div><div class="notify-desc">默认 <code>https://api.telegram.org</code>；无法直连时可填自建 / 反代地址。</div></div>' +
-          '<input class="notify-input" id="notifyTgApiBase" placeholder="https://api.telegram.org">' +
-        '</div>' +
-        '<div class="notify-row stack set-row" data-kw="代理 proxy socks5 加速 直连">' +
-          '<div class="notify-label-wrap"><div class="notify-label">代理（只给这个 Bot 用）</div>' +
-          '<div class="notify-desc"><b>只有 Telegram 通道走这个代理</b>，邮件 / 浏览器通知照常直连，互不影响。' +
-          '支持 <code>http://127.0.0.1:7890</code>、<code>socks5://127.0.0.1:1080</code>；留空 = 直连。</div></div>' +
-          '<input class="notify-input" id="notifyTgProxy" placeholder="留空 = 直连（不走代理）" autocomplete="off" spellcheck="false">' +
-        '</div>' +
-        '<div class="notify-row inline set-row" data-kw="静音 silent 免打扰">' +
-          '<div class="notify-label-wrap"><div class="notify-label">静音发送</div><div class="notify-desc">发送时客户端不响铃 / 不震动。</div></div>' +
-          '<label class="set-switch"><input type="checkbox" id="notifyTgSilent"><span></span></label>' +
-        '</div>' +
+        '<div class="notify-card-title"><i class="bi bi-broadcast"></i> 推送账号</div>' +
+        '<div class="notify-desc" style="margin:0 0 10px;">勾选发到哪些账号；没配置过就先去「通知渠道」添加。</div>' +
+        '<div id="notifyTargets" class="notify-targets">加载中…</div>' +
       '</div>' +
 
       '<div class="notify-card">' +
@@ -637,12 +879,12 @@
 
       '<div class="notify-card">' +
         '<div class="notify-card-title"><i class="bi bi-gear-wide-connected"></i> 操作</div>' +
-        '<div class="notify-desc" style="margin:0 0 12px;">保存后立即生效；测试会按所选通道发一条真实通知。</div>' +
+        '<div class="notify-desc" style="margin:0 0 12px;">保存后立即生效；测试会按该渠道已勾选的账号各发一条真实通知。</div>' +
         '<div class="notify-actions" data-kw="测试 保存 test save">' +
-          '<button class="notify-btn" id="notifyTestLocal"><i class="bi bi-bell"></i> 测试浏览器</button>' +
+          '<button class="notify-btn" id="notifyTestLocal"><i class="bi bi-bell"></i> 测试桌面</button>' +
           '<button class="notify-btn" id="notifyTestEmail"><i class="bi bi-envelope"></i> 测试邮件</button>' +
           '<button class="notify-btn" id="notifyTestTelegram"><i class="bi bi-telegram"></i> 测试 Telegram</button>' +
-          '<button class="notify-btn" id="notifyTestAll"><i class="bi bi-broadcast"></i> 全部通道</button>' +
+          '<button class="notify-btn" id="notifyTestAll"><i class="bi bi-broadcast"></i> 全部选中</button>' +
           '<button class="notify-btn primary" id="notifySave"><i class="bi bi-save"></i> 保存</button>' +
         '</div>' +
       '</div>' +
@@ -654,6 +896,105 @@
         '</div>' +
         '<div class="notify-desc" style="margin:0 0 10px;">最多保留 30 条。</div>' +
         '<div id="notifyHistory" class="notify-history">加载中…</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function cronNotifyBuildSectionHTML() {
+    return '<div class="set-sec" id="sec-cron-notify" data-kw="定时任务 通知 cron 钉钉 pushplus telegram 邮件 桌面 账号">' +
+      '<h2 data-kw="定时任务 通知 cron 钉钉 pushplus telegram 邮件 桌面 账号"><i class="bi bi-alarm"></i> 定时任务通知</h2>' +
+      '<div class="set-desc" data-kw="定时任务 通知 cron 钉钉 pushplus telegram 邮件 桌面 账号">' +
+        '定时任务<b>失败 / 超时 / 安排重试</b>时推送。推送账号统一在「<b>通知渠道</b>」里配置，这里只勾选要发到哪些账号；' +
+        '与 AI 通知互不影响。</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title"><i class="bi bi-power"></i> 总开关与触发事件</div>' +
+        '<div class="notify-row inline set-row" data-kw="启用定时任务通知 enabled 开关 启用">' +
+          '<div class="notify-label-wrap"><div class="notify-label">启用定时任务通知</div>' +
+          '<div class="notify-desc">总开关；关闭后所有账号均不推送。</div></div>' +
+          '<label class="set-switch"><input type="checkbox" id="notifyCronEnabled"><span></span></label>' +
+        '</div>' +
+        '<div class="notify-row inline set-row" data-kw="触发事件 失败 超时 重试 成功 fail timeout retry success">' +
+          '<div class="notify-label-wrap"><div class="notify-label">触发事件</div>' +
+          '<div class="notify-desc">勾选哪些事件时推送（任务里关掉「发送通知」的不推送，两者取交集）；' +
+            '「执行成功」默认关闭，开启后每次执行成功也会推送并留记录。</div></div>' +
+          '<div class="notify-cron-evs">' +
+            '<label class="notify-check"><input type="checkbox" id="notifyCronEvFail"> 执行失败</label>' +
+            '<label class="notify-check"><input type="checkbox" id="notifyCronEvTimeout"> 执行超时</label>' +
+            '<label class="notify-check"><input type="checkbox" id="notifyCronEvRetry"> 安排重试</label>' +
+            '<label class="notify-check"><input type="checkbox" id="notifyCronEvSuccess"> 执行成功</label>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title"><i class="bi bi-broadcast"></i> 推送账号</div>' +
+        '<div class="notify-desc" style="margin:0 0 10px;">勾选发到哪些账号；没配置过就先去「通知渠道」添加。' +
+          '任务里还能再按渠道筛选（任务 → 通知渠道）。</div>' +
+        '<div id="cronNotifyTargets" class="notify-targets">加载中…</div>' +
+      '</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title"><i class="bi bi-pencil-square"></i> 通知模板</div>' +
+        '<div class="notify-row stack set-row" data-kw="定时任务 快速模板 预设 preset 模板 template">' +
+          '<div class="notify-label-wrap"><div class="notify-label">快速模板</div>' +
+          '<div class="notify-desc">点一下同时套用标题 + 正文，下面的预览即时生效；套用后仍可自由修改。清空两个字段则使用系统默认文案。</div></div>' +
+          '<div class="notify-presets">' +
+            Object.keys(CRON_TPL_PRESETS).map(id => {
+              const p = CRON_TPL_PRESETS[id];
+              return '<button type="button" class="notify-preset-cron" data-cpreset="' + id + '" title="' + p.desc + '">' +
+                '<i class="bi ' + p.icon + '"></i> ' + p.name + '</button>';
+            }).join("") +
+          '</div>' +
+        '</div>' +
+        '<div class="notify-preview set-row" data-kw="定时任务 效果预览 预览 preview">' +
+          '<div class="notify-preview-head"><span><i class="bi bi-eye"></i> 效果预览</span>' +
+          '<span class="notify-preview-tag">示例数据</span></div>' +
+          '<div class="notify-preview-card">' +
+            '<div class="notify-preview-app"><i class="bi bi-alarm-fill"></i> File_Flask<span>刚刚</span></div>' +
+            '<div class="notify-preview-title" id="notifyCronPreviewTitle">—</div>' +
+            '<div class="notify-preview-body" id="notifyCronPreviewBody">—</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="notify-row stack set-row" data-kw="定时任务 标题模板 title">' +
+          '<div class="notify-label-wrap"><div class="notify-label">标题模板</div>' +
+          '<div class="notify-desc">留空 = 使用系统默认文案。</div></div>' +
+          '<input class="notify-input" id="notifyCronTitle" placeholder="定时任务{event} · {task}">' +
+        '</div>' +
+        '<div class="notify-vars set-row" data-kw="定时任务 变量 variable 可用变量">' +
+          '<span class="notify-vars-tip">可用变量（点击插入）</span>' +
+          CRON_NOTIFY_VARS.map(x =>
+            '<button type="button" class="notify-var" data-var="{' + x.key + '}" title="' + x.desc + '">{' + x.key + '}</button>').join("") +
+        '</div>' +
+        '<div class="notify-row stack set-row" data-kw="定时任务 正文模板 body">' +
+          '<div class="notify-label-wrap"><div class="notify-label">正文模板</div>' +
+          '<div class="notify-desc">支持换行；钉钉 / PushPlus 等渠道按纯文本发送。</div></div>' +
+          '<textarea class="notify-input notify-textarea" id="notifyCronBody" rows="4" placeholder="任务「{task}」{event}。&#10;退出码：{exit}"></textarea>' +
+        '</div>' +
+      '</div>' +
+
+      // 操作在前、记录在后：测试 / 保存是高频操作，别让它沉到最底下
+      '<div class="notify-card">' +
+        '<div class="notify-card-title"><i class="bi bi-gear-wide-connected"></i> 操作</div>' +
+        '<div class="notify-desc" style="margin:0 0 12px;">保存后立即生效；测试会按该渠道已勾选的账号各发一条真实通知。</div>' +
+        '<div class="notify-actions" data-kw="测试 保存 test save 钉钉 pushplus 邮件 桌面 telegram">' +
+          '<button class="notify-btn" id="notifyCronTestDesktop"><i class="bi bi-bell"></i> 测试桌面</button>' +
+          '<button class="notify-btn" id="notifyCronTestEmail"><i class="bi bi-envelope"></i> 测试邮件</button>' +
+          '<button class="notify-btn" id="notifyCronTestTelegram"><i class="bi bi-telegram"></i> 测试 Telegram</button>' +
+          '<button class="notify-btn" id="notifyCronTestDingtalk"><i class="bi bi-chat-dots"></i> 测试钉钉</button>' +
+          '<button class="notify-btn" id="notifyCronTestPushplus"><i class="bi bi-wechat"></i> 测试 PushPlus</button>' +
+          '<button class="notify-btn" id="notifyCronTestWeb"><i class="bi bi-globe2"></i> 测试网页</button>' +
+          '<button class="notify-btn primary" id="notifyCronSaveBtn" style="margin-left:auto;"><i class="bi bi-save"></i> 保存</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="notify-card">' +
+        '<div class="notify-card-title" style="justify-content:space-between;">' +
+          '<span><i class="bi bi-clock-history"></i> 通知记录</span>' +
+          '<button class="notify-btn" id="notifyCronHistoryRefresh"><i class="bi bi-arrow-clockwise"></i> 刷新</button>' +
+        '</div>' +
+        '<div class="notify-desc" style="margin:0 0 10px;">定时任务触发的推送记录（最新 50 条；全部记录见「AI 通知」分区）。</div>' +
+        '<div id="notifyCronHistory" class="notify-history">加载中…</div>' +
       '</div>' +
     '</div>';
   }
@@ -835,6 +1176,7 @@
       const d = await r.json();
       if (d && d.cfg) {
         _notifyCache = d.cfg;
+        await notifyChannelsLoad();          // 先拿到渠道账号，账号勾选才有得渲染
         notifyFill(d.cfg);
         notifyRenderHistory(d.recent || []);
       }
@@ -855,70 +1197,24 @@
     cronNotifyLoadHistory();
   }
 
+  let _cronNotifyCache = null;
+
   function cronNotifyFill(n) {
     const q = id => document.getElementById(id);
     if (!q("notifyCronEnabled")) return;
-    const ev = n.events || {}, ch = n.channels || {};
-    const dk = n.desktop || {}, em = n.email || {}, tg = n.telegram || {};
-    const ding = n.dingtalk || {}, pp = n.pushplus || {};
+    const ev = n.events || {};
+    _cronNotifyCache = n;
     q("notifyCronEnabled").checked = !!n.enabled;
     if (q("notifyCronEvFail"))    q("notifyCronEvFail").checked = ev.fail !== false;
     if (q("notifyCronEvTimeout")) q("notifyCronEvTimeout").checked = ev.timeout !== false;
     if (q("notifyCronEvRetry"))   q("notifyCronEvRetry").checked = !!ev.retry;
     if (q("notifyCronEvSuccess")) q("notifyCronEvSuccess").checked = !!ev.success;
-    if (q("notifyCronChDesktop"))  q("notifyCronChDesktop").checked = ch.desktop !== false;
-    if (q("notifyCronChEmail"))    q("notifyCronChEmail").checked = !!ch.email;
-    if (q("notifyCronChDingtalk")) q("notifyCronChDingtalk").checked = !!ch.dingtalk;
-    if (q("notifyCronChTelegram")) q("notifyCronChTelegram").checked = !!ch.telegram;
-    if (q("notifyCronChPushplus")) q("notifyCronChPushplus").checked = !!ch.pushplus;
-    if (q("notifyCronChWeb"))      q("notifyCronChWeb").checked = !!ch.web;
-    // 网页版：站点地址（留空自动推断）+ 保留天数 + 测试页链接
-    const web = n.web || {};
-    if (q("notifyCronWebBase")) q("notifyCronWebBase").value = web.base_url || "";
-    if (q("notifyCronWebDays")) q("notifyCronWebDays").value = web.retention_days || 7;
-    // 固定跳转 / 入口文字
-    if (q("notifyCronWebLinkOn"))   q("notifyCronWebLinkOn").checked = web.link_enabled !== false;
-    if (q("notifyCronWebLinkText")) q("notifyCronWebLinkText").value = web.link_text || "";
-    if (q("notifyCronWebLinkUrl"))  q("notifyCronWebLinkUrl").value = web.link_url || "";
-    const webOpen = q("notifyCronWebOpen");
-    if (webOpen) {
-      const base = String(web.base_url || "").replace(/\/+$/, "") || location.origin;
-      webOpen.href = base + "/n/test";
-    }
-    // 配置来源判断字段：use_global = true → 复用全局；false → 独立配置
-    const pickSrc = (gid, oid, useGlobal) => {
-      if (q(gid)) q(gid).checked = useGlobal !== false;
-      if (q(oid)) q(oid).checked = useGlobal === false;
-    };
-    pickSrc("notifyCronDeskSrcG", "notifyCronDeskSrcO", dk.use_global);
-    pickSrc("notifyCronEmailSrcG", "notifyCronEmailSrcO", em.use_global);
-    pickSrc("notifyCronTgSrcG", "notifyCronTgSrcO", tg.use_global);
-    // 桌面独立配置
-    if (q("notifyCronDeskApp"))   q("notifyCronDeskApp").value = dk.app_name || "";
-    if (q("notifyCronDeskSound")) q("notifyCronDeskSound").checked = dk.sound !== false;
-    // 邮件独立配置（密码后端返回掩码，原样回填；未设置时为空）
-    if (q("notifyCronEmailTo"))    q("notifyCronEmailTo").value = em.to || "";
-    if (q("notifyCronEmailHost"))  q("notifyCronEmailHost").value = em.host || "";
-    if (q("notifyCronEmailPort"))  q("notifyCronEmailPort").value = em.port || 465;
-    if (q("notifyCronEmailSec"))   q("notifyCronEmailSec").value = em.security || "ssl";
-    if (q("notifyCronEmailUser"))  q("notifyCronEmailUser").value = em.username || "";
-    if (q("notifyCronEmailPwd"))   q("notifyCronEmailPwd").value = em.password || "";
-    if (q("notifyCronEmailFrom"))  q("notifyCronEmailFrom").value = em.from_addr || "";
-    // Telegram 独立配置
-    if (q("notifyCronTgToken"))   q("notifyCronTgToken").value = tg.bot_token || "";
-    if (q("notifyCronTgChat"))    q("notifyCronTgChat").value = tg.chat_id || "";
-    if (q("notifyCronTgApiBase")) q("notifyCronTgApiBase").value = tg.api_base || "https://api.telegram.org";
-    if (q("notifyCronTgProxy"))   q("notifyCronTgProxy").value = tg.proxy || "";
-    // 钉钉 / PushPlus
-    if (q("notifyCronDingWebhook")) q("notifyCronDingWebhook").value = ding.webhook || "";
-    if (q("notifyCronDingSecret"))  q("notifyCronDingSecret").value = ding.secret || "";
-    if (q("notifyCronPpToken"))     q("notifyCronPpToken").value = pp.token || "";
-    if (q("notifyCronPpTopic"))     q("notifyCronPpTopic").value = pp.topic || "";
+    // 推送账号：渠道参数已统一到「通知渠道」分区，这里只渲染可勾选的账号
+    notifyChannelsLoad().then(() => notifyTargetsRender("cronNotifyTargets", n.targets));
     // 通知模板（清空 = 用系统默认文案）
     const tpl = n.template || {};
     if (q("notifyCronTitle")) q("notifyCronTitle").value = tpl.title || "";
     if (q("notifyCronBody"))  q("notifyCronBody").value = tpl.body || "";
-    notifyToggleOptVisibility();
     cronNotifyPreviewRefresh();
   }
 
@@ -926,49 +1222,13 @@
     const q = id => document.getElementById(id);
     const c = id => { const el = q(id); return el ? el.checked : false; };
     const v = id => { const el = q(id); return el ? el.value.trim() : ""; };
-    // 判断字段读取：radio 选中 "own" → use_global = false（独立配置）
-    const useGlobal = name => {
-      const own = document.querySelector('input[name="' + name + '"][value="own"]');
-      return !(own && own.checked);
-    };
     return {
       notify: {
         enabled: c("notifyCronEnabled"),
         events: { fail: c("notifyCronEvFail"), timeout: c("notifyCronEvTimeout"),
                   retry: c("notifyCronEvRetry"), success: c("notifyCronEvSuccess") },
-        channels: {
-          desktop: c("notifyCronChDesktop"), email: c("notifyCronChEmail"),
-          dingtalk: c("notifyCronChDingtalk"), telegram: c("notifyCronChTelegram"),
-          pushplus: c("notifyCronChPushplus"), web: c("notifyCronChWeb"),
-        },
-        desktop: {
-          use_global: useGlobal("cronDeskSrc"),
-          app_name: v("notifyCronDeskApp"),
-          sound: c("notifyCronDeskSound"),
-        },
-        email: {
-          use_global: useGlobal("cronEmailSrc"),
-          to: v("notifyCronEmailTo"), host: v("notifyCronEmailHost"),
-          port: parseInt(v("notifyCronEmailPort"), 10) || 465,
-          security: v("notifyCronEmailSec") || "ssl",
-          username: v("notifyCronEmailUser"), password: v("notifyCronEmailPwd"),
-          from_addr: v("notifyCronEmailFrom"),
-        },
-        telegram: {
-          use_global: useGlobal("cronTgSrc"),
-          bot_token: v("notifyCronTgToken"), chat_id: v("notifyCronTgChat"),
-          api_base: v("notifyCronTgApiBase") || "https://api.telegram.org",
-          proxy: v("notifyCronTgProxy"),
-        },
-        dingtalk: { webhook: v("notifyCronDingWebhook"), secret: v("notifyCronDingSecret") },
-        pushplus: { token: v("notifyCronPpToken"), topic: v("notifyCronPpTopic") },
-        web: {
-          base_url: v("notifyCronWebBase").replace(/\/+$/, ""),
-          retention_days: parseInt(v("notifyCronWebDays"), 10) || 7,
-          link_enabled: c("notifyCronWebLinkOn"),
-          link_text: v("notifyCronWebLinkText"),
-          link_url: v("notifyCronWebLinkUrl"),
-        },
+        // 只提交勾选的账号；渠道参数在「通知渠道」里维护
+        targets: notifyTargetsCollect("cronNotifyTargets"),
         template: { title: v("notifyCronTitle"), body: v("notifyCronBody") },
       },
     };
@@ -1040,11 +1300,13 @@
                      telegram: "Telegram", pushplus: "PushPlus", web: "网页版" }[channel] || channel;
       if (res && res.ok) notifyToast(`测试通知已发送（${name}）`, "ok");
       else notifyToast(`测试失败（${name}）：${(res && res.detail) || d.error || "未知错误"}`, "err");
-      await notifyLoad();
+      // 只刷新记录，不重绘整块表单，避免刚勾的账号被服务端快照覆盖
+      cronNotifyLoadHistory();
     } catch (e) {
       notifyToast("测试请求失败：" + e.message, "err");
     } finally {
       if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset._old || "测试"; }
+      notifyTestButtonsRefresh();     // 发送期间若改了勾选，按最新勾选恢复可点状态
     }
   }
 
@@ -1062,73 +1324,18 @@
 
   function notifyFill(cfg) {
     const q = id => document.getElementById(id);
-    const ch = cfg.channels || {};
-    const dk = cfg.desktop || {};
-    const sk = cfg.smtp || {};
-    const tg = cfg.telegram || {};
     const tp = cfg.template || {};
-    // 兼容"channels.desktop 是 bool"
-    const desktopOn = typeof ch.desktop === "object" ? !!ch.desktop.enabled : !!ch.desktop;
-    const smtpOn = typeof ch.smtp === "object" ? !!ch.smtp.enabled : !!ch.smtp;
-    const tgOn = typeof ch.telegram === "object" ? !!ch.telegram.enabled : !!ch.telegram;
-
-    if (q("notifyEnabled"))        q("notifyEnabled").checked = !!cfg.enabled;
-    if (q("notifyDesktop"))        q("notifyDesktop").checked = desktopOn;
-    if (q("notifyAppName"))        q("notifyAppName").value = dk.app_name || "File_Flask";
-    if (q("notifyDesktopSound"))   q("notifyDesktopSound").checked = dk.sound !== false;
-
-    if (q("notifyEmail"))          q("notifyEmail").checked = smtpOn;
-    if (q("notifyTo"))             q("notifyTo").value = sk.to || "";
-    if (q("notifySmtpHost"))       q("notifySmtpHost").value = sk.host || "";
-    if (q("notifySmtpPort"))       q("notifySmtpPort").value = sk.port || 465;
-    if (q("notifyEncryption"))     q("notifyEncryption").value = sk.security || "ssl";
-    if (q("notifyUser"))           q("notifyUser").value = sk.username || "";
-    if (q("notifyPassword")) {
-      q("notifyPassword").value = "";
-      q("notifyPassword").placeholder = sk.password_set ? "已保存（留空保持不变）" : "授权码";
-    }
-    if (q("notifyFromName"))       q("notifyFromName").value = sk.from_name || sk.from_addr || "";
-
-    if (q("notifyTelegram"))       q("notifyTelegram").checked = tgOn;
-    if (q("notifyTgChat"))         q("notifyTgChat").value = tg.chat_id || "";
-    if (q("notifyTgThread"))       q("notifyTgThread").value = tg.message_thread_id || "";
-    if (q("notifyTgApiBase"))      q("notifyTgApiBase").value = tg.api_base || "https://api.telegram.org";
-    if (q("notifyTgProxy"))        q("notifyTgProxy").value = tg.proxy || "";
-    if (q("notifyTgSilent"))       q("notifyTgSilent").checked = !!tg.disable_notification;
-    if (q("notifyTgToken")) {
-      q("notifyTgToken").value = "";
-      q("notifyTgToken").placeholder = tg.token_set ? "已保存（留空保持不变）" : "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11";
-    }
-
-    if (q("notifyTitle"))          q("notifyTitle").value = tp.chat || NOTIFY_DEFAULTS.template.chat;
-    if (q("notifyBody"))           q("notifyBody").value = cfg.template_body || NOTIFY_DEFAULTS.template_body;
-
-    notifyToggleOptVisibility();
+    if (q("notifyEnabled")) q("notifyEnabled").checked = !!cfg.enabled;
+    if (q("notifyTitle"))   q("notifyTitle").value = tp.chat || NOTIFY_DEFAULTS.template.chat;
+    if (q("notifyBody"))    q("notifyBody").value = cfg.template_body || NOTIFY_DEFAULTS.template_body;
+    // 推送账号：渠道参数已统一到「通知渠道」分区，这里只渲染可勾选的账号
+    notifyChannelsLoad().then(() => notifyTargetsRender("notifyTargets", cfg.targets));
     notifyPreviewRefresh();
   }
 
   function notifyToggleOptVisibility() {
-    const desktopOn = document.getElementById("notifyDesktop")?.checked;
-    document.querySelectorAll(".notifyDesktopOpts").forEach(el => el.style.display = desktopOn ? "" : "none");
-    const emailOn = document.getElementById("notifyEmail")?.checked;
-    document.querySelectorAll(".notifyEmailOpts").forEach(el => el.style.display = emailOn ? "" : "none");
-    const tgOn = document.getElementById("notifyTelegram")?.checked;
-    document.querySelectorAll(".notifyTelegramOpts").forEach(el => el.style.display = tgOn ? "" : "none");
-    // 定时任务通知：配置卡跟随对应渠道开关；独立配置块跟随「配置来源」判断字段
-    const cronChOn = (id) => { const el = document.getElementById(id); return el ? el.checked : false; };
-    document.querySelectorAll(".notifyCronDeskOpts").forEach(el => el.style.display = cronChOn("notifyCronChDesktop") ? "" : "none");
-    document.querySelectorAll(".notifyCronEmailOpts").forEach(el => el.style.display = cronChOn("notifyCronChEmail") ? "" : "none");
-    document.querySelectorAll(".notifyCronTgOpts").forEach(el => el.style.display = cronChOn("notifyCronChTelegram") ? "" : "none");
-    document.querySelectorAll(".notifyCronDingOpts").forEach(el => el.style.display = cronChOn("notifyCronChDingtalk") ? "" : "none");
-    document.querySelectorAll(".notifyCronPpOpts").forEach(el => el.style.display = cronChOn("notifyCronChPushplus") ? "" : "none");
-    document.querySelectorAll(".notifyCronWebOpts").forEach(el => el.style.display = cronChOn("notifyCronChWeb") ? "" : "none");
-    const ownOn = (name) => {
-      const own = document.querySelector('input[name="' + name + '"][value="own"]');
-      return !!(own && own.checked);
-    };
-    document.querySelectorAll("#notifyCronDeskOwnOpts").forEach(el => el.style.display = ownOn("cronDeskSrc") ? "" : "none");
-    document.querySelectorAll("#notifyCronEmailOwnOpts").forEach(el => el.style.display = ownOn("cronEmailSrc") ? "" : "none");
-    document.querySelectorAll("#notifyCronTgOwnOpts").forEach(el => el.style.display = ownOn("cronTgSrc") ? "" : "none");
+    // 各渠道的参数表单已挪到「通知渠道」分区，这里只保留模板预览的刷新
+    notifyPreviewRefresh();
   }
 
   function notifyReadForm() {
@@ -1140,29 +1347,8 @@
     return {
       enabled: c("notifyEnabled"),
       scope: "both",
-      channels: { desktop: c("notifyDesktop"), smtp: c("notifyEmail"), telegram: c("notifyTelegram") },
-      desktop: {
-        app_name: q("notifyAppName").trim() || "File_Flask",
-        sound: c("notifyDesktopSound"),
-      },
-      smtp: {
-        to: q("notifyTo").trim(),
-        host: q("notifySmtpHost").trim(),
-        port: parseInt(q("notifySmtpPort"), 10) || 465,
-        security: q("notifyEncryption"),
-        username: q("notifyUser").trim(),
-        password: q("notifyPassword").trim(),  // 空字符串表示"保持不变"
-        from_addr: q("notifyFromName").trim(),  // 后端字段 from_addr
-        from_name: q("notifyFromName").trim(),  // 兼容字段
-      },
-      telegram: {
-        bot_token: q("notifyTgToken").trim(),   // 空字符串表示"保持不变"
-        chat_id: q("notifyTgChat").trim(),
-        message_thread_id: q("notifyTgThread").trim(),
-        api_base: q("notifyTgApiBase").trim() || "https://api.telegram.org",
-        proxy: q("notifyTgProxy").trim(),   // 仅 Telegram 使用；空 = 直连
-        disable_notification: c("notifyTgSilent"),
-      },
+      // 只提交勾选的账号；SMTP / Telegram 等参数在「通知渠道」里维护
+      targets: notifyTargetsCollect("notifyTargets"),
       template: Object.assign(
         { chat: titleTpl },
         // 标题里带 {task} / {title} / {channel} 变量时，AI 助手与智能体共用同一模板（变量会自动区分）；
@@ -1174,12 +1360,8 @@
   }
 
   async function notifySave(silent) {
+    // 渠道参数（SMTP / Telegram / 桌面）已挪到「通知渠道」分区，这里只保存开关、账号勾选与模板
     const body = notifyReadForm();
-    // SMTP 授权码 / Telegram Bot Token 传输加密（见 js/24_敏感字段传输加密.js）
-    if (window.TP) {
-      if (body.smtp && body.smtp.password) body.smtp.password = window.TP.encrypt(body.smtp.password);
-      if (body.telegram && body.telegram.bot_token) body.telegram.bot_token = window.TP.encrypt(body.telegram.bot_token);
-    }
     try {
       const r = await fetch("/api/ai/notify", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -1191,17 +1373,6 @@
       cronNotifySave(true);                 // 定时任务通知的配置一并保存
       if (silent) return d;                 // 自动保存：不打扰，也不清空正在编辑的框
       notifyToast("通知设置已保存", "ok");
-      // 密码框回到默认 placeholder
-      const pwd = document.getElementById("notifyPassword");
-      if (pwd) { pwd.value = ""; pwd.placeholder = "授权码"; }
-      // Telegram Token 同理：清空输入框，按是否已保存切换 placeholder
-      const tk = document.getElementById("notifyTgToken");
-      if (tk) {
-        tk.value = "";
-        tk.placeholder = (d.cfg && d.cfg.telegram && d.cfg.telegram.token_set)
-          ? "已保存（留空保持不变）"
-          : "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11";
-      }
     } catch (e) {
       notifyToast("保存失败：" + e.message, "err");
     }
@@ -1227,8 +1398,12 @@
     // 测试浏览器通道时顺带申请通知权限（首次使用）
     if (channel === "desktop" || channel === "all") notifyRequestBrowserPermission();
     try {
-      // 先保存（如果用户改了配置就直接把当前表单保存）
-      try { await notifySave(); } catch (_) {}
+      // 先保存当前表单（含刚勾的账号）；保存失败就别测了，否则测的是旧配置
+      const saved = await notifySave(true);
+      if (!saved) {
+        notifyToast("测试已取消：通知设置没能保存", "err");
+        return;
+      }
       const r = await fetch("/api/ai/notify/test", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ channel }),
@@ -1246,12 +1421,14 @@
         }
         notifyToast("测试失败：" + (parts.join(" | ") || d.error || "未知错误"), "err");
       }
-      // 刷新历史
-      await notifyLoad();
+      // 只刷新历史列表；不要整块重绘表单，
+      // 否则服务端快照会把界面上刚勾的账号覆盖掉（表现为「测试完勾选就没了」）
+      notifyRefreshHistoryOnly();
     } catch (e) {
       notifyToast("测试请求失败：" + e.message, "err");
     } finally {
       if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset._old || '<i class="bi bi-broadcast"></i> 测试'; }
+      notifyTestButtonsRefresh();     // 发送期间若改了勾选，按最新勾选恢复可点状态
     }
   }
 
@@ -1525,13 +1702,29 @@
   }
 
   function notifyMountSettings() {
+    // 刚建好 HTML：账号还没勾选，先把「测试」按钮置灰，等数据回来再按勾选放开
+    notifyTestButtonsRefresh();
     // 全局事件只绑定一次；数据每次都刷新
     if (!window.__notifyMounted) {
       window.__notifyMounted = true;
 
       document.addEventListener("input", e => {
         const t = e.target;
-        if (!t || !t.id || !t.id.startsWith("notify")) return;
+        if (!t) return;
+        // 「通知渠道」账号字段：只改内存，防抖保存；不重建 DOM，避免打断输入
+        if (t.dataset && (t.dataset.f || t.dataset.nchName)) {
+          const acc = naccFind(t.dataset.nch, t.dataset.id);
+          if (acc) {
+            if (t.dataset.nchName) acc.name = t.value;
+            else acc.cfg[t.dataset.f] = (t.type === "checkbox") ? t.checked : t.value;
+            acc._touched = true;              // 用户动过：草稿转正，可以落库了
+            _naccVer++;
+            naccRefreshCardStatus(t.dataset.nch, t.dataset.id);
+          }
+          notifyChannelsAutoSave();
+          return;
+        }
+        if (!t.id || !t.id.startsWith("notify")) return;
         notifyToggleOptVisibility();
         if (t.id === "notifyTitle" || t.id === "notifyBody") notifyPreviewRefresh();
         if (t.id === "notifyCronTitle" || t.id === "notifyCronBody") cronNotifyPreviewRefresh();
@@ -1540,10 +1733,34 @@
       }, true);
       document.addEventListener("change", e => {
         const t = e.target;
-        if (!t || !t.id || !t.id.startsWith("notify")) return;
+        if (!t) return;
+        // 账号勾选（「通知」/「定时任务通知」两个分区）
+        if (t.dataset && t.dataset.nchTarget) {
+          notifyTargetsSyncChip(t);          // 胶囊高亮跟着勾选状态走
+          notifyTestButtonsRefresh();        // 「测试」按钮的可点状态跟着勾选变
+          if (t.closest && t.closest("#cronNotifyTargets")) {
+            if (_cronNotifyCache) _cronNotifyCache.targets = notifyTargetsCollect("cronNotifyTargets");
+            cronNotifyAutoSave();
+          } else {
+            if (_notifyCache) _notifyCache.targets = notifyTargetsCollect("notifyTargets");
+            notifyAutoSave();
+          }
+          return;
+        }
+        if (t.dataset && (t.dataset.f || t.dataset.nchName)) {
+          const acc = naccFind(t.dataset.nch, t.dataset.id);
+          if (acc) {
+            if (t.dataset.nchName) acc.name = t.value;
+            else acc.cfg[t.dataset.f] = (t.type === "checkbox") ? t.checked : t.value;
+            acc._touched = true;              // 用户动过：草稿转正，可以落库了
+            _naccVer++;
+            naccRefreshCardStatus(t.dataset.nch, t.dataset.id);
+          }
+          notifyChannelsAutoSave();
+          return;
+        }
+        if (!t.id || !t.id.startsWith("notify")) return;
         notifyToggleOptVisibility();
-        // 开启「浏览器通知」时，向浏览器申请通知权限
-        if (t.id === "notifyDesktop" && t.checked) notifyRequestBrowserPermission();
         // 开关 / 勾选 / 下拉：切换即自动保存（两个分区都适用）
         if (t.id.startsWith("notifyCron")) cronNotifyAutoSave();
         else notifyAutoSave();
@@ -1551,7 +1768,20 @@
       // 离开输入框（失焦）即自动保存：通知与定时任务通知两个分区都适用
       document.addEventListener("focusout", e => {
         const t = e.target;
-        if (!t || !t.id || !t.id.startsWith("notify") || !t.isConnected) return;
+        if (!t) return;
+        if (t.dataset && (t.dataset.f || t.dataset.nchName)) {
+          const acc = naccFind(t.dataset.nch, t.dataset.id);
+          if (acc) {
+            if (t.dataset.nchName) acc.name = t.value;
+            else acc.cfg[t.dataset.f] = (t.type === "checkbox") ? t.checked : t.value;
+            acc._touched = true;              // 用户动过：草稿转正，可以落库了
+            _naccVer++;
+            naccRefreshCardStatus(t.dataset.nch, t.dataset.id);
+          }
+          notifyChannelsAutoSave();
+          return;
+        }
+        if (!t.id || !t.id.startsWith("notify") || !t.isConnected) return;
         if (t.id.startsWith("notifyCron")) cronNotifyAutoSave();
         else notifyAutoSave();
       }, true);
@@ -1576,6 +1806,36 @@
           window.open(webChip.dataset.webUrl, "_blank", "noopener");
           return;
         }
+        // 只有一个账号的渠道：点这一行的任意空白处也能勾选 / 取消
+        const ntRow = e.target && e.target.closest ? e.target.closest(".nt-group.nt-single") : null;
+        if (ntRow && !(e.target.closest(".nt-opt") || e.target.tagName === "INPUT" ||
+                       (e.target.closest && e.target.closest(".nt-go")))) {
+          const cb = ntRow.querySelector('input[data-nch-target]');
+          if (cb) {
+            cb.checked = !cb.checked;
+            cb.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          return;
+        }
+        // 通知渠道账号：添加 / 删除 / 测试
+        const naccBtn = e.target && e.target.closest ? e.target.closest("[data-nacc-act]") : null;
+        if (naccBtn) {
+          const act = naccBtn.dataset.naccAct;
+          const ch = naccBtn.dataset.ch;
+          const aid = naccBtn.dataset.id;
+          if (act === "add") notifyChannelsAdd(ch);
+          else if (act === "del") notifyChannelsDel(ch, aid, naccBtn);
+          else if (act === "test") notifyChannelTest(ch, aid, naccBtn);
+          else if (act === "toggle") naccToggleCard(ch, aid, naccBtn);
+          return;
+        }
+        // 账号选择里的「去配置」→ 跳到通知渠道分区
+        const goBtn = e.target && e.target.closest ? e.target.closest(".nt-go") : null;
+        if (goBtn) {
+          const nav = document.querySelector('.set-navitem[data-sec="sec-channels"]');
+          if (nav) nav.click();
+          return;
+        }
         // 按钮内含 <i> 图标，e.target 可能是图标而不是按钮，统一向上找最近的 button
         const btn = e.target && e.target.closest ? e.target.closest("button") : null;
         const id = btn ? btn.id : (e.target ? e.target.id : "");
@@ -1595,14 +1855,33 @@
         else if (id === "notifyClearHistory") notifyClearHistory();
       });
 
-      // 进入通知 / 定时任务通知分区时刷新
+      // 进入通知 / 定时任务通知 / 通知渠道分区时刷新
       document.addEventListener("click", e => {
         const nav = e.target.closest && e.target.closest(".set-navitem");
-        if (nav && nav.dataset.sec === "sec-notify") {
+        if (!nav) return;
+        if (nav.dataset.sec === "sec-notify") {
           setTimeout(() => notifyLoad(), 100);
-        } else if (nav && nav.dataset.sec === "sec-cron-notify") {
+        } else if (nav.dataset.sec === "sec-cron-notify") {
           setTimeout(() => cronNotifyLoad(), 100);
+        } else if (nav.dataset.sec === "sec-channels") {
+          setTimeout(() => notifyChannelsLoad(true), 100);
         }
+      });
+
+      // 关页面 / 切走时，把还在防抖队列里的渠道改动一起提交（keepalive 保证请求发得出去）
+      window.addEventListener("pagehide", () => {
+        if (!_naccTimer || !_nacc) return;
+        clearTimeout(_naccTimer);
+        _naccTimer = null;
+        try {
+          const body = JSON.stringify({ channels: naccPayload() });
+          if (body === _naccSavedJson) return;          // 没有实际改动：不发请求
+          fetch("/api/notify/channels", {
+            method: "POST", keepalive: true,
+            headers: { "Content-Type": "application/json" },
+            body: body,
+          });
+        } catch (_) { /* 忽略：页面已经在卸载 */ }
       });
 
       // 启动浏览器通知轮询（镜像 desktop 通道到当前浏览器）
@@ -1612,5 +1891,6 @@
     setTimeout(() => {
       notifyPreviewRefresh();
       if (document.getElementById("notifyHistory")) notifyLoad();
+      if (document.getElementById("notifyChannelsBox")) notifyChannelsLoad(true);
     }, 100);
   }

@@ -291,7 +291,8 @@ html.theme-light .dlc-btn.primary:hover { color: #fff; }
   transition: border-color .16s, transform .16s, box-shadow .16s;
 }
 
-.dlc-task:hover { border-color: var(--dlc-line); transform: translateY(-1px); box-shadow: var(--dlc-shadow); }
+/* 悬停只用边框 + 阴影强调，不做位移：translateY 会让鼠标反复进出 hover 区造成抖动 */
+.dlc-task:hover { border-color: var(--dlc-line); box-shadow: var(--dlc-shadow); }
 .dlc-task.running { border-color: rgba(79, 193, 255, .45); box-shadow: inset 3px 0 0 var(--dlc-acc); }
 
 /* 下载中任务卡：流光背景（青→紫极光缓慢流动） */

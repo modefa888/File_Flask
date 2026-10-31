@@ -1,7 +1,10 @@
   /* ===== 通用弹窗（替代原生 prompt/confirm） ===== */
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none;
-    align-items: center; justify-content: center; z-index: 2500;
+    align-items: center; justify-content: center;
+    /* 全站弹层普遍在 9000~12000（下载中心遮罩 3200、二次确认框 9999 等），
+       2500 会被它们盖住；取 9995：高于所有面板/遮罩，低于悬浮提示(10000)与 toast(10001) */
+    z-index: 9995;
   }
   .modal-overlay.show { display: flex; }
   .ide-modal {

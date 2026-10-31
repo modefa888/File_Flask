@@ -2040,7 +2040,14 @@ async function dlUrlConfirm() {
       const stTxt = old.status ? ("（" + dlStatusText(old.status, old) + "）") : "";
       const ask = "该链接已存在下载任务" + (d.count > 1 ? "（共 " + d.count + " 个）" : "") + "：\n\n" +
         (old.name || u) + stTxt + "\n\n是否删除旧任务，并开始一个新的下载任务？";
-      if (!window.confirm(ask)) { errMsg = "已跳过重复链接"; continue; }
+      // 自定义弹窗（不用 uiConfirm：它会把 msg 整体 esc，\n 无法换行 → 用 uiModal 的 html + pre-wrap）
+      const ok = await uiModal({
+        title: "已存在下载任务",
+        icon: "bi-exclamation-triangle",
+        html: '<div class="m-msg" style="white-space:pre-wrap">' + esc(ask) + "</div>",
+        okText: "删除并重新下载",
+        danger: true });
+      if (!ok) { errMsg = "已跳过重复链接"; continue; }
       d = await dlReq("/api/dl/url", { method: "POST", body: body(true) });
     }
     if (d && d.ok) ok++; else errMsg = (d && d.error) || "创建失败";

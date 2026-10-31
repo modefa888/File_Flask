@@ -106,6 +106,8 @@ def env_info():
 # 代理兜底：任务级 opts.proxy 优先，其次下载设置里的「网络下载代理」，
 # 最后自动检测内置 v2ray / xray 的 HTTP 入站（本机某些站点直连会被重置，
 # 浏览器走代理能播、服务器直连下载失败，就是这种情况）。
+# 自动探测到的代理不是立刻启用：先直连下载，同一主机直连连续失败
+# 达到阈值（默认 2 次）后，该主机后续任务（含失败重试）才走代理兜底。
 # ----------------------------------------------------------------------
 def _host_local(url):
     """目标是否本机 / 局域网地址（这类地址不该走代理）。"""
@@ -122,6 +124,32 @@ def _host_local(url):
         return False
 
 
+def _url_host(url):
+    try:
+        return urllib.parse.urlsplit(url or "").hostname or ""
+    except ValueError:
+        return ""
+
+
+# 每主机「连续直连失败」计数（进程内记忆，直连成功即清零）
+_DIRECT_FAIL = {}
+_DIRECT_FAIL_LOCK = threading.Lock()
+_DIRECT_FAIL_N = 2         # 直连失败多少次后才启用自动代理兜底
+
+
+def _direct_fails(url):
+    with _DIRECT_FAIL_LOCK:
+        return int(_DIRECT_FAIL.get(_url_host(url), 0))
+
+
+def _direct_fail_bump(url):
+    host = _url_host(url)
+    if not host or _host_local(url):
+        return
+    with _DIRECT_FAIL_LOCK:
+        _DIRECT_FAIL[host] = min(9, int(_DIRECT_FAIL.get(host, 0)) + 1)
+
+
 def _v2ray_http_proxy():
     """内置 v2ray / xray 正在跑且开了 HTTP 入站时，返回 http://127.0.0.1:端口。"""
     try:
@@ -136,8 +164,10 @@ def _v2ray_http_proxy():
     return ""
 
 
-def _effective_proxy(opts, url=""):
-    """算出该任务最终应使用的代理：任务级 > 下载设置 > 内置 v2ray HTTP 入站。"""
+def _effective_proxy(opts, url="", force=False):
+    """算出该任务最终应使用的代理：任务级 > 下载设置 > 内置 v2ray HTTP 入站。
+    自动探测到的代理默认先不启用，除非该主机直连已连续失败满阈值；
+    force=True 表示确认要兜底（直连失败重试），直接给出自动代理。"""
     opts = opts or {}
     if opts.get("direct"):
         return ""
@@ -145,6 +175,8 @@ def _effective_proxy(opts, url=""):
     if p:
         return p
     if _host_local(url):
+        return ""
+    if not force and _direct_fails(url) < _DIRECT_FAIL_N:
         return ""
     try:
         p = str(dl.get_settings().get("proxy") or "").strip()
@@ -547,14 +579,61 @@ def reconcile():
 # ----------------------------------------------------------------------
 # 调度
 # ----------------------------------------------------------------------
+def _run_once(tid, t):
+    """按任务类型跑一轮下载（不含代理兜底逻辑）。"""
+    scheme = urllib.parse.urlsplit(t.get("url") or "").scheme.lower()
+    if scheme == "magnet":
+        _run_torrent(tid, t)
+    elif t.get("kind") == "hls":
+        _run_hls(tid, t)
+    elif scheme == "ftp":
+        _run_ftp(tid, t)
+    else:
+        _run_http(tid, t)
+
+
+def _record_outcome(t):
+    """任务收尾记账：直连成功 → 该主机失败计数清零；直连失败 → +1；
+    走代理跑的任务不影响计数（直连好不好，只由直连的结果决定）。"""
+    if not isinstance(t, dict) or t.get("status") not in ("ready", "failed"):
+        return
+    url = t.get("url") or ""
+    host = _url_host(url)
+    if not host or _host_local(url):
+        return
+    if str((t.get("opts") or {}).get("proxy") or "").strip():
+        return
+    if t.get("status") == "ready":
+        with _DIRECT_FAIL_LOCK:
+            _DIRECT_FAIL.pop(host, None)
+    else:
+        _direct_fail_bump(url)
+
+
+def _proxy_fallback(t):
+    """直连失败满阈值 → 返回该任务可用的自动代理；不满足条件返回空串。
+    用户显式填了代理 / 选了直连 / 本机地址的任务不参与兜底。"""
+    if not isinstance(t, dict) or t.get("status") != "failed":
+        return ""
+    opts = dict(t.get("opts") or {})
+    if opts.get("direct") or str(opts.get("proxy") or "").strip():
+        return ""
+    url = t.get("url") or ""
+    if _host_local(url) or _direct_fails(url) < _DIRECT_FAIL_N:
+        return ""
+    return _effective_proxy(opts, url, force=True)
+
+
 def _run(tid):
     with _RUN_LOCK:
         _RUNNING.add(tid)
+    t = None
     try:
         t = dl.get(tid)
         if not t:
             return
         # 兜底代理：老任务 / 失败重试时若任务里没填代理，按「设置 → 下载」补上并落库
+        # （新逻辑下只有该主机直连已失败满阈值，这里才会拿到自动代理，否则保持直连）
         opts0 = dict(t.get("opts") or {})
         px = _effective_proxy(opts0, t.get("url") or "")
         if px and not str(opts0.get("proxy") or "").strip():
@@ -564,15 +643,27 @@ def _run(tid):
             except Exception:
                 pass
             t["opts"] = opts0
-        scheme = urllib.parse.urlsplit(t.get("url") or "").scheme.lower()
-        if scheme == "magnet":
-            _run_torrent(tid, t)
-        elif t.get("kind") == "hls":
-            _run_hls(tid, t)
-        elif scheme == "ftp":
-            _run_ftp(tid, t)
-        else:
-            _run_http(tid, t)
+        try:
+            _run_once(tid, t)
+        except _Stopped:
+            raise
+        except Exception:
+            # 探测 / 调度阶段就抛异常：外层统一标失败，这里先把直连失败记上账
+            if not str((t.get("opts") or {}).get("proxy") or "").strip():
+                _direct_fail_bump(t.get("url") or "")
+            raise
+        t2 = dl.get(tid) or t
+        _record_outcome(t2)
+        # 直连优先：直连连续失败满阈值才自动切代理兜底，重跑一次
+        fb = _proxy_fallback(t2)
+        if fb:
+            opts = dict(t2.get("opts") or {})
+            opts["proxy"] = fb
+            dl._update(tid, opts=opts, speed=0,
+                       phase="直连失败 %d 次，改用代理重试…" % _DIRECT_FAIL_N)
+            t2["opts"] = opts
+            _run_once(tid, t2)
+            _record_outcome(dl.get(tid) or t2)
     except _Stopped:
         pass
     except Exception as e:

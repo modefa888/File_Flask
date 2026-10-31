@@ -126,3 +126,30 @@
 
 #sec-git-creds .gc-field { transition: opacity .15s; }
 #sec-git-creds .gc-field[disabled] { opacity: .5; pointer-events: none; }
+
+/* 兜底代理：勾选行（选择器要比 .gc-row label / .gc-row input 更具体）
+   —— .gc-row label 是 (1,1,1)，这里用 (1,2,0)/(1,2,1) 才能盖掉文字色与输入框外观 */
+#sec-git-creds .gc-row .gc-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #d0d0d0;
+  cursor: pointer;
+  user-select: none;
+}
+#sec-git-creds .gc-row .gc-check input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  accent-color: #0d7ec4;
+  cursor: pointer;
+  flex: none;
+}
+#sec-git-creds .gc-row .gc-check input[type="checkbox"]:focus { box-shadow: none; }
+#sec-git-creds .gc-row input:disabled { cursor: not-allowed; }

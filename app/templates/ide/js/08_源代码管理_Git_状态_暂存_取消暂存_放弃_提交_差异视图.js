@@ -695,13 +695,15 @@
   }
 
   /* ---------- 设置 → Git 认证：可视化配置 Token，自动用于 push/pull/fetch ---------- */
-  let gcState = { type: "none", hasToken: false, loading: false };
+  let gcState = { type: "none", hasToken: false, loading: false, proxyMasked: false };
   function gitCredsMountSettings(host) {
     const q = (s) => host.querySelector(s);
     const typeEl = q("#gcType");
     const tokenWrap = q("#gcTokenWrap");
     const usernameWrap = q("#gcUsernameWrap");
     const hostWrap = q("#gcHostWrap");
+    const proxyEl = q("#gcProxyFallback");
+    const proxyUrlEl = q("#gcProxyUrl");
     const tokenEl = q("#gcToken");
     const usernameEl = q("#gcUsername");
     const hostEl = q("#gcHost");
@@ -715,22 +717,48 @@
       tipEl.innerHTML = html;
     }
     function renderSummary(d) {
+      // 兜底代理与认证方式相互独立：两种状态下都显示，避免关掉 Token 后看不到代理配置
+      const proxyBit = (d && d.proxy_enabled && d.proxy_url)
+        ? ' <span class="gc-sum-div">|</span> 兜底代理：<b>' + esc(d.proxy_url) + '</b>' : '';
       if (!d || d.type === "none" || !d.has_token) {
-        summaryEl.innerHTML = '<span class="gc-sum-na"><i class="bi bi-info-circle"></i> 当前未启用认证</span>';
+        summaryEl.innerHTML = '<span class="gc-sum-na"><i class="bi bi-info-circle"></i> 当前未启用认证</span>' + proxyBit;
         return;
       }
       const parts = ['<span class="gc-sum-ok"><i class="bi bi-check-circle"></i> 已启用 HTTPS Token 认证</span>'];
       if (d.username) parts.push('用户名：<b>' + esc(d.username) + '</b>');
       if (d.host) parts.push('限定主机：<b>' + esc(d.host) + '</b>');
       parts.push('Token：<b>' + esc(d.token || "已保存") + '</b>');
-      summaryEl.innerHTML = parts.join(' <span class="gc-sum-div">|</span> ');
+      summaryEl.innerHTML = parts.join(' <span class="gc-sum-div">|</span> ') + proxyBit;
     }
     function updateFields() {
       const on = typeEl.value === "https_token";
       tokenWrap.style.display = on ? "" : "none";
       usernameWrap.style.display = on ? "" : "none";
       hostWrap.style.display = on ? "" : "none";
-      summaryEl.style.display = on ? "" : "none";
+      // 摘要里也带兜底代理状态，所以只要启用了代理就保留显示
+      summaryEl.style.display = (on || !!(proxyEl && proxyEl.checked)) ? "" : "none";
+      // 代理地址仅在勾选「直连失败时改用代理」后可编辑
+      if (proxyUrlEl) {
+        const onProxy = !!(proxyEl && proxyEl.checked);
+        proxyUrlEl.disabled = !onProxy;
+        proxyUrlEl.style.opacity = onProxy ? "" : ".55";
+      }
+    }
+    // 代理地址与 Token 一样不裸传（见 js/24_敏感字段传输加密.js）
+    function proxyPayload() {
+      const v = proxyUrlEl ? proxyUrlEl.value.trim() : "";
+      if (!v) return "";
+      return window.TP ? window.TP.encrypt(v) : v;
+    }
+    function applyProxyFields(d) {
+      if (proxyEl) proxyEl.checked = !!d.proxy_enabled;
+      gcState.proxyMasked = !!d.proxy_has_auth;
+      if (proxyUrlEl) {
+        // 带账号密码的地址后端脱敏返回（scheme://***@host），此时留空表示沿用
+        proxyUrlEl.value = d.proxy_has_auth ? "" : (d.proxy_url || "");
+        proxyUrlEl.placeholder = d.proxy_has_auth ? "已保存（含认证，留空沿用）" : "http://127.0.0.1:7890";
+      }
+      updateFields();
     }
     async function loadCreds() {
       try {
@@ -743,6 +771,7 @@
         hostEl.value = d.host || "";
         tokenEl.placeholder = d.has_token ? "已保存（留空沿用）" : "输入 Token";
         tokenEl.value = "";
+        applyProxyFields(d);
         renderSummary(d);
         updateFields();
       } catch (e) {
@@ -761,7 +790,12 @@
           username: usernameEl.value.trim(),
           host: hostEl.value.trim(),
           // Token 传输加密（见 js/24_敏感字段传输加密.js）；未启用时 TP.encrypt 原样返回
-          token: window.TP ? window.TP.encrypt(tokenEl.value.trim()) : tokenEl.value.trim()
+          token: window.TP ? window.TP.encrypt(tokenEl.value.trim()) : tokenEl.value.trim(),
+          // 兜底代理：勾选后直连失败才使用该地址，地址同样加密传输
+          proxy_fallback: !!(proxyEl && proxyEl.checked),
+          proxy_url: proxyPayload(),
+          // 脱敏地址留空 = 沿用旧值（用户重填了地址则视为替换）
+          proxy_keep: !(proxyUrlEl && proxyUrlEl.value.trim()) && !!gcState.proxyMasked
         };
         const d = await fetch("/api/git/credentials", {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -773,6 +807,7 @@
         hostEl.value = d.host || "";
         tokenEl.placeholder = d.has_token ? "已保存（留空沿用）" : "输入 Token";
         tokenEl.value = "";
+        applyProxyFields(d);
         renderSummary(d);
         setTip("ok", "已保存 Git 认证设置");
       } catch (e) {
@@ -785,15 +820,20 @@
     }
     async function testCreds() {
       if (!gitState.isRepo) { setTip("warn", "当前不是 Git 仓库，无法测试"); return; }
-      if (typeEl.value !== "https_token") { setTip("warn", "请先选择「HTTPS Token」认证方式"); return; }
+      const proxyOn = !!(proxyEl && proxyEl.checked);
+      if (typeEl.value !== "https_token" && !proxyOn) {
+        setTip("warn", "请先选择「HTTPS Token」认证方式，或勾选兜底代理后再测试");
+        return;
+      }
       if (gcState.loading) return;
-      // 先保存，使当前输入的 Token / 用户名 / 主机生效后再测
+      // 先保存，使当前输入的 Token / 用户名 / 主机 / 代理生效后再测
       await saveCreds();
       if (tipEl.classList.contains("gc-tip-err")) return;
       gcState.loading = true;
       saveBtn.disabled = true;
       testBtn.disabled = true;
-      setTip("info", '<i class="bi bi-arrow-repeat spin"></i> 正在测试…');
+      setTip("info", '<i class="bi bi-arrow-repeat spin"></i> 正在测试' +
+        (proxyOn ? '（先直连，失败自动改用代理）' : '') + '…');
       try {
         const rd = await fetch("/api/git/remote?path=" + encodeURIComponent(gitState.repo)).then(r => r.json());
         if (rd.error) throw new Error(rd.error);
@@ -814,6 +854,7 @@
       }
     }
     typeEl.addEventListener("change", updateFields);
+    if (proxyEl) proxyEl.addEventListener("change", updateFields);
     saveBtn.onclick = saveCreds;
     testBtn.onclick = testCreds;
     loadCreds();

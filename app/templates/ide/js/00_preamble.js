@@ -280,11 +280,15 @@
         return o;
       });
       localStorage.setItem("ide.session.tabs", JSON.stringify(list));
+      // 完整标签顺序（含不参与内容恢复的插件视图，如「API 管理面板」）：
+      // 这些视图由各自模块稍后重建，恢复时要靠它插回原位，否则每次刷新位置都会漂
+      localStorage.setItem("ide.session.tabOrder",
+        JSON.stringify(tabs.map(t => ({ path: t.path, pluginId: t.pluginViewId || "" }))));
       localStorage.setItem("ide.session.activeTab", (active && sessionIsRestorable(active)) ? active.path : "");
     } catch (_) {}
   }
   async function sessionRestore() {
-    if (!ideSettingGet("restoreSession", true)) return;
+    if (!ideSettingGet("restoreSession", true)) { ideEmit("sessionRestored"); return; }
     try {
       const panel = localStorage.getItem("ide.session.panel");
       // 「终端连接」是工具面板，刷新后自动弹出来很打扰（连接本身也已断开），直接忽略。
@@ -366,6 +370,9 @@
         if (bp && bp.show && typeof toggleBottom === "function") toggleBottom(true, bp.pane || "output");
       } catch (_) {}
     } catch (_) {}
+    // 会话恢复结束（含失败）：依赖「标签已就位」的模块（如 API 管理面板）此时再建标签，
+    // 否则它们会在文件 / V2Ray 等标签恢复之前抢先插入，刷新后标签顺序每次都不同
+    ideEmit("sessionRestored");
   }
   // IDE 树中隐藏的目录：各类语言/工具的依赖与缓存目录（对任何项目生效）
   // 「显示全部」开关：开启后依赖目录（node_modules 等）也会显示，可手动展开，「全部展开」会跳过

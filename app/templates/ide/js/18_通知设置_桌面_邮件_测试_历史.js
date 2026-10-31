@@ -994,11 +994,34 @@
   // 改动即自动保存（防抖）：开关 / 勾选 / 输入后稍等片刻就落库，刷新不丢；
   // skipFill 回填，避免打断正在进行的输入
   let _cronAutoSaveTimer = null;
+  // 是否存在「已启用」的定时任务：没有的话，这块设置基本没人用，
+  // 自动保存弹提示只会成为噪音（尤其开局误触发 focusout 时）。
+  // 侧栏没加载过任务列表时补一次 /api/cron/tasks，并缓存 60 秒，避免每次保存都多一个请求。
+  let _cronEnabledProbe = { at: 0, has: false };
+  async function cronNotifyHasEnabledTask() {
+    try {
+      const cached = (typeof CRON !== "undefined" && CRON && Array.isArray(CRON.tasks)) ? CRON.tasks : null;
+      if (cached && cached.length) return cached.some(t => t && t.enabled);
+      const now = Date.now();
+      if (now - _cronEnabledProbe.at < 60000) return _cronEnabledProbe.has;
+      let has = false;
+      const r = await fetch("/api/cron/tasks");
+      const d = await r.json();
+      const list = (d && d.tasks) || [];
+      if (typeof CRON !== "undefined" && CRON) CRON.tasks = list;   // 顺带补上侧栏缓存
+      has = list.some(t => t && t.enabled);
+      _cronEnabledProbe = { at: now, has: has };
+      return has;
+    } catch (e) {
+      return false;
+    }
+  }
   function cronNotifyAutoSave() {
     clearTimeout(_cronAutoSaveTimer);
     _cronAutoSaveTimer = setTimeout(async () => {
       if (await cronNotifySave(true, true)) {
-        notifyToast("定时任务通知：设置已自动保存", "ok");
+        // 静默保存照样生效，只是没在用定时任务时不打扰用户
+        if (await cronNotifyHasEnabledTask()) notifyToast("定时任务通知：设置已自动保存", "ok");
       }
     }, 600);
   }

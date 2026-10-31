@@ -296,6 +296,11 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .gr-test-btn { background: #e8e8e8; border-color: #cecece; color: #8a6a00; }
 :where(html.theme-light) .gr-test-btn:hover { background: #dcdcdc; }
 :where(html.theme-light) .gr-status-na { background: #ececec; color: #666666; }
+/* 测试连接状态条：深色主题的高饱和底在白弹窗里过重，浅色下改为淡底+深字（与设置页 Git 认证的 gc-tip 同色） */
+:where(html.theme-light) .gr-status-info { background: #e3f0fb; color: #0b5c9a; }
+:where(html.theme-light) .gr-status-ok { background: #dff3e4; color: #1a7f37; }
+:where(html.theme-light) .gr-status-warn { background: #fbf3d9; color: #8a5a00; }
+:where(html.theme-light) .gr-status-err { background: #fbe0e0; color: #c0392b; }
 :where(html.theme-light) .gr-creds-btn { border-color: #cecece; color: #005fb8; }
 :where(html.theme-light) .gr-creds-btn:hover { background: #e3f0fb; border-color: #8ab4d8; }
 
@@ -686,6 +691,7 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) #sec-git-creds .gc-summary { background: #f0f0f0; border-color: #e0e0e0; color: #5a5a5a; }
 :where(html.theme-light) #sec-git-creds .gc-sum-na { color: #6b6b6b; }
 :where(html.theme-light) #sec-git-creds .gc-sum-div { color: #b0b0b0; }
+:where(html.theme-light) #sec-git-creds .gc-row .gc-check { color: #333333; }
 
 /* ---------- 设置页：命令安全（34） ---------- */
 :where(html.theme-light) .cg-loading { color: #6b6b6b; }

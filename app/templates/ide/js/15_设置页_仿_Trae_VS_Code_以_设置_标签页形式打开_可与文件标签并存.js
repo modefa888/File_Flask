@@ -338,6 +338,11 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
               '<label>限定主机（可选）</label>' +
               '<input type="text" id="gcHost" placeholder="例如 github.com，留空则对所有 HTTPS 远程生效" autocomplete="off" spellcheck="false">' +
             '</div>' +
+            '<div class="gc-row gc-field" id="gcProxyWrap">' +
+              '<label class="gc-check"><input type="checkbox" id="gcProxyFallback"> 直连失败时改用代理（兜底）</label>' +
+              '<input type="text" id="gcProxyUrl" placeholder="http://127.0.0.1:7890" autocomplete="off" spellcheck="false">' +
+              '<div class="gc-hint">push / pull / fetch 与「测试连接」都先走直连；超时或无法连接时，才自动改用此代理重试一次。支持 http / https / socks5，需要认证写成 socks5://用户:密码@主机:端口；本机 V2Ray 内核默认是 socks5://127.0.0.1:10808。仅对 HTTPS 远程生效，SSH 远程不走此代理</div>' +
+            '</div>' +
             '<div class="gc-actions">' +
               '<button class="gc-btn secondary" id="gcTest"><i class="bi bi-wifi"></i> 测试认证</button>' +
               '<button class="gc-btn primary" id="gcSave">保存</button>' +

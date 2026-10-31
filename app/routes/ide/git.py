@@ -34,8 +34,11 @@ _TIMEOUT = 20
 _MAX_DIFF_BYTES = 512 * 1024
 
 
+_SECRET_FIELDS = ("token", "proxy_url")      # 以密文落库的字段（代理地址可能带用户名密码）
+
+
 def _load_git_creds():
-    """Git 认证信息（一行一个字段；token 以密文落库，这里解密后返回）。"""
+    """Git 认证信息（一行一个字段；敏感字段以密文落库，这里解密后返回）。"""
     out = {}
     try:
         conn = store_conn()
@@ -46,26 +49,31 @@ def _load_git_creds():
             conn.close()
     except Exception:
         return {}
-    raw_token = out.get("token")
-    if raw_token:
-        plain, need_rewrite = secret.decrypt_ex(raw_token)
-        out["token"] = plain
-        if need_rewrite:
-            try:
-                _save_git_creds(out)      # 历史明文 / 旧密钥：顺手用当前密钥重写
-            except Exception:
-                pass
+
+    need_save = False
+    for key in _SECRET_FIELDS:
+        raw = out.get(key)
+        if not raw:
+            continue
+        plain, need_rewrite = secret.decrypt_ex(raw)
+        out[key] = plain
+        need_save = need_save or need_rewrite
+    if need_save:
+        try:
+            _save_git_creds(out)          # 历史明文 / 旧密钥：顺手用当前密钥重写
+        except Exception:
+            pass
     return out
 
 
 def _save_git_creds(creds):
-    """整表覆盖写入（token 加密后落库，一行一个字段）。"""
+    """整表覆盖写入（敏感字段加密后落库，一行一个字段）。"""
     creds = creds if isinstance(creds, dict) else {}
     with store_tx() as conn:
         conn.execute("DELETE FROM git_creds")
         for k, v in creds.items():
             value = str(v)
-            if k == "token" and value:
+            if k in _SECRET_FIELDS and value:
                 value = secret.encrypt(value)
             conn.execute("INSERT INTO git_creds (name, value) VALUES (?,?)", (str(k), value))
 
@@ -75,7 +83,7 @@ def _import_git_creds(creds) -> None:
         conn.execute("DELETE FROM git_creds")
         for k, v in (creds or {}).items():
             value = str(v)
-            if k == "token" and value:
+            if k in _SECRET_FIELDS and value:
                 value = secret.encrypt(value)
             conn.execute("INSERT INTO git_creds (name, value) VALUES (?,?)", (str(k), value))
 
@@ -119,11 +127,101 @@ def _auth_remote_url(url, creds):
         return url
 
 
+_RE_PROXY = re.compile(r"^(https?|socks5h?|socks4a?)://", re.I)
+
+
+def _mask_proxy(proxy):
+    """代理地址脱敏：带认证时显示 scheme://***@host:port，否则原样返回。"""
+    if not proxy:
+        return ""
+    try:
+        u = urlsplit(proxy)
+        if u.username is None:
+            return proxy
+        port = ":" + str(u.port) if u.port else ""
+        return "%s://***@%s%s" % (u.scheme, u.hostname or "", port)
+    except Exception:
+        return "***"
+
+
+def _normalize_proxy(value):
+    """规范化代理地址（不写协议按 http 处理）；非法返回空串。"""
+    proxy = (value or "").strip()
+    if not proxy:
+        return ""
+    if not _RE_PROXY.match(proxy):
+        if "://" in proxy:              # 写了不支持的协议（如 ftp://）直接拒绝，不要硬拼成 http://ftp://
+            return ""
+        proxy = "http://" + proxy
+    try:
+        u = urlsplit(proxy)
+        if not u.hostname or u.scheme.lower() not in ("http", "https", "socks5", "socks5h", "socks4a"):
+            return ""
+    except Exception:
+        return ""
+    return proxy
+
+
+def _proxy_cfg(creds):
+    """「兜底代理」：开启且地址有效时返回代理 URL，否则空串。
+
+    语义是「先直连，直连不行再用代理」：这里的返回值只用于直连失败后的重试，
+    不会让所有请求都强制走代理。
+    """
+    if not isinstance(creds, dict):
+        return ""
+    flag = str(creds.get("proxy_fallback") or "").strip().lower()
+    if flag not in ("1", "true", "yes", "on"):
+        return ""
+    return _normalize_proxy(creds.get("proxy_url"))
+
+
+def _is_http_remote(url):
+    """兜底代理只对 HTTP(S) 远程有意义（SSH 远程要靠 ProxyCommand，http.proxy 管不到）。"""
+    u = (url or "").strip().lower()
+    return u.startswith("http://") or u.startswith("https://")
+
+
+def _proxy_public(creds):
+    """回传前端的代理配置：带认证的地址脱敏，避免明文密码出现在页面上。"""
+    creds = creds if isinstance(creds, dict) else {}
+    flag = str(creds.get("proxy_fallback") or "").strip().lower() in ("1", "true", "yes", "on")
+    url = (creds.get("proxy_url") or "").strip()
+    masked = _mask_proxy(url)
+    return {
+        "proxy_enabled": flag,
+        "proxy_url": masked,
+        "proxy_has_auth": bool(url) and masked != url,
+    }
+
+
+def _probe_proxy(proxy, timeout=3.0):
+    """探测代理端口是否可连：代理本身都不通时不必再重试，直接报直连的错误。"""
+    try:
+        u = urlsplit(proxy)
+        host = u.hostname
+        if u.scheme == "https":
+            port = u.port or 443
+        elif (u.scheme or "").startswith("socks"):
+            port = u.port or 1080
+        else:
+            port = u.port or 80
+    except Exception:
+        return False, "代理地址无法解析"
+    if not host:
+        return False, "代理地址缺少主机名"
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True, ""
+    except OSError as e:
+        return False, "无法连接代理 %s:%s（%s）" % (host, port, e)
+
+
 def _git_exe():
     return shutil.which("git")
 
 
-def _git(cwd, args, timeout=_TIMEOUT):
+def _git(cwd, args, timeout=_TIMEOUT, proxy=""):
     """执行 git 命令，返回 (CompletedProcess, error)。
 
     统一带上 `-c safe.directory=*`：本服务可能以 root 运行，而仓库/工作区属于
@@ -134,6 +232,9 @@ def _git(cwd, args, timeout=_TIMEOUT):
     统一带上 `-c core.quotepath=false`：Git 默认把非 ASCII 路径转义成
     `"01_\346\240\207....css"` 形式（并包上引号），导致提交文件列表、
     差异等处中文文件名显示为乱码。关闭后直接输出 UTF-8 原文。
+
+    proxy：临时代理地址（`-c http.proxy=...`），只作用于本次命令，
+    不写入 ~/.gitconfig；为空即直连。
     """
     exe = _git_exe()
     if not exe:
@@ -142,8 +243,11 @@ def _git(cwd, args, timeout=_TIMEOUT):
     # 禁止 Git 弹出交互式用户名/密码提示；在 Web 后端没有终端，hang 住会导致超时
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_ASKPASS"] = "false"
+    conf = [exe, "-c", "safe.directory=*", "-c", "core.quotepath=false"]
+    if proxy:
+        conf += ["-c", "http.proxy=" + proxy, "-c", "https.proxy=" + proxy]
     try:
-        proc = subprocess.run([exe, "-c", "safe.directory=*", "-c", "core.quotepath=false"] + args,
+        proc = subprocess.run(conf + args,
                               cwd=cwd, capture_output=True,
                               text=True, errors="replace", timeout=timeout,
                               stdin=subprocess.DEVNULL, env=env)
@@ -890,11 +994,20 @@ def _remote_op(verb, timeout):
     origin_url = proc_url.stdout.strip()
     auth_url = _auth_remote_url(origin_url, creds)
 
-    # 先探一下远端端口：网络不通时立刻失败，避免 git 卡满 120s、
+    proxy = _proxy_cfg(creds) if _is_http_remote(origin_url) else ""
+    # 先探直连端口：网络不通时立刻失败，避免 git 卡满 120s、
     # 用户反复点推送堆出一堆「推送中」记录
     reachable, why = _probe_remote(origin_url)
+    use_proxy = ""
     if not reachable:
-        return jsonify({"ok": False, "error": why, "output": ""}), 400
+        if proxy:
+            proxy_ok, proxy_why = _probe_proxy(proxy)
+            if proxy_ok:
+                use_proxy = proxy          # 直连不通、代理可用 → 直接走兜底代理
+            else:
+                why += "；兜底代理 " + _mask_proxy(proxy) + " 也不可用：" + proxy_why
+        if not use_proxy:
+            return jsonify({"ok": False, "error": why, "output": ""}), 400
 
     args = [verb]
     branch = ""
@@ -920,13 +1033,38 @@ def _remote_op(verb, timeout):
     hid = _push_hist_start(root, branch, push_commits) if verb == "push" else None
 
     # 低速断开：连接建立后 20 秒内几乎没有数据（<1KB/s）就主动断，避免半死不活地挂着
-    proc, err = _git(root, ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=20"] + args,
-                     timeout=timeout)
+    def _run(via_proxy):
+        return _git(root, ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=20"] + args,
+                    timeout=timeout, proxy=via_proxy)
+
+    proc, err = _run(use_proxy)
+    used_fallback = False
+    proxy_retry_msg = ""
+    if (err or proc is None or proc.returncode != 0) and proxy and not use_proxy:
+        # 端口探得通、但 git 仍失败（DNS 污染 / TLS 劫持 / 半通网络）→ 用兜底代理再试一次
+        proxy_ok, _proxy_why = _probe_proxy(proxy)
+        if proxy_ok:
+            proc2, err2 = _run(proxy)
+            if not err2 and proc2 is not None and proc2.returncode == 0:
+                proc, err = proc2, err2
+                use_proxy = proxy
+                used_fallback = True
+            else:
+                proxy_retry_msg = (err2 or ((proc2.stdout or "") + (proc2.stderr or "")).strip())[:300]
     if err:
-        _push_hist_finish(hid, False, str(err))
-        return _fail(err, 500)
+        msg = str(err)
+        if proxy and not use_proxy:
+            msg += "（直连失败后已尝试兜底代理 " + _mask_proxy(proxy) + "，仍未成功）"
+        _push_hist_finish(hid, False, msg)
+        return _fail(msg, 500)
     out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if used_fallback:
+        out = "直连失败，已自动改用代理 " + _mask_proxy(proxy) + " 重试成功\n" + out
+    elif use_proxy:
+        out = "直连不可达，已直接使用代理 " + _mask_proxy(use_proxy) + "\n" + out
     if proc.returncode != 0:
+        if proxy_retry_msg:
+            out += "\n（兜底代理 " + _mask_proxy(proxy) + " 重试也失败：" + proxy_retry_msg + "）"
         # 输出为空时至少记下返回码，避免记录里只有一句干巴巴的「失败」
         _push_hist_finish(hid, False, out or f"git 进程异常退出（返回码 {proc.returncode}，无输出）")
         # 对常见错误给出更直接的提示
@@ -1189,7 +1327,15 @@ def api_git_remote_test():
     if not isinstance(creds, dict):
         creds = _load_git_creds()
     url = _auth_remote_url(url, creds)
+    # 兜底代理：先直连测试，直连失败（且代理端口可连）再走代理测一次；SSH 远程不适用
+    proxy = _proxy_cfg(creds) if _is_http_remote(url) else ""
     proc, err = _git(root, ["ls-remote", "--symref", url, "HEAD"], timeout=20)
+    via = "direct"
+    if proxy and (err or proc is None or proc.returncode != 0) and _probe_proxy(proxy)[0]:
+        proc2, err2 = _git(root, ["ls-remote", "--symref", url, "HEAD"], timeout=20, proxy=proxy)
+        if not err2 and proc2 is not None and proc2.returncode == 0:
+            proc, err = proc2, err2
+            via = "proxy"
     if err:
         if err == "git 命令执行超时":
             return jsonify({
@@ -1225,22 +1371,25 @@ def api_git_remote_test():
         "ok": True,
         "output": out,
         "default_branch": default_branch,
-        "message": "连接成功" + (("，默认分支：" + default_branch) if default_branch else "")
+        "via": via,
+        "message": "连接成功" +
+                   ("（经代理 " + _mask_proxy(proxy) + "）" if via == "proxy" else "") +
+                   (("，默认分支：" + default_branch) if default_branch else "")
     })
 
 
 @bp.route("/api/git/credentials", methods=["GET"])
 def api_git_credentials_get():
-    """读取已保存的 Git 认证信息（Token 脱敏返回）。"""
+    """读取已保存的 Git 认证信息（Token / 带认证的代理地址脱敏返回）。"""
     creds = _load_git_creds()
-    return jsonify({
+    return jsonify(dict({
         "ok": True,
         "type": creds.get("type") or "none",
         "username": creds.get("username") or "",
         "token": _mask_token(creds.get("token") or ""),
         "host": creds.get("host") or "",
         "has_token": bool(creds.get("token")),
-    })
+    }, **_proxy_public(creds)))
 
 
 @bp.route("/api/git/credentials", methods=["POST"])
@@ -1271,15 +1420,34 @@ def api_git_credentials_post():
         creds.pop("token", None)
         creds.pop("username", None)
         creds.pop("host", None)
+
+    # 兜底代理：地址留空时——勾选中且是「脱敏回传」的旧值则沿用，否则视为清空
+    proxy_on = bool(data.get("proxy_fallback"))
+    keep_old = bool(data.get("proxy_keep"))
+    # 前端同样以 RSA 密文提交代理地址（可能含用户名密码）
+    proxy_url = transport.unwrap(data.get("proxy_url") or "").strip()
+    if proxy_url and "***" not in proxy_url:
+        norm = _normalize_proxy(proxy_url)
+        if not norm:
+            return _fail("代理地址格式不正确，示例：http://127.0.0.1:7890 或 socks5://127.0.0.1:1080")
+        creds["proxy_url"] = norm
+    elif keep_old and proxy_on and (creds.get("proxy_url") or "").strip():
+        pass                                   # 含账号密码的地址被脱敏返回，留空 = 沿用
+    else:
+        creds.pop("proxy_url", None)
+    if proxy_on and not (creds.get("proxy_url") or "").strip():
+        return _fail("已启用兜底代理，请填写代理地址，例如 http://127.0.0.1:7890")
+    creds["proxy_fallback"] = "1" if proxy_on else "0"
+
     _save_git_creds(creds)
-    return jsonify({
+    return jsonify(dict({
         "ok": True,
         "type": creds["type"],
         "token": _mask_token(creds.get("token") or ""),
         "has_token": bool(creds.get("token")),
         "username": creds.get("username") or "",
         "host": creds.get("host") or "",
-    })
+    }, **_proxy_public(creds)))
 
 
 @bp.route("/api/git/gitignore", methods=["POST"])

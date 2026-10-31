@@ -348,7 +348,7 @@
       }
       if (spec.title) opened.setTitle(spec.title);
       if (spec.iconHtml || spec.icon) opened.setIcon(spec.iconHtml || ('<i class="bi ' + spec.icon + '"></i>'));
-      activate(opened.tab);
+      if (!spec.background) activate(opened.tab);   // background：只刷新内容，不抢当前焦点
       return opened;
     }
     // 兜底：清掉已关闭实例残留的键
@@ -424,7 +424,7 @@
     tabs.push(tab);
     renderTabsAll();
     _plViews.set(key, view);
-    activate(tab);                                       // 与打开文件一致：创建即激活
+    if (!spec.background) activate(tab);                 // 与打开文件一致：创建即激活；background 仅后台建标签
     if (isDoc) {
       // 内容文档：挂 CodeMirror 编辑器（行号 / 高亮 / 脏标记 / Ctrl+S onSave）
       _plMountDoc(tab, view);
@@ -1813,13 +1813,15 @@
 
     // 对外：打开面板（可带初始标签 overview | tests | ai | docs）；已打开则聚焦并切换
     // 开启状态持久化到 IDE.settings：刷新页面后自动恢复（见下方启动恢复逻辑）
-    function open(tab) {
+    // opts.background = true：只建标签 / 刷新内容，不激活，避免刷新页面时抢走当前焦点
+    function open(tab, opts) {
+      opts = opts || {};
       if (tab) _tab = tab;
       try { IDE.settings.set("_extConsole.open", _tab || "overview"); } catch (e) {}
       const ex = IDE.editors.get("builtin-console");
       if (ex) {
         if (typeof _switch === "function") _switch(_tab);
-        if (ex.focus) ex.focus();
+        if (!opts.background && ex.focus) ex.focus();
         return;
       }
       IDE.editors.open({
@@ -1827,6 +1829,7 @@
         title: "API 管理面板",
         icon: "bi-grid-1x2",
         noSplit: true,
+        background: !!opts.background,
         render: (box) => _render(box, IDE),
         onClose: () => { _switch = null; try { IDE.settings.set("_extConsole.open", null); } catch (e) {} return true; }
       });
@@ -1835,11 +1838,67 @@
   })();
   IDE.extConsole = _extConsole;   // 内置管理面板：扩展模块卡片与插件命令共用入口
 
-  // 刷新页面后恢复面板：上次会话面板开着 → 延迟自动重开（含上次所在标签 / 二次开发基线）
+  // 刷新页面后恢复面板：上次会话面板开着 → 自动重开（含上次所在标签 / 二次开发基线）
+  // · 焦点：只有「刷新前焦点就在面板上」才激活它。activeTab 里存的是上次的激活标签，
+  //   插件视图不参与会话保存，所以面板为焦点时 activeTab 是空的；
+  //   有值时说明用户当时在看设置页 / 文件，恢复时应留在后台，否则刷新一下就被面板顶掉。
+  // · 顺序：必须等会话恢复结束（sessionRestored）再建标签。会话恢复要读文件、拉接口，
+  //   耗时不稳定；先建面板会让它随机插在文件 / V2Ray 标签之前，刷新后标签顺序每次都变。
   (function () {
     const saved = IDE.settings.get("_extConsole.open", null);
     if (!saved) return;
-    setTimeout(() => { try { _extConsole.open(saved); } catch (e) { /* 编辑器尚未就绪时忽略 */ } }, 400);
+    let lastActive = "";
+    try { lastActive = localStorage.getItem("ide.session.activeTab") || ""; } catch (e) {}
+    const restoreSession = IDE.settings.get("restoreSession", true) !== false;
+    const background = restoreSession && !!lastActive && String(lastActive).indexOf("\u0001") < 0;
+    let opened = false;
+    // 按上次的标签顺序把面板插回原位：插件视图不参与会话内容恢复，
+    // 但位置记在 ide.session.tabOrder 里（见 00_preamble 的 sessionSaveTabs）
+    const restoreConsolePos = () => {
+      try {
+        const order = JSON.parse(localStorage.getItem("ide.session.tabOrder") || "[]");
+        if (!Array.isArray(order) || !order.length) return;
+        const want = order.findIndex(o => o && o.pluginId === "builtin-console");
+        if (want < 0) return;
+        const idx = tabs.findIndex(t => t.pluginViewId === "builtin-console");
+        if (idx < 0) return;
+        // 目标位置 = 快照里排在它前面的普通标签，如今还剩下的个数
+        const beforePaths = order.slice(0, want).filter(o => o && !o.pluginId).map(o => o.path);
+        const target = tabs.filter(t => !t.pluginView && beforePaths.indexOf(t.path) >= 0).length;
+        if (target === idx) return;
+        const [tab] = tabs.splice(idx, 1);
+        tabs.splice(Math.min(target, tabs.length), 0, tab);
+        renderTabsAll();
+      } catch (e) { /* 顺序恢复失败不影响打开 */ }
+    };
+    const openOnce = () => {
+      if (opened) return;
+      try {
+        _extConsole.open(saved, { background: background });
+      } catch (e) {
+        return;                                  // 编辑器尚未就绪：留给下一次重试
+      }
+      if (!(IDE.editors && IDE.editors.get("builtin-console"))) return;   // 没真正建出标签也重试
+      opened = true;
+      restoreConsolePos();
+    };
+    // 正常路径：会话恢复结束事件到达后立刻恢复
+    // 注意用闭包里的 IDE，而不是 window.IDE —— 后者此时还没赋值（文件末尾才挂到 window）
+    try {
+      if (IDE.events && typeof IDE.events.on === "function") {
+        IDE.events.on("sessionRestored", () => setTimeout(openOnce, 0));
+      }
+    } catch (e) {}
+    // 兜底：事件没到（被提前 emit / 监听失效）时才用。3 秒后开始轮询，避免在会话
+    // 恢复途中抢跑、又把标签顺序打乱；一次失败也还有后续重试
+    let tries = 0;
+    const retry = () => {
+      if (opened || tries >= 6) return;
+      tries++;
+      openOnce();
+      if (!opened) setTimeout(retry, 800);
+    };
+    setTimeout(retry, 3000);
   })();
 
   // 内置扩展卡片（扩展列表顶部，始终可用、不可卸载）

@@ -15,13 +15,38 @@
     ".pl-pad{padding:10px;color:var(--fg,#ddd);font-size:13px;line-height:1.6}",
     ".pl-pad p{margin:0 0 8px}",
     ".pl-out{margin-top:8px;max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-all;background:rgba(127,127,127,.12);border-radius:6px;padding:8px;font-size:12px}",
-    ".pl-card{border:1px solid rgba(127,127,127,.25);border-radius:8px;padding:8px 10px;margin:8px}",
-    ".pl-card .pl-row{display:flex;align-items:center;gap:6px}",
-    ".pl-card .pl-ver{color:#8a8;font-size:11px}",
-    ".pl-card .pl-desc{color:#aaa;font-size:12px;margin:4px 0}",
-    ".pl-card .pl-author{color:#888;font-size:11px}",
-    ".pl-card .pl-acts{display:flex;align-items:center;gap:10px;margin-top:6px}",
-    ".pl-card .pl-sw{font-size:12px;color:#bbb;display:flex;align-items:center;gap:4px}",
+    // 侧栏「扩展」面板：头部工具行 + 插件卡片。配色统一用 rgba(127,127,127,·)，
+    // 深浅两套主题下都不用再单独写覆盖；按钮尺寸与其它侧栏面板保持一套语言。
+    "#extPanel{padding-top:0}",
+    ".pl-head{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:0 0 8px}",
+    ".pl-head-t{flex:1 0 auto;min-width:0;font-size:11.5px;color:#8e9299;letter-spacing:.2px}",
+    ".pl-head-acts{display:flex;gap:6px;margin-left:auto}",
+    ".pl-head .g-btn{box-sizing:border-box;height:26px;padding:0 9px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;gap:5px;font-size:11.5px;border:1px solid rgba(127,127,127,.28);background:rgba(127,127,127,.08);color:inherit;transition:background .14s ease,border-color .14s ease}",
+    ".pl-head .g-btn:hover{background:rgba(127,127,127,.18);border-color:rgba(127,127,127,.42)}",
+    ".pl-head .pl-ico{width:26px;padding:0}",
+    ".pl-search-wrap{padding:0 0 8px}",
+    ".pl-search{box-sizing:border-box;width:100%;height:28px;padding:0 9px;border-radius:6px;border:1px solid rgba(127,127,127,.3);background:rgba(127,127,127,.1);color:inherit;font-family:inherit;font-size:12px;outline:none}",
+    ".pl-search:focus{border-color:#0d7ec4}",
+    ".pl-card{border:1px solid rgba(127,127,127,.22);border-radius:10px;padding:10px 11px;margin:0 0 8px;background:rgba(127,127,127,.055);transition:background .14s ease,border-color .14s ease}",
+    ".pl-card:hover{background:rgba(127,127,127,.1);border-color:rgba(127,127,127,.38)}",
+    ".pl-card .pl-row{display:flex;align-items:center;gap:7px;min-width:0}",
+    ".pl-card .pl-row>i{flex:none;font-size:14px;color:#4da3ff}",
+    ".pl-card .pl-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:600}",
+    ".pl-card .pl-ver{flex:none;font-size:10.5px;line-height:1.7;padding:0 6px;border-radius:8px;color:#7fae8a;background:rgba(127,127,127,.12)}",
+    ".pl-card .pl-st{flex:none;margin-left:auto;font-size:10.5px;line-height:1.7;padding:0 7px;border-radius:9px;border:1px solid transparent}",
+    ".pl-card .pl-st.on{color:#4ec98a;background:rgba(78,201,138,.12);border-color:rgba(78,201,138,.38)}",
+    ".pl-card .pl-st.off{color:#9aa0a8;background:rgba(127,127,127,.12);border-color:rgba(127,127,127,.3)}",
+    ".pl-card .pl-desc{color:#9aa0a8;font-size:11.5px;line-height:1.7;margin:6px 0 0}",
+    ".pl-card .pl-author{color:#878d95;font-size:11px;margin-top:4px}",
+    ".pl-card .pl-acts{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:9px}",
+    ".pl-card .pl-sp{flex:1 1 auto}",
+    ".pl-card .pl-sw{font-size:11.5px;color:#b6bcc4;display:inline-flex;align-items:center;gap:5px;cursor:pointer}",
+    ".pl-card .pl-acts .g-btn{box-sizing:border-box;height:26px;padding:0 10px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:11.5px}",
+    ".pl-card .pl-acts .g-btn.outline{border:1px solid rgba(127,127,127,.28);background:rgba(127,127,127,.08);color:inherit}",
+    ".pl-card .pl-acts .g-btn.outline:hover{background:rgba(127,127,127,.18);border-color:rgba(127,127,127,.42)}",
+    ".pl-card .pl-acts .g-btn:not(.outline){border:0;color:#fff;background:linear-gradient(180deg,#189ae6,#0b71b4);box-shadow:0 1px 2px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.14)}",
+    ".pl-card .pl-acts .g-btn:not(.outline):hover{background:linear-gradient(180deg,#1ea6f5,#0c7cbf)}",
+    "#extPanel .ph{padding:8px 0;color:#8a9098;font-size:11.5px;line-height:1.7}",
     // 插件「编辑区视图」：与打开文件同款标签页容器，内容由插件自行渲染
     ".pl-view-host{height:100%;overflow:hidden}",
     ".pl-view-body{height:100%;overflow:auto;color:var(--fg,#ddd);font-size:13px}",
@@ -2279,15 +2304,15 @@
   // 内置扩展卡片（扩展列表顶部，始终可用、不可卸载）
   function _extConsoleCard() {
     return '<div class="pl-card" data-builtin="console" data-search="扩展自定义插件 api 管理面板 内置 builtin console 总览 测试 ai" style="cursor:pointer" title="内置扩展 · 点击查看说明">' +
-      '<div class="pl-row"><i class="bi bi-puzzle"></i> <b>扩展自定义插件</b> <span class="pl-ver">内置</span>' +
-        '<span style="margin-left:auto;font-size:11px;color:#7bd88f">始终可用</span></div>' +
+      '<div class="pl-row"><i class="bi bi-puzzle"></i><b class="pl-name">扩展自定义插件</b><span class="pl-ver">内置</span>' +
+        '<span class="pl-st on">始终可用</span></div>' +
       '<div class="pl-desc">系统 API 总览 / API 测试 / AI 开发插件 / 文档：浏览宿主全部接口、一键自检测试、用 AI 生成插件代码骨架、内置查看宿主 API 文档。</div>' +
       '<div class="pl-acts">' +
-        '<button class="g-btn" data-btab="" style="padding:1px 10px;font-size:11px">打开面板</button>' +
-        '<span style="flex:1"></span>' +
-        '<button class="g-btn outline" data-btab="tests" style="padding:1px 8px;font-size:11px">API 测试</button>' +
-        '<button class="g-btn outline" data-btab="ai" style="padding:1px 8px;font-size:11px">AI 开发</button>' +
-        '<button class="g-btn outline" data-btab="docs" style="padding:1px 8px;font-size:11px">文档</button>' +
+        '<button class="g-btn" data-btab="" title="打开扩展面板">打开面板</button>' +
+        '<span class="pl-sp"></span>' +
+        '<button class="g-btn outline" data-btab="tests">API 测试</button>' +
+        '<button class="g-btn outline" data-btab="ai">AI 开发</button>' +
+        '<button class="g-btn outline" data-btab="docs">文档</button>' +
       '</div></div>';
   }
 
@@ -2297,38 +2322,37 @@
     _plFetchList().then(list => {
       list = list || [];
       let html =
-        '<div class="ph" style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
-          '<span>已安装扩展（' + list.length + '）</span>' +
-          '<span style="display:flex;gap:6px">' +
+        '<div class="pl-head">' +
+          '<span class="pl-head-t">已安装扩展（' + list.length + '）</span>' +
+          '<span class="pl-head-acts">' +
             /* 搜索按钮：默认收起，点一下才展开下面的搜索框 */
-            '<button class="g-btn outline" id="plSearchToggle" title="搜索已安装的扩展" ' +
-              'style="padding:2px 8px;font-size:12px"><i class="bi bi-search"></i></button>' +
-            '<button class="g-btn outline" id="plHistory" style="padding:2px 8px;font-size:12px">历史</button>' +
-            '<button class="g-btn outline" id="plUpload" style="padding:2px 8px;font-size:12px">上传插件(zip)</button>' +
+            '<button class="g-btn outline pl-ico" id="plSearchToggle" title="搜索已安装的扩展"><i class="bi bi-search"></i></button>' +
+            '<button class="g-btn outline" id="plHistory" title="查看插件上传 / 安装历史">历史</button>' +
+            '<button class="g-btn outline" id="plUpload" title="上传插件 zip 包安装"><i class="bi bi-file-earmark-arrow-up"></i>上传插件</button>' +
           '</span>' +
         '</div>';
       if (list.length) {
-        html += '<div id="plSearchWrap" style="display:none;padding:0 8px 6px">' +
-          '<input id="plSearch" placeholder="搜索已安装的扩展…" ' +
-          'style="width:100%;box-sizing:border-box;padding:3px 8px;font-size:12px;background:rgba(127,127,127,.1);border:1px solid rgba(127,127,127,.25);border-radius:6px;color:inherit;outline:none">' +
+        html += '<div class="pl-search-wrap" id="plSearchWrap" style="display:none">' +
+          '<input class="pl-search" id="plSearch" placeholder="搜索已安装的扩展…" spellcheck="false" autocomplete="off">' +
           '</div>';
       }
-      if (!list.length) html += '<div class="ph" style="color:#888">暂无插件。把插件目录打包成 zip 上传即可。</div>';
+      if (!list.length) html += '<div class="ph">暂无插件。把插件目录打包成 zip 上传即可。</div>';
       html += _extConsoleCard();               // 内置扩展（扩展自定义插件）：始终置顶展示
       for (const p of list) {
         _plIcons.set(p.id, _plResolveIcon(p));   // 同步插件图标（视图标签默认图标即取自此）
         const search = ((p.name || "") + " " + p.id + " " + (p.description || "") + " " + (p.author || "")).toLowerCase();
         html +=
           '<div class="pl-card" data-id="' + _esc(p.id) + '" data-search="' + _esc(search) + '" style="cursor:pointer" title="点击查看详情">' +
-            '<div class="pl-row"><i class="bi ' + _esc(_plResolveIcon(p) || "bi-puzzle") + '"></i> <b>' + _esc(p.name || p.id) + '</b> <span class="pl-ver">v' + _esc(p.version || "0.0.0") + '</span>' +
-              '<span style="margin-left:auto;font-size:11px;color:' + (p.enabled ? "#7bd88f" : "#888") + '">' + (p.enabled ? "已启用" : "已禁用") + '</span></div>' +
+            '<div class="pl-row"><i class="bi ' + _esc(_plResolveIcon(p) || "bi-puzzle") + '"></i><b class="pl-name">' + _esc(p.name || p.id) + '</b>' +
+              '<span class="pl-ver">v' + _esc(p.version || "0.0.0") + '</span>' +
+              '<span class="pl-st ' + (p.enabled ? "on" : "off") + '">' + (p.enabled ? "已启用" : "已禁用") + '</span></div>' +
             (p.description ? '<div class="pl-desc">' + _esc(p.description) + '</div>' : '') +
             (p.author ? '<div class="pl-author">作者：' + _esc(p.author) + '</div>' : '') +
             '<div class="pl-acts">' +
               '<label class="pl-sw"><input type="checkbox" data-act="toggle" ' + (p.enabled ? "checked" : "") + '> 启用</label>' +
-              '<span style="flex:1"></span>' +
-              '<button class="g-btn outline" data-act="reload" title="重新加载插件代码（无需刷新页面）" style="padding:1px 6px;font-size:11px">重载</button>' +
-              '<button class="g-btn outline" data-act="uninstall" style="padding:1px 6px;font-size:11px">卸载</button>' +
+              '<span class="pl-sp"></span>' +
+              '<button class="g-btn outline" data-act="reload" title="重新加载插件代码（无需刷新页面）">重载</button>' +
+              '<button class="g-btn outline" data-act="uninstall">卸载</button>' +
             '</div>' +
           '</div>';
       }

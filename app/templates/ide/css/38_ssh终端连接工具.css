@@ -1,7 +1,49 @@
 /* 38_ SSH 终端连接工具：侧栏列表 + 编辑器区远程终端 */
-.ssh-tools { display: flex; gap: 6px; padding: 8px 10px; }
-.ssh-tools .g-btn.block { flex: 1; }
-.ssh-list { padding: 4px 8px 12px; }
+
+/* ---------- 侧栏顶部工具行（「新建连接」+ 刷新） ----------
+   原来 .side-panel 的 10px 内边距和 .ssh-tools 的 8px 内边距叠在一起，
+   标题「终端连接」和按钮之间空出一大块；这里把这一层内边距收干净：
+   顶部 0（紧贴侧栏标题），左右 0（跟 .side-panel 的 12px 对齐，按钮拉满整行）。 */
+#sshconnPanel { padding-top: 0; }
+#sshconnPanel .ssh-tools {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 0 8px; margin: 0;
+}
+/* 主按钮：30px 常规高度 + 6px 圆角 + 轻渐变，与右侧方形刷新按钮同高 */
+#sshconnPanel .ssh-tools .g-btn.block {
+  flex: 1 1 auto; width: auto; min-width: 0; margin: 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 30px; padding: 0 12px; border-radius: 6px;
+  background: linear-gradient(180deg, #189ae6, #0b71b4);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .14);
+  font-size: 12.5px; letter-spacing: .2px;
+  transition: background .14s ease, box-shadow .14s ease;
+}
+#sshconnPanel .ssh-tools .g-btn.block > i { font-size: 13px; line-height: 1; }
+#sshconnPanel .ssh-tools .g-btn.block:hover {
+  background: linear-gradient(180deg, #1ea6f5, #0c7cbf);
+  box-shadow: 0 2px 7px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .2);
+}
+#sshconnPanel .ssh-tools .g-btn.block:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .45);
+}
+/* 刷新：换成描边小方块，和主按钮同一高度、同一圆角，视觉上成组 */
+#sshconnPanel .ssh-tools .g-ico {
+  flex: none; width: 30px; height: 30px; padding: 0; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #2b2e31; border: 1px solid #3a3e42; color: #c4c9ce; font-size: 14px;
+  transition: background .14s ease, border-color .14s ease, color .14s ease;
+}
+#sshconnPanel .ssh-tools .g-ico:hover { background: #35393d; border-color: #4a4f55; color: #ffffff; }
+#sshconnPanel .ssh-tools .g-ico:active { transform: translateY(1px); }
+html.theme-light #sshconnPanel .ssh-tools .g-ico {
+  background: #f2f4f6; border-color: #d6dae0; color: #5a6572;
+}
+html.theme-light #sshconnPanel .ssh-tools .g-ico:hover { background: #e7ebef; border-color: #c6ccd4; color: #1f2328; }
+
+/* 列表 / 常用命令：去掉自带左右内边距，条目与上方按钮左右对齐 */
+.ssh-list { padding: 0 0 10px; }
 /* 连接项 / 常用命令项：与数据库面板 .dbc-item、文件夹管理器 .fm-remote-item
    同一套高亮语言——悬停淡底、已打开淡底 + 左侧蓝条、当前查看整条蓝底 + 深蓝左条 */
 .ssh-item {
@@ -207,12 +249,12 @@ html.theme-light .ssh-motd-acts button:hover { background: #eef1f4; color: #1f23
 /* 常用命令区块 */
 .ssh-cmd-head {
   display: flex; align-items: center; gap: 6px;
-  padding: 10px 12px 4px; font-size: 12px; color: #9aa;
+  padding: 10px 0 4px; font-size: 12px; color: #9aa;
   border-top: 1px solid #333; margin-top: 4px;
 }
 .ssh-cmd-head span { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #cfcfcf; }
 .ssh-cmd-head button { margin-left: auto; }
-.ssh-cmds { padding: 2px 8px 12px; max-height: 42%; overflow: auto; }
+.ssh-cmds { padding: 2px 0 12px; max-height: 42%; overflow: auto; }
 .ssh-cmd .ssh-main > i { color: #7fbf7f; }
 
 /* AI 助手入口（44_ 的可拖动浮层）：终端标题栏右侧、关闭按钮左边 */

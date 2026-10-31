@@ -1,0 +1,113 @@
+/* 54_ 侧栏面板统一按钮样式
+   ------------------------------------------------------------------
+   把「终端连接」(38)、「定时任务」(36) 两个面板调过的按钮规范，推广到
+   左侧栏里的所有面板（运行和调试 / 后台任务 / 运行环境 / 数据库 /
+   API 调试 / 文件夹管理器 / V2Ray / 下载中心 …）：
+
+     · 主按钮            30px 高 / 6px 圆角 / 淡蓝渐变 + 微投影，悬停提亮、点击下沉
+     · 次级按钮 .outline  同高描边灰底
+     · 工具行图标按钮      同高 30×30 描边方块
+
+   写法约定：
+   · 本文件在所有面板自己的样式之后加载，用 .side-panel 前缀压过局部规则；
+   · .fm-remote-item 虽然也是 button.g-btn.block.outline，但它是「远程服务器」
+     列表行，必须排除，否则会被压成 30px 高的小按钮；
+   · 顶部再补 padding-top:0 —— .side-panel 的 10px 上内边距会让侧栏标题和
+     第一行按钮之间空出一块，与「终端连接」「定时任务」两个面板不一致。
+   ------------------------------------------------------------------ */
+
+/* ---------- 顶部按钮区紧贴侧栏标题 ---------- */
+#runPanel, #runnerPanel, #envPanel, #fmPanel, #dbconnPanel, #apiPanel,
+#v2rayPanel, #downloadsPanel { padding-top: 0; }
+
+/* 工具行自带的上下 / 左右内边距也收掉，宽度交给 .side-panel 的 12px */
+.side-panel .dbc-tools,
+.side-panel .api-tools,
+.side-panel .env-tools { padding: 0 0 6px; }
+/* 运行环境的搜索框与同排 30px 图标按钮对齐（border-box 保证总高就是 30px） */
+.side-panel .env-tools input { box-sizing: border-box; height: 30px; border-radius: 6px; }
+
+/* ---------- 主按钮（不带 .outline） ---------- */
+.side-panel .g-btn.block:not(.outline):not(.fm-remote-item) {
+  box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  height: 30px; padding: 0 12px; border: 0; border-radius: 6px;
+  background: linear-gradient(180deg, #189ae6, #0b71b4);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .14);
+  color: #ffffff; font-size: 12.5px; letter-spacing: .2px;
+  transition: background .14s ease, box-shadow .14s ease;
+}
+.side-panel .g-btn.block:not(.outline):not(.fm-remote-item) > i { font-size: 13px; line-height: 1; }
+.side-panel .g-btn.block:not(.outline):not(.fm-remote-item):hover {
+  background: linear-gradient(180deg, #1ea6f5, #0c7cbf);
+  box-shadow: 0 2px 7px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .2);
+}
+.side-panel .g-btn.block:not(.outline):not(.fm-remote-item):active {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .45);
+}
+
+/* ---------- 次级按钮（.outline） ---------- */
+.side-panel .g-btn.block.outline:not(.fm-remote-item) {
+  box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  height: 30px; padding: 0 12px; border-radius: 6px;
+  border: 1px solid #3a3e42; background: #26292c; color: #c8ced4;
+  font-size: 12.5px;
+  transition: background .14s ease, border-color .14s ease, color .14s ease;
+}
+.side-panel .g-btn.block.outline:not(.fm-remote-item) > i { font-size: 13px; line-height: 1; }
+.side-panel .g-btn.block.outline:not(.fm-remote-item):hover {
+  background: #303337; border-color: #4a4f55; color: #ffffff;
+}
+.side-panel .g-btn.block.outline:not(.fm-remote-item):active { transform: translateY(1px); }
+
+/* ---------- 工具行里的图标按钮：同高描边方块 ---------- */
+.side-panel :is(.ssh-tools, .cron-tools, .dbc-tools, .api-tools, .fm-tools,
+                .env-tools, .dls-tools, .runner-head) .g-ico {
+  flex: none; width: 30px; height: 30px; padding: 0; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #2b2e31; border: 1px solid #3a3e42; color: #c4c9ce; font-size: 14px;
+  transition: background .14s ease, border-color .14s ease, color .14s ease;
+}
+.side-panel :is(.ssh-tools, .cron-tools, .dbc-tools, .api-tools, .fm-tools,
+                .env-tools, .dls-tools, .runner-head) .g-ico:hover {
+  background: #35393d; border-color: #4a4f55; color: #ffffff;
+}
+.side-panel :is(.ssh-tools, .cron-tools, .dbc-tools, .api-tools, .fm-tools,
+                .env-tools, .dls-tools, .runner-head) .g-ico:active { transform: translateY(1px); }
+/* 保持「只看已安装」这类开关态的配色，别被上面的方块样式盖掉 */
+.side-panel .env-tools .g-ico.on {
+  background: #0d5a8a; border-color: #1b7fc0; color: #ffffff;
+}
+
+/* ---------- V2Ray 面板：按钮尺寸与上面对齐（配色仍用它自己的绿色主色） ---------- */
+#v2rayPanel .v2-btn { box-sizing: border-box; height: 30px; border-radius: 6px; }
+#v2rayPanel .v2-ico { width: 30px; height: 30px; border-radius: 6px; }
+#v2rayPanel .v2-btn-ghost { background: #26292c; border: 1px solid #3a3e42; color: #c8ced4; }
+#v2rayPanel .v2-btn-ghost:hover { background: #303337; border-color: #4a4f55; color: #ffffff; }
+
+/* ---------- 源代码管理：提交按钮圆角跟上，拆分按钮保持左右各半 ---------- */
+#gitPanel .git-commit-btns .g-btn.split-main { border-radius: 6px 0 0 6px; }
+#gitPanel .git-commit-btns .g-btn.split-arrow { border-radius: 0 6px 6px 0; }
+
+/* ---------- 浅色主题：描边按钮换成浅灰描边，主按钮保持蓝色主色 ---------- */
+html.theme-light .side-panel .g-btn.block.outline:not(.fm-remote-item) {
+  background: #f2f4f6; border-color: #d6dae0; color: #40474e;
+}
+html.theme-light .side-panel .g-btn.block.outline:not(.fm-remote-item):hover {
+  background: #e7ebef; border-color: #c6ccd4; color: #1f2328;
+}
+html.theme-light .side-panel :is(.ssh-tools, .cron-tools, .dbc-tools, .api-tools, .fm-tools,
+                                 .env-tools, .dls-tools, .runner-head) .g-ico {
+  background: #f2f4f6; border-color: #d6dae0; color: #5a6572;
+}
+html.theme-light .side-panel :is(.ssh-tools, .cron-tools, .dbc-tools, .api-tools, .fm-tools,
+                                 .env-tools, .dls-tools, .runner-head) .g-ico:hover {
+  background: #e7ebef; border-color: #c6ccd4; color: #1f2328;
+}
+html.theme-light .side-panel .env-tools .g-ico.on {
+  background: #e3f0fb; border-color: #a8c8e8; color: #0b63a8;
+}
+html.theme-light #v2rayPanel .v2-btn-ghost { background: #f2f4f6; border-color: #d6dae0; color: #40474e; }
+html.theme-light #v2rayPanel .v2-btn-ghost:hover { background: #e7ebef; border-color: #c6ccd4; color: #1f2328; }

@@ -1,11 +1,55 @@
   /* ===== 定时任务（参考青龙面板） ===== */
   /* 面板本身不横向滚：按钮行收窄时也不会把刷新按钮挤出面板外 */
-  #cronPanel { overflow-x: hidden; }
-  .cron-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  /* padding-top 归零：原来 .side-panel 的 10px 让标题和按钮之间空出一块，
+     现在按钮紧贴侧栏标题（与「终端连接」面板一致） */
+  #cronPanel { overflow-x: hidden; padding-top: 0; }
+  .cron-tools { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; }
   /* g-btn.block 默认 width:100%，放进 flex 行里会和刷新按钮一起撑破容器，
      这里改成弹性占满剩余宽度（与 .api-tools 的做法一致） */
   .cron-tools .g-btn.block { flex: 1 1 auto; width: auto; min-width: 0; margin-top: 0; }
   .cron-tools .g-ico { flex: none; }
+
+  /* ---------- 顶部按钮区：与「终端连接」面板同一套按钮语言 ----------
+     主按钮 30px 高 / 6px 圆角 / 轻渐变；刷新换成同高的描边方块；
+     「打开管理面板」是同高的次级描边按钮，三者在同一条视觉节奏上。 */
+  #cronPanel .cron-tools .g-btn.block {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 30px; padding: 0 12px; border-radius: 6px;
+    background: linear-gradient(180deg, #189ae6, #0b71b4);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .14);
+    font-size: 12.5px; letter-spacing: .2px;
+    transition: background .14s ease, box-shadow .14s ease;
+  }
+  #cronPanel .cron-tools .g-btn.block > i { font-size: 13px; line-height: 1; }
+  #cronPanel .cron-tools .g-btn.block:hover {
+    background: linear-gradient(180deg, #1ea6f5, #0c7cbf);
+    box-shadow: 0 2px 7px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .2);
+  }
+  #cronPanel .cron-tools .g-btn.block:active { transform: translateY(1px); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .45); }
+  #cronPanel .cron-tools .g-ico {
+    flex: none; width: 30px; height: 30px; padding: 0; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #2b2e31; border: 1px solid #3a3e42; color: #c4c9ce; font-size: 14px;
+    transition: background .14s ease, border-color .14s ease, color .14s ease;
+  }
+  #cronPanel .cron-tools .g-ico:hover { background: #35393d; border-color: #4a4f55; color: #ffffff; }
+  #cronPanel .cron-tools .g-ico:active { transform: translateY(1px); }
+  /* 次级按钮「打开管理面板」：贴住上面一行，不再留 6px 的默认上外边距 */
+  #cronOpenView {
+    box-sizing: border-box; width: 100%; height: 30px; margin: 0 0 2px; padding: 0 12px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    border-radius: 6px; border: 1px solid #3a3e42; background: #26292c; color: #c8ced4;
+    font-family: inherit; font-size: 12.5px; cursor: pointer;
+    transition: background .14s ease, border-color .14s ease, color .14s ease;
+  }
+  #cronOpenView > i { font-size: 13px; line-height: 1; }
+  #cronOpenView:hover { background: #303337; border-color: #4a4f55; color: #ffffff; }
+  #cronOpenView:active { transform: translateY(1px); }
+  /* 浅色主题：描边方块 / 次级按钮换成浅灰描边，主按钮保持蓝色主色 */
+  html.theme-light #cronPanel .cron-tools .g-ico { background: #f2f4f6; border-color: #d6dae0; color: #5a6572; }
+  html.theme-light #cronPanel .cron-tools .g-ico:hover { background: #e7ebef; border-color: #c6ccd4; color: #1f2328; }
+  html.theme-light #cronOpenView { background: #f2f4f6; border-color: #d6dae0; color: #40474e; }
+  html.theme-light #cronOpenView:hover { background: #e7ebef; border-color: #c6ccd4; color: #1f2328; }
   .cron-list { display: flex; flex-direction: column; gap: 8px; min-width: 0;
     overflow-y: auto; overflow-x: hidden; padding-right: 2px; }
   .cron-item { background: #2a2d2e; border: 1px solid #37373d; border-left: 2px solid #6fcf8a;

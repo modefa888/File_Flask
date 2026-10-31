@@ -1344,7 +1344,9 @@ def api_ai_chat():
                             continue
                         delta = (choices[0] or {}).get("delta") or {}
                         piece = delta.get("content")
-                        reasoning = delta.get("reasoning_content")
+                        # 思考内容：DeepSeek/Qwen/GLM 用 reasoning_content，
+                        # OpenAI o 系列 / 部分网关用 reasoning —— 都透传给前端实时展示
+                        reasoning = delta.get("reasoning_content") or delta.get("reasoning") or ""
                         if piece or reasoning:
                             yield _sse({"delta": piece or "", "reasoning": reasoning or ""})
                         if piece:

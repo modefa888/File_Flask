@@ -280,7 +280,7 @@
         return o;
       });
       localStorage.setItem("ide.session.tabs", JSON.stringify(list));
-      // 完整标签顺序（含不参与内容恢复的插件视图，如「API 管理面板」）：
+      // 完整标签顺序（含不参与内容恢复的插件视图，如「扩展自定义插件」）：
       // 这些视图由各自模块稍后重建，恢复时要靠它插回原位，否则每次刷新位置都会漂
       localStorage.setItem("ide.session.tabOrder",
         JSON.stringify(tabs.map(t => ({ path: t.path, pluginId: t.pluginViewId || "" }))));

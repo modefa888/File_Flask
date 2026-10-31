@@ -153,6 +153,18 @@
     }
     return id;
   };
+  // 注销单条命令（插件停用时按 owner 自动清理；动态命令 / 自测也可手动注销）
+  IDE.unregisterCommand = function (id) {
+    const c = _plCommands.get(id);
+    if (!c) return false;
+    _plCommands.delete(id);
+    if (typeof QO_COMMANDS !== "undefined" && Array.isArray(QO_COMMANDS)) {
+      for (let i = QO_COMMANDS.length - 1; i >= 0; i--) {
+        if (QO_COMMANDS[i] && QO_COMMANDS[i][2] === id) QO_COMMANDS.splice(i, 1);
+      }
+    }
+    return true;
+  };
   IDE.executeCommand = function (id) {
     const c = _plCommands.get(id);
     if (!c) { if (typeof toast === "function") toast("命令不存在: " + id, "warn"); return; }
@@ -554,7 +566,8 @@
       const resp = await fetch("/api/ai/plugin", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: opts.signal || undefined          // 支持外部 AbortController 停止生成
       });
       if (!resp.ok) {
         let msg = "HTTP " + resp.status;
@@ -1136,7 +1149,7 @@
   }
 
   // ============================================================================
-  // 内置扩展：API 管理面板（总览 / 测试 / AI 开发插件）
+  // 内置扩展：扩展自定义插件（API 总览 / 测试 / AI 开发插件 / 文档）
   // 不依赖任何插件，始终可用；插件侧命令可通过 IDE.extConsole.open(tab) 转发到这里
   // ============================================================================
   const _extConsole = (function () {
@@ -1158,6 +1171,7 @@
         ["IDE.registerPanel({id,title,icon,render|index})", "注册侧边栏面板：render 自绘 或 index iframe"],
         ["IDE.registerCommand(id, {title, run})", "注册命令（面板按钮 / 命令面板均可触发）"],
         ["IDE.executeCommand(id)", "执行一条已注册命令"],
+        ["IDE.unregisterCommand(id)", "注销一条命令（插件停用时按归属自动清理）"],
       ]],
       ["通知 / 弹窗", [
         ["IDE.notifications.show(msg, type)", "类型 ok|info|warn|err"],
@@ -1227,11 +1241,22 @@
             if (!IDE.host || !IDE.version) throw new Error("host/version 缺失");
             return "host=" + IDE.host + "，api v" + IDE.version + "，已激活插件 " + (IDE.plugins ? IDE.plugins.size : 0) + " 个";
           } },
-        { name: "命令注册", desc: "IDE.getCommands() 数量与归属",
+        { name: "命令注册", desc: "registerCommand → getCommands → executeCommand → 注销",
           run: () => {
-            const all = IDE.getCommands();
-            if (!all.length) throw new Error("没有任何已注册命令");
-            return all.length + " 条命令，本插件贡献 " + all.filter((c) => c.owner === "system-api").length + " 条";
+            // 不能用「有没有插件注册命令」判定：没装插件时注册表本来就是空的，
+            // 这只是当前环境状态，不是 API 故障。这里自带一条临时命令跑完整链路再清理。
+            const id = "__extc_probe_" + Date.now();
+            const base = IDE.getCommands().length;
+            let fired = 0;
+            IDE.registerCommand(id, { title: "管理面板自测命令", run: () => { fired++; } });
+            try {
+              if (!IDE.getCommands().some((c) => c.id === id)) throw new Error("注册后 getCommands() 查不到该命令");
+              IDE.executeCommand(id);
+              if (fired !== 1) throw new Error("executeCommand() 没有触发命令");
+              return "注册 → 查询 → 执行 链路正常（临时命令已注销；环境另有 " + base + " 条已注册命令）";
+            } finally {
+              IDE.unregisterCommand(id);
+            }
           } },
         { name: "通知 / 状态栏", desc: "notifications.show + statusBar.set/remove（无残留）",
           run: () => {
@@ -1305,59 +1330,157 @@
       box.innerHTML =
         '<div class="extc">' +
           '<style>' +
-            '.extc{height:100%;display:flex;flex-direction:column;font-size:12.5px;color:#c2c6cc}' +
-            '.extc .c-top{display:flex;gap:6px;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(127,127,127,.25);flex:none;flex-wrap:wrap}' +
-            '.extc .c-tab{font-family:inherit;font-size:12px;padding:4px 14px;border-radius:6px;cursor:pointer;' +
-              'border:1px solid rgba(127,127,127,.3);background:rgba(127,127,127,.08);color:#c2c6cc}' +
-            '.extc .c-tab.on{background:#0d7ec4;border-color:#0d7ec4;color:#fff}' +
-            '.extc .c-meta{margin-left:auto;color:#8a9098;font-size:11.5px}' +
-            '.extc .c-body{flex:1;overflow:auto;padding:12px 16px 24px}' +
-            '.extc h5{margin:14px 0 6px;font-size:12px;color:#8a9098;letter-spacing:.4px}' +
-            '.extc .row{display:flex;gap:12px;padding:4px 8px;border-radius:6px;align-items:baseline}' +
+            /* ---- 基础 ---- */
+            '.extc{height:100%;display:flex;flex-direction:column;font-size:12.5px;line-height:1.6;color:#c9d1d9;color-scheme:dark}' +
+            '.extc *{box-sizing:border-box}' +
+            /* ---- 顶部标签栏：分段式，带图标 ---- */
+            '.extc .c-top{display:flex;gap:4px;align-items:center;padding:8px 14px;border-bottom:1px solid rgba(127,127,127,.22);flex:none;flex-wrap:wrap;background:rgba(127,127,127,.05)}' +
+            '.extc .c-tab{display:inline-flex;align-items:center;gap:6px;font-family:inherit;font-size:12.5px;padding:6px 14px;' +
+              'border-radius:8px;cursor:pointer;border:1px solid transparent;background:transparent;color:#9aa4af;' +
+              'transition:background .15s,color .15s,box-shadow .15s}' +
+            '.extc .c-tab .bi{font-size:13px;opacity:.9}' +
+            '.extc .c-tab:hover{background:rgba(127,127,127,.16);color:#e6edf3}' +
+            '.extc .c-tab.on{background:#0d7ec4;color:#fff;box-shadow:0 2px 10px rgba(13,126,196,.35)}' +
+            '.extc .c-tab:focus-visible{outline:2px solid #0d7ec4;outline-offset:1px}' +
+            '.extc .c-meta{margin-left:auto;font-size:11px;color:#8b949e;padding:2px 10px;border:1px solid rgba(127,127,127,.25);border-radius:999px}' +
+            /* ---- 内容区 ---- */
+            '.extc .c-body{flex:1;overflow:auto;padding:16px 20px 40px}' +
+            '.extc .c-body>section{max-width:1000px;margin:0 auto}' +
+            '.extc .c-body>section>*:first-child{margin-top:0}' +
+            '.extc .ec-card{border:1px solid rgba(127,127,127,.22);border-radius:12px;padding:14px 16px;margin-bottom:14px;background:rgba(127,127,127,.05)}' +
+            '.extc .ec-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}' +
+            '.extc .ec-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 8px}' +
+            '.extc .ec-hint{color:#8b949e;font-size:11.5px}' +
+            '.extc h5{margin:0 0 10px;font-size:11.5px;font-weight:600;letter-spacing:.06em;color:#8b949e}' +
+            /* ---- API 总览列表 ---- */
+            '.extc .row{display:flex;gap:14px;padding:5px 10px;border-radius:8px;align-items:baseline;transition:background .12s}' +
             '.extc .row:hover{background:rgba(127,127,127,.12)}' +
-            '.extc .row code{color:#6cb6ff;font-size:11.5px;flex:none;min-width:300px}' +
-            '.extc .row span{color:#8a9098}' +
-            '.extc .srch{font-family:inherit;font-size:12px;padding:4px 10px;border-radius:6px;width:220px;' +
-              'border:1px solid rgba(127,127,127,.3);background:rgba(127,127,127,.08);color:#c2c6cc;outline:none}' +
-            '.extc .trow{display:flex;gap:10px;align-items:flex-start;padding:7px 10px;border:1px solid rgba(127,127,127,.22);border-radius:8px;margin-bottom:6px}' +
-            '.extc .badge{flex:none;font-size:10.5px;padding:2px 8px;border-radius:99px;border:1px solid rgba(127,127,127,.35);color:#8a9098;min-width:52px;text-align:center}' +
-            '.extc .badge.ok{color:#3fb950;border-color:#3fb950}' +
-            '.extc .badge.bad{color:#f85149;border-color:#f85149}' +
-            '.extc .badge.run{color:#d29922;border-color:#d29922}' +
-            '.extc .tname{font-weight:600;flex:none;min-width:96px}' +
-            '.extc .tdesc{color:#8a9098;flex:1}' +
-            '.extc .tdet{color:#8a9098;font-size:11.5px;flex:2}' +
-            '.extc .trun,.extc .b{font-family:inherit;font-size:12px;padding:5px 14px;border-radius:6px;cursor:pointer;' +
-              'border:1px solid rgba(127,127,127,.3);background:rgba(127,127,127,.08);color:#c2c6cc}' +
-            '.extc .trun{font-size:11px;padding:2px 10px}' +
-            '.extc .trun:hover,.extc .b:hover{background:#0d7ec4;border-color:#0d7ec4;color:#fff}' +
-            '.extc .b.pri{background:#0d7ec4;border-color:#0d7ec4;color:#fff}' +
-            '.extc .b:disabled{opacity:.45;cursor:default}' +
-            '.extc textarea{font-family:inherit;font-size:12px;line-height:1.6;width:100%;box-sizing:border-box;min-height:88px;' +
-              'resize:vertical;padding:8px 10px;border-radius:8px;border:1px solid rgba(127,127,127,.3);' +
-              'background:rgba(127,127,127,.08);color:#c2c6cc;outline:none}' +
-            '.extc textarea:focus{border-color:#0d7ec4}' +
-            '.extc pre{white-space:pre-wrap;word-break:break-word;font-size:11.5px;line-height:1.6;padding:10px 12px;' +
-              'border-radius:8px;border:1px solid rgba(127,127,127,.22);background:rgba(0,0,0,.25);max-height:260px;overflow:auto;margin:6px 0}' +
-            '.extc .fhead{display:flex;gap:8px;align-items:center;margin:10px 0 0}' +
-            '.extc .fhead b{color:#6cb6ff;font-size:12px}' +
-            '.extc .stat{font-size:11.5px;color:#8a9098;margin:8px 0}' +
+            '.extc .row code{color:#79c0ff;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11.5px;flex:none;min-width:300px}' +
+            '.extc .row span{color:#8b949e}' +
+            /* ---- 输入控件（select 用 color-scheme 跟随主题，不再出现白底下拉） ---- */
+            '.extc .srch,.extc select,.extc textarea{font-family:inherit;font-size:12.5px;padding:6px 10px;border-radius:8px;' +
+              'border:1px solid rgba(127,127,127,.3);background:rgba(127,127,127,.08);color:inherit;outline:none;' +
+              'transition:border-color .15s,box-shadow .15s}' +
+            '.extc select{max-width:360px;cursor:pointer}' +
+            '.extc .srch{width:240px}' +
+            '.extc .srch:focus,.extc select:focus,.extc textarea:focus{border-color:#0d7ec4;box-shadow:0 0 0 3px rgba(13,126,196,.18)}' +
+            '.extc textarea{width:100%;min-height:96px;line-height:1.7;resize:vertical;display:block}' +
+            /* ---- 按钮 ---- */
+            '.extc .b,.extc .trun{font-family:inherit;font-size:12.5px;padding:6px 14px;border-radius:8px;cursor:pointer;' +
+              'border:1px solid rgba(127,127,127,.3);background:rgba(127,127,127,.08);color:inherit;' +
+              'transition:background .15s,border-color .15s,color .15s}' +
+            '.extc .b:hover:not(:disabled),.extc .trun:hover{background:rgba(13,126,196,.18);border-color:#0d7ec4;color:#e6edf3}' +
+            '.extc .b.pri{background:#0d7ec4;border-color:#0d7ec4;color:#fff;box-shadow:0 2px 8px rgba(13,126,196,.3)}' +
+            '.extc .b.pri:hover:not(:disabled){background:#0a6aa6;border-color:#0a6aa6}' +
+            '.extc .b:disabled,.extc .trun:disabled{opacity:.45;cursor:not-allowed}' +
+            '.extc .trun{font-size:11.5px;padding:4px 12px}' +
+            /* ---- 测试行 ---- */
+            '.extc .trow{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(127,127,127,.22);' +
+              'border-radius:10px;margin-bottom:8px;background:rgba(127,127,127,.03);transition:border-color .15s,background .15s}' +
+            '.extc .trow:hover{border-color:rgba(13,126,196,.5);background:rgba(13,126,196,.06)}' +
+            '.extc .badge{flex:none;font-size:10.5px;padding:2px 9px;border-radius:999px;border:1px solid rgba(127,127,127,.35);' +
+              'color:#8b949e;min-width:56px;text-align:center;margin-top:1px}' +
+            '.extc .badge.ok{color:#3fb950;border-color:rgba(63,185,80,.5);background:rgba(63,185,80,.12)}' +
+            '.extc .badge.bad{color:#f85149;border-color:rgba(248,81,73,.5);background:rgba(248,81,73,.12)}' +
+            '.extc .badge.run{color:#d29922;border-color:rgba(210,153,34,.5);background:rgba(210,153,34,.12)}' +
+            '.extc .tname{font-weight:600;flex:none;min-width:100px}' +
+            '.extc .tdesc{color:#8b949e;flex:1}' +
+            '.extc .tdet{color:#8b949e;font-size:11.5px;flex:2;word-break:break-word}' +
+            /* ---- 代码块 / 状态 ---- */
+            '.extc pre{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;' +
+              'font-size:11.5px;line-height:1.65;padding:12px 14px;border-radius:10px;border:1px solid rgba(127,127,127,.22);' +
+              'background:rgba(0,0,0,.28);max-height:280px;overflow:auto;margin:8px 0}' +
+            '.extc .fhead{display:flex;gap:8px;align-items:center;margin:14px 0 0;font-size:12px}' +
+            '.extc .fhead b{color:#79c0ff;font-size:12px}' +
+            '.extc .stat{font-size:11.5px;color:#8b949e;margin:8px 0}' +
             '.extc .stat.err{color:#f85149}' +
-            /* 浅色主题跟随（视图活在宿主文档里，html.theme-light 直接覆盖） */
-            'html.theme-light .extc{color:#30363d}' +
+            /* ---- AI 开发：步骤条 / 思考链路 / 文件产出 ---- */
+            '.extc .ec-steps{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0 6px;padding:9px 12px;' +
+              'border-radius:10px;background:rgba(127,127,127,.06);border:1px solid rgba(127,127,127,.12)}' +
+            '.extc .ec-step{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#8b949e;transition:color .15s}' +
+            '.extc .ec-step i{width:6px;height:6px;border-radius:50%;background:#5a6068;display:inline-block}' +
+            '.extc .ec-step.ok{color:#3fb950}' +
+            '.extc .ec-step.ok i{background:#3fb950}' +
+            '.extc .ec-step.run{color:#79c0ff}' +
+            '.extc .ec-step.run i{background:#0d7ec4;animation:ecPulse 1s ease-in-out infinite}' +
+            '.extc .ec-step.fail{color:#f85149}' +
+            '.extc .ec-step.fail i{background:#f85149}' +
+            '@keyframes ecPulse{50%{opacity:.3}}' +
+            /* 生成过程：头部（标题 / 实时统计 / 停止）+ 左右两栏（思考 / 流式输出），窄屏自动换行 */
+            '.extc .ec-workhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}' +
+            '.extc .ec-workhead h5{margin:0}' +
+            '.extc .ec-workstat{margin-left:auto;font-size:11px;font-weight:400;color:#8b949e;letter-spacing:0}' +
+            '.extc .ec-workgrid{display:flex;gap:12px;align-items:stretch;flex-wrap:wrap}' +
+            /* 左：运行日志（窄栏，固定高度内部滚动） */
+            '.extc .ec-logwrap{flex:0 1 230px;min-width:180px;display:flex;flex-direction:column;' +
+              'border:1px solid rgba(127,127,127,.22);border-radius:10px;background:rgba(127,127,127,.03);overflow:hidden}' +
+            '.extc .ec-subhead{display:flex;align-items:center;gap:6px;padding:7px 10px;font-size:11.5px;color:#8b949e;' +
+              'border-bottom:1px solid rgba(127,127,127,.14);flex:none}' +
+            /* 右：思考过程（固定高度 + 内部滚动） */
+            '.extc .ec-think{flex:1 1 420px;min-width:280px;border:1px solid rgba(127,127,127,.22);border-radius:10px;' +
+              'background:rgba(127,127,127,.04);overflow:hidden;display:flex;flex-direction:column}' +
+            '.extc .ec-think-head{display:flex;align-items:center;gap:6px;padding:7px 10px;font-size:11.5px;color:#8b949e;' +
+              'border-bottom:1px solid rgba(127,127,127,.14);flex:none}' +
+            '.extc .ec-think-body{height:360px;overflow:auto;padding:8px 10px;flex:none}' +
+            '.extc .ec-reason{font-size:11.5px;line-height:1.7;color:#9aa4af;white-space:pre-wrap;' +
+              'padding:6px 8px;border-left:2px solid rgba(13,126,196,.5);margin:0}' +
+            '.extc .ec-reason.placeholder{color:#6b7280;font-style:italic;border-left-color:rgba(127,127,127,.35)}' +
+            '.extc .ec-log{margin:0;height:360px;overflow:auto;padding:8px 10px 8px 26px;font-size:11.5px;line-height:1.8;color:#8b949e}' +
+            '.extc .ec-log li.ok{color:#3fb950}' +
+            '.extc .ec-log li.bad{color:#f85149}' +
+            '.extc .ec-log .t{color:#6b7280;margin-right:6px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}' +
+            '.extc .ec-write{display:none;align-items:flex-start;gap:8px;margin-bottom:10px;' +
+              'font-size:11.5px;line-height:1.6;color:#3fb950;word-break:break-all}' +
+            '.extc .ec-write:not(:empty){display:flex}' +
+            '.extc .ec-write.err{color:#f85149}' +
+            '.extc .ec-write code{background:rgba(127,127,127,.14);border-radius:4px;padding:1px 5px;font-size:11px}' +
+            '.extc .ec-files{display:flex;flex-direction:column;gap:8px}' +
+            '.extc .ec-file{border:1px solid rgba(127,127,127,.22);border-radius:10px;overflow:hidden;background:rgba(127,127,127,.03)}' +
+            '.extc .ec-file.miss{opacity:.6;border-style:dashed}' +
+            '.extc .ec-file-h{display:flex;align-items:center;gap:8px;padding:8px 10px;font-size:12.5px}' +
+            '.extc .ec-file-size{font-size:11px;color:#8b949e}' +
+            '.extc .ec-file-st{font-size:10.5px;padding:1px 8px;border-radius:999px;' +
+              'border:1px solid rgba(127,127,127,.35);color:#8b949e}' +
+            '.extc .ec-file-st.ok{color:#3fb950;border-color:rgba(63,185,80,.5);background:rgba(63,185,80,.1)}' +
+            '.extc .ec-file-st.warn{color:#d29922;border-color:rgba(210,153,34,.5);background:rgba(210,153,34,.1)}' +
+            '.extc .ec-file-h .trun:first-of-type{margin-left:auto}' +
+            '.extc .ec-file pre{margin:0;border:none;border-top:1px solid rgba(127,127,127,.16);border-radius:0;max-height:260px}' +
+            /* ---- 浅色主题跟随（视图活在宿主文档里，html.theme-light 直接覆盖） ---- */
+            'html.theme-light .extc{color:#24292f;color-scheme:light}' +
+            'html.theme-light .extc .c-top{background:rgba(0,0,0,.02);border-bottom-color:rgba(0,0,0,.1)}' +
+            'html.theme-light .extc .c-tab{color:#57606a}' +
+            'html.theme-light .extc .c-tab:hover{background:rgba(0,0,0,.06);color:#24292f}' +
+            'html.theme-light .extc .c-tab.on{background:#0d7ec4;color:#fff}' +
+            'html.theme-light .extc .c-meta{color:#6b7078;border-color:rgba(0,0,0,.14)}' +
+            'html.theme-light .extc .ec-card{background:rgba(0,0,0,.025);border-color:rgba(0,0,0,.1)}' +
             'html.theme-light .extc h5,html.theme-light .extc .row span,html.theme-light .extc .tdesc,' +
-            'html.theme-light .extc .tdet,html.theme-light .extc .c-meta,html.theme-light .extc .stat{color:#6b7078}' +
-            'html.theme-light .extc .row code,html.theme-light .extc .fhead b{color:#0550ae}' +
-            'html.theme-light .extc .c-tab,html.theme-light .extc .b,html.theme-light .extc .trun,html.theme-light .extc .srch,' +
-            'html.theme-light .extc textarea{color:#30363d;border-color:rgba(0,0,0,.16);background:rgba(0,0,0,.045)}' +
-            'html.theme-light .extc .c-tab.on,html.theme-light .extc .b.pri{background:#0d7ec4;border-color:#0d7ec4;color:#fff}' +
-            'html.theme-light .extc .trow,html.theme-light .extc pre{border-color:rgba(0,0,0,.14);background:rgba(0,0,0,.03)}' +
+            'html.theme-light .extc .tdet,html.theme-light .extc .stat,html.theme-light .extc .ec-hint{color:#6b7078}' +
+            'html.theme-light .extc .row:hover{background:rgba(0,0,0,.05)}' +
+            'html.theme-light .extc .row code{color:#0550ae}' +
+            'html.theme-light .extc .b,html.theme-light .extc .trun,html.theme-light .extc .srch,' +
+            'html.theme-light .extc select,html.theme-light .extc textarea{color:#24292f;border-color:rgba(0,0,0,.16);background:#fff}' +
+            'html.theme-light .extc .b:hover:not(:disabled),html.theme-light .extc .trun:hover{background:#e3f0fb;border-color:#0d7ec4;color:#0b5c9a}' +
+            'html.theme-light .extc .b.pri{background:#0d7ec4;border-color:#0d7ec4;color:#fff}' +
+            'html.theme-light .extc .trow{border-color:rgba(0,0,0,.1);background:#fff}' +
+            'html.theme-light .extc .trow:hover{border-color:rgba(13,126,196,.45);background:#f6fbff}' +
+            'html.theme-light .extc pre{border-color:rgba(0,0,0,.12);background:#f6f8fa;color:#24292f}' +
+            'html.theme-light .extc .fhead b{color:#0550ae}' +
+            'html.theme-light .extc .ec-steps{background:rgba(0,0,0,.03);border-color:rgba(0,0,0,.08)}' +
+            'html.theme-light .extc .ec-step{color:#6b7078}' +
+            'html.theme-light .extc .ec-think,html.theme-light .extc .ec-logwrap{background:rgba(0,0,0,.02);border-color:rgba(0,0,0,.1)}' +
+            'html.theme-light .extc .ec-think-head{color:#6b7078;border-bottom-color:rgba(0,0,0,.08)}' +
+            'html.theme-light .extc .ec-reason{color:#57606a}' +
+            'html.theme-light .extc .ec-log{color:#6b7078}' +
+            'html.theme-light .extc .ec-file{background:#fff;border-color:rgba(0,0,0,.1)}' +
+            'html.theme-light .extc .ec-file pre{border-top-color:rgba(0,0,0,.1)}' +
+            'html.theme-light .extc .ec-write{color:#1a7f37}' +
+            'html.theme-light .extc .ec-write.err{color:#c0392b}' +
           '</style>' +
           '<div class="c-top">' +
-            '<button class="c-tab" data-t="overview">API 总览</button>' +
-            '<button class="c-tab" data-t="tests">API 测试</button>' +
-            '<button class="c-tab" data-t="ai">AI 开发插件</button>' +
-            '<button class="c-tab" data-t="docs">文档</button>' +
+            '<button class="c-tab" data-t="overview"><i class="bi bi-grid-1x2"></i>API 总览</button>' +
+            '<button class="c-tab" data-t="tests"><i class="bi bi-check2-square"></i>API 测试</button>' +
+            '<button class="c-tab" data-t="ai"><i class="bi bi-stars"></i>AI 开发插件</button>' +
+            '<button class="c-tab" data-t="docs"><i class="bi bi-book"></i>文档</button>' +
             '<span class="c-meta">v' + _esc(IDE.version) + '</span>' +
           '</div>' +
           '<div class="c-body">' +
@@ -1387,9 +1510,9 @@
     // —— 标签一：API 总览（静态目录 + 实时反射，带搜索过滤）——
     function _renderTabOverview(sec, IDE) {
       sec.innerHTML =
-        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">' +
+        '<div class="ec-toolbar" style="margin-bottom:6px">' +
           '<input class="srch" type="text" placeholder="过滤 API…（如 workspace / ai / open）">' +
-          '<span style="color:#8a9098;font-size:11.5px">静态精选目录 + 运行时实时反射，悬停行查看说明</span></div><div data-list></div>';
+          '<span class="ec-hint">静态精选目录 + 运行时实时反射，悬停行查看说明</span></div><div data-list></div>';
       const list = sec.querySelector("[data-list]");
       const refl = _reflect(IDE);
       const render = (filter) => {
@@ -1423,10 +1546,10 @@
           '<span class="tdet"></span>' +
           '<button class="trun">运行</button></div>';
       sec.innerHTML =
-        '<div style="display:flex;gap:8px;margin-bottom:10px">' +
+        '<div class="ec-toolbar">' +
           '<button class="b pri" data-a="all">运行全部</button>' +
           '<button class="b" data-a="clear">清除结果</button>' +
-          '<span class="stat" data-sum style="margin:0 0 0 8px"></span>' +
+          '<span class="stat" data-sum style="margin:0"></span>' +
         '</div><div data-list>' + tests.map(row).join("") + '</div>';
       const list = sec.querySelector("[data-list]"), sum = sec.querySelector("[data-sum]");
 
@@ -1462,33 +1585,110 @@
     // —— 标签三：AI 开发插件（需求 → 流式生成 → 解析 plugin.json / main.js → 写入工作区）——
     function _renderTabAi(sec, IDE) {
       sec.innerHTML =
-        '<h5 style="margin-top:0">基于已有插件二次开发（可选）</h5>' +
-        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-          '<select data-pl style="font-family:inherit;font-size:12px;padding:4px 8px;border-radius:6px;max-width:340px;' +
-            'border:1px solid rgba(127,127,127,.3);background:rgba(127,127,127,.08);color:inherit;outline:none">' +
-            '<option value="">— 从零开始（不基于已有插件）—</option></select>' +
-          '<button class="b" data-a="load" disabled>载入现有代码</button>' +
-          '<button class="b" data-a="unload" style="display:none">退出二次开发</button>' +
+        '<div class="ec-card">' +
+          '<h5>① 基于已有插件二次开发（可选）</h5>' +
+          '<div class="ec-toolbar" style="margin-bottom:8px">' +
+            '<select data-pl>' +
+              '<option value="">— 从零开始（不基于已有插件）—</option></select>' +
+            '<button class="b" data-a="load" disabled>载入现有代码</button>' +
+            '<button class="b" data-a="unload" style="display:none">退出二次开发</button>' +
+          '</div>' +
+          '<div class="stat" data-base style="margin:0">选择已安装插件并载入其现有代码，AI 将在原有实现上按需求升级；id 保持不变，生成后一键覆盖热部署。</div>' +
         '</div>' +
-        '<div class="stat" data-base style="margin:4px 0 0">选择已安装插件并载入其现有代码，AI 将在原有实现上按需求升级；id 保持不变，生成后一键覆盖热部署。</div>' +
-        '<h5>需求描述</h5>' +
-        '<textarea data-prompt>开发一个「番茄钟」插件：侧边栏面板里显示 25 分钟倒计时，可开始/暂停/重置，结束后弹通知；倒计时进行中在状态栏显示剩余时间。</textarea>' +
-        '<div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">' +
-          '<button class="b" data-a="gen">生成插件</button>' +
-          '<button class="b pri" data-a="install" disabled>安装并热部署</button>' +
-          '<button class="b" data-a="copy" disabled>复制 main.js</button>' +
-          '<button class="b" data-a="write" disabled>写入工作区检查</button>' +
+        '<div class="ec-card">' +
+          '<h5>② 需求描述</h5>' +
+          '<textarea data-prompt>开发一个「番茄钟」插件：侧边栏面板里显示 25 分钟倒计时，可开始/暂停/重置，结束后弹通知；倒计时进行中在状态栏显示剩余时间。</textarea>' +
+          '<div class="ec-actions">' +
+            '<button class="b pri" data-a="gen"><i class="bi bi-stars"></i> 生成插件</button>' +
+            '<button class="b" data-a="install" disabled>安装并热部署</button>' +
+          '</div>' +
+          '<div class="ec-steps" data-steps>' +
+            '<span class="ec-step" data-step="1"><i></i>描述需求</span>' +
+            '<span class="ec-step" data-step="2"><i></i>AI 生成</span>' +
+            '<span class="ec-step" data-step="3"><i></i>解析校验</span>' +
+            '<span class="ec-step" data-step="4"><i></i>写入 / 安装</span>' +
+          '</div>' +
+          '<div class="stat" data-stat style="margin:0">使用「设置 → 系统 AI」里配置的插件宿主模型；生成后可一键「安装并热部署」到插件系统（无需刷新），也可先写入工作区人工检查。</div>' +
         '</div>' +
-        '<div class="stat" data-stat>使用「设置 → 系统 AI」里配置的插件宿主模型；生成后可一键「安装并热部署」到插件系统（无需刷新），也可先写入工作区人工检查。</div>' +
-        '<pre data-out style="display:none"></pre>' +
-        '<div data-files></div>';
+        /* 生成过程：左运行日志 / 右思考过程（固定高度），不再展示最终代码块 */
+        '<div class="ec-card" data-workwrap style="display:none">' +
+          '<div class="ec-workhead">' +
+            '<h5>③ 生成过程</h5>' +
+            '<span class="ec-workstat" data-genmeta></span>' +
+            '<button class="b" data-a="stop" style="display:none"><i class="bi bi-stop-circle"></i> 停止</button>' +
+          '</div>' +
+          '<div class="ec-workgrid">' +
+            '<div class="ec-logwrap">' +
+              '<div class="ec-subhead"><i class="bi bi-list-check"></i><b>运行日志</b></div>' +
+              '<ol class="ec-log" data-think-log></ol>' +
+            '</div>' +
+            '<div class="ec-think" data-think>' +
+              '<div class="ec-think-head"><i class="bi bi-lightbulb"></i><b>思考过程</b>' +
+                '<button class="trun" data-think-toggle style="margin-left:auto">收起</button></div>' +
+              '<div class="ec-think-body" data-think-body>' +
+                '<div class="ec-reason placeholder" data-think-reason>等待模型返回思考内容…</div>' +
+              '</div>' +
+            '</div>' +
+            '<pre data-out style="display:none">等待首个数据包…</pre>' +
+            '<span data-streammeta style="display:none"></span>' +
+          '</div>' +
+        '</div>' +
+        /* 产出文件与写入 / 安装结果（默认隐藏） */
+        '<div class="ec-card" data-fileswrap style="display:none">' +
+          '<h5>④ 产出文件与写入情况</h5>' +
+          '<div class="ec-write" data-write></div>' +
+          '<div class="ec-files" data-files></div>' +
+        '</div>';
 
       const ta = sec.querySelector("[data-prompt]"), out = sec.querySelector("[data-out]"),
             stat = sec.querySelector("[data-stat]"), files = sec.querySelector("[data-files]"),
-            bGen = sec.querySelector('[data-a="gen"]'), bCopy = sec.querySelector('[data-a="copy"]'),
-            bWrite = sec.querySelector('[data-a="write"]'), bInstall = sec.querySelector('[data-a="install"]'),
+            bGen = sec.querySelector('[data-a="gen"]'), bInstall = sec.querySelector('[data-a="install"]'),
             sel = sec.querySelector("[data-pl]"), bLoad = sec.querySelector('[data-a="load"]'),
-            bUnload = sec.querySelector('[data-a="unload"]'), baseInfo = sec.querySelector("[data-base]");
+            bUnload = sec.querySelector('[data-a="unload"]'), baseInfo = sec.querySelector("[data-base]"),
+            steps = sec.querySelector("[data-steps]"), genmeta = sec.querySelector("[data-genmeta]"),
+            workWrap = sec.querySelector("[data-workwrap]"), filesWrap = sec.querySelector("[data-fileswrap]"),
+            thinkWrap = sec.querySelector("[data-think]"), thinkBody = sec.querySelector("[data-think-body]"),
+            thinkReason = sec.querySelector("[data-think-reason]"), thinkLog = sec.querySelector("[data-think-log]"),
+            thinkToggle = sec.querySelector("[data-think-toggle]"), writeBox = sec.querySelector("[data-write]"),
+            stopBtn = sec.querySelector('[data-a="stop"]'), streammeta = sec.querySelector("[data-streammeta]");
+
+      // —— 步骤条：""（待开始）/ run（进行中）/ ok / fail ——
+      function setStep(n, st) {
+        const el = steps && steps.querySelector('[data-step="' + n + '"]');
+        if (el) el.className = "ec-step" + (st ? " " + st : "");
+      }
+      function resetSteps() { [1, 2, 3, 4].forEach((n) => setStep(n, "")); }
+
+      // 体积：大于 1KB 显示 KB，否则显示字符数
+      const fmtSize = (n) => (n >= 1024 ? (n / 1024).toFixed(1) + " KB" : n + " 字符");
+
+      // —— 思考链路：阶段日志（始终有）+ 模型推理文本（返回 reasoning 时才有）——
+      function thinkReset() {
+        thinkWrap.style.display = "";
+        thinkReason.className = "ec-reason placeholder";
+        thinkReason.textContent = "等待模型返回思考内容…";
+        thinkLog.innerHTML = "";
+        thinkBody.style.display = ""; thinkBody.scrollTop = 0; thinkLog.scrollTop = 0;
+        thinkToggle.textContent = "收起";
+        out.textContent = "等待首个数据包…";
+        streammeta.textContent = "";
+      }
+      // 是否已经贴在底部：只有贴底时才自动跟随，用户手动往上翻看时不再抢滚动
+      const nearBottom = (el, pad) => el.scrollHeight - el.scrollTop - el.clientHeight < (pad || 40);
+      function thinkLogAdd(text, cls) {
+        const li = document.createElement("li");
+        if (cls) li.className = cls;
+        li.innerHTML = '<span class="t">' + new Date().toLocaleTimeString() + '</span>' + _esc(text);
+        const stick = nearBottom(thinkLog);
+        thinkLog.appendChild(li);
+        if (stick) thinkLog.scrollTop = thinkLog.scrollHeight;   // 日志容器自己滚动（固定在 360px 高）
+        return li;
+      }
+      thinkToggle.addEventListener("click", () => {
+        const open = thinkBody.style.display !== "none";
+        thinkBody.style.display = open ? "none" : "";
+        thinkToggle.textContent = open ? "展开" : "收起";
+      });
       let parsed = null;
       let base = null;   // 二次开发基线：{ id, name, version, main, jsonText, js }
 
@@ -1520,7 +1720,10 @@
               .then((js) => { base = { id: meta.id || id, name: meta.name || id, version: meta.version || "0.0.0", main, jsonText, js }; });
           })
           .then(() => {
-            parsed = null; bCopy.disabled = true; bWrite.disabled = true; bInstall.disabled = true; files.innerHTML = "";
+            parsed = null; bInstall.disabled = true;
+            files.innerHTML = ""; filesWrap.style.display = "none";
+            writeBox.className = "ec-write"; writeBox.textContent = "";
+            resetSteps();
             if (!silent) ta.value = "在保持现有功能不回退的前提下：";
             bUnload.style.display = ""; sel.disabled = true;
             try { IDE.settings.set("_extConsole.base", base.id); } catch (e) {}
@@ -1538,8 +1741,11 @@
 
       // —— 退出二次开发：清空基线，回到从零生成 ——
       bUnload.addEventListener("click", () => {
-        base = null; parsed = null; bCopy.disabled = true; bWrite.disabled = true; bInstall.disabled = true;
-        files.innerHTML = ""; bUnload.style.display = "none"; sel.disabled = false; bLoad.disabled = !sel.value;
+        base = null; parsed = null; bInstall.disabled = true;
+        files.innerHTML = ""; filesWrap.style.display = "none";
+        writeBox.className = "ec-write"; writeBox.textContent = "";
+        resetSteps();
+        bUnload.style.display = "none"; sel.disabled = false; bLoad.disabled = !sel.value;
         try { IDE.settings.set("_extConsole.base", null); } catch (e) {}
         baseInfo.textContent = "已退出二次开发模式，回到从零开始生成。";
       });
@@ -1581,59 +1787,176 @@
           FMT + API_DESC + TAIL + "用户需求：" + req;
       }
 
+      let genCtrl = null;
       bGen.addEventListener("click", () => {
-        parsed = null; bCopy.disabled = true; bWrite.disabled = true; bInstall.disabled = true;
-        files.innerHTML = "";
-        out.style.display = ""; out.textContent = "";
-        stat.className = "stat"; stat.textContent = "AI 生成中（流式）…" + (base ? "（二次开发基线：" + base.id + " v" + base.version + "）" : "");
+        parsed = null; bInstall.disabled = true;
+        files.innerHTML = ""; filesWrap.style.display = "none";
+        writeBox.className = "ec-write"; writeBox.textContent = "";
+        workWrap.style.display = "";
+        // 把「生成过程」滚进视野：点完生成能马上看到进度，而不是停在输入框
+        setTimeout(() => { try { workWrap.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {} }, 0);
+        resetSteps(); setStep(1, "ok"); setStep(2, "run");
+        thinkReset();
+        if (base) thinkLogAdd("二次开发基线：" + base.id + " v" + base.version + "（现有代码 " + fmtSize(base.js.length) + "）");
+        const spec = buildSpec();
+        thinkLogAdd("已组装提示词（" + fmtSize(spec.length) + "），发送给插件宿主模型…");
+        stat.className = "stat"; stat.textContent = "AI 生成中（流式）…" + (base ? "（基线：" + base.id + "）" : "");
+        genmeta.textContent = "等待模型响应…";
+        stopBtn.style.display = "";
         bGen.disabled = true;
         const t0 = Date.now();
-        IDE.ai.chat([{ role: "user", content: buildSpec() }], {
-          onChunk: (full) => { out.textContent = full; out.scrollTop = out.scrollHeight; }
+        let firstAt = 0;
+        genCtrl = new AbortController();
+        const ctrl = genCtrl;
+        let timedOut = false;
+        const tick = setInterval(() => {
+          if (firstAt) return;
+          const s = (Date.now() - t0) / 1000;
+          if (s > 120) {                                 // 120 秒一个字符都没有：自动收尾，别无限挂着
+            timedOut = true; clearInterval(tick);
+            try { ctrl.abort(); } catch (e) {}
+            return;
+          }
+          genmeta.textContent = s > 20
+            ? "模型响应较慢 · " + s.toFixed(1) + "s（推理型模型首包可能较久，可点「停止」）"
+            : "等待模型响应 · " + s.toFixed(1) + "s";
+        }, 200);
+        IDE.ai.chat([{ role: "user", content: spec }], {
+          signal: ctrl.signal,
+          onReasoning: (full) => {
+            // 思考内容先到也算「已有响应」，避免一直显示等待
+            if (!firstAt) { firstAt = Date.now(); thinkLogAdd("模型开始输出思考内容"); }
+            // 滚动容器是 .ec-think-body：贴底时跟随最新内容，用户往上翻看时保持当前位置
+            const stick = nearBottom(thinkBody);
+            const keepTop = thinkBody.scrollTop;
+            thinkReason.className = "ec-reason";
+            thinkReason.textContent = full;
+            thinkBody.scrollTop = stick ? thinkBody.scrollHeight : keepTop;
+          },
+          onChunk: (full) => {
+            if (!firstAt) {
+              firstAt = Date.now();
+              out.textContent = "";
+              if (thinkReason.classList.contains("placeholder")) {
+                thinkReason.textContent = "当前模型未返回思考内容（仅部分模型支持深度思考）；生成过程见右侧流式输出";
+              }
+              thinkLogAdd("开始接收代码（首包 " + ((firstAt - t0) / 1000).toFixed(1) + "s）");
+            }
+            out.textContent = full; out.scrollTop = out.scrollHeight;
+            const blocks = Math.floor((full.match(/```/g) || []).length / 2);
+            genmeta.textContent = "接收中 · " + fmtSize(full.length) + " · 代码块 " + blocks +
+              " · " + ((Date.now() - t0) / 1000).toFixed(1) + "s";
+            streammeta.textContent = fmtSize(full.length) + " · " + blocks + " 个代码块";
+          }
         }).then((r) => {
-          parsed = _parseAiBlocks(r.text || "");
-          stat.textContent = "生成完成，共 " + (r.text || "").length + " 字，耗时 " + ((Date.now() - t0) / 1000).toFixed(1) + "s";
+          const text = r.text || "";
+          parsed = _parseAiBlocks(text);
+          const cost = ((Date.now() - t0) / 1000).toFixed(1);
+          setStep(2, "ok");
+          genmeta.textContent = "完成 · " + fmtSize(text.length) + " · " + cost + "s";
+          streammeta.textContent = fmtSize(text.length) + " · 完成";
+          thinkLogAdd("生成结束，共 " + fmtSize(text.length) + "，耗时 " + cost + "s");
+          if (r.reasoning) thinkLogAdd("模型思考过程 " + fmtSize(r.reasoning.length));
+          const okFiles = !!(parsed.json && parsed.js);
+          setStep(3, okFiles ? "ok" : "fail");
+          thinkLogAdd(okFiles ? "解析成功：plugin.json + main.js 均已识别"
+            : "解析不完整：缺少 " + (!parsed.json ? "plugin.json " : "") + (!parsed.js ? "main.js" : ""),
+            okFiles ? "ok" : "bad");
+          stat.textContent = "生成完成，共 " + text.length + " 字，耗时 " + cost + "s";
           _showFiles();
         }).catch((e) => {
+          if (timedOut) {
+            setStep(2, "fail");
+            genmeta.textContent = "超时";
+            streammeta.textContent = "超时";
+            thinkLogAdd("等待 120 秒仍未收到任何数据，已自动停止", "bad");
+            stat.className = "stat err";
+            stat.textContent = "AI 接口 120 秒无任何响应，已自动停止。请检查「设置 → 系统 AI」的接口地址 / 模型是否可用（推理模型首包也可能较慢）";
+            return;
+          }
+          const aborted = (e && e.name === "AbortError") || (ctrl.signal && ctrl.signal.aborted);
+          if (aborted) {
+            setStep(2, "");
+            genmeta.textContent = "已停止";
+            streammeta.textContent = "已停止";
+            stat.className = "stat";
+            stat.textContent = "已停止生成，可修改需求后重新生成";
+            thinkLogAdd("已手动停止生成", "bad");
+            return;
+          }
+          setStep(2, "fail");
+          thinkLogAdd("生成失败：" + (e.message || e), "bad");
+          genmeta.textContent = "失败";
           stat.className = "stat err";
           stat.textContent = "生成失败：" + (e.message || e) + "（请检查 设置 → 系统 AI 是否已配置可用）";
-        }).finally(() => { bGen.disabled = false; });
+        }).finally(() => {
+          clearInterval(tick); bGen.disabled = false;
+          stopBtn.style.display = "none";
+          if (genCtrl === ctrl) genCtrl = null;
+        });
       });
 
-      const _showFiles = () => {
-        let html = "";
-        [["plugin.json", parsed.json], ["main.js", parsed.js]].forEach((p) => {
-          html += '<div class="fhead"><b>' + p[0] + '</b>' + (p[1] ? "（" + p[1].length + " 字符）" : "（AI 未输出该块）") + '</div>';
-          if (p[1]) html += '<pre>' + _esc(p[1]) + '</pre>';
+      // 停止生成：中断 SSE 连接（后端会随连接断开结束本次请求）
+      stopBtn.addEventListener("click", () => {
+        if (genCtrl) { try { genCtrl.abort(); } catch (e) {} }
+      });
+
+      // 更新文件卡状态（写入 / 安装后调用）
+      function markFiles(label, cls) {
+        files.querySelectorAll(".ec-file").forEach((card) => {
+          if (card.classList.contains("miss")) return;
+          const st = card.querySelector("[data-st]");
+          if (!st) return;
+          st.textContent = label;
+          st.className = "ec-file-st" + (cls ? " " + cls : "");
         });
-        files.innerHTML = html;
-        bCopy.disabled = !parsed.js;
-        bWrite.disabled = !(parsed.json && parsed.js);
+      }
+
+      const _showFiles = () => {
+        const list = [
+          { name: "plugin.json", icon: "bi-filetype-json", code: parsed && parsed.json },
+          { name: "main.js", icon: "bi-filetype-js", code: parsed && parsed.js }
+        ];
+        files.innerHTML = list.map((f) => {
+          const ok = !!f.code;
+          return '<div class="ec-file' + (ok ? "" : " miss") + '" data-file="' + f.name + '">' +
+            '<div class="ec-file-h"><i class="bi ' + f.icon + '"></i><b>' + f.name + '</b>' +
+              '<span class="ec-file-size">' + (ok ? fmtSize(f.code.length) : "—") + '</span>' +
+              '<span class="ec-file-st" data-st>' + (ok ? "已生成" : "未生成") + '</span>' +
+              (ok ? '<button class="trun" data-file-toggle>查看</button>' +
+                    '<button class="trun" data-file-copy>复制</button>' : "") +
+            '</div>' +
+            (ok ? '<pre data-file-code style="display:none">' + _esc(f.code) + '</pre>' : "") +
+          '</div>';
+        }).join("");
+        files.querySelectorAll(".ec-file").forEach((card) => {
+          const name = card.dataset.file;
+          const code = card.querySelector("[data-file-code]");
+          const t = card.querySelector("[data-file-toggle]");
+          if (t && code) t.addEventListener("click", () => {
+            const show = code.style.display === "none";
+            code.style.display = show ? "" : "none";
+            t.textContent = show ? "收起" : "查看";
+          });
+          const cp = card.querySelector("[data-file-copy]");
+          if (cp) cp.addEventListener("click", () => {
+            const text = name === "plugin.json" ? parsed.json : parsed.js;
+            navigator.clipboard.writeText(text).then(() =>
+              IDE.notifications.show(name + " 已复制到剪贴板", "ok"));
+          });
+        });
+        filesWrap.style.display = "";
+        setTimeout(() => { try { filesWrap.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {} }, 0);
         bInstall.disabled = !(parsed.json && parsed.js);
       };
-      bCopy.addEventListener("click", () => {
-        if (!parsed || !parsed.js) return;
-        navigator.clipboard.writeText(parsed.js).then(() => IDE.notifications.show("main.js 已复制到剪贴板", "ok"));
-      });
-      bWrite.addEventListener("click", () => {
-        const root = IDE.workspace.getRoot();
-        if (!root) { IDE.notifications.show("请先打开一个文件夹（工作区）", "warn"); return; }
-        if (!parsed || !parsed.json || !parsed.js) return;
-        const dir = _join(root, ".ide-workspace-tools/ai-plugin-" + Date.now());
-        Promise.all([
-          IDE.workspace.writeFile(_join(dir, "plugin.json"), parsed.json + "\n"),
-          IDE.workspace.writeFile(_join(dir, "main.js"), parsed.js + "\n")
-        ]).then(() => {
-          IDE.notifications.show("已写入 " + dir.split("/").pop() + "/，可在文件树查看", "ok");
-          return IDE.workspace.openFile(_join(dir, "main.js"));
-        }).catch((e) => IDE.notifications.show("写入失败：" + (e.message || e), "err"));
-      });
 
       // —— 一键安装 + 热部署：JSON 直装接口写入插件目录 → 停用旧实例 → 立即激活新代码（无需刷新） ——
       bInstall.addEventListener("click", () => {
         if (!parsed || !parsed.json || !parsed.js) return;
         stat.className = "stat";
         stat.textContent = "正在安装（写入插件目录）…";
+        setStep(4, "run");
+        thinkLogAdd("正在安装到插件目录…");
         bInstall.disabled = true;
         IDE.api.post("/api/plugins/install-files", {
           files: { "plugin.json": parsed.json, "main.js": parsed.js }
@@ -1641,15 +1964,27 @@
           if (res && res.error) throw new Error(res.error);
           const meta = (res && res.plugin) || {};
           stat.textContent = "已写入插件目录：" + (meta.id || "?") + "，正在热部署…";
+          thinkLogAdd("已写入插件目录：" + (meta.id || "?") + "，开始热部署");
           try { _plDeactivate(meta.id); } catch (e) {}          // 同 id 已在跑则先停用旧实例
           return Promise.resolve(_plActivate(meta)).then(() => { // 立即加载新 main.js（不缓存）
             stat.textContent = "✓ 插件「" + (meta.name || meta.id) + "」已安装并激活（热部署完成，扩展列表已刷新）。";
+            setStep(4, "ok");
+            markFiles("已安装", "ok");
+            writeBox.className = "ec-write";
+            writeBox.innerHTML = '<i class="bi bi-check-circle"></i><span>已安装并热部署：<b>' +
+              _esc(meta.name || meta.id || "?") + '</b> v' + _esc(meta.version || "") +
+              '（' + _esc(meta.id || "") + '）· ' + new Date().toLocaleTimeString() + '</span>';
+            thinkLogAdd("热部署完成：" + (meta.name || meta.id), "ok");
             try { _plRenderPanel(); } catch (e) {}
             IDE.notifications.show("插件已安装并热部署：" + (meta.name || meta.id), "ok");
           });
         }).catch((e) => {
           stat.className = "stat err";
           stat.textContent = "安装失败：" + (e.message || e);
+          setStep(4, "fail");
+          writeBox.className = "ec-write err";
+          writeBox.innerHTML = '<i class="bi bi-x-circle"></i><span>安装失败：' + _esc(e.message || e) + '</span>';
+          thinkLogAdd("安装失败：" + (e.message || e), "bad");
         }).finally(() => { if (parsed && parsed.json && parsed.js) bInstall.disabled = false; });
       });
     }
@@ -1676,10 +2011,26 @@
           '.docmd hr{border:none;border-top:1px solid rgba(127,127,127,.25);margin:14px 0}' +
           '.docmd ul,.docmd ol{margin:6px 0;padding-left:22px}' +
           '.docmd a{color:#6cb6ff}' +
-          '.extc .toc{font-family:inherit;font-size:11.5px;padding:2px 10px;border-radius:99px;cursor:pointer;' +
-            'border:1px solid rgba(127,127,127,.3);background:rgba(127,127,127,.08);color:#c2c6cc}' +
-          '.extc .toc.sub{opacity:.72;font-size:11px}' +
-          '.extc .toc:hover{background:#0d7ec4;border-color:#0d7ec4;color:#fff}' +
+          /* 文档：左侧悬浮固定目录（sticky，随内容滚动保持可见，可折叠） */
+          '.extc .c-body>section[data-tab="docs"]{max-width:1180px}' +
+          '.ec-docwrap{display:flex;gap:18px;align-items:flex-start}' +
+          '.ec-docmain{flex:1;min-width:0}' +
+          '.ec-toc{position:sticky;top:0;flex:none;width:214px;max-height:calc(100vh - 210px);overflow:auto;' +
+            'border:1px solid rgba(127,127,127,.22);border-radius:12px;padding:10px 8px;background:rgba(127,127,127,.05)}' +
+          '.ec-toc-head{display:flex;align-items:center;gap:6px;padding:0 8px 8px;font-size:11px;color:#8b949e;letter-spacing:.06em}' +
+          '.ec-toc-btn{margin-left:auto;flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;' +
+            'border:1px solid rgba(127,127,127,.28);border-radius:6px;background:transparent;color:#9aa4af;cursor:pointer;font-size:11px}' +
+          '.ec-toc-btn:hover{background:rgba(127,127,127,.16);color:#e6edf3}' +
+          '.ec-toc-list{display:flex;flex-direction:column;gap:1px}' +
+          '.extc .ec-toc .toc{width:100%;font-family:inherit;font-size:11.5px;line-height:1.5;text-align:left;padding:4px 8px;' +
+            'border:none;border-radius:6px;background:transparent;color:#9aa4af;cursor:pointer;' +
+            'white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+          '.extc .ec-toc .toc:hover{background:rgba(13,126,196,.16);color:#e6edf3}' +
+          '.extc .ec-toc .toc.sub{padding-left:18px;font-size:11px;opacity:.78}' +
+          '.ec-toc.collapsed{width:38px;padding:10px 4px}' +
+          '.ec-toc.collapsed .ec-toc-head b,.ec-toc.collapsed .ec-toc-list{display:none}' +
+          '.ec-toc.collapsed .ec-toc-head{padding:0;justify-content:center}' +
+          '.ec-toc.collapsed .ec-toc-btn{margin:0}' +
           /* 浅色主题跟随 */
           'html.theme-light .docmd{color:#30363d}' +
           'html.theme-light .docmd h3,html.theme-light .docmd h4{color:#0550ae}' +
@@ -1689,19 +2040,43 @@
           'html.theme-light .docmd pre code{color:#30363d}' +
           'html.theme-light .docmd blockquote{color:#6b7078}' +
           'html.theme-light .docmd th,html.theme-light .docmd td{border-color:rgba(0,0,0,.18)}' +
-          'html.theme-light .extc .toc{color:#30363d;border-color:rgba(0,0,0,.16);background:rgba(0,0,0,.045)}' +
+          'html.theme-light .ec-toc{background:rgba(0,0,0,.02);border-color:rgba(0,0,0,.1)}' +
+          'html.theme-light .ec-toc-head{color:#6b7078}' +
+          'html.theme-light .ec-toc-btn{color:#57606a;border-color:rgba(0,0,0,.14)}' +
+          'html.theme-light .ec-toc-btn:hover{background:rgba(0,0,0,.06);color:#24292f}' +
+          'html.theme-light .extc .ec-toc .toc{color:#57606a}' +
+          'html.theme-light .extc .ec-toc .toc:hover{background:#e3f0fb;color:#0b5c9a}' +
         '</style>' +
-        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;flex-wrap:wrap">' +
-          '<button class="b" data-a="reload">刷新</button>' +
-          '<button class="b" data-a="open">在编辑器打开</button>' +
-          '<span class="stat" data-meta style="margin:0"></span>' +
-        '</div>' +
-        '<div data-toc style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 12px"></div>' +
-        '<div class="docmd" data-doc><div style="color:#8a9098">加载中…</div></div>';
+        '<div class="ec-docwrap">' +
+          '<aside class="ec-toc" data-tocwrap>' +
+            '<div class="ec-toc-head"><b>目录</b>' +
+              '<button class="ec-toc-btn" data-toc-toggle title="收起目录"><i class="bi bi-chevron-double-left"></i></button>' +
+            '</div>' +
+            '<nav class="ec-toc-list" data-toc></nav>' +
+          '</aside>' +
+          '<div class="ec-docmain">' +
+            '<div class="ec-toolbar" style="margin-bottom:4px">' +
+              '<button class="b" data-a="reload">刷新</button>' +
+              '<button class="b" data-a="open">在编辑器打开</button>' +
+              '<span class="stat" data-meta style="margin:0"></span>' +
+            '</div>' +
+            '<div class="docmd" data-doc><div style="color:#8a9098">加载中…</div></div>' +
+          '</div>' +
+        '</div>';
 
       const doc = sec.querySelector("[data-doc]"), toc = sec.querySelector("[data-toc]"),
+            tocWrap = sec.querySelector("[data-tocwrap]"), tocToggle = sec.querySelector("[data-toc-toggle]"),
             meta = sec.querySelector("[data-meta]"), bReload = sec.querySelector('[data-a="reload"]'),
             bOpen = sec.querySelector('[data-a="open"]');
+      // 目录折叠：状态持久化，下次打开文档页沿用
+      function setTocCollapsed(on) {
+        tocWrap.classList.toggle("collapsed", !!on);
+        tocToggle.innerHTML = '<i class="bi ' + (on ? "bi-chevron-double-right" : "bi-chevron-double-left") + '"></i>';
+        tocToggle.title = on ? "展开目录" : "收起目录";
+        try { IDE.settings.set("_extConsole.tocCollapsed", !!on); } catch (e) {}
+      }
+      tocToggle.addEventListener("click", () => setTocCollapsed(!tocWrap.classList.contains("collapsed")));
+      setTocCollapsed(IDE.settings.get("_extConsole.tocCollapsed", false));
       const DOC_REL = "docs/window.IDE宿主API使用文档.md";
 
       // —— 轻量 Markdown 渲染：标题/表格/代码块/行内代码/列表/引用/链接/粗体/水平线 ——
@@ -1767,10 +2142,10 @@
         bOpen.disabled = !root;
         if (!root) {
           doc.innerHTML = '<div style="color:#8a9098;padding:20px 0">请先打开工作区文件夹（文档位于 <code>' + DOC_REL + '</code>）。</div>';
-          toc.style.display = "none"; meta.textContent = ""; return;
+          tocWrap.style.display = "none"; meta.textContent = ""; return;
         }
         const p = _join(root, DOC_REL);
-        toc.style.display = ""; toc.innerHTML = "";
+        tocWrap.style.display = ""; toc.innerHTML = "";
         doc.innerHTML = '<div style="color:#8a9098">加载中…</div>';
         meta.textContent = "读取中…";
         IDE.workspace.readFile(p).then((txt) => {
@@ -1795,11 +2170,11 @@
             b.addEventListener("click", () => h.scrollIntoView({ behavior: "smooth", block: "start" }));
             toc.appendChild(b);
           });
-          if (!heads.length) toc.style.display = "none";
+          if (!heads.length) tocWrap.style.display = "none";
         }).catch((e) => {
           doc.innerHTML = '<div style="color:#f85149;padding:12px 0">读取失败：' + _esc(e.message || e) +
             '<br>（请确认工作区打开的是本项目根目录 File_Flask）</div>';
-          meta.textContent = ""; toc.style.display = "none";
+          meta.textContent = ""; tocWrap.style.display = "none";
         });
       }
 
@@ -1826,8 +2201,8 @@
       }
       IDE.editors.open({
         id: "builtin-console",
-        title: "API 管理面板",
-        icon: "bi-grid-1x2",
+        title: "扩展自定义插件",
+        icon: "bi-puzzle",
         noSplit: true,
         background: !!opts.background,
         render: (box) => _render(box, IDE),
@@ -1903,8 +2278,8 @@
 
   // 内置扩展卡片（扩展列表顶部，始终可用、不可卸载）
   function _extConsoleCard() {
-    return '<div class="pl-card" data-builtin="console" data-search="api 管理面板 内置 builtin console 总览 测试 ai" style="cursor:pointer" title="内置扩展 · 点击查看说明">' +
-      '<div class="pl-row"><i class="bi bi-grid-1x2"></i> <b>API 管理面板</b> <span class="pl-ver">内置</span>' +
+    return '<div class="pl-card" data-builtin="console" data-search="扩展自定义插件 api 管理面板 内置 builtin console 总览 测试 ai" style="cursor:pointer" title="内置扩展 · 点击查看说明">' +
+      '<div class="pl-row"><i class="bi bi-puzzle"></i> <b>扩展自定义插件</b> <span class="pl-ver">内置</span>' +
         '<span style="margin-left:auto;font-size:11px;color:#7bd88f">始终可用</span></div>' +
       '<div class="pl-desc">系统 API 总览 / API 测试 / AI 开发插件 / 文档：浏览宿主全部接口、一键自检测试、用 AI 生成插件代码骨架、内置查看宿主 API 文档。</div>' +
       '<div class="pl-acts">' +
@@ -1925,18 +2300,21 @@
         '<div class="ph" style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
           '<span>已安装扩展（' + list.length + '）</span>' +
           '<span style="display:flex;gap:6px">' +
+            /* 搜索按钮：默认收起，点一下才展开下面的搜索框 */
+            '<button class="g-btn outline" id="plSearchToggle" title="搜索已安装的扩展" ' +
+              'style="padding:2px 8px;font-size:12px"><i class="bi bi-search"></i></button>' +
             '<button class="g-btn outline" id="plHistory" style="padding:2px 8px;font-size:12px">历史</button>' +
             '<button class="g-btn outline" id="plUpload" style="padding:2px 8px;font-size:12px">上传插件(zip)</button>' +
           '</span>' +
         '</div>';
       if (list.length) {
-        html += '<div style="padding:0 8px 6px">' +
+        html += '<div id="plSearchWrap" style="display:none;padding:0 8px 6px">' +
           '<input id="plSearch" placeholder="搜索已安装的扩展…" ' +
           'style="width:100%;box-sizing:border-box;padding:3px 8px;font-size:12px;background:rgba(127,127,127,.1);border:1px solid rgba(127,127,127,.25);border-radius:6px;color:inherit;outline:none">' +
           '</div>';
       }
       if (!list.length) html += '<div class="ph" style="color:#888">暂无插件。把插件目录打包成 zip 上传即可。</div>';
-      html += _extConsoleCard();               // 内置扩展（API 管理面板）：始终置顶展示
+      html += _extConsoleCard();               // 内置扩展（扩展自定义插件）：始终置顶展示
       for (const p of list) {
         _plIcons.set(p.id, _plResolveIcon(p));   // 同步插件图标（视图标签默认图标即取自此）
         const search = ((p.name || "") + " " + p.id + " " + (p.description || "") + " " + (p.author || "")).toLowerCase();
@@ -1971,6 +2349,19 @@
           c.style.display = (!kw || (c.dataset.search || "").indexOf(kw) >= 0) ? "" : "none";
         });
       });
+      // 搜索开关：默认隐藏搜索框，点 🔍 展开并聚焦；收起时清空关键词、还原列表
+      const sWrap = box.querySelector("#plSearchWrap"), sTog = box.querySelector("#plSearchToggle");
+      if (sWrap && sTog && sInp) {
+        sTog.addEventListener("click", () => {
+          const show = sWrap.style.display === "none";
+          sWrap.style.display = show ? "" : "none";
+          sTog.style.background = show ? "rgba(13,126,196,.28)" : "";
+          sTog.style.borderColor = show ? "#0d7ec4" : "";
+          sTog.style.color = show ? "#ffffff" : "";
+          if (show) sInp.focus();
+          else { sInp.value = ""; sInp.dispatchEvent(new Event("input")); }
+        });
+      }
       box.querySelectorAll(".pl-card").forEach(card => {
         const id = card.dataset.id;
         // 点卡片（按钮 / 开关除外）→ 详情弹窗

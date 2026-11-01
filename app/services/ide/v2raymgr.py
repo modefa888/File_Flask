@@ -810,6 +810,7 @@ def _stats_sample():
             counters = _xray_counters(core, api_port)
     ok = "uplink" in counters and "downlink" in counters
     now = time.time()
+    du = dd = 0.0
     with _stat_lock:
         prev = _stat.get("prev") or {}
         last_ts = float(_stat.get("ts") or 0)
@@ -825,6 +826,16 @@ def _stats_sample():
         _stat.update({"speed_up": su, "speed_down": sd, "ts": now, "api_ok": ok,
                       "prev": {"up": counters.get("uplink", 0),
                                "down": counters.get("downlink", 0)} if ok else {}})
+    # 客户端使用统计：内核在跑就采样（连接在线即累计时长；有流量增量再分摊流量）
+    if ok and st.get("running"):
+        try:
+            dt = max(0.5, now - (last_ts or 0)) if last_ts else 0.0
+            if dt:
+                cl = inbound_clients()
+                if cl.get("ok") and cl.get("items"):
+                    _usage_sample(cl["items"], du, dd, dt)
+        except Exception:                  # noqa: BLE001
+            pass
 
 
 def _stats_loop():
@@ -842,6 +853,100 @@ def _ensure_stats_thread():
         _stats_thread = threading.Thread(target=_stats_loop, daemon=True,
                                          name="v2ray-stats")
         _stats_thread.start()
+
+
+# ---------------------------------------------------------------------------
+# 客户端使用统计：按来源 IP 记录 流量（上/下行）、使用时长、首次 / 最后使用。
+# 内核 stats API 只有全站上下行计数、不区分来源 IP——把每个采样周期的增量按
+# 「各 IP 活动连接数占比」分摊到客户端（近似但够用）；时长按在线秒数累计。
+# 数据落库（设置表 client_usage），进程重启后继续累计。
+# ---------------------------------------------------------------------------
+
+_USAGE_KEY = "client_usage"
+_usage_lock = threading.Lock()
+_usage_cache = None                     # 进程内缓存：读一次库，之后内存累加
+_usage_last_save = 0.0                  # 上次落库时间（脏数据节流，最多 10 秒一次）
+
+
+def _usage_load() -> dict:
+    global _usage_cache
+    if _usage_cache is None:
+        try:
+            j = json.loads(v2raydb.all_settings().get(_USAGE_KEY) or "{}")
+            _usage_cache = j if isinstance(j, dict) else {}
+        except Exception:                  # noqa: BLE001
+            _usage_cache = {}
+    return _usage_cache
+
+
+def _usage_save(force: bool = False) -> None:
+    global _usage_last_save, _usage_cache
+    now = time.time()
+    if not force and now - _usage_last_save < 10.0:
+        return
+    try:
+        data = dict(_usage_cache or {})
+        if len(data) > 200:                # 上限保护：只留最近活跃的 200 个客户端
+            data = dict(sorted(data.items(),
+                               key=lambda kv: -((kv[1] or {}).get("last") or 0))[:200])
+        v2raydb.set_setting(_USAGE_KEY, json.dumps(data, ensure_ascii=False))
+        _usage_cache = data
+        _usage_last_save = now
+    except Exception:                      # noqa: BLE001
+        pass
+
+
+def _usage_sample(clients: list, du: float, dd: float, dt: float) -> None:
+    """一个采样周期：clients = 实时连接按 IP 聚合的客户端，
+    du / dd = 本周期上下行增量字节，dt = 周期秒数（在线时长 +dt）。"""
+    if not clients:
+        return
+    now = int(time.time())
+    total_conns = sum(c.get("conns") or 0 for c in clients) or 1
+    with _usage_lock:
+        data = _usage_load()
+        for c in clients:
+            ip = str(c.get("ip") or "")
+            if not ip:
+                continue
+            share = (c.get("conns") or 0) / total_conns
+            row = data.get(ip) if isinstance(data.get(ip), dict) else {}
+            if not row:
+                row = {"up": 0, "down": 0, "dur": 0, "first": now, "last": 0}
+            row["up"] = int(row.get("up") or 0) + int(du * share)
+            row["down"] = int(row.get("down") or 0) + int(dd * share)
+            row["dur"] = int(row.get("dur") or 0) + max(1, int(dt))
+            row["last"] = now
+            data[ip] = row
+        _usage_save()
+
+
+def client_usage() -> list:
+    """客户端使用统计（按最后使用倒序）；online = 10 秒内仍活跃。"""
+    now = int(time.time())
+    with _usage_lock:
+        rows = []
+        for ip, row in (_usage_load() or {}).items():
+            if not isinstance(row, dict):
+                continue
+            rows.append({"ip": ip, "up": int(row.get("up") or 0),
+                         "down": int(row.get("down") or 0),
+                         "dur": int(row.get("dur") or 0),
+                         "first": int(row.get("first") or 0),
+                         "last": int(row.get("last") or 0)})
+    for r in rows:
+        r["online"] = now - (r["last"] or 0) <= 10
+    rows.sort(key=lambda x: -(x["last"] or 0))
+    return rows
+
+
+def client_usage_reset() -> None:
+    """清空客户端使用统计。"""
+    global _usage_cache, _usage_last_save
+    with _usage_lock:
+        _usage_cache = {}
+        _usage_last_save = 0.0
+        _usage_save(force=True)
 
 
 def traffic() -> dict:

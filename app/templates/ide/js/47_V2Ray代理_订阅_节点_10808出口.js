@@ -22,7 +22,7 @@
   const VIEW_PATH = "\u0000v2ray";           // 虚拟路径：不可见字符，避免与真实文件冲突
   const V2 = { st: null, nodes: [], subs: [], cores: [], coreInfo: null, sec: "overview",
                pick: "", selSub: null, logTimer: null, autoLog: true, log: "", logTab: "core",
-               trafTimer: null, traffic: null,
+               trafTimer: null, traffic: null, usage: [],
                busy: false, showManual: false, nodeForm: false, exit: null, ping: {}, dl: {}, kw: "",
                nodeTab: "__all__", sortPing: false, hideFail: false,
                subBusy: {}, subAllBusy: false, subForm: false,
@@ -757,8 +757,12 @@
 
   /* ---------- 实时连接：连到代理入站端口（SOCKS5 / HTTP）的客户端 ---------- */
   function v2ClientsFetch() {
-    return post("/api/v2ray/clients", {}).then(r => {
+    return Promise.all([
+      post("/api/v2ray/clients", {}),
+      api("/api/v2ray/client_usage").catch(() => ({ items: [] })),
+    ]).then(([r, u]) => {
       V2.clients = r || null;
+      V2.usage = (u && u.items) || [];
       if (v2vActive() && V2.sec === "clients") v2vRender();
     });
   }
@@ -797,7 +801,49 @@
       v2vSecHead("bi-people", "实时连接",
         (d && d.items && d.items.length ? ("客户端 " + d.items.length + " · 连接 " + d.total + " · ") : "") +
         "每 3 秒自动刷新") +
-      inner + "</div>";
+      inner + "</div>" + v2vUsage();
+  }
+
+  /* ---------- 使用统计：按来源 IP 的流量 / 时长 / 首末使用 ---------- */
+  function v2FmtDur(sec) {
+    sec = Math.max(0, Math.floor(Number(sec) || 0));
+    const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600),
+          m = Math.floor(sec % 3600 / 60);
+    if (d) return d + " 天 " + h + " 小时";
+    if (h) return h + " 小时 " + m + " 分";
+    if (m) return m + " 分 " + Math.floor(sec % 60) + " 秒";
+    return Math.floor(sec % 60) + " 秒";
+  }
+  function v2FmtTs(t) {
+    t = Number(t) || 0;
+    if (!t) return "—";
+    return new Date(t * 1000).toLocaleString("zh-CN", { hour12: false });
+  }
+  function v2vUsage() {
+    const rows = (V2.usage || []).filter(r => (r.up + r.down) > 0 || r.dur > 0);
+    let list;
+    if (!rows.length) {
+      list = '<div class="v2v-empty"><i class="bi bi-clock-history"></i><b>暂无使用记录</b>' +
+        "<span>客户端经代理产生流量后会在这里按 IP 累计：流量 · 使用时长 · 首次 / 最后使用</span></div>";
+    } else {
+      list = '<div class="v2v-list">' + rows.slice(0, 50).map(r =>
+        '<div class="v2v-item">' +
+        '<span class="v2v-ico" style="background:rgba(16,185,129,.12);color:#10b981">' +
+        '<i class="bi bi-person-check"></i></span>' +
+        '<div style="min-width:0;flex:1"><b style="font-size:13px">' + esc(r.ip) + "</b>" +
+        '<div style="font-size:11.5px;opacity:.65;margin-top:2px">↑ ' + fmtBytes(r.up) +
+        " · ↓ " + fmtBytes(r.down) + " · 使用时长 " + v2FmtDur(r.dur) +
+        "<br>首次 " + v2FmtTs(r.first) + " · 最后 " + v2FmtTs(r.last) + "</div></div>" +
+        '<span class="v2v-ping ' + (r.online ? "good" : "") + '">' +
+        (r.online ? "在线 · " : "") + fmtBytes(r.up + r.down) + "</span></div>"
+      ).join("") + "</div>";
+    }
+    return '<div class="v2v-sec">' +
+      v2vSecHead("bi-clock-history", "使用统计",
+        "按来源 IP 累计 · 数据落库，重启服务不清零 · 每 3 秒刷新",
+        '<span class="v2v-flex"></span>' +
+        '<button class="v2v-btn ico danger" data-act="usage-clear" title="清空统计"><i class="bi bi-eraser"></i></button>') +
+      list + "</div>";
   }
 
   /* ---------- 节点失效自动切换（看门狗在后端运行，与网页是否打开无关） ----------
@@ -2150,6 +2196,14 @@
       }
       case "log-refresh": await v2LogFetch(); break;
       case "connlog-refresh": await v2ConnFetch(); v2ConnRender(); break;
+      case "usage-clear": {
+        const ok = await uiConfirm("清空使用统计", "确定清空所有客户端的使用统计？流量 / 时长 / 时间记录都会归零。", "清空", true);
+        if (!ok) return;
+        await post("/api/v2ray/client_usage/clear");
+        V2.usage = [];
+        v2vRender();
+        break;
+      }
       case "log-clear": {
         const conn = V2.logTab === "conn";
         const ok = await uiConfirm("清空" + (conn ? "连接记录" : "日志"),

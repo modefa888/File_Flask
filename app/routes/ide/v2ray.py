@@ -79,6 +79,19 @@ def v2_clients():
     return jsonify(v2raymgr.inbound_clients())
 
 
+@bp.get("/api/v2ray/client_usage")
+def v2_client_usage():
+    """客户端使用统计：按来源 IP 的流量 / 使用时长 / 首次与最后使用时间。"""
+    return jsonify({"items": v2raymgr.client_usage()})
+
+
+@bp.post("/api/v2ray/client_usage/clear")
+def v2_client_usage_clear():
+    """清空客户端使用统计。"""
+    v2raymgr.client_usage_reset()
+    return jsonify({"ok": True})
+
+
 @bp.get("/api/v2ray/core")
 def v2_core():
     return jsonify(v2raymgr.core_info())

@@ -2247,6 +2247,13 @@
   (function () {
     const saved = IDE.settings.get("_extConsole.open", null);
     if (!saved) return;
+    // 防「幽灵自开」：关掉的面板不会出现在 tabOrder 快照里。标记残留（上次 onClose
+    // 没来得及清）时快照对不上 → 本次不自动恢复。只跳过、不清标记：一次快照误判
+    // 不该永久杀掉面板，手动重开后 openOnce 会补存新快照，下次刷新即可正常恢复
+    try {
+      const order0 = JSON.parse(localStorage.getItem("ide.session.tabOrder") || "[]");
+      if (!Array.isArray(order0) || !order0.some(o => o && o.pluginId === "builtin-console")) return;
+    } catch (e) { /* 快照读不到就按原逻辑走 */ }
     let lastActive = "";
     try { lastActive = localStorage.getItem("ide.session.activeTab") || ""; } catch (e) {}
     const restoreSession = IDE.settings.get("restoreSession", true) !== false;
@@ -2281,6 +2288,10 @@
       if (!(IDE.editors && IDE.editors.get("builtin-console"))) return;   // 没真正建出标签也重试
       opened = true;
       restoreConsolePos();
+      // 关键：后台恢复（background）不走 activate，不会触发 sessionSaveTabs，
+      // 而会话恢复过程中恢复文件标签的 activate 已把 tabOrder 快照覆盖成「无面板」。
+      // 不在这里补存的话，下次刷新 gate 读到旧快照会误判面板已关 → 面板被反复删除
+      try { sessionSaveTabs(); } catch (e2) {}
     };
     // 正常路径：会话恢复结束事件到达后立刻恢复
     // 注意用闭包里的 IDE，而不是 window.IDE —— 后者此时还没赋值（文件末尾才挂到 window）

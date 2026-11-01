@@ -305,6 +305,7 @@
       const activePath = localStorage.getItem("ide.session.activeTab") || "";
       for (const t of list) {
         if (!t || !t.path) continue;
+        try {  // 单个标签恢复失败（如某视图初始化异常）不能中断循环，否则后续标签全被丢弃
         if (t.isSettings && typeof window.openSettingsTab === "function") {
           let sec = t.settingsSec || "";
           try { sec = localStorage.getItem("ide.session.settingsSec") || sec; } catch (_) {}
@@ -337,8 +338,8 @@
         // 文件夹管理器可视化查看（虚拟路径 \u0000fm）：直接重开，当前目录由模块自己记在 localStorage
         if (t.path === "\u0000fm" && typeof openFolderManagerView === "function") { openFolderManagerView(); continue; }
         // 下载中心（虚拟路径 \u0000downloads）：直接重开，子视图（任务 / 记录 / 设置）由会话快照带上
-        if (t.path === "\u0000downloads" && typeof window.openDownloadCenter === "function") {
-          window.openDownloadCenter(t.view);
+        if (t.path === "\u0000downloads") {
+          try { if (typeof window.openDownloadCenter === "function") window.openDownloadCenter(t.view); } catch (e) {}
           continue;
         }
         // 远程文件管理器（虚拟路径 \u0000sshfm:<连接id>）：按 id 找回 SSH 连接后重开。
@@ -359,6 +360,7 @@
         // 否则 openFile 会去后端读一个不存在的路径，刷新后冒出「路径不存在」的错误标签
         if (t.path.indexOf("\u0000") >= 0) continue;
         await openFile(t.path, t.name, t.group || 0).catch(() => {});
+        } catch (_) {}  // 本条恢复失败：跳过，继续恢复下一个标签
       }
       if (activePath && activePath.indexOf("\u0001") < 0) {
         const tab = findTab(activePath);

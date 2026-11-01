@@ -193,6 +193,18 @@ html.theme-light .dlc-btn.primary { color: #fff; }
 html.theme-light .dlc-btn.primary:hover { color: #fff; }
 .dlc-btn.danger:hover { border-color: var(--dlc-bad); color: var(--dlc-bad); }
 .dlc-btn.sm { height: 26px; padding: 0 9px; font-size: 11.5px; border-radius: 7px; }
+.dlc-btn.sm em {
+  font-style: normal;
+  font-size: 10.5px;
+  margin-left: 5px;
+  background: var(--dlc-card);
+  border: 1px solid var(--dlc-line);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 15px;
+  color: var(--dlc-fg2);
+  font-variant-numeric: tabular-nums;
+}
 
 .dlc-iconbtn {
   width: 28px;
@@ -1128,6 +1140,39 @@ html.theme-light .dlc-pitem.sel .dlc-cb { color: #fff; }
 }
 .dls-sum b { color: #cfcfcf; font-weight: 600; font-variant-numeric: tabular-nums; }
 
+.dls-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 2px;
+  border: 1px solid #33333a;
+  border-radius: 7px;
+  background: #232327;
+}
+.dls-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #9a9aa2;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s ease, color .12s ease;
+}
+.dls-tab b { font-weight: 600; font-variant-numeric: tabular-nums; opacity: .75; }
+.dls-tab:hover { color: #e4e4e8; background: #2e2e34; }
+.dls-tab.on { background: #34343b; color: #f0f0f3; font-weight: 600; }
+.dls-tab.on b { opacity: 1; }
+
 .dls-sec {
   font-size: 10.5px;
   color: #7f7f7f;
@@ -1280,6 +1325,10 @@ html.theme-light .dls-empty b { color: #414750; }
 html.theme-light .dls-foot { border-top-color: #eef1f6; }
 html.theme-light .dls-ico { border-color: #dfe4ea; color: #475467; }
 html.theme-light .dls-tag { color: #9a6700; border-color: #e3d2ac; }
+html.theme-light .dls-tabs { border-color: #e3e6ec; background: #f1f3f6; }
+html.theme-light .dls-tab { color: #62666d; }
+html.theme-light .dls-tab:hover { color: #1f2328; background: #e7eaef; }
+html.theme-light .dls-tab.on { background: #fff; color: #1f2328; box-shadow: 0 1px 2px rgba(15, 23, 42, .12); }
 
 /* ---------------- 切片查看弹窗（m3u8 分片下载 / 重试情况） ---------------- */
 .dlc-segs {

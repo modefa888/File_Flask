@@ -502,10 +502,23 @@ def create_task(url, save_dir="", filename="", threads=0, opts=None, user="", ip
         def_name = _hls_stem(url) + (".mp4" if ffmpeg_path() else ".ts")
     else:
         def_name = _name_from_url(url)
+    # 同名任务自动加序号：index.mp4 已存在 → index(2).mp4（不同链接解析出同名文件时）
+    name = dl._safe_name(filename or def_name)
+    try:
+        _, rows = dl.list_tasks(q=os.path.splitext(name)[0], status="all", page=1, page_size=200)
+        taken = {str(r.get("name") or "") for r in rows}
+        if name in taken:
+            stem, ext = os.path.splitext(name)
+            i = 1
+            while name in taken:
+                i += 1
+                name = "%s(%d)%s" % (stem, i, ext)
+    except Exception:                      # noqa: BLE001
+        pass
     note = ("磁力 / BT · %d 线程" % n) if kind == "torrent" else (
         "HLS · 分片下载后自动拼接 MP4" if kind == "hls" else "多线程 %d · 服务器端下载" % n)
     row = {
-        "id": tid, "ts": dl._now_ts(), "kind": kind, "name": filename or def_name,
+        "id": tid, "ts": dl._now_ts(), "kind": kind, "name": name,
         "src": [], "src_dir": "", "save_dir": folder, "artifact": "",
         "size": 0, "done": 0, "status": "probing", "phase": "正在解析链接…",
         "error": "", "user": user or "", "ip": ip or "", "hits": 0,

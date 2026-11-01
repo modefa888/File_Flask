@@ -13,7 +13,7 @@ const DL_ACTIVE = ["pending", "building", "ready", "downloading", "paused"];
 
 const DL = {
   tasks: [], items: [], total: 0, page: 1, pages: 1, kw: "", status: "all",
-  stats: {}, cfg: null, usage: null, tab: "act",
+  stats: {}, cfg: null, usage: null, tab: "act", sideTab: "all",
   running: {},          // 传输中：id -> {ctrl, bytes, total, speed, writable, useFs, chunks}
   handles: {},          // id -> FileSystemFileHandle（本页会话内有效）
   sel: {},              // 记录多选：id -> 1（仅当前列表内的选中项有效）
@@ -47,13 +47,14 @@ function dlIcon(task) {
   if (task.kind === "zip") return { i: "bi-file-earmark-zip", cls: "zip" };
   if (task.kind === "text") return { i: "bi-file-earmark-text", cls: "txt" };
   if (task.kind === "torrent") return { i: "bi-magnet", cls: "txt" };
-  if (task.kind === "url") return { i: "bi-globe2", cls: "" };
+  // 先按文件名扩展名识别（url / hls 任务的文件名可能是 xxx.mp4，不该显示地球）
   const ext = String(task.name || "").split(".").pop().toLowerCase();
   if (["mp4", "mkv", "webm", "avi", "mov", "flv"].indexOf(ext) >= 0) return { i: "bi-film", cls: "" };
   if (["mp3", "wav", "flac", "aac", "m4a", "ogg"].indexOf(ext) >= 0) return { i: "bi-music-note-beamed", cls: "" };
   if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"].indexOf(ext) >= 0) return { i: "bi-image", cls: "" };
   if (["zip", "rar", "7z", "tar", "gz"].indexOf(ext) >= 0) return { i: "bi-file-earmark-zip", cls: "zip" };
   if (["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"].indexOf(ext) >= 0) return { i: "bi-file-earmark-text", cls: "txt" };
+  if (task.kind === "url" || task.kind === "hls") return { i: "bi-globe2", cls: "" };
   return { i: "bi-file-earmark", cls: "" };
 }
 function dlStatusText(s, t) {
@@ -334,7 +335,35 @@ function dlSideRender() {
       '<span>累计 <b>' + dlSize(st.done_bytes || 0) + '</b></span>';
   }
 
-  if (!act.length && !fin.length) {
+  // 状态 tab：全部 / 进行中 / 已结束
+  const tabs = document.getElementById("dlsTabs");
+  if (tabs) {
+    const mk = function (k, label, n) {
+      return '<button class="dls-tab' + (DL.sideTab === k ? " on" : "") +
+        '" data-dls="stab" data-tab="' + k + '">' + label +
+        (n ? ' <b>' + n + '</b>' : "") + '</button>';
+    };
+    tabs.innerHTML = mk("all", "全部", st.total || (act.length + fin.length)) +
+      mk("act", "进行中", act.length) + mk("fin", "已结束", fin.length);
+  }
+
+  const tab = DL.sideTab;
+  if (tab !== "all" && !act.length && !fin.length) {
+    list.innerHTML =
+      '<div class="dls-empty"><i class="bi bi-cloud-arrow-down"></i>' +
+      '<b>还没有下载任务</b>' +
+      '<p>点上面的「新建下载」，勾选文件或文件夹即可打包下载，支持暂停与断点续传。</p></div>';
+  } else if (tab === "act") {
+    list.innerHTML = act.length
+      ? act.map(dlSideItem).join("")
+      : '<div class="dls-empty"><i class="bi bi-hourglass-split"></i>' +
+        '<b>没有进行中的任务</b><p>当前所有下载都已完成或已结束。</p></div>';
+  } else if (tab === "fin") {
+    list.innerHTML = fin.length
+      ? fin.map(dlSideItem).join("")
+      : '<div class="dls-empty"><i class="bi bi-check2-circle"></i>' +
+        '<b>没有已结束的任务</b><p>完成的下载会出现在这里，可打开或删除。</p></div>';
+  } else if (!act.length && !fin.length) {
     list.innerHTML =
       '<div class="dls-empty"><i class="bi bi-cloud-arrow-down"></i>' +
       '<b>还没有下载任务</b>' +
@@ -442,10 +471,15 @@ function dlRenderTasks() {
   if (!box) return;
   box.classList.remove("rec-mode");
   const st = DL.stats || {};
-  // 「正在下载」包含一切进行中的任务：真正在传输的 + 排队 / 解析 / 打包 / 合并 / 已暂停
+  // 「正在下载」只数真正在跑的：传输中 + 排队 / 解析 / 打包 / 合并；已暂停不算
   const run = DL.tasks.filter(function (t) {
-    return !!DL.running[t.id] || t.status === "downloading" || t.status === "paused" || dlIsWaiting(t);
+    return !!DL.running[t.id] || t.status === "downloading" || dlIsWaiting(t);
   });
+  // 已暂停的任务仍留在「正在下载」tab 列表里（方便继续），但不计入「正在下载」数量
+  const paused = DL.tasks.filter(function (t) {
+    return !DL.running[t.id] && t.status === "paused";
+  });
+  const actList = run.concat(paused).sort(dlByTsDesc);
   const wait = DL.tasks.filter(dlIsWaiting).length;
   // 失败 / 取消单独一个 tab；fin 只留真正完成的
   const fail = DL.tasks.filter(function (t) {
@@ -479,16 +513,15 @@ function dlRenderTasks() {
         '<i class="bi bi-x-circle"></i>下载失败<em' +
         (fail.length ? ' class="bad"' : '') + '>' + fail.length + '</em></button>' +
       '<span style="flex:1"></span>' +
-      (run.length
-        ? '<button class="dlc-btn sm" data-act="pause-all" title="暂停所有正在传输的任务">' +
-          '<i class="bi bi-pause-fill"></i>全部暂停</button>'
-        : '') +
-      (DL.tasks.some(function (t) { return t.status === "paused"; })
-        ? '<button class="dlc-btn sm" data-act="resume-all" title="继续所有已暂停的任务">' +
-          '<i class="bi bi-play-fill"></i>全部继续</button>'
-        : '') +
+      // 两个按钮常驻，各带数量：全部暂停（下载数）/ 全部继续（暂停数）
+      '<button class="dlc-btn sm" data-act="pause-all" title="暂停所有正在传输的任务（排队中的不受影响）"' +
+      (run.length ? '' : ' disabled') + '>' +
+      '<i class="bi bi-pause-fill"></i>全部暂停<em>' + run.length + '</em></button>' +
+      '<button class="dlc-btn sm" data-act="resume-all" title="继续所有已暂停的任务（断点续传）"' +
+      (paused.length ? '' : ' disabled') + '>' +
+      '<i class="bi bi-play-fill"></i>全部继续<em>' + paused.length + '</em></button>' +
     '</div>';
-  const show = DL.tab === "act" ? run : (DL.tab === "fail" ? fail : fin);
+  const show = DL.tab === "act" ? actList : (DL.tab === "fail" ? fail : fin);
   if (!show.length) {
     html += DL.tab === "act"
       ? '<div class="dlc-empty"><div class="dlc-ebox"><i class="bi bi-cloud-arrow-down"></i></div>' +
@@ -2342,6 +2375,7 @@ function dlPickNetDir() {
       if (b) {
         const act = b.dataset.dls;
         const id = b.dataset.id || "";
+        if (act === "stab") { DL.sideTab = b.dataset.tab === "act" || b.dataset.tab === "fin" ? b.dataset.tab : "all"; return dlSideRender(); }
         if (act === "open") return openDownloadCenter();
         if (act === "view") return dlOpenArtifact(id);
         if (act === "del") return dlDeleteTask(id);

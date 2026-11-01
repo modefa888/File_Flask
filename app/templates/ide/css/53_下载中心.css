@@ -307,6 +307,27 @@ html.theme-light .dlc-btn.primary:hover { color: #fff; }
 .dlc-task:hover { border-color: var(--dlc-line); box-shadow: var(--dlc-shadow); }
 .dlc-task.running { border-color: rgba(79, 193, 255, .45); box-shadow: inset 3px 0 0 var(--dlc-acc); }
 
+/* 侧栏点击定位：卡片滚到视口中央后闪烁高亮 6s（见 52_ 里 dlApplyFocus） */
+.dlc-task.dlc-flash {
+  border-color: var(--dlc-acc);
+  animation: dlcFlash 6s ease-out 1;
+}
+@keyframes dlcFlash {
+  0%, 60% {
+    background: rgba(79, 193, 255, .16);
+    box-shadow: 0 0 0 2px rgba(79, 193, 255, .4), var(--dlc-shadow);
+  }
+  100% {
+    background: var(--dlc-card);
+    box-shadow: var(--dlc-shadow);
+  }
+}
+/* running 卡的极光 ::before 会盖住闪烁蓝底，高亮期间先收起来（划过即取消高亮，见 52_ dlOnFlashDismiss） */
+.dlc-task.dlc-flash::before {
+  animation: none;
+  opacity: 0;
+}
+
 /* 下载中任务卡：流光背景（青→紫极光缓慢流动） */
 .dlc-task.running {
   position: relative;

@@ -18,4 +18,4 @@ paramiko>=3.0
 # 实时协作编辑：WebSocket 通道（兼容 Werkzeug 开发服务器）
 flask-sock>=0.7
 
-requests>=2.31.0
+bs4

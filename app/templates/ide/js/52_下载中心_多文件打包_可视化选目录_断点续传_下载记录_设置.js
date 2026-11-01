@@ -140,7 +140,10 @@ async function dlProgress(id, offset, status) {
 }
 
 /* ---------------- 标签页 ---------------- */
-function openDownloadCenter(view) {
+function openDownloadCenter(view, opts) {
+  // 定位请求：侧栏点任务卡片带过来的 id。用「到期时间戳」保存（见 dlApplyFocus）：
+  // 列表会在轮询中整体重建 DOM，一次性加的 class 会被刷掉，所以每次渲染都重新挂高亮
+  if (opts && opts.focusId) { DL.flashId = String(opts.focusId); DL.flashUntil = Date.now() + 6000; DL.flashScroll = true; }
   // 去重：会话恢复 / 外部重复调用可能残留多个下载中心标签，留一个，避免两份内容叠在一起
   const dups = tabs.filter(function (t) { return t.path === DL_VIEW_PATH; });
   if (dups.length > 1) {
@@ -212,6 +215,7 @@ function dlBuild() {
   scroll.addEventListener("change", dlOnChange);
   scroll.addEventListener("input", dlOnInput);
   scroll.addEventListener("contextmenu", dlOnCtx);
+  scroll.addEventListener("mouseover", dlOnFlashDismiss);   // 划过高亮卡 = 取消选中
   const head = $("dlHead");                 // 顶部工具行（新建 / 刷新 / 导出 / 清理 …）
   if (head) head.addEventListener("click", dlOnClick);
   root.querySelector(".dlc-nav").addEventListener("click", function (e) {
@@ -480,6 +484,16 @@ function dlRenderTasks() {
     return !DL.running[t.id] && t.status === "paused";
   });
   const actList = run.concat(paused).sort(dlByTsDesc);
+  // 侧栏点击定位：目标任务不在当前 tab 时，自动切到它所在的分组（进行中 / 完成 / 失败）
+  if (DL.flashId) {
+    const ft = dlFindTask(DL.flashId);
+    if (ft) {
+      const g = (!DL.running[ft.id] && (ft.status === "failed" || ft.status === "canceled")) ? "fail"
+        : (!!DL.running[ft.id] || ft.status === "downloading" || ft.status === "paused" ||
+           dlIsWaiting(ft)) ? "act" : "fin";
+      if (DL.tab !== g) DL.tab = g;
+    }
+  }
   const wait = DL.tasks.filter(dlIsWaiting).length;
   // 失败 / 取消单独一个 tab；fin 只留真正完成的
   const fail = DL.tasks.filter(function (t) {
@@ -538,6 +552,40 @@ function dlRenderTasks() {
     html += '<div class="dlc-list" id="dlQueList">' + show.map(dlTaskCard).join("") + '</div>';
   }
   box.innerHTML = html;
+  dlApplyFocus();
+}
+/* 侧栏点击定位：任务卡滚进视口中央 + 高亮 6 秒。
+ * 下载中心列表在轮询中会整体重建 DOM，所以高亮状态用到期时间戳（DL.flashUntil）保存，
+ * 这里每次渲染都被调用，只要还没过期就重新把 class 挂到新生成的卡片上，避免被刷新掐断。 */
+function dlApplyFocus() {
+  if (!DL.flashId || Date.now() > DL.flashUntil) { DL.flashId = ""; DL.flashScroll = false; return; }
+  const box = $("dlScroll");
+  let card = null;
+  if (box) box.querySelectorAll(".dlc-task").forEach(function (c) {
+    if (!card && c.dataset.id === DL.flashId) card = c;
+  });
+  if (!card) return;                                   // 这条还没刷出来：等下次渲染
+  if (DL.flashScroll) {                                // 滚动定位只做一次
+    try { card.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) { card.scrollIntoView(); }
+    DL.flashScroll = false;
+  }
+  // 新节点的动画从头播；在 6s 窗口内视觉上始终保持高亮，不会被下一次刷新掐断
+  card.classList.remove("dlc-flash");
+  void card.offsetWidth;                               // 强制重排，保证连续点击也能重新触发
+  card.classList.add("dlc-flash");
+}
+/* 放弃定位高亮：之后渲染不再重新挂 class，也不再强制切分组 */
+function dlFlashClear() {
+  DL.flashId = ""; DL.flashUntil = 0; DL.flashScroll = false;
+  document.querySelectorAll("#dlScroll .dlc-task.dlc-flash").forEach(function (c) {
+    c.classList.remove("dlc-flash");
+  });
+}
+/* 鼠标划过高亮卡：立即取消选中效果，方便继续操作 / 切分组 tab */
+function dlOnFlashDismiss(e) {
+  if (!DL.flashId) return;
+  const t = e.target.closest(".dlc-task");
+  if (t && t.dataset.id === DL.flashId) dlFlashClear();
 }
 function dlStatCard(icon, label, val, cls) {
   return '<div class="' + cls + '"><div class="dlc-sic"><i class="bi ' + icon + '"></i></div>' +
@@ -1023,6 +1071,7 @@ function dlOnClick(e) {
     return;
   }
   if (act === "tab-act" || act === "tab-fin" || act === "tab-fail") {
+    dlFlashClear();   // 手动切 tab = 放弃定位，之后渲染不再强制切回原分组
     DL.tab = act === "tab-act" ? "act" : (act === "tab-fail" ? "fail" : "fin");
     return dlRender();
   }
@@ -2386,7 +2435,10 @@ function dlPickNetDir() {
         if (act === "pause") return dlStopTask(id);
         return;
       }
-      if (e.target.closest(".dls-item")) openDownloadCenter();   // 点任务卡片 → 完整面板
+      // 点任务卡片 → 完整面板，并定位到这条任务（滚动 + 高亮）
+      const it = e.target.closest(".dls-item");
+      if (it && it.dataset.id) openDownloadCenter("tasks", { focusId: it.dataset.id });
+      else if (it) openDownloadCenter();
     });
   }
 

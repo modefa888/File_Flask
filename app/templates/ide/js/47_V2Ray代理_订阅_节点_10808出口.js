@@ -21,7 +21,7 @@
 
   const VIEW_PATH = "\u0000v2ray";           // 虚拟路径：不可见字符，避免与真实文件冲突
   const V2 = { st: null, nodes: [], subs: [], cores: [], coreInfo: null, sec: "overview",
-               pick: "", selSub: null, logTimer: null, autoLog: false, log: "",
+               pick: "", selSub: null, logTimer: null, autoLog: true, log: "", logTab: "core",
                trafTimer: null, traffic: null,
                busy: false, showManual: false, nodeForm: false, exit: null, ping: {}, dl: {}, kw: "",
                nodeTab: "__all__", sortPing: false, hideFail: false,
@@ -1346,18 +1346,50 @@
   }
 
   function v2vLog() {
-    return '<div class="v2v-sec">' +
-      v2vSecHead("bi-journal-text", "内核运行日志", "来自内核进程输出（data/v2ray/xray.log，Xray / sing-box 共用）",
-        '<span class="v2v-flex"></span>' +
-        '<span class="v2v-live' + (V2.autoLog ? " on" : "") + '"><i></i>' +
-        (V2.autoLog ? "实时刷新中" : "已暂停") + "</span>" +
-        '<button class="v2v-btn" data-act="log-toggle"><i class="bi ' + (V2.autoLog ? "bi-pause" : "bi-play") + '"></i>' +
-        (V2.autoLog ? "暂停刷新" : "自动刷新") + "</button>" +
-        '<button class="v2v-btn ico" data-act="log-refresh" title="刷新日志"><i class="bi bi-arrow-clockwise"></i></button>' +
-        '<button class="v2v-btn ico danger" data-act="log-clear" title="清空日志"><i class="bi bi-eraser"></i></button>') +
-      '<pre class="v2v-log" id="v2vLog">' + esc(V2.log || "（暂无日志）") + "</pre>" +
-      '<div class="v2v-hint"><i class="bi bi-info-circle"></i><div>连接失败时先看这里的报错，' +
-      "常见原因是节点参数不对（uuid / 密码 / sni）或服务器不可达。</div></div></div>";
+    const core = V2.logTab !== "conn";
+    const ctl =
+      '<span class="v2v-live' + (V2.autoLog ? " on" : "") + '"><i></i>' +
+      (V2.autoLog ? "实时刷新中" : "已暂停") + "</span>" +
+      '<button class="v2v-btn" data-act="log-toggle"><i class="bi ' + (V2.autoLog ? "bi-pause" : "bi-play") + '"></i>' +
+      (V2.autoLog ? "暂停刷新" : "自动刷新") + "</button>" +
+      '<button class="v2v-btn ico" data-act="' + (core ? "log-refresh" : "connlog-refresh") + '" title="刷新"><i class="bi bi-arrow-clockwise"></i></button>' +
+      '<button class="v2v-btn ico danger" data-act="log-clear" title="清空"><i class="bi bi-eraser"></i></button>';
+    const tabs = '<div class="v2v-tabs" style="margin-bottom:8px">' +
+      '<button class="v2v-tab' + (core ? " on" : "") + '" data-act="log-tab" data-tab="core"><i class="bi bi-journal-text"></i>内核运行日志</button>' +
+      '<button class="v2v-tab' + (core ? "" : " on") + '" data-act="log-tab" data-tab="conn"><i class="bi bi-arrow-left-right"></i>节点连接记录</button>' +
+      '<span class="v2v-flex"></span>' + ctl + "</div>";
+    let body;
+    if (core) {
+      body = '<pre class="v2v-log" id="v2vLog">' + esc(V2.log || "（暂无日志）") + "</pre>" +
+        '<div class="v2v-hint"><i class="bi bi-info-circle"></i><div>来自内核进程输出（data/v2ray/xray.log，Xray / sing-box 共用）。' +
+        "连接失败时先看这里的报错，常见原因是节点参数不对（uuid / 密码 / sni）或服务器不可达。</div></div>";
+    } else {
+      body = '<pre class="v2v-log" id="v2vConnLog">' + esc(V2.connLogText || "（暂无连接记录）") + "</pre>" +
+        '<div class="v2v-hint"><i class="bi bi-info-circle"></i><div>手动连接 / 自动切换 / 连通验证 / 移回收站的全过程（最新在前）：' +
+        "每次手动连接、断开、自动切换链的每一步（探测异常 → 切换 → 验证），以及验证超时被自动移入回收站的节点。</div></div>";
+    }
+    return '<div class="v2v-sec">' + tabs + body + "</div>";
+  }
+
+  /* ---------- 连接记录渲染 ---------- */
+  const CONN_KIND_TXT = { manual: "手动", disconnect: "断开", auto: "自动切换", probe: "验证", trash: "回收站", fail: "失败" };
+  function v2ConnRender() {
+    const el = $("v2vConnLog");
+    if (!el) return;
+    const evs = V2.connLog || [];
+    if (!evs.length) { V2.connLogText = "（暂无连接记录）"; }
+    else {
+      V2.connLogText = evs.map((e) => {
+        const tag = CONN_KIND_TXT[e.kind] || "信息";
+        return "[" + (e.ts || "") + "][" + tag + "] " + (e.msg || "");
+      }).join("\n");
+    }
+    el.textContent = V2.connLogText;
+  }
+  async function v2ConnFetch() {
+    const r = await api("/api/v2ray/conn_log?lines=200");
+    V2.connLog = r.events || [];
+    v2ConnRender();
   }
 
   /* ---------- 日志轮询 ---------- */
@@ -1372,7 +1404,8 @@
     v2LogStop();
     const tick = async () => {
       if (!V2.autoLog || !v2vActive() || V2.sec !== "log") { V2.logTimer = null; return; }
-      await v2LogFetch().catch(() => {});
+      // 只刷新当前正看着的那个 tab，省一半请求
+      await (V2.logTab === "conn" ? v2ConnFetch() : v2LogFetch()).catch(() => {});
       V2.logTimer = setTimeout(tick, 2000);
     };
     tick();
@@ -1387,7 +1420,7 @@
       if (tb) {
         V2.sec = tb.dataset.sec;
         v2SaveView();
-        if (V2.sec === "log") { v2LogFetch().catch(() => {}); if (V2.autoLog) v2LogStart(); } else v2LogStop();
+        if (V2.sec === "log") { v2LogFetch().catch(() => {}); v2ConnFetch().catch(() => {}); if (V2.autoLog) v2LogStart(); } else v2LogStop();
         if (V2.sec === "overview") v2TrafStart(); else v2TrafStop();
         if (V2.sec === "clients") { v2ClientsFetch().catch(() => {}); v2ClientsStart(); } else v2ClientsStop();
         v2vRender();
@@ -2108,13 +2141,29 @@
 
       /* -------- 日志 -------- */
       case "log-toggle": V2.autoLog = !V2.autoLog; v2vRender(); if (V2.autoLog) v2LogStart(); else v2LogStop(); break;
+      case "log-tab": {
+        V2.logTab = ds.tab === "conn" ? "conn" : "core";
+        v2vRender();
+        await (V2.logTab === "conn" ? v2ConnFetch() : v2LogFetch()).catch(() => {});
+        if (V2.logTab === "conn") v2ConnRender();
+        break;
+      }
       case "log-refresh": await v2LogFetch(); break;
+      case "connlog-refresh": await v2ConnFetch(); v2ConnRender(); break;
       case "log-clear": {
-        const ok = await uiConfirm("清空日志", "确定清空内核运行日志？", "清空", true);
+        const conn = V2.logTab === "conn";
+        const ok = await uiConfirm("清空" + (conn ? "连接记录" : "日志"),
+          conn ? "确定清空全部节点连接记录？" : "确定清空内核运行日志？", "清空", true);
         if (!ok) return;
-        await post("/api/v2ray/log/clear");
-        V2.log = "";
-        await v2LogFetch();
+        if (conn) {
+          await post("/api/v2ray/conn_log/clear");
+          V2.connLog = [];
+          v2ConnRender();
+        } else {
+          await post("/api/v2ray/log/clear");
+          V2.log = "";
+          await v2LogFetch();
+        }
         break;
       }
       default: break;

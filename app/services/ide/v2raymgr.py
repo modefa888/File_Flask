@@ -43,6 +43,7 @@ _log = get_logger()
 _DIR = os.path.join(config.DATA_ROOT, "v2ray")
 _CONFIG_FILE = os.path.join(_DIR, "config.json")
 _LOG_FILE = os.path.join(_DIR, "xray.log")
+_CONN_LOG = os.path.join(_DIR, "conn_events.log")   # 节点连接情况日志（手动 / 自动切换 / 验证 / 回收站）
 _STATE_FILE = os.path.join(_DIR, "state.json")
 _CORE_DIR = os.path.join(_DIR, "core")
 _VERSIONS_DIR = os.path.join(_DIR, "versions")   # 多版本共存：data/v2ray/versions/v<版本号>/
@@ -405,6 +406,11 @@ def start(node_id: str, auto_probe: bool = True) -> dict:
                       "core": core, "port": port})
         v2raydb.set_setting("active_node", _meta["node_id"])
         _log.info("V2Ray 内核已启动 pid=%s 节点=%s 端口=%s", _proc.pid, _meta["node_name"], port)
+        _node_disp = _meta["node_name"] or _meta["node_id"]
+        if auto_probe:
+            _conn_log("manual", "手动连接节点：%s" % _node_disp)
+        else:
+            _conn_log("auto", "自动切换到节点：%s" % _node_disp)
         _ensure_failover_thread()          # 连上节点即确保自动切换看门狗在跑
         if auto_probe:
             threading.Thread(target=_probe_after_switch, args=(_meta["node_id"],),
@@ -564,7 +570,14 @@ def real_ping(node_id: str, timeout: float = 8.0) -> dict:
                                      headers={"User-Agent": "FileFlask-V2Ray/1.0"})
         t0 = time.time()
         with opener.open(req, timeout=timeout) as resp:
-            resp.read(64)
+            body = resp.read(256)
+            # 204 探测必须真的是 204：账号失效 / 订阅过期的代理服务器会返回
+            # HTTP 200 + 错误页（如 [ERROR] Please get new subscription link），
+            # 不校验状态码就会把错误页当「验证通过」，废节点永远清不进回收站
+            if getattr(resp, "status", 200) != 204:
+                snippet = body[:120].decode("utf-8", "replace").strip().replace("\n", " ")
+                return {"ok": False, "error": "代理服务异常（HTTP %d）%s"
+                        % (getattr(resp, "status", 200), "：" + snippet if snippet else "")}
         return {"ok": True, "ms": int((time.time() - t0) * 1000)}
     except urllib.error.HTTPError as e:
         return {"ok": False, "error": proxyutil.http_status_text(e.code)}
@@ -929,9 +942,78 @@ def _failover_pick(cur_id: str, exclude=()) -> dict | None:
     return cands[0][0] if cands else None
 
 
+_conn_lock = threading.Lock()
+
+
+def _conn_log(kind: str, msg: str) -> None:
+    """记一条节点连接情况日志（data/v2ray/conn_events.log，JSONL 追加）。
+    kind：manual=手动连接 / disconnect=手动断开 / auto=自动切换 / probe=连通验证 /
+          trash=自动移回收站 / fail=连接失败。前端「日志」页按类型着色展示。"""
+    try:
+        line = json.dumps({"ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+                           "kind": kind, "msg": str(msg)}, ensure_ascii=False)
+        with _conn_lock:
+            with open(_CONN_LOG, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+    except Exception:                      # noqa: BLE001
+        pass
+
+
+def conn_events(limit: int = 200) -> list:
+    """读取最近的节点连接记录（倒序返回最新在前）。"""
+    try:
+        with _conn_lock:
+            with open(_CONN_LOG, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        out = []
+        for ln in reversed(lines[-max(1, min(1000, int(limit or 200))):]):
+            try:
+                out.append(json.loads(ln))
+            except Exception:              # noqa: BLE001
+                continue
+        return out
+    except OSError:
+        return []
+
+
+def trim_conn_log(keep: int = 2000) -> None:
+    """连接日志裁剪：只保留最近 keep 条，避免无限膨胀。"""
+    try:
+        with _conn_lock:
+            with open(_CONN_LOG, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            if len(lines) <= keep:
+                return
+            with open(_CONN_LOG, "w", encoding="utf-8") as f:
+                f.writelines(lines[-keep:])
+    except Exception:                      # noqa: BLE001
+        pass
+
+
+def clear_conn_log() -> None:
+    """清空节点连接记录。"""
+    try:
+        with _conn_lock:
+            with open(_CONN_LOG, "w", encoding="utf-8") as f:
+                f.write("")
+    except Exception:                      # noqa: BLE001
+        pass
+
+
 def _metric_write(nid: str, ping: int) -> None:
     """把切换 / 验证得到的真延迟写进节点测速台账（与路由层 node_metrics 同结构；
     ping<0 表示实测不可用，前端按「超时」展示）。"""
+    _node_metric_set(nid, ping=ping)
+
+
+# 同一节点真连通验证连续失败达到这么多次 → 自动移入回收站（软删，列表里不再出现）。
+# 设 2 次而非 1 次是为了防「连上瞬间网络闪断」这种单次抖动误删好节点；
+# 真正废掉的节点（订阅过期 / 被墙）反复验证必失败，很快就会被清掉。
+_NODE_FAIL_LIMIT = 2
+
+
+def _node_metric_set(nid: str, ping=None, fail=None) -> None:
+    """写节点测速台账：更新真延迟与/或连续验证失败计数。"""
     try:
         try:
             m = json.loads(v2raydb.all_settings().get("node_metrics") or "{}")
@@ -940,7 +1022,10 @@ def _metric_write(nid: str, ping: int) -> None:
         if not isinstance(m, dict):
             m = {}
         row = m.get(nid) if isinstance(m.get(nid), dict) else {}
-        row["ping"] = int(ping)
+        if ping is not None:
+            row["ping"] = int(ping)
+        if fail is not None:
+            row["fail"] = int(fail)
         row["ts"] = int(time.time())
         m[nid] = row
         v2raydb.set_setting("node_metrics", json.dumps(m, ensure_ascii=False))
@@ -948,18 +1033,53 @@ def _metric_write(nid: str, ping: int) -> None:
         pass
 
 
+def _node_fail_count(nid: str) -> int:
+    try:
+        m = json.loads(v2raydb.all_settings().get("node_metrics") or "{}")
+        return int((m.get(nid) or {}).get("fail") or 0)
+    except Exception:                      # noqa: BLE001
+        return 0
+
+
+def _node_fail_bump(nid: str, ok: bool = False) -> bool:
+    """记录一次真连通验证结果：成功 → 清零失败计数；失败 → +1，达到阈值则
+    自动移入回收站（至少保留一个节点，避免断网时把列表清空）。返回是否已被移走。"""
+    if ok:
+        _node_metric_set(nid, fail=0)
+        return False
+    fail = _node_fail_count(nid) + 1
+    if fail < _NODE_FAIL_LIMIT:
+        _node_metric_set(nid, fail=fail)
+        return False
+    try:
+        n = v2raydb.get_node(nid)
+        if n and len(v2raydb.list_nodes()) > 1:   # 至少留一个，防止整体断网误清
+            v2raydb.delete_nodes([nid])
+            _conn_log("trash", "节点 %s 连续验证失败 %d 次，已自动移入回收站" % (n.get("name") or nid, fail))
+            _log.warning("节点 %s 真连通连续失败 %d 次，已自动移入回收站",
+                         n.get("name") or nid, fail)
+            return True
+    except Exception as e:                 # noqa: BLE001
+        _log.warning("自动移入回收站失败：%s", e)
+    return False
+
+
 def _probe_after_switch(nid: str) -> None:
     """连接 / 切换节点后异步验证一次真连通并更新延迟台账：
-    成功写毫秒数，失败写 -1（界面上该节点延迟标签即时更新为超时/可用）。
+    成功写毫秒数并清零失败计数，失败写 -1 并累加失败计数（达到阈值自动移回收站）。
     手动连接的节点验证失败时**立即**进入自动切换链——不用等看门狗下一轮。"""
     try:
+        name = (v2raydb.get_node(nid) or {}).get("name") or nid
         r = real_ping(nid, timeout=8.0)
         _metric_write(nid, int(r["ms"]) if r.get("ok") else -1)
         if r.get("ok"):
+            _node_fail_bump(nid, ok=True)
+            _conn_log("probe", "连通验证通过：%s（延迟 %dms）" % (name, r["ms"]))
             _log.info("节点 %s 连通验证通过，延迟 %dms", nid, r["ms"])
             return
+        _conn_log("probe", "连通验证失败：%s（%s）" % (name, r.get("error") or "未知原因"))
         _log.warning("节点 %s 连通验证失败：%s，立即尝试自动切换", nid, r.get("error"))
-        name = (v2raydb.get_node(nid) or {}).get("name") or nid
+        _node_fail_bump(nid)               # 失败计数 +1，达阈值会自动移回收站
         _failover_chain(nid, name)
     except Exception as e:                 # noqa: BLE001
         _log.warning("节点 %s 连通验证异常：%s", nid, e)
@@ -984,25 +1104,37 @@ def _failover_chain(cur_id: str, cur_name: str = "") -> None:
 
 def _failover_chain_locked(cur_id: str, cur_name: str = "") -> None:
     tried = {cur_id}
+    failed = []                            # 本次链里真连通验证失败的候选（链末兜底再 +1）
     for _ in range(30):                    # 防御上限：异常数据也不会死循环
         cand = _failover_pick(cur_id, exclude=tried)
         if not cand:
             _log.warning("节点 %s 已失效，候选节点均已试过仍不可用", cur_name or cur_id)
-            return
+            _conn_log("auto", "自动切换失败：候选节点均已试过仍不可用（当前停留在 %s）" % (cur_name or cur_id))
+            break
         r = start(cand.get("id"), auto_probe=False)
         if r.get("error"):
             _log.warning("自动切换到 %s 失败：%s", cand.get("name"), r.get("error"))
+            _conn_log("fail", "自动切换到 %s 失败：%s" % (cand.get("name") or cand.get("id"), r.get("error")))
             tried.add(cand.get("id"))
             continue
         _log.warning("节点失效自动切换：%s → %s", cur_name or cur_id, cand.get("name"))
+        _conn_log("auto", "自动切换节点：%s → %s" % (cur_name or cur_id, cand.get("name") or cand.get("id")))
         cur_id, cur_name = cand.get("id"), cand.get("name")
         pr = real_ping(cur_id, timeout=8.0)
         _metric_write(cur_id, int(pr["ms"]) if pr.get("ok") else -1)
         if pr.get("ok"):
+            _node_fail_bump(cur_id, ok=True)
+            _conn_log("probe", "切换后验证通过：%s（延迟 %dms），节点可用" % (cur_name, pr["ms"]))
             _log.info("自动切换后验证通过：%s 延迟 %dms", cur_name, pr["ms"])
             return
+        _conn_log("probe", "切换后验证失败：%s（%s），继续换下一个" % (cur_name, pr.get("error") or "未知原因"))
         _log.warning("切换后验证失败：%s（%s），继续换下一个节点", cur_name, pr.get("error"))
+        _node_fail_bump(cur_id)            # 失败计数 +1（达到阈值自动移回收站）
+        failed.append(cur_id)
         tried.add(cur_id)
+    # 整条链都没找到可用节点：把本轮验证失败的候选再补一次计数，确保废节点被清到回收站
+    for nid in failed:
+        _node_fail_bump(nid)
 
 
 def _main_proxy_ok(timeout: float = 8.0) -> bool:
@@ -1025,7 +1157,9 @@ def _main_proxy_ok(timeout: float = 8.0) -> bool:
                                      headers={"User-Agent": "FileFlask-V2Ray/1.0"})
         with opener.open(req, timeout=timeout) as resp:
             resp.read(64)
-        return True
+            # 同 real_ping：200 错误页（订阅过期提示等）不能算「能出网」
+            return getattr(resp, "status", 200) == 204
+        return False
     except Exception:                      # noqa: BLE001
         return False
 
@@ -1051,6 +1185,8 @@ def _failover_loop():
                 _failover_bad = 0
             else:
                 _failover_bad += 1
+                _conn_log("probe", "看门狗探测：%s 连接异常（第 %d 次）" %
+                          (node.get("name") or cid or "当前节点", _failover_bad))
                 # 连续两次失败才切换，避免网络抖动误判
                 if _failover_bad >= 2:
                     _failover_bad = 0

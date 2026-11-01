@@ -560,12 +560,15 @@ def v2_connect():
         return _fail("请先选择要连接的节点")
     r = v2raymgr.start(nid)
     if r.get("error"):
+        v2raymgr._conn_log("fail", "手动连接失败：%s（%s）"
+                           % ((v2raydb.get_node(nid) or {}).get("name") or nid, r["error"]))
         return _fail(r["error"], 500)
     return jsonify(r)
 
 
 @bp.post("/api/v2ray/disconnect")
 def v2_disconnect():
+    v2raymgr._conn_log("disconnect", "手动断开连接")
     return jsonify(v2raymgr.stop())
 
 
@@ -582,9 +585,22 @@ def v2_log():
     return jsonify({"log": v2raymgr.log_tail(_int(request.args.get("lines"), 200))})
 
 
+@bp.get("/api/v2ray/conn_log")
+def v2_conn_log():
+    """节点连接情况日志（手动连接 / 自动切换 / 验证 / 回收站），最新在前。"""
+    return jsonify({"events": v2raymgr.conn_events(_int(request.args.get("lines"), 200))})
+
+
 @bp.post("/api/v2ray/log/clear")
 def v2_log_clear():
     v2raymgr.clear_log()
+    return jsonify({"ok": True})
+
+
+@bp.post("/api/v2ray/conn_log/clear")
+def v2_conn_log_clear():
+    """清空节点连接记录。"""
+    v2raymgr.clear_conn_log()
     return jsonify({"ok": True})
 
 

@@ -333,8 +333,11 @@ def _write_and_validate(core: str, cfg: dict) -> str:
     return _validate_config(core, _CONFIG_FILE)
 
 
-def start(node_id: str) -> dict:
-    """按节点启动内核；已有进程则先停掉。返回 status()。"""
+def start(node_id: str, auto_probe: bool = True) -> dict:
+    """按节点启动内核；已有进程则先停掉。返回 status()。
+    auto_probe=True（手动连接 / 切换节点）时，启动成功后后台实测一次
+    真连通延迟并写进节点测速台账，界面上的延迟标签会自动更新；
+    看门狗切换链 / 测速路由临时切回等内部调用传 False，避免重复探测。"""
     global _proc, _meta
     with _lock:
         st = _settings()
@@ -403,6 +406,9 @@ def start(node_id: str) -> dict:
         v2raydb.set_setting("active_node", _meta["node_id"])
         _log.info("V2Ray 内核已启动 pid=%s 节点=%s 端口=%s", _proc.pid, _meta["node_name"], port)
         _ensure_failover_thread()          # 连上节点即确保自动切换看门狗在跑
+        if auto_probe:
+            threading.Thread(target=_probe_after_switch, args=(_meta["node_id"],),
+                             daemon=True, name="v2ray-postprobe").start()
         return status()
 
 
@@ -868,11 +874,13 @@ _failover_thread = None
 
 
 def _auto_failover_on() -> bool:
-    """是否开启「节点失效自动切换」（落库在设置表 auto_failover，0/1）。"""
+    """是否开启「节点失效自动切换」（落库在设置表 auto_failover，0/1）。
+    用户从没设置过时默认开启——节点挂了自动换是预期行为，可在管理面板关掉。"""
     try:
-        return int(v2raydb.all_settings().get("auto_failover") or 0) == 1
+        raw = v2raydb.all_settings().get("auto_failover")
+        return raw is None or int(raw or 0) == 1
     except Exception:                      # noqa: BLE001
-        return False
+        return True
 
 
 def _node_reachable(host: str, port: int, timeout: float = 5) -> bool:
@@ -895,10 +903,12 @@ def _node_reachable(host: str, port: int, timeout: float = 5) -> bool:
                 pass
 
 
-def _failover_pick(cur_id: str) -> dict | None:
+def _failover_pick(cur_id: str, exclude=()) -> dict | None:
     """在当前节点之外挑一个最优候选：优先用测速数据里延迟最低的可用节点，
-    没测速数据时退而取列表里第一个「实际连通」的节点；都连不上就返回第一个（仍会尝试，但至少换了）。"""
-    nodes = [n for n in v2raydb.list_nodes() if n.get("id") != cur_id]
+    没测速数据时退而取列表里第一个「实际连通」的节点；都连不上就返回第一个（仍会尝试，但至少换了）。
+    exclude：切换链里已试过失败的节点 id，跳过避免原地打转。"""
+    nodes = [n for n in v2raydb.list_nodes()
+             if n.get("id") != cur_id and n.get("id") not in exclude]
     if not nodes:
         return None
     metrics = {}
@@ -919,8 +929,110 @@ def _failover_pick(cur_id: str) -> dict | None:
     return cands[0][0] if cands else None
 
 
+def _metric_write(nid: str, ping: int) -> None:
+    """把切换 / 验证得到的真延迟写进节点测速台账（与路由层 node_metrics 同结构；
+    ping<0 表示实测不可用，前端按「超时」展示）。"""
+    try:
+        try:
+            m = json.loads(v2raydb.all_settings().get("node_metrics") or "{}")
+        except Exception:                  # noqa: BLE001
+            m = {}
+        if not isinstance(m, dict):
+            m = {}
+        row = m.get(nid) if isinstance(m.get(nid), dict) else {}
+        row["ping"] = int(ping)
+        row["ts"] = int(time.time())
+        m[nid] = row
+        v2raydb.set_setting("node_metrics", json.dumps(m, ensure_ascii=False))
+    except Exception:                      # noqa: BLE001
+        pass
+
+
+def _probe_after_switch(nid: str) -> None:
+    """连接 / 切换节点后异步验证一次真连通并更新延迟台账：
+    成功写毫秒数，失败写 -1（界面上该节点延迟标签即时更新为超时/可用）。
+    手动连接的节点验证失败时**立即**进入自动切换链——不用等看门狗下一轮。"""
+    try:
+        r = real_ping(nid, timeout=8.0)
+        _metric_write(nid, int(r["ms"]) if r.get("ok") else -1)
+        if r.get("ok"):
+            _log.info("节点 %s 连通验证通过，延迟 %dms", nid, r["ms"])
+            return
+        _log.warning("节点 %s 连通验证失败：%s，立即尝试自动切换", nid, r.get("error"))
+        name = (v2raydb.get_node(nid) or {}).get("name") or nid
+        _failover_chain(nid, name)
+    except Exception as e:                 # noqa: BLE001
+        _log.warning("节点 %s 连通验证异常：%s", nid, e)
+
+
+# 切换链并发保护：看门狗与手动连接后的验证可能同时触发，避免两条链互相打架
+_FAILOVER_BUSY = threading.Lock()
+
+
+def _failover_chain(cur_id: str, cur_name: str = "") -> None:
+    """节点失效后的自动切换链：换下一个节点 → 真连通验证（实测出网 + 延迟），
+    验证不过就继续换下一个，直到找到可用节点或把候选全部试完。
+    每次验证结果都写进延迟台账，界面能看到各节点最新的可用状态。"""
+    if not _FAILOVER_BUSY.acquire(blocking=False):
+        _log.info("已有切换在进行中，跳过本次切换链（当前节点 %s）", cur_name or cur_id)
+        return
+    try:
+        _failover_chain_locked(cur_id, cur_name)
+    finally:
+        _FAILOVER_BUSY.release()
+
+
+def _failover_chain_locked(cur_id: str, cur_name: str = "") -> None:
+    tried = {cur_id}
+    for _ in range(30):                    # 防御上限：异常数据也不会死循环
+        cand = _failover_pick(cur_id, exclude=tried)
+        if not cand:
+            _log.warning("节点 %s 已失效，候选节点均已试过仍不可用", cur_name or cur_id)
+            return
+        r = start(cand.get("id"), auto_probe=False)
+        if r.get("error"):
+            _log.warning("自动切换到 %s 失败：%s", cand.get("name"), r.get("error"))
+            tried.add(cand.get("id"))
+            continue
+        _log.warning("节点失效自动切换：%s → %s", cur_name or cur_id, cand.get("name"))
+        cur_id, cur_name = cand.get("id"), cand.get("name")
+        pr = real_ping(cur_id, timeout=8.0)
+        _metric_write(cur_id, int(pr["ms"]) if pr.get("ok") else -1)
+        if pr.get("ok"):
+            _log.info("自动切换后验证通过：%s 延迟 %dms", cur_name, pr["ms"])
+            return
+        _log.warning("切换后验证失败：%s（%s），继续换下一个节点", cur_name, pr.get("error"))
+        tried.add(cur_id)
+
+
+def _main_proxy_ok(timeout: float = 8.0) -> bool:
+    """经主实例 socks 入站实测能否真出网（204 探测，域名交给内核解析）。
+    TCP 握手只说明节点服务器端口开着——账号失效 / 订阅过期 / 协议被墙时
+    它照样通，所以看门狗判断节点死活必须看「代理真的能上网」。"""
+    st = status()
+    if not st.get("running"):
+        return False
+    port = int((st.get("inbound") or {}).get("socks_port") or 0)
+    if not port:
+        return False
+    try:
+        s = _apply_auth(_settings())
+        user, pwd = str(s.get("socks_user") or ""), str(s.get("socks_pass") or "")
+        auth = ("%s:%s@" % (urllib.parse.quote(user, safe=""),
+                            urllib.parse.quote(pwd, safe=""))) if user else ""
+        opener = proxyutil.build_opener(proxy="socks5h://%s127.0.0.1:%d" % (auth, port))
+        req = urllib.request.Request("http://www.gstatic.com/generate_204",
+                                     headers={"User-Agent": "FileFlask-V2Ray/1.0"})
+        with opener.open(req, timeout=timeout) as resp:
+            resp.read(64)
+        return True
+    except Exception:                      # noqa: BLE001
+        return False
+
+
 def _failover_loop():
-    """看门狗主循环：每 60 秒探测当前节点，连续 2 次失败则自动切换。"""
+    """看门狗主循环：每 60 秒探测当前节点（TCP 握手 + 经主实例实测出网），
+    连续 2 次失败则进入自动切换链（切换后逐个真连通验证，不行继续换）。"""
     global _failover_bad
     while True:
         if not _auto_failover_on():
@@ -934,23 +1046,15 @@ def _failover_loop():
                 continue
             node = st.get("node") or {}
             cid = node.get("id") or ""
-            if _node_reachable(node.get("server"), int(node.get("port") or 0), timeout=5):
+            if _node_reachable(node.get("server"), int(node.get("port") or 0), timeout=5) \
+                    and _main_proxy_ok(timeout=8):
                 _failover_bad = 0
             else:
                 _failover_bad += 1
                 # 连续两次失败才切换，避免网络抖动误判
                 if _failover_bad >= 2:
                     _failover_bad = 0
-                    cand = _failover_pick(cid)
-                    if cand:
-                        r = start(cand.get("id"))
-                        if r.get("error"):
-                            _log.warning("节点失效自动切换失败：%s", r.get("error"))
-                        else:
-                            _log.warning("节点失效自动切换：%s → %s",
-                                         node.get("name"), cand.get("name"))
-                    else:
-                        _log.warning("当前节点 %s 已失效，但没有其它节点可切换", node.get("name"))
+                    _failover_chain(cid, node.get("name") or "")
         except Exception as e:             # noqa: BLE001
             _log.warning("节点失效自动切换异常：%s", e)
         time.sleep(_FAILOVER_INTERVAL)
@@ -1523,3 +1627,8 @@ def core_use_version(version: str, kind: str = "xray") -> dict:
             return {"ok": True, "version": real_ver, "path": exe,
                     "restarted": False, "error": r["error"]}
     return {"ok": True, "version": real_ver, "path": exe, "restarted": running}
+
+
+# 服务进程一起来就把看门狗拉起（开关关闭时线程自会空转休眠）：
+# 覆盖「服务重启后内核是接管状态、没人调 start()」的场景
+_ensure_failover_thread()

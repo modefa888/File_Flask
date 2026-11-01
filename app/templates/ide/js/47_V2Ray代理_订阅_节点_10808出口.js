@@ -113,6 +113,21 @@
     if (findTab(VIEW_PATH)) v2vRender();
   }
 
+  /* 切换 / 连接节点后：服务端会异步实测一次真延迟并写入测速台账（几秒），
+     本地缓存的旧延迟要先清掉，补拉时才会采纳服务端新值，界面即时更新 */
+  function v2PingRefresh(id) {
+    if (!id) return;
+    delete V2.ping[id];
+    setTimeout(async () => {
+      try {
+        delete V2.ping[id];
+        await v2FetchAll();
+        v2SideRender();
+        if (findTab(VIEW_PATH)) v2vRender();
+      } catch (_) {}
+    }, 4500);
+  }
+
   /* ==================================================================
      内核任务：探测 / 下载的实时进度（EventSource 订阅 SSE）
      ================================================================== */
@@ -365,6 +380,7 @@
         const r = await post("/api/v2ray/connect", { id: id });
         if (r.error) return toast(r.error, "err");
         toast("已连接：" + ((nodeOf(id) || {}).name || id), "ok");
+        v2PingRefresh(id);               // 服务端正在实测该节点延迟，稍后补拉更新
       }
       await v2Reload();
     } finally { V2.busy = false; }
@@ -394,6 +410,7 @@
         if (r.error) return toast(r.error, "err");
         toast("已连接：" + ((nodeOf(id) || {}).name || id), "ok");
         await v2Reload();
+        v2PingRefresh(id);               // 服务端正在实测该节点延迟，稍后补拉更新
       } finally { V2.busy = false; }
     });
     // 活动栏图标：点一下补一次实时刷新（面板显隐由 02_ 的通用机制驱动）
@@ -1700,6 +1717,7 @@
         toast("已连接", "ok");
         V2.pick = ds.id;
         await v2Reload();
+        v2PingRefresh(ds.id);            // 服务端正在实测该节点延迟，稍后补拉更新
         break;
       }
       case "disconnect": {

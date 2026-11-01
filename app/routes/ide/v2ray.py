@@ -660,7 +660,7 @@ def v2_ping():
     prev_id = ((st0.get("node") or {}) or {}).get("id") if was_running else None
     try:
         if (not was_running) or (prev_id != nid):
-            r = v2raymgr.start(nid)
+            r = v2raymgr.start(nid, auto_probe=False)   # 下面马上自己探测并落台账
             if r.get("error"):
                 return _fail("启动该节点失败：" + r["error"])
         st = v2raymgr.status()
@@ -688,7 +688,7 @@ def v2_ping():
             v2raymgr.stop()
         elif prev_id and prev_id != nid:
             v2raymgr.stop()
-            v2raymgr.start(prev_id)
+            v2raymgr.start(prev_id, auto_probe=False)   # 测速后恢复原节点，无需再探测
 
 
 @bp.post("/api/v2ray/ping-batch")
@@ -819,7 +819,7 @@ def v2_dl_test():
     port = int((st0.get("inbound") or {}).get("socks_port") or 10808)
     try:
         if (not was_running) or (prev_id != nid):
-            r = v2raymgr.start(nid)
+            r = v2raymgr.start(nid, auto_probe=False)   # 测速流程自测，无需再探测
             if r.get("error"):
                 return _fail("启动该节点失败：" + r["error"])
             port = int((v2raymgr.status().get("inbound") or {}).get("socks_port") or port)
@@ -836,7 +836,7 @@ def v2_dl_test():
             v2raymgr.stop()
         elif prev_id and prev_id != nid:
             v2raymgr.stop()
-            v2raymgr.start(prev_id)
+            v2raymgr.start(prev_id, auto_probe=False)   # 测速后恢复原节点，无需再探测
 
 
 @bp.post("/api/v2ray/dl-temp")

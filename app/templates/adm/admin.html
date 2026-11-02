@@ -30,6 +30,8 @@
     <style>{% include "adm/css/03_浅色主题.css" %}</style>
     <style>{% include "adm/css/04_在线更新.css" %}</style>
     <style>{% include "adm/css/05_图标库.css" %}</style>
+    {# 下载管理：进度条 / 产物信息卡 #}
+    <style>{% include "adm/css/06_下载管理.css" %}</style>
 </head>
 
 <body>
@@ -109,6 +111,8 @@
         {% include "adm/js/17_所有图标.js" %}
         {% include "adm/js/17_在线更新.js" %}
         {% include "adm/js/19_V2RAY代理.js" %}
+        {# 下载管理：复用 IDE 下载中心的 /api/dl/* 接口，导航顺序排在 V2RAY 代理之后 #}
+        {% include "adm/js/20_下载管理.js" %}
         {% include "adm/js/99_初始化.js" %}
     </script>
 </body>

@@ -1,0 +1,74 @@
+/* ===== 后台管理：下载管理（20_下载管理.js） =====
+   只补表格里进度条、产物信息卡这类小样式，其余全部复用 02_组件.css。 */
+
+/* 任务表工具行：状态筛选 + 搜索 + 条数 + 每页 + 刷新 全在一行，窄屏才换行 */
+.dladm-host .adm-table-toolbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+}
+.dladm-host .adm-table-toolbar .adm-spacer { flex: 1 1 auto; }
+.dladm-host .adm-table-toolbar .dladm-status { flex: none; }
+.dladm-host .adm-table-toolbar .dladm-refresh { flex: none; margin-left: 2px; }
+
+/* 进度列：细进度条 + 已下载 / 总大小 */
+.dladm-pct { display: flex; flex-direction: column; gap: 4px; min-width: 132px; }
+.dladm-bar {
+    display: block;
+    height: 5px;
+    border-radius: 99px;
+    background: var(--adm-border-soft);
+    overflow: hidden;
+}
+.dladm-bar i {
+    display: block;
+    height: 100%;
+    border-radius: 99px;
+    background: linear-gradient(90deg, var(--adm-brand), var(--adm-cyan));
+    transition: width .3s ease;
+}
+.dladm-pct > span {
+    font-size: 11px;
+    color: var(--adm-text-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* 任务 id 小字 */
+.dladm-id {
+    margin-top: 2px;
+    font-size: 10.5px;
+    color: var(--adm-text-mute);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+/* 产物与清理：键值信息卡 */
+.dladm-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px;
+}
+.dladm-kv { display: flex; align-items: baseline; gap: 12px; font-size: 12.5px; }
+.dladm-kv > span {
+    flex: none;
+    width: 96px;
+    color: var(--adm-text-dim);
+}
+.dladm-kv > b {
+    min-width: 0;
+    font-weight: 500;
+    color: var(--adm-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* 产物目录：允许换行，长路径不截断 */
+.dladm-path {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    color: var(--adm-text);
+    word-break: break-all;
+    white-space: normal;
+}
+.dladm-acts { margin-top: 12px; }
+.dladm-tip { margin-top: 10px; line-height: 1.7; }

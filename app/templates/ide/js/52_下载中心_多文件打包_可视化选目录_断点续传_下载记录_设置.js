@@ -231,9 +231,21 @@ function dlView(v) {
   document.querySelectorAll("#dlCenter .dlc-navitem").forEach(function (n) {
     n.classList.toggle("on", n.dataset.view === DL.view && !n.dataset.act);
   });
+  if (DL.view === "settings") {
+    // 设置页等数据回来再画：先按旧数据画一遍、数据到了再整块重绘，
+    // 会让开关/输入框明显闪一下（开关还会先显示"关"再滑成"开"）
+    dlHeadRender();
+    const box = $("dlScroll");
+    if (box) {
+      box.classList.remove("rec-mode");
+      box.innerHTML = '<div class="dlc-loading">加载设置…</div>';
+    }
+    DL.settingsPending = true;
+    dlLoadUsage();
+    return;
+  }
   dlRender();
   if (DL.view === "records") dlLoadRecords();
-  else if (DL.view === "settings") dlLoadUsage();
   else dlLoadTasks();
 }
 
@@ -265,13 +277,34 @@ async function dlLoadRecords(silent) {
   dlPaintNav();
   if (DL.view === "records") dlRenderRecords();
 }
-async function dlLoadUsage() {
+async function dlLoadUsage(silent) {
   const d = await dlReq("/api/dl/settings");       // 一次拿到设置 + 占用，打开设置页即可见
-  if (!d.ok) return;
+  if (!d.ok) {
+    // 拿不到数据也要让页面可用，别卡在「加载设置…」
+    if (DL.view === "settings" && !silent && DL.settingsPending) {
+      DL.settingsPending = false;
+      dlRenderSettings();
+    }
+    return;
+  }
   DL.cfg = d.settings || DL.cfg;
   DL.usage = d.usage || null;
   dlPaintNav();
-  if (DL.view === "settings") dlRenderSettings();
+  if (DL.view !== "settings") return;
+  DL.settingsPending = false;
+  // silent = 轮询刷新：只更新占用数字，绝不重建页面
+  //（1.5s 重建一次会让开关跳动、输入框失焦）
+  if (silent) dlPaintUsage();
+  else dlRenderSettings();
+}
+// 只刷新「存储 → 当前占用」这三个数字
+function dlPaintUsage() {
+  const u = DL.usage;
+  if (!u) return;
+  const a = $("dlUArt"), b = $("dlUBytes"), r = $("dlURec");
+  if (a) a.textContent = (u.artifacts || 0) + " 个";
+  if (b) b.textContent = dlSize(u.artifact_bytes || 0);
+  if (r) r.textContent = (u.records || 0) + " 条";
 }
 async function dlLoadEnv() {
   const d = await dlReq("/api/dl/env");
@@ -316,7 +349,7 @@ function dlPollStart() {
     const busy = Object.keys(DL.running).length > 0 || DL.pendingAuto.length > 0 ||
       (DL.tasks || []).some(dlIsActive);
     if (tabOn && DL.view === "records") { if (busy) dlLoadRecords(true); return; }
-    if (tabOn && DL.view === "settings") { if (busy) dlLoadUsage(); return; }
+    if (tabOn && DL.view === "settings") { if (busy) dlLoadUsage(true); return; }
     dlLoadTasks(true);                               // 任务页 / 侧栏：保持进度新鲜
   }, 1500);
 }
@@ -879,7 +912,10 @@ function dlRenderSettings() {
       '<small>下载完成 / 失败时推送到桌面 · 邮件 · 群机器人</small></h3>' +
       dlSRow("启用通知",
         "一键开关；触发事件、推送账号与文案在「设置 → 下载通知」里配置",
-        '<label class="dlc-sw"><input type="checkbox" id="dcNotifySw"><span></span></label>' +
+        // 开关状态直接用已加载的 DL.notify 渲染；还不知道状态时先隐藏（pending），
+        // 否则会先画出"关"再滑成"开"，看着像按钮在跳
+        '<label class="dlc-sw' + (DL.notify ? "" : " pending") + '"><input type="checkbox" id="dcNotifySw"' +
+        (DL.notify && DL.notify.enabled ? " checked" : "") + '><span></span></label>' +
         '<button class="dlc-btn sm" data-act="dln-open"><i class="bi bi-sliders2"></i> 详细设置</button>') +
     '</div>' +
     '<div class="dlc-sec"><h3><i class="bi bi-hdd-stack"></i>存储' +
@@ -905,7 +941,11 @@ async function dlLoadNotify() {
   const d = await dlReq("/api/dl/notify");
   if (d && d.ok && d.cfg) DL.notify = d.cfg;
   const sw = $("dcNotifySw");
-  if (sw && DL.notify) sw.checked = !!DL.notify.enabled;
+  if (!sw) return;
+  if (DL.notify) sw.checked = !!DL.notify.enabled;
+  // 数据到了（或请求失败）就把开关显示出来：pending 状态是 visibility:hidden，不占动画
+  const lb = sw.closest(".dlc-sw");
+  if (lb) lb.classList.remove("pending");
 }
 async function dlSaveNotify(patch) {
   const d = await dlReq("/api/dl/notify", { method: "POST", body: JSON.stringify(patch || {}) });

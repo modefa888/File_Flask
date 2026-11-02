@@ -724,6 +724,7 @@ html.theme-light .dlc-select {
 .dlc-pager b { color: var(--dlc-fg2); font-variant-numeric: tabular-nums; }
 
 /* ---------- 设置 ---------- */
+.dlc-loading { padding: 48px 10px; text-align: center; color: var(--dlc-dim); font-size: 12px; }
 .dlc-sec { max-width: 860px; margin-bottom: 22px; }
 .dlc-sec > h3 {
   display: flex;
@@ -740,7 +741,8 @@ html.theme-light .dlc-select {
 .dlc-srow {
   display: flex;
   align-items: center;
-  gap: 14px;
+  flex-wrap: wrap;              /* 窗口变窄时控件换到下一行，别把标题文字挤成竖排 */
+  gap: 8px 14px;
   padding: 11px 14px;
   background: var(--dlc-card);
   border: 1px solid var(--dlc-line2);
@@ -749,10 +751,23 @@ html.theme-light .dlc-select {
   transition: border-color .15s;
 }
 .dlc-srow:hover { border-color: var(--dlc-line); }
-.dlc-srow .dlc-sinfo { flex: 1; min-width: 0; }
+.dlc-srow .dlc-sinfo { flex: 1 1 220px; min-width: 0; }
 .dlc-srow .dlc-slabel { font-size: 12.5px; color: var(--dlc-fg); }
 .dlc-srow .dlc-sdesc { font-size: 11px; color: var(--dlc-dim); margin-top: 2px; line-height: 1.6; }
-.dlc-srow .dlc-sctl { flex: none; display: flex; align-items: center; gap: 6px; }
+/* 控件区：宽屏靠右、窄屏可以收缩并换行（之前 flex:none 会撑爆整行，
+   把左边的标题挤成一个字一行） */
+.dlc-srow .dlc-sctl {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.dlc-srow .dlc-sctl > .dlc-pathbox { flex: 1 1 auto; min-width: 140px; }
+.dlc-srow .dlc-sctl .dlc-input { max-width: 100%; }
 /* 说明行（没有控件，下面接一块自定义内容，如通知账号勾选） */
 .dlc-srow-top { align-items: flex-start; margin-bottom: 0;
   border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
@@ -794,7 +809,9 @@ html.theme-light .dlc-select {
 .dlc-input.wide { width: 100%; min-width: 180px; max-width: 380px; }
 
 /* 开关 */
-.dlc-sw { position: relative; width: 36px; height: 20px; flex: none; cursor: pointer; }
+.dlc-sw { position: relative; display: block; width: 36px; height: 20px; flex: none; cursor: pointer; }
+/* 状态还没拉到：先占位不显示，避免先画"关"再滑到"开"的跳动 */
+.dlc-sw.pending { visibility: hidden; }
 .dlc-sw input { position: absolute; opacity: 0; width: 0; height: 0; }
 .dlc-sw span {
   position: absolute;
@@ -834,7 +851,16 @@ html.theme-light .dlc-select {
   font-family: ui-monospace, Menlo, Consolas, monospace;
   overflow: hidden;
 }
-.dlc-pathbox span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+/* flex:1 + min-width:0 才能让长路径省略号收窄（否则 span 的 min-content 会把整行撑爆） */
+.dlc-pathbox span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
 .dlc-pathbox bdi { direction: ltr; }
 
 .dlc-usage {

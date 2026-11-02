@@ -49,6 +49,128 @@ function _apvIsLight() {
   return false;
 }
 
+/* ---------------- 音律跳动：Web Audio 频谱 ---------------- */
+/* 同一个 <audio> 的 createMediaElementSource 只能调用一次（重复会抛错），
+   结果缓存在元素上；AudioContext 全局复用（浏览器上限约 6 个）。
+   拿不到频谱（跨域 / 浏览器不支持）时返回 null，调用方退回 CSS 循环动画。 */
+var _apvAudioCtx = null;
+function _apvEnsureCtx() {
+  if (!_apvAudioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    try { _apvAudioCtx = new AC(); } catch (_) { return null; }
+  }
+  if (_apvAudioCtx.state === "suspended") {
+    try { _apvAudioCtx.resume(); } catch (_) {}
+  }
+  return _apvAudioCtx;
+}
+function _apvAnalyser(audio) {
+  if (audio.__apvAnalyser) return audio.__apvAnalyser;
+  const ctx = _apvEnsureCtx();
+  if (!ctx) return null;
+  try {
+    const src = ctx.createMediaElementSource(audio);
+    const an = ctx.createAnalyser();
+    an.fftSize = 512;                 // 256 个频段：低频分得细，频谱带才有层次
+    an.minDecibels = -90;
+    an.maxDecibels = -25;             // 拉大动态范围，安静段落不会一片贴顶
+    an.smoothingTimeConstant = 0.6;   // 响应快一点，鼓点才跳得起来
+    src.connect(an);
+    an.connect(ctx.destination);      // 必须接回扬声器，否则没声音
+    audio.__apvAnalyser = an;
+    audio.__apvSrc = src;
+    return an;
+  } catch (_) {
+    return null;
+  }
+}
+
+/* ---------------- 底部 LED 频谱带（canvas） ---------------- */
+/* 一列列小方块堆成柱（LED 电平表的观感），色相按列位从紫到黄渐变，基线下方画淡倒影。
+   数据复用同一份 AnalyserNode 频谱，和圆盘外圈的小条共用一次 getByteFrequencyData。 */
+var _apvVizDpr = Math.min(2, window.devicePixelRatio || 1);
+
+function _apvVizMount(main) {
+  if (!main) return null;
+  const cv = document.createElement("canvas");
+  cv.className = "apv-viz";
+  main.insertBefore(cv, main.firstChild);
+  const viz = { cv: cv, ctx: cv.getContext("2d"), smooth: new Float32Array(64) };
+  const fit = () => {
+    const r = cv.getBoundingClientRect();
+    const w = Math.max(1, Math.round(r.width * _apvVizDpr));
+    const h = Math.max(1, Math.round(r.height * _apvVizDpr));
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  };
+  viz.fit = fit;
+  viz.clear = () => { try { viz.ctx.clearRect(0, 0, cv.width, cv.height); } catch (_) {} };
+  fit();
+  try {
+    viz.ro = new ResizeObserver(fit);
+    viz.ro.observe(cv);
+  } catch (_) {
+    window.addEventListener("resize", fit);
+  }
+  return viz;
+}
+
+function _apvVizFrame(viz, data) {
+  const cv = viz.cv, ctx = viz.ctx;
+  const W = cv.width, H = cv.height;
+  if (!W || !H || !cv.isConnected) return;
+  const dpr = _apvVizDpr;
+  ctx.clearRect(0, 0, W, H);
+  const cols = Math.max(20, Math.min(64, Math.round(W / (8 * dpr))));
+  const gap = Math.max(1, Math.round(1.6 * dpr));
+  const cw = Math.max(2, Math.floor((W - gap * (cols + 1)) / cols));
+  const cellH = Math.max(2, Math.round(4 * dpr));
+  const cellG = Math.max(1, Math.round(1 * dpr));
+  const maxRows = Math.max(6, Math.floor((H * 0.56) / (cellH + cellG)));
+  const baseY = H - Math.round(H * 0.33);
+  const n = data.length;
+  const vals = viz.vals || (viz.vals = new Float32Array(64));
+  /* 第一遍：分箱取平均 → 去底噪 → 时间平滑（上升快、回落慢） */
+  for (let i = 0; i < cols; i++) {
+    // 对数式分箱：低频只占左边少量列（柱子高），高频铺开成一大片矮柱
+    const b0 = Math.floor(Math.pow(i / cols, 1.7) * n);
+    const b1 = Math.max(b0 + 1, Math.floor(Math.pow((i + 1) / cols, 1.7) * n));
+    let v = 0;
+    for (let b = b0; b < Math.min(n, b1); b++) {
+      const x = data[b] / 255;
+      if (x > v) v = x;                                 // 取箱内峰值：低频高、高频低，才有斜坡层次
+    }
+    v = Math.max(0, (v - 0.06) / 0.94);                // 减掉底噪
+    const prev = viz.smooth[i] || 0;
+    const s = v > prev ? v : prev * 0.9;
+    viz.smooth[i] = s;
+    vals[i] = s;
+  }
+  /* 自动增益：只把整体音量补到「峰值约占八成格」的水平，留出向上的跳动空间；
+     直接按峰值归一化会让最响的那列永远顶满 —— 看起来就是"一直这么高" */
+  let peak = 0;
+  for (let i = 0; i < cols; i++) if (vals[i] > peak) peak = vals[i];
+  // 用「慢速平均响度」算增益：鼓点瞬间能冲到满格，平时回落到六七成，落差看得见
+  viz.avg = viz.avg ? viz.avg * 0.97 + peak * 0.03 : peak;
+  const gain = Math.min(3, Math.max(0.9, 0.85 / Math.max(0.1, viz.avg)));
+  /* 第二遍：绘制方块柱 + 倒影 */
+  for (let i = 0; i < cols; i++) {
+    const v = Math.min(1, vals[i] * gain);
+    const rows = Math.round(Math.pow(v, 1.15) * maxRows);   // 中段稍压低，低频更突出
+    if (rows <= 0) continue;
+    const x = gap + i * (cw + gap);
+    const hue = 300 - (i / Math.max(1, cols - 1)) * 240;    // 紫 → 蓝 → 青 → 绿 → 黄
+    for (let r = 0; r < rows; r++) {
+      ctx.fillStyle = "hsl(" + hue.toFixed(0) + ",100%," +
+        (56 + (r / maxRows) * 16).toFixed(0) + "%)";
+      ctx.fillRect(x, baseY - (r + 1) * (cellH + cellG), cw, cellH);
+      ctx.globalAlpha = 0.3 * (1 - r / Math.max(1, rows));   // 倒影
+      ctx.fillRect(x, baseY + gap + r * (cellH + cellG), cw, cellH);
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
 // 切换主题时由 applyVideoPlayerTheme（22_）统一调用：同步页面上所有音频播放器皮肤
 window.applyAudioPlayerTheme = function (light) {
   const isLight = typeof light === "boolean" ? light : _apvIsLight();
@@ -68,8 +190,15 @@ function setupAudioView(tab, host, path, name) {
     '<div class="apv-wrap' + (_apvIsLight() ? " apv-light" : "") + (_apvState.fold ? " apv-fold" : "") + '">' +
       '<div class="apv-main">' +
         '<div class="apv-badge"></div>' +
-        '<div class="apv-art"><div class="apv-disc"><i class="bi bi-music-note-beamed"></i>' +
-          '<span class="apv-ring"></span></div></div>' +
+        '<div class="apv-art">' +
+          /* 圆盘外圈的 12 根频谱条：播放时跟着音乐跳（位置/序号都走 CSS 变量） */
+          '<div class="apv-eq" aria-hidden="true">' +
+            Array.from({ length: 12 }, (_, i) =>
+              '<i style="--a:' + (i * 30) + 'deg;--i:' + i + '"></i>').join("") +
+          '</div>' +
+          '<div class="apv-disc-wrap"><div class="apv-disc"><i class="bi bi-music-note-beamed"></i>' +
+            '<span class="apv-ring"></span></div></div>' +
+        '</div>' +
         '<div class="apv-name"></div>' +
         '<div class="apv-sub"></div>' +
         '<div class="apv-timerow">' +
@@ -198,11 +327,60 @@ function setupAudioView(tab, host, path, name) {
     _apvSave(); syncMode();
   };
 
+  /* ---------- 音律跳动（圆盘外圈频谱条 + 圆盘随低频呼吸 + 底部 LED 频谱带） ---------- */
+  /* 暂停时特效不消失：停掉动画循环，画面冻结在最后一帧，继续播放时接着跳 */
+  const eqEls = Array.prototype.slice.call(host.querySelectorAll(".apv-eq i"));
+  const viz = _apvVizMount($(".apv-main"));
+  let eqRaf = 0, eqSilent = 0, eqLevel = 0;
+  const eqFreeze = () => {
+    if (eqRaf) { cancelAnimationFrame(eqRaf); eqRaf = 0; }
+  };
+  const eqStart = () => {
+    if (eqRaf || wrap.classList.contains("eq-static")) return;
+    const an = _apvAnalyser(audio);
+    if (!an) { wrap.classList.add("eq-static"); return; }   // 拿不到频谱 → 用 CSS 动画
+    const buf = new Uint8Array(an.frequencyBinCount);
+    const step = () => {
+      if (!host.isConnected) { eqRaf = 0; return; }
+      if (audio.paused || audio.ended) { eqFreeze(); return; }
+      an.getByteFrequencyData(buf);
+      const n = eqEls.length;
+      const span = Math.max(n, Math.floor(buf.length * 0.5));   // 只用低频~中频段
+      let avg = 0, sum = 0;
+      for (let i = 0; i < n; i++) {
+        const v = buf[Math.floor(i / n * span)] / 255;
+        eqEls[i].style.setProperty("--v", (0.22 + v * 1.3).toFixed(3));
+        sum += v;
+        avg += v;
+      }
+      avg /= n;
+      // 整体平均能量驱动圆盘呼吸 / 光晕（用低频单点会一直顶着 1，看不出起伏）
+      eqLevel = eqLevel * 0.68 + avg * 0.32;
+      wrap.style.setProperty("--apv-scale", (1 + eqLevel * 0.26).toFixed(4));
+      wrap.style.setProperty("--apv-lv", Math.min(1, eqLevel * 2.4).toFixed(3));
+      if (viz) _apvVizFrame(viz, buf);        // 底部 LED 频谱带
+      if (sum < 0.02) {                       // 一直没数据：认为分析不可用，交给 CSS
+        if (++eqSilent > 45) { wrap.classList.add("eq-static"); eqRaf = 0; return; }
+      } else {
+        eqSilent = 0;
+      }
+      eqRaf = requestAnimationFrame(step);
+    };
+    eqRaf = requestAnimationFrame(step);
+  };
+  // 切歌 / 关标签：停动画循环 + 断开尺寸监听
+  _apvCleanups.push(() => {
+    eqFreeze();
+    try { if (viz && viz.ro) viz.ro.disconnect(); } catch (_) {}
+  });
+
   /* ---------- 播放 / 暂停 ---------- */
   const syncPlayIcon = () => {
     const playing = !audio.paused && !audio.ended;
     playBtn.innerHTML = '<i class="bi ' + (playing ? "bi-pause-fill" : "bi-play-fill") + '"></i>';
     $(".apv-disc").classList.toggle("spin", playing);
+    wrap.classList.toggle("playing", playing);
+    if (playing) eqStart(); else eqFreeze();
   };
   const togglePlay = () => {
     errEl.style.display = "none";

@@ -17,6 +17,7 @@
   flex: 1 1 auto;
   min-width: 0;
   position: relative;
+  isolation: isolate;            /* 让底部的频谱画布（z-index:-1）留在主区内、内容之上 */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -24,6 +25,18 @@
   gap: 14px;
   padding: 30px 34px;
   overflow: auto;
+}
+
+/* 底部 LED 频谱带（canvas 绘制：彩色方块 + 倒影），播放 / 暂停都常显（暂停时冻结在最后一帧） */
+.apv-viz {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 168px;
+  z-index: -1;
+  pointer-events: none;
 }
 
 .apv-badge {
@@ -38,8 +51,68 @@
   pointer-events: none;
 }
 
-/* 唱片封面：播放时缓慢旋转 */
-.apv-art { flex: none; }
+/* 唱片封面：播放时缓慢旋转 + 外圈音律跳动 */
+.apv-art {
+  --apv-eq-r: 92px;                 /* 频谱条离圆心的距离，随圆盘尺寸调整 */
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 26px;
+}
+/* 圆盘外面的均衡器：12 根小条绕圈排列，高度随低频跳动（JS 写 --v）
+   拿不到频谱（跨域 / 旧浏览器）时退回 .eq-static 的 CSS 循环动画 */
+.apv-eq {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* 常显：播放时跟着音乐跳，暂停时冻结在最后一帧 */
+}
+.apv-eq i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 18px;
+  margin: -9px 0 0 -2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(158, 214, 255, 0.98), rgba(79, 193, 255, 0.06));
+  box-shadow: 0 0 7px rgba(79, 193, 255, 0.35);
+  transform: rotate(var(--a, 0deg)) translateY(calc(-1 * var(--apv-eq-r))) scaleY(var(--v, 0.3));
+  will-change: transform;
+}
+/* 拿不到真实频谱时的兜底动画：播放时跑，暂停时停在这一帧 */
+.apv-wrap.eq-static .apv-eq i {
+  animation: apv-eq-bob 1.05s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * -0.085s);
+  animation-play-state: paused;
+}
+.apv-wrap.playing.eq-static .apv-eq i { animation-play-state: running; }
+@keyframes apv-eq-bob {
+  0%, 100% { transform: rotate(var(--a, 0deg)) translateY(calc(-1 * var(--apv-eq-r))) scaleY(0.28); }
+  50% { transform: rotate(var(--a, 0deg)) translateY(calc(-1 * var(--apv-eq-r))) scaleY(1.05); }
+}
+
+/* 缩放层：低频能量大时圆盘轻微膨胀（旋转在里面的 .apv-disc 上，两者互不影响） */
+.apv-disc-wrap {
+  position: relative;
+  transform: scale(var(--apv-scale, 1));
+  transform-origin: center center;
+  will-change: transform;
+}
+/* 圆盘背后的光晕：跟着低频明暗呼吸（只用 opacity，合成层，性能友好） */
+.apv-disc-wrap::before {
+  content: "";
+  position: absolute;
+  inset: -26px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(79, 193, 255, 0.34), rgba(79, 193, 255, 0) 70%);
+  opacity: calc(0.05 + 0.75 * var(--apv-lv, 0));
+  transition: opacity 0.09s linear;
+  pointer-events: none;
+}
+
 .apv-disc {
   position: relative;
   width: 148px;
@@ -262,6 +335,8 @@
   .apv-side { width: 210px; }
   .apv-main { padding: 22px 16px; }
   .apv-disc { width: 116px; height: 116px; font-size: 34px; }
+  .apv-art { --apv-eq-r: 70px; padding: 22px; }
+  .apv-eq i { width: 3px; height: 14px; margin: -7px 0 0 -1.5px; }
 }
 
 /* ================================================================
@@ -277,6 +352,13 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14), inset 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 .apv-light .apv-disc .apv-ring { border-color: rgba(0, 0, 0, 0.12); }
+.apv-light .apv-disc-wrap::before {
+  background: radial-gradient(circle, rgba(13, 126, 196, 0.24), rgba(13, 126, 196, 0) 68%);
+}
+.apv-light .apv-eq i {
+  background: linear-gradient(180deg, rgba(13, 126, 196, 0.92), rgba(13, 126, 196, 0.04));
+  box-shadow: 0 0 7px rgba(13, 126, 196, 0.2);
+}
 .apv-light .apv-sub { color: #6b7280; }
 .apv-light .apv-t { color: #6b7280; }
 .apv-light .apv-track { background: #d8dde5; }

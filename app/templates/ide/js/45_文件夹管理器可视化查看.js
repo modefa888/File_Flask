@@ -165,9 +165,8 @@ function _fmMakeTab(conn, startPath) {
     name: remote ? (conn.name || conn.host) : "文件夹管理器",
     displayPath: remote ? ("文件管理器 · " + (conn.user || "root") + "@" + conn.host) : "文件夹管理器",
     relPath: "",
-    iconHtml: remote
-      ? '<i class="bi bi-folder2-open" style="color:#e2a04a"></i>'
-      : '<i class="bi bi-folder2-open" style="color:#c09553"></i>',
+    // 与左侧「文件夹管理器」活动栏图标同色（--ide-c-fm）；远程 / 本地统一用同一个颜色
+    iconHtml: '<i class="bi bi-folder2-open" style="color:var(--ide-c-fm)"></i>',
   };
   tab.onBeforeClose = () => {
     fmRememberPath(fm);                            // 关标签时把当前目录记下来，下次打开回到这里

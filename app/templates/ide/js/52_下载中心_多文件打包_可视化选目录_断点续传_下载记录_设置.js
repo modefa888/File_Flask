@@ -164,7 +164,8 @@ function openDownloadCenter(view, opts) {
     tab = {
       path: DL_VIEW_PATH, host: host, cm: null, original: "", dirty: false,
       group: curGroup, name: "下载中心", displayPath: "下载中心", relPath: "",
-      iconHtml: '<i class="bi bi-cloud-arrow-down" style="color:#4fc1ff"></i>',
+      // 与左侧「下载中心」活动栏图标同色（--ide-c-downloads）
+      iconHtml: '<i class="bi bi-cloud-arrow-down" style="color:var(--ide-c-downloads)"></i>',
       isDownloads: true,           // 会话恢复：刷新页面后按此标记重开（见 00_preamble sessionRestore）
     };
     tab.onBeforeClose = function () { dlStopAll(); dlPollStop(); return true; };

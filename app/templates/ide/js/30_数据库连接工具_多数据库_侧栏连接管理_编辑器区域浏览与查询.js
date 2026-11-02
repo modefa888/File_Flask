@@ -467,7 +467,8 @@
       tab = { path: path, displayPath: conn.name, name: conn.name, host: host, cm: null,
               original: "", dirty: false, big: false, group: curGroup, isDbConn: true,
               connId: conn.id,
-              iconHtml: '<i class="bi ' + escAttr(dbcKind(conn.kind).icon || "bi-database") + '"></i>' };
+              // 颜色与左侧「数据库」活动栏图标同源（--ide-c-dbconn）
+              iconHtml: '<i class="bi ' + escAttr(dbcKind(conn.kind).icon || "bi-database") + '" style="color:var(--ide-c-dbconn)"></i>' };
       tabs.push(tab);
       renderTabsAll();
       buildDbView(tab, conn);

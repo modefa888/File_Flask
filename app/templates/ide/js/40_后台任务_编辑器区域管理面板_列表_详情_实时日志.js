@@ -42,7 +42,8 @@ function openRunnerView(tid) {
     tab = {
       path: RUNNER_VIEW_PATH, host: host, cm: null, original: "", dirty: false,
       group: curGroup, name: "后台任务", displayPath: "后台任务", relPath: "",
-      iconHtml: '<i class="bi bi-play-btn" style="color:#7ec96f"></i>',
+      // 与左侧「后台任务」活动栏图标同色（--ide-c-runner）
+      iconHtml: '<i class="bi bi-play-btn" style="color:var(--ide-c-runner)"></i>',
     };
     tab.onBeforeClose = () => {          // 关标签：断日志连接、停自动刷新
       clearTimeout(RUNVIEW.tick);

@@ -481,7 +481,8 @@
       tab = {
         path: VIEW_PATH, host: host, cm: null, original: "", dirty: false,
         group: curGroup, name: "V2Ray 代理", displayPath: "V2Ray 代理", relPath: "",
-        iconHtml: '<i class="bi bi-shield-shaded" style="color:#4fc9a8"></i>',
+        // 与左侧「V2Ray 代理」活动栏图标同色（--ide-c-v2ray）
+        iconHtml: '<i class="bi bi-shield-shaded" style="color:var(--ide-c-v2ray)"></i>',
       };
       tab.onBeforeClose = () => { v2LogStop(); v2TrafStop(); v2JobClose(); v2SaveView(false); return true; };
       tab.onActivate = () => {

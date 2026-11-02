@@ -1901,7 +1901,7 @@
     const iconName = (tab.diff && tab.relPath) ? baseName(tab.relPath) : tabName;
     const isSshTab = String(tab.path || "").indexOf("\u0000ssh:") === 0;
     const ic = tab.iconHtml || (isSshTab
-      ? '<i class="bi bi-hdd-network"></i>'      // SSH 会话：统一用服务器图标，不交给文件类型推断
+      ? '<i class="bi bi-hdd-network" style="color:var(--ide-c-ssh)"></i>'   // SSH 会话：统一用服务器图标（与侧栏「终端连接」同色）
       : iconFor(iconName, false));                 // 汇总标签页可自带图标
     el.innerHTML = '<span class="t-ic">' + ic + '</span><span class="t-nm">' + esc(tabName) + '</span><span class="t-dot"></span><span class="t-close"><i class="bi bi-x"></i></span>';
     // closeTab 是 async：出错时别静默吞掉（表现为「点 × 没反应」），打到控制台便于排查

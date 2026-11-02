@@ -1571,7 +1571,8 @@
       tab = {
         path: CRON_VIEW_PATH, host: host, cm: null, original: "", dirty: false,
         group: curGroup, name: "定时任务", displayPath: "定时任务", relPath: "",
-        iconHtml: '<i class="bi bi-alarm" style="color:#e2c08a"></i>',
+        // 与左侧「定时任务」活动栏图标同色（--ide-c-cron）
+        iconHtml: '<i class="bi bi-alarm" style="color:var(--ide-c-cron)"></i>',
       };
       tab.onBeforeClose = () => {
         clearTimeout(CRON.view.timer); clearTimeout(CRON.view.logTimer);

@@ -191,6 +191,10 @@ html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacit
 {# 包管理器浮层（requirements.txt 工具栏 🔍：PyPI 搜索 / 安装 / 升级 / 卸载 / 下载） #}
 {% include 'ide/css/55_包管理器浮层.css' %}
 </style>
+{# 活动栏彩色图标：每个面板一个专属色，深浅主题各一套（内部用 html.theme-light 提高特异性压过 29_） #}
+<style>
+{% include 'ide/css/56_活动栏彩色图标.css' %}
+</style>
 {# 29_浅色主题 必须最后一个 <style> 加载：它的浅色覆盖与原始规则同权重，靠「后加载者胜」生效 #}
 <style>
 {% include 'ide/css/29_浅色主题.css' %}

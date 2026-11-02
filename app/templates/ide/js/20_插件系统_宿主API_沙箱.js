@@ -291,7 +291,8 @@
   let _plViewSeq = 0;
   const _plViews = new Map();                            // 实例键 → view（同一 id 可在不同编辑组各存一个实例）
   const PL_VIEW_PREFIX = "\u0000plugin:";                // 虚拟路径（与真实文件、内部 key 均不冲突）
-  const PL_DEFAULT_ICON = '<i class="bi bi-puzzle"></i>';
+  // 插件视图标签图标统一取「扩展」活动栏图标的品红（--ide-c-ext），与侧栏颜色一致
+  const PL_DEFAULT_ICON = '<i class="bi bi-puzzle" style="color:var(--ide-c-ext)"></i>';
 
   // 取某 id 处于打开状态的视图实例；group 不为 null 时限定编辑组（拆分后同 id 会有多个实例）
   function _plFindView(id, group) {
@@ -384,7 +385,7 @@
         catch (e) { console.error("[IDE] view render 失败:", id, e); }
       }
       if (spec.title) opened.setTitle(spec.title);
-      if (spec.iconHtml || spec.icon) opened.setIcon(spec.iconHtml || ('<i class="bi ' + spec.icon + '"></i>'));
+      if (spec.iconHtml || spec.icon) opened.setIcon(spec.iconHtml || ('<i class="bi ' + spec.icon + '" style="color:var(--ide-c-ext)"></i>'));
       if (!spec.background) activate(opened.tab);   // background：只刷新内容，不抢当前焦点
       return opened;
     }
@@ -394,7 +395,9 @@
     const key = id + "\u0000" + (++_plViewSeq);          // 实例唯一键：同 id 拆分出的多个实例各自独立
     // 默认标签图标：未指定 icon/iconHtml 时，用打开该视图的插件在插件列表中的图标，兜底为通用拼图图标
     const _ownerIcon = (_plCurrentId && _plIcons.get(_plCurrentId)) || "";
-    const _defIconHtml = _ownerIcon ? ('<i class="bi ' + _ownerIcon + '"></i>') : PL_DEFAULT_ICON;
+    const _defIconHtml = _ownerIcon
+      ? ('<i class="bi ' + _ownerIcon + '" style="color:var(--ide-c-ext)"></i>')
+      : PL_DEFAULT_ICON;
     // 内容文档模式：spec.content 为字符串时，标签页内直接挂 CodeMirror（等同打开真实文件的体验）；
     // 未传 content 时仍是插件自绘视图（render 自定义渲染 / iframe 加载 index.html）。
     const isDoc = typeof spec.content === "string";
@@ -414,7 +417,7 @@
       pluginView: true, pluginViewId: id, pluginOwner: _plCurrentId || "",
       pluginDoc: isDoc, langLabel: "",
       noSplit: !!spec.noSplit,   // 插件声明禁止拆分
-      iconHtml: spec.iconHtml || (spec.icon ? '<i class="bi ' + spec.icon + '"></i>' : _defIconHtml),
+      iconHtml: spec.iconHtml || (spec.icon ? '<i class="bi ' + spec.icon + '" style="color:var(--ide-c-ext)"></i>' : _defIconHtml),
     };
 
     const view = {

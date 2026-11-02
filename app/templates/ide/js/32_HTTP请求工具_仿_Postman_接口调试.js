@@ -1144,8 +1144,10 @@
     if (!tab) {
       const host = document.createElement("div");
       host.className = "cm-host api-host";
+      // 图标颜色与左侧「API 调试」活动栏图标同源（--ide-c-api）
       tab = { path: path, displayPath: req.name, name: req.name, host: host, cm: null, original: "",
-        dirty: false, big: false, group: curGroup, isApi: true, reqId: req.id, iconHtml: '<i class="bi bi-send"></i>' };
+        dirty: false, big: false, group: curGroup, isApi: true, reqId: req.id,
+        iconHtml: '<i class="bi bi-send" style="color:var(--ide-c-api)"></i>' };
       tabs.push(tab); renderTabsAll();
     }
     apiBuildView(tab, req);

@@ -133,7 +133,8 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
       host.className = "cm-host set-host";
       tab = { path: SETTINGS_PATH, displayPath: "设置", name: "设置", host, cm: null,
               original: "", dirty: false, big: false, group: curGroup, isSettings: true,
-              iconHtml: '<i class="bi bi-gear"></i>' };  // 左侧固定显示齿轮图标，而非默认文件图标
+              // 左侧固定显示齿轮图标（颜色与活动栏底部「设置」一致），而非默认文件图标
+              iconHtml: '<i class="bi bi-gear" style="color:var(--ide-c-settings)"></i>' };
       tabs.push(tab);
       renderTabsAll();
       buildSettingsContent(host);

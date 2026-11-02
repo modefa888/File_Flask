@@ -1851,7 +1851,8 @@
      复用单文件差异的渲染管线（mountSplitDiff）：每个文件块用一个轻量上下文
      {cmBox, relPath, diffText, diffView} 渲染，因此配色 / 折叠未更改区域 /
      语法高亮 / 行内词级高亮与逐个打开文件时的差异视图完全一致。 */
-  const ALL_DIFF_ICON = '<i class="bi bi-file-diff" style="color:#e2a03f"></i>';
+  // 「打开更改」汇总标签：颜色与左侧「源代码管理」活动栏图标同源（--ide-c-git）
+  const ALL_DIFF_ICON = '<i class="bi bi-file-diff" style="color:var(--ide-c-git)"></i>';
 
   function openAllChangesTab() {
     if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return null; }

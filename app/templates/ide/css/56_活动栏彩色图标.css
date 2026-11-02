@@ -1,0 +1,110 @@
+/* ================================================================
+   活动栏彩色图标 + 标签页同色
+   ----------------------------------------------------------------
+   原来左侧活动栏所有图标统一是灰色（#858585），只靠形状区分。
+   这里给每个面板一个专属色，并把这套颜色抽成 CSS 变量，
+   让「编辑器区域的标签页图标」也用同一份色值 —— 同一个功能
+   在侧栏和标签页上永远是同一种颜色（深 / 浅主题各自一套）。
+
+   用法：
+     · 侧栏：本文件把变量映射到 .act[data-panel=...] / #actProc / #actSettings；
+     · 标签页：各模块建 tab 时写 iconHtml: '<i class="bi bi-cpu" style="color:var(--ide-c-env)"></i>'，
+       不要写死十六进制色值，切主题时会自动换成浅色主题的深色变体。
+
+   注意：浅色主题的变量写在 html.theme-light 上（比 :root 多一个类），
+   29_浅色主题.css 里的通用灰虽然加载更晚，但本文件的 :html.theme-light .activitybar .act
+   规则特异性更高，不会被压掉。
+   ================================================================ */
+
+/* ---------- 调色板（唯一色值来源） ---------- */
+:root {
+  /* --ide-c-xxx 为常规色；--ide-h-xxx 为悬停 / 激活 / 强调用的亮（深色主题）或深（浅色主题）变体 */
+  --ide-c-explorer: #e8c47c;  --ide-h-explorer: #ffe0a3;   /* 资源管理器：琥珀 */
+  --ide-c-search: #6cb6ff;    --ide-h-search: #a8d3ff;     /* 搜索：天蓝 */
+  --ide-c-git: #f0523d;       --ide-h-git: #ff8f7a;        /* 源代码管理：Git 橙红 */
+  --ide-c-run: #c792ea;       --ide-h-run: #dfb8ff;        /* 运行和调试：紫 */
+  --ide-c-runner: #46c78a;    --ide-h-runner: #7de8b6;     /* 后台任务：运行绿 */
+  --ide-c-env: #ffa84d;       --ide-h-env: #ffc98a;        /* 运行环境 / 运行管理：橙 */
+  --ide-c-dbconn: #4dd4c4;    --ide-h-dbconn: #8ff0e4;     /* 数据库：青绿 */
+  --ide-c-api: #ff7eb6;       --ide-h-api: #ffb0d3;        /* API 调试：粉 */
+  --ide-c-cron: #ffd45e;      --ide-h-cron: #ffe89a;       /* 定时任务：明黄 */
+  --ide-c-ssh: #38c6e8;       --ide-h-ssh: #85e0f7;        /* 终端连接 / SSH 会话：青蓝 */
+  --ide-c-fm: #a3e635;        --ide-h-fm: #cbef7f;         /* 文件夹管理器：青柠 */
+  --ide-c-v2ray: #8f9bff;     --ide-h-v2ray: #bcc4ff;      /* V2Ray 代理：靛蓝 */
+  --ide-c-downloads: #7dd3fc; --ide-h-downloads: #b3e6ff;  /* 下载中心：天青 */
+  --ide-c-ext: #e879f9;       --ide-h-ext: #f5a8ff;        /* 扩展 / 插件视图：品红 */
+  --ide-c-proc: #7ee787;      --ide-h-proc: #b3ffbe;       /* 进程资源管理器：薄荷绿 */
+  --ide-c-settings: #a9b4c2;  --ide-h-settings: #cfd8e3;   /* 设置：钢灰 */
+}
+
+/* 浅色主题：同色相压暗，白底上才看得清 */
+html.theme-light {
+  --ide-c-explorer: #b57b16;  --ide-h-explorer: #8a5c00;
+  --ide-c-search: #1f6feb;    --ide-h-search: #0b4dbf;
+  --ide-c-git: #d0342c;       --ide-h-git: #a3211a;
+  --ide-c-run: #8b3fc4;       --ide-h-run: #6b21a8;
+  --ide-c-runner: #128a5b;    --ide-h-runner: #0b6641;
+  --ide-c-env: #c46a00;       --ide-h-env: #9a5300;
+  --ide-c-dbconn: #0e8f82;    --ide-h-dbconn: #0a6b60;
+  --ide-c-api: #d63384;       --ide-h-api: #a61e61;
+  --ide-c-cron: #a97d00;      --ide-h-cron: #8d6400;
+  --ide-c-ssh: #0a7ea4;       --ide-h-ssh: #075e7b;
+  --ide-c-fm: #4d7c0f;        --ide-h-fm: #3a5c0a;
+  --ide-c-v2ray: #4338ca;     --ide-h-v2ray: #31279b;
+  --ide-c-downloads: #0284c7; --ide-h-downloads: #0369a1;
+  --ide-c-ext: #a21caf;       --ide-h-ext: #86198f;
+  --ide-c-proc: #16a34a;      --ide-h-proc: #15803d;
+  --ide-c-settings: #5b6672;  --ide-h-settings: #383f47;
+}
+
+/* ---------- 活动栏：颜色改为变量驱动 ---------- */
+.activitybar .act { color: var(--act-c, #858585); transition: color .15s ease; }
+.activitybar .act:hover { color: var(--act-h, #ffffff); }
+.activitybar .act.active { color: var(--act-h, #ffffff); border-left-color: var(--act-h, #ffffff); }
+
+/* 面板 → 色板变量：未定义的面板（插件系统新增的图标等）自动回落默认灰 */
+.activitybar .act[data-panel="explorer"]  { --act-c: var(--ide-c-explorer);  --act-h: var(--ide-h-explorer); }
+.activitybar .act[data-panel="search"]    { --act-c: var(--ide-c-search);    --act-h: var(--ide-h-search); }
+.activitybar .act[data-panel="git"]       { --act-c: var(--ide-c-git);       --act-h: var(--ide-h-git); }
+.activitybar .act[data-panel="run"]       { --act-c: var(--ide-c-run);       --act-h: var(--ide-h-run); }
+.activitybar .act[data-panel="runner"]    { --act-c: var(--ide-c-runner);    --act-h: var(--ide-h-runner); }
+.activitybar .act[data-panel="env"]       { --act-c: var(--ide-c-env);       --act-h: var(--ide-h-env); }
+.activitybar .act[data-panel="dbconn"]    { --act-c: var(--ide-c-dbconn);    --act-h: var(--ide-h-dbconn); }
+.activitybar .act[data-panel="api"]       { --act-c: var(--ide-c-api);       --act-h: var(--ide-h-api); }
+.activitybar .act[data-panel="cron"]      { --act-c: var(--ide-c-cron);      --act-h: var(--ide-h-cron); }
+.activitybar .act[data-panel="sshconn"]   { --act-c: var(--ide-c-ssh);       --act-h: var(--ide-h-ssh); }
+.activitybar .act[data-panel="fm"]        { --act-c: var(--ide-c-fm);        --act-h: var(--ide-h-fm); }
+.activitybar .act[data-panel="v2ray"]     { --act-c: var(--ide-c-v2ray);     --act-h: var(--ide-h-v2ray); }
+.activitybar .act[data-panel="downloads"] { --act-c: var(--ide-c-downloads); --act-h: var(--ide-h-downloads); }
+.activitybar .act[data-panel="ext"]       { --act-c: var(--ide-c-ext);       --act-h: var(--ide-h-ext); }
+/* 底部两个图标没有 data-panel（不参与排序 / 启停），用 id 定位 */
+.activitybar #actProc     { --act-c: var(--ide-c-proc);     --act-h: var(--ide-h-proc); }
+.activitybar #actSettings { --act-c: var(--ide-c-settings); --act-h: var(--ide-h-settings); }
+
+/* 悬停 / 激活时在图标后面垫一层同色淡底（径向柔光，避免生硬的方块） */
+.activitybar .act::before {
+  content: ""; position: absolute; inset: 5px 4px; border-radius: 7px;
+  background: currentColor; opacity: 0; transition: opacity .16s ease; pointer-events: none;
+}
+.activitybar .act:hover::before { opacity: .10; }
+.activitybar .act.active::before { opacity: .16; }
+/* 图标与徽标压在淡底之上 */
+.activitybar .act > i { position: relative; z-index: 1; }
+.activitybar .act > .runner-badge { z-index: 2; }
+/* 当前面板的图标带一圈同色微光，深色主题下更像「亮起」 */
+.activitybar .act.active > i { filter: drop-shadow(0 0 6px currentColor); }
+
+/* ---------- 浅色主题：活动栏 ---------- */
+/* 色值本身已由 html.theme-light 上的变量切换，这里只负责压过 29_ 里的通用灰 */
+html.theme-light .activitybar .act { color: var(--act-c, #4a4a4a); }
+html.theme-light .activitybar .act:hover { color: var(--act-h, #000000); }
+html.theme-light .activitybar .act.active { color: var(--act-h, #000000); border-left-color: var(--act-h, #0066b8); }
+html.theme-light .activitybar .act:hover::before { opacity: .09; }
+html.theme-light .activitybar .act.active::before { opacity: .14; }
+html.theme-light .activitybar .act.active > i { filter: none; }   /* 白底上不要发光 */
+
+/* ---------- 标签页：与侧栏同色 ---------- */
+/* 各模块建标签时写 iconHtml: '<i class="bi bi-xxx" style="color:var(--ide-c-yyy)"></i>'，
+   与侧栏取的是同一份变量，颜色天然一致；内联样式优先级最高，
+   所以激活 / 悬停标签的文字色规则不会把图标颜色改掉。 */
+.tab .t-ic .bi { flex: none; }

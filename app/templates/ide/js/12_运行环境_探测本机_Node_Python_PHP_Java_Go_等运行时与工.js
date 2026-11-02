@@ -834,7 +834,8 @@
       tab = {
         path: ENV_VIEW_PATH, host: host, cm: null, original: "", dirty: false,
         group: curGroup, name: "运行管理", displayPath: "运行管理", relPath: "",
-        iconHtml: '<i class="bi bi-cpu" style="color:#6fcf8a"></i>',
+        // 图标颜色与左侧「运行环境」活动栏图标同源（--ide-c-env），深浅主题自动切换
+        iconHtml: '<i class="bi bi-cpu" style="color:var(--ide-c-env)"></i>',
       };
       tab.onBeforeClose = () => { ENV.view.openId = null; return true; };
       // 切回本标签时同步一次（期间可能在侧栏改过自定义路径 / 环境变量）

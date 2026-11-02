@@ -285,7 +285,8 @@
     if (!tn || /^ssh:/.test(tn)) tn = (c.user || "root") + "@" + (c.host || "远程主机");
     const tab = {
       path: path, name: tn, host: host,
-      iconHtml: '<i class="bi bi-hdd-network"></i>',
+      // 图标颜色与左侧「终端连接」活动栏图标同源（--ide-c-ssh）
+      iconHtml: '<i class="bi bi-hdd-network" style="color:var(--ide-c-ssh)"></i>',
       isSshTerm: true, connId: c.id,
       // 必须带编辑组：mountHost 按 group 找容器，缺了 host 永远挂不进编辑区（页面一片空白）
       group: (typeof curGroup === "number" && curGroup >= 0) ? curGroup : 0,
@@ -309,7 +310,8 @@
     if (!tn || /^ssh:/.test(tn)) tn = (c.user || "root") + "@" + (c.host || "远程主机");
     const tab = {
       path: path, name: tn, host: host,
-      iconHtml: '<i class="bi bi-hdd-network"></i>',
+      // 图标颜色与左侧「终端连接」活动栏图标同源（--ide-c-ssh）
+      iconHtml: '<i class="bi bi-hdd-network" style="color:var(--ide-c-ssh)"></i>',
       isSshTerm: true, connId: c.id, sshPlaceholder: true,
       // 与真实终端一致：mountHost 按 group 找容器
       group: (typeof curGroup === "number" && curGroup >= 0) ? curGroup : 0,

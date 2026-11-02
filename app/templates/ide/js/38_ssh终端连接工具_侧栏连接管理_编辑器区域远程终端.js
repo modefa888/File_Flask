@@ -94,7 +94,7 @@
     // 首次加载完成后，按上次记录恢复「未连接」的 SSH 占位标签（点击后才建连）
     if (!SSHC.restored) {
       SSHC.restored = true;
-      setTimeout(sshSessionRestore, 0);              // 等本调用栈收尾，避免和其它模块的会话恢复抢布局
+      whenSessionRestored(sshSessionRestore);       // 等通用会话恢复收尾，别抢焦点、别误建连
     }
   }
   /* ---------- 活动栏角标：当前「已连接」的 SSH 会话数 ----------
@@ -234,6 +234,22 @@
     renderTabsAll();
     if (typeof sessionSaveTabs === "function") sessionSaveTabs();
   }
+  /* 等通用会话恢复（00_preamble 的 sessionRestore）彻底结束再恢复 SSH 标签：
+     两者是各自独立的异步流程，SSH 这边只依赖一个 /api/ssh/list 请求，往往先返回，
+     于是会抢在文件标签建好之前激活占位标签 —— 表现为「一刷新就跳到远程终端标签」，
+     而 activate() 又会触发占位标签的 onActivate（点击标签即连接），顺带把连接也建了。 */
+  function whenSessionRestored(fn) {
+    let done = false;
+    const run = () => {
+      if (done) return;
+      done = true;
+      document.removeEventListener("ide:session-restored", run);
+      setTimeout(fn, 0);                            // 让出当前调用栈，等恢复流程彻底收尾
+    };
+    if (window.__ideSessionRestored) { run(); return; }
+    document.addEventListener("ide:session-restored", run);
+    setTimeout(run, 4000);                          // 兜底：会话恢复异常时也不能不恢复 SSH 标签
+  }
   function sshSessionRestore() {
     if (!sshSessionAllowed() || !SSHC.paramiko) return;
     sshCleanStaleTabs();
@@ -251,9 +267,11 @@
       } catch (e) { console.warn("SSH 标签恢复失败", id, e); }
     });
     // 占位标签的 host 只有 activate 才会加 .active（.cm-host 默认 display:none），
-    // 没有激活就只剩一条标签栏、编辑区一片空白。已有其它标签被激活时不抢焦点。
+    // 没有激活就只剩一条标签栏、编辑区一片空白。已有其它标签被激活时不抢焦点；
+    // 恢复过程的激活只负责「显示」，建连只由用户点标签 / 点「连接」按钮触发。
     if (!active) {
-      const t = first || tabs[tabs.length - 1];
+      const other = tabs.filter(t => t && !t.isSshTerm).pop();   // 有其它标签就优先显示它
+      const t = other || first || tabs[tabs.length - 1];
       if (t) activate(t);
     }
   }
@@ -265,6 +283,7 @@
     const r = await api("/api/ssh/open", { method: "POST", body: JSON.stringify({ id: c.id }) });
     if (r.error) { toast("连接失败：" + r.error, "err"); return; }
     if (tab) {                                     // 复用刷新后保留的占位标签
+      tab.onUserClick = null;
       tab.onActivate = null;
       tab.sshPlaceholder = false;
       tab.host.innerHTML = "";
@@ -362,7 +381,9 @@
       Promise.resolve(connectSsh(c)).finally(() => { tab.sshBusy = false; });
     };
     btn.onclick = go;
-    tab.onActivate = go;                           // 点标签本身也会触发连接
+    // 只有「用户点标签」才建连：不能挂到 onActivate 上，因为会话恢复、
+    // 关闭其它标签时的兜底激活都会触发 onActivate —— 那不就成了刷新即自动连接。
+    tab.onUserClick = go;
   }
 
   // 终端配色跟随界面主题（白天 / 黑夜），<html>.theme-light 由设置页切换

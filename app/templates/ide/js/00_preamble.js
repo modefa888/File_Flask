@@ -267,8 +267,36 @@
     if (t.path.indexOf("\u0001") >= 0) return false;   // 内部 key：差异 / 比较视图
     return true;
   }
+  // 上次会话的完整标签顺序：必须在「恢复开始之前」就读出来。
+  // 恢复途中每 openFile / activate 一次都会调用 sessionSaveTabs，如果那时才读，
+  // 拿到的只是「已恢复的这一小撮标签」——晚一步建标签的插件 / 工具视图不在里面，
+  // 于是每刷新一次，它们就漂到末尾一次（用户看到的「标签自己移动」）。
+  const SESSION_ORDER_SNAP = (() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("ide.session.tabOrder") || "[]");
+      return Array.isArray(raw) ? raw : [];
+    } catch (_) { return []; }
+  })();
+  /* 有上次的标签要恢复：在恢复真正开始之前（首屏与资源管理器初始化期间）先别让欢迎页闪出来，
+     否则刷新时是「欢迎页 → 标签栏」两次整屏切换。恢复结束 / 兜底超时后自动放开。 */
+  window.__ideRestorePending = (() => {
+    try {
+      if (!ideSettingGet("restoreSession", true)) return false;
+      return !!String(localStorage.getItem("ide.session.tabs") || "").trim();
+    } catch (_) { return false; }
+  })();
+  if (window.__ideRestorePending) {
+    setTimeout(() => {   // 兜底：恢复流程异常中断时不能把欢迎页永久藏住
+      if (!window.__ideRestorePending) return;
+      window.__ideRestorePending = false;
+      try { if (typeof rebuildGroups === "function") rebuildGroups(); } catch (_) {}
+    }, 12000);
+  }
   function sessionSaveTabs() {
     if (!ideSettingGet("restoreSession", true)) return;
+    // 恢复途中不落盘：此时 tabs 只有一部分，写进去会把完整快照改成残缺快照，
+    // 连下次刷新要用的顺序 / 激活标签都会被破坏
+    if (window.__ideRestoringSession) return;
     try {
       const list = tabs.filter(sessionIsRestorable).map(t => {
         const o = { path: t.path, name: t.name, group: t.group };
@@ -281,14 +309,29 @@
       });
       localStorage.setItem("ide.session.tabs", JSON.stringify(list));
       // 完整标签顺序（含不参与内容恢复的插件视图，如「扩展自定义插件」）：
-      // 这些视图由各自模块稍后重建，恢复时要靠它插回原位，否则每次刷新位置都会漂
+      // 这些视图由各自模块稍后重建，恢复时要靠它插回原位，否则每次刷新位置都会漂。
+      // name 是给「没有 path 的虚拟标签」兜底匹配用的（见 tabOrderKeyOf）
       localStorage.setItem("ide.session.tabOrder",
-        JSON.stringify(tabs.map(t => ({ path: t.path, pluginId: t.pluginViewId || "" }))));
+        JSON.stringify(tabs.map(t => ({ path: t.path || "", pluginId: t.pluginViewId || "", name: t.name || "" }))));
       localStorage.setItem("ide.session.activeTab", (active && sessionIsRestorable(active)) ? active.path : "");
     } catch (_) {}
   }
+  // 会话恢复完成信号：SSH 等「刷新后不自动连接」的模块必须等它结束后再恢复自己的标签，
+  // 否则会抢在文件标签之前拿到 active（刷新后焦点莫名跳到远程终端）。
+  function markSessionRestored() {
+    window.__ideSessionRestored = true;
+    try { document.dispatchEvent(new CustomEvent("ide:session-restored")); } catch (_) {}
+  }
   async function sessionRestore() {
-    if (!ideSettingGet("restoreSession", true)) { ideEmit("sessionRestored"); return; }
+    if (!ideSettingGet("restoreSession", true)) {
+      window.__ideRestorePending = false;
+      try { rebuildGroups(); } catch (_) {}
+      ideEmit("sessionRestored"); markSessionRestored(); return;
+    }
+    window.__ideRestorePending = false;   // 真正开始恢复：改由 __ideRestoringSession 控制标签栏行为
+    window.__ideRestoringSession = true;
+    // 兜底：某个恢复步骤卡住（接口不返回等）时，不能永久禁止标签落盘
+    setTimeout(() => { window.__ideRestoringSession = false; }, 15000);
     try {
       const panel = localStorage.getItem("ide.session.panel");
       // 「终端连接」是工具面板，刷新后自动弹出来很打扰（连接本身也已断开），直接忽略。
@@ -360,21 +403,121 @@
         // 否则 openFile 会去后端读一个不存在的路径，刷新后冒出「路径不存在」的错误标签
         if (t.path.indexOf("\u0000") >= 0) continue;
         await openFile(t.path, t.name, t.group || 0).catch(() => {});
+        // 先把第一个恢复出来的标签显示上，避免整段恢复过程编辑区一片空白；
+        // 恢复结束后会统一切到上次的活动标签（只切一次，不会逐个文件闪）
+        if (!active && tabs.length) activate(tabs[tabs.length - 1]);
         } catch (_) {}  // 本条恢复失败：跳过，继续恢复下一个标签
       }
       if (activePath && activePath.indexOf("\u0001") < 0) {
         const tab = findTab(activePath);
         if (tab) activate(tab);
       }
+      // 恢复途中文件标签一律「只建不激活」，快照里没有活动标签时兜底激活最后一个，
+      // 否则刷新后标签都在、编辑区却是一片空白
+      if (!active && tabs.length) activate(tabs[tabs.length - 1]);
       // 底部面板：恢复上次的显隐状态与当前标签（输出 / 终端 / 运行日志）
       try {
         const bp = JSON.parse(localStorage.getItem("ide.session.bottom") || "");
         if (bp && bp.show && typeof toggleBottom === "function") toggleBottom(true, bp.pane || "output");
       } catch (_) {}
     } catch (_) {}
+    // 恢复阶段结束：从这里开始，标签变动才重新写回快照
+    window.__ideRestoringSession = false;
+    window.__ideRestorePending = false;
+    // 没恢复出任何标签时把欢迎页放出来（恢复期间它是藏着的）
+    try { rebuildGroups(); } catch (_) {}
+    // 按上次的完整顺序把标签摆回去（文件标签已按快照重建，晚建的插件 / 工具视图要补位）
+    scheduleTabOrderRestore();
+    // 顺序摆好后再把当前标签滚进可视区（恢复途中滚动被屏蔽，避免标签栏来回滑）
+    if (active) scrollTabIntoView(active);
     // 会话恢复结束（含失败）：依赖「标签已就位」的模块（如 API 管理面板）此时再建标签，
     // 否则它们会在文件 / V2Ray 等标签恢复之前抢先插入，刷新后标签顺序每次都不同
     ideEmit("sessionRestored");
+    markSessionRestored();
+  }
+  /* ---------------- 标签顺序复原 ----------------
+     会话恢复只保证「文件标签」按快照顺序重建；工具 / 插件视图（V2Ray 大页、后台任务、
+     扩展自定义插件、API 请求、数据库视图…）由各自模块在恢复中或恢复后才建标签，
+     一律 push 到末尾 —— 刷新一次位置就漂一次。
+     这里用 SESSION_ORDER_SNAP 把它们插回原位：快照里没有的标签（用户恢复后新开的）
+     保持相对顺序、继续排在末尾，不会被乱动。 */
+  function tabOrderKeyOf(t) {
+    if (!t) return "";
+    if (t.pluginViewId) return "p:" + t.pluginViewId;
+    if (t.path) return "f:" + String(t.path);
+    return "n:" + String(t.name || "");
+  }
+  function tabOrderKeyOfSaved(o) {
+    if (!o) return "";
+    if (o.pluginId) return "p:" + o.pluginId;
+    if (o.path) return "f:" + String(o.path);
+    return "n:" + String(o.name || "");
+  }
+  function applyTabOrder() {
+    if (!SESSION_ORDER_SNAP.length || tabs.length < 2) return false;
+    // 同一个 key 可能在快照里出现多次（比如同时开了两个「扩展自定义插件」视图）：
+    // 按出现顺序排队，先出现的标签拿先出现的位置，不会互相抢同一个坑
+    const queues = new Map();
+    const nameQueues = new Map();      // 兜底：同一视图重建后 id / 路径变了，但标题没变
+    SESSION_ORDER_SNAP.forEach((o, i) => {
+      const k = tabOrderKeyOfSaved(o);
+      if (k) {
+        if (!queues.has(k)) queues.set(k, []);
+        queues.get(k).push(i);
+      }
+      const nm = String((o && o.name) || "");
+      if (nm) {
+        if (!nameQueues.has(nm)) nameQueues.set(nm, []);
+        nameQueues.get(nm).push(i);
+      }
+    });
+    if (!queues.size) return false;
+    const before = tabs.map(tabOrderKeyOf).join("\u0001");
+    const pos = new Map(tabs.map((t, i) => [t, i]));
+    const take = (m, key) => {
+      const q = m.get(key);
+      return (q && q.length) ? q.shift() : -1;
+    };
+    const rankOf = new Map();
+    tabs.forEach(t => {
+      let r = take(queues, tabOrderKeyOf(t));
+      if (r < 0) r = take(nameQueues, String(t.name || ""));
+      rankOf.set(t, r < 0 ? 1e9 : r);   // 快照里没有的：排到最后，保持相对顺序
+    });
+    tabs.sort((a, b) => (rankOf.get(a) - rankOf.get(b)) || (pos.get(a) - pos.get(b)));
+    if (tabs.map(tabOrderKeyOf).join("\u0001") === before) return false;
+    // 只把已有节点搬到新位置：整条标签栏重建会让恢复过程来回闪（用户看到的「抖动」）
+    if (tabs.some(t => !t.el)) renderTabsAll();
+    else syncTabOrderDom();
+    // 顺序变了就把修正后的完整顺序写回快照：否则中间某个模块（如扩展面板恢复）
+    // 早一步落盘的「残缺快照」会一直留到下次刷新，下次又少一排标签的位置
+    try { sessionSaveTabs(); } catch (_) {}
+    return true;
+  }
+  // 各模块建标签的时间点不一致（接口快慢不同），恢复后多补几拍；用户一动手就停，别跟人抢
+  function scheduleTabOrderRestore() {
+    const delays = [0, 120, 400, 900, 1600, 2600, 4000, 6000, 8000];
+    let i = 0, stopped = false, timer = null;
+    // 打开这段时间窗：晚到的插件 / 工具视图标签在 renderTabsAll 里立刻归位，
+    // 直接出现在最终位置，而不是「先冒到末尾、再被定时器搬回去」（那就是肉眼看到的第三处抖动）
+    window.__ideOrderRestoring = true;
+    const stop = () => {
+      stopped = true;
+      window.__ideOrderRestoring = false;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("pointerdown", stop, true);
+      document.removeEventListener("keydown", stop, true);
+    };
+    document.addEventListener("pointerdown", stop, true);
+    document.addEventListener("keydown", stop, true);
+    const tick = () => {
+      if (stopped) return;
+      try { applyTabOrder(); } catch (_) {}
+      if (++i < delays.length) timer = setTimeout(tick, delays[i]);
+      else stop();
+    };
+    if (delays[0] > 0) timer = setTimeout(tick, delays[0]);
+    else tick();
   }
   // IDE 树中隐藏的目录：各类语言/工具的依赖与缓存目录（对任何项目生效）
   // 「显示全部」开关：开启后依赖目录（node_modules 等）也会显示，可手动展开，「全部展开」会跳过
@@ -1712,11 +1855,16 @@
       renderTabsAll();
       const seq = ++openSeq;           // 本次打开的序号；await 期间用户又点了别的文件则 seq 过期
       const wasActive = active;        // 记录打开前的活动标签，用于判断用户是否中途切换
+      // 会话恢复期间「只建不显示」：所有标签先在后台建好，最后统一激活上次的标签。
+      // 否则恢复 N 个标签就会把编辑器切 N 次（逐个文件闪过去），标签栏也跟着抖。
+      const restoring = !!window.__ideRestoringSession;
       // 只切 host 显示（同组其它 host 先取消 active，避免两个「加载中」同时可见）；
       // 完整 activate 留到内容就绪后，避免 CodeMirror 在不可见容器里测量出错
-      tabs.forEach(t => { if (t !== tab && t.group === grp) t.host.classList.remove("active"); });
-      host.classList.add("active");
-      host.innerHTML = '<div style="padding:30px;color:#888;">正在加载 ' + esc(name) + ' …</div>';
+      if (!restoring) {
+        tabs.forEach(t => { if (t !== tab && t.group === grp) t.host.classList.remove("active"); });
+        host.classList.add("active");
+        host.innerHTML = '<div style="padding:30px;color:#888;">正在加载 ' + esc(name) + ' …</div>';
+      }
       try {
         const ext = getExt(name);
         // 图片类型：标签页内嵌图片查看器（缩放 / 拖拽 / 旋转 / 镜像 / 同目录切换，实现见 49_）
@@ -1861,12 +2009,12 @@
         // 竞态防护：加载期间用户又点了其它文件（activate 过别的标签 / 又发起新打开），
         // 则本次不抢焦点，只把内容挂好留在后台标签里（用户最后一次点击优先）
         if (active === tab) { scheduleRefresh(tab); }
-        else if (seq === openSeq && active === wasActive) { activate(tab); scheduleRefresh(tab); }
+        else if (!restoring && seq === openSeq && active === wasActive) { activate(tab); scheduleRefresh(tab); }
         else { tab.host.classList.remove("active"); }
       } catch (e) {
         host.innerHTML = '<div style="padding:30px;color:#c66;">无法打开：' + esc(e.message || e) + '</div>';
         // 出错也一样守规矩：用户已切到别的文件就不抢焦点，错误信息留在后台标签里
-        if (active === tab || (seq === openSeq && active === wasActive)) host.classList.add("active");
+        if (!restoring && (active === tab || (seq === openSeq && active === wasActive))) host.classList.add("active");
       }
     } else {
       activate(tab);
@@ -1893,8 +2041,8 @@
     // 同一标签的旧节点先摘掉，避免重复挂载（标签栏出现重影/点击错位）
     if (tab.el && tab.el.parentNode) tab.el.parentNode.removeChild(tab.el);
     const el = document.createElement("div");
-    // tab-db：数据库连接标签，加一条类型色边（激活时整条着色），与侧栏高亮呼应
-    el.className = "tab" + (tab.dirty ? " dirty" : "") + (tab.isDbConn ? " tab-db" : "");
+    // 数据库连接标签和其它标签长一样：不加左侧类型色边、也不改底色（类型只体现在图标颜色上）
+    el.className = "tab" + (tab.dirty ? " dirty" : "");
     // 差异标签的 name 带 "@提交哈希" 后缀（如 ide.html@895cd54），直接匹配取不到类型图标，
     // 用 relPath 的真实文件名来取图标；大小 1.4em 由 .t-ic 规则统一控制
     const tabName = cleanTabName(tab.name, tab.path);
@@ -1908,13 +2056,22 @@
     el.addEventListener("click", (e) => {
       e.stopPropagation();
       if (e.target.closest(".t-close")) Promise.resolve(closeTab(tab)).catch(err => console.error("关闭标签失败", err));
-      else activate(tab);
+      else {
+        activate(tab);
+        // 「仅用户点击标签才执行」的钩子（SSH 占位标签靠它建连）。
+        // 注意不能用 activate 里的 onActivate：会话恢复 / 关闭其它标签的兜底激活
+        // 也会走 activate，那些场景不该建立远程连接。
+        if (typeof tab.onUserClick === "function") {
+          try { tab.onUserClick(); } catch (_) {}
+        }
+      }
     });
     setupTabDrag(el, tab);
     const bundle = groupBundles.get(tab.group);
     if (bundle) bundle.tabbar.appendChild(el);
     if (tab === groupActive.get(tab.group)) el.classList.add("active");
     tab.el = el;
+    tab._domSig = tabDomSig(tab);   // 记下本次渲染对应的字段快照，供 renderTabsAll 判断能否复用节点
     // 协作标记：由 43_ 协作模块按会话状态打标（解耦；未加载协作模块时无副作用）
     if (typeof window.IDECollabTabMark === "function") window.IDECollabTabMark(el, tab);
   }
@@ -1941,17 +2098,55 @@
     if (bar) bar.classList.toggle("hidden", !tabs.length);
   }
   syncCrumbsBar();   // 首屏（此时还没恢复任何标签页）先把空面包屑栏藏掉
+  /* 标签节点签名：只有这几个字段会体现在标签 DOM 上（标题 / 图标 / 未保存圆点 / 差异标记）。
+     签名没变就复用原节点 → renderTabsAll 不再「先清空整条标签栏再全部重建」。
+     刷新恢复时每打开一个标签都会调一次 renderTabsAll，全量重建会让标签栏反复重绘、
+     滚动位置被顶回开头，看起来就是「标签在抖」。 */
+  function tabDomSig(t) {
+    return [t.name || "", t.path || "", t.relPath || "", t.iconHtml || "",
+            t.dirty ? "1" : "0", t.diff ? "1" : "0", String(t.group)].join("\u0002");
+  }
+  /* 按 tabs 数组顺序重排各组标签栏里的节点：insertBefore 只搬动已有节点，
+     不创建 / 不销毁 → 不闪、不丢 hover、不重置横向滚动位置。 */
+  function syncTabOrderDom() {
+    const byGroup = new Map();
+    tabs.forEach(t => {
+      if (!t.el) return;
+      if (!byGroup.has(t.group)) byGroup.set(t.group, []);
+      byGroup.get(t.group).push(t.el);
+    });
+    byGroup.forEach((els, gid) => {
+      const b = groupBundles.get(gid);
+      if (!b) return;
+      const bar = b.tabbar, live = new Set(els), sl = bar.scrollLeft;
+      [...bar.children].forEach(el => { if (!live.has(el)) el.remove(); });   // 清掉已关闭标签的残留节点
+      let ref = bar.firstElementChild;
+      els.forEach(el => {
+        if (el === ref) ref = ref.nextElementSibling;
+        else bar.insertBefore(el, ref);
+      });
+      bar.scrollLeft = sl;   // 重排不能把标签栏的滚动位置顶回去
+    });
+  }
   function renderTabsAll() {
     rebuildGroups();
-    // 标签栏是 tabs 的唯一投影：先清空再按顺序重建，
-    // 否则 rebuildGroups 命中缓存提前返回时，旧标签节点会残留并不断累积
-    groupBundles.forEach(b => { b.tabbar.textContent = ""; });
-    tabs.forEach(t => { t.el = null; renderTab(t); mountHost(t); });
+    // 标签栏是 tabs 的唯一投影：内容变了的标签才重建节点，其余复用（顺序由 syncTabOrderDom 调）
+    tabs.forEach(t => { if (!t.el || t._domSig !== tabDomSig(t)) renderTab(t); });
+    syncTabOrderDom();
+    // 复用旧节点时不会执行 renderTab 里的「是否激活」判断，这里统一对齐一次，避免高亮残留
+    tabs.forEach(t => { if (t.el) t.el.classList.toggle("active", groupActive.get(t.group) === t); });
+    tabs.forEach(t => { if (t.el) mountHost(t); });
     if (typeof apiSyncOpenMarks === "function") apiSyncOpenMarks();   // 标签栏重建后刷新 API 已打开标记
     if (typeof dbcSyncOpenMarks === "function") dbcSyncOpenMarks();   // 数据库侧栏「已打开」高亮跟随标签
     if (typeof fmSyncOpenMarks === "function") fmSyncOpenMarks();     // 文件夹管理器侧栏「已打开」高亮跟随标签
     if (typeof sshSyncOpenMarks === "function") sshSyncOpenMarks();   // SSH 终端侧栏「已打开」高亮跟随标签
     syncCrumbsBar();                                                  // 空标签页时藏掉面包屑那条线
+    // 恢复窗口内：新标签（插件 / 工具视图）直接插到最终位置，不再先冒到末尾再被搬走
+    if (window.__ideOrderRestoring && !window.__ideOrderApplying) {
+      window.__ideOrderApplying = true;
+      try { applyTabOrder(); } catch (_) {}
+      finally { window.__ideOrderApplying = false; }
+    }
   }
   /* ---------- 动态编辑组：组按「行」排布，每行内可并排多个组 ----------
      向右拆分：与源组同行、插在其右侧；向下拆分：在源组所在行的下方新起一行 */
@@ -2098,7 +2293,9 @@
   function rebuildGroups() {
     const rows = layoutRows();
     const flat = rows.flat();
-    welcome.style.display = flat.length ? "none" : "flex";
+    // 会话恢复中（或马上要恢复）先藏住欢迎页：避免「欢迎页 → 标签栏」整屏闪一次
+    const waitingRestore = window.__ideRestoringSession || window.__ideRestorePending;
+    welcome.style.display = (flat.length || waitingRestore) ? "none" : "flex";
     const key = rows.map(r => r.join("+")).join("|");
     if (key === builtGroupKey) return;
     builtGroupKey = key;
@@ -2127,6 +2324,9 @@
   }
   // 打开/切换文件时，把激活标签滚进标签栏可视区（标签多时不再“藏在”滚动区域外）
   function scrollTabIntoView(tab) {
+    // 恢复途中逐个标签激活会反复横向拖动标签栏（看起来就是「标签在左右滑动」），
+    // 等恢复结束、顺序摆好之后再滚一次到当前标签
+    if (window.__ideRestoringSession) return;
     const el = tab && tab.el, bar = el && el.parentElement;
     if (!el || !bar || bar.scrollWidth <= bar.clientWidth) return;
     const r = el.getBoundingClientRect(), br = bar.getBoundingClientRect();

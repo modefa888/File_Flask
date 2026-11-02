@@ -114,10 +114,6 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .tabbar { background: #f3f3f3; }
 :where(html.theme-light) .tab { background: #ececec; border-right-color: #e0e0e0; color: #5a5a5a; }
 :where(html.theme-light) .tab.active { background: #ffffff; color: #1f2328; }
-:where(html.theme-light) .tab.tab-db { box-shadow: inset 3px 0 0 #a8c8e8; }
-:where(html.theme-light) .tab.tab-db.active { background: #cde3f8; color: #0b3d63; box-shadow: inset 3px 0 0 #005fb8; }
-:where(html.theme-light) .tab.tab-db.active .t-close { color: #0b3d63; }
-:where(html.theme-light) .tab.tab-db.active .t-close:hover { background: #a8c8e8; color: #1f2328; }
 :where(html.theme-light) .tab .t-dot { background: #005fb8; }
 :where(html.theme-light) .tab .t-close { color: #5a5a5a; }
 :where(html.theme-light) .tab .t-close:hover { background: #d0d0d0; color: #000000; }

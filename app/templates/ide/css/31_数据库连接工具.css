@@ -1,11 +1,5 @@
   /* ===== 数据库连接工具：左栏连接列表 + 编辑器区域的库表浏览与查询 ===== */
 
-  /* ---------- 编辑器标签：数据库连接标签加颜色（与侧栏高亮呼应） ---------- */
-  .tab.tab-db { box-shadow: inset 3px 0 0 #0e639c; }        /* 未激活：左侧一条蓝边 */
-  .tab.tab-db.active { background: #094771; color: #ffffff; box-shadow: inset 3px 0 0 #4db8ff; }
-  .tab.tab-db.active .t-close { color: #cfe8ff; }
-  .tab.tab-db.active .t-close:hover { background: #0e639c; color: #ffffff; }
-
   /* ---------- 左栏面板 ---------- */
   .dbc-tools { display: flex; align-items: center; gap: 6px; padding: 8px 10px 0; }
   .dbc-tools .g-btn { flex: 1; }

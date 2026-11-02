@@ -212,6 +212,9 @@
     const act = document.createElement("div");
     act.className = "act";
     act.dataset.panel = id;
+    // 插件面板没有预置色板：按注册顺序轮流分配一个强调色（data-accent），
+    // 否则它会成为彩色活动栏里唯一的灰图标（色值见 56_活动栏彩色图标.css）
+    act.dataset.accent = String((_plPanels.size % 4) + 1);
     act.title = spec.title || id;
     act.innerHTML = '<i class="bi ' + (spec.icon || "bi-puzzle") + '"></i>';
     const settingsAct = document.getElementById("actSettings");

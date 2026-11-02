@@ -81,6 +81,13 @@ html.theme-light {
 .activitybar #actProc     { --act-c: var(--ide-c-proc);     --act-h: var(--ide-h-proc); }
 .activitybar #actSettings { --act-c: var(--ide-c-settings); --act-h: var(--ide-h-settings); }
 
+/* 插件注册的面板（20_ 插件系统按注册顺序打的 data-accent）：轮流取用已有色板，
+   否则它们会是彩色活动栏里唯一几枚灰图标 */
+.activitybar .act[data-accent="1"] { --act-c: var(--ide-c-ext);    --act-h: var(--ide-h-ext); }
+.activitybar .act[data-accent="2"] { --act-c: var(--ide-c-api);    --act-h: var(--ide-h-api); }
+.activitybar .act[data-accent="3"] { --act-c: var(--ide-c-ssh);    --act-h: var(--ide-h-ssh); }
+.activitybar .act[data-accent="4"] { --act-c: var(--ide-c-runner); --act-h: var(--ide-h-runner); }
+
 /* 悬停 / 激活时在图标后面垫一层同色淡底（径向柔光，避免生硬的方块） */
 .activitybar .act::before {
   content: ""; position: absolute; inset: 5px 4px; border-radius: 7px;

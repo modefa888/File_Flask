@@ -204,7 +204,8 @@
       '<option value="pypi">PyPI 官方</option>' +
       '</select>' +
       '<button class="refresh" title="重新检测"><i class="bi bi-arrow-clockwise"></i>刷新</button>' +
-      '<button class="install" title="安装所有缺失包" disabled><i class="bi bi-box-arrow-in-down"></i>一键安装缺失</button>';
+      '<button class="install" title="安装所有缺失包" disabled><i class="bi bi-box-arrow-in-down"></i>一键安装缺失</button>' +
+      '<button class="pkgmgr" title="包管理器：搜索 PyPI / 安装 / 升级 / 卸载 / 下载，自动同步 requirements.txt"><i class="bi bi-search"></i></button>';
     tab.host.appendChild(tb);
 
     tab.reqState = { checking: false, items: [], venv: null, error: null };
@@ -359,6 +360,13 @@
 
     refreshBtn.addEventListener("click", () => check());
     installBtn.addEventListener("click", () => installPackages(null, true));
+    // 包管理器浮层（53_）：搜索 / 安装 / 升级 / 卸载 / 下载，装完自动同步 requirements.txt
+    const pmBtn = tb.querySelector("button.pkgmgr");
+    if (pmBtn) pmBtn.addEventListener("click", () => {
+      if (typeof window.openPkgManager === "function") window.openPkgManager(tab);
+      else toast("包管理器模块未加载，请刷新页面", "warn");
+    });
+    tab.reqCheck = check;          // 浮层操作完成后回调：重新检测 gutter 状态
     tab.cm.on("change", () => {
       if (tab.reqTimer) clearTimeout(tab.reqTimer);
       tab.reqTimer = setTimeout(() => check(), 800);

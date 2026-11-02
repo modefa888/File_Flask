@@ -188,6 +188,8 @@ html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacit
 {% include 'ide/css/53_下载中心.css' %}
 {# 侧栏各面板的按钮外观统一（主按钮 / 次级按钮 / 工具行图标），必须放在各面板样式之后 #}
 {% include 'ide/css/54_侧栏面板统一按钮样式.css' %}
+{# 包管理器浮层（requirements.txt 工具栏 🔍：PyPI 搜索 / 安装 / 升级 / 卸载 / 下载） #}
+{% include 'ide/css/55_包管理器浮层.css' %}
 </style>
 {# 29_浅色主题 必须最后一个 <style> 加载：它的浅色覆盖与原始规则同权重，靠「后加载者胜」生效 #}
 <style>
@@ -289,6 +291,8 @@ try { if (localStorage.getItem('ide.sidebar.collapsed') === '1') document.docume
 {% include 'ide/js/47_V2Ray代理_订阅_节点_10808出口.js' %}
 {# 下载中心（任务 / 记录 / 设置）：须放在 16_（关闭大 IIFE）之前，复用闭包内的 $ / esc / toast / findTab / activate #}
 {% include 'ide/js/52_下载中心_多文件打包_可视化选目录_断点续传_下载记录_设置.js' %}
+{# 包管理器（requirements.txt 工具栏 🔍）：须放在 16_ 之前，复用闭包内的 $ / esc / toast / uiConfirm / refreshTreeDirty #}
+{% include 'ide/js/53_包管理器_PyPI搜索_安装_升级_卸载_下载_自动同步requirements.js' %}
 {% include 'ide/js/16_自定义悬停提示_全局接管所有_title_属性.js' %}
 {% include 'ide/js/17_SQLite数据库查看器_db_sqlite只读浏览_表列表_分页数据.js' %}
 {# 标签页内嵌视频播放器：openFile 的视频分支调用 setupVideoView（全局函数，须在 IIFE 关闭后加载） #}

@@ -374,6 +374,19 @@ CREATE TABLE IF NOT EXISTS dl_cfg (
     value TEXT DEFAULT ''
 );
 
+-- 数据采集（可视化采集任意网站数据）：一行一个采集方案
+-- cfg：选择器 / 字段 / 翻页 / 请求头等全部配置（JSON）；rows：上次采集到的行数
+CREATE TABLE IF NOT EXISTS scraper_tasks (
+    id      TEXT PRIMARY KEY,
+    name    TEXT DEFAULT '',
+    url     TEXT DEFAULT '',
+    cfg     TEXT DEFAULT '{}',
+    rows    INTEGER DEFAULT 0,
+    ts      TEXT DEFAULT '',
+    updated REAL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_scraper_tasks_up ON scraper_tasks(updated DESC);
+
 -- AI 对话历史（原独立库 data/.file_manager_ai_chat.db，表结构保持一致以便直接搬运）
 -- root：对话所属的项目根目录（IDE 的 ROOT）。空串 = 还没绑定项目（旧数据），
 -- 首次进入某个项目时由 chatdb.adopt_unassigned() 一次性划归该项目，

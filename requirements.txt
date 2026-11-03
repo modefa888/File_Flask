@@ -17,6 +17,12 @@ psutil>=5.9
 paramiko>=3.0
 # 实时协作编辑：WebSocket 通道（兼容 Werkzeug 开发服务器）
 flask-sock>=0.7
+# 数据采集（可视化采集任意网站数据）：requests 负责抓页面，bs4 负责按选择器提取
+requests>=2.28
+# 数据采集「浏览器渲染」模式（懒加载 / 滚动加载更多）：无头 Chromium 执行站点脚本。
+# 装完还要拉一次浏览器内核：playwright install chromium
+# 不装也能用，只是渲染模式会提示不可用，静态抓取照常。
+playwright>=1.40
 
 bs4
 

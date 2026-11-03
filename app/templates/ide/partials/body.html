@@ -43,6 +43,8 @@
       {# 下载中心：不在侧边栏开面板，点一下直接在编辑器区域打开「下载中心」标签页；
          data-panel 让它可以参与「设置 → 外观」的图标排序 / 启停，点击时在 JS 里拦掉默认的侧栏切换 #}
       <div class="act" data-panel="downloads" id="actDownloads" title="下载中心（多文件打包 / 可视化选目录 / 断点续传 / 下载记录）"><i class="bi bi-cloud-arrow-down"></i><span class="runner-badge" id="actDlBadge" style="display:none">0</span></div>
+      {# 数据采集：点图标在编辑区打开「可视化采集」工作台，侧栏同时给出已保存的采集方案 #}
+      <div class="act" data-panel="scraper" id="actScraper" title="数据采集（可视化点选任意网站元素，批量采集并导出表格）"><i class="bi bi-radar"></i></div>
       <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
       {# 底部两个图标：进程资源管理器在设置之上，设置永远在最底下。
          act-spacer 让「组内第一个」吸收上方全部空白，把整组顶到活动栏最底部（若两个都写 margin-top:auto，
@@ -234,6 +236,16 @@
         <div class="dls-tabs" id="dlsTabs"></div>
         <div class="dls-list scroll-thin" id="dlsList"></div>
         <div class="dls-foot" id="dlsFoot"></div>
+      </div>
+      {# 数据采集（侧栏）：已保存的采集方案列表；完整工作台在编辑区标签页 #}
+      <div class="side-panel" id="scraperPanel">
+        <button class="g-btn block scrp-open" id="scrsOpen" title="在编辑区打开可视化采集工作台"><i class="bi bi-window-stack"></i> 打开采集工作台</button>
+        <div class="scr-row" style="justify-content:space-between;margin:8px 0 6px">
+          <span class="s-hint" style="margin:0">已保存的采集方案</span>
+          <button class="g-ico" id="scrsRefresh" title="刷新方案列表"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+        <div class="scrp-list scroll-thin" id="scrTaskList"></div>
+        <div class="s-hint">在页面上点选「列表项」和「字段」即可生成选择器，支持翻页与 CSV / Excel / JSON 导出；方案保存在本地数据库，换浏览器也在。</div>
       </div>
     </div>
 

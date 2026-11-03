@@ -32,6 +32,7 @@
   --ide-c-fm: #a3e635;        --ide-h-fm: #cbef7f;         /* 文件夹管理器：青柠 */
   --ide-c-v2ray: #8f9bff;     --ide-h-v2ray: #bcc4ff;      /* V2Ray 代理：靛蓝 */
   --ide-c-downloads: #7dd3fc; --ide-h-downloads: #b3e6ff;  /* 下载中心：天青 */
+  --ide-c-scraper: #f9a03f;   --ide-h-scraper: #ffc078;     /* 数据采集：琥珀橙 */
   --ide-c-ext: #e879f9;       --ide-h-ext: #f5a8ff;        /* 扩展 / 插件视图：品红 */
   --ide-c-proc: #7ee787;      --ide-h-proc: #b3ffbe;       /* 进程资源管理器：薄荷绿 */
   --ide-c-settings: #a9b4c2;  --ide-h-settings: #cfd8e3;   /* 设置：钢灰 */
@@ -52,6 +53,7 @@ html.theme-light {
   --ide-c-fm: #4d7c0f;        --ide-h-fm: #3a5c0a;
   --ide-c-v2ray: #4338ca;     --ide-h-v2ray: #31279b;
   --ide-c-downloads: #0284c7; --ide-h-downloads: #0369a1;
+  --ide-c-scraper: #b45309;   --ide-h-scraper: #8a3f06;
   --ide-c-ext: #a21caf;       --ide-h-ext: #86198f;
   --ide-c-proc: #16a34a;      --ide-h-proc: #15803d;
   --ide-c-settings: #5b6672;  --ide-h-settings: #383f47;
@@ -76,6 +78,7 @@ html.theme-light {
 .activitybar .act[data-panel="fm"]        { --act-c: var(--ide-c-fm);        --act-h: var(--ide-h-fm); }
 .activitybar .act[data-panel="v2ray"]     { --act-c: var(--ide-c-v2ray);     --act-h: var(--ide-h-v2ray); }
 .activitybar .act[data-panel="downloads"] { --act-c: var(--ide-c-downloads); --act-h: var(--ide-h-downloads); }
+.activitybar .act[data-panel="scraper"]   { --act-c: var(--ide-c-scraper);   --act-h: var(--ide-h-scraper); }
 .activitybar .act[data-panel="ext"]       { --act-c: var(--ide-c-ext);       --act-h: var(--ide-h-ext); }
 /* 底部两个图标没有 data-panel（不参与排序 / 启停），用 id 定位 */
 .activitybar #actProc     { --act-c: var(--ide-c-proc);     --act-h: var(--ide-h-proc); }

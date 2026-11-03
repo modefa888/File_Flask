@@ -385,6 +385,11 @@
           try { if (typeof window.openDownloadCenter === "function") window.openDownloadCenter(t.view); } catch (e) {}
           continue;
         }
+        // 数据采集工作台（虚拟路径 \u0000scraper）：直接重开；选择器草稿由模块自己的 localStorage 恢复
+        if (t.path === "\u0000scraper") {
+          try { if (typeof window.openScraperWorkbench === "function") window.openScraperWorkbench(); } catch (e) {}
+          continue;
+        }
         // 远程文件管理器（虚拟路径 \u0000sshfm:<连接id>）：按 id 找回 SSH 连接后重开。
         // 必须 await：内部要等连接列表返回再建标签并 activate 自己，不 await 的话它会晚于
         // 下面的「恢复上次活动标签」，刷新后焦点就被远程标签抢走（当前页被切走）。

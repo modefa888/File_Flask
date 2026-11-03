@@ -29,6 +29,7 @@ const SCR = {
   live: false, interactive: false, agentSeq: 0, agentMap: {},
   logs: [], resultMin: false, advOpen: false, tasks: [],
   genLang: "py", genCode: "", genAiCode: false, genAbort: null,
+  itemLock: false,                        // 🔒 锁定后点选 / 自动识别不再改动列表项选择器
   hlEl: null, saveTimer: 0
 };
 
@@ -170,6 +171,8 @@ function scrBuild() {
         '<div class="scr-card">',
           '<div class="scr-cardhead"><i class="bi bi-list-stars"></i>列表项选择器',
             '<span class="scr-badge" id="scrSiteName" style="margin-left:auto" title="当前配置所属站点"></span>',
+            '<button class="scr-mini scr-itemlock" id="scrItemLock" title="锁定选择器：锁定后点选 / 自动识别都不会再改动它">' +
+              '<i class="bi bi-unlock"></i></button>',
           '</div>',
           '<input class="scr-in mono" id="scrItemSel" spellcheck="false" autocomplete="off" ',
             'placeholder="点左侧任意一条数据，自动生成">',
@@ -243,6 +246,8 @@ function scrBuild() {
       '</div>',
     '</div>',
 
+    '<div class="scr-resizer" id="scrResizer" title="上下拖动调整结果区高度"></div>',
+
     '<div class="scr-result" id="scrResult">',
       '<div class="scr-resulthead">',
         '<i class="bi bi-chevron-down" id="scrResultToggle" title="收起 / 展开结果"></i>',
@@ -283,6 +288,14 @@ function scrBuild() {
         '<div class="scr-tblempty">还没有采集结果：抓取页面 → 点选列表项和字段 → 开始采集</div>',
       '</div>',
       '<div class="scr-logs" id="scrLogs" hidden></div>',
+      '<div class="scr-ai-pop scr-exp-pop" id="scrExpPop" hidden>',
+        '<div class="scr-ai-pop-title"><i class="bi bi-download"></i> 确认导出</div>',
+        '<div>将下载 <code id="scrExpName">CSV</code>（<span id="scrExpRows">0</span> 行），是否继续？</div>',
+        '<div class="scr-ai-pop-acts">',
+          '<button class="scr-mini" id="scrExpNo">取消</button>',
+          '<button class="scr-mini" id="scrExpOk"><i class="bi bi-download"></i> 确认导出</button>',
+        '</div>',
+      '</div>',
     '</div>',
 
     /* 查看元素（树形）：点左边树里的节点，右边自动给出相对列表项的 XPath / CSS，可一键写回字段 */
@@ -487,6 +500,15 @@ function scrBindOnce() {
     scrItemCountLocal();
     scrSaveDraft();
   });
+  // 🔒 锁定列表项选择器：点选 / 自动识别不再改动
+  $("scrItemLock").addEventListener("click", function () {
+    SCR.itemLock = !SCR.itemLock;
+    scrSyncLock();
+    scrSaveDraft();
+    toast(SCR.itemLock
+      ? "已锁定列表项选择器：点选 / 自动识别都不会再改动它"
+      : "已解锁：点选 / 自动识别可以重新选择列表项", SCR.itemLock ? "ok" : "warn");
+  });
   $("scrGuess").addEventListener("click", scrGuessList);
   // 列表项调整条：扩大 / 缩小 / 确认 / 取消
   $("scrAdjUp").addEventListener("click", function () { scrAdjApply("up"); });
@@ -495,6 +517,52 @@ function scrBindOnce() {
   $("scrAdjNo").addEventListener("click", function () { scrAdjCancel(false); });
   // 代码生成悬浮框
   $("scrGenCode").addEventListener("click", scrCodeGenOpen);
+  // 结果区高度：上下拖动调整（与底部面板分隔条同款逻辑，记到 localStorage）
+  (function () {
+    const sp = $("scrResizer");
+    const res = $("scrResult");
+    if (!sp || !res) return;
+    let savedH = 0;
+    try { savedH = Number(localStorage.getItem("ide.scraper.resH")) || 0; } catch (_) { }
+    if (savedH >= 120) res.style.height = savedH + "px";
+    let startY = 0, startH = 0, raf = 0, dragging = false;
+    const apply = (h) => {
+      res.style.height = Math.min(Math.max(120, h), Math.max(160, window.innerHeight * 0.75)) + "px";
+    };
+    const onMove = (e) => {
+      if (!dragging) return;
+      if (!(e.buttons & 1)) { onUp(); return; }   // 左键已松开（可能松在 iframe / 窗口外），立即结束拖动
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        apply(startH + (startY - e.clientY));     // 向上拖变高
+      });
+      e.preventDefault();
+    };
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      sp.classList.remove("dragging");
+      document.body.classList.remove("scr-resizing");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      try { localStorage.setItem("ide.scraper.resH", String(Math.round(res.getBoundingClientRect().height))); } catch (_) { }
+    };
+    sp.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      dragging = true;
+      startY = e.clientY;
+      startH = res.getBoundingClientRect().height;
+      sp.classList.add("dragging");
+      document.body.classList.add("scr-resizing");
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+    sp.addEventListener("dblclick", () => {       // 双击恢复默认高度
+      res.style.height = "";
+      try { localStorage.removeItem("ide.scraper.resH"); } catch (_) { }
+    });
+  })();
   $("scrCodeGenLang").addEventListener("change", function () {
     SCR.genLang = this.value;
     scrCodeGenRender();
@@ -696,9 +764,45 @@ function scrBindOnce() {
     box.classList.toggle("min", SCR.resultMin);
     this.className = "bi " + (SCR.resultMin ? "bi-chevron-up" : "bi-chevron-down");
   });
-  $("scrExpCsv").addEventListener("click", function () { scrExport("csv"); });
-  $("scrExpXlsx").addEventListener("click", function () { scrExport("xlsx"); });
-  $("scrExpJson").addEventListener("click", function () { scrExport("json"); });
+  $("scrExpCsv").addEventListener("click", function () { scrExportAsk("csv"); });
+  $("scrExpXlsx").addEventListener("click", function () { scrExportAsk("xlsx"); });
+  $("scrExpJson").addEventListener("click", function () { scrExportAsk("json"); });
+  // 导出二次确认弹层
+  $("scrExpOk").addEventListener("click", function () {
+    scrPopHide($("scrExpPop"));
+    if (SCR.expFmt) scrExport(SCR.expFmt);
+  });
+  $("scrExpNo").addEventListener("click", function () { scrPopHide($("scrExpPop")); });
+  if (!SCR.__expOutsideBound) {
+    SCR.__expOutsideBound = true;
+    document.addEventListener("mousedown", function (e) {
+      const pop = $("scrExpPop");
+      if (!pop || pop.hidden) return;
+      const t = e.target;
+      if (t && t.closest && (t.closest("#scrExpPop") || t.closest("#scrExpCsv") ||
+        t.closest("#scrExpXlsx") || t.closest("#scrExpJson"))) return;
+      scrPopHide(pop);
+    });
+  }
+  // 结果表分页
+  $("scrTableWrap").addEventListener("click", function (e) {
+    const b = e.target.closest("[data-scr-page]");
+    if (!b || b.disabled) return;
+    const pages = Math.max(1, Math.ceil(SCR.rows.length / SCR_RES_PAGE));
+    const a = b.dataset.scrPage;
+    if (a === "first") SCR.resPage = 1;
+    else if (a === "prev") SCR.resPage = Math.max(1, (SCR.resPage || 1) - 1);
+    else if (a === "next") SCR.resPage = Math.min(pages, (SCR.resPage || 1) + 1);
+    else if (a === "last") SCR.resPage = pages;
+    else return;
+    scrRenderResult(SCR.rows);
+  });
+  $("scrTableWrap").addEventListener("keydown", function (e) {
+    if (!e.target || e.target.id !== "scrPagerJump" || e.key !== "Enter") return;
+    const pages = Math.max(1, Math.ceil(SCR.rows.length / SCR_RES_PAGE));
+    SCR.resPage = Math.min(pages, Math.max(1, Number(e.target.value) || 1));
+    scrRenderResult(SCR.rows);
+  });
 
   // ---- 结果筛选 ----
   $("scrFilterBtn").addEventListener("click", function () {
@@ -1175,6 +1279,7 @@ function scrItemSelOf(el, doc) {
 }
 
 function scrPickItem(el, doc) {
+  if (SCR.itemLock) { toast("列表项选择器已锁定（点 🔒 解锁后再选）", "warn"); return; }
   // 不直接保存：先进「调整」状态，调整条上可扩大 / 缩小，确认才生效
   SCR.adjEl = el; SCR.adjDoc = doc; SCR.adjStack = [el];
   scrAdjUpdate(scrItemSelOf(el, doc), doc);
@@ -2944,6 +3049,7 @@ function scrItemCountLocal(showToast) {
 }
 
 function scrGuessList() {
+  if (SCR.itemLock) { toast("列表项选择器已锁定（点 🔒 解锁后再识别）", "warn"); return; }
   if (SCR.interactive) {
     // 交互页读不到 DOM：让代理脚本用同一套启发式识别，回传选择器
     scrAgentCall("guess", {}, 10000).then(function (d) {
@@ -3130,7 +3236,7 @@ function scrPreviewLocal() {
     toast(scrIsXPath(SCR.itemSel) ? "当前页没有 XPath 匹配结果" : "当前页没有匹配到列表项", "warn");
     return;
   }
-  const rows = roots.slice(0, 50).map(function (r) {
+  const rows = roots.slice(0, 2000).map(function (r) {
     const row = {};
     SCR.fields.forEach(function (f) {
       row[f.name] = scrApplyRules(scrRawFieldValue(r, f, doc), f);
@@ -3263,8 +3369,12 @@ function scrAddFilter() {
 }
 
 /* ---------------- 渲染结果表 ---------------- */
+const SCR_RES_PAGE = 50;          // 结果表每页显示多少行（分页查看全量数据）
+
 function scrRenderResult(rows, meta) {
   meta = meta || {};
+  if (rows !== SCR.__lastRows) SCR.resPage = 1;   // 新数据 / 重新筛选 → 回到第 1 页
+  SCR.__lastRows = rows || null;
   SCR.rows = rows || [];
   SCR.columns = SCR.columns && SCR.columns.length
     ? SCR.columns
@@ -3284,25 +3394,43 @@ function scrRenderResult(rows, meta) {
     counts.textContent = allN ? ("筛选后 0 / " + allN + " 行") : "0 行";
     return;
   }
+
+  const pages = Math.max(1, Math.ceil(SCR.rows.length / SCR_RES_PAGE));
+  SCR.resPage = Math.min(Math.max(1, SCR.resPage || 1), pages);
+  const start = (SCR.resPage - 1) * SCR_RES_PAGE;
+  const view = SCR.rows.slice(start, start + SCR_RES_PAGE);
+
   counts.innerHTML = "共 <b>" + SCR.rows.length + "</b> 行" +
     (allN > SCR.rows.length ? '<span class="scr-counts-dim">（原始 ' + allN + " 行，已筛选）</span>" : "") +
     " · " + SCR.columns.length + " 列" +
     (meta.total ? '（当前页匹配 ' + meta.total + " 项）" : "") +
     (meta.pages ? " · 翻了 " + meta.pages + " 页" : "") +
     (meta.scroll ? " · 滚动加载 " + meta.scroll + " 次" : "") +
-    (SCR.rows.length > SCR_MAX_RENDER ? " · 表格只显示前 " + SCR_MAX_RENDER + " 行" : "");
+    (pages > 1 ? ' · 第 <b>' + SCR.resPage + "</b> / " + pages + " 页" : "");
 
   const head = ['<table class="scr-table"><thead><tr><th style="width:52px">#</th>'].concat(
     SCR.columns.map(function (c) { return "<th>" + esc(c) + "</th>"; })
   ).join("");
-  const body = SCR.rows.slice(0, SCR_MAX_RENDER).map(function (r, i) {
+  const body = view.map(function (r, i) {
     const tds = SCR.columns.map(function (c) {
       const v = r[c] == null ? "" : String(r[c]);
       return '<td title="' + scrA(v) + '">' + esc(v) + "</td>";
     }).join("");
-    return "<tr><td class='num'>" + (i + 1) + "</td>" + tds + "</tr>";
+    return "<tr><td class='num'>" + (start + i + 1) + "</td>" + tds + "</tr>";
   }).join("");
-  wrap.innerHTML = head + "</tr></thead><tbody>" + body + "</tbody></table>";
+  const pager = pages > 1
+    ? '<div class="scr-pager">' +
+      '<span class="scr-pager-info">第 <b>' + SCR.resPage + "</b> / " + pages + " 页 · 每页 " + SCR_RES_PAGE + " 行</span>" +
+      '<button class="scr-mini" data-scr-page="first"' + (SCR.resPage <= 1 ? " disabled" : "") + '>首页</button>' +
+      '<button class="scr-mini" data-scr-page="prev"' + (SCR.resPage <= 1 ? " disabled" : "") + '>上一页</button>' +
+      '<button class="scr-mini" data-scr-page="next"' + (SCR.resPage >= pages ? " disabled" : "") + '>下一页</button>' +
+      '<button class="scr-mini" data-scr-page="last"' + (SCR.resPage >= pages ? " disabled" : "") + '>末页</button>' +
+      '<input class="scr-in scr-pager-jump" id="scrPagerJump" type="number" min="1" max="' + pages +
+        '" value="' + SCR.resPage + '" title="输入页码后回车跳转">' +
+      '<span class="scr-pager-info">页</span>' +
+      "</div>"
+    : "";
+  wrap.innerHTML = head + "</tr></thead><tbody>" + body + "</tbody></table>" + pager;
 
   if (SCR.resultMin) {
     SCR.resultMin = false;
@@ -3326,6 +3454,23 @@ function scrRenderLogs(logs) {
 }
 
 /* ---------------- 采集 / 导出 ---------------- */
+const SCR_EXP_NAMES = { csv: "CSV", xlsx: "Excel 工作簿", json: "JSON" };
+
+/* 导出先弹二次确认，确认后才真正下载 */
+function scrExportAsk(fmt) {
+  if (!SCR.rows.length) { toast("还没有数据可导出", "warn"); return; }
+  const pop = $("scrExpPop");
+  if (!pop) { scrExport(fmt); return; }
+  SCR.expFmt = fmt;
+  const n = $("scrExpName");
+  if (n) n.textContent = SCR_EXP_NAMES[fmt] || fmt;
+  const r = $("scrExpRows");
+  if (r) r.textContent = SCR.rows.length;
+  scrPopHide($("scrAiPop"));
+  scrPopHide($("scrDlPop"));
+  pop.hidden = false;
+}
+
 function scrCollectCfg() {
   return {
     item_selector: SCR.itemSel,
@@ -3477,7 +3622,22 @@ function scrApplyDraftToInputs() {
   if ($("scrScrollTimes")) $("scrScrollTimes").value = SCR.scrollTimes || "";
   if ($("scrAdv")) $("scrAdv").hidden = !SCR.advOpen;
   if ($("scrAdvBtn")) $("scrAdvBtn").classList.toggle("on", SCR.advOpen);
+  scrSyncLock();
   scrSyncRenderUI();
+}
+
+/* 🔒 锁定状态同步：图标 / 提示 / 输入框只读 */
+function scrSyncLock() {
+  const b = $("scrItemLock");
+  if (b) {
+    b.classList.toggle("on", !!SCR.itemLock);
+    b.innerHTML = '<i class="bi bi-' + (SCR.itemLock ? "lock-fill" : "unlock") + '"></i>';
+    b.title = SCR.itemLock
+      ? "选择器已锁定：点选 / 自动识别不会再改动它，点击解锁"
+      : "锁定选择器：锁定后点选 / 自动识别都不会再改动它";
+  }
+  const inp = $("scrItemSel");
+  if (inp) inp.readOnly = !!SCR.itemLock;
 }
 
 /* ---------------- 交互预览：与代理脚本通信 ----------------
@@ -3548,6 +3708,7 @@ function scrAgentOnMessage(e) {
 function scrLivePicked(d) {
   if (d.mode === "item") {
     if (d.pending) {                  // 调整中：先不保存，等用户在调整条上确认
+      if (SCR.itemLock) { toast("列表项选择器已锁定（点 🔒 解锁后再选）", "warn"); return; }
       scrAdjUpdate(d.selector || "", null, d.count || 0);
       return;
     }
@@ -3757,6 +3918,7 @@ function scrDraftPayload() {
     delay: SCR.delay, advOpen: SCR.advOpen,
     render: SCR.render, scrollTimes: SCR.scrollTimes, scrollLoops: SCR.scrollLoops,
     live: !!SCR.live,
+    itemLock: !!SCR.itemLock,
     hideSelectors: (SCR.hideSelectors || []).slice(0, 200),
     siteKey: SCR.siteKey || "",
     sites: SCR.sites || {},              // 各站点各存一套，切回来直接接着用
@@ -3789,6 +3951,7 @@ function scrRestoreDraft() {
   SCR.taskName = d.taskName || "";
   SCR.advOpen = !!d.advOpen;
   SCR.live = !!d.live;
+  SCR.itemLock = !!d.itemLock;
   SCR.hideSelectors = Array.isArray(d.hideSelectors) ? d.hideSelectors.slice(0, 200) : [];
   SCR.sites = (d.sites && typeof d.sites === "object") ? d.sites : {};
   SCR.siteKey = d.siteKey || scrHostOf(SCR.url);

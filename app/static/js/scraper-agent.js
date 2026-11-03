@@ -366,7 +366,7 @@
   }
 
   function extractRows(itemSel, fields) {
-    var roots = itemNodes(itemSel).slice(0, 50);
+    var roots = itemNodes(itemSel).slice(0, 2000);   // 全量提取（分页展示），导出不受影响
     return roots.map(function (r) {
       var row = {};
       (fields || []).forEach(function (f) {

@@ -162,6 +162,9 @@ html.theme-light .scr-loading { background: rgba(255, 255, 255, .72); color: #1f
 .scr-cardhead { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--scr-fg); margin-bottom: 8px; }
 .scr-cardhead > .bi { color: var(--scr-acc); }
 .scr-cardhead .scr-mini { margin-left: auto; }
+/* 🔒 列表项选择器锁定按钮：锁上时点亮 */
+.scr-cardhead .scr-itemlock { margin-left: 0; flex: none; }
+.scr-cardhead .scr-itemlock.on { background: var(--scr-acc); border-color: var(--scr-acc); color: #fff; }
 .scr-hint { font-size: 11px; color: var(--scr-dim); line-height: 1.7; margin-top: 6px; }
 .scr-in {
   width: 100%; height: 28px; padding: 0 8px; background: var(--scr-card2); color: var(--scr-fg);
@@ -314,7 +317,19 @@ html.theme-light .scr-tn-tag { color: #0369a1; }
 .scr-diag-tips li { margin: 2px 0; }
 
 /* ---------- 底部结果区 ---------- */
-.scr-result { flex: none; height: 300px; display: flex; flex-direction: column; border-top: 1px solid var(--scr-line); background: var(--scr-panel); }
+/* ---------- 预览区 / 结果区拖动分隔条（与底部面板分隔条同款交互） ---------- */
+.scr-resizer {
+  flex: none; height: 5px; background: var(--scr-panel); cursor: row-resize; position: relative;
+}
+.scr-resizer::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 2px; height: 1px;
+  background: transparent; transition: background .12s;
+}
+.scr-resizer:hover::after, .scr-resizer.dragging::after { background: var(--scr-acc); }
+body.scr-resizing { cursor: row-resize; -webkit-user-select: none; user-select: none; }
+body.scr-resizing .scr-frame { pointer-events: none; }   /* 拖动时别让预览 iframe 吃掉鼠标事件（防抖动） */
+
+.scr-result { flex: none; height: var(--scr-res-h, 300px); display: flex; flex-direction: column; border-top: 1px solid var(--scr-line); background: var(--scr-panel); }
 
 /* ---------- 结果筛选条（按字符串过滤行） ---------- */
 .scr-filterbar {
@@ -492,3 +507,25 @@ html.theme-light .scrp-name { color: #1f2328; }
 }
 .scr-fopts .scr-frule:hover { border-color: var(--scr-acc); color: var(--scr-acc); }
 .scr-fopts .scr-frule.on { border-color: var(--scr-acc); color: var(--scr-acc); background: rgba(56, 189, 248, .08); }
+
+/* ---------- 结果表分页条 ---------- */
+.scr-pager {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 7px 10px; border-top: 1px solid var(--scr-line);
+  background: var(--scr-card2); font-size: 11.5px; color: var(--scr-fg2);
+}
+.scr-pager-info b { color: var(--scr-acc); }
+.scr-pager .scr-mini { flex: none; }
+.scr-pager .scr-mini:disabled { opacity: .45; cursor: not-allowed; }
+.scr-pager-jump {
+  width: 64px; height: 24px; text-align: center; flex: none;
+  background: var(--scr-card); color: var(--scr-fg); border: 1px solid var(--scr-line);
+  border-radius: 4px; font-size: 11.5px; outline: none;
+}
+.scr-pager-jump:focus { border-color: var(--scr-acc); }
+
+/* ---------- 导出二次确认弹层 ---------- */
+.scr-exp-pop {
+  position: fixed; top: auto; right: 18px; bottom: 130px; z-index: 9600;
+  width: auto; min-width: 250px; max-width: 320px; height: auto;
+}

@@ -317,8 +317,8 @@
 #upRecDrawer .upr-tag.fail { background: #fdecec; color: #d1242f; cursor: help; }
 #upRecDrawer .upr-tag.gone { background: #f1f3f5; color: #98a2b3; cursor: help; }
 
-/* 文件已不在原位置：整行置灰 + 文件名加删除线 */
-#upRecDrawer tbody tr.gone { background: #fcfcfd; }
+/* 文件已不在原位置：整行置灰 + 文件名加删除线（点它不跳目录，所以不给手型） */
+#upRecDrawer tbody tr.gone { background: #fcfcfd; cursor: default; }
 #upRecDrawer tbody tr.gone .upr-fn { color: #98a2b3; text-decoration: line-through; }
 #upRecDrawer tbody tr.gone .upr-fp { opacity: .6; }
 

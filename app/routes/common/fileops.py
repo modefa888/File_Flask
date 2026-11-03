@@ -858,6 +858,18 @@ def api_upload_records_missing():
     return jsonify({"success": bool(ok)})
 
 
+@bp.route("/api/files/exists", methods=["GET"])
+def api_files_exists():
+    """快速判断某个路径是否还存在（点上传记录跳转前先校验，免的跳到空目录）。"""
+    raw = (request.args.get("path") or "").strip()
+    if not raw:
+        return jsonify({"success": True, "exists": False, "is_dir": False})
+    target = os.path.abspath(os.path.normpath(raw))
+    if not os.path.exists(target):
+        return jsonify({"success": True, "exists": False, "is_dir": False})
+    return jsonify({"success": True, "exists": True, "is_dir": os.path.isdir(target)})
+
+
 @bp.route("/api/files/upload_record_fail", methods=["POST"])
 def api_upload_record_fail():
     """前端上报一条失败的上传记录（分片中断等，走不到 merge 的情况）。"""

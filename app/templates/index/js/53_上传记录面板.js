@@ -94,11 +94,11 @@
                 $('uprPrev').addEventListener('click', function () { if (_page > 1) { _page--; load(); } });
                 $('uprNext').addEventListener('click', function () { if (_page < _pages) { _page++; load(); } });
                 $('uprClear').addEventListener('click', onClear);
-                // 点记录行（文件名那一列）→ 左侧跳到该文件位置并高亮
+                // 点记录行（文件名那一列）→ 先校验文件还在不在，在才跳到左侧对应目录
                 $('uprTbody').addEventListener('click', function (e) {
                     const tr = e.target.closest('tr[data-dir]');
                     if (!tr || !tr.dataset.dir) return;
-                    jumpTo(tr.dataset.path || '', tr.dataset.dir, tr);
+                    onRowClick(tr);
                 });
                 $('uprKw').addEventListener('input', function (e) {
                     clearTimeout(_searchTimer);
@@ -327,6 +327,40 @@
                         _markRow(tr, true);
                     }
                 }, 200);
+            }
+
+            // 点记录行前的存在性校验：没有完整路径的老记录不拦（避免误伤），有路径就问一下后端
+            var _EXISTS_API_OK = true;   // 服务重启后才有 /api/files/exists，没重启就退回 /api/properties
+            function _existsByProps(path) {
+                return fetch('/api/properties?path=' + encodeURIComponent(path) + '&light=1', { credentials: 'same-origin' })
+                    .then(function (r) { return !!r.ok; })
+                    .catch(function () { return true; });
+            }
+            function _checkExists(path) {
+                if (!path) return Promise.resolve(true);
+                if (!_EXISTS_API_OK) return _existsByProps(path);
+                return fetch('/api/files/exists?path=' + encodeURIComponent(path), { credentials: 'same-origin' })
+                    .then(function (r) {
+                        if (r.status === 404) { _EXISTS_API_OK = false; return null; }   // 老后端没这个接口
+                        return r.json().then(function (d) { return !!(d && d.success && d.exists); });
+                    })
+                    .then(function (v) { return v === null ? _existsByProps(path) : v; })
+                    .catch(function () { return true; });   // 校验本身失败就不拦，别影响正常跳转
+            }
+
+            // 点记录行：文件不存在就直接标「已删除」并停在原地，不跳目录
+            async function onRowClick(tr) {
+                const path = tr.dataset.path || '';
+                const dir = tr.dataset.dir || '';
+                if (tr.dataset.missing === '1') {
+                    showToast('提示', '该文件已不存在，未跳转（记录仍保留）', 'warning');
+                    return;
+                }
+                const exists = await _checkExists(path);
+                if (!tr.parentNode) return;          // 等待期间列表已经重渲染
+                if (!exists) { _markRow(tr, true); return; }
+                if (!dir) return;
+                jumpTo(path, dir, tr);
             }
 
             // 跳到左侧文件管理：打开文件所在目录并高亮该文件（抽屉不关闭，方便接着点下一条）

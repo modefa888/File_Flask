@@ -914,7 +914,11 @@
         gitLiveCard = document.createElement("div");
         gitLiveCard.className = "git-live-card";
         document.body.appendChild(gitLiveCard);
+        // 鼠标可以移进悬浮框点「开始」：进入时取消隐藏，离开时再收起
+        gitLiveCard.addEventListener("mouseenter", () => clearTimeout(gitLiveHideT));
+        gitLiveCard.addEventListener("mouseleave", hideSoon);
       }
+      const vLabel = verb === "fetch" ? "抓取" : "拉取";
       const refresh = async () => {
         if (!gitLiveCard || gitLiveVerb !== verb) return;
         try {
@@ -922,17 +926,36 @@
             encodeURIComponent(gitState.repo) + "&verb=" + verb).then(r => r.json());
           if (!gitLiveCard || gitLiveVerb !== verb) return;
           const st = d.status || "idle";
-          const stTxt = st === "running" ? '<i class="spin"></i> 执行中…'
+          const running = st === "running";
+          const stTxt = running ? '<i class="spin"></i> 执行中…'
             : st === "done" ? '<i class="bi bi-check-circle"></i> 已完成'
             : st === "fail" ? '<i class="bi bi-x-circle"></i> 失败'
-            : '空闲（点按钮开始）';
-          const lines = (d.lines || []).map(esc);
+            : '<i class="bi bi-power"></i> 空闲';
+          // 历史条目：最近 10 次执行（时间 + 结果 + 摘要）
+          const hist = (d.hist || []).map(h =>
+            '<div class="glc-hi"><span class="glc-hi-ok ' + (h.ok ? "ok" : "no") + '">' +
+              (h.ok ? "✓" : "✕") + '</span><span class="glc-hi-ts">' + esc(h.ts || "") +
+              '</span><span class="glc-hi-msg">' + esc(h.msg || "") + '</span></div>');
           gitLiveCard.innerHTML =
             '<div class="glc-head"><span class="glc-st ' + st + '">' + stTxt + '</span>' +
-              '<span class="glc-v">' + (verb === "fetch" ? "抓取" : "拉取") + '</span></div>' +
-            (lines.length
-              ? '<div class="glc-lines">' + lines.join("\n") + '</div>'
-              : '<div class="glc-lines dim">暂无输出</div>');
+              '<span class="glc-v">' + vLabel + '</span></div>' +
+            '<div class="glc-act"><button class="glc-run" id="glcRun" ' + (running ? "disabled" : "") + '>' +
+              '<i class="bi ' + (running ? "bi-hourglass" : "bi-play-fill") + '"></i> ' +
+              (running ? "执行中…" : "开始" + vLabel) + '</button></div>' +
+            (d.lines && d.lines.length
+              ? '<div class="glc-cap">操作信息</div><div class="glc-lines">' + d.lines.map(esc).join("\n") + '</div>'
+              : "") +
+            (hist.length
+              ? '<div class="glc-cap">历史</div><div class="glc-hist">' + hist.reverse().join("") + '</div>'
+              : "");
+          const runBtn = gitLiveCard.querySelector("#glcRun");
+          if (runBtn && !running) {
+            runBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              remoteOp(verb, vLabel);
+              setTimeout(refresh, 300);       // 点完立刻看一眼状态，不等下一轮轮询
+            });
+          }
         } catch (e) { /* 悬浮框轮询失败不打扰用户 */ }
       };
       refresh();
@@ -946,13 +969,15 @@
       gitLiveCard.style.left = x + "px";
       gitLiveCard.style.top = y + "px";
     });
-    btn.addEventListener("mouseleave", () => {
-      gitLiveHideT = setTimeout(() => {
-        clearInterval(gitLiveTimer);
-        if (gitLiveCard) gitLiveCard.style.display = "none";
-        gitLiveVerb = "";
-      }, 250);
-    });
+    btn.addEventListener("mouseleave", hideSoon);
+  }
+
+  function hideSoon() {
+    gitLiveHideT = setTimeout(() => {
+      clearInterval(gitLiveTimer);
+      if (gitLiveCard) gitLiveCard.style.display = "none";
+      gitLiveVerb = "";
+    }, 250);
   }
 
   function remoteOp(verb, label, done) {

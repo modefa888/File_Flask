@@ -329,12 +329,25 @@ def _git_live(cwd, args, timeout=_TIMEOUT, proxy="", lkey=""):
 
     th = threading.Thread(target=_reader, daemon=True)
     th.start()
+    def _hist_add(live, ok, msg):
+        """最近 10 次执行历史（供悬浮框展示），凭据打码。"""
+        hist = live.setdefault("hist", [])
+        hist.append({"ts": time.strftime("%m-%d %H:%M:%S"), "ok": bool(ok),
+                     "msg": _mask_url_cred(str(msg))[:200]})
+        del hist[:-10]
+
     try:
         rc = proc.wait(timeout=timeout)
         th.join(2)
         out = (proc.stdout.read() or "") if proc.stdout else ""
         live["status"] = "done" if rc == 0 else "fail"
         live["ts"] = time.time()
+        if rc == 0:
+            _hist_add(live, True, err_lines[-1] if err_lines else "完成")
+        else:
+            msg = next((ln for ln in err_lines if ln.lower().startswith(("fatal", "error"))),
+                       err_lines[-1] if err_lines else "执行失败")
+            _hist_add(live, False, msg)
         return subprocess.CompletedProcess(args, rc, stdout=out,
                                            stderr="\n".join(err_lines)), None
     except subprocess.TimeoutExpired:
@@ -342,6 +355,7 @@ def _git_live(cwd, args, timeout=_TIMEOUT, proxy="", lkey=""):
         proc.wait(5)
         live["status"] = "fail"
         live["ts"] = time.time()
+        _hist_add(live, False, "执行超时")
         return None, "git 命令执行超时"
 
 
@@ -1204,7 +1218,8 @@ def api_git_remote_live():
     live = _REMOTE_LIVE.get(_live_key(root or "", verb)) or {}
     lines = [_mask_url_cred(ln) for ln in (live.get("lines") or [])]
     return jsonify({"ok": True, "status": live.get("status") or "idle",
-                    "lines": lines, "ts": live.get("ts") or 0})
+                    "lines": lines, "ts": live.get("ts") or 0,
+                    "hist": live.get("hist") or []})
 
 
 @bp.route("/api/git/push", methods=["POST"])

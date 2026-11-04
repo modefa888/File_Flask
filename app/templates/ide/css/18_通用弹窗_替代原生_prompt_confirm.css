@@ -202,6 +202,29 @@
     color: #9cdcfe; word-break: break-all; max-height: 160px; overflow: auto; white-space: pre-wrap;
   }
   .git-live-card .glc-lines.dim { color: #777777; }
+  /* 开始按钮：悬浮框内直接发起抓取 / 拉取 */
+  .git-live-card .glc-act { margin: 7px 0; }
+  .git-live-card .glc-run {
+    display: inline-flex; align-items: center; gap: 5px; width: 100%; justify-content: center;
+    padding: 5px 14px; border: none; border-radius: 5px; cursor: pointer;
+    background: #0d7ec4; color: #ffffff; font-size: 12px; font-family: inherit;
+  }
+  .git-live-card .glc-run:hover { background: #0a6aa8; }
+  .git-live-card .glc-run:disabled { background: #3a3d41; color: #9a9a9a; cursor: not-allowed; }
+  /* 区块小标题 + 历史列表 */
+  .git-live-card .glc-cap {
+    margin: 7px 0 3px; font-size: 10.5px; color: #8a8a8a;
+    text-transform: uppercase; letter-spacing: .5px;
+  }
+  .git-live-card .glc-hist { max-height: 150px; overflow: auto; display: flex; flex-direction: column; gap: 3px; }
+  .git-live-card .glc-hi { display: flex; align-items: center; gap: 6px; font-size: 11px; min-width: 0; }
+  .git-live-card .glc-hi-ok { flex: none; font-weight: 600; }
+  .git-live-card .glc-hi-ok.ok { color: #7ee787; }
+  .git-live-card .glc-hi-ok.no { color: #ff7b72; }
+  .git-live-card .glc-hi-ts { flex: none; color: #9cdcfe; font-variant-numeric: tabular-nums; }
+  .git-live-card .glc-hi-msg {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a8a8a8;
+  }
   .git-live-card .spin {
     display: inline-block; width: 10px; height: 10px; border-radius: 50%;
     border: 1.5px solid currentColor; border-top-color: transparent;

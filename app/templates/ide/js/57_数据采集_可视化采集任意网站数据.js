@@ -4254,10 +4254,8 @@ function scrBindSidebar() {
   const act = document.getElementById("actScraper");
   if (act && act.dataset.bound !== "1") {
     act.dataset.bound = "1";
-    act.addEventListener("click", function () {
-      // 侧栏切换由 02_ 的 showPanel 负责；这里把工作台标签页也一起打开，点一下就进入可视化界面
-      setTimeout(function () { scrOpenCenter(); }, 0);
-    });
+    // 只切换左侧栏面板（02_ 的 showPanel 负责），不自动打开右侧编辑区的工作台标签页；
+    // 工作台仅在点「打开采集工作台」按钮 / 侧栏方案条目 / 会话恢复时才打开
   }
 }
 

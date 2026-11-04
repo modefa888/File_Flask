@@ -309,6 +309,14 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .git-live-card .glc-st.idle { color: #8a8f98; }
 :where(html.theme-light) .git-live-card .glc-lines { color: #0b62a4; }
 :where(html.theme-light) .git-live-card .glc-lines.dim { color: #98a0a8; }
+:where(html.theme-light) .git-live-card .glc-run { background: #0d7ec4; color: #ffffff; }
+:where(html.theme-light) .git-live-card .glc-run:hover { background: #0a6aa8; }
+:where(html.theme-light) .git-live-card .glc-run:disabled { background: #e4e6e8; color: #9a9a9a; }
+:where(html.theme-light) .git-live-card .glc-cap { color: #8a8f98; }
+:where(html.theme-light) .git-live-card .glc-hi-ok.ok { color: #1a7f37; }
+:where(html.theme-light) .git-live-card .glc-hi-ok.no { color: #c62828; }
+:where(html.theme-light) .git-live-card .glc-hi-ts { color: #0b62a4; }
+:where(html.theme-light) .git-live-card .glc-hi-msg { color: #667080; }
 
 /* ---------- 发布推送记录弹窗（18） ---------- */
 :where(html.theme-light) .ph-i { background: #f6f7f9; border-color: #e2e5e9; border-left-color: #b0b6bd; }

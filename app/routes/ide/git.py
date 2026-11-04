@@ -99,7 +99,11 @@ def _mask_token(token):
 
 
 def _auth_remote_url(url, creds):
-    """如果配置了 HTTPS Token，把 https://host/... 重写为 https://<token>@host/...。"""
+    """如果配置了 HTTPS Token，把 https://host/... 重写为 https://<user>:<token>@host/...。
+
+    注意 token 必须放「密码」位：只写 https://<token>@host/ 时 git 认为用户名是
+    token、密码缺失，会提示输入密码（服务端禁了交互提示就直接失败）。
+    """
     if not url or not isinstance(url, str):
         return url
     if (creds or {}).get("type") != "https_token":
@@ -111,17 +115,17 @@ def _auth_remote_url(url, creds):
         return url
     try:
         u = urlsplit(url)
-        if u.scheme != "https" or u.username is not None:
+        if u.scheme != "https":
+            return url
+        if u.password:                      # 用户已写全 user:pass，尊重原样
             return url
         host_filter = (creds.get("host") or "").strip().lower()
         if host_filter and (u.hostname or "").lower() != host_filter:
             return url
-        username = (creds.get("username") or "").strip()
+        # URL 已带用户名 → token 补成密码；否则 GitHub PAT 用任意用户名均可（惯用 x-access-token）
+        username = u.username or (creds.get("username") or "").strip() or "x-access-token"
         port = ":" + str(u.port) if u.port else ""
-        if username:
-            netloc = f"{quote(username, safe='')}:{quote(token, safe='')}@{u.hostname}{port}"
-        else:
-            netloc = f"{quote(token, safe='')}@{u.hostname}{port}"
+        netloc = f"{quote(username, safe='')}:{quote(token, safe='')}@{u.hostname}{port}"
         return urlunsplit((u.scheme, netloc, u.path, u.query, u.fragment))
     except Exception:
         return url

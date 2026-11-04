@@ -184,16 +184,33 @@
   .gr-creds-btn:hover { background: #2a3a4a; border-color: #5a7a9a; }
 
   /* ===== 发布推送记录弹窗 ===== */
-  .ph-list { max-height: 400px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
-  .ph-i { padding: 7px 9px; border-radius: 5px; background: #232323; border: 1px solid #3a3a3a; }
-  .ph-l1 { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+  .ph-list { max-height: 58vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
+  /* 整条记录：左侧 3px 状态色条（绿成功 / 红失败 / 黄中断 / 蓝推送中） */
+  .ph-i {
+    padding: 9px 12px 9px 14px; border-radius: 8px; background: #232323;
+    border: 1px solid #3a3a3a; border-left: 3px solid #555555;
+    transition: background .12s, border-color .12s;
+  }
+  .ph-i:hover { background: #272727; border-color: #4a4a4a; }
+  .ph-i.st-ok { border-left-color: #3fb950; }
+  .ph-i.st-fail { border-left-color: #f85149; }
+  .ph-i.st-warn { border-left-color: #d29922; }
+  .ph-i.st-run { border-left-color: #58a6ff; }
+  .ph-i.st-run.running { background: #1f262e; border-color: #2b4a6b; }
+  .ph-l1 { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+  /* 头部行可点击展开 / 收起详情；箭头提示折叠状态 */
+  .ph-head { cursor: pointer; user-select: none; }
+  .ph-head:hover .ph-ts { text-decoration: underline; text-underline-offset: 3px; }
+  .ph-tw { flex: none; color: #7a7a7a; font-size: 11px; transition: color .12s; }
+  .ph-head:hover .ph-tw { color: #c9c9c9; }
+  .ph-body { margin-top: 7px; }
   .ph-sp { flex: 1; }
-  .ph-ts { color: #9cdcfe; }
+  .ph-ts { color: #9cdcfe; font-variant-numeric: tabular-nums; }
   .ph-br {
     color: #d6a3e0; background: #332a3d; padding: 1px 7px; border-radius: 8px;
     font-size: 11px; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .ph-ok { font-size: 11px; flex: none; }
+  .ph-ok { font-size: 11.5px; flex: none; font-weight: 600; }
   .ph-ok.ok { color: #7ee787; }
   .ph-ok.no { color: #ff7b72; }
   .ph-ok.warn { color: #e2c08a; }
@@ -205,11 +222,27 @@
     animation: grSpin .8s linear infinite; font-style: normal;
     vertical-align: -1px; opacity: .9;
   }
-  .ph-i.running { border-color: #2b4a6b; background: #1f262e; }
-  .ph-detail {
-    margin-top: 4px; font-size: 11.5px; color: #98a0a8; white-space: pre-wrap; word-break: break-all;
-    line-height: 1.5; max-height: 72px; overflow: auto; font-family: ui-monospace, Menlo, Consolas, monospace;
+  /* 标题栏统计（共 N 次 / ✓成功 / ✕失败 / ⟳推送中） */
+  .ph-sum {
+    margin-left: auto; display: inline-flex; gap: 9px; align-items: center;
+    font-size: 11px; font-weight: 400; color: #9a9a9a; white-space: nowrap;
   }
+  .ph-sum-ok { color: #7ee787; }
+  .ph-sum-no { color: #ff7b72; }
+  .ph-sum-run { color: #58a6ff; }
+  /* 输出 / 报错详情：终端样式块；失败红色高亮，一眼看到报错内容 */
+  .ph-detail {
+    margin-top: 6px; padding: 7px 9px; border-radius: 6px;
+    background: #1b1b1b; border: 1px solid #303030;
+    font-size: 11.5px; color: #98a0a8; white-space: pre-wrap; word-break: break-all;
+    line-height: 1.6; max-height: 140px; overflow: auto;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .ph-detail .bi { margin-right: 4px; opacity: .9; }
+  .ph-detail.err { background: #2d1517; border-color: #5c2320; color: #ff9d96; }
+  .ph-detail.warn { background: #2b2113; border-color: #57451e; color: #e2c08a; }
+  .ph-detail.run { background: #16202b; border-color: #26435f; color: #79b8ff; }
+  .ph-detail.ok { color: #6e7681; }
   /* 提交明细（对齐图形区提交悬浮卡） */
   .ph-cmt { margin-top: 6px; padding: 5px 7px; border-radius: 4px; background: #1b1b1b; border: 1px solid #333; }
   .ph-cmt-s { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #e0e0e0; min-width: 0; }

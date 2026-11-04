@@ -301,15 +301,28 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .gr-creds-btn:hover { background: #e3f0fb; border-color: #8ab4d8; }
 
 /* ---------- 发布推送记录弹窗（18） ---------- */
-:where(html.theme-light) .ph-i { background: #f6f7f9; border-color: #e2e5e9; }
+:where(html.theme-light) .ph-i { background: #f6f7f9; border-color: #e2e5e9; border-left-color: #b0b6bd; }
+:where(html.theme-light) .ph-i:hover { background: #f0f2f5; border-color: #d3d7dc; }
+:where(html.theme-light) .ph-i.st-ok { border-left-color: #1a7f37; }
+:where(html.theme-light) .ph-i.st-fail { border-left-color: #cf222e; }
+:where(html.theme-light) .ph-i.st-warn { border-left-color: #9a6700; }
+:where(html.theme-light) .ph-i.st-run { border-left-color: #0969da; }
+:where(html.theme-light) .ph-i.st-run.running { background: #eef4fb; border-color: #b3cbe8; }
 :where(html.theme-light) .ph-ts { color: #0b62a4; }
 :where(html.theme-light) .ph-br { color: #8a3aa0; background: #f3e9f7; }
 :where(html.theme-light) .ph-ok.ok { color: #1a7f37; }
 :where(html.theme-light) .ph-ok.no { color: #c62828; }
 :where(html.theme-light) .ph-ok.warn { color: #9a6700; }
 :where(html.theme-light) .ph-run { color: #005fb8; }
-:where(html.theme-light) .ph-i.running { border-color: #b3cbe8; background: #eef4fb; }
-:where(html.theme-light) .ph-detail { color: #667080; }
+:where(html.theme-light) .ph-sum { color: #6a7280; }
+:where(html.theme-light) .ph-sum-ok { color: #1a7f37; }
+:where(html.theme-light) .ph-sum-no { color: #c62828; }
+:where(html.theme-light) .ph-sum-run { color: #005fb8; }
+:where(html.theme-light) .ph-detail { background: #f6f8fa; border-color: #e4e7ea; color: #667080; }
+:where(html.theme-light) .ph-detail.err { background: #fdeef0; border-color: #f0c4c7; color: #a40e26; }
+:where(html.theme-light) .ph-detail.warn { background: #fff5e0; border-color: #e6d19a; color: #7a5300; }
+:where(html.theme-light) .ph-detail.run { background: #eaf3fd; border-color: #c3ddf6; color: #0a5cad; }
+:where(html.theme-light) .ph-detail.ok { color: #8a929c; }
 :where(html.theme-light) .ph-cmt { background: #fbfbfc; border-color: #e6e8eb; }
 :where(html.theme-light) .ph-cmt-s { color: #333; }
 :where(html.theme-light) .ph-cmt-s .bi { color: #c98a00; }

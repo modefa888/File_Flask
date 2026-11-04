@@ -491,8 +491,8 @@
     if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
     const ov = $("modalOverlay");
     ov.innerHTML =
-      '<div class="ide-modal">' +
-        '<div class="m-title"><i class="bi bi-cloud-upload"></i><span>发布推送记录</span></div>' +
+      '<div class="ide-modal wide">' +
+        '<div class="m-title"><i class="bi bi-cloud-upload"></i><span>发布推送记录</span><span class="ph-sum" id="phSum"></span></div>' +
         '<div class="m-body"><div id="pushHistList" class="ph-list"><div class="ph-empty">加载中…</div></div></div>' +
         '<div class="m-foot">' +
           '<button class="m-cancel" id="phClear">清空记录</button>' +
@@ -528,29 +528,67 @@
 
         if (!items.length) {
           list.innerHTML = '<div class="ph-empty">还没有推送记录<br>点工具栏「发布分支 / 推送」后会自动记录在这里</div>';
+          const sum0 = $("phSum");
+          if (sum0) sum0.textContent = "";
           return;
+        }
+        /* 标题栏统计：成功 / 失败 / 推送中 */
+        const isInterrupt = (x) => /推送中断/.test(String(x.detail || ""));
+        const nOk = items.filter(x => x.status !== "running" && x.ok).length;
+        const nFail = items.filter(x => x.status !== "running" && !x.ok && !isInterrupt(x)).length;
+        const nRun = items.filter(x => x.status === "running").length;
+        const sum = $("phSum");
+        if (sum) {
+          sum.innerHTML =
+            '<span>共 ' + items.length + ' 次</span>' +
+            (nOk ? '<span class="ph-sum-ok">✓ ' + nOk + '</span>' : "") +
+            (nFail ? '<span class="ph-sum-no">✕ ' + nFail + '</span>' : "") +
+            (nRun ? '<span class="ph-sum-run">⟳ ' + nRun + '</span>' : "");
         }
         list.innerHTML = "";
         items.forEach(it => {
           const running = (it.status === "running");       // 推送进行中（开始时先落库，结束后回写）
           // 服务重启 / 进程结束留下的「中断」记录（并非真的推送失败）：用黄色区分，避免误以为要重推
-          const interrupted = !running && !it.ok && /推送中断/.test(String(it.detail || ""));
+          const interrupted = !running && !it.ok && isInterrupt(it);
+          // 状态决定整条记录的左侧色条：成功绿 / 失败红 / 中断黄 / 推送中蓝
+          const stCls = running ? "st-run" : interrupted ? "st-warn" : (it.ok ? "st-ok" : "st-fail");
           const row = document.createElement("div");
-          row.className = "ph-i" + (running ? " running" : "");
-          row.innerHTML =
-            '<div class="ph-l1">' +
-              '<span class="ph-ts"></span>' +
-              (it.branch ? '<span class="ph-br"></span>' : '') +
-              '<span class="ph-sp"></span>' +
-              (running
-                ? '<span class="ph-run"><i class="spin"></i> 推送中</span>'
-                : interrupted
-                  ? '<span class="ph-ok warn">⚠ 中断</span>'
-                  : '<span class="ph-ok ' + (it.ok ? "ok" : "no") + '">' + (it.ok ? "✓ 成功" : "✕ 失败") + '</span>') +
-            '</div>';
-          row.querySelector(".ph-ts").textContent = String(it.ts || "").slice(5, 16);
-          if (it.branch) row.querySelector(".ph-br").textContent = it.branch;
+          row.className = "ph-i " + stCls + (running ? " running" : "");
+          /* 头部行：时间 / 分支 / 结果 + 折叠箭头；点击展开详情 */
+          const head = document.createElement("div");
+          head.className = "ph-l1 ph-head";
+          head.innerHTML =
+            '<span class="ph-ts"></span>' +
+            (it.branch ? '<span class="ph-br"></span>' : '') +
+            '<span class="ph-sp"></span>' +
+            (running
+              ? '<span class="ph-run"><i class="spin"></i> 推送中</span>'
+              : interrupted
+                ? '<span class="ph-ok warn">⚠ 中断</span>'
+                : '<span class="ph-ok ' + (it.ok ? "ok" : "no") + '">' + (it.ok ? "✓ 成功" : "✕ 失败") + '</span>') +
+            '<i class="bi bi-chevron-right ph-tw"></i>';
+          head.querySelector(".ph-ts").textContent = String(it.ts || "").slice(5, 16);
+          if (it.branch) head.querySelector(".ph-br").textContent = it.branch;
+          row.appendChild(head);
           list.appendChild(row);
+
+          /* 主体（默认折叠）：报错信息放最上面，提交明细在下面 */
+          const body = document.createElement("div");
+          body.className = "ph-body";
+          body.style.display = "none";
+          row.appendChild(body);
+
+          const dt = document.createElement("div");
+          // 详情按结果着色：失败红色报错块最醒目，中断黄、推送中蓝、成功灰
+          dt.className = "ph-detail " + (running ? "run" : interrupted ? "warn" : (it.ok ? "ok" : "err"));
+          if (running) {
+            dt.innerHTML = '<i class="bi bi-hourglass-split"></i>正在推送到远程仓库，结束后这里会显示结果…';
+          } else if (!it.ok && !interrupted && it.detail) {
+            dt.innerHTML = '<i class="bi bi-exclamation-triangle"></i>' + esc(String(it.detail));
+          } else {
+            dt.textContent = it.detail || (it.ok ? "推送成功" : "—");
+          }
+          body.appendChild(dt);
 
           // 本次推送的提交明细（样式对齐图形区的提交悬浮卡）
           let cmts = [];
@@ -574,13 +612,16 @@
             if (c.d) meta.push(String(c.d).slice(0, 16));
             if (c.h) meta.push(c.h);
             cd.querySelector(".ph-cmt-m").textContent = meta.join(" · ");
-            row.appendChild(cd);
+            body.appendChild(cd);
           });
 
-          const dt = document.createElement("div");
-          dt.className = "ph-detail";
-          dt.textContent = running ? "正在推送到远程仓库，结束后这里会显示结果…" : (it.detail || "—");
-          row.appendChild(dt);
+          // 点击头部切换折叠；展开后箭头转下
+          head.addEventListener("click", () => {
+            const open = body.style.display === "none";
+            body.style.display = open ? "" : "none";
+            const tw = head.querySelector(".ph-tw");
+            if (tw) tw.className = "bi " + (open ? "bi-chevron-down" : "bi-chevron-right") + " ph-tw";
+          });
         });
       } catch (e) {
         list.innerHTML = '<div class="ph-empty">读取推送记录失败：' + esc(String(e.message || e)) + '</div>';

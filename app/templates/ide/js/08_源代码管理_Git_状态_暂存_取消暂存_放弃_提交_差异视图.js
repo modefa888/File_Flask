@@ -903,81 +903,207 @@
 
   let gitRemoteBusy = "";           // 正在执行的远程操作，防止连点堆出多条「推送中」
 
-  /* 抓取 / 拉取按钮的实时进度悬浮框：悬停即显示最近进度行，执行中每 800ms 轮询后端 */
-  let gitLiveCard = null, gitLiveTimer = 0, gitLiveVerb = "", gitLiveHideT = 0;
-  function gitLiveHover(btn, verb) {
-    btn.addEventListener("mouseenter", () => {
-      clearTimeout(gitLiveHideT);
-      clearInterval(gitLiveTimer);
-      gitLiveVerb = verb;
-      if (!gitLiveCard) {
-        gitLiveCard = document.createElement("div");
-        gitLiveCard.className = "git-live-card";
-        document.body.appendChild(gitLiveCard);
-        // 鼠标可以移进悬浮框点「开始」：进入时取消隐藏，离开时再收起
-        gitLiveCard.addEventListener("mouseenter", () => clearTimeout(gitLiveHideT));
-        gitLiveCard.addEventListener("mouseleave", hideSoon);
-      }
-      const vLabel = verb === "fetch" ? "抓取" : "拉取";
-      const refresh = async () => {
-        if (!gitLiveCard || gitLiveVerb !== verb) return;
-        try {
-          const d = await fetch("/api/git/remote/live?repo=" +
-            encodeURIComponent(gitState.repo) + "&verb=" + verb).then(r => r.json());
-          if (!gitLiveCard || gitLiveVerb !== verb) return;
-          const st = d.status || "idle";
-          const running = st === "running";
-          const stTxt = running ? '<i class="spin"></i> 执行中…'
-            : st === "done" ? '<i class="bi bi-check-circle"></i> 已完成'
-            : st === "fail" ? '<i class="bi bi-x-circle"></i> 失败'
-            : '<i class="bi bi-power"></i> 空闲';
-          // 历史条目：最近 10 次执行（时间 + 结果 + 摘要）
-          const hist = (d.hist || []).map(h =>
-            '<div class="glc-hi"><span class="glc-hi-ok ' + (h.ok ? "ok" : "no") + '">' +
-              (h.ok ? "✓" : "✕") + '</span><span class="glc-hi-ts">' + esc(h.ts || "") +
-              '</span><span class="glc-hi-msg">' + esc(h.msg || "") + '</span></div>');
-          gitLiveCard.innerHTML =
-            '<div class="glc-head"><span class="glc-st ' + st + '">' + stTxt + '</span>' +
-              '<span class="glc-v">' + vLabel + '</span></div>' +
-            '<div class="glc-act"><button class="glc-run" id="glcRun" ' + (running ? "disabled" : "") + '>' +
-              '<i class="bi ' + (running ? "bi-hourglass" : "bi-play-fill") + '"></i> ' +
-              (running ? "执行中…" : "开始" + vLabel) + '</button></div>' +
-            (d.lines && d.lines.length
-              ? '<div class="glc-cap">操作信息</div><div class="glc-lines">' + d.lines.map(esc).join("\n") + '</div>'
-              : "") +
-            (hist.length
-              ? '<div class="glc-cap">历史</div><div class="glc-hist">' + hist.reverse().join("") + '</div>'
-              : "");
-          const runBtn = gitLiveCard.querySelector("#glcRun");
-          if (runBtn && !running) {
-            runBtn.addEventListener("click", (e) => {
-              e.stopPropagation();
-              remoteOp(verb, vLabel);
-              setTimeout(refresh, 300);       // 点完立刻看一眼状态，不等下一轮轮询
-            });
-          }
-        } catch (e) { /* 悬浮框轮询失败不打扰用户 */ }
-      };
-      refresh();
-      gitLiveTimer = setInterval(refresh, 800);
-      const r = btn.getBoundingClientRect();
-      gitLiveCard.style.display = "block";
-      const cw = gitLiveCard.offsetWidth || 300, ch = gitLiveCard.offsetHeight || 80;
-      let x = Math.max(8, Math.min(r.left, window.innerWidth - cw - 8));
-      let y = r.bottom + 6;
-      if (y + ch > window.innerHeight - 8) y = Math.max(8, r.top - ch - 6);
-      gitLiveCard.style.left = x + "px";
-      gitLiveCard.style.top = y + "px";
-    });
-    btn.addEventListener("mouseleave", hideSoon);
-  }
+  /* 远程仓库同步弹窗：版本信息 + 抓取/拉取选项卡 + 功能说明 + 动态进度 + 文件变更 */
+  function showRemoteLive(verb0) {
+    if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
+    let verb = verb0;
+    const meta = {
+      fetch: {
+        icon: "bi-cloud-download", name: "抓取", toast: "抓取",
+        desc: "只从远程下载新提交（存到 origin/分支），不会改动你正在编辑的文件——想先看看远程有什么更新、再决定要不要合并时用它。",
+      },
+      pull: {
+        icon: "bi-arrow-down-circle", name: "拉取", toast: "拉取",
+        desc: "下载远程新提交并合并进当前分支，工作区文件会随之更新；若与本地修改冲突会提示处理。等价于 抓取 + 合并。",
+      },
+    };
+    const stageMap = [
+      ["Counting objects", "统计对象"],
+      ["Compressing objects", "压缩对象"],
+      ["Receiving objects", "接收对象"],
+      ["Resolving deltas", "解析差异"],
+      ["Updating files", "更新文件"],
+    ];
+    /* git 统计行转中文："3 files changed, 189 insertions(+), 2 deletions(-)"
+       → "已更改 3 个文件，189 行插入(+)，2 行删除(-)" */
+    const statZh = (s) => {
+      const m = String(s || "").match(/(\d+)\s+files? changed(?:,\s*(\d+)\s+insertions?\(\+\))?(?:,\s*(\d+)\s+deletions?\(-\))?/);
+      if (!m) return s || "";
+      let t = "已更改 " + m[1] + " 个文件";
+      if (m[2]) t += "，" + m[2] + " 行插入(+)";
+      if (m[3]) t += "，" + m[3] + " 行删除(-)";
+      return t;
+    };
+    const ov = $("modalOverlay");
+    ov.innerHTML =
+      '<div class="ide-modal wide rl-modal">' +
+        '<div class="m-title"><i class="bi bi-cloud-arrow-down"></i><span>远程仓库同步</span><span class="ph-sum" id="rlSum"></span></div>' +
+        '<div class="m-body">' +
+          '<div class="rl-info" id="rlInfo"><i class="spin"></i> 读取仓库信息…</div>' +
+          '<div class="rl-tabs" id="rlTabs">' +
+            '<span class="rl-tab" data-verb="fetch"><i class="bi bi-cloud-download"></i> 抓取 Fetch</span>' +
+            '<span class="rl-tab" data-verb="pull"><i class="bi bi-arrow-down-circle"></i> 拉取 Pull</span>' +
+          '</div>' +
+          '<div class="rl-desc"><i class="bi bi-lightbulb"></i><span id="rlDesc"></span></div>' +
+          '<div id="rlBody"><div class="ph-empty">加载中…</div></div>' +
+        '</div>' +
+        '<div class="m-foot">' +
+          '<button class="m-cancel" id="rlPush"><i class="bi bi-cloud-upload"></i> 立即推送</button>' +
+          '<button class="m-cancel" id="rlHist"><i class="bi bi-clock-history"></i> 推送记录</button>' +
+          '<button class="m-ok" id="rlClose">关闭</button>' +
+        '</div>' +
+      '</div>';
+    ov.classList.add("show");
+    let timer = 0, dead = false, lastSig = "";
+    const close = () => { dead = true; clearInterval(timer); ov.classList.remove("show"); };
+    $("rlClose").onclick = close;
+    $("rlPush").onclick = () => { remoteOp("push", "发布分支"); };
+    $("rlHist").onclick = () => { close(); showPushHistory(); };
 
-  function hideSoon() {
-    gitLiveHideT = setTimeout(() => {
-      clearInterval(gitLiveTimer);
-      if (gitLiveCard) gitLiveCard.style.display = "none";
-      gitLiveVerb = "";
-    }, 250);
+    function renderTabs() {
+      $("rlTabs").querySelectorAll(".rl-tab").forEach(t => {
+        t.classList.toggle("on", t.dataset.verb === verb);
+        t.onclick = () => {
+          if (verb === t.dataset.verb) return;
+          verb = t.dataset.verb;
+          lastSig = "";
+          $("rlBody").innerHTML = '<div class="ph-empty">加载中…</div>';
+          renderTabs();
+          refresh();
+        };
+      });
+      $("rlDesc").textContent = meta[verb].desc;
+    }
+
+    /* 从输出行提取各阶段的百分比进度 */
+    function progBars(lines) {
+      const bars = [];
+      stageMap.forEach(([en, zh]) => {
+        let last = null;
+        lines.forEach(ln => {
+          const m = ln.match(new RegExp("^" + en + ":\\s+(\\d+)%\\s+\\((\\d+)/(\\d+)\\)"));
+          if (m) last = m;
+        });
+        if (last) bars.push({ zh, pct: +last[1], cur: last[2], total: last[3] });
+      });
+      return bars;
+    }
+
+    function renderInfo(i) {
+      const el = $("rlInfo");
+      if (!el) return;
+      const t = (s) => {
+        if (!s) return "";
+        try { const r = gitRelTime(s); return r || s.slice(0, 10); } catch (_) { return s.slice(0, 10); }
+      };
+      const state = i.no_upstream
+        ? '<span class="nu" title="本地分支还没有关联远程跟踪分支（从未抓取/推送成功过）"><i class="bi bi-exclamation-circle"></i>未关联</span>' +
+          '<button class="rl-linkup" id="rlLinkUp" title="抓取远程同名分支并设为上游">关联</button>'
+        : i.ahead
+        ? '<span class="up" title="本地比远程多 ' + i.ahead + ' 个提交，推送后同步"><i class="bi bi-arrow-up-circle"></i>领先 ' + i.ahead + '</span>'
+        : i.behind
+        ? '<span class="dn" title="远程比本地多 ' + i.behind + ' 个提交，拉取后同步"><i class="bi bi-arrow-down-circle"></i>落后 ' + i.behind + '</span>'
+        : '<span class="eq"><i class="bi bi-check2-circle"></i>一致</span>';
+      const fresh = i.remote_fresh
+        ? '<span class="fresh" title="刚从远程在线获取"><i class="bi bi-broadcast"></i>在线</span>' : "";
+      el.innerHTML =
+        '<div class="rl-row">' +
+          '<span class="rl-side loc"><i class="bi bi-pc-display"></i>本地</span>' +
+          '<span class="rl-br"><i class="bi bi-diagram-3"></i>' + esc(i.branch || "?") + '</span>' +
+          '<span class="rl-hash">' + esc(i.head || "?") + '</span>' +
+          '<span class="rl-sub">' + esc(i.head_subject || "") + '</span>' +
+          '<span class="rl-t">' + esc(t(i.head_time)) + '</span>' +
+        '</div>' +
+        '<div class="rl-row">' +
+          '<span class="rl-side rem"><i class="bi bi-cloud-check"></i>远程</span>' +
+          '<span class="rl-br dim">origin/' + esc(i.branch || "?") + '</span>' +
+          '<span class="rl-hash">' + esc(i.remote_head || "?") + '</span>' +
+          '<span class="rl-sub' + (i.remote_subject ? '' : ' dim') + '">' +
+            esc(i.remote_subject || (i.remote_head ? "（抓取后显示提交说明）" : "")) + '</span>' +
+          '<span class="rl-t">' + esc(t(i.remote_time)) + '</span>' +
+          fresh + state +
+        '</div>' +
+        (i.remote ? '<div class="rl-url"><i class="bi bi-link-45deg"></i>' + esc(i.remote) + '</div>' : "");
+      // 「关联」按钮：抓取远程同名分支 + 设为上游，之后就能看到说明/落后数
+      const linkBtn = el.querySelector("#rlLinkUp");
+      if (linkBtn) {
+        linkBtn.onclick = async (e) => {
+          e.stopPropagation();
+          linkBtn.disabled = true;
+          linkBtn.innerHTML = '<i class="spin"></i> 关联中…';
+          try {
+            const r = await fetch("/api/git/branch/upstream", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ repo: gitState.repo }),
+            }).then(x => x.json());
+            if (r.error) throw new Error(r.error);
+            toast("已关联远程分支 origin/" + (r.branch || ""));
+            refresh();
+            if (typeof loadGitStatus === "function") loadGitStatus(true);
+          } catch (err2) {
+            toast("关联失败：" + err2.message, "error");
+            linkBtn.disabled = false;
+            linkBtn.textContent = "关联";
+          }
+        };
+      }
+    }
+
+    async function refresh() {
+      if (dead) return;
+      try {
+        const d = await fetch("/api/git/remote/live?repo=" +
+          encodeURIComponent(gitState.repo) + "&verb=" + verb).then(r => r.json());
+        if (dead) return;
+        if (d.info) renderInfo(d.info);
+        const st = d.status || "idle";
+        const running = st === "running";
+        const sig = JSON.stringify([verb, st, d.lines, d.files, d.stat]);
+        if (sig === lastSig) return;            // 数据没变就不重绘，避免进度条/图标闪烁
+        lastSig = sig;
+        const m = meta[verb];
+        const lines = d.lines || [];
+        const stChip = running ? '<span class="rl-chip run"><i class="spin"></i> 执行中</span>'
+          : st === "done" ? '<span class="rl-chip ok"><i class="bi bi-check-circle"></i> 已完成</span>'
+          : st === "fail" ? '<span class="rl-chip no"><i class="bi bi-x-circle"></i> 失败</span>'
+          : '<span class="rl-chip idle"><i class="bi bi-power"></i> 空闲</span>';
+        const sum = $("rlSum");
+        if (sum) sum.textContent = d.stat ? statZh(d.stat) : "";
+        const bars = progBars(lines).map(b =>
+          '<div class="rl-bar"><span class="rl-bar-n">' + b.zh + '</span>' +
+          '<span class="rl-bar-t' + (running ? ' go' : '') + '"><i style="width:' + b.pct + '%"></i></span>' +
+          '<span class="rl-bar-v">' + b.pct + '%（' + b.cur + '/' + b.total + '）</span></div>').join("");
+        const files = (d.files || []).map(f => {
+          const fm = f.match(/^([AMDRT])\d*\s+(.*)$/);
+          const tag = fm ? fm[1] : "·", p = fm ? fm[2].replace(/\t/g, " → ") : f;
+          return '<div class="rl-fi"><span class="rl-fi-tag ' + tag + '">' + tag + '</span>' +
+                 '<span class="rl-fi-p">' + esc(p) + '</span></div>';
+        }).join("");
+        const body = $("rlBody");
+        if (!body) return;
+        body.innerHTML =
+          '<div class="rl-top">' + stChip +
+            '<button class="m-ok rl-run" id="rlRun" ' + (running ? "disabled" : "") + '>' +
+              '<i class="bi ' + (running ? "bi-hourglass" : "bi-play-fill") + '"></i> ' +
+              (running ? "执行中…" : "开始" + m.toast) + '</button></div>' +
+          (bars ? '<div class="rl-cap"><i class="bi bi-activity"></i> 动态进度</div><div class="rl-bars">' + bars + '</div>' : "") +
+          (files ? '<div class="rl-cap"><i class="bi bi-file-earmark-diff"></i> 文件信息</div><div class="rl-files">' + files + '</div>' : "") +
+          '<div class="rl-cap"><i class="bi bi-terminal"></i> 操作信息</div>' +
+          '<div class="rl-log" id="rlLog">' + (lines.length ? lines.map(esc).join("\n") : "暂无输出，点上方「开始" + m.toast + "」开始同步") + '</div>';
+        const run = $("rlRun");
+        if (run && !running) run.onclick = (e) => {
+          e.stopPropagation();
+          remoteOp(verb, m.toast);
+          setTimeout(refresh, 300);
+        };
+        const log = $("rlLog");
+        if (log) log.scrollTop = log.scrollHeight;   // 输出自动滚到底
+      } catch (e) { /* 轮询失败忽略 */ }
+    }
+    renderTabs();
+    refresh();
+    timer = setInterval(refresh, 800);
   }
 
   function remoteOp(verb, label, done) {
@@ -1108,8 +1234,7 @@
       return b;
     };
     addAct("bi-crosshair", "转到当前历史记录项", gotoCurrentCommit);
-    gitLiveHover(addAct("bi-cloud-download", "从所有远程存储库中抓取（悬停看实时进度）", () => remoteOp("fetch", "抓取")), "fetch");
-    gitLiveHover(addAct("bi-arrow-down-circle", "拉取（悬停看实时进度）", () => remoteOp("pull", "拉取")), "pull");
+    addAct("bi-cloud-arrow-down", "与远程同步（抓取 / 拉取，点击打开进度面板）", () => showRemoteLive("pull"));
     addAct("bi-cloud-upload", "发布分支 / 推送", () => remoteOp("push", "发布分支"));
     addAct("bi-arrow-clockwise", "刷新", () => loadGitStatus(true));
     addAct("bi-three-dots", "更多操作", () => {});

@@ -181,6 +181,36 @@ def _proxy_cfg(creds):
     return _normalize_proxy(creds.get("proxy_url"))
 
 
+def _verify_github_token(token, proxy="", timeout=10):
+    """用 GitHub API 校验 token 本身是否有效，返回 (ok, 提示)。
+
+    背景：public 仓库的 ls-remote 匿名也能成功，「测试连接」会假成功；
+    只有 API 带上 token 能拿到当前用户，才能真正证明 token 没失效。
+    """
+    import urllib.request
+    import urllib.error
+    import json as _json
+    handlers = []
+    if proxy:
+        handlers.append(urllib.request.ProxyHandler(
+            {"http": proxy, "https": proxy}))
+    opener = urllib.request.build_opener(*handlers)
+    try:
+        r = opener.open(urllib.request.Request(
+            "https://api.github.com/user",
+            headers={"User-Agent": "flask-ide", "Authorization": "Bearer " + token},
+        ), timeout=timeout)
+        login = (_json.loads(r.read() or b"{}") or {}).get("login") or "?"
+        return True, login
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            return False, "token 已失效或被撤销（GitHub 返回 401），请到 GitHub 重新生成并保存"
+        return False, f"GitHub 返回 HTTP {e.code}，token 校验未通过"
+    except Exception as e:
+        # 网络原因校验不了时不阻断流程，只提示未确认
+        return True, f"token 未能在线校验（{e}），按原样使用"
+
+
 def _is_http_remote(url):
     """兜底代理只对 HTTP(S) 远程有意义（SSH 远程要靠 ProxyCommand，http.proxy 管不到）。"""
     u = (url or "").strip().lower()
@@ -266,6 +296,10 @@ def _git(cwd, args, timeout=_TIMEOUT, proxy=""):
 # 抓取 / 拉取的实时进度：键 "<repo根>|<verb>"，值 {lines, status, ts}
 # 进度行由后台线程从 git stderr 流式读入，前端悬浮框轮询展示
 _REMOTE_LIVE = {}
+# 远程最新提交的在线查询缓存：键 (repo根, 分支)，值 (取到时间, 远程hash, 是否在线取到)
+_REMOTE_HEAD_CACHE = {}
+# 正在在线查询的键集合：轮询重叠时防止并发重复 ls-remote
+_REMOTE_HEAD_INFLIGHT = set()
 
 _RE_REMOTE_TOKENISH = re.compile(r"https://[^/\s]+@", re.I)
 
@@ -1181,10 +1215,15 @@ def _remote_op(verb, timeout):
             }), 400
         if ("permission denied" in lowered or "authentication failed" in lowered or
                 "could not read username" in lowered or "could not read password" in lowered or
+                "invalid username or token" in lowered or
                 "没有那个设备或地址" in out):
+            hint = "保存的 Token 已失效或被撤销，请到 GitHub 重新生成后填入「设置 → Git 认证」"
+            if "invalid username or token" not in lowered:
+                hint = ("请到「设置 → Git 认证」填写 Personal Access Token，"
+                        "或在远程地址中使用 https://<Token>@github.com/用户名/仓库名.git")
             return jsonify({
                 "ok": False,
-                "error": "访问远程仓库需要认证。请到「设置 → Git 认证」填写 Personal Access Token，或在远程地址中使用 https://<Token>@github.com/用户名/仓库名.git。",
+                "error": "访问远程仓库需要认证。" + hint,
                 "output": out
             }), 400
         return jsonify({"ok": False, "error": out or f"{verb} 失败", "output": out}), 500
@@ -1202,6 +1241,45 @@ def api_git_pull():
     return _remote_op("pull", 60)
 
 
+@bp.route("/api/git/branch/upstream", methods=["POST"])
+def api_git_branch_upstream():
+    """把当前分支关联到远程同名分支：fetch 一次 + 设置 upstream。
+
+    仓库从没成功抓取/推送过时，本地既没有 origin/分支 引用、也没有上游配置，
+    界面上就会显示「未关联」，远程提交说明也取不到——这个接口一次补齐。
+    """
+    data = request.get_json(silent=True) or {}
+    root, err = _repo_root(data.get("repo") or "")
+    if err:
+        return _fail(err)
+    if not root:
+        return _fail("不是 Git 仓库")
+    creds = _load_git_creds()
+    pb, _e = _git(root, ["rev-parse", "--abbrev-ref", "HEAD"], timeout=5)
+    if not pb or pb.returncode != 0 or not (pb.stdout or "").strip():
+        return _fail("无法读取当前分支")
+    branch = pb.stdout.strip()
+    pu, _e = _git(root, ["remote", "get-url", "origin"], timeout=5)
+    origin_url = (pu.stdout or "").strip() if pu and pu.returncode == 0 else ""
+    if not origin_url:
+        return _fail("当前仓库没有配置远程仓库 origin")
+    url = _auth_remote_url(origin_url, creds)
+    proxy = _proxy_cfg(creds) if _is_http_remote(origin_url) else ""
+    refspec = branch + ":refs/remotes/origin/" + branch
+    proc, e = _git(root, ["fetch", url, refspec], timeout=60, proxy=proxy)
+    if (e or not proc or proc.returncode != 0) and proxy:
+        proc, e = _git(root, ["fetch", url, refspec], timeout=60)   # 代理失败再直连一次
+    if e or not proc or proc.returncode != 0:
+        msg = e or ((proc.stdout or "") + (proc.stderr or "")).strip()
+        return _fail("抓取远程分支失败：" + _mask_url_cred(msg)[:300], 500)
+    p2, e2 = _git(root, ["branch", "--set-upstream-to=origin/" + branch, branch], timeout=10)
+    if e2 or not p2 or p2.returncode != 0:
+        msg = e2 or ((p2.stdout or "") + (p2.stderr or "")).strip()
+        return _fail("设置关联分支失败：" + _mask_url_cred(msg)[:300], 500)
+    _REMOTE_HEAD_CACHE.pop((root, branch), None)     # 清缓存，版本信息立即刷新
+    return jsonify({"ok": True, "branch": branch, "output": "已关联 origin/" + branch})
+
+
 @bp.route("/api/git/remote/live")
 def api_git_remote_live():
     """抓取 / 拉取的实时进度（供工具栏按钮悬浮框轮询）。
@@ -1215,11 +1293,97 @@ def api_git_remote_live():
     root, err = _repo_root(repo)
     if err:
         return _fail(err)
+    creds = _load_git_creds()
     live = _REMOTE_LIVE.get(_live_key(root or "", verb)) or {}
     lines = [_mask_url_cred(ln) for ln in (live.get("lines") or [])]
+    # 版本信息：本地 / 远程最新提交（哈希、说明、时间）、领先落后、远程地址（脱敏）
+    info = {}
+    try:
+        pb, _e = _git(root, ["rev-parse", "--abbrev-ref", "HEAD"], timeout=5)
+        if pb and pb.returncode == 0:
+            info["branch"] = pb.stdout.strip()
+        branch = info.get("branch") or ""
+        ph, _e = _git(root, ["rev-parse", "--short", "HEAD"], timeout=5)
+        if ph and ph.returncode == 0:
+            info["head"] = ph.stdout.strip()
+        pl, _e = _git(root, ["log", "-1", "--format=%s%x09%cI"], timeout=5)
+        if pl and pl.returncode == 0 and pl.stdout:
+            parts = pl.stdout.strip().split("\t", 1)
+            if len(parts) == 2:
+                info["head_subject"], info["head_time"] = parts
+        psb, _e = _git(root, ["status", "-sb"], timeout=5)
+        if psb and psb.returncode == 0 and psb.stdout:
+            first = psb.stdout.splitlines()[0]
+            m = re.search(r"ahead (\d+)", first)
+            if m:
+                info["ahead"] = int(m.group(1))
+            m = re.search(r"behind (\d+)", first)
+            if m:
+                info["behind"] = int(m.group(1))
+            # "## main" 而没有 "main...origin/main"：本地分支没有关联远程跟踪分支
+            if first.startswith("## ") and "..." not in first:
+                info["no_upstream"] = True
+        pu, _e = _git(root, ["remote", "get-url", "origin"], timeout=5)
+        origin_url = pu.stdout.strip() if pu and pu.returncode == 0 else ""
+        if origin_url:
+            info["remote"] = _mask_url_cred(origin_url)
+        # 远程分支最新提交：先取本地 origin/分支 的记录（含说明/时间）
+        if branch:
+            prl, _e = _git(root, ["log", "-1", "--format=%h%x09%s%x09%cI", "origin/" + branch], timeout=5)
+            if prl and prl.returncode == 0 and prl.stdout:
+                parts = prl.stdout.strip().split("\t", 2)
+                if len(parts) == 3:
+                    info["remote_head"], info["remote_subject"], info["remote_time"] = parts
+            # 在线查远程真实最新 hash（成功缓存 60s / 失败 15s；失败回落本地 origin/分支 记录）
+            ck = (root, branch)
+            now = time.time()
+            cached = _REMOTE_HEAD_CACHE.get(ck)
+            # 刚完成过一次抓取 / 拉取 → 缓存已过期，强制重新在线查
+            if cached and live.get("ts") and cached[0] < live["ts"]:
+                cached = None
+            if not cached or now - cached[0] > (60 if cached[2] else 15):
+                online = ""
+                if origin_url and ck not in _REMOTE_HEAD_INFLIGHT:
+                    _REMOTE_HEAD_INFLIGHT.add(ck)   # 防止轮询重叠时并发重复在线查询
+                    try:
+                        url = _auth_remote_url(origin_url, creds)
+                        args = ["ls-remote", url, "refs/heads/" + branch]
+                        px = _proxy_cfg(creds) if _is_http_remote(origin_url) else ""
+                        plr = None
+                        if px:
+                            plr, _e = _git(root, args, timeout=12, proxy=px)
+                            if not (plr and plr.returncode == 0):
+                                plr, _e = _git(root, args, timeout=12)
+                        else:
+                            plr, _e = _git(root, args, timeout=12)
+                        if plr and plr.returncode == 0 and plr.stdout.strip():
+                            online = plr.stdout.split()[0]
+                    finally:
+                        _REMOTE_HEAD_INFLIGHT.discard(ck)
+                cached = (now, online, bool(online))
+                _REMOTE_HEAD_CACHE[ck] = cached
+            if cached and cached[1]:
+                info["remote_head"] = cached[1][:7]
+                info["remote_fresh"] = cached[2]
+    except Exception:
+        pass
+    files, stat = [], ""
+    # 拉取完成后给出「本次更新了哪些文件」：HEAD@{1} 是 pull 前的位置
+    if (live.get("status") == "done" and verb == "pull" and root):
+        try:
+            pf, _e = _git(root, ["diff", "--name-status", "HEAD@{1}", "HEAD"], timeout=10)
+            if pf and pf.returncode == 0:
+                files = [ln for ln in (pf.stdout or "").splitlines() if ln.strip()]
+            pst, _e = _git(root, ["diff", "--stat", "HEAD@{1}", "HEAD"], timeout=10)
+            if pst and pst.returncode == 0:
+                out = [ln for ln in (pst.stdout or "").splitlines() if ln.strip()]
+                stat = out[-1] if out else ""
+        except Exception:
+            pass
     return jsonify({"ok": True, "status": live.get("status") or "idle",
                     "lines": lines, "ts": live.get("ts") or 0,
-                    "hist": live.get("hist") or []})
+                    "hist": live.get("hist") or [],
+                    "files": files, "stat": stat, "info": info})
 
 
 @bp.route("/api/git/push", methods=["POST"])
@@ -1453,6 +1617,14 @@ def api_git_remote_test():
     url = _auth_remote_url(url, creds)
     # 兜底代理：先直连测试，直连失败（且代理端口可连）再走代理测一次；SSH 远程不适用
     proxy = _proxy_cfg(creds) if _is_http_remote(url) else ""
+    # token 在线校验：public 仓库 ls-remote 匿名也能成功，不做这一步
+    # 「测试连接」会假成功，推送时才暴雷（GitHub 401 Invalid username or token）
+    if url.startswith("https://github.com/") and (creds or {}).get("type") == "https_token":
+        tok = (creds.get("token") or "").strip()
+        if tok:
+            ok, info = _verify_github_token(tok, proxy=proxy)
+            if not ok:
+                return _fail("Token 校验失败：" + info, 400)
     proc, err = _git(root, ["ls-remote", "--symref", url, "HEAD"], timeout=20)
     via = "direct"
     if proxy and (err or proc is None or proc.returncode != 0) and _probe_proxy(proxy)[0]:

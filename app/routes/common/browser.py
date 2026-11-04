@@ -2460,6 +2460,76 @@ def _sheet_read_xlsx(path, sheet_name):
         wb.close()
 
 
+def _sheet_meta_path(path):
+    """csv/tsv 没有单元格格式，用侧存元数据记住对齐与合并。
+    放在数据目录（按文件绝对路径哈希命名），不会污染用户工程目录。"""
+    import hashlib
+    d = os.path.join(_STORAGE_DIR, "sheet_meta")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        pass
+    h = hashlib.md5(os.path.abspath(path).encode("utf-8")).hexdigest()
+    return os.path.join(d, h + ".json")
+
+
+def _sheet_read_meta(path):
+    try:
+        with open(_sheet_meta_path(path), "r", encoding="utf-8") as f:
+            d = json.load(f) or {}
+        return {"merges": d.get("merges") or [], "aligns": d.get("aligns") or []}
+    except Exception:
+        return {"merges": [], "aligns": []}
+
+
+def _sheet_write_meta(path, merges=None, aligns=None):
+    cur = _sheet_read_meta(path)
+    data = {
+        "merges": cur["merges"] if merges is None else merges,
+        "aligns": cur["aligns"] if aligns is None else aligns,
+    }
+    try:
+        with open(_sheet_meta_path(path), "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _sheet_extras_xlsx(path, sheet_name):
+    """读取单元格合并区域 + 水平对齐（read_only 模式拿不到这些，只能再开一次）。
+    文件较大时跳过，避免为了格式信息拖慢打开速度。"""
+    out = {"merges": [], "aligns": [], "formulas": []}
+    try:
+        if os.path.getsize(path) > 5 * 1024 * 1024:
+            return out
+        import openpyxl
+        # data_only=False 才能拿到公式原文（True 只会给缓存的计算结果）
+        wb = openpyxl.load_workbook(path, data_only=False)
+        try:
+            ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb[wb.sheetnames[0]]
+            out["merges"] = [[m.min_row - 1, m.min_col - 1, m.max_row - 1, m.max_col - 1]
+                             for m in ws.merged_cells.ranges]
+            for row in ws.iter_rows():
+                for cell in row:
+                    if cell.value is None:
+                        continue
+                    if isinstance(cell.value, str) and cell.value.startswith("="):
+                        out["formulas"].append([cell.row - 1, cell.column - 1, cell.value])
+                        if len(out["formulas"]) >= 5000:
+                            return out
+                        continue        # 公式格不参与对齐统计，避免超出上限时丢公式
+                    hv = cell.alignment.horizontal if cell.alignment else None
+                    if hv in ("left", "center", "right"):
+                        out["aligns"].append([cell.row - 1, cell.column - 1, hv])
+                        if len(out["aligns"]) >= 5000:
+                            return out
+        finally:
+            wb.close()
+    except Exception:
+        pass
+    return out
+
+
 def _sheet_read_xls(path, sheet_name):
     """xls / et（WPS BIFF8）：xlrd 读取，只读。"""
     import xlrd
@@ -2510,6 +2580,13 @@ def api_sheet_read():
     except Exception as e:
         return jsonify({"error": "读取表格失败：" + str(e)}), 500
     writable = ext in _SHEET_WRITE_EXTS or ext in _SHEET_CSV_EXTS
+    # 合并区域 / 对齐：xlsx 存在文件里，csv/tsv 存在侧存元数据里
+    if ext in _SHEET_WRITE_EXTS:
+        extras = _sheet_extras_xlsx(target_path, active)
+    elif ext in _SHEET_CSV_EXTS:
+        extras = _sheet_read_meta(target_path)
+    else:
+        extras = {"merges": [], "aligns": []}
     return jsonify({
         "ok": True,
         "ext": ext,
@@ -2521,6 +2598,9 @@ def api_sheet_read():
         "truncated": trunc,
         "writable": writable,
         "is_csv": ext in _SHEET_CSV_EXTS,
+        "merges": extras["merges"],
+        "aligns": extras["aligns"],
+        "formulas": extras.get("formulas") or [],
         "max_rows": _SHEET_MAX_ROWS,
         "max_cols": _SHEET_MAX_COLS,
     })
@@ -2537,13 +2617,17 @@ def api_sheet_write():
     sheet_name = body.get("sheet") or None
     changes = body.get("changes") or []
     data = body.get("data")
+    merges = body.get("merges")          # None=未改动；[]=清空全部合并
+    aligns = body.get("aligns")          # None=未改动（保留原对齐）；[]=清空全部对齐
     if ext in _SHEET_RO_EXTS:
         return jsonify({"error": "该格式（.%s）为只读，不支持直接保存，请另存为 .xlsx 后再编辑" % ext}), 400
     try:
         if ext in _SHEET_WRITE_EXTS:
-            _sheet_write_xlsx(target_path, sheet_name, changes, data)
+            _sheet_write_xlsx(target_path, sheet_name, changes, data, merges, aligns)
         elif ext in _SHEET_CSV_EXTS:
             _sheet_write_csv(target_path, ext, data, changes)
+            if merges is not None or aligns is not None:
+                _sheet_write_meta(target_path, merges, aligns)   # 格式存侧存元数据
         else:
             return jsonify({"error": "不支持的表格类型: " + ext}), 400
     except ImportError as e:
@@ -2553,17 +2637,55 @@ def api_sheet_write():
     return jsonify({"ok": True})
 
 
-def _sheet_write_xlsx(path, sheet_name, changes, data):
+def _sheet_write_xlsx(path, sheet_name, changes, data, merges=None, aligns=None):
     import openpyxl
     wb = openpyxl.load_workbook(path, data_only=False)
     names = wb.sheetnames
     ws = wb[sheet_name] if sheet_name in names else wb[names[0]]
+    # 显式传了 merges（包括空数组）就先拆开旧合并：空数组 = 全部取消合并
+    if merges is not None:
+        for rng in list(ws.merged_cells.ranges):
+            try:
+                ws.unmerge_cells(str(rng))
+            except Exception:
+                pass
     if data is not None:
         if ws.max_row > 0:
             ws.delete_rows(1, ws.max_row)
         for r, row in enumerate(data, start=1):
             for c, v in enumerate(row, start=1):
                 ws.cell(row=r, column=c).value = _sheet_coerce(v)
+    if merges:
+        for m in merges:
+            try:
+                r1, c1, r2, c2 = int(m[0]) + 1, int(m[1]) + 1, int(m[2]) + 1, int(m[3]) + 1
+            except (TypeError, ValueError, IndexError):
+                continue
+            if r2 <= r1 and c2 <= c1:
+                continue
+            try:
+                ws.merge_cells(start_row=r1, start_column=c1, end_row=r2, end_column=c2)
+            except Exception:
+                pass
+    # 单元格水平对齐（左 / 居中 / 右）；显式传了 aligns（哪怕是空数组）就先清空旧对齐
+    if aligns is not None:
+        from openpyxl.styles import Alignment
+        for row in ws.iter_rows():
+            for cell in row:
+                cur = cell.alignment
+                if cur is not None and cur.horizontal:
+                    cell.alignment = Alignment(vertical=cur.vertical, wrap_text=cur.wrap_text)
+        for a in aligns:
+            try:
+                r, c, hv = int(a[0]) + 1, int(a[1]) + 1, str(a[2])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if hv not in ("left", "center", "right"):
+                continue
+            try:
+                ws.cell(row=r, column=c).alignment = Alignment(horizontal=hv)
+            except Exception:
+                pass
     for ch in changes:
         try:
             r, c, v = int(ch[0]) + 1, int(ch[1]) + 1, ch[2]

@@ -355,16 +355,26 @@
       items.push({ label: "在侧边打开", sc: "Ctrl+Enter", act: () => ctxAction("open-side") });
     }
     items.push({ label: "打开方式…", sub: () => {
-      const isSheet = /\.(xlsx|xlsm|xltx|xltm|xls|et|ett|csv|tsv)$/i.test(name);
-      const list = [{ label: isSheet ? "表格查看 / 编辑" : "编辑器打开", act: () => openFile(path, name) }];
-      if (/\.(csv|tsv)$/i.test(name)) {
-        list.push({ label: "以文本编辑器打开", act: () => openFile(path, name, null, true) });
+      const list = [];
+      // 文件夹没有「编辑器打开」可言（点了只会报「不是文件」），只给目录类入口
+      if (!isDir) {
+        const isSheet = /\.(xlsx|xlsm|xltx|xltm|xls|et|ett|csv|tsv)$/i.test(name);
+        list.push({ label: isSheet ? "表格查看 / 编辑" : "编辑器打开", act: () => openFile(path, name) });
+        if (/\.(csv|tsv)$/i.test(name)) {
+          list.push({ label: "以文本编辑器打开", act: () => openFile(path, name, null, true) });
+        }
+        if (/\.(md|markdown|html|htm)$/i.test(name)) {
+          list.push({ label: "渲染预览（Markdown / HTML）", act: async () => { await openFile(path, name); mdSetMode("preview"); } });
+        }
       }
-      if (/\.(md|markdown|html|htm)$/i.test(name)) {
-        list.push({ label: "渲染预览（Markdown / HTML）", act: async () => { await openFile(path, name); mdSetMode("preview"); } });
+      // 文件夹浏览器（内置可视化浏览视图）：文件 → 打开所在目录，文件夹 → 打开它自己
+      if (typeof openFolderManagerView === "function") {
+        list.push({ label: "在文件夹浏览器中打开", act: () => openFolderManagerView(null, isDir ? path : destDir) });
       }
-      list.push({ label: "浏览器打开（原文件）", act: () => window.open(rawFileUrl(path), "_blank", "noopener") });
-      list.push({ label: "在文件管理器中打开", act: () => revealInManager(destDir) });
+      // 调系统文件管理器只对目录有意义（文件是先开所在目录再选中）
+      if (isDir) {
+        list.push({ label: "在文件管理器中打开", act: () => revealInManager(destDir) });
+      }
       return list;
     }});
     // 文件与文件夹都能加进 AI 对话：文件带内容，文件夹带目录结构（只列名称，不读内容）

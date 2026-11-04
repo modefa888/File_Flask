@@ -3,6 +3,7 @@
  * 视图由 21_ 表格查看编辑.js 的 setupSheetView 渲染
  * ================================================================ */
 .sheetv {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -10,38 +11,107 @@
   background: #1e1e1e;
   color: #ddd;
 }
+
+/* 多选浮动快捷条：贴在表格右下角 */
+.sheetv-quick {
+  position: absolute;
+  right: 14px;
+  bottom: 16px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(37, 37, 38, .96);
+  border: 1px solid #454545;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .45);
+  backdrop-filter: blur(6px);
+  font-size: 12px;
+}
+.sheetv-quick .q-info { color: #9cd; padding: 0 6px; white-space: nowrap; }
+.sheetv-quick button {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; border-radius: 999px; cursor: pointer;
+  background: #333; border: 1px solid #444; color: #ddd;
+  font-size: 12px; font-family: inherit; white-space: nowrap;
+}
+.sheetv-quick button:hover { background: #3d3d3d; }
+.sheetv-quick button.danger:hover { background: #5a2b2b; border-color: #7a3a3a; }
+.sheetv-quick button:disabled { opacity: .4; cursor: not-allowed; }
 .sheetv-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  background: #252526;
-  border-bottom: 1px solid #333;
+  padding: 7px 12px;
+  background: linear-gradient(180deg, #2a2b2d, #232426);
+  border-bottom: 1px solid #38393b;
   flex-wrap: wrap;
   font-size: 12px;
 }
 .sheetv-name {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-weight: 600;
-  max-width: 280px;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.sheetv-name .bi { color: #4fc1ff; font-size: 13px; }
 .sheetv-sheets {
-  background: #1e1e1e;
+  background: #1b1c1e;
   color: #ddd;
-  border: 1px solid #444;
-  border-radius: 4px;
-  padding: 3px 6px;
+  border: 1px solid #3d3e40;
+  border-radius: 6px;
+  padding: 3px 8px;
   font-size: 12px;
+  font-family: inherit;
 }
-.sheetv-meta { color: #9cd; white-space: nowrap; }
+.sheetv-sheets:hover { border-color: #4a4b4d; }
+.sheetv-meta {
+  color: #8fd0ff;
+  white-space: nowrap;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(79, 193, 255, .1);
+  font-variant-numeric: tabular-nums;
+}
 .sheetv-flex { flex: 1; }
-.sheetv-tip { color: #c9a; white-space: nowrap; }
-.sheetv-grid { flex: 1; overflow: auto; min-height: 0; }
+.sheetv-tip { color: #a08a6a; white-space: nowrap; }
+/* 按钮分组：浅底圆角容器，组内按钮无边框，视觉上成一组 */
+.sheetv-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: #1f2022;
+  border: 1px solid #343536;
+  border-radius: 8px;
+}
+/* 公式编辑栏 */
+.sheetv-fbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px; background: #252526; border-bottom: 1px solid #333; font-size: 12px;
+}
+.sheetv-fbar .fx { font-style: italic; font-weight: 700; color: #4fc1ff; }
+.sheetv-fref {
+  flex: none; min-width: 54px; padding: 2px 8px; border-radius: 4px;
+  background: #1f2022; border: 1px solid #343536; color: #8fd0ff;
+  text-align: center; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px;
+}
+.sheetv-finput {
+  flex: 1; min-width: 0; padding: 3px 9px; border-radius: 6px;
+  background: #1b1c1e; border: 1px solid #3d3e40; color: #ddd;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; outline: none;
+}
+.sheetv-finput:focus { border-color: #0a84ff; box-shadow: 0 0 0 2px rgba(10, 132, 255, .15); }
+.sheetv-finput:disabled { opacity: .5; }
+.sheetv-grid { flex: 1; overflow: auto; min-height: 0; outline: none; }
+/* 按住拖动框选时：禁止浏览器选中文字，鼠标保持十字光标 */
+body.sheet-drag, body.sheet-drag * { user-select: none; -webkit-user-select: none; }
+body.sheet-drag .sheetv-cell { cursor: cell; }
 .sheetv-empty, .sheetv-err { padding: 24px; color: #888; }
 .sheetv-err { color: #c66; }
 .sheetv-table {
@@ -67,6 +137,8 @@
   text-align: center;
   font-weight: 500;
   position: sticky;
+  cursor: pointer;
+  user-select: none;
 }
 .sheetv-colhead { top: 0; z-index: 2; }
 .sheetv-rownum { left: 0; z-index: 1; }
@@ -76,11 +148,91 @@
   z-index: 3;
   background: #2d2d2d;
   position: sticky;
+  cursor: pointer;
 }
 .sheetv-cell { background: #1e1e1e; color: #ddd; cursor: cell; }
 .sheetv-cell:hover { background: #242424; }
-.sheetv-cell[contenteditable="true"]:focus {
-  outline: 2px solid #0a84ff;
-  outline-offset: -2px;
-  background: #16324a;
+/* 选中区域 / 整行整列 / 查找命中 */
+.sheetv-cell.sel { background: #16324a; }
+.sheetv-colhead.sel, .sheetv-rownum.sel { background: #0a84ff; color: #fff; }
+.sheetv-cell.hit { background: #4a3f13; }
+/* 悬停「删除行 / 删除列」时的虚拟删除预览（红色淡染） */
+.sheetv-cell.pv-del { background: rgba(248, 81, 73, .18); }
+.sheetv-rownum.pv-del, .sheetv-colhead.pv-del { background: rgba(248, 81, 73, .5); color: #fff; }
+/* 悬停「插入行 / 插入列」时真实插入的虚拟行 / 虚拟列（虚线蓝框 + 淡蓝底） */
+.sheetv-cell.pv-cell, .sheetv-colhead.pv-cell {
+  background: rgba(79, 193, 255, .12);
+  border: 1px dashed #4fc1ff !important;
+  color: #4fc1ff;
+  font-weight: 600;
 }
+.sheetv-rownum.pv-cell { color: #4fc1ff; }
+.sheetv-cell.editing { outline: 2px solid #0a84ff; outline-offset: -2px; background: #16324a; }
+.sheetv-cell[contenteditable="true"]:focus { outline: 2px solid #0a84ff; outline-offset: -2px; }
+
+/* 工具栏按钮 */
+.sheetv-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: transparent; border: none; color: #cfd2d6; border-radius: 6px;
+  padding: 4px 9px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  font-family: inherit; transition: background .12s, color .12s;
+}
+.sheetv-btn:hover { background: #33353a; color: #ffffff; }
+.sheetv-btn:active { background: #2a2c30; }
+.sheetv-btn:disabled { opacity: .38; cursor: not-allowed; background: transparent; }
+.sheetv-btn.danger { color: #c98b88; }
+.sheetv-btn.danger:hover { background: rgba(248, 81, 73, .18); color: #ff8a85; }
+.sheetv-btn .bi { font-size: 12.5px; }
+/* 插入按钮右侧的方向小箭头 */
+.sheetv-btn.caret { padding: 4px 3px; margin-left: -4px; }
+.sheetv-btn.caret .bi { font-size: 9px; }
+/* 查找框：胶囊形，带放大镜 */
+.sheetv-findwrap {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 999px;
+  background: #1b1c1e; border: 1px solid #3d3e40;
+  transition: border-color .15s, box-shadow .15s;
+}
+.sheetv-findwrap:focus-within { border-color: #0a84ff; box-shadow: 0 0 0 2px rgba(10, 132, 255, .15); }
+.sheetv-findwrap .bi { color: #7d848c; font-size: 12px; }
+.sheetv-find {
+  background: transparent; border: none; color: #ddd; font-size: 12px;
+  width: 130px; font-family: inherit; outline: none; padding: 0;
+}
+/* 保存按钮：主色渐变 */
+.sheetv-save {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 16px; border: none; border-radius: 7px; cursor: pointer;
+  font-size: 12px; font-weight: 600; font-family: inherit; color: #ffffff;
+  background: linear-gradient(135deg, #1f6feb, #388bfd);
+  box-shadow: 0 2px 8px rgba(31, 111, 235, .3);
+  transition: filter .15s, box-shadow .2s, transform .1s;
+}
+.sheetv-save:hover { filter: brightness(1.12); box-shadow: 0 3px 12px rgba(31, 111, 235, .45); }
+.sheetv-save:active { transform: translateY(1px); }
+.sheetv-save:disabled {
+  background: #35363a; color: #8b8f94; box-shadow: none; cursor: not-allowed; filter: none;
+}
+/* 合并单元格：稍微区别于普通格，提示这是一块区域 */
+.sheetv-cell.merged { background: #202226; }
+/* 单元格水平对齐 */
+.sheetv-cell.ta-left { text-align: left; }
+.sheetv-cell.ta-center { text-align: center; }
+.sheetv-cell.ta-right { text-align: right; }
+/* 公式单元格：结果用偏青的颜色，和普通文本区分 */
+.sheetv-cell.fx { color: #7fd3ff; }
+
+/* 右键菜单 */
+.sheetv-ctx {
+  position: fixed; z-index: 9500; min-width: 190px; padding: 4px;
+  background: #252526; border: 1px solid #454545; border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .5); font-size: 12px; color: #ddd;
+}
+.sheetv-ctx .it {
+  display: flex; justify-content: space-between; gap: 18px;
+  padding: 5px 10px; border-radius: 4px; cursor: pointer;
+}
+.sheetv-ctx .it:hover { background: #094771; }
+.sheetv-ctx .it.dis { opacity: .4; pointer-events: none; }
+.sheetv-ctx .k { color: #8a8a8a; }
+.sheetv-ctx .sp { height: 1px; background: #3a3a3a; margin: 4px 2px; }

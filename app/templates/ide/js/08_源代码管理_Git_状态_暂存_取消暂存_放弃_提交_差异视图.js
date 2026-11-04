@@ -7,6 +7,7 @@
   let gitGraph = [];             // 提交历史（图形区块，滚动懒加载时不断追加）
   let gitGraphHasMore = false;   // 是否还有更早的提交未加载
   let gitGraphLoading = false;   // 懒加载请求进行中
+  let gitViewBranch = "";        // 图形区当前查看的分支（空 = 当前工作分支，只影响查看不影响工作区）
   const GIT_LOG_PAGE = 30;       // 每次加载的提交条数
 
   function gitPost(url, body, okMsg) {
@@ -363,6 +364,76 @@
     first.scrollIntoView({ block: "center" });
     first.classList.add("flash");
     setTimeout(() => first.classList.remove("flash"), 1200);
+  }
+
+  /* 图形区查看分支的查询串：只看历史，不切换工作区分支 */
+  function gitBranchQuery() {
+    return gitViewBranch ? "&branch=" + encodeURIComponent(gitViewBranch) : "";
+  }
+
+  /* 切换分支查看：列出本地 / 远程分支，选中后只重新加载图形区历史 */
+  function showBranchPicker(anchor) {
+    let menu = $("gitBranchMenu");
+    if (!menu) {
+      menu = document.createElement("div");
+      menu.className = "ctx-menu";
+      menu.id = "gitBranchMenu";
+      document.body.appendChild(menu);
+      document.addEventListener("click", () => { menu.style.display = "none"; });
+    }
+    const place = () => {
+      const r = anchor.getBoundingClientRect();
+      menu.style.left = Math.min(r.left, window.innerWidth - 240) + "px";
+      menu.style.top = "";
+      menu.style.bottom = "";
+      menu.style.display = "block";
+      const mh = menu.offsetHeight || 160;
+      if (r.bottom + 2 + mh > window.innerHeight - 4) {
+        menu.style.bottom = (window.innerHeight - r.top + 2) + "px";
+      } else {
+        menu.style.top = (r.bottom + 2) + "px";
+      }
+    };
+    menu.innerHTML = '<div class="mi"><span style="width:14px;display:inline-block"></span><span>加载分支…</span></div>';
+    place();
+    fetch("/api/git/branches?path=" + encodeURIComponent(gitState.repo || ROOT))
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) throw new Error(d.error);
+        const cur = d.current || gitState.branch || "";
+        const rows = [];
+        rows.push({ name: "", label: "当前分支（" + (cur || "?") + "）", on: !gitViewBranch });
+        (d.local || []).filter(b => b !== cur).forEach(b => {
+          rows.push({ name: b, label: b, on: gitViewBranch === b });
+        });
+        (d.remote || []).forEach(b => {
+          rows.push({ name: b, label: b, on: gitViewBranch === b, dim: true });
+        });
+        if (rows.length === 1) rows.push({ name: "", label: "没有其他分支", disabled: true });
+        menu.innerHTML = "";
+        rows.forEach(it => {
+          const el = document.createElement("div");
+          el.className = "mi";
+          el.innerHTML = '<span style="width:14px;display:inline-block">' + (it.on ? "✓" : "") + "</span>" +
+            '<span>' + esc(it.label) + "</span>";
+          if (it.dim) el.style.opacity = ".8";
+          if (!it.disabled) {
+            el.onclick = (e) => {
+              e.stopPropagation();
+              menu.style.display = "none";
+              gitViewBranch = it.name;
+              loadGitStatus(true);
+            };
+          }
+          menu.appendChild(el);
+        });
+        place();
+      })
+      .catch(e => {
+        menu.innerHTML = '<div class="mi"><span style="width:14px;display:inline-block"></span><span>' +
+          esc("读取分支失败：" + (e.message || e)) + "</span></div>";
+        place();
+      });
   }
 
   /* 提交悬停信息卡：作者 / 相对时间 / 完整信息 / 变更统计 / 哈希（模拟 VS Code 图形视图） */
@@ -996,14 +1067,21 @@
         if (!s) return "";
         try { const r = gitRelTime(s); return r || s.slice(0, 10); } catch (_) { return s.slice(0, 10); }
       };
-      const state = i.no_upstream
+      /* 两侧各用各自视角描述同一处差异：
+         本地比远程多 1 个提交 → 本地行「领先 1」，远程行「落后 1」 */
+      const localState = i.no_upstream
         ? '<span class="nu" title="本地分支还没有关联远程跟踪分支（从未抓取/推送成功过）"><i class="bi bi-exclamation-circle"></i>未关联</span>' +
           '<button class="rl-linkup" id="rlLinkUp" title="抓取远程同名分支并设为上游">关联</button>'
         : i.ahead
-        ? '<span class="up" title="本地比远程多 ' + i.ahead + ' 个提交，推送后同步"><i class="bi bi-arrow-up-circle"></i>领先 ' + i.ahead + '</span>'
+        ? '<span class="up" title="本地比远程多 ' + i.ahead + ' 个提交，推送后可同步"><i class="bi bi-arrow-up-circle"></i>领先 ' + i.ahead + '</span>'
         : i.behind
-        ? '<span class="dn" title="远程比本地多 ' + i.behind + ' 个提交，拉取后同步"><i class="bi bi-arrow-down-circle"></i>落后 ' + i.behind + '</span>'
+        ? '<span class="dn" title="本地比远程少 ' + i.behind + ' 个提交，拉取后可同步"><i class="bi bi-arrow-down-circle"></i>落后 ' + i.behind + '</span>'
         : '<span class="eq"><i class="bi bi-check2-circle"></i>一致</span>';
+      const remoteState = i.ahead
+        ? '<span class="dn" title="远程比本地少 ' + i.ahead + ' 个提交（本地已领先）"><i class="bi bi-arrow-down-circle"></i>落后 ' + i.ahead + '</span>'
+        : i.behind
+        ? '<span class="up" title="远程比本地多 ' + i.behind + ' 个提交（本地已落后）"><i class="bi bi-arrow-up-circle"></i>领先 ' + i.behind + '</span>'
+        : (i.no_upstream ? "" : '<span class="eq"><i class="bi bi-check2-circle"></i>一致</span>');
       const fresh = i.remote_fresh
         ? '<span class="fresh" title="刚从远程在线获取"><i class="bi bi-broadcast"></i>在线</span>' : "";
       el.innerHTML =
@@ -1013,6 +1091,7 @@
           '<span class="rl-hash">' + esc(i.head || "?") + '</span>' +
           '<span class="rl-sub">' + esc(i.head_subject || "") + '</span>' +
           '<span class="rl-t">' + esc(t(i.head_time)) + '</span>' +
+          localState +
         '</div>' +
         '<div class="rl-row">' +
           '<span class="rl-side rem"><i class="bi bi-cloud-check"></i>远程</span>' +
@@ -1021,7 +1100,7 @@
           '<span class="rl-sub' + (i.remote_subject ? '' : ' dim') + '">' +
             esc(i.remote_subject || (i.remote_head ? "（抓取后显示提交说明）" : "")) + '</span>' +
           '<span class="rl-t">' + esc(t(i.remote_time)) + '</span>' +
-          fresh + state +
+          fresh + remoteState +
         '</div>' +
         (i.remote ? '<div class="rl-url"><i class="bi bi-link-45deg"></i>' + esc(i.remote) + '</div>' : "");
       // 「关联」按钮：抓取远程同名分支 + 设为上游，之后就能看到说明/落后数
@@ -1182,7 +1261,7 @@
     gitGraphLoading = true;
     if (moreEl) { moreEl.textContent = "正在加载更多提交…"; moreEl.style.display = ""; }
     const url = "/api/git/log?path=" + encodeURIComponent(gitState.repo || ROOT) +
-      "&limit=" + GIT_LOG_PAGE + "&skip=" + gitGraph.length;
+      "&limit=" + GIT_LOG_PAGE + "&skip=" + gitGraph.length + gitBranchQuery();
     fetch(url)
       .then(r => r.json())
       .then(d => {
@@ -1223,6 +1302,10 @@
     head.className = "git-sec-head git-graph-head";
     head.innerHTML = '<i class="bi bi-chevron-down git-sec-tw"></i><span class="git-sec-title">图形</span>' +
       '<span class="g-auto" title="自动抓取由 Git 服务提供程序管理"><i class="bi bi-diagram-3"></i>自动</span>' +
+      (gitViewBranch
+        ? '<span class="g-viewbr" title="当前查看分支的历史（不影响工作区）">' +
+            '<i class="bi bi-signpost-split"></i>' + esc(gitViewBranch) + ' ✕</span>'
+        : "") +
       '<span class="git-acts"></span><span class="git-cnt">' + (gitGraph.length || "") + '</span>';
     const acts = head.querySelector(".git-acts");
     const addAct = (icon, title, fn) => {
@@ -1234,6 +1317,11 @@
       return b;
     };
     addAct("bi-crosshair", "转到当前历史记录项", gotoCurrentCommit);
+    const brBtn = addAct("bi-signpost-split", "切换分支查看（只看历史，不切换工作分支）", () => {});
+    brBtn.onclick = (e) => { e.stopPropagation(); showBranchPicker(brBtn); };
+    // 标题栏的「查看中分支」小标签：点一下回到当前分支
+    const vb = head.querySelector(".g-viewbr");
+    if (vb) vb.onclick = (e) => { e.stopPropagation(); gitViewBranch = ""; loadGitStatus(true); };
     addAct("bi-cloud-arrow-down", "与远程同步（抓取 / 拉取，点击打开进度面板）", () => showRemoteLive("pull"));
     addAct("bi-cloud-upload", "发布分支 / 推送", () => remoteOp("push", "发布分支"));
     addAct("bi-arrow-clockwise", "刷新", () => loadGitStatus(true));
@@ -1439,7 +1527,7 @@
     return Promise.all([
       fetch("/api/git/status?path=" + encodeURIComponent(ROOT) + "&show_all=" + (gitShowAll ? "1" : "0"))
         .then(r => r.json()),
-      fetch("/api/git/log?path=" + encodeURIComponent(ROOT) + "&limit=" + GIT_LOG_PAGE + "&skip=0")
+      fetch("/api/git/log?path=" + encodeURIComponent(ROOT) + "&limit=" + GIT_LOG_PAGE + "&skip=0" + gitBranchQuery())
         .then(r => r.json()).catch(() => ({ commits: [] })),
     ])
       .then(([d, lg]) => {

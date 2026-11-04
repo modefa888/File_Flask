@@ -485,10 +485,13 @@ def _parse_branch(line):
         inner = line[line.rindex("[") + 1:line.rindex("]")]
         for part in inner.split(","):
             part = part.strip()
-            if part.startswith("ahead "):
-                info["ahead"] = int(part[6:].split()[0] or 0)
-            elif part.startswith("behind "):
-                info["behind"] = int(part[7:].split()[0] or 0)
+            # 兼容中文 locale 的「领先 1 / 落后 2」
+            m = re.match(r"(?:ahead|领先)\s*(\d+)", part)
+            if m:
+                info["ahead"] = int(m.group(1))
+            m = re.match(r"(?:behind|落后)\s*(\d+)", part)
+            if m:
+                info["behind"] = int(m.group(1))
     return info
 
 
@@ -904,8 +907,13 @@ def api_git_log():
         return jsonify({"ok": True, "is_repo": False, "repo": os.path.abspath(repo), "commits": []})
     # %x1f 作为字段分隔符，避免提交信息中含逗号时解析出错；%d 为 ref 装饰（分支/标签）
     fmt = "%h%x1f%s%x1f%an%x1f%ad%x1f%d"
-    proc, err = _git(root, ["log", f"-{limit}", f"--skip={skip}",
-                            "--date=format:%Y-%m-%d %H:%M", f"--pretty=format:{fmt}"])
+    args = ["log", f"-{limit}", f"--skip={skip}",
+            "--date=format:%Y-%m-%d %H:%M", f"--pretty=format:{fmt}"]
+    # 可选：查看指定分支的历史（只读，不切换工作区分支）
+    branch = (request.args.get("branch") or "").strip()
+    if branch and not branch.startswith("-") and not re.search(r"\s", branch):
+        args.append(branch)
+    proc, err = _git(root, args)
     if err:
         return jsonify({"ok": False, "is_repo": True, "repo": root, "error": err, "commits": []})
     commits = []
@@ -920,6 +928,37 @@ def api_git_log():
                                 "author": parts[2], "date": parts[3], "refs": refs})
     return jsonify({"ok": True, "is_repo": True, "repo": root, "commits": commits,
                     "has_more": len(commits) >= limit})
+
+
+@bp.route("/api/git/branches")
+def api_git_branches():
+    """分支列表：当前分支 / 本地分支 / 远程分支（供图形区切换查看）。"""
+    repo = request.args.get("path", "")
+    root, err = _repo_root(repo)
+    if err:
+        return _fail(err)
+    if not root:
+        return _fail("不是 Git 仓库")
+    current = ""
+    pb, _e = _git(root, ["rev-parse", "--abbrev-ref", "HEAD"], timeout=5)
+    if pb and pb.returncode == 0:
+        current = (pb.stdout or "").strip()
+    # 同时取全名与短名：本地分支名也可能含 "/"（如 feature/x），不能靠短名判断类型
+    # 注意 for-each-ref 不支持 %x1f 转义，ref 名本身不含空格，这里用空格分隔
+    proc, e = _git(root, ["for-each-ref", "--format=%(refname) %(refname:short)",
+                          "refs/heads", "refs/remotes"], timeout=15)
+    if e:
+        return _fail(e, 500)
+    local, remote = [], []
+    for line in ((proc.stdout or "").splitlines() if proc and proc.returncode == 0 else []):
+        if " " not in line.strip():
+            continue
+        full, short = line.strip().split(" ", 1)
+        full, short = full.strip(), short.strip()
+        if not short or short.endswith("/HEAD"):
+            continue                    # 跳过 origin/HEAD 这类指针
+        (remote if full.startswith("refs/remotes/") else local).append(short)
+    return jsonify({"ok": True, "current": current, "local": local, "remote": remote})
 
 
 def _rule_hit(rel, pattern):
@@ -1313,11 +1352,12 @@ def api_git_remote_live():
                 info["head_subject"], info["head_time"] = parts
         psb, _e = _git(root, ["status", "-sb"], timeout=5)
         if psb and psb.returncode == 0 and psb.stdout:
+            # 注意：git 输出随系统语言变化，中文环境是「[领先 1]」「[落后 2]」
             first = psb.stdout.splitlines()[0]
-            m = re.search(r"ahead (\d+)", first)
+            m = re.search(r"(?:ahead|领先)\s*(\d+)", first)
             if m:
                 info["ahead"] = int(m.group(1))
-            m = re.search(r"behind (\d+)", first)
+            m = re.search(r"(?:behind|落后)\s*(\d+)", first)
             if m:
                 info["behind"] = int(m.group(1))
             # "## main" 而没有 "main...origin/main"：本地分支没有关联远程跟踪分支

@@ -218,6 +218,16 @@
   }
   /* 图形区块头：标题 / 自动 / 工具栏 / 计数 全部同一行，禁止换行 */
   .git-graph-head { flex-wrap: nowrap; gap: 3px; padding-left: 8px; padding-right: 8px; }
+  /* 正在查看哪个分支的历史（点一下回到当前分支） */
+  .git-graph .g-viewbr {
+    display: inline-flex; align-items: center; gap: 3px; flex: none;
+    max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    margin-left: 4px; padding: 1px 7px; border-radius: 999px; cursor: pointer;
+    font-size: 11px; color: #4fc1ff; background: rgba(79, 193, 255, .12);
+    border: 1px solid rgba(79, 193, 255, .35);
+  }
+  .git-graph .g-viewbr:hover { background: rgba(79, 193, 255, .22); }
+  html.theme-light .git-graph .g-viewbr { color: #0b62a4; background: rgba(11, 98, 164, .1); border-color: rgba(11, 98, 164, .3); }
   .git-graph-head .git-acts { display: flex; margin-left: auto; gap: 3px; flex: none; }
   .git-graph-head .git-acts button { font-size: 13px; padding: 1px 4px; flex: none; }
   .git-graph-head .git-cnt { margin-left: 3px; flex: none; }

@@ -92,6 +92,17 @@ html.theme-light .scr-btn.danger:hover { background: #fdecec; }
 
 /* 高级设置：悬浮面板（点「高级」按钮弹出，浮在地址栏下方，不占布局空间） */
 .scr-top { position: relative; }
+/* ---------- 实时内存占用 ---------- */
+.scr-membadge { cursor: pointer; color: var(--scr-acc); }
+.scr-membadge:hover { text-decoration: underline; }
+.scr-membar {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 7px;
+  background: var(--scr-card2); border: 1px solid var(--scr-line); border-radius: 6px;
+  padding: 6px 9px; font-size: 11.5px; color: var(--scr-fg2); line-height: 1.6;
+}
+.scr-membar > .bi { color: var(--scr-acc); flex: none; }
+.scr-membar span { flex: 1; min-width: 0; }
+.scr-membar .scr-mini { flex: none; }
 .scr-adv {
   position: absolute; top: calc(100% + 6px); right: 12px; z-index: 40;
   display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px;
@@ -354,7 +365,9 @@ body.scr-resizing .scr-frame { pointer-events: none; }   /* 拖动时别让预�
 .scr-chip.static { padding-right: 9px; background: var(--scr-card2); border-color: var(--scr-line); color: var(--scr-dim); }
 .scr-counts-dim { color: var(--scr-dim); font-weight: 400; }
 #scrFilterBtn.on { color: var(--scr-acc); border-color: var(--scr-acc); }
-.scr-result.min { height: 34px; }
+/* !important：resizer 会把高度写成内联 style.height（拖动 / localStorage 记忆），
+   内联样式优先级高于类规则，不加 important 收起后高度不会被压下来 */
+.scr-result.min { height: 34px !important; }
 /* 收起结果区时，筛选条 / 表格 / 日志不再占位，避免内容溢出到编辑器外面 */
 .scr-result.min .scr-filterbar,
 .scr-result.min .scr-tablewrap,

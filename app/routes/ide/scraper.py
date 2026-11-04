@@ -72,6 +72,10 @@ def api_scraper_fetch():
             scroll_times=int(data.get("scroll_times") or 0),
             # 交互预览：保留站点脚本（轮播 / 点击 / 滚动加载），靠 iframe sandbox 隔离
             interactive=bool(data.get("live") or data.get("interactive")),
+            # 不代理图片资源：src 保持原站地址，预览更快；防盗链站可能裂图
+            no_img=bool(data.get("no_img")),
+            # 低内存模式（迷你版）：Chromium 启动参数瘦身，省一半以上内存
+            low_mem=bool(data.get("low_mem")),
         )
     except ValueError as e:
         return _fail(e, 400)
@@ -98,6 +102,18 @@ def api_scraper_preview(token):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+@bp.route("/api/scraper/mem", methods=["GET"])
+def api_scraper_mem():
+    """数据采集模块实时内存占用：进程 RSS + 图片 / 镜像 / 预览缓存与渲染会话明细。"""
+    return jsonify(sc.mem_stats())
+
+
+@bp.route("/api/scraper/mem/clear", methods=["POST"])
+def api_scraper_mem_clear():
+    """一键释放：清空图片 / 镜像 / 预览缓存，关闭所有渲染会话（当前预览会失效）。"""
+    return jsonify(sc.mem_clear())
 
 
 @bp.route("/api/scraper/scroll", methods=["POST"])
@@ -304,6 +320,7 @@ def api_scraper_run():
             dedupe=data.get("dedupe", True),
             render=bool(data.get("render")),
             scroll_times=int(data.get("scroll_times") or 0),
+            low_mem=bool(data.get("low_mem")),
         )
     except ValueError as e:
         return _fail(e, 400)

@@ -103,6 +103,9 @@
     }
   } catch (e) { }
 
+  // 「不代理图片资源」模式下（服务端注入 window.__SCR_NO_IMG__），图片地址保持原站直连
+  function noImg() { return window.__SCR_NO_IMG__ === true; }
+
   // 属性赋值（框架最常用的写法）与 setAttribute 两条路都要管
   function patchProp(ctor, prop) {
     try {
@@ -113,7 +116,13 @@
         configurable: true,
         enumerable: d.enumerable,
         get: d.get,
-        set: function (v) { d.set.call(this, mm(v)); }
+        set: function (v) {
+          if (noImg() && (ctor === window.HTMLImageElement || prop === "srcset")) {
+            d.set.call(this, v);
+            return;
+          }
+          d.set.call(this, mm(v));
+        }
       });
     } catch (e) { }
   }
@@ -130,6 +139,9 @@
     var _setAttr = Element.prototype.setAttribute;
     Element.prototype.setAttribute = function (n, v) {
       var low = String(n || "").toLowerCase();
+      if (low === "src" && noImg() && /^(IMG|SOURCE)$/.test(this.tagName)) {
+        return _setAttr.call(this, n, v);
+      }
       if (low === "src" || low === "href" || low === "poster" || low === "data") v = mm(v);
       return _setAttr.call(this, n, v);
     };

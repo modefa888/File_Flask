@@ -32,6 +32,7 @@ import threading
 import time
 import uuid
 from urllib.parse import quote, unquote, urljoin, urlparse
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 import requests
 from bs4 import BeautifulSoup
@@ -126,6 +127,186 @@ def get_preview(token):
                 "insecure": bool(item.get("insecure"))}
 
 
+def _fmt_mb(n):
+    try:
+        n = float(n or 0)
+    except Exception:
+        n = 0.0
+    if n < 1024 * 1024:
+        return "%.0f KB" % (n / 1024) if n else "0 KB"
+    if n < 1024 * 1024 * 1024:
+        return "%.1f MB" % (n / 1048576.0)
+    return "%.2f GB" % (n / 1073741824.0)
+
+
+_CHROMIUM_KEYS = ("chrome", "chromium", "headless_shell", "playwright")
+
+
+def _chromium_mem():
+    """统计 Chromium（无头浏览器）子进程的内存占用。
+
+    Flask 进程的 RSS 不包含 Playwright 起的浏览器子进程 —— 它们才是渲染模式下的
+    内存大头（单个几百 MB 到 1GB+）。这里遍历 /proc 建进程树，找出本进程的所有
+    后代里 cmdline 命中 chrome / chromium / headless_shell / playwright 的，
+    累加各自的 VmRSS（crashpad 崩溃收集器除外，占用很小没有统计意义）。
+    """
+    me = os.getpid()
+    kids = {}
+    cmds = {}
+    try:
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            try:
+                with open("/proc/%s/stat" % pid, "rb") as f:
+                    data = f.read().decode("utf-8", "ignore")
+                # comm 字段可能含空格和括号，取最后一个 ")" 之后才是状态字段
+                rest = data[data.rindex(")") + 2:].split()
+                ppid = int(rest[1])
+                with open("/proc/%s/cmdline" % pid, "rb") as f:
+                    cmd = f.read().decode("utf-8", "ignore").replace("\x00", " ").lower()
+                kids.setdefault(ppid, []).append(int(pid))
+                cmds[int(pid)] = cmd
+            except Exception:
+                continue
+    except Exception:
+        return {"n": 0, "bytes": 0, "bytes_h": "0 KB"}
+    total, n = 0, 0
+    stack, seen = [me], {me}
+    while stack:
+        cur = stack.pop()
+        for ch in kids.get(cur, []):
+            if ch in seen:
+                continue
+            seen.add(ch)
+            stack.append(ch)
+            cmd = cmds.get(ch, "")
+            if not any(k in cmd for k in _CHROMIUM_KEYS):
+                continue
+            if "crashpad" in cmd:
+                continue
+            try:
+                with open("/proc/%d/status" % ch, "r") as f:
+                    for line in f:
+                        if line.startswith("VmRSS:"):
+                            total += int(line.split()[1]) * 1024   # kB → B
+                            n += 1
+                            break
+            except Exception:
+                continue
+    # 进程树外的 Playwright 内核：浏览器主进程退出后，它的子进程会被 init 收养
+    # （或变成僵尸），上面那条「从本进程往下找」的路径就看不见了。界面上会显示
+    # Chromium 0 个，但系统里其实还有残留进程，这里单独报出来。
+    orphan = sum(1 for pid, cmd in cmds.items()
+                 if pid not in seen and "ms-playwright" in cmd and "crashpad" not in cmd)
+    return {"n": n, "bytes": total, "bytes_h": _fmt_mb(total), "orphans": orphan}
+
+
+def mem_stats():
+    """数据采集模块的实时内存占用：进程 RSS + 各缓存块明细（给前端仪表用）。
+
+    RSS 是「整个 Flask 进程」的常驻内存，除下面几块缓存外，还有 BeautifulSoup
+    解析大页面的临时对象、每个请求线程独立的 glibc malloc arena、线程栈等。
+    进程一多，arena 释放后也不一定还给内核，所以 RSS 往往远大于缓存明细之和、
+    且只涨不跌；用 other / threads 显式列出，免得看起来像内存凭空消失。
+    """
+    rss = 0
+    threads = 0
+    try:
+        with open("/proc/self/status", "r") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    rss = int(line.split()[1]) * 1024   # kB → B
+                elif line.startswith("Threads:"):
+                    threads = int(line.split()[1])
+    except Exception:
+        try:
+            import resource
+            rss = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * 1024
+        except Exception:
+            rss = 0
+    anon = 0
+    try:
+        with open("/proc/self/smaps_rollup", "r") as f:
+            for line in f:
+                if line.startswith("Anonymous:"):
+                    anon = int(line.split()[1]) * 1024   # kB → B
+                    break
+    except Exception:
+        pass
+    with _IMG_LOCK:
+        img_n, img_b = len(_IMG_CACHE), int(_IMG_SIZE)
+    with _MIRROR_LOCK:
+        mir_n, mir_b = len(_MIRROR_CACHE), int(_MIRROR_SIZE)
+    with _PREVIEW_LOCK:
+        prev_n = len(_PREVIEWS)
+        # 别用 str(html)：那等于每 5 秒把所有预览页整份复制一遍，自己制造内存峰值
+        prev_b = sum(len(v.get("html") or "") for v in _PREVIEWS.values())
+    sess_n = 0
+    try:
+        from . import render as render_mod
+        sess_n = len(getattr(render_mod, "_sessions", None) or {})
+    except Exception:
+        pass
+    chrom = _chromium_mem()
+    other = max(0, rss - img_b - mir_b - prev_b - chrom["bytes"])
+    return {
+        "rss": rss,
+        "rss_h": _fmt_mb(rss),
+        "threads": threads,
+        "anon": anon,
+        "anon_h": _fmt_mb(anon),
+        "other": other,
+        "other_h": _fmt_mb(other),
+        "img": {"n": img_n, "bytes": img_b, "bytes_h": _fmt_mb(img_b)},
+        "mirror": {"n": mir_n, "bytes": mir_b, "bytes_h": _fmt_mb(mir_b)},
+        "previews": {"n": prev_n, "bytes": prev_b, "bytes_h": _fmt_mb(prev_b)},
+        "render_sessions": sess_n,
+        "chromium": chrom,
+    }
+
+
+def mem_clear():
+    """一键释放：清空图片 / 镜像 / 预览缓存，关掉所有渲染会话（当前预览会失效）。
+
+    注意：预览 HTML 一并清掉，前端需要重新「抓取页面」才能继续点选。
+    """
+    global _IMG_SIZE, _MIRROR_SIZE
+    with _IMG_LOCK:
+        _IMG_CACHE.clear()
+        _IMG_SIZE = 0
+    with _MIRROR_LOCK:
+        _MIRROR_CACHE.clear()
+        _MIRROR_SIZE = 0
+    with _PREVIEW_LOCK:
+        _PREVIEWS.clear()
+    closed = 0
+    try:
+        from . import render as render_mod
+        with render_mod._lock:
+            for t in list(render_mod._sessions.keys()):
+                sess = render_mod._sessions.pop(t, None)
+                if sess is not None:
+                    try:
+                        sess.close()
+                        closed += 1
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    try:
+        import gc
+        gc.collect()
+    except Exception:
+        pass
+    # gc.collect() 只把对象还给 Python 的内存池，RSS 仍被 glibc arena 占着
+    _trim_heap()
+    out = mem_stats()
+    out["closed_sessions"] = closed
+    out["ok"] = True
+    return out
+
+
 def scroll_preview(token, times=3, delay=1.2, asset_prefix=""):
     """在渲染会话里继续往下滚 N 屏（触发懒加载 / 无限滚动），返回新的预览地址。"""
     item = get_preview(token)
@@ -137,7 +318,7 @@ def scroll_preview(token, times=3, delay=1.2, asset_prefix=""):
     from . import render as render_mod
     sess = render_mod.get_session(session_token)
     if not sess:
-        raise RuntimeError("渲染会话已过期（空闲超过 5 分钟），请重新抓取页面")
+        raise RuntimeError("渲染会话已过期（空闲超过 2 分钟），请重新抓取页面")
     html, scroll_y = sess.scroll(times=times, delay=delay)
     # 交互预览（含「渲染 + 交互」同时开启）滚动后重建 DOM 时也要保留脚本并继续走镜像，
     # 否则滚一次就退化成静态预览，轮播 / 点击特效全没了
@@ -156,10 +337,137 @@ def scroll_preview(token, times=3, delay=1.2, asset_prefix=""):
     }
 
 
+# ------------------------------------------------- 出站 HTTP（有界并发 + 连接池）
+# 交互预览里站点所有资源都走 /mirror 代取，一个门户首页能打出上百个并发请求。
+# 原来每个 Werkzeug 请求线程各自 requests.get()：并发无上限、TCP 不复用，更要命的是
+# glibc 会给每个线程单独分一个 malloc arena（几十 MB），线程退出也不还给内核，
+# 于是 RSS 越用越大。这里把「发请求 / 读响应 / 解析大文本」收敛到固定数量的 worker：
+#   · arena 数量被 worker 数封顶；
+#   · 每个 worker 一个 Session，连接 keep-alive 复用，CLOSE-WAIT 不再堆积；
+#   · 流式分块读，超过上限立刻断连，不再把超大响应整块读进内存；
+#   · 读完立刻 close()，连接归还连接池。
+_HTTP_WORKERS = 16                 # 懒加载一类密集小请求，太少会成为瓶颈、把请求都堆在队列
+_HTTP_CHUNK = 64 * 1024
+_HTTP_QUEUE_MAX = 32                 # 同时「在执行 + 排队」的上限：满了就立刻失败，不堆请求线程
+_HTTP_RESULT_TIMEOUT = 35            # 单个请求最多等这么久（含队列），到时直接 502
+_HTTP_READ_BUDGET = 30               # 流式读取的绝对时长上限，防长连接 / 慢流占死 worker
+_HTTP_LOCAL = threading.local()
+_HTTP_EXEC = None
+_HTTP_EXEC_LOCK = threading.Lock()
+_HTTP_QUEUE = threading.BoundedSemaphore(_HTTP_QUEUE_MAX)
+
+
+def _http_session():
+    """每个池线程一个 Session：连接池天然线程封闭，不用加锁也不会串 Cookie。"""
+    s = getattr(_HTTP_LOCAL, "session", None)
+    if s is None:
+        from requests.adapters import HTTPAdapter
+        s = requests.Session()
+        adapter = HTTPAdapter(pool_connections=8, pool_maxsize=8, max_retries=0)
+        s.mount("http://", adapter)
+        s.mount("https://", adapter)
+        _HTTP_LOCAL.session = s
+    return s
+
+
+def _http_exec():
+    global _HTTP_EXEC
+    with _HTTP_EXEC_LOCK:
+        if _HTTP_EXEC is None:
+            _HTTP_EXEC = ThreadPoolExecutor(max_workers=_HTTP_WORKERS,
+                                            thread_name_prefix="scr-http")
+    _ensure_heap_trimmer()
+    return _HTTP_EXEC
+
+
+def _http_read(url, headers, timeout, insecure=False, max_bytes=16 * 1024 * 1024,
+               method="GET", body=None):
+    """池线程里执行：流式限量读取，返回「已读完且已归还连接」的 Response。
+
+    timeout 只管「两次收包之间的间隔」，源站持续吐数据（SSE / 慢流）时不会触发，
+    所以再叠一层绝对时长预算：读超过预算就断连，免得一个长连接把 worker 占死，
+    后面成片的懒加载请求全卡在队列里。
+    """
+    r = _http_session().request(method, url, headers=headers, data=body,
+                                timeout=timeout, verify=not insecure,
+                                allow_redirects=True, stream=True)
+    try:
+        chunks, size, deadline = [], 0, time.time() + _HTTP_READ_BUDGET
+        for chunk in r.iter_content(_HTTP_CHUNK):
+            if not chunk:
+                continue
+            size += len(chunk)
+            if size > max_bytes:
+                lim = ("%.1f MB" % (max_bytes / 1048576.0) if max_bytes >= 1048576
+                       else "%.0f KB" % (max_bytes / 1024.0))
+                raise RuntimeError("资源过大（超过 %s）" % lim)
+            chunks.append(chunk)
+            if time.time() > deadline:
+                raise RuntimeError("资源读取超时（超过 %.0f 秒）" % _HTTP_READ_BUDGET)
+        # 内容已经在手：后面 r.content / r.text / r.apparent_encoding 只读这段缓存
+        r._content = b"".join(chunks)
+        r._content_consumed = True
+        return r
+    finally:
+        r.close()
+
+
+def _http_submit(fn, *args, **kwargs):
+    """提交到池；超出并发上限立刻失败，绝不长时间阻塞请求线程。
+
+    懒加载一滚动就打出成片请求：若让它们在队列里阻塞 90 秒，Werkzeug 会为每个
+    请求各开一个线程，线程反复建销又让 glibc 的 malloc arena 只增不减 —— 表现就是
+    「页面卡住 + 内存一直涨」。所以这里不排队、不阻塞：能力之外直接 503。
+    """
+    if not _HTTP_QUEUE.acquire(blocking=False):
+        raise RuntimeError("资源代取繁忙（并发过多），请稍后重试")
+    try:
+        fut = _http_exec().submit(fn, *args, **kwargs)
+    except BaseException:
+        _HTTP_QUEUE.release()
+        raise
+    fut.add_done_callback(lambda _f: _HTTP_QUEUE.release())
+    try:
+        return fut.result(timeout=_HTTP_RESULT_TIMEOUT)
+    except FuturesTimeout:
+        raise RuntimeError("资源代取超时，请稍后重试")
+
+
+# ------------------------------------------------- 堆内存归还
+# Python 把对象 free 掉之后，glibc 的 malloc arena 仍占着 RSS。定期 trim 一次把
+# 空闲页还给内核；「释放内存」按钮也会立即触发同一个动作。
+_TRIM_INTERVAL = 300
+_trim_lock = threading.Lock()
+_trim_started = False
+
+
+def _trim_heap():
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
+def _ensure_heap_trimmer():
+    global _trim_started
+    with _trim_lock:
+        if _trim_started:
+            return
+        _trim_started = True
+
+    def _run():
+        while True:
+            time.sleep(_TRIM_INTERVAL)
+            _trim_heap()
+
+    threading.Thread(target=_run, daemon=True, name="scr-heap-trim").start()
+
+
 # ------------------------------------------------- 资源代理（图片 / 字体）
 _IMG_TTL = 3600
 _IMG_ITEM_MAX = 12 * 1024 * 1024      # 单个资源上限
-_IMG_TOTAL_MAX = 64 * 1024 * 1024     # 内存缓存总量上限
+_IMG_TOTAL_MAX = 32 * 1024 * 1024     # 内存缓存总量上限（内存优化：64MB → 32MB）
 _IMG_CACHE = {}
 _IMG_SIZE = 0
 _IMG_LOCK = threading.Lock()
@@ -200,7 +508,8 @@ def fetch_media(url, ref=""):
     if ref:
         headers["Referer"] = ref
     try:
-        r = requests.get(target, headers=headers, timeout=15, allow_redirects=True)
+        # 走池：连接复用 + 流式限量读取，超大资源在读的过程中就断掉
+        r = _http_submit(_http_read, target, headers, 15, False, _IMG_ITEM_MAX)
     except requests.exceptions.RequestException as e:
         raise RuntimeError("资源请求失败：%s" % e)
     if r.status_code >= 400:
@@ -396,9 +705,11 @@ def _rewrite_srcset(value, base_url, mirror_base):
     return ", ".join(parts)
 
 
-def _rewrite_all_links(soup, base_url, mirror_base):
-    """交互预览：页面上所有资源 / 跳转地址都改走镜像。"""
+def _rewrite_all_links(soup, base_url, mirror_base, no_img=False):
+    """交互预览：页面上所有资源 / 跳转地址都改走镜像。no_img=True 时图片类标签跳过（直连原站）。"""
     for tag, attrs in _MIRROR_ATTRS.items():
+        if no_img and tag in ("img", "source", "video", "audio"):
+            continue
         for el in soup.find_all(tag):
             for attr in attrs:
                 v = el.get(attr)
@@ -532,7 +843,7 @@ def agent_js():
 # ------------------------------------------------------- 镜像资源抓取 + 缓存
 _MIRROR_TTL = 900
 _MIRROR_ITEM_MAX = 24 * 1024 * 1024
-_MIRROR_TOTAL_MAX = 128 * 1024 * 1024
+_MIRROR_TOTAL_MAX = 64 * 1024 * 1024    # 内存优化：128MB → 64MB，命中不足时重新代取即可
 _MIRROR_CACHE = {}
 _MIRROR_SIZE = 0
 _MIRROR_LOCK = threading.Lock()
@@ -565,7 +876,11 @@ def _decode_body(resp):
 
 def fetch_mirror(target, page_url, hdrs=None, insecure=False, token="",
                  mirror_base="", asset_prefix="", accept="", method="GET", body=None):
-    """代取一个站点资源并改写其中的地址，返回 {status, ctype, data} 或 {redirect}。"""
+    """代取一个站点资源并改写其中的地址，返回 {status, ctype, data} 或 {redirect}。
+
+    网络请求和 HTML / JS 改写都丢进固定大小的线程池（见「出站 HTTP」）：请求线程
+    只查缓存、写缓存，不再各自解析几 MB 的 DOM，避免并发一高就新开一堆 malloc arena。
+    """
     target = check_url(target)
     method = (method or "GET").upper()
     key = (token, target, accept, method, len(body or b""))
@@ -577,6 +892,38 @@ def fetch_mirror(target, page_url, hdrs=None, insecure=False, token="",
         if hit:
             _MIRROR_CACHE.pop(key, None)
 
+    res = _http_submit(_mirror_job, target, page_url, hdrs, insecure, mirror_base,
+                       asset_prefix, accept, method, body)
+    if res.get("redirect"):
+        return res
+    global _MIRROR_SIZE
+    data = res.get("data") or b""
+    with _MIRROR_LOCK:
+        old = _MIRROR_CACHE.pop(key, None)
+        if old:
+            _MIRROR_SIZE -= len(old["data"])
+        _MIRROR_CACHE[key] = {"status": res["status"], "ctype": res["ctype"],
+                              "data": data, "ts": now}
+        _MIRROR_SIZE += len(data)
+        # key 带预览 token，重新抓一次页面旧 token 的条目就再也命中不了；
+        # 光靠总量上限兜底会让它们一直占着内存，插入时顺手清掉过期的
+        for k in [k for k, v in _MIRROR_CACHE.items()
+                  if k != key and now - v["ts"] > _MIRROR_TTL]:
+            v = _MIRROR_CACHE.pop(k, None)
+            if v:
+                _MIRROR_SIZE -= len(v["data"])
+        while _MIRROR_SIZE > _MIRROR_TOTAL_MAX and len(_MIRROR_CACHE) > 1:
+            k, v = next(iter(_MIRROR_CACHE.items()))
+            if k == key:
+                break
+            _MIRROR_CACHE.pop(k, None)
+            _MIRROR_SIZE -= len(v["data"])
+    return res
+
+
+def _mirror_job(target, page_url, hdrs, insecure, mirror_base, asset_prefix,
+                accept, method, body):
+    """池线程里执行：发请求 → 解码 → 改写地址。大对象只在这几个线程里分配/释放。"""
     headers = {
         "User-Agent": DEFAULT_UA,
         "Accept": accept or "*/*",
@@ -596,12 +943,8 @@ def fetch_mirror(target, page_url, hdrs=None, insecure=False, token="",
         headers[k] = str(v)
 
     try:
-        if method in ("GET", "HEAD"):
-            r = requests.get(target, headers=headers, timeout=20,
-                             verify=not insecure, allow_redirects=True)
-        else:
-            r = requests.request(method, target, headers=headers, data=body,
-                                 timeout=20, verify=not insecure, allow_redirects=True)
+        r = _http_read(target, headers, timeout=20, insecure=insecure,
+                       max_bytes=_MIRROR_ITEM_MAX, method=method, body=body)
     except requests.exceptions.RequestException as e:
         raise RuntimeError("资源请求失败：%s" % e)
     if r.history and r.url and r.url != target:
@@ -626,30 +969,34 @@ def fetch_mirror(target, page_url, hdrs=None, insecure=False, token="",
             text = _rewrite_js_text(text, r.url, mirror_base)
         data = text.encode("utf-8", "ignore")
         ctype = ctype + "; charset=utf-8"
-
-    global _MIRROR_SIZE
-    with _MIRROR_LOCK:
-        old = _MIRROR_CACHE.pop(key, None)
-        if old:
-            _MIRROR_SIZE -= len(old["data"])
-        _MIRROR_CACHE[key] = {"status": status, "ctype": ctype, "data": data, "ts": now}
-        _MIRROR_SIZE += len(data)
-        while _MIRROR_SIZE > _MIRROR_TOTAL_MAX and len(_MIRROR_CACHE) > 1:
-            k, v = next(iter(_MIRROR_CACHE.items()))
-            if k == key:
-                break
-            _MIRROR_CACHE.pop(k, None)
-            _MIRROR_SIZE -= len(v["data"])
     return {"status": status, "ctype": ctype, "data": data}
 
 
-def clean_html(raw, base_url, asset_prefix="", keep_scripts=False, mirror_base=""):
+def _promote_lazy(soup, base_url):
+    """不代理图片模式：只把懒加载的真实地址补成绝对地址（浏览器直连源站），src 保持原样。"""
+    for el in soup.find_all(["img", "source", "video", "audio"]):
+        for attr in _LAZY_ATTRS:
+            v = str(el.get(attr) or "").strip()
+            if v and not v.startswith("data:"):
+                if not str(el.get("src") or "").strip():
+                    try:
+                        el["src"] = _abs_url(v, base_url)
+                    except Exception:
+                        pass
+                break
+        for attr in _LAZY_ATTRS:
+            if el.has_attr(attr):
+                del el.attrs[attr]
+
+
+def clean_html(raw, base_url, asset_prefix="", keep_scripts=False, mirror_base="", no_img=False):
     """清洗预览用 HTML。
 
     keep_scripts=False（默认）：去脚本 / 去事件属性 / 图片改走代理，安全但站点特效不跑；
     keep_scripts=True（交互预览）：保留站点脚本（轮播 / 点击 / 滚动加载才能工作），
     并且把页面上所有资源地址改写成 mirror_base 开头的镜像地址 —— 脚本、样式、图片、
     接口全部由服务端代取，浏览器不直连源站；再由 iframe 的 sandbox 负责隔离。
+    no_img=True：图片资源不做代理改写，src 保持原站地址（预览更快，防盗链站可能裂图）。
     """
     soup = BeautifulSoup(raw or "", "html.parser")
     # CSP / refresh 两种模式都要去掉：前者会挡掉我们的注入脚本与高亮样式，后者会把 iframe 跳走
@@ -661,7 +1008,7 @@ def clean_html(raw, base_url, asset_prefix="", keep_scripts=False, mirror_base="
     if keep_scripts and mirror_base:
         # 交互预览：脚本照跑，但地址全部改走镜像（相对地址靠 <base> 指向镜像根）
         try:
-            _rewrite_all_links(soup, base_url, mirror_base)
+            _rewrite_all_links(soup, base_url, mirror_base, no_img=no_img)
         except Exception as e:
             _log.warning("预览资源镜像改写失败: %s", e)
     elif not keep_scripts:
@@ -685,7 +1032,10 @@ def clean_html(raw, base_url, asset_prefix="", keep_scripts=False, mirror_base="
                 if low.startswith("on") or low in ("srcdoc", "formaction"):
                     del el.attrs[name]
         try:
-            _rewrite_media(soup, base_url, asset_prefix)
+            if no_img:
+                _promote_lazy(soup, base_url)   # 只补懒加载真地址，不做代理改写
+            else:
+                _rewrite_media(soup, base_url, asset_prefix)
         except Exception as e:
             _log.warning("预览资源改写失败: %s", e)
 
@@ -712,8 +1062,9 @@ def clean_html(raw, base_url, asset_prefix="", keep_scripts=False, mirror_base="
     if keep_scripts:
         try:
             cfg = soup.new_tag("script")
-            cfg.string = ("window.__SCR_MIRROR__=%s;window.__SCR_SITE__=%s;window.__SCR_PAGE__=%s;"
-                          % (json.dumps(mirror_base or ""), json.dumps(_origin_of(base_url)),
+            cfg.string = ("window.__SCR_NO_IMG__=%s;window.__SCR_MIRROR__=%s;window.__SCR_SITE__=%s;window.__SCR_PAGE__=%s;"
+                          % (json.dumps(bool(no_img and keep_scripts)),
+                             json.dumps(mirror_base or ""), json.dumps(_origin_of(base_url)),
                              json.dumps(base_url)))
             head.insert(0, cfg)
         except Exception:
@@ -765,7 +1116,8 @@ def blocked_reason(text):
 
 
 def fetch_page(url, headers=None, timeout=25, insecure=False, keep_html=True,
-               asset_prefix="", render=False, scroll_times=0, interactive=False):
+               asset_prefix="", render=False, scroll_times=0, interactive=False,
+               no_img=False, low_mem=False):
     """请求一个页面，返回 {url, status, title, preview, bytes, cost_ms, rendered[, html]}。
 
     render=True 时改用无头浏览器执行站点脚本（懒加载 / 无限滚动只有这样才能出来），
@@ -791,7 +1143,8 @@ def fetch_page(url, headers=None, timeout=25, insecure=False, keep_html=True,
 
     if render:
         from . import render as render_mod
-        sess = render_mod.open_session(target, headers=hdrs, insecure=insecure, timeout=timeout)
+        sess = render_mod.open_session(target, headers=hdrs, insecure=insecure, timeout=timeout,
+                                       low_mem=low_mem)
         session_token = sess.token
         final_url = sess.page_url or target
         text = sess.html or ""
@@ -846,7 +1199,8 @@ def fetch_page(url, headers=None, timeout=25, insecure=False, keep_html=True,
     # 镜像地址里要带 token，所以先定 token 再清洗 HTML
     token = uuid.uuid4().hex
     mirror_base = mirror_base_of(asset_prefix, token) if live else ""
-    html = clean_html(text, final_url, asset_prefix, keep_scripts=live, mirror_base=mirror_base)
+    html = clean_html(text, final_url, asset_prefix, keep_scripts=live, mirror_base=mirror_base,
+                      no_img=no_img)
     cache_preview(html, final_url, session_token, live=live, hdrs=hdrs,
                   insecure=insecure, token=token)
     out = {
@@ -1191,7 +1545,7 @@ def find_next_url(html, next_selector, base_url):
 
 def crawl(url, fields, item_selector="", pages=1, page_mode="none", url_template="",
           next_selector="", delay_ms=300, headers=None, timeout=25, insecure=False,
-          limit_per_page=0, dedupe=True, render=False, scroll_times=0):
+          limit_per_page=0, dedupe=True, render=False, scroll_times=0, low_mem=False):
     """按配置翻页采集，返回 {ok, rows, columns, count, pages, logs}。"""
     fields = normalize_fields(fields)
     if not fields:
@@ -1263,7 +1617,7 @@ def crawl(url, fields, item_selector="", pages=1, page_mode="none", url_template
                 from . import render as render_mod
                 html_text, page_url = render_mod.render_once(
                     target, headers=headers or {}, insecure=insecure,
-                    timeout=timeout, scroll_times=scroll_times)
+                    timeout=timeout, scroll_times=scroll_times, low_mem=low_mem)
                 page = {"html": html_text, "url": page_url}
             else:
                 page = fetch_page(target, headers=headers, timeout=timeout, insecure=insecure)

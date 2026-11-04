@@ -25,6 +25,8 @@ const SCR = {
   taskId: "", taskName: "",
   pages: 1, pageMode: "none", urlTemplate: "", nextSel: "",
   ua: "", cookie: "", insecure: false, delay: 300, dedupe: true,
+  noImg: false, fetchTimeout: 30,        // 不代理图片资源 / 抓取超时（秒）
+  lowMem: false,                         // 低内存模式（迷你版 Chromium）
   render: false, scrollTimes: 0, scrollLoops: 6, rendered: false, pendingScrollY: null,
   live: false, interactive: false, agentSeq: 0, agentMap: {},
   logs: [], resultMin: false, advOpen: false, tasks: [],
@@ -70,6 +72,48 @@ function scrSize(n) {
   return (n / 1048576).toFixed(2) + " MB";
 }
 
+/* ---------------- 实时内存占用（数据采集模块） ---------------- */
+function scrMemApply(d) {
+  if (!d || d.error) return;
+  const badge = $("scrMemBadge");
+  const info = $("scrMemInfo");
+  const rss = d.rss_h || scrSize(d.rss || 0);
+  const chromN = (d.chromium && d.chromium.n) || 0;
+  const chromH = (d.chromium && d.chromium.bytes_h) || "0 KB";
+  const chromOrphan = (d.chromium && d.chromium.orphans) || 0;
+  const orphanTip = chromOrphan ? "（树外残留 " + chromOrphan + " 个）" : "";
+  const otherH = d.other_h || "0 KB";
+  if (badge) {
+    badge.textContent = "内存 " + rss + (chromN ? " + Chromium " + chromH : "");
+    badge.title = "数据采集模块内存占用（含未归还的堆，不等于各项缓存之和）\n" +
+      "Flask 进程 RSS：" + rss + "\n" +
+      "线程数：" + (d.threads || 0) + " 个\n" +
+      "其他（线程栈 / 解析临时对象 / 未归还的堆）：" + otherH + "\n" +
+      "Chromium（渲染子进程）：" + chromN + " 个 / " + chromH + orphanTip + "\n" +
+      "图片代理缓存：" + ((d.img && d.img.n) || 0) + " 项 / " + ((d.img && d.img.bytes_h) || "0") + "\n" +
+      "镜像缓存：" + ((d.mirror && d.mirror.n) || 0) + " 项 / " + ((d.mirror && d.mirror.bytes_h) || "0") + "\n" +
+      "预览页缓存：" + ((d.previews && d.previews.n) || 0) + " 份 / " + ((d.previews && d.previews.bytes_h) || "0") + "\n" +
+      "渲染会话：" + (d.render_sessions || 0) + " 个\n点击打开「高级」查看明细与释放";
+  }
+  if (info) {
+    info.innerHTML = "进程 <b>" + rss + "</b>" +
+      " · 线程 " + (d.threads || 0) + " 个" +
+      " · 其他（堆/栈） " + otherH +
+      " · Chromium <b>" + chromN + "</b> 个 / " + chromH + orphanTip +
+      " · 图片缓存 " + ((d.img && d.img.n) || 0) + " 项 " + ((d.img && d.img.bytes_h) || "") +
+      " · 镜像缓存 " + ((d.mirror && d.mirror.n) || 0) + " 项 " + ((d.mirror && d.mirror.bytes_h) || "") +
+      " · 预览 " + ((d.previews && d.previews.n) || 0) + " 份 " + ((d.previews && d.previews.bytes_h) || "") +
+      " · 渲染会话 " + (d.render_sessions || 0) + " 个";
+  }
+}
+
+function scrMemRefresh() {
+  fetch("/api/scraper/mem", { credentials: "same-origin", cache: "no-store" })
+    .then(function (r) { return r.json(); })
+    .then(scrMemApply)
+    .catch(function () { });
+}
+
 /* ---------------- 标签页 ---------------- */
 function scrOpenCenter() {
   let tab = findTab(SCR_VIEW_PATH);
@@ -113,15 +157,25 @@ function scrBuild() {
           'placeholder="输入要采集的网址，例如 https://example.com/list">',
         '<button class="scr-btn primary" id="scrGo"><i class="bi bi-cloud-download"></i> 抓取页面</button>',
         '<button class="scr-btn" id="scrAdvBtn" title="请求头 / Cookie / 延时等高级设置"><i class="bi bi-sliders"></i> 高级</button>',
+        '<span class="scr-stat scr-membadge" id="scrMemBadge" title="数据采集模块内存占用（点击查看明细）"></span>',
         '<span class="scr-stat" id="scrStat"></span>',
       '</div>',
       '<div class="scr-adv" id="scrAdv" hidden>',
+        '<div class="scr-membar">',
+          '<i class="bi bi-memory"></i>',
+          '<span id="scrMemInfo">内存：读取中…</span>',
+          '<button class="scr-mini" id="scrMemFree" title="清空图片 / 镜像 / 预览缓存并关闭渲染会话（当前预览会失效，需重新抓取页面）">' +
+            '<i class="bi bi-eraser"></i> 释放内存</button>',
+        '</div>',
         '<label>User-Agent<input type="text" id="scrUa" placeholder="留空用默认浏览器 UA"></label>',
         '<label>Cookie<input type="text" id="scrCookie" placeholder="需要登录态时粘贴 Cookie"></label>',
         '<label>翻页延时（毫秒）<input type="number" id="scrDelay" min="0" max="5000" step="100"></label>',
+        '<label title="单页请求的最长等待时间，慢站可以调大">超时（秒）<input type="number" id="scrTimeout" min="5" max="60" step="5"></label>',
         '<label class="scr-check"><input type="checkbox" id="scrInsecure"> 忽略证书错误</label>',
         '<label class="scr-check" title="用无头浏览器真实执行站点脚本：懒加载图片、滚动到底加载更多的站点必须打开。可与工具条的「交互模式」同时使用（先渲染再交互）"><input type="checkbox" id="scrRender"> 浏览器渲染（执行 JS）</label>',
         '<label title="开启渲染时，打开页面后先自动往下滚几屏再交给点选">先滚 N 屏<input type="number" id="scrScrollTimes" min="0" max="20" step="1" placeholder="0"></label>',
+        '<label class="scr-check" title="预览里的图片不再走本机代理，直接用原站地址加载：预览更快、更省流量；有防盗链的站点可能显示裂图"><input type="checkbox" id="scrNoImg"> 不代理图片资源</label>',
+        '<label class="scr-check" title="迷你版 Chromium：启动参数瘦身（不加载图片 / 限制 V8 堆 / 合并渲染进程 / 缩小视口），内存能省一半以上；代价是页面更慢、极端重型的页面可能打不开。勾选后重新抓取生效"><input type="checkbox" id="scrLowMem"> 低内存模式（迷你版）</label>',
       '</div>',
     '</div>',
 
@@ -415,7 +469,33 @@ function scrBindOnce() {
     SCR.advOpen = !SCR.advOpen;
     $("scrAdv").hidden = !SCR.advOpen;
     this.classList.toggle("on", SCR.advOpen);
+    if (SCR.advOpen) scrMemRefresh();
   });
+  // 实时内存：徽标点击打开高级面板；5 秒自动刷新（仅数据采集页可见时）
+  $("scrMemBadge").addEventListener("click", function () {
+    if (!SCR.advOpen) $("scrAdvBtn").click();
+    else scrMemRefresh();
+  });
+  $("scrMemFree").addEventListener("click", function () {
+    const btn = this;
+    btn.disabled = true;
+    scrReq("/api/scraper/mem/clear", {}).then(function (d) {
+      btn.disabled = false;
+      if (!d || d.error) { toast((d && d.error) || "释放失败", "err"); return; }
+      scrMemApply(d);
+      toast("已释放内存（关闭渲染会话 " + (d.closed_sessions || 0) + " 个）；当前预览已失效，请重新抓取页面", "ok");
+      SCR.previewUrl = "";
+      const fr = $("scrFrame");
+      if (fr) fr.src = "about:blank";
+      SCR.interactive = false;
+    });
+  });
+  if (!SCR.__memTimer) {
+    SCR.__memTimer = setInterval(function () {
+      if (SCR.busy || !scrVisible()) return;
+      scrMemRefresh();
+    }, 5000);
+  }
   // 悬浮面板：点到面板和「高级」按钮外面就自动收起
   if (!SCR.__advOutsideBound) {
     SCR.__advOutsideBound = true;
@@ -434,6 +514,23 @@ function scrBindOnce() {
   $("scrCookie").addEventListener("input", function () { SCR.cookie = this.value.trim(); scrSaveDraft(); });
   $("scrDelay").addEventListener("change", function () { SCR.delay = Math.max(0, Math.min(5000, Number(this.value) || 0)); scrSaveDraft(); });
   $("scrInsecure").addEventListener("change", function () { SCR.insecure = !!this.checked; scrSaveDraft(); });
+  $("scrNoImg").addEventListener("change", function () {
+    SCR.noImg = !!this.checked;
+    scrSaveDraft();
+    if (SCR.noImg) toast("已勾选「不代理图片资源」：重新抓取页面后生效，图片直连原站（防盗链站可能裂图）", "ok");
+  });
+  $("scrLowMem").addEventListener("change", function () {
+    SCR.lowMem = !!this.checked;
+    scrSaveDraft();
+    toast(SCR.lowMem
+      ? "已开启「低内存模式（迷你版）」：重新抓取页面后生效，Chromium 内存可省一半以上"
+      : "已关闭「低内存模式」：重新抓取页面后恢复正常渲染", SCR.lowMem ? "ok" : "warn");
+  });
+  $("scrTimeout").addEventListener("change", function () {
+    SCR.fetchTimeout = Math.max(5, Math.min(60, Number(this.value) || 30));
+    this.value = SCR.fetchTimeout;
+    scrSaveDraft();
+  });
   $("scrRender").addEventListener("change", function () {
     SCR.render = !!this.checked;
     scrSyncRenderUI();
@@ -764,6 +861,12 @@ function scrBindOnce() {
     box.classList.toggle("min", SCR.resultMin);
     this.className = "bi " + (SCR.resultMin ? "bi-chevron-up" : "bi-chevron-down");
   });
+  // 还没有采集数据时默认收起结果区（scrRenderResult 渲染出数据后会自动展开）
+  if (!SCR.rows || !SCR.rows.length) {
+    SCR.resultMin = true;
+    $("scrResult").classList.add("min");
+    $("scrResultToggle").className = "bi bi-chevron-up";
+  }
   $("scrExpCsv").addEventListener("click", function () { scrExportAsk("csv"); });
   $("scrExpXlsx").addEventListener("click", function () { scrExportAsk("xlsx"); });
   $("scrExpJson").addEventListener("click", function () { scrExportAsk("json"); });
@@ -943,7 +1046,8 @@ async function scrFetchPage(url) {
   scrSetLoading(true, "正在抓取页面…");
   scrStat("抓取中…");
   const d = await scrReq("/api/scraper/fetch", {
-    url: url, ua: SCR.ua, cookie: SCR.cookie, insecure: SCR.insecure, timeout: 30,
+    url: url, ua: SCR.ua, cookie: SCR.cookie, insecure: SCR.insecure,
+    timeout: SCR.fetchTimeout || 30, no_img: !!SCR.noImg, low_mem: !!SCR.lowMem,
     render: SCR.render, scroll_times: SCR.scrollTimes,
     // 交互预览：让后端保留并执行站点脚本、把所有资源改写成镜像代理地址
     live: !!SCR.live
@@ -3481,12 +3585,14 @@ function scrCollectCfg() {
     next_selector: SCR.nextSel,
     delay_ms: SCR.delay,
     insecure: SCR.insecure,
+    timeout: SCR.fetchTimeout || 30,
     ua: SCR.ua,
     cookie: SCR.cookie,
     render: SCR.render,
     // 滚动加载模式下，滚动次数用「翻页 → 最多滚动」那个值
     scroll_times: SCR.pageMode === "scroll" ? SCR.scrollLoops : SCR.scrollTimes,
     scroll_loops: SCR.scrollLoops,
+    low_mem: !!SCR.lowMem,
   };
 }
 
@@ -3620,6 +3726,9 @@ function scrApplyDraftToInputs() {
   if ($("scrRender")) $("scrRender").checked = !!SCR.render;
   if ($("scrLiveBtn")) $("scrLiveBtn").classList.toggle("on", !!SCR.live);
   if ($("scrScrollTimes")) $("scrScrollTimes").value = SCR.scrollTimes || "";
+  if ($("scrNoImg")) $("scrNoImg").checked = !!SCR.noImg;
+  if ($("scrLowMem")) $("scrLowMem").checked = !!SCR.lowMem;
+  if ($("scrTimeout")) $("scrTimeout").value = SCR.fetchTimeout || 30;
   if ($("scrAdv")) $("scrAdv").hidden = !SCR.advOpen;
   if ($("scrAdvBtn")) $("scrAdvBtn").classList.toggle("on", SCR.advOpen);
   scrSyncLock();
@@ -3917,6 +4026,8 @@ function scrDraftPayload() {
     ua: SCR.ua, cookie: SCR.cookie, insecure: SCR.insecure,
     delay: SCR.delay, advOpen: SCR.advOpen,
     render: SCR.render, scrollTimes: SCR.scrollTimes, scrollLoops: SCR.scrollLoops,
+    noImg: !!SCR.noImg, fetchTimeout: SCR.fetchTimeout || 30,
+    lowMem: !!SCR.lowMem,
     live: !!SCR.live,
     itemLock: !!SCR.itemLock,
     hideSelectors: (SCR.hideSelectors || []).slice(0, 200),
@@ -3951,6 +4062,9 @@ function scrRestoreDraft() {
   SCR.taskName = d.taskName || "";
   SCR.advOpen = !!d.advOpen;
   SCR.live = !!d.live;
+  SCR.noImg = !!d.noImg;
+  SCR.lowMem = !!d.lowMem;
+  SCR.fetchTimeout = Math.max(5, Math.min(60, Number(d.fetchTimeout) || 30));
   SCR.itemLock = !!d.itemLock;
   SCR.hideSelectors = Array.isArray(d.hideSelectors) ? d.hideSelectors.slice(0, 200) : [];
   SCR.sites = (d.sites && typeof d.sites === "object") ? d.sites : {};

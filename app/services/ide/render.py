@@ -13,7 +13,7 @@ Playwright 的同步 API 对象只能在「创建它的线程」里使用，而 
 
 资源
 ----
-每个会话 = 一个 Chromium（约 100~200MB）。默认最多同时留 2 个，空闲 5 分钟自动关闭；
+每个会话 = 一个 Chromium（约 100~200MB）。默认最多同时留 2 个，空闲 2 分钟自动关闭；
 超出上限时先关最久没用的那个。playwright 没装时直接抛错，由路由层转成可读提示。
 """
 import queue
@@ -28,11 +28,17 @@ _log = get_logger()
 
 MAX_SESSIONS = 2
 IDLE_TIMEOUT = 120          # 会话空闲多久自动关闭（秒）。Chromium 是内存大户，不能挂太久
+STALE_TIMEOUT = 360         # 一次性 / 构造失败会话的兜底清理时长（秒），比正常渲染耗时宽裕
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 _sessions = {}
 _lock = threading.Lock()
+# 所有还活着的会话，包括 render_once 的一次性会话和「构造到一半失败」的会话。
+# 这些都不在 _sessions 里，过去一旦没人拿到对象引用，close() 就永远不会被调用：
+# worker 线程卡在 _q.get()，Playwright driver 和 Chromium 进程一直留着。
+_ALL = set()
+_ALL_LOCK = threading.Lock()
 
 
 def available():
@@ -56,12 +62,13 @@ def _require_playwright():
 class RenderSession:
     """一个常驻无头浏览器的渲染会话；所有 Playwright 操作都在自己的 worker 线程里跑。"""
 
-    def __init__(self, url, headers=None, insecure=False, timeout=30):
+    def __init__(self, url, headers=None, insecure=False, timeout=30, low_mem=False):
         _require_playwright()
         self.token = uuid.uuid4().hex
         self.url = url
         self.page_url = url
         self.html = ""
+        self.low_mem = bool(low_mem)
         self.last_used = time.time()
         self._q = queue.Queue()
         self._closed = False
@@ -70,14 +77,30 @@ class RenderSession:
         self._ctx = None
         self._page = None
         self._thread = threading.Thread(target=self._loop, daemon=True, name="scr-render")
+        with _ALL_LOCK:
+            _ALL.add(self)
+        _ensure_reaper()
         self._thread.start()
-        # 首屏：打开页面并等一小会儿，让首屏接口 / 懒加载图起来
-        self.html = self.call(lambda: self._open(url, headers or {}, insecure, timeout),
-                              timeout=max(60, int(timeout) + 40))
-        self.page_url = self.call(lambda: self._page.url, timeout=30) or url
+        try:
+            # 首屏：打开页面并等一小会儿，让首屏接口 / 懒加载图起来
+            self.html = self.call(lambda: self._open(url, headers or {}, insecure, timeout),
+                                  timeout=max(60, int(timeout) + 40))
+            self.page_url = self.call(lambda: self._page.url, timeout=30) or url
+        except BaseException:
+            # 首屏超时 / 打开失败：对象还没返回给调用方，外面没人会调 close()；
+            # 不清理就会永久留下一个 worker 线程和一整套 Chromium 进程。
+            self.close()
+            raise
 
     # ---------------------------------------------------------- 线程内执行
     def _loop(self):
+        try:
+            self._loop_inner()
+        finally:
+            with _ALL_LOCK:
+                _ALL.discard(self)
+
+    def _loop_inner(self):
         from playwright.sync_api import sync_playwright
         try:
             self._pw = sync_playwright().start()
@@ -129,17 +152,26 @@ class RenderSession:
 
     # ---------------------------------------------------------- 具体动作
     def _open(self, url, headers, insecure, timeout):
-        self._browser = self._pw.chromium.launch(
-            headless=True,
-            args=["--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled",
-                  # 内存控制：视频 / 重型站点单个页面就能吃 1GB+，这里压一压
-                  "--disable-gpu",                # 无头用不上 GPU，省掉 GPU 进程内存
-                  "--mute-audio",                 # 静音，媒体解码照常但省一部分
-                  "--renderer-process-limit=1"],  # 渲染进程合并，减少进程数开销
-        )
+        args = ["--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled",
+                # 内存控制：视频 / 重型站点单个页面就能吃 1GB+，这里压一压
+                "--disable-gpu",                # 无头用不上 GPU，省掉 GPU 进程内存
+                "--mute-audio",                 # 静音，媒体解码照常但省一部分
+                "--renderer-process-limit=1"]   # 渲染进程合并，减少进程数开销
+        if self.low_mem:
+            # 低内存模式（迷你版）：再瘦一圈，代价是页面更慢 / 极端重型的页面可能崩
+            args += [
+                "--blink-settings=imagesEnabled=false",   # 干脆不加载图片（配合「不代理图片资源」）
+                "--process-per-site",                     # 同站点复用渲染进程
+                "--disable-features=site-per-process,BackForwardCache,Translate,MediaRouter",
+                "--js-flags=--max-old-space-size=192",    # 限制单个渲染进程的 V8 堆（MB）
+                "--disable-background-networking",
+                "--disk-cache-size=1",
+            ]
+        self._browser = self._pw.chromium.launch(headless=True, args=args)
         self._ctx = self._browser.new_context(
             user_agent=headers.get("User-Agent") or UA,
-            viewport={"width": 1440, "height": 960},
+            viewport=({"width": 1024, "height": 768} if self.low_mem
+                      else {"width": 1440, "height": 960}),
             locale="zh-CN",
             timezone_id="Asia/Shanghai",
             ignore_https_errors=bool(insecure),
@@ -217,6 +249,15 @@ class RenderSession:
             self._q.put(None)
         except Exception:
             pass
+        # 只往队列投毒不等待：worker 若正卡在 Playwright 调用里，浏览器还要过很久
+        # 才关，这段时间它既不在 _sessions 里，也不会被「一键释放」看到。这里等一小
+        # 会儿，正常情况下足够让 _ctx / _browser / driver 全部退出。
+        t = self._thread
+        if t is not None and t.is_alive() and t is not threading.current_thread():
+            try:
+                t.join(timeout=3)
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------- 会话管理
@@ -228,7 +269,12 @@ def _sweep():
             if now - sess.last_used > IDLE_TIMEOUT:
                 _sessions.pop(token, None)
                 dead.append(sess)
-    for sess in dead:
+    # 兜底：一次性会话（render_once）和构造失败没人接手的会话都不在 _sessions 里，
+    # 只扫 _sessions 会漏掉它们，Playwright driver / Chromium 就一直挂着。
+    with _ALL_LOCK:
+        stale = [s for s in _ALL
+                 if not s._closed and now - s.last_used > STALE_TIMEOUT]
+    for sess in dead + stale:
         try:
             sess.close()
         except Exception:
@@ -260,7 +306,7 @@ def _ensure_reaper():
     threading.Thread(target=_run, daemon=True, name="scr-render-reaper").start()
 
 
-def open_session(url, headers=None, insecure=False, timeout=30):
+def open_session(url, headers=None, insecure=False, timeout=30, low_mem=False):
     """打开一个渲染会话（同一时间最多 MAX_SESSIONS 个）。"""
     _ensure_reaper()
     _sweep()
@@ -273,7 +319,8 @@ def open_session(url, headers=None, insecure=False, timeout=30):
             except Exception:
                 pass
             break
-    sess = RenderSession(url, headers=headers, insecure=insecure, timeout=timeout)
+    sess = RenderSession(url, headers=headers, insecure=insecure, timeout=timeout,
+                         low_mem=low_mem)
     with _lock:
         _sessions[sess.token] = sess
     return sess
@@ -298,11 +345,13 @@ def get_session(token):
     return sess
 
 
-def render_once(url, headers=None, insecure=False, timeout=30, scroll_times=0, delay=1.2):
+def render_once(url, headers=None, insecure=False, timeout=30, scroll_times=0, delay=1.2,
+                low_mem=False):
     """一次性渲染：打开 → 滚 N 屏 → 取 HTML → 关会话。采集时按页调用。"""
     sess = None
     try:
-        sess = RenderSession(url, headers=headers, insecure=insecure, timeout=timeout)
+        sess = RenderSession(url, headers=headers, insecure=insecure, timeout=timeout,
+                             low_mem=low_mem)
         html = sess.html
         if scroll_times:
             html, _y = sess.scroll(times=scroll_times, delay=delay)

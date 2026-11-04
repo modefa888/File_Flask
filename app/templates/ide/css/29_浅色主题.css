@@ -300,6 +300,16 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .gr-creds-btn { border-color: #cecece; color: #005fb8; }
 :where(html.theme-light) .gr-creds-btn:hover { background: #e3f0fb; border-color: #8ab4d8; }
 
+/* ---------- 抓取 / 拉取实时进度悬浮框（18） ---------- */
+:where(html.theme-light) .git-live-card { background: #ffffff; border-color: #d0d4d9; color: #333333; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+:where(html.theme-light) .git-live-card .glc-v { color: #8a8f98; }
+:where(html.theme-light) .git-live-card .glc-st.running { color: #005fb8; }
+:where(html.theme-light) .git-live-card .glc-st.done { color: #1a7f37; }
+:where(html.theme-light) .git-live-card .glc-st.fail { color: #c62828; }
+:where(html.theme-light) .git-live-card .glc-st.idle { color: #8a8f98; }
+:where(html.theme-light) .git-live-card .glc-lines { color: #0b62a4; }
+:where(html.theme-light) .git-live-card .glc-lines.dim { color: #98a0a8; }
+
 /* ---------- 发布推送记录弹窗（18） ---------- */
 :where(html.theme-light) .ph-i { background: #f6f7f9; border-color: #e2e5e9; border-left-color: #b0b6bd; }
 :where(html.theme-light) .ph-i:hover { background: #f0f2f5; border-color: #d3d7dc; }

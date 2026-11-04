@@ -902,6 +902,59 @@
   }
 
   let gitRemoteBusy = "";           // 正在执行的远程操作，防止连点堆出多条「推送中」
+
+  /* 抓取 / 拉取按钮的实时进度悬浮框：悬停即显示最近进度行，执行中每 800ms 轮询后端 */
+  let gitLiveCard = null, gitLiveTimer = 0, gitLiveVerb = "", gitLiveHideT = 0;
+  function gitLiveHover(btn, verb) {
+    btn.addEventListener("mouseenter", () => {
+      clearTimeout(gitLiveHideT);
+      clearInterval(gitLiveTimer);
+      gitLiveVerb = verb;
+      if (!gitLiveCard) {
+        gitLiveCard = document.createElement("div");
+        gitLiveCard.className = "git-live-card";
+        document.body.appendChild(gitLiveCard);
+      }
+      const refresh = async () => {
+        if (!gitLiveCard || gitLiveVerb !== verb) return;
+        try {
+          const d = await fetch("/api/git/remote/live?repo=" +
+            encodeURIComponent(gitState.repo) + "&verb=" + verb).then(r => r.json());
+          if (!gitLiveCard || gitLiveVerb !== verb) return;
+          const st = d.status || "idle";
+          const stTxt = st === "running" ? '<i class="spin"></i> 执行中…'
+            : st === "done" ? '<i class="bi bi-check-circle"></i> 已完成'
+            : st === "fail" ? '<i class="bi bi-x-circle"></i> 失败'
+            : '空闲（点按钮开始）';
+          const lines = (d.lines || []).map(esc);
+          gitLiveCard.innerHTML =
+            '<div class="glc-head"><span class="glc-st ' + st + '">' + stTxt + '</span>' +
+              '<span class="glc-v">' + (verb === "fetch" ? "抓取" : "拉取") + '</span></div>' +
+            (lines.length
+              ? '<div class="glc-lines">' + lines.join("\n") + '</div>'
+              : '<div class="glc-lines dim">暂无输出</div>');
+        } catch (e) { /* 悬浮框轮询失败不打扰用户 */ }
+      };
+      refresh();
+      gitLiveTimer = setInterval(refresh, 800);
+      const r = btn.getBoundingClientRect();
+      gitLiveCard.style.display = "block";
+      const cw = gitLiveCard.offsetWidth || 300, ch = gitLiveCard.offsetHeight || 80;
+      let x = Math.max(8, Math.min(r.left, window.innerWidth - cw - 8));
+      let y = r.bottom + 6;
+      if (y + ch > window.innerHeight - 8) y = Math.max(8, r.top - ch - 6);
+      gitLiveCard.style.left = x + "px";
+      gitLiveCard.style.top = y + "px";
+    });
+    btn.addEventListener("mouseleave", () => {
+      gitLiveHideT = setTimeout(() => {
+        clearInterval(gitLiveTimer);
+        if (gitLiveCard) gitLiveCard.style.display = "none";
+        gitLiveVerb = "";
+      }, 250);
+    });
+  }
+
   function remoteOp(verb, label, done) {
     if (!gitState.isRepo) { toast("当前不是 Git 仓库", "warn"); return; }
     if (gitRemoteBusy) {
@@ -1030,8 +1083,8 @@
       return b;
     };
     addAct("bi-crosshair", "转到当前历史记录项", gotoCurrentCommit);
-    addAct("bi-cloud-download", "从所有远程存储库中抓取", () => remoteOp("fetch", "抓取"));
-    addAct("bi-arrow-down-circle", "拉取", () => remoteOp("pull", "拉取"));
+    gitLiveHover(addAct("bi-cloud-download", "从所有远程存储库中抓取（悬停看实时进度）", () => remoteOp("fetch", "抓取")), "fetch");
+    gitLiveHover(addAct("bi-arrow-down-circle", "拉取（悬停看实时进度）", () => remoteOp("pull", "拉取")), "pull");
     addAct("bi-cloud-upload", "发布分支 / 推送", () => remoteOp("push", "发布分支"));
     addAct("bi-arrow-clockwise", "刷新", () => loadGitStatus(true));
     addAct("bi-three-dots", "更多操作", () => {});

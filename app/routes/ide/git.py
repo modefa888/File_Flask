@@ -16,6 +16,7 @@ import re
 import shutil
 import socket
 import subprocess
+import threading
 import time
 from urllib.parse import quote, urlsplit, urlunsplit
 
@@ -260,6 +261,88 @@ def _git(cwd, args, timeout=_TIMEOUT, proxy=""):
     except OSError as e:
         return None, f"git 执行失败：{e}"
     return proc, None
+
+
+# 抓取 / 拉取的实时进度：键 "<repo根>|<verb>"，值 {lines, status, ts}
+# 进度行由后台线程从 git stderr 流式读入，前端悬浮框轮询展示
+_REMOTE_LIVE = {}
+
+_RE_REMOTE_TOKENISH = re.compile(r"https://[^/\s]+@", re.I)
+
+
+def _mask_url_cred(text):
+    """报错 / 进度行里可能带出 https://user:pass@host 形式的远程地址，凭据部分打码。"""
+    return _RE_REMOTE_TOKENISH.sub("https://***@", text or "")
+
+
+def _live_key(root, verb):
+    return f"{root}|{verb}"
+
+
+def _git_live(cwd, args, timeout=_TIMEOUT, proxy="", lkey=""):
+    """与 _git 等价的流式版本：git 的 stderr 进度（Receiving objects: xx%…）
+    会被后台线程逐段读入 _REMOTE_LIVE[lkey]，供前端悬浮框轮询展示。
+
+    返回值模拟 CompletedProcess（returncode / stdout / stderr），行为与 _git 一致。
+    """
+    exe = _git_exe()
+    if not exe:
+        return None, "未找到 git 命令，请先安装 Git"
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_ASKPASS"] = "false"
+    conf = [exe, "-c", "safe.directory=*", "-c", "core.quotepath=false"]
+    if proxy:
+        conf += ["-c", "http.proxy=" + proxy, "-c", "https.proxy=" + proxy]
+    live = _REMOTE_LIVE.setdefault(lkey, {"lines": [], "status": "idle", "ts": 0})
+    live.update({"lines": [], "status": "running", "ts": time.time()})
+    try:
+        proc = subprocess.Popen(conf + args, cwd=cwd,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, errors="replace", bufsize=256,
+                                stdin=subprocess.DEVNULL, env=env)
+    except OSError as e:
+        live.update({"status": "fail", "lines": [f"git 执行失败：{e}"], "ts": time.time()})
+        return None, f"git 执行失败：{e}"
+
+    err_lines = []                                          # stderr 原文（汇总后当 stderr 返回）
+
+    def _reader():
+        buf = ""
+        while True:
+            ch = proc.stderr.read(256)
+            if not ch:
+                break
+            buf += ch
+            # git 进度用 \r 刷新同一行，普通输出用 \n；两种分隔都拆开
+            parts = re.split(r"[\r\n]+", buf)
+            buf = parts.pop() if parts else ""
+            for ln in parts:
+                ln = ln.strip()
+                if ln:
+                    err_lines.append(ln)
+                    live["lines"] = err_lines[-8:]          # 悬浮框只看最近几行
+                    live["ts"] = time.time()
+        if buf.strip():
+            err_lines.append(buf.strip())
+            live["lines"] = err_lines[-8:]
+
+    th = threading.Thread(target=_reader, daemon=True)
+    th.start()
+    try:
+        rc = proc.wait(timeout=timeout)
+        th.join(2)
+        out = (proc.stdout.read() or "") if proc.stdout else ""
+        live["status"] = "done" if rc == 0 else "fail"
+        live["ts"] = time.time()
+        return subprocess.CompletedProcess(args, rc, stdout=out,
+                                           stderr="\n".join(err_lines)), None
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(5)
+        live["status"] = "fail"
+        live["ts"] = time.time()
+        return None, "git 命令执行超时"
 
 
 def _fail(msg, code=400):
@@ -1016,7 +1099,7 @@ def _remote_op(verb, timeout):
     args = [verb]
     branch = ""
     if verb == "fetch":
-        args += ["--prune", auth_url]
+        args += ["--prune", "--progress", auth_url]
     elif verb == "push":
         # 分支没有上游时自动发布（push -u <url> <branch>）
         proc_br, _ = _git(root, ["rev-parse", "--abbrev-ref", "HEAD"])
@@ -1028,7 +1111,7 @@ def _remote_op(verb, timeout):
         else:
             args += [auth_url]
     else:  # pull
-        args += [auth_url]
+        args += ["--progress", auth_url]
 
     # push 开始先落一条「推送中」记录（含本次要推送的提交明细），结束后回写结果
     push_commits = []
@@ -1037,9 +1120,12 @@ def _remote_op(verb, timeout):
     hid = _push_hist_start(root, branch, push_commits) if verb == "push" else None
 
     # 低速断开：连接建立后 20 秒内几乎没有数据（<1KB/s）就主动断，避免半死不活地挂着
+    lkey = _live_key(root, verb) if verb in ("fetch", "pull") else ""
     def _run(via_proxy):
-        return _git(root, ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=20"] + args,
-                    timeout=timeout, proxy=via_proxy)
+        full = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=20"] + args
+        if lkey:                        # 抓取 / 拉取：流式执行，进度实时写入 _REMOTE_LIVE
+            return _git_live(root, full, timeout=timeout, proxy=via_proxy, lkey=lkey)
+        return _git(root, full, timeout=timeout, proxy=via_proxy)
 
     proc, err = _run(use_proxy)
     used_fallback = False
@@ -1100,6 +1186,25 @@ def api_git_fetch():
 @bp.route("/api/git/pull", methods=["POST"])
 def api_git_pull():
     return _remote_op("pull", 60)
+
+
+@bp.route("/api/git/remote/live")
+def api_git_remote_live():
+    """抓取 / 拉取的实时进度（供工具栏按钮悬浮框轮询）。
+
+    status: idle=没执行过 / running=进行中 / done=完成 / fail=失败；lines 为最近几行输出。
+    """
+    repo = request.args.get("repo", "")
+    verb = (request.args.get("verb") or "").strip().lower()
+    if verb not in ("fetch", "pull"):
+        return _fail("参数不合法")
+    root, err = _repo_root(repo)
+    if err:
+        return _fail(err)
+    live = _REMOTE_LIVE.get(_live_key(root or "", verb)) or {}
+    lines = [_mask_url_cred(ln) for ln in (live.get("lines") or [])]
+    return jsonify({"ok": True, "status": live.get("status") or "idle",
+                    "lines": lines, "ts": live.get("ts") or 0})
 
 
 @bp.route("/api/git/push", methods=["POST"])

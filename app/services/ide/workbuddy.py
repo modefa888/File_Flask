@@ -40,6 +40,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -57,12 +58,29 @@ _log = get_logger()
 
 CONFIG_KEY = "workbuddy.config"
 DEFAULT_DOMAIN = "www.codebuddy.cn"
+GLOBAL_DOMAIN = "www.workbuddy.ai"
 # 只允许把凭据发往这些官方域名（支持子域），防止配置误填导致 token 外泄
 ALLOWED_DOMAINS = ("codebuddy.cn", "workbuddy.ai", "copilot.tencent.com", "tencent.com")
+
+# 国际版（realm=global）：注册激活 / 地区完善 / trial 加油包，均在 workbuddy.ai 同域
+GLOBAL_BASE = "https://" + GLOBAL_DOMAIN
+GLOBAL_WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+PATH_GLOBAL_REGISTER = "/auth/realms/copilot/overseas/user/register"
+PATH_GLOBAL_COUNTRIES = "/billing/area/get-country-code"
+PATH_GLOBAL_REGION = "/console/login/account"
+PATH_GLOBAL_TRIAL = "/billing/ide/trial"
+GLOBAL_REGION_CODES = ("HK", "MO", "SG", "TH", "PH", "MY", "ID")
 
 PATH_STATUS = "/v2/billing/meter/checkin-activity-status"
 PATH_CHECKIN = "/v2/billing/meter/daily-checkin"
 PATH_CREDITS = "/billing/meter/get-user-resource-summary"
+# 逐包构成（面额 / 剩余 / 失效时刻）：CN 走 /v2，国际版回退不带 /v2
+PATH_RESOURCE = "/v2/billing/meter/get-user-resource"
+PATH_RESOURCE_ALT = "/billing/meter/get-user-resource"
+PACKAGE_END_FMT = "%Y-%m-%d %H:%M:%S"
+PACKAGE_COLORS = ("#5b8cff", "#22d3ee", "#34d399", "#fbbf24", "#a78bfa",
+                  "#f87171", "#f472b6", "#60a5fa", "#4ade80", "#fb923c")
 
 # OAuth 设备授权（CLI 插件同款请求头与端点；参考 linguo2625469/workbuddy2api-panel）
 OAUTH_BASE = {"cn": "https://copilot.tencent.com", "global": "https://www.workbuddy.ai"}
@@ -323,15 +341,34 @@ def detect_auth(explicit=""):
 
 # --------------------------------------------------------------------------- 多账号
 
-ACCOUNT_FIELDS = ("uid", "nickname", "source", "auth_file", "token", "refresh_token",
-                  "domain", "oauth_domain", "enterprise_id", "login_method",
-                  "expires_at", "enabled", "is_default", "remark",
+ACCOUNT_FIELDS = ("uid", "nickname", "realm", "source", "auth_file", "token",
+                  "refresh_token", "domain", "oauth_domain", "enterprise_id",
+                  "login_method", "expires_at", "enabled", "is_default", "remark",
                   "last_balance", "last_check_at", "created_at", "updated_at")
 _MIGRATED_KEY = "workbuddy.accounts_migrated"
+_REALM_COLUMN_READY = False
+
+
+def _ensure_realm_column() -> None:
+    """旧库补 realm 列（进程内只检查一次），存量账号默认国内版。"""
+    global _REALM_COLUMN_READY
+    if _REALM_COLUMN_READY:
+        return
+    conn = store_db.store_conn()
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(workbuddy_accounts)")}
+        if "realm" not in cols:
+            conn.execute("ALTER TABLE workbuddy_accounts "
+                         "ADD COLUMN realm TEXT DEFAULT 'cn'")
+            conn.commit()
+    finally:
+        conn.close()
+    _REALM_COLUMN_READY = True
 
 
 def ensure_migrated() -> None:
     """旧版单账号配置 → workbuddy_accounts 一次性迁移（幂等，不丢凭据）。"""
+    _ensure_realm_column()
     if store_db.get_meta(_MIGRATED_KEY):
         return
     cfg = get_config()
@@ -377,6 +414,7 @@ def public_account(acc) -> dict:
         "uid": uid,
         "nickname": acc.get("nickname") or "",
         "display_name": (acc.get("nickname") or acc.get("remark") or uid[:8] or "未命名账号"),
+        "realm": "global" if str(acc.get("realm") or "cn") == "global" else "cn",
         "source": acc.get("source") or "",
         "login_method": acc.get("login_method") or "",
         "auth_file": acc.get("auth_file") or "",
@@ -447,6 +485,16 @@ def save_account(data: dict) -> dict:
               "enterprise_id", "login_method", "remark"):
         if k in data:
             acc[k] = str(data[k] or "").strip()[:256]
+    if "realm" in data:
+        acc["realm"] = "global" if str(data["realm"] or "").strip() == "global" else "cn"
+    if not acc.get("realm"):
+        acc["realm"] = "cn"
+    if acc["realm"] == "global":
+        # 国际版计费 / 注册链路都在 workbuddy.ai 同域，X-Domain 也显式声明
+        if not str(acc.get("domain") or "").strip():
+            acc["domain"] = GLOBAL_DOMAIN
+        if not str(acc.get("oauth_domain") or "").strip():
+            acc["oauth_domain"] = GLOBAL_DOMAIN
     if "enabled" in data:
         acc["enabled"] = 1 if data["enabled"] else 0
     if "expires_at" in data:
@@ -525,6 +573,11 @@ def _account_to_cfg(acc) -> dict:
     # OAuth / 手动凭据都走「已保存 token」；auto 保留本机文件探测
     if str(cfg["source"]) not in ("auto", "manual"):
         cfg["source"] = "manual"
+    realm = "global" if str(acc.get("realm") or "cn") == "global" else "cn"
+    cfg["realm"] = realm
+    if realm == "global":
+        cfg["domain"] = cfg.get("domain") or GLOBAL_DOMAIN
+        cfg["oauth_domain"] = cfg.get("oauth_domain") or GLOBAL_DOMAIN
     g = get_config()
     cfg["proxy"], cfg["timeout"] = g["proxy"], g["timeout"]
     cfg["account_uid"] = acc.get("uid") or ""
@@ -718,7 +771,8 @@ def resolve_credentials(uid=None, cfg=None) -> dict:
             "login_method": str(cfg.get("login_method") or "").strip(),
             "oauth_domain": str(cfg.get("oauth_domain") or "").strip(),
             "expires_at": float(cfg.get("expires_at") or 0),
-            "account_uid": str(cfg.get("account_uid") or cfg.get("uid") or "").strip()}
+            "account_uid": str(cfg.get("account_uid") or cfg.get("uid") or "").strip(),
+            "realm": "global" if str(cfg.get("realm") or "cn") == "global" else "cn"}
 
 
 # --------------------------------------------------------------------------- OAuth 设备授权登录
@@ -841,8 +895,9 @@ def login_poll(state) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", uid or ""):
         raise WorkBuddyError("登录成功但账号 UID 无效，请重新扫码登录")
 
-    saved = {"uid": uid, "source": "oauth", "login_method": "oauth", "token": token,
-             "refresh_token": refresh, "nickname": nickname, "enterprise_id": ent,
+    saved = {"uid": uid, "source": "oauth", "login_method": "oauth", "realm": realm,
+             "token": token, "refresh_token": refresh, "nickname": nickname,
+             "enterprise_id": ent,
              "expires_at": (time.time() + expires_in) if expires_in else 0}
     # OAuth 返回的是授权服务域（如 copilot.tencent.com），只作 X-Domain 头；
     # 签到 / 余额接口仍打 www.codebuddy.cn，不能用授权域当请求域名。
@@ -855,9 +910,19 @@ def login_poll(state) -> dict:
     set_current(uid)                   # 新登录的账号自动成为当前账号
     login_cancel(state)
     _log.info("WorkBuddy 扫码登录完成（uid 已隐藏）")
-    return {"done": True, "uid": uid, "nickname": nickname,
+    note = ""
+    if realm == "global":
+        # 国际版没有每日签到：登录后立即完成注册激活 + 一次性 trial 加油包
+        try:
+            gcreds = resolve_credentials(uid)
+            gcreds["timeout"] = get_config()["timeout"]
+            note = global_checkin(gcreds, source="oauth").get("message") or ""
+        except Exception as e:
+            note = "国际版激活未完成：%s" % e
+            _log.warning("WorkBuddy 国际版注册激活失败：%s", e)
+    return {"done": True, "uid": uid, "nickname": nickname, "realm": realm,
             "expires_at": acc["expires_at"], "expires_text": acc["expires_text"],
-            "account": acc}
+            "checkin_message": note, "account": acc}
 
 
 def login_qr_image(state):
@@ -894,7 +959,7 @@ def refresh_login(uid=None, force=False) -> dict:
     refresh = secret.decrypt(acc.get("refresh_token") or "")
     if not refresh:
         raise WorkBuddyError("该账号没有可用的刷新令牌，请重新扫码登录")
-    realm = "global" if "workbuddy.ai" in str(
+    realm = "global" if str(acc.get("realm") or "") == "global" or "workbuddy.ai" in str(
         acc.get("oauth_domain") or acc.get("domain") or "") else "cn"
     access = secret.decrypt(acc.get("token") or "")
     code, msg, data = _oauth_request(
@@ -939,8 +1004,11 @@ def _maybe_refresh(cfg) -> dict:
 
 # --------------------------------------------------------------------------- 接口
 
-def _request(creds: dict, path: str, method="POST") -> dict:
-    """调用一次官方接口；HTTP 错误也解析响应体（「今天已签到」常以 400 返回）。"""
+def _request(creds: dict, path: str, method="POST", body=None) -> dict:
+    """调用一次官方接口；HTTP 错误也解析响应体（「今天已签到」常以 400 返回）。
+
+    body 为 dict 时按 JSON 发送，缺省沿用计费接口的 {} 请求体。
+    """
     host = _domain(creds.get("domain"))
     url = "https://" + host + path
     headers = {
@@ -956,11 +1024,23 @@ def _request(creds: dict, path: str, method="POST") -> dict:
     if creds.get("enterprise_id"):
         headers["X-Enterprise-Id"] = str(creds["enterprise_id"])
         headers["X-Tenant-Id"] = str(creds["enterprise_id"])
-    xdomain = creds.get("oauth_domain") or creds.get("domain") or ""
-    if xdomain:
-        headers["X-Domain"] = str(xdomain)
-    body = b"{}" if method == "POST" else None
-    req = urllib.request.Request(url, data=body, method=method, headers=headers)
+    realm = "global" if str(creds.get("realm") or "") == "global" else "cn"
+    if realm == "global":
+        # 国际版客户端形态：显式声明国际域、无企业、英文语言（对齐参考项目）
+        headers["X-Domain"] = GLOBAL_DOMAIN
+        headers["Accept-Language"] = "en-US,en;q=0.9"
+        if not creds.get("enterprise_id"):
+            headers["X-No-Enterprise-Id"] = "1"
+    else:
+        headers["Accept-Language"] = "zh-CN,zh;q=0.9"
+        xdomain = creds.get("oauth_domain") or creds.get("domain") or ""
+        if xdomain:
+            headers["X-Domain"] = str(xdomain)
+    payload = (b"{}" if body is None
+               else json.dumps(body, ensure_ascii=False).encode("utf-8"))
+    req = urllib.request.Request(
+        url, data=(payload if method == "POST" else None),
+        method=method, headers=headers)
     try:
         proxy = str((get_config().get("proxy") or "")).strip()
         opener = (proxyutil.build_opener(proxy=proxy) if proxy
@@ -1005,7 +1085,12 @@ def _request(creds: dict, path: str, method="POST") -> dict:
 
 
 def fetch_status(creds: dict) -> dict:
-    """今日签到状态 + 连签 / 活动信息。"""
+    """今日签到状态 + 连签 / 活动信息。国际版无每日签到体系，返回占位说明。"""
+    if str(creds.get("realm") or "") == "global":
+        return {"today_checked_in": None, "streak_days": 0, "today_credit": 0,
+                "total_credits": 0, "start_time": "", "end_time": "",
+                "already": False, "global": True,
+                "message": "国际版无每日签到，改用注册激活 + 试用加油包"}
     res = _request(creds, PATH_STATUS)
     obj = res["json"]
     out = {}
@@ -1026,6 +1111,13 @@ def fetch_status(creds: dict) -> dict:
 
 def fetch_credits(creds: dict) -> dict:
     """积分余额（不同版本字段名不一致，按候选名逐个兼容）。"""
+    if str(creds.get("realm") or "") == "global":
+        # 国际版没有 CN 的 summary 端点，余额用逐包明细求和（同参考项目口径）
+        packs = fetch_packages(creds)
+        return {"balance": sum(p["remain"] for p in packs),
+                "used": sum(p["used"] for p in packs),
+                "total": sum(p["size"] for p in packs),
+                "balance_key": "global.packages", "expire_at": ""}
     res = _request(creds, PATH_CREDITS)
     obj = res["json"]
     balance, key = _pick(obj, _BALANCE_KEYS)
@@ -1046,6 +1138,8 @@ def fetch_credits(creds: dict) -> dict:
 
 def do_checkin(creds: dict, source="manual") -> dict:
     """执行签到（幂等）：先查状态，已签到就不再发起领取请求。"""
+    if str(creds.get("realm") or "") == "global":
+        return global_checkin(creds, source=source)
     status = {}
     try:
         status = fetch_status(creds)
@@ -1071,6 +1165,421 @@ def do_checkin(creds: dict, source="manual") -> dict:
     _record(creds, result, source)
     _log.info("WorkBuddy 签到完成：%s（来源 %s）", result["status"], source)
     return result
+
+
+# --------------------------------------------------------------------------- 国际版注册激活 / 签到
+
+def _find_list(node, wanted="list", depth=0):
+    """在嵌套 JSON 里找指定键的数组（国际版地区列表双层信封用）。"""
+    if depth > 6:
+        return None
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if _norm_key(k) == wanted and isinstance(v, list):
+                return v
+        for v in node.values():
+            got = _find_list(v, wanted, depth + 1)
+            if got is not None:
+                return got
+    elif isinstance(node, list):
+        for v in node[:3]:
+            got = _find_list(v, wanted, depth + 1)
+            if got is not None:
+                return got
+    return None
+
+
+def _global_request(creds, path, method="GET", body=None, extra=None) -> tuple:
+    """国际版注册链路请求（web 指纹 + 同域 Origin/Referer），返回 (code, msg, data)。"""
+    headers = {
+        "User-Agent": GLOBAL_WEB_UA,
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Origin": GLOBAL_BASE,
+        "Referer": GLOBAL_BASE + "/",
+        "Authorization": "Bearer " + creds["token"],
+        "X-User-Id": str(creds.get("uid") or ""),
+    }
+    if extra:
+        headers.update(extra)
+    payload = (json.dumps(body, ensure_ascii=False).encode("utf-8")
+               if body is not None else None)
+    req = urllib.request.Request(GLOBAL_BASE + path, data=payload,
+                                 method=method, headers=headers)
+    try:
+        proxy = str(get_config().get("proxy") or "").strip()
+        opener = (proxyutil.build_opener(proxy=proxy) if proxy
+                  else urllib.request.build_opener())
+        resp = opener.open(req, timeout=int(creds.get("timeout") or 15))
+        raw = resp.read(1024 * 512)
+    except urllib.error.HTTPError as e:
+        try:
+            raw = e.read(1024 * 512)
+        except Exception:
+            raw = b""
+    except Exception as e:
+        raise WorkBuddyError("连接国际版注册服务失败：%s"
+                             % proxyutil.friendly_error(e, GLOBAL_BASE + path))
+    try:
+        obj = json.loads(raw.decode("utf-8", "replace"))
+    except (TypeError, ValueError):
+        obj = {}
+    if not isinstance(obj, dict):
+        obj = {}
+    return obj.get("code", 0), str(obj.get("msg") or obj.get("message") or ""), obj.get("data")
+
+
+def _global_register_status(creds):
+    """检查国际版注册激活状态：(已激活, 需补地区, 说明)。code=200 已激活。"""
+    path = PATH_GLOBAL_REGISTER + "?userId=" + urllib.parse.quote(
+        str(creds.get("uid") or ""))
+    code, msg, _ = _global_request(creds, path)
+    if code == 200:
+        return True, False, "register success"
+    if code == 500 or "region required" in (msg or "").lower():
+        return False, True, msg
+    return False, False, msg or ("code=%s" % code)
+
+
+def _global_countries(creds):
+    """拉取可选注册地区（data 可能是 JSON 字符串，需二次解析），按国际版白名单排序。"""
+    code, msg, data = _global_request(
+        creds, PATH_GLOBAL_COUNTRIES, method="POST", body={"filterForbidden": 1})
+    if code != 0:
+        raise WorkBuddyError("获取注册地区失败：%s（code=%s）" % (msg, code))
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except (TypeError, ValueError):
+            data = {}
+    items = _find_list(data) or []
+    by_code = {}
+    for c in items:
+        if isinstance(c, dict):
+            key = str(_pick(c, ("IOS2",))[0] or "").strip()
+            if key:
+                by_code[key] = c
+    return [by_code[k] for k in GLOBAL_REGION_CODES if k in by_code]
+
+
+def _global_submit_region(creds, country) -> None:
+    """提交注册地区（幂等）；字段值均为数组，对齐官方 web 注册页。"""
+    attrs = {
+        "countryCode": [str(_pick(country, ("Code",))[0] or "")],
+        "countryFullName": [str(_pick(country, ("EnName",))[0] or "")],
+        "countryName": [str(_pick(country, ("IOS2",))[0] or "")],
+    }
+    code, msg, _ = _global_request(
+        creds, PATH_GLOBAL_REGION, method="POST", body={"attributes": attrs})
+    if code != 0:
+        raise WorkBuddyError("提交注册地区失败：%s（code=%s）" % (msg, code))
+
+
+def _global_claim_trial(creds):
+    """领取一次性 trial 加油包；幂等码 14051 = 已领过，不算失败。"""
+    try:
+        _request(creds, PATH_GLOBAL_TRIAL, body={})
+        return True, "试用加油包已领取"
+    except WorkBuddyError as e:
+        if "14051" in str(e):
+            return False, "试用加油包已领过"
+        return False, "领取试用包失败：%s" % e
+
+
+def global_activation(creds) -> dict:
+    """国际版新账号闭环：注册状态 → 必要时补地区 → 领取试用加油包。"""
+    msgs, new_active, trial_new = [], False, False
+    activated, needs_region, msg = _global_register_status(creds)
+    if activated:
+        msgs.append("账号已激活")
+    elif needs_region:
+        countries = _global_countries(creds)
+        if not countries:
+            raise WorkBuddyError("未取到可用的注册地区")
+        _global_submit_region(creds, countries[0])
+        activated, _, msg2 = _global_register_status(creds)
+        if not activated:
+            raise WorkBuddyError("补全地区后仍未激活：%s" % (msg2 or msg))
+        new_active = True
+        msgs.append("注册地区已补全并激活")
+    else:
+        msgs.append("注册激活状态：%s" % (msg or "未知"))
+    trial_new, tmsg = _global_claim_trial(creds)
+    msgs.append(tmsg)
+    return {"activated": activated, "new_activated": new_active,
+            "trial_claimed": trial_new, "messages": msgs}
+
+
+def global_checkin(creds, source="manual") -> dict:
+    """国际版「签到」：无每日签到体系，等价于幂等的注册激活 + 一次性 trial 加油包。"""
+    msgs, did = [], False
+    try:
+        act = global_activation(creds)
+        did = bool(act["new_activated"] or act["trial_claimed"])
+        msgs = act["messages"]
+    except Exception as e:
+        msgs = ["注册激活未完成：%s" % e]
+    result = {"ok": True, "status": "success" if did else "already",
+              "message": "；".join(msgs) or "国际版账号状态已确认",
+              "credit": 0, "streak_days": 0, "global": True}
+    _record(creds, result, source)
+    _log.info("WorkBuddy 国际版积分动作完成：%s", result["status"])
+    return result
+
+
+# --------------------------------------------------------------------------- 积分构成 / 到期
+
+def _accounts_of(obj):
+    """从嵌套响应里找 Accounts 数组（Response.Data.Accounts，层级可能随版本变化）。"""
+    def walk(node, depth=0):
+        if depth > 8:
+            return None
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if _norm_key(k) == "accounts" and isinstance(v, list):
+                    return v
+            for v in node.values():
+                got = walk(v, depth + 1)
+                if got is not None:
+                    return got
+        elif isinstance(node, list):
+            for v in node[:5]:
+                got = walk(v, depth + 1)
+                if got is not None:
+                    return got
+        return None
+    return walk(obj) or []
+
+
+def _package_end(acct) -> float:
+    """真实失效时刻：DeductionEndTime（epoch ms）优先，其余墙钟字段兜底。"""
+    ms = _num(_pick(acct, ("DeductionEndTime",))[0], 0) or 0
+    if ms > 0:
+        return ms / 1000 if ms > 1e11 else ms
+    for name in ("ExpiredTime", "PackageEndTime", "CycleEndTime"):
+        raw = str(_pick(acct, (name,))[0] or "").strip()
+        if not raw:
+            continue
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                return time.mktime(time.strptime(raw[:19], fmt))
+            except (ValueError, TypeError):
+                continue
+    return 0.0
+
+
+def _package_numbers(acct):
+    """单包 (remain, used, size)：周期字段与容量字段二选一，不能混算（参考上游口径）。"""
+    cycle_size = _num(_pick(acct, ("CycleCapacitySize",))[0], 0) or 0
+    if cycle_size > 0:
+        remain = _num(_pick(acct, ("CycleCapacityRemain",))[0], 0) or 0
+        used = max(_num(_pick(acct, ("CycleCapacityUsed",))[0], 0) or 0,
+                   cycle_size - remain)
+        size = cycle_size
+    else:
+        remain = _num(_pick(acct, ("CapacityRemain",))[0], 0) or 0
+        used = _num(_pick(acct, ("CapacityUsed",))[0], 0) or 0
+        size = _num(_pick(acct, ("CapacitySize",))[0], 0) or 0
+        if used == 0 and size > remain:
+            used = size - remain
+    remain = max(0.0, min(remain, size)) if size > 0 else max(0.0, remain)
+    return remain, max(0.0, used), max(size, remain)
+
+
+def _source_color(key) -> str:
+    text = str(key or "其他")
+    return PACKAGE_COLORS[sum(ord(c) for c in text) % len(PACKAGE_COLORS)]
+
+
+def fetch_packages(creds: dict) -> list:
+    """查询账号逐包构成：包名 / 面额 / 剩余 / 已用 / 失效时刻。"""
+    now = time.time()
+    body = {
+        "PageNumber": 1,
+        "PageSize": 100,
+        "ProductCode": "p_tcaca",
+        "Status": [0, 3],
+        "PackageEndTimeRangeBegin": time.strftime(PACKAGE_END_FMT, time.localtime(now)),
+        "PackageEndTimeRangeEnd": time.strftime(
+            PACKAGE_END_FMT, time.localtime(now + 365 * 101 * 86400)),
+    }
+    # 国际版不带 /v2 前缀；CN 现状 /v2 优先，另一个作兼容回退
+    paths = ((PATH_RESOURCE_ALT, PATH_RESOURCE)
+             if str(creds.get("realm") or "") == "global"
+             else (PATH_RESOURCE, PATH_RESOURCE_ALT))
+    accounts, last_err = [], None
+    for path in paths:
+        try:
+            accounts = _accounts_of(_request(creds, path, body=body)["json"])
+            if accounts:
+                break
+        except WorkBuddyError as e:
+            last_err = e
+    if not accounts and last_err:
+        # 企业号 / 接口变体：不抛错，降级为「无分包明细」，余额仍用汇总接口
+        _log.warning("WorkBuddy 积分包查询失败：%s", last_err)
+    out = []
+    for i, a in enumerate(accounts):
+        if not isinstance(a, dict):
+            continue
+        remain, used, size = _package_numbers(a)
+        created = _num(_pick(a, ("CreateTime",))[0], 0) or 0
+        out.append({
+            "pid": str(i),
+            "name": str(_pick(a, ("PackageName", "name"))[0] or "积分包")[:64],
+            "package_code": str(_pick(a, ("PackageCode",))[0] or "")[:64],
+            "sub_product": str(_pick(a, ("SubProductName", "SubProductCode"))[0] or "")[:64],
+            "remain": remain, "used": used, "size": size,
+            "end_at": _package_end(a),
+            "created_at": (created / 1000 if created > 1e11 else created),
+        })
+    return out
+
+
+def save_packages(uid, packs) -> None:
+    """按账号全量替换积分包快照（事务内完成，避免读到半份数据）。"""
+    now = time.time()
+    with store_db.store_tx() as conn:
+        conn.execute("DELETE FROM workbuddy_packages WHERE uid=?", (str(uid),))
+        for p in packs:
+            conn.execute(
+                "INSERT OR REPLACE INTO workbuddy_packages "
+                "(uid, pid, name, package_code, sub_product, remain, used, size, "
+                " end_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (str(uid), p["pid"], p["name"], p["package_code"], p["sub_product"],
+                 p["remain"], p["used"], p["size"], p["end_at"], p["created_at"], now))
+    _log.info("WorkBuddy 积分包快照已更新（%s 个包）", len(packs))
+
+
+def refresh_packages(uid=None) -> dict:
+    """刷新指定账号的积分构成，并把余额缓存同步为逐包求和。"""
+    target = str(uid or "").strip() or current_uid()
+    if not target:
+        raise WorkBuddyError("尚未添加账号")
+    creds = resolve_credentials(target)
+    creds["timeout"] = get_config()["timeout"]
+    packs = fetch_packages(creds)
+    save_packages(target, packs)
+    balance = sum(p["remain"] for p in packs)
+    if packs:
+        _update_balance(target, balance)
+    return {"ok": True, "uid": target, "count": len(packs), "balance": balance}
+
+
+def _public_package(row, now=None) -> dict:
+    now = now or time.time()
+    end = float(row.get("end_at") or 0)
+    key = row.get("package_code") or row.get("name") or "其他"
+    return {
+        "pid": row.get("pid"), "name": row.get("name") or "积分包",
+        "package_code": row.get("package_code") or "",
+        "sub_product": row.get("sub_product") or "",
+        "remain": float(row.get("remain") or 0),
+        "used": float(row.get("used") or 0),
+        "size": float(row.get("size") or 0),
+        "end_at": end,
+        "end_text": time.strftime("%Y-%m-%d %H:%M", time.localtime(end)) if end else "",
+        "days_left": int(math.ceil((end - now) / 86400)) if end else None,
+        "color": _source_color(key),
+        "created_at": float(row.get("created_at") or 0),
+        "updated_at": float(row.get("updated_at") or 0),
+    }
+
+
+def credits_summary() -> dict:
+    """跨账号总积分统计 + 账号积分构成 + 最近过期积分。
+
+    数据全部来自本地 workbuddy_packages 快照，读库不触发任何外部请求。
+    """
+    accounts = list_accounts()
+    conn = store_db.store_conn()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM workbuddy_packages ORDER BY uid, CAST(pid AS INTEGER)")]
+    finally:
+        conn.close()
+    now = time.time()
+    per_uid = {}
+    for r in rows:
+        per_uid.setdefault(r["uid"], []).append(_public_package(r, now))
+
+    by_account, source_map, buckets, recent = [], {}, {}, []
+    total_balance = total_size = total_used = 0.0
+    expiring_7 = expiring_30 = 0.0
+    updated_at = 0.0
+    for acc in accounts:
+        uid = acc["uid"]
+        packs = per_uid.get(uid, [])
+        balance = sum(p["remain"] for p in packs)
+        size = sum(p["size"] for p in packs)
+        used = sum(p["used"] for p in packs)
+        no_detail = not packs
+        if no_detail and acc.get("last_balance") is not None:
+            balance = float(acc["last_balance"])
+            size = balance
+        total_balance += balance
+        total_size += size
+        total_used += used
+        local_sources = {}
+        for p in packs:
+            updated_at = max(updated_at, p["updated_at"])
+            key = p["package_code"] or p["name"] or "其他"
+            for target in (source_map, local_sources):
+                s = target.setdefault(key, {
+                    "name": p["name"] or key, "remain": 0.0, "size": 0.0,
+                    "count": 0, "color": p["color"]})
+                s["remain"] += p["remain"]
+                s["size"] += p["size"]
+                s["count"] += 1
+            if p["remain"] <= 0 or p["end_at"] <= now:
+                continue
+            days = max(0, int(math.ceil((p["end_at"] - now) / 86400)))
+            if days <= 7:
+                expiring_7 += p["remain"]
+            if days <= 30:
+                expiring_30 += p["remain"]
+            day = time.strftime("%Y-%m-%d", time.localtime(p["end_at"]))
+            b = buckets.setdefault(day, {
+                "date": day, "remain": 0.0, "expire_at": p["end_at"],
+                "days_left": days})
+            b["remain"] += p["remain"]
+            b["expire_at"] = min(b["expire_at"], p["end_at"])
+            b["days_left"] = min(b["days_left"], days)
+            recent.append({
+                "uid": uid, "display_name": acc["display_name"],
+                "name": p["name"], "color": p["color"], "remain": p["remain"],
+                "end_at": p["end_at"], "end_text": p["end_text"], "days_left": days})
+        packs = sorted(packs, key=lambda p: (p["end_at"] or float("inf"), -p["remain"]))
+        by_account.append({
+            "uid": uid, "display_name": acc["display_name"],
+            "is_default": acc["is_default"], "balance": balance,
+            "size": size, "used": used, "package_count": len(packs),
+            "no_detail": no_detail,
+            "packages": packs,
+            "by_source": sorted(local_sources.values(),
+                                 key=lambda s: -s["remain"]),
+            "last_check_at": acc["last_check_at"],
+        })
+    by_source = sorted(source_map.values(), key=lambda s: -s["remain"])
+    expiry_buckets = sorted(buckets.values(), key=lambda b: b["date"])[:14]
+    recent.sort(key=lambda r: r["end_at"])
+    return {
+        "ok": True,
+        "total_balance": round(total_balance, 2),
+        "total_size": round(total_size, 2),
+        "total_used": round(total_used, 2),
+        "account_count": len(accounts),
+        "package_count": len(rows),
+        "expiring_7d": round(expiring_7, 2),
+        "expiring_30d": round(expiring_30, 2),
+        "nearest_expiry": recent[0] if recent else None,
+        "by_account": by_account,
+        "by_source": by_source,
+        "expiry_buckets": expiry_buckets,
+        "recent_expiry": recent[:10],
+        "updated_at": updated_at,
+    }
 
 
 # --------------------------------------------------------------------------- 记录
@@ -1155,11 +1664,16 @@ def overview(uid=None) -> dict:
     acc = get_account(target) if target else None
     out = {"ok": True, "config": public_config(), "today": time.strftime("%Y-%m-%d"),
            "updated_at": time.time(), "status": None, "credits": None,
-           "errors": {}, "history_recent": [], "accounts": list_accounts(),
-           "current_uid": target, "account": public_account(acc) if acc else None}
+           "errors": {}, "history_recent": [], "history_all": [],
+           "accounts": list_accounts(), "current_uid": target,
+           "account": public_account(acc) if acc else None}
+    # 日历按「账号 × 最近 14 天」展示，需要跨账号记录（不受当前账号筛选影响）
+    hist_limit = 14 * max(1, len(out["accounts"])) + 60
     if not acc:
         out["configured"] = False
         out["error"] = "尚未添加 WorkBuddy 账号，请点「添加账号」扫码登录"
+        out["history_all"] = list_history(limit=hist_limit)["items"]
+        out["credits_summary"] = credits_summary()
         return out
     try:
         creds = resolve_credentials(target)
@@ -1167,6 +1681,8 @@ def overview(uid=None) -> dict:
         out["configured"] = False
         out["error"] = str(e)
         out["history_recent"] = list_history(limit=30, uid=target)["items"]
+        out["history_all"] = list_history(limit=hist_limit)["items"]
+        out["credits_summary"] = credits_summary()
         return out
     out["configured"] = True
     out["credential"] = {"source": creds["source"], "domain": creds["domain"],
@@ -1174,30 +1690,47 @@ def overview(uid=None) -> dict:
                          "login_method": creds.get("login_method", ""),
                          "nickname": creds.get("nickname", ""),
                          "expires_at": creds.get("expires_at", 0),
-                         "account_uid": target}
+                         "account_uid": target,
+                         "realm": creds.get("realm", "cn")}
     creds["timeout"] = get_config()["timeout"]
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    is_global = str(creds.get("realm") or "") == "global"
+    with ThreadPoolExecutor(max_workers=3) as pool:
         jobs = {"status": pool.submit(fetch_status, creds),
-                "credits": pool.submit(fetch_credits, creds)}
+                "packages": pool.submit(refresh_packages, target)}
+        if not is_global:
+            jobs["credits"] = pool.submit(fetch_credits, creds)
         for key, job in jobs.items():
             try:
-                out[key] = job.result()
+                res = job.result()
+                out["packages_refresh" if key == "packages" else key] = res
             except Exception as e:
                 out["errors"][key] = str(e)
+    if is_global and out.get("packages_refresh"):
+        # 国际版余额直接由逐包快照求和，避免重复请求 summary 端点
+        out["credits"] = {"balance": out["packages_refresh"]["balance"],
+                          "used": 0, "total": 0,
+                          "balance_key": "global.packages", "expire_at": ""}
     if out["credits"] and out["credits"].get("balance") is not None:
         _update_balance(target, out["credits"]["balance"])
     out["history_recent"] = list_history(limit=30, uid=target)["items"]
+    out["history_all"] = list_history(limit=hist_limit)["items"]
+    out["credits_summary"] = credits_summary()   # 读本地快照，不再发外部请求
     return out
 
 
 def test_connection(uid=None) -> dict:
-    """只查询签到状态，不领取积分：用于验证指定账号的凭据是否可用。"""
+    """只查询状态、不领取积分：国内版查签到状态，国际版查注册激活状态。"""
     creds = resolve_credentials(uid)
     creds["timeout"] = get_config()["timeout"]
-    return {"ok": True, "credential": {"domain": creds["domain"], "uid": creds["uid"],
-                                       "source": creds["source"],
-                                       "account_uid": creds.get("account_uid", "")},
-            "status": fetch_status(creds)}
+    cred_info = {"domain": creds["domain"], "uid": creds["uid"],
+                 "source": creds["source"], "realm": creds.get("realm", "cn"),
+                 "account_uid": creds.get("account_uid", "")}
+    if str(creds.get("realm") or "") == "global":
+        activated, needs_region, msg = _global_register_status(creds)
+        return {"ok": True, "credential": cred_info,
+                "status": {"global": True, "activated": activated,
+                           "needs_region": needs_region, "message": msg}}
+    return {"ok": True, "credential": cred_info, "status": fetch_status(creds)}
 
 
 # --------------------------------------------------------------------------- 批量操作
@@ -1210,15 +1743,17 @@ def _checkin_one(uid, nickname="") -> dict:
 
 
 def _refresh_one(uid, nickname="") -> dict:
-    creds = resolve_credentials(uid)
-    creds["timeout"] = get_config()["timeout"]
-    cr = fetch_credits(creds)
-    if cr.get("balance") is not None:
-        _update_balance(uid, cr["balance"])
-        return {"uid": uid, "nickname": nickname, "ok": True, "status": "success",
-                "balance": cr["balance"]}
-    return {"uid": uid, "nickname": nickname, "ok": False, "status": "failed",
-            "message": cr.get("error") or "未取得余额"}
+    """刷新一个账号的余额 + 逐包构成；企业号无分包时回退汇总接口。"""
+    result = refresh_packages(uid)
+    if not result["count"]:
+        creds = resolve_credentials(uid)
+        creds["timeout"] = get_config()["timeout"]
+        cr = fetch_credits(creds)
+        if cr.get("balance") is not None:
+            _update_balance(uid, cr["balance"])
+            result["balance"] = cr["balance"]
+    return {"uid": uid, "nickname": nickname, "ok": True, "status": "success",
+            "balance": result["balance"], "packages": result["count"]}
 
 
 def _run_all(worker) -> dict:

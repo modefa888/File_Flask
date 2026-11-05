@@ -7,6 +7,8 @@ POST /api/workbuddy/test                测试连接：只查签到状态，不�
 POST /api/workbuddy/checkin             执行当日签到（幂等，body 可带 uid）
 POST /api/workbuddy/checkin/all         全部启用账号批量签到
 GET  /api/workbuddy/history             签到记录（q / page / page_size / uid）
+GET  /api/workbuddy/credits/summary     跨账号总积分 / 账号构成 / 最近过期积分
+POST /api/workbuddy/credits/refresh     刷新积分构成快照（body: {uid?, all?}）
 
 多账号管理：
 GET  /api/workbuddy/accounts            账号列表（脱敏）
@@ -17,7 +19,10 @@ POST /api/workbuddy/accounts/refresh   刷新指定账号登录态
 POST /api/workbuddy/accounts/refresh_all  批量刷新全部账号余额
 
 OAuth 设备授权登录（参考 workbuddy2api-panel 的 login/start + login/poll）：
-POST /api/workbuddy/login/start         发起授权，返回 state / 授权 URL / 二维码地址
+国内版 realm=cn（copilot.tencent.com + 微信扫码），
+国际版 realm=global（workbuddy.ai，登录后自动注册激活 + 领取一次性 trial 加油包；
+国际版无每日签到体系，签到按钮等价为幂等的激活 / 试用包领取）。
+POST /api/workbuddy/login/start         发起授权（body: {realm: cn|global}）
 GET  /api/workbuddy/login/qr            授权链接二维码（PNG）
 GET  /api/workbuddy/login/poll          轮询授权结果；成功后凭据加密落库
 POST /api/workbuddy/login/refresh       用 refreshToken 刷新登录态
@@ -156,6 +161,26 @@ def wb_login_cancel():
     data = request.get_json(silent=True) or {}
     wb.login_cancel(data.get("state", ""))
     return jsonify({"ok": True})
+
+
+# --------------------------------------------------------------------------- 积分构成
+
+@bp.get("/api/workbuddy/credits/summary")
+def wb_credits_summary():
+    return jsonify(wb.credits_summary())
+
+
+@bp.post("/api/workbuddy/credits/refresh")
+def wb_credits_refresh():
+    data = request.get_json(silent=True) or {}
+    try:
+        if data.get("all"):
+            return jsonify(wb.refresh_all())
+        return jsonify(wb.refresh_packages(uid=data.get("uid", "")))
+    except wb.WorkBuddyError as e:
+        return _fail(e)
+    except Exception as e:
+        return _fail("刷新积分构成失败：%s" % e, 502)
 
 
 # --------------------------------------------------------------------------- 多账号

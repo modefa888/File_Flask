@@ -1,13 +1,13 @@
 /* ---------------- 通用容器 ---------------- */
 .adm-section {
-    margin-bottom: 16px;
+    margin-bottom: 14px;
 }
 
 .adm-section-head {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin: 0 0 12px;
+    margin: 0 0 10px;
 }
 
 .adm-section-head h2 {
@@ -431,7 +431,7 @@
 /* ---------------- Tab 切换 ---------------- */
 .adm-tabbar {
     display: flex;
-    gap: 4px;
+    gap: 6px;
     flex-wrap: wrap;
     border-bottom: 1px solid var(--adm-border);
     margin-bottom: 16px;
@@ -445,28 +445,49 @@
     background: transparent;
     color: var(--adm-text-dim);
     font-size: 13.5px;
+    font-weight: 500;
+    letter-spacing: .2px;
+    /* 高度不要随意改：在线更新页 .upd-top-actions 的 39px 与这里对齐 */
     padding: 10px 15px;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    transition: color .15s, background .15s, border-color .15s;
+    transition: color .18s, background .18s, border-color .18s,
+        transform .18s, box-shadow .18s;
 }
 
 .adm-tab i {
     font-size: 15px;
+    transition: transform .18s;
 }
 
 .adm-tab:hover {
     color: var(--adm-text);
     background: rgba(91, 140, 255, 0.08);
+    transform: translateY(-1px);
+}
+
+.adm-tab:hover i {
+    transform: scale(1.08);
 }
 
 .adm-tab.active {
     color: var(--adm-brand);
     border-bottom-color: var(--adm-brand);
-    background: rgba(91, 140, 255, 0.1);
-    font-weight: 600;
+    background: linear-gradient(180deg, rgba(91, 140, 255, .16), rgba(91, 140, 255, .06));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06);
+    font-weight: 650;
+}
+
+.adm-tab.active i {
+    color: var(--adm-brand);
+}
+
+.adm-tab:focus-visible {
+    outline: 2px solid var(--adm-brand);
+    outline-offset: 2px;
+    border-radius: 6px;
 }
 
 .adm-tabpanel {
@@ -475,6 +496,12 @@
 
 .adm-tabpanel.active {
     display: block;
+    animation: adm-tab-fade .18s ease-out;
+}
+
+@keyframes adm-tab-fade {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: none; }
 }
 
 /* Tab 面板内的操作条（清空 / 刷新等按钮靠右） */

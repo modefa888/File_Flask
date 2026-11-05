@@ -102,7 +102,7 @@ RULE_DESC = {
     ("/api/workbuddy/test", "POST"): "WorkBuddy：测试连接（只查状态，不领取积分）",
     ("/api/workbuddy/checkin", "POST"): "WorkBuddy：执行每日签到（幂等）",
     ("/api/workbuddy/history", "GET"): "WorkBuddy：签到记录（搜索 / 分页）",
-    ("/api/workbuddy/login/start", "POST"): "WorkBuddy：发起 OAuth 设备授权（授权链接 / state）",
+    ("/api/workbuddy/login/start", "POST"): "WorkBuddy：发起 OAuth 设备授权（realm=cn 国内版 / global 国际版）",
     ("/api/workbuddy/login/qr", "GET"): "WorkBuddy：授权链接二维码（SVG）",
     ("/api/workbuddy/login/poll", "GET"): "WorkBuddy：轮询扫码登录结果（成功后凭据加密落库）",
     ("/api/workbuddy/login/refresh", "POST"): "WorkBuddy：用 refreshToken 刷新登录态",
@@ -115,6 +115,8 @@ RULE_DESC = {
     ("/api/workbuddy/accounts/refresh", "POST"): "WorkBuddy：刷新指定账号登录态",
     ("/api/workbuddy/accounts/refresh_all", "POST"): "WorkBuddy：批量刷新全部账号余额",
     ("/api/workbuddy/checkin/all", "POST"): "WorkBuddy：全部启用账号批量签到",
+    ("/api/workbuddy/credits/summary", "GET"): "WorkBuddy：跨账号总积分 / 账号构成 / 最近过期积分",
+    ("/api/workbuddy/credits/refresh", "POST"): "WorkBuddy：刷新积分构成快照",
 }
 
 # 不允许停用 / 改权限的接口：避免把登录入口或管理入口锁死

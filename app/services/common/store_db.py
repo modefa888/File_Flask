@@ -625,6 +625,7 @@ CREATE TABLE IF NOT EXISTS collab_preshare (
 CREATE TABLE IF NOT EXISTS workbuddy_accounts (
     uid           TEXT PRIMARY KEY,
     nickname      TEXT DEFAULT '',
+    realm         TEXT DEFAULT 'cn',     -- cn 国内版 / global 国际版（workbuddy.ai）
     source        TEXT DEFAULT '',       -- oauth / file / manual
     auth_file     TEXT DEFAULT '',
     token         TEXT DEFAULT '',
@@ -641,6 +642,22 @@ CREATE TABLE IF NOT EXISTS workbuddy_accounts (
     last_check_at REAL DEFAULT 0,
     created_at    REAL DEFAULT 0,
     updated_at    REAL DEFAULT 0
+);
+
+-- WorkBuddy 积分包（账号积分构成 / 到期明细；每次刷新按账号全量替换）
+CREATE TABLE IF NOT EXISTS workbuddy_packages (
+    uid          TEXT NOT NULL,
+    pid          TEXT NOT NULL,
+    name         TEXT DEFAULT '',
+    package_code TEXT DEFAULT '',
+    sub_product  TEXT DEFAULT '',
+    remain       REAL DEFAULT 0,
+    used         REAL DEFAULT 0,
+    size         REAL DEFAULT 0,
+    end_at       REAL DEFAULT 0,
+    created_at   REAL DEFAULT 0,
+    updated_at   REAL DEFAULT 0,
+    PRIMARY KEY (uid, pid)
 );
 
 -- WorkBuddy 积分 / 每日签到记录（按 日期 + 账号唯一，重复点击只覆盖同一行）

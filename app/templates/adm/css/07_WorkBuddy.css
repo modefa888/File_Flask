@@ -207,51 +207,141 @@
 .wb-guide p { margin: 0 0 10px; font-size: 12.5px; color: var(--adm-text-dim); line-height: 1.8; }
 .wb-guide code { font-size: 11.5px; color: var(--adm-cyan); word-break: break-all; }
 
-/* ---------------- 最近 14 天签到日历（7×2） ---------------- */
-.wb-cal {
+/* ---------------- 各账号 × 最近 14 天签到矩阵 ---------------- */
+.wb-cal-scroll { overflow-x: auto; padding-bottom: 2px; }
+.wb-cal-matrix { min-width: 920px; display: grid; gap: 6px; }
+.wb-cal-row {
     display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 9px;
+    grid-template-columns: 210px repeat(14, minmax(42px, 1fr));
+    gap: 4px;
+    align-items: stretch;
 }
-.wb-cal-day {
-    position: relative;
+.wb-cal-account {
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 10px;
+    background: var(--adm-panel-2);
     display: flex;
     flex-direction: column;
-    align-items: center;
     justify-content: center;
-    gap: 3px;
-    min-height: 82px;
-    padding: 8px 4px;
+    gap: 5px;
+}
+.wb-cal-account.head {
+    background: transparent;
+    border-color: transparent;
+    font-size: 11.5px;
+    color: var(--adm-text-dim);
+}
+.wb-cal-account.head > span:first-child { font-weight: 650; }
+.wb-cal-account-name { display: flex; align-items: center; gap: 5px; min-width: 0; flex-wrap: wrap; }
+.wb-cal-account-name b { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-cal-account-meta {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    font-size: 10.5px; color: var(--adm-text-mute);
+}
+.wb-cal-today { padding: 1px 6px; border-radius: 6px; font-size: 10px; font-weight: 600; }
+.wb-cal-today.ok { color: var(--adm-ok); background: rgba(52, 211, 153, .14); }
+.wb-cal-today.warn { color: var(--adm-warn); background: rgba(251, 191, 36, .14); }
+.wb-account-badge.global {
+    color: var(--adm-cyan);
+    border-color: rgba(34, 211, 238, .4);
+    background: rgba(34, 211, 238, .12);
+}
+.wb-cal-date {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; padding: 5px 0;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 8px;
+    background: var(--adm-panel-2);
+    font-size: 11px; color: var(--adm-text-dim);
+}
+.wb-cal-date b { font-size: 11.5px; font-weight: 650; }
+.wb-cal-date span { font-size: 9.5px; color: var(--adm-text-mute); }
+.wb-cal-date.today {
+    border-color: var(--adm-brand);
+    color: var(--adm-brand);
+    background: rgba(91, 140, 255, .12);
+}
+.wb-cal-cell {
+    appearance: none;
+    font: inherit;
+    min-width: 0;
+    min-height: 44px;
+    padding: 3px 1px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 9px;
+    background: var(--adm-panel-2);
+    color: var(--adm-text-mute);
+    cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1px;
+    transition: transform .15s, box-shadow .15s, border-color .15s, background .15s;
+}
+.wb-cal-cell i { font-size: 14px; line-height: 1.1; }
+.wb-cal-cell small { font-size: 9px; line-height: 1; opacity: .85; }
+.wb-cal-cell:hover {
+    transform: translateY(-2px);
+    border-color: var(--adm-brand);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .18);
+}
+.wb-cal-cell.ok {
+    color: var(--adm-ok);
+    border-color: rgba(52, 211, 153, .45);
+    background: linear-gradient(160deg, rgba(52, 211, 153, .2), rgba(52, 211, 153, .06));
+}
+.wb-cal-cell.done {
+    color: var(--adm-brand);
+    border-color: rgba(91, 140, 255, .4);
+    background: rgba(91, 140, 255, .1);
+}
+.wb-cal-cell.bad {
+    color: var(--adm-bad);
+    border-color: rgba(248, 113, 113, .4);
+    background: rgba(248, 113, 113, .1);
+}
+.wb-cal-cell.today { box-shadow: 0 0 0 2px rgba(91, 140, 255, .22); }
+
+/* ---------------- 就地悬浮二次确认 ---------------- */
+.wb-popconfirm {
+    position: fixed;
+    z-index: 2000;
+    width: 272px;
+    padding: 14px;
     border: 1px solid var(--adm-border);
     border-radius: 12px;
-    text-align: center;
-    background: var(--adm-panel-2);
-    min-width: 0;
+    background: var(--adm-panel);
+    box-shadow: 0 14px 38px rgba(0, 0, 0, .38), 0 0 0 1px rgba(91, 140, 255, .08);
+    animation: wb-pop-in .16s ease-out;
 }
-.wb-cal-day .d { font-size: 12.5px; font-weight: 650; color: var(--adm-text-dim); }
-.wb-cal-day .w { font-size: 10.5px; color: var(--adm-text-mute); }
-.wb-cal-day .m { font-size: 16px; line-height: 1.2; color: var(--adm-text-mute); }
-.wb-cal-day.ok {
-    border-color: rgba(52, 211, 153, .5);
-    background: linear-gradient(160deg, rgba(52, 211, 153, .18), rgba(52, 211, 153, .06));
+@keyframes wb-pop-in {
+    from { opacity: 0; transform: translateY(-5px) scale(.97); }
+    to { opacity: 1; transform: none; }
 }
-.wb-cal-day.ok .m, .wb-cal-day.ok .d { color: var(--adm-ok); }
-.wb-cal-day.miss .m { opacity: .45; }
-.wb-cal-day.today {
-    border-color: var(--adm-brand);
-    box-shadow: 0 0 0 2px rgba(91, 140, 255, .15);
-}
-.wb-cal-day .today-tag {
+.wb-popconfirm::after {
+    content: '';
     position: absolute;
-    top: 5px;
-    right: 6px;
-    font-size: 9px;
-    line-height: 1;
-    padding: 2px 4px;
-    border-radius: 5px;
-    color: #fff;
-    background: var(--adm-brand);
+    right: 22px;
+    top: -6px;
+    width: 10px;
+    height: 10px;
+    transform: rotate(45deg);
+    border-left: 1px solid var(--adm-border);
+    border-top: 1px solid var(--adm-border);
+    background: var(--adm-panel);
 }
+.wb-popconfirm.flip::after { top: auto; bottom: -6px; transform: rotate(225deg); }
+.wb-popconfirm-title {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 13px; font-weight: 650; color: var(--adm-text);
+}
+.wb-popconfirm-title i { color: var(--adm-bad); font-size: 15px; }
+.wb-popconfirm-text {
+    margin: 8px 0 12px;
+    font-size: 11.8px; line-height: 1.7; color: var(--adm-text-dim);
+}
+.wb-popconfirm-acts { display: flex; justify-content: flex-end; gap: 8px; }
+.wb-history-account { min-width: 150px; max-width: 220px; }
 .wb-cal-legend {
     display: flex;
     align-items: center;
@@ -271,6 +361,9 @@
     background: var(--adm-panel-2);
 }
 .wb-legend-dot.ok { border-color: rgba(52, 211, 153, .6); background: var(--adm-ok); }
+.wb-legend-dot.done { border-color: rgba(91, 140, 255, .6); background: var(--adm-brand); }
+.wb-legend-dot.bad { border-color: rgba(248, 113, 113, .6); background: var(--adm-bad); }
+.wb-legend-dot.miss { background: var(--adm-panel-2); }
 .wb-legend-dot.today { border-color: var(--adm-brand); box-shadow: 0 0 0 2px rgba(91, 140, 255, .2); }
 
 /* ---------------- 扫码登录弹窗（左右双栏） ---------------- */
@@ -548,8 +641,155 @@
     color: var(--adm-brand);
 }
 
+/* ---------------- 总积分统计 ---------------- */
+.adm-stat-grid.wb-total-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+.wb-total-stats .adm-stat { padding: 14px 16px; }
+.wb-total-stats .adm-stat-val { font-size: 24px; font-weight: 700; }
+.wb-nearest {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 10px 14px;
+    border: 1px solid rgba(251, 191, 36, .4);
+    border-radius: 12px;
+    background: rgba(251, 191, 36, .09);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--adm-text-dim);
+}
+.wb-nearest > i { color: var(--adm-warn); font-size: 16px; }
+.wb-nearest b { color: var(--adm-text); }
+.wb-nearest-days {
+    margin-left: auto;
+    flex: 0 0 auto;
+    padding: 3px 11px;
+    border-radius: 999px;
+    font-weight: 700;
+    color: #fff;
+    background: var(--adm-warn);
+}
+
+/* ---------------- 账号积分构成 ---------------- */
+.wb-comp-list { display: grid; gap: 10px; }
+.wb-comp-row {
+    min-width: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--adm-border);
+    border-radius: 14px;
+    background: var(--adm-panel);
+}
+.wb-comp-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.wb-comp-name {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 140px;
+    font-size: 13.5px;
+    font-weight: 650;
+}
+.wb-comp-name i { color: var(--adm-brand); font-size: 16px; }
+.wb-comp-num { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.wb-comp-num b { font-size: 20px; font-weight: 700; color: var(--adm-brand); }
+.wb-comp-head > button { margin-left: auto; }
+.wb-comp-bar {
+    display: flex;
+    height: 12px;
+    margin: 12px 0 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--adm-border-soft);
+}
+.wb-comp-seg { height: 100%; min-width: 2px; }
+.wb-comp-seg + .wb-comp-seg { border-left: 1px solid rgba(255, 255, 255, .35); }
+.wb-comp-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 11.5px;
+    color: var(--adm-text-dim);
+}
+.wb-comp-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.wb-comp-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+.wb-comp-detail { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--adm-border); }
+.wb-comp-detail[hidden] { display: none; }
+.wb-pack-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.wb-pack-table th {
+    padding: 6px 8px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--adm-text-mute);
+    border-bottom: 1px solid var(--adm-border);
+}
+.wb-pack-table td { padding: 7px 8px; border-bottom: 1px solid var(--adm-border-soft); }
+.wb-pack-table td b { color: var(--adm-text); }
+
+/* ---------------- 最近过期积分 ---------------- */
+.wb-exp-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    height: 132px;
+    padding: 8px 4px 0;
+}
+.wb-exp-col {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+}
+.wb-exp-val {
+    margin-bottom: 3px;
+    font-size: 10.5px;
+    white-space: nowrap;
+    color: var(--adm-text-mute);
+}
+.wb-exp-bar {
+    width: 100%;
+    max-width: 48px;
+    border-radius: 6px 6px 2px 2px;
+    background: linear-gradient(180deg, var(--adm-brand), rgba(91, 140, 255, .35));
+}
+.wb-exp-bar.danger { background: linear-gradient(180deg, var(--adm-bad), rgba(248, 113, 113, .35)); }
+.wb-exp-date { margin-top: 5px; font-size: 10.5px; white-space: nowrap; color: var(--adm-text-mute); }
+.wb-exp-list { display: grid; gap: 6px; margin-top: 14px; }
+.wb-exp-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 10px;
+    background: var(--adm-panel-2);
+    font-size: 12px;
+}
+.wb-exp-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 2px; }
+.wb-exp-who { min-width: 72px; font-weight: 650; }
+.wb-exp-name {
+    flex: 1 1 120px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--adm-text-dim);
+}
+.wb-exp-item b { color: var(--adm-text); }
+.wb-exp-badge { padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 650; }
+.wb-exp-badge.danger { color: var(--adm-bad); background: rgba(248, 113, 113, .15); }
+.wb-exp-badge.warn { color: var(--adm-warn); background: rgba(251, 191, 36, .15); }
+.wb-exp-badge.mute { color: var(--adm-text-mute); background: rgba(90, 102, 131, .12); }
+.wb-empty { padding: 16px; text-align: center; color: var(--adm-text-mute); font-size: 12.5px; }
+
 /* ---------------- 响应式 ---------------- */
 @media (max-width: 1100px) {
+    .adm-stat-grid.wb-total-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .adm-stat-grid.wb-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .wb-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .wb-hero { grid-template-columns: 1fr; gap: 18px; }
@@ -565,5 +805,49 @@
     .wb-cal-day .w { display: none; }
     .wb-login { grid-template-columns: 1fr; gap: 18px; }
     .wb-login-qr { max-width: 230px; margin: 0 auto; }
+    .wb-exp-chart { height: 104px; }
+    .wb-exp-val { display: none; }
     .wb-login-info h3 { font-size: 17px; }
+}
+
+/* ---------------- 详情 Tab：把长区块收敛到同一区域 ---------------- */
+.wb-detail > .adm-section-head { margin-bottom: 8px; }
+.wb-detail > .adm-section-head h2 { font-size: 13px; }
+
+.wb-detail .adm-tabbar {
+    gap: 4px;
+    padding: 5px 8px 0;
+    margin-bottom: 0;
+    background: var(--adm-bg-soft);
+    border: 1px solid var(--adm-border-soft);
+    border-bottom-color: var(--adm-border);
+    border-radius: 12px 12px 0 0;
+}
+
+.wb-detail .adm-tab { padding: 9px 15px; }
+
+.wb-detail .adm-tab.active {
+    background: var(--adm-panel);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+
+.wb-detail .adm-tabpanel { padding: 16px 2px 2px; }
+.wb-detail .adm-tabpanel > .adm-section:last-child { margin-bottom: 0; }
+
+/* Tab 标签已是主标题，面板内的 section 标题降级为副标题 */
+.wb-detail .adm-section-head h2 {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--adm-text-dim);
+}
+
+.wb-detail .adm-section-head h2 i { color: var(--adm-text-mute); }
+
+@media (max-width: 760px) {
+    .wb-detail .adm-tabbar { padding: 4px 4px 0; }
+    .wb-detail .adm-tab { padding: 9px 11px; font-size: 12.5px; }
+    .wb-cal-matrix { min-width: 860px; }
+    .wb-cal-row { grid-template-columns: 170px repeat(14, minmax(40px, 1fr)); }
+    .wb-popconfirm { width: calc(100vw - 24px); max-width: 272px; }
+    .wb-history-account { min-width: 120px; }
 }

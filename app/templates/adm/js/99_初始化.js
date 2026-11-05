@@ -81,6 +81,14 @@
         else shell.classList.toggle('mobile-open');
     });
 
+    /* 窄屏抽屉打开时点遮罩关闭：遮罩是 .adm-shell::after 伪元素，事件落到 .adm-shell 上冒泡，
+     * 统一在 document 拦截——点在抽屉（.adm-side）或汉堡按钮内不处理（汉堡自身负责 toggle） */
+    document.addEventListener('click', function (ev) {
+        if (!shell.classList.contains('mobile-open')) return;
+        if (ev.target.closest('.adm-side') || ev.target.closest('#admMenuBtn')) return;
+        shell.classList.remove('mobile-open');
+    });
+
     /* 首屏状态已由 <head> 脚本恢复；这里把按钮图标对齐到当前状态（窄屏会自动取消折叠） */
     paintSideToggle(applyCollapsed());
 

@@ -853,10 +853,21 @@
     .wb-hero-actions { min-width: 0; }
 }
 @media (max-width: 760px) {
-    .wb-balance { font-size: 34px; }
-    .wb-hero { padding: 18px; }
-    .wb-accounts { grid-template-columns: 1fr; }
+    .wb-balance { font-size: 30px; letter-spacing: -1px; }
+    .wb-hero { padding: 14px 14px 16px; gap: 14px; }
+    .wb-hero-sub { gap: 8px; }
+    .wb-hero-tools { gap: 6px; }
+    .wb-hero-tools .adm-btn { padding: 8px 10px; }
+    .wb-btn-main { width: 100%; justify-content: center; padding: 10px 18px; }
+    .wb-accounts { grid-template-columns: 1fr; gap: 10px; }
+    .wb-account { padding: 12px; }
     .wb-info-grid { grid-template-columns: 1fr; }
+    .wb-stats .adm-stat-val,
+    .wb-total-stats .adm-stat-val { font-size: 20px; }
+    .wb-stats .adm-stat,
+    .wb-total-stats .adm-stat { padding: 12px 13px; }
+    .wb-nearest { flex-wrap: wrap; row-gap: 6px; }
+    .wb-nearest-days { margin-left: 0; }
     .wb-cal { gap: 6px; }
     .wb-cal-day { min-height: 68px; }
     .wb-cal-day .w { display: none; }
@@ -865,6 +876,17 @@
     .wb-exp-chart { height: 104px; }
     .wb-exp-val { display: none; }
     .wb-login-info h3 { font-size: 17px; }
+    /* 逐包明细表窄屏横向滚动，避免列被压扁 */
+    .wb-comp-detail { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .wb-pack-table { min-width: 520px; }
+}
+
+@media (max-width: 480px) {
+    .wb-hero-actions { gap: 10px; }
+    /* 「明细」按钮收成整行，名称与积分各占一行更透气 */
+    .wb-comp-head > button { margin-left: 0; flex: 1 1 100%; justify-content: center; }
+    .wb-comp-num b { font-size: 18px; }
+    .wb-legend { gap: 10px; }
 }
 
 /* ---------------- 详情 Tab：把长区块收敛到同一区域 ---------------- */
@@ -901,8 +923,15 @@
 .wb-detail .adm-section-head h2 i { color: var(--adm-text-mute); }
 
 @media (max-width: 760px) {
-    .wb-detail .adm-tabbar { padding: 4px 4px 0; }
-    .wb-detail .adm-tab { padding: 9px 11px; font-size: 12.5px; }
+    .wb-detail .adm-tabbar {
+        padding: 4px 4px 0;
+        flex-wrap: nowrap;              /* 覆盖公共的 wrap：放不下时横向滑动而不是换两行 */
+        overflow-x: auto;               /* 4 个标签在 375px 放不下时横向滑动 */
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    .wb-detail .adm-tabbar::-webkit-scrollbar { display: none; }
+    .wb-detail .adm-tab { padding: 9px 11px; font-size: 12.5px; white-space: nowrap; flex: 0 0 auto; }
     .wb-cal-matrix { min-width: 860px; }
     .wb-cal-row { grid-template-columns: 170px repeat(14, minmax(40px, 1fr)); }
     .wb-popconfirm { width: calc(100vw - 24px); max-width: 272px; }

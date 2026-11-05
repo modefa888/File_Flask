@@ -640,6 +640,44 @@
     flex-wrap: wrap;
 }
 
+/* ---------------- 窄屏通用 ---------------- */
+@media (max-width: 760px) {
+    /* 标题与右侧按钮行两行排布：否则 h2 会被按钮挤成一字一行的竖排 */
+    .adm-section-head {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+
+    /* 弹窗贴边留出边距，不再顶满屏幕 */
+    .adm-modal-mask {
+        padding: 14px;
+    }
+
+    .adm-modal {
+        max-width: 100%;
+    }
+
+    /* 行信息弹窗：窄屏收成单列，否则两列里值区只剩两三字符宽 */
+    .adm-rowinfo.two-col {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .adm-rowinfo-item,
+    .adm-rowinfo.two-col .adm-rowinfo-item {
+        grid-template-columns: 96px minmax(0, 1fr);
+        gap: 4px 10px;
+    }
+}
+
+@media (max-width: 480px) {
+    /* 行信息：标签改到值上方，值占满整行宽，时间 / 文件名不再一字一行竖排 */
+    .adm-rowinfo-item,
+    .adm-rowinfo.two-col .adm-rowinfo-item {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 2px;
+    }
+}
+
 /* ---------------- 工具栏 ---------------- */
 .adm-toolbar {
     display: flex;

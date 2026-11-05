@@ -408,7 +408,7 @@ var ADM = window.ADM = {
                 if (e.target.closest('button, a, input, select, textarea, label')) return;
                 var idx = start + parseInt(tr.dataset.row, 10);
                 var row = st.rows[idx];
-                if (row) ADM._rowInfo(row, st, tr);
+                if (row) ADM._rowInfo(row, st, tr, host);
             });
         });
 
@@ -528,8 +528,9 @@ var ADM = window.ADM = {
         return ADM.esc(String(v));
     },
 
-    /* 弹出某一行信息；st.detail 可自定义内容；tr 用于复用该行「操作」列的动作按钮 */
-    _rowInfo: function (row, st, tr) {
+    /* 弹出某一行信息；st.detail 可自定义内容；tr 用于复用该行「操作」列的动作按钮；
+     * host（可选）为该行所在表格宿主，供无 onRender 的模块把弹窗按钮点击嫁接回原始监听器 */
+    _rowInfo: function (row, st, tr, host) {
         var title = row.name || row.username || row.target || row.task_name || row.module || row.file || '详细信息';
         if (st && st.detailTitle) {
             try { title = st.detailTitle(row); } catch (e) { /* 忽略自定义标题异常 */ }
@@ -563,8 +564,28 @@ var ADM = window.ADM = {
                 var actHost = box.querySelector('.adm-modal-foot-left');
                 if (!actHost) return;
                 // 复用表格的行内事件绑定（靠 data-* 属性识别），使弹窗内的按钮同样可用
+                // 第二参传 st.last：模块 onRender 普遍按 (host, last) 签名取统计数据，
+                // 不传会在绑定前抛错被吞掉，弹窗里的按钮就全都没绑上事件
                 if (st && st.onRender) {
-                    try { st.onRender(actHost); } catch (e) { /* 绑定失败不影响查看信息 */ }
+                    try { st.onRender(actHost, st.last); } catch (e) { /* 绑定失败不影响查看信息 */ }
+                } else if (host) {
+                    // 模块没有 onRender（按钮在页面渲染后一次性绑定，如 AI 模型管理）：
+                    // 委托嫁接——点击弹窗按钮时找到原表格宿主里同一 data-* 的按钮并触发它，
+                    // 复用其真实监听器，避免逐模块补 onRender
+                    actHost.addEventListener('click', function (ev) {
+                        var btn = ev.target.closest('button, a');
+                        if (!btn || !btn.attributes) return;
+                        var attrs = btn.attributes;
+                        for (var i = 0; i < attrs.length; i++) {
+                            var a = attrs[i];
+                            if (a.name.indexOf('data-') !== 0 || a.name === 'data-row') continue;
+                            var esc = (window.CSS && CSS.escape)
+                                ? CSS.escape(a.value) : a.value.replace(/"/g, '\\"');
+                            var orig = null;
+                            try { orig = host.querySelector('[' + a.name + '="' + esc + '"]'); } catch (e2) { /* 非法选择器跳过 */ }
+                            if (orig && orig !== btn) { orig.click(); break; }
+                        }
+                    });
                 }
                 // 按钮自身的事件先执行（打开确认框 / 日志弹窗），随后再关掉信息弹窗
                 actHost.addEventListener('click', function (ev) {
@@ -764,7 +785,7 @@ var ADM = window.ADM = {
                 if (e.target.closest('button, a, input, select, textarea, label')) return;
                 var idx = parseInt(tr.dataset.row, 10);
                 var row = items[idx];
-                if (row) ADM._rowInfo(row, st, tr);
+                if (row) ADM._rowInfo(row, st, tr, host);
             });
         });
 

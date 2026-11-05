@@ -366,6 +366,49 @@ html.adm-side-collapsed .adm-foot-link span {
     }
 }
 
+/* ---------------- 窄屏顶栏：标题不被右侧按钮挤压换行 ---------------- */
+@media (max-width: 760px) {
+    .adm-top {
+        padding: 12px 14px;
+        gap: 10px;
+    }
+
+    .adm-top-title h1 {
+        font-size: 15px;
+        white-space: nowrap;
+    }
+
+    .adm-top-title p {
+        font-size: 11px;
+    }
+
+    .adm-top-actions {
+        gap: 8px;
+    }
+
+    .adm-top-actions .adm-btn {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+
+    .adm-user {
+        padding: 5px 9px;
+        font-size: 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    /* 副标题让位：页面内有同义信息，顶栏保持单行 */
+    .adm-top-title p {
+        display: none;
+    }
+
+    /* 主题 / 刷新按钮只留图标，给标题腾出宽度 */
+    .adm-top-actions .adm-btn span {
+        display: none;
+    }
+}
+
 
 /* ---------------- 侧栏底部「设置」+ 悬浮入口 ----------------
    默认只露一个「设置」，点开才弹出 返回桌面端 / 打开 IDE / 退出登录，避免底部常驻三行占地方 */

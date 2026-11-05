@@ -1657,8 +1657,41 @@ def _update_balance(uid, balance) -> None:
         _log.warning("WorkBuddy 余额缓存写入失败：%s", e)
 
 
-def overview(uid=None) -> dict:
-    """首屏：指定账号的余额 / 签到状态 + 全部账号列表 + 该账号最近记录。"""
+def _local_status(uid: str, today: str) -> dict:
+    """从本地签到记录推断账号状态（缓存模式不发任何外部请求，毫秒级返回）。"""
+    conn = store_db.store_conn()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT day, status, credit FROM workbuddy_checkin "
+            "WHERE uid=? ORDER BY day DESC LIMIT 120", (str(uid),))]
+    finally:
+        conn.close()
+    ok_days = {r["day"] for r in rows if r["status"] in ("success", "already")}
+    total_credit = sum(float(r["credit"] or 0) for r in rows)
+    checked = today in ok_days
+    # 连签天数：从今天（未签则从昨天）往前数连续签到日
+    cur = time.mktime(time.strptime(today, "%Y-%m-%d"))
+    if not checked:
+        cur -= 86400
+    streak = 0
+    while time.strftime("%Y-%m-%d", time.localtime(cur)) in ok_days:
+        streak += 1
+        cur -= 86400
+    today_credit = 0.0
+    for r in rows:
+        if r["day"] == today:
+            today_credit = float(r["credit"] or 0)
+            break
+    return {"today_checked_in": checked, "streak_days": streak,
+            "total_credits": total_credit, "today_credit": today_credit,
+            "cached": True}
+
+
+def overview(uid=None, fresh=False) -> dict:
+    """首屏：指定账号的余额 / 签到状态 + 全部账号列表 + 该账号最近记录。
+
+    fresh=False（默认）只读本地库，切换账号 / 首屏即时返回；
+    fresh=True 才请求官方接口拉取最新状态、余额与积分包。"""
     ensure_migrated()
     target = str(uid or "").strip() or current_uid()
     acc = get_account(target) if target else None
@@ -1675,6 +1708,21 @@ def overview(uid=None) -> dict:
         out["history_all"] = list_history(limit=hist_limit)["items"]
         out["credits_summary"] = credits_summary()
         return out
+    if not fresh:
+        # 本地缓存模式：余额用 last_balance 快照，签到状态从本机签到记录推断
+        out["configured"] = True
+        out["cached"] = True
+        out["status"] = _local_status(target, out["today"])
+        bal = acc.get("last_balance")
+        out["credits"] = None if bal is None else {
+            "balance": float(bal), "used": None, "total": None,
+            "balance_key": "cached", "expire_at": ""}
+        # 本地可得的数据同样带上：签到记录表 + 积分构成快照（无外呼）
+        out["history_recent"] = list_history(limit=30, uid=target)["items"]
+        out["history_all"] = list_history(limit=hist_limit)["items"]
+        out["credits_summary"] = credits_summary()
+        return out
+    out["cached"] = False
     try:
         creds = resolve_credentials(target)
     except WorkBuddyError as e:

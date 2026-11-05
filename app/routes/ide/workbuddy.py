@@ -45,7 +45,10 @@ def _fail(msg, code=400):
 
 @bp.get("/api/workbuddy/overview")
 def wb_overview():
-    return jsonify(wb.overview(uid=request.args.get("uid", "")))
+    # 默认只读本地库（切换账号毫秒级）；fresh=1 才请求官方最新数据
+    fresh = request.args.get("fresh") in ("1", "true")
+    return jsonify(wb.overview(
+        uid=request.args.get("uid", ""), fresh=fresh))
 
 
 @bp.route("/api/workbuddy/config", methods=["GET", "POST"])

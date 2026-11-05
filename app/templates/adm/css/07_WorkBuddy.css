@@ -100,6 +100,20 @@
     color: var(--adm-text-mute);
 }
 .wb-hero-expire { display: inline-flex; align-items: center; gap: 5px; }
+/* 本地缓存模式徽标：提示当前展示的是库内快照 */
+.wb-cache-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--adm-cyan);
+    border: 1px dashed rgba(34, 211, 238, .45);
+    background: rgba(34, 211, 238, .08);
+}
+.wb-cache-tag i { font-size: 12px; }
 .wb-hero-actions {
     position: relative;
     z-index: 1;
@@ -603,15 +617,54 @@
     color: var(--adm-brand);
     background: rgba(91, 140, 255, .16);
 }
+/* 余额一行、版本/凭据来源一行，避免窄卡片里三段文字挤在一起换行错乱 */
 .wb-account-meta {
     display: flex;
-    gap: 14px;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 5px;
     font-size: 11.5px;
     color: var(--adm-text-dim);
+    min-width: 0;
 }
-.wb-account-meta i { margin-right: 4px; color: var(--adm-brand); }
-.wb-account-exp { font-size: 11px; color: var(--adm-text-mute); }
+.wb-account-balance {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    font-size: 15.5px;
+    font-weight: 700;
+    letter-spacing: -.2px;
+    color: var(--adm-text);
+}
+.wb-account-balance i {
+    align-self: center;
+    font-size: 13px;
+    color: var(--adm-brand);
+}
+.wb-account-balance em {
+    font-style: normal;
+    font-size: 10.5px;
+    font-weight: 500;
+    color: var(--adm-text-mute);
+}
+.wb-account-tags {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--adm-text-dim);
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.wb-account-tags i { color: var(--adm-brand); font-size: 11.5px; }
+.wb-account-tags .dot { color: var(--adm-text-mute); }
+.wb-account-exp {
+    font-size: 11px;
+    color: var(--adm-text-mute);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .wb-account-exp.warn { color: var(--adm-warn); }
 .wb-account-acts {
     display: grid;
@@ -622,8 +675,12 @@
 .wb-account-acts .adm-btn {
     width: 100%;
     justify-content: center;
+    min-width: 0;
     padding: 5px 6px;
     font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .wb-accounts-empty {
     grid-column: 1 / -1;

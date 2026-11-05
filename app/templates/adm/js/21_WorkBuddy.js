@@ -35,13 +35,15 @@ function wbDayStr(dt) {
 function wbEsc(s) { return ADM.esc(s === null || s === undefined ? '' : s); }
 
 /* ---------------- 首屏 ---------------- */
-async function wbRefresh(el, uid) {
+/* fresh=true 才请求官方最新数据；默认只读本地库（切换账号 / 首屏即时返回） */
+async function wbRefresh(el, uid, fresh) {
     if (uid !== undefined) {
         wbCurrentUid = uid || '';
         if (uid) wbHistoryUid = '';   // 切换账号后清掉旧筛选，避免表格显示「无记录」
     }
     var url = '/api/workbuddy/overview' +
         (wbCurrentUid ? '?uid=' + encodeURIComponent(wbCurrentUid) : '');
+    if (fresh) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'fresh=1';
     var d;
     try {
         d = await ADM.api(url);
@@ -64,6 +66,7 @@ function wbRender(el, d) {
     var errs = d.errors || {};
     var isGlobal = ((d.account && d.account.realm) ||
         (d.credential && d.credential.realm) || 'cn') === 'global';
+    var cached = !!d.cached;   // 本地缓存模式：切换账号 / 首屏零外呼
     var checked = st.today_checked_in === true || st.already === true;
     var unknown = !d.configured || (st.today_checked_in === undefined && !st.already);
     var stateHtml = isGlobal
@@ -79,8 +82,10 @@ function wbRender(el, d) {
 
     /* ---- 顶部指标：与 hero 大数字互补，不再重复显示余额 ---- */
     html += '<div class="adm-section">' + ADM.sectionHead('bi-graph-up', '积分总览',
-        '<span class="adm-hint">数据来源：WorkBuddy 官方计费接口 · 更新于 ' +
-        wbEsc(ADM.dt(d.updated_at)) + '</span>') + '<div class="adm-stat-grid wb-stats">';
+        '<span class="adm-hint">' + (cached
+            ? '本地缓存数据（签到状态按本机记录推断） · 点右上「刷新」拉取官方最新'
+            : '数据来源：WorkBuddy 官方计费接口 · 更新于 ' + wbEsc(ADM.dt(d.updated_at))) +
+        '</span>') + '<div class="adm-stat-grid wb-stats">';
     if (isGlobal) {
         html += ADM.stat('bi-globe2', '账号版本',
             '<span class="wb-stat-ok">国际版</span>', 'workbuddy.ai · 无每日签到体系');
@@ -112,6 +117,7 @@ function wbRender(el, d) {
         (isGlobal ? ' · 国际版' : ' · 国内版') + ' · 当前可用积分</div>' +
         '<div class="wb-balance">' + wbFmtNum(cr.balance) + '<small>积分</small></div>' +
         '<div class="wb-hero-sub">' + stateHtml +
+        (cached ? '<span class="wb-cache-tag"><i class="bi bi-database"></i> 缓存数据</span>' : '') +
         (cr.expire_at ? ('<span class="wb-hero-expire"><i class="bi bi-clock"></i> 额度有效期 ' +
             wbEsc(cr.expire_at) + '</span>') : '') +
         '</div></div>' +
@@ -283,20 +289,21 @@ function wbAccountBar(d) {
             (active ? '<span class="wb-account-badge current">当前</span>' : '') +
             '</div>' +
             '<div class="wb-account-meta">' +
-            '<span><i class="bi bi-coin"></i> ' +
+            '<span class="wb-account-balance"><i class="bi bi-coin"></i> ' +
             (a.last_balance === null || a.last_balance === undefined ? '—' : wbFmtNum(a.last_balance)) +
-            ' 积分</span>' +
-            '<span><i class="bi ' + (a.login_method === 'oauth' ? 'bi-qr-code' : 'bi-key') + '"></i> ' +
+            '<em>积分</em></span>' +
+            '<span class="wb-account-tags">' +
+            '<i class="bi bi-globe2"></i> ' + (a.realm === 'global' ? '国际版' : '国内版') +
+            '<span class="dot">·</span>' +
+            '<i class="bi ' + (a.login_method === 'oauth' ? 'bi-qr-code' : 'bi-key') + '"></i> ' +
             (a.login_method === 'oauth' ? '扫码登录' : (a.source === 'file' ? '本机文件' : '手动')) +
-            '</span>' +
-            '<span><i class="bi bi-globe2"></i> ' +
-            (a.realm === 'global' ? '国际版' : '国内版') + '</span></div>' +
+            '</span></div>' +
             '<div class="wb-account-exp' + (a.expires_soon ? ' warn' : '') + '">' +
             wbEsc(a.expires_text ? '登录态至 ' + a.expires_text
                 : (a.token_set ? '凭据已配置' : '未配置凭据')) + '</div>' +
             '<div class="wb-account-acts">' +
             '<button class="adm-btn sm ghost" data-wbact="use"' + (active ? ' disabled' : '') + '>切换</button>' +
-            '<button class="adm-btn sm ghost" data-wbact="refresh">刷新登录态</button>' +
+            '<button class="adm-btn sm ghost" data-wbact="refresh" title="重新获取 OAuth 登录态">刷新凭据</button>' +
             '<button class="adm-btn sm ghost" data-wbact="default"' +
             (a.is_default ? ' disabled' : '') + '>设为默认</button>' +
             '<button class="adm-btn sm danger" data-wbact="del">移除</button>' +
@@ -373,6 +380,12 @@ function wbComposition(s) {
             legend += '<span><i style="background:' + wbEsc(src.color) + '"></i>' +
                 wbEsc(src.name) + ' ' + wbFmtNum(src.remain) + '</span>';
         });
+        if (!seg && a.no_detail && a.balance > 0) {
+            // 尚未拉取分包明细：用灰条示意余额快照，引导点「刷新构成」
+            seg += '<span class="wb-comp-seg" style="width:100%;background:rgba(90,102,131,.45)"></span>';
+            legend += '<span><i style="background:rgba(90,102,131,.45)"></i>余额快照（暂无分包明细） ' +
+                wbFmtNum(a.balance) + '</span>';
+        }
         h += '<div class="wb-comp-row">' +
             '<div class="wb-comp-head">' +
             '<div class="wb-comp-name"><i class="bi bi-person-circle"></i> ' +
@@ -639,7 +652,9 @@ function wbConfirmPop(anchor, opts) {
 /* ---------------- 事件 ---------------- */
 function wbBind(el, d) {
     var reload = el.querySelector('#wbReload');
-    if (reload) reload.addEventListener('click', function () { wbRefresh(el); });
+    if (reload) reload.addEventListener('click', function () {
+        wbRefresh(el, undefined, true);   // 手动「刷新」才拉取官方最新数据
+    });
 
     var checkin = el.querySelector('#wbCheckin');
     if (checkin) checkin.addEventListener('click', async function () {
@@ -653,7 +668,7 @@ function wbBind(el, d) {
                     ? ('签到成功，+' + wbFmtNum(r.credit) + ' 积分')
                     : (r.message || '今天已签到')),
                 r.status === 'success' ? 'ok' : 'warn');
-            await wbRefresh(el);
+            await wbRefresh(el, undefined, true);   // 签到后余额 / 状态已变化
         } catch (e) {
             ADM.toast((e && e.message) || String(e), 'err');
             checkin.disabled = false;
@@ -702,7 +717,7 @@ function wbBind(el, d) {
             var s = r.summary || {};
             ADM.toast('批量签到：成功 ' + (s.success || 0) + ' · 已签 ' + (s.already || 0) +
                 ' · 失败 ' + (s.failed || 0), s.failed ? 'warn' : 'ok');
-            await wbRefresh(el);
+            await wbRefresh(el, undefined, true);
         } catch (e) {
             ADM.toast((e && e.message) || String(e), 'err');
             all.disabled = false;
@@ -716,7 +731,7 @@ function wbBind(el, d) {
             var s = r.summary || {};
             ADM.toast('余额刷新：成功 ' + (s.success || 0) + ' · 失败 ' + (s.failed || 0),
                 s.failed ? 'warn' : 'ok');
-            await wbRefresh(el);
+            await wbRefresh(el, undefined, true);
         } catch (e) {
             ADM.toast((e && e.message) || String(e), 'err');
             refreshAll.disabled = false;
@@ -812,7 +827,7 @@ function wbBind(el, d) {
             var sum = r.summary || {};
             ADM.toast('积分构成已刷新：成功 ' + (sum.success || 0) +
                 ' · 失败 ' + (sum.failed || 0), sum.failed ? 'warn' : 'ok');
-            await wbRefresh(el);
+            await wbRefresh(el, undefined, true);
         } catch (e) {
             ADM.toast((e && e.message) || String(e), 'err');
             rc.disabled = false;
@@ -897,7 +912,7 @@ async function wbOpenLogin(el, realm) {
                         ADM.toast('WorkBuddy 登录成功' + (r.nickname ? '：' + r.nickname : '') +
                             (r.checkin_message ? ' · ' + r.checkin_message : ''), 'ok');
                         done(true);
-                        await wbRefresh(el, '');   // 跟随服务端刚切换的新账号
+                        await wbRefresh(el, '', true);   // 新账号需拉取余额 / 激活结果
                         return;
                     }
                     msgEl.textContent = r.message ||
@@ -1071,6 +1086,6 @@ async function wbOpenAddAccount(el) {
     });
     if (ok) {
         ADM.toast('账号已添加', 'ok');
-        await wbRefresh(el, typeof ok === 'string' ? ok : '');
+        await wbRefresh(el, typeof ok === 'string' ? ok : '', true);
     }
 }

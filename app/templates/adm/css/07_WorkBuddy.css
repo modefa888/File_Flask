@@ -207,6 +207,36 @@
 }
 .wb-error i { margin-top: 2px; }
 
+/* 网站连接登录结果行 */
+.wb-ok {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 9px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(52, 211, 153, .4);
+    background: rgba(52, 211, 153, .08);
+    color: var(--adm-ok, #10b981);
+    font-size: 12.5px;
+    line-height: 1.6;
+    word-break: break-all;
+}
+.wb-ok i { margin-top: 2px; }
+.wb-err {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 9px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(248, 113, 113, .4);
+    background: rgba(248, 113, 113, .08);
+    color: var(--adm-bad, #f87171);
+    font-size: 12.5px;
+    line-height: 1.6;
+    word-break: break-all;
+}
+.wb-err i { margin-top: 2px; }
+
 .wb-guide {
     display: flex;
     gap: 14px;

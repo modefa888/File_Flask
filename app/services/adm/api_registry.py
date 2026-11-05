@@ -63,6 +63,7 @@ MODULE_NAMES = {
     "plugins": "插件管理", "dbconn": "数据库连接", "httpreq": "HTTP 请求工具", "cron": "定时任务",
     "sshconn": "SSH 连接", "file_hints": "文件说明", "collab": "协作编辑", "adm": "后台管理",
     "workbuddy": "WorkBuddy 积分",
+    "traecn": "Trae CN 积分",
 }
 
 # 首次登记时的默认说明（之后可在后台编辑；已编辑的不再覆盖）
@@ -117,6 +118,16 @@ RULE_DESC = {
     ("/api/workbuddy/checkin/all", "POST"): "WorkBuddy：全部启用账号批量签到",
     ("/api/workbuddy/credits/summary", "GET"): "WorkBuddy：跨账号总积分 / 账号构成 / 最近过期积分",
     ("/api/workbuddy/credits/refresh", "POST"): "WorkBuddy：刷新积分构成快照",
+    ("/api/traecn/overview", "GET"): "Trae CN：积分余额 / 今日签到状态 / 最近记录汇总",
+    ("/api/traecn/test", "POST"): "Trae CN：测试连接（只查状态，不领取积分）",
+    ("/api/traecn/checkin", "POST"): "Trae CN：执行每日签到（幂等）",
+    ("/api/traecn/checkin/all", "POST"): "Trae CN：全部启用账号批量签到",
+    ("/api/traecn/history", "GET"): "Trae CN：签到记录（搜索 / 分页）",
+    ("/api/traecn/accounts", "GET"): "Trae CN：账号列表（脱敏）与当前账号",
+    ("/api/traecn/accounts/save", "POST"): "Trae CN：新增 / 编辑账号（token 加密落库）",
+    ("/api/traecn/accounts/delete", "POST"): "Trae CN：移除账号",
+    ("/api/traecn/accounts/current", "POST"): "Trae CN：切换当前账号",
+    ("/api/traecn/accounts/refresh_all", "POST"): "Trae CN：批量刷新全部账号余额",
 }
 
 # 不允许停用 / 改权限的接口：避免把登录入口或管理入口锁死

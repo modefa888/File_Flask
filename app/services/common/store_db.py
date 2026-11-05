@@ -672,6 +672,43 @@ CREATE TABLE IF NOT EXISTS workbuddy_checkin (
     at          REAL DEFAULT 0,
     PRIMARY KEY (day, uid)
 );
+
+-- Trae CN 多账号：凭据（Cloud-IDE-Token JWT 经 secret.encrypt 加密）与展示信息
+CREATE TABLE IF NOT EXISTS traecn_accounts (
+    uid           TEXT PRIMARY KEY,    -- 账号标识（优先取 JWT payload 里的 user_id）
+    nickname      TEXT DEFAULT '',
+    token         TEXT DEFAULT '',     -- Cloud-IDE-Token（JWT，加密落库）
+    device_id     TEXT DEFAULT '',     -- 客户端 aha.device.device_id（claim 接口必需）
+    user_region   TEXT DEFAULT 'cn',
+    source        TEXT DEFAULT 'manual',
+    expires_at    REAL DEFAULT 0,      -- JWT exp（Unix 秒，签发约 14 天）
+    enabled       INTEGER DEFAULT 1,
+    is_default    INTEGER DEFAULT 0,
+    remark        TEXT DEFAULT '',
+    last_balance  REAL,
+    last_check_at REAL DEFAULT 0,
+    created_at    REAL DEFAULT 0,
+    updated_at    REAL DEFAULT 0
+);
+
+-- Trae CN 每日签到记录（按 日期 + 账号唯一，重复点击只覆盖同一行）
+CREATE TABLE IF NOT EXISTS traecn_checkin (
+    day      TEXT NOT NULL,
+    uid      TEXT NOT NULL DEFAULT '',
+    status   TEXT DEFAULT '',       -- success / already
+    credit   REAL DEFAULT 0,        -- 本次签到入账积分（status 接口的 credits + extra_credits）
+    message  TEXT DEFAULT '',
+    source   TEXT DEFAULT '',
+    at       REAL DEFAULT 0,
+    PRIMARY KEY (day, uid)
+);
+
+-- Trae CN 积分包缓存（usage 接口的 user_entitlement_pack_list，供「积分构成 / 到期提醒」本地展示）
+CREATE TABLE IF NOT EXISTS traecn_entitlements (
+    uid        TEXT PRIMARY KEY,
+    packs      TEXT DEFAULT '[]',   -- JSON 数组：来源 / 面额 / 到期时间
+    updated_at REAL DEFAULT 0
+);
 """
 
 

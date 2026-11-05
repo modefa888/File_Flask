@@ -62,6 +62,7 @@ MODULE_NAMES = {
     "agent": "AI 代理", "chat_history": "AI 会话历史", "pip": "Python 依赖", "npm": "Node 依赖",
     "plugins": "插件管理", "dbconn": "数据库连接", "httpreq": "HTTP 请求工具", "cron": "定时任务",
     "sshconn": "SSH 连接", "file_hints": "文件说明", "collab": "协作编辑", "adm": "后台管理",
+    "workbuddy": "WorkBuddy 积分",
 }
 
 # 首次登记时的默认说明（之后可在后台编辑；已编辑的不再覆盖）
@@ -95,6 +96,25 @@ RULE_DESC = {
     ("/register", "*"): "注册页 / 提交注册",
     ("/logout", "*"): "退出登录",
     ("/collab", "*"): "受限协作页（协作者）",
+    ("/api/workbuddy/overview", "GET"): "WorkBuddy：积分余额 / 今日签到状态 / 最近记录汇总",
+    ("/api/workbuddy/config", "GET"): "WorkBuddy：读取凭据配置（token 脱敏）",
+    ("/api/workbuddy/config", "POST"): "WorkBuddy：保存凭据配置（token 加密落库）",
+    ("/api/workbuddy/test", "POST"): "WorkBuddy：测试连接（只查状态，不领取积分）",
+    ("/api/workbuddy/checkin", "POST"): "WorkBuddy：执行每日签到（幂等）",
+    ("/api/workbuddy/history", "GET"): "WorkBuddy：签到记录（搜索 / 分页）",
+    ("/api/workbuddy/login/start", "POST"): "WorkBuddy：发起 OAuth 设备授权（授权链接 / state）",
+    ("/api/workbuddy/login/qr", "GET"): "WorkBuddy：授权链接二维码（SVG）",
+    ("/api/workbuddy/login/poll", "GET"): "WorkBuddy：轮询扫码登录结果（成功后凭据加密落库）",
+    ("/api/workbuddy/login/refresh", "POST"): "WorkBuddy：用 refreshToken 刷新登录态",
+    ("/api/workbuddy/login/logout", "POST"): "WorkBuddy：清除已保存的登录凭据",
+    ("/api/workbuddy/login/cancel", "POST"): "WorkBuddy：放弃本次授权会话",
+    ("/api/workbuddy/accounts", "GET"): "WorkBuddy：账号列表（脱敏）与当前账号",
+    ("/api/workbuddy/accounts/save", "POST"): "WorkBuddy：新增 / 编辑账号（凭据加密落库）",
+    ("/api/workbuddy/accounts/delete", "POST"): "WorkBuddy：移除账号",
+    ("/api/workbuddy/accounts/current", "POST"): "WorkBuddy：切换当前账号",
+    ("/api/workbuddy/accounts/refresh", "POST"): "WorkBuddy：刷新指定账号登录态",
+    ("/api/workbuddy/accounts/refresh_all", "POST"): "WorkBuddy：批量刷新全部账号余额",
+    ("/api/workbuddy/checkin/all", "POST"): "WorkBuddy：全部启用账号批量签到",
 }
 
 # 不允许停用 / 改权限的接口：避免把登录入口或管理入口锁死

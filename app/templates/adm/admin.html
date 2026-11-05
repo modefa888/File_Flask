@@ -32,6 +32,8 @@
     <style>{% include "adm/css/05_图标库.css" %}</style>
     {# 下载管理：进度条 / 产物信息卡 #}
     <style>{% include "adm/css/06_下载管理.css" %}</style>
+    {# WorkBuddy 积分 / 签到：余额主卡、签到日历 #}
+    <style>{% include "adm/css/07_WorkBuddy.css" %}</style>
 </head>
 
 <body>
@@ -113,6 +115,8 @@
         {% include "adm/js/19_V2RAY代理.js" %}
         {# 下载管理：复用 IDE 下载中心的 /api/dl/* 接口，导航顺序排在 V2RAY 代理之后 #}
         {% include "adm/js/20_下载管理.js" %}
+        {# WorkBuddy 积分 / 签到 #}
+        {% include "adm/js/21_WorkBuddy.js" %}
         {% include "adm/js/99_初始化.js" %}
     </script>
 </body>

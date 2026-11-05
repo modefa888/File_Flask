@@ -1,0 +1,569 @@
+/* 后台管理：WorkBuddy 积分 / 签到模块。
+ * 全部颜色取自 adm 主题变量，深色 / 浅色主题自动适配。 */
+
+/* ---------------- 顶部指标卡（四等分铺满，避免右侧留白） ---------------- */
+.adm-stat-grid.wb-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+.wb-stats .adm-stat {
+    padding: 14px 16px;
+    transition: transform .18s ease, box-shadow .18s ease;
+}
+.wb-stats .adm-stat:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgba(16, 24, 40, .12);
+}
+.wb-stats .adm-stat-top { font-size: 12px; }
+.wb-stats .adm-stat-val {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -.3px;
+    line-height: 1.25;
+}
+.wb-stats .adm-stat-sub { font-size: 11.5px; }
+.wb-stat-ok { color: var(--adm-ok); }
+.wb-stat-warn { color: var(--adm-warn); }
+
+/* ---------------- 首屏主卡片 ---------------- */
+.wb-hero {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 28px;
+    padding: 24px 28px;
+    border: 1px solid var(--adm-border);
+    border-radius: 18px;
+    background:
+        radial-gradient(560px 220px at 2% -30%, rgba(91, 140, 255, .20), transparent 70%),
+        radial-gradient(520px 220px at 96% 130%, rgba(124, 92, 255, .16), transparent 70%),
+        linear-gradient(180deg, var(--adm-panel-2), var(--adm-panel));
+    overflow: hidden;
+}
+.wb-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 2px;
+    background: linear-gradient(90deg, var(--adm-brand), var(--adm-brand-2), transparent 78%);
+    opacity: .8;
+}
+.wb-hero::after {
+    content: "";
+    position: absolute;
+    right: -80px;
+    top: -110px;
+    width: 250px;
+    height: 250px;
+    border-radius: 50%;
+    border: 1px solid rgba(91, 140, 255, .16);
+    box-shadow: 0 0 0 36px rgba(91, 140, 255, .04), 0 0 0 72px rgba(124, 92, 255, .035);
+    pointer-events: none;
+}
+.wb-hero-main { min-width: 0; position: relative; z-index: 1; }
+.wb-hero-label {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 12.5px;
+    color: var(--adm-text-dim);
+    letter-spacing: .4px;
+}
+.wb-hero-label i { color: var(--adm-brand); font-size: 16px; }
+.wb-balance {
+    margin: 10px 0 12px;
+    font-size: 46px;
+    line-height: 1.08;
+    font-weight: 700;
+    letter-spacing: -1.4px;
+    background: linear-gradient(100deg, var(--adm-brand), var(--adm-cyan));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: var(--adm-brand);
+}
+.wb-balance small {
+    font-size: 14px;
+    font-weight: 600;
+    margin-left: 10px;
+    letter-spacing: 0;
+    -webkit-text-fill-color: var(--adm-text-dim);
+    color: var(--adm-text-dim);
+}
+.wb-hero-sub {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: var(--adm-text-mute);
+}
+.wb-hero-expire { display: inline-flex; align-items: center; gap: 5px; }
+.wb-hero-actions {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    min-width: 268px;
+}
+.wb-hero-primary { display: flex; justify-content: flex-end; }
+.wb-btn-main {
+    padding: 11px 26px;
+    font-size: 13.5px;
+    font-weight: 650;
+    box-shadow: 0 8px 20px rgba(91, 140, 255, .28);
+}
+.wb-hero-tools {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+.wb-hero-tools .adm-btn {
+    width: 100%;
+    justify-content: center;
+    white-space: nowrap;
+}
+
+/* ---------------- 状态徽标 ---------------- */
+.wb-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 650;
+    border: 1px solid var(--adm-border);
+    background: var(--adm-panel-2);
+    color: var(--adm-text-dim);
+}
+.wb-state.ok { color: var(--adm-ok); border-color: rgba(52, 211, 153, .42); background: rgba(52, 211, 153, .12); }
+.wb-state.warn { color: var(--adm-warn); border-color: rgba(251, 191, 36, .42); background: rgba(251, 191, 36, .12); }
+.wb-state.bad { color: var(--adm-bad); border-color: rgba(248, 113, 113, .42); background: rgba(248, 113, 113, .12); }
+
+/* ---------------- 账户与活动：卡片式信息网格 ---------------- */
+.wb-info-card { padding: 12px; }
+.wb-info-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+.wb-info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    padding: 11px 13px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 11px;
+    background: var(--adm-panel-2);
+}
+.wb-info-k {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11.5px;
+    color: var(--adm-text-mute);
+}
+.wb-info-k i { color: var(--adm-brand); font-size: 13px; }
+.wb-info-v {
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--adm-text);
+    word-break: break-all;
+}
+
+/* ---------------- 错误提示 / 未配置引导 ---------------- */
+.wb-errors { margin-top: 12px; display: grid; gap: 8px; }
+.wb-error {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 9px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(248, 113, 113, .4);
+    background: rgba(248, 113, 113, .08);
+    color: var(--adm-bad);
+    font-size: 12.5px;
+    line-height: 1.6;
+    word-break: break-all;
+}
+.wb-error i { margin-top: 2px; }
+
+.wb-guide {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 16px 18px;
+    border: 1px dashed var(--adm-border);
+    border-radius: 14px;
+    background: var(--adm-panel-2);
+}
+.wb-guide > i { font-size: 24px; color: var(--adm-brand); }
+.wb-guide h3 { margin: 0 0 6px; font-size: 14px; }
+.wb-guide p { margin: 0 0 10px; font-size: 12.5px; color: var(--adm-text-dim); line-height: 1.8; }
+.wb-guide code { font-size: 11.5px; color: var(--adm-cyan); word-break: break-all; }
+
+/* ---------------- 最近 14 天签到日历（7×2） ---------------- */
+.wb-cal {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 9px;
+}
+.wb-cal-day {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 82px;
+    padding: 8px 4px;
+    border: 1px solid var(--adm-border);
+    border-radius: 12px;
+    text-align: center;
+    background: var(--adm-panel-2);
+    min-width: 0;
+}
+.wb-cal-day .d { font-size: 12.5px; font-weight: 650; color: var(--adm-text-dim); }
+.wb-cal-day .w { font-size: 10.5px; color: var(--adm-text-mute); }
+.wb-cal-day .m { font-size: 16px; line-height: 1.2; color: var(--adm-text-mute); }
+.wb-cal-day.ok {
+    border-color: rgba(52, 211, 153, .5);
+    background: linear-gradient(160deg, rgba(52, 211, 153, .18), rgba(52, 211, 153, .06));
+}
+.wb-cal-day.ok .m, .wb-cal-day.ok .d { color: var(--adm-ok); }
+.wb-cal-day.miss .m { opacity: .45; }
+.wb-cal-day.today {
+    border-color: var(--adm-brand);
+    box-shadow: 0 0 0 2px rgba(91, 140, 255, .15);
+}
+.wb-cal-day .today-tag {
+    position: absolute;
+    top: 5px;
+    right: 6px;
+    font-size: 9px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 5px;
+    color: #fff;
+    background: var(--adm-brand);
+}
+.wb-cal-legend {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+    font-size: 11.5px;
+    color: var(--adm-text-dim);
+}
+.wb-cal-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.wb-legend-dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 1px solid var(--adm-border);
+    background: var(--adm-panel-2);
+}
+.wb-legend-dot.ok { border-color: rgba(52, 211, 153, .6); background: var(--adm-ok); }
+.wb-legend-dot.today { border-color: var(--adm-brand); box-shadow: 0 0 0 2px rgba(91, 140, 255, .2); }
+
+/* ---------------- 扫码登录弹窗（左右双栏） ---------------- */
+.wb-login {
+    position: relative;
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 26px;
+    padding: 4px 2px 8px;
+}
+.wb-login::before {
+    content: "";
+    position: absolute;
+    left: -18px;
+    top: -18px;
+    width: 240px;
+    height: 200px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(91, 140, 255, .12), transparent 70%);
+    pointer-events: none;
+}
+.wb-login-qr { position: relative; z-index: 1; text-align: center; }
+.wb-login-qr-box {
+    padding: 12px;
+    border: 1px solid var(--adm-border);
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 12px 30px rgba(16, 24, 40, .14);
+}
+.wb-login-qr-box img { display: block; width: 100%; height: auto; }
+.wb-login-qr-cap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--adm-brand);
+    background: rgba(91, 140, 255, .12);
+}
+.wb-login-qr-tip {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--adm-text-mute);
+}
+.wb-login-qr-tip i { margin-right: 4px; }
+
+.wb-login-info { position: relative; z-index: 1; min-width: 0; }
+.wb-login-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 650;
+    color: var(--adm-ok);
+    border: 1px solid rgba(52, 211, 153, .4);
+    background: rgba(52, 211, 153, .1);
+}
+.wb-login-info h3 { margin: 12px 0 8px; font-size: 19px; font-weight: 700; letter-spacing: .2px; }
+.wb-login-info > p {
+    margin: 0 0 14px;
+    font-size: 12.5px;
+    line-height: 1.85;
+    color: var(--adm-text-dim);
+}
+.wb-login-steps {
+    list-style: none;
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 12px;
+    background: var(--adm-panel-2);
+    display: grid;
+    gap: 9px;
+}
+.wb-login-steps li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+    color: var(--adm-text-dim);
+}
+.wb-login-steps li > span {
+    flex: 0 0 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(135deg, var(--adm-brand), var(--adm-brand-2));
+}
+.wb-login-open {
+    display: inline-flex;
+    justify-content: center;
+    width: 100%;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: 0 8px 20px rgba(91, 140, 255, .24);
+}
+.wb-login-state {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+    padding: 11px 14px;
+    border: 1px solid rgba(91, 140, 255, .32);
+    border-radius: 12px;
+    background: rgba(91, 140, 255, .08);
+    color: var(--adm-brand);
+    font-size: 12.5px;
+    font-weight: 600;
+    word-break: break-all;
+}
+.wb-login-state > i { font-size: 15px; }
+.wb-login-dot {
+    flex: 0 0 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--adm-brand);
+    animation: wb-pulse 1.4s ease-in-out infinite;
+}
+.wb-login-state.ok {
+    color: var(--adm-ok);
+    border-color: rgba(52, 211, 153, .45);
+    background: rgba(52, 211, 153, .1);
+}
+.wb-login-state.ok .wb-login-dot { background: var(--adm-ok); animation: none; }
+.wb-login-state.err {
+    color: var(--adm-bad);
+    border-color: rgba(248, 113, 113, .45);
+    background: rgba(248, 113, 113, .1);
+}
+.wb-login-state.err .wb-login-dot { background: var(--adm-bad); animation: none; }
+@keyframes wb-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: .45; transform: scale(.72); }
+}
+.wb-login-note {
+    margin-top: 12px;
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--adm-text-mute);
+}
+.wb-login-note i { margin-right: 5px; color: var(--adm-text-dim); }
+
+/* ---------------- 配置弹窗里的登录态卡片 ---------------- */
+.wb-login-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--adm-border);
+    border-radius: 12px;
+    background: var(--adm-panel-2);
+}
+.wb-login-card-main { min-width: 0; }
+.wb-login-card-main b { font-size: 13px; }
+.wb-login-card-main b i { color: var(--adm-brand); margin-right: 5px; }
+.wb-login-card-main .adm-hint { margin-top: 5px; }
+
+/* ---------------- 账号管理 ---------------- */
+.wb-accounts {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+}
+.wb-account {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid var(--adm-border);
+    border-radius: 14px;
+    background: var(--adm-panel);
+    transition: transform .18s ease, box-shadow .18s ease;
+}
+.wb-account:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgba(16, 24, 40, .10);
+}
+.wb-account.active {
+    border-color: var(--adm-brand);
+    box-shadow: 0 0 0 2px rgba(91, 140, 255, .16);
+    background: linear-gradient(160deg, rgba(91, 140, 255, .10), var(--adm-panel) 70%);
+}
+.wb-account-top { display: flex; align-items: center; gap: 10px; }
+.wb-account-avatar {
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(135deg, var(--adm-brand), var(--adm-brand-2));
+}
+.wb-account-id {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.wb-account-id b {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.wb-account-id .adm-hint { white-space: nowrap; }
+.wb-account-badge {
+    flex: 0 0 auto;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 650;
+    color: var(--adm-text-dim);
+    background: rgba(90, 102, 131, .14);
+}
+.wb-account-badge.current {
+    color: var(--adm-brand);
+    background: rgba(91, 140, 255, .16);
+}
+.wb-account-meta {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    font-size: 11.5px;
+    color: var(--adm-text-dim);
+}
+.wb-account-meta i { margin-right: 4px; color: var(--adm-brand); }
+.wb-account-exp { font-size: 11px; color: var(--adm-text-mute); }
+.wb-account-exp.warn { color: var(--adm-warn); }
+.wb-account-acts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 2px;
+}
+.wb-account-acts .adm-btn {
+    width: 100%;
+    justify-content: center;
+    padding: 5px 6px;
+    font-size: 11.5px;
+}
+.wb-accounts-empty {
+    grid-column: 1 / -1;
+    padding: 22px;
+    text-align: center;
+    border: 1px dashed var(--adm-border);
+    border-radius: 14px;
+    color: var(--adm-text-mute);
+    font-size: 12.5px;
+}
+.wb-accounts-empty i {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 22px;
+    color: var(--adm-brand);
+}
+
+/* ---------------- 响应式 ---------------- */
+@media (max-width: 1100px) {
+    .adm-stat-grid.wb-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .wb-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .wb-hero { grid-template-columns: 1fr; gap: 18px; }
+    .wb-hero-actions { min-width: 0; }
+}
+@media (max-width: 760px) {
+    .wb-balance { font-size: 34px; }
+    .wb-hero { padding: 18px; }
+    .wb-accounts { grid-template-columns: 1fr; }
+    .wb-info-grid { grid-template-columns: 1fr; }
+    .wb-cal { gap: 6px; }
+    .wb-cal-day { min-height: 68px; }
+    .wb-cal-day .w { display: none; }
+    .wb-login { grid-template-columns: 1fr; gap: 18px; }
+    .wb-login-qr { max-width: 230px; margin: 0 auto; }
+    .wb-login-info h3 { font-size: 17px; }
+}

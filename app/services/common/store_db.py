@@ -620,6 +620,41 @@ CREATE TABLE IF NOT EXISTS collab_preshare (
     path TEXT PRIMARY KEY,
     data TEXT NOT NULL
 );
+
+-- WorkBuddy 多账号：凭据（token / refreshToken 经 secret.encrypt 加密）与展示信息
+CREATE TABLE IF NOT EXISTS workbuddy_accounts (
+    uid           TEXT PRIMARY KEY,
+    nickname      TEXT DEFAULT '',
+    source        TEXT DEFAULT '',       -- oauth / file / manual
+    auth_file     TEXT DEFAULT '',
+    token         TEXT DEFAULT '',
+    refresh_token TEXT DEFAULT '',
+    domain        TEXT DEFAULT '',
+    oauth_domain  TEXT DEFAULT '',
+    enterprise_id TEXT DEFAULT '',
+    login_method  TEXT DEFAULT '',
+    expires_at    REAL DEFAULT 0,
+    enabled       INTEGER DEFAULT 1,
+    is_default    INTEGER DEFAULT 0,
+    remark        TEXT DEFAULT '',
+    last_balance  REAL,
+    last_check_at REAL DEFAULT 0,
+    created_at    REAL DEFAULT 0,
+    updated_at    REAL DEFAULT 0
+);
+
+-- WorkBuddy 积分 / 每日签到记录（按 日期 + 账号唯一，重复点击只覆盖同一行）
+CREATE TABLE IF NOT EXISTS workbuddy_checkin (
+    day         TEXT NOT NULL,
+    uid         TEXT NOT NULL DEFAULT '',
+    status      TEXT DEFAULT '',
+    credit      REAL DEFAULT 0,
+    streak_days INTEGER DEFAULT 0,
+    message     TEXT DEFAULT '',
+    source      TEXT DEFAULT '',
+    at          REAL DEFAULT 0,
+    PRIMARY KEY (day, uid)
+);
 """
 
 

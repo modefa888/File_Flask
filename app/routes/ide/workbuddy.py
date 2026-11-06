@@ -173,6 +173,15 @@ def wb_credits_summary():
     return jsonify(wb.credits_summary())
 
 
+@bp.get("/api/workbuddy/models")
+def wb_models():
+    """当前账号的订阅档位 + 可用模型列表（?uid= 可指定账号，缺省当前账号）。"""
+    try:
+        return jsonify(wb.models_info(request.args.get("uid", "")))
+    except Exception as e:                                 # noqa: BLE001
+        return _fail(str(e) or "获取模型清单失败")
+
+
 @bp.post("/api/workbuddy/credits/refresh")
 def wb_credits_refresh():
     data = request.get_json(silent=True) or {}

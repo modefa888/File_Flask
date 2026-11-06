@@ -155,6 +155,26 @@ def _pick(obj, names):
     return None, ""
 
 
+def _find_list(obj, wanted: str, depth: int = 0):
+    """在嵌套 JSON 里按「归一化键名」找第一个数组值（限制深度防失控）。"""
+    if depth > 6:
+        return None
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if _norm_key(k) == wanted and isinstance(v, list):
+                return v
+        for v in obj.values():
+            got = _find_list(v, wanted, depth + 1)
+            if got is not None:
+                return got
+    elif isinstance(obj, list):
+        for v in obj[:20]:
+            got = _find_list(v, wanted, depth + 1)
+            if got is not None:
+                return got
+    return None
+
+
 def _num(v, default=None):
     try:
         if v is None or isinstance(v, bool):
@@ -1004,10 +1024,11 @@ def _maybe_refresh(cfg) -> dict:
 
 # --------------------------------------------------------------------------- 接口
 
-def _request(creds: dict, path: str, method="POST", body=None) -> dict:
+def _request(creds: dict, path: str, method="POST", body=None, ua=None) -> dict:
     """调用一次官方接口；HTTP 错误也解析响应体（「今天已签到」常以 400 返回）。
 
     body 为 dict 时按 JSON 发送，缺省沿用计费接口的 {} 请求体。
+    ua 可指定客户端身份（如 CLI 渠道的 UA），缺省沿用 web 计费 UA。
     """
     host = _domain(creds.get("domain"))
     url = "https://" + host + path
@@ -1015,7 +1036,7 @@ def _request(creds: dict, path: str, method="POST", body=None) -> dict:
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Authorization": "Bearer " + creds["token"],
-        "User-Agent": "Mozilla/5.0 (WorkBuddy Credits)",
+        "User-Agent": ua or "Mozilla/5.0 (WorkBuddy Credits)",
         "X-Client-Platform": "web",
     }
     if creds.get("uid"):
@@ -1467,6 +1488,242 @@ def refresh_packages(uid=None) -> dict:
     return {"ok": True, "uid": target, "count": len(packs), "balance": balance}
 
 
+# --------------------------------------------------------------------------- 模型与档位
+
+# 订阅档位：计费摘要里的 SubscriptionPackageCode → 展示名（对齐官方三档体系）
+TIER_LABELS = {
+    "standard": "标准版", "advanced": "高级版", "flagship": "旗舰版",
+    "professional": "专业版", "trial": "体验版", "free": "体验版",
+}
+# 模型清单：CLI 同款 /v3/config（data.models[]）；失败回退旧的企业模型接口
+PATH_MODELS_V3 = "/v3/config"
+PATH_MODELS_FALLBACK = "/console/enterprises/personal/models"
+
+# 从模型 tags / id 推导能力徽章（对齐参考项目的 vision / reasoning / agent 范式）
+_CAP_RULES = (
+    ("多模态", ("vision", "multimodal", "image", "绘图", "图片", "多模态")),
+    ("文生图", ("text-to-image", "image-gen", "image_generation", "绘画", "生图")),
+    ("推理", ("reasoning", "think", "o1", "o3", "r1", "deepseek-r1", "推理")),
+    ("智能体", ("agent", "智能体", "craft")),
+)
+
+
+def _model_caps(tags, mid) -> dict:
+    """由标签 / 模型 id 推导能力徽章与免费标识（接口本身不直接给这些字段）。"""
+    hay = " ".join(str(t).lower() for t in tags) + " " + str(mid or "").lower()
+    caps = [label for label, keys in _CAP_RULES if any(k in hay for k in keys)]
+    free = ("free" in hay or "trial" in hay or "体验" in hay
+            or str(mid or "").rstrip().endswith("-f"))
+    return caps, free
+
+
+def _tier_info(obj: dict) -> dict:
+    """从计费摘要响应里提取订阅档位（体验 / 标准 / 高级 / 旗舰）。"""
+    code = str(_pick(obj, ("SubscriptionPackageCode", "subscription_package_code",
+                           "PackageCode", "package_code"))[0] or "").strip().lower()
+    paid = _pick(obj, ("IsPaidUser", "is_paid_user"))[0]
+    trial = _pick(obj, ("ProTrialStatus", "pro_trial_status"))[0]
+    label = TIER_LABELS.get(code) or (code.upper() if code else "")
+    if not label:
+        label = "付费用户" if paid else "体验版"
+    return {"code": code, "label": label, "is_paid": bool(paid),
+            "pro_trial": "" if trial is None else str(trial)[:32]}
+
+
+def _find_models_list(obj, depth: int = 0):
+    """递归找第一个「模型数组」：键名是 models 系列且值是数组（任意包裹层级）。"""
+    if depth > 6:
+        return None
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, list) and _norm_key(k) in ("models", "modellist",
+                                                        "modelslist", "modeldata"):
+                return v
+        for v in obj.values():
+            got = _find_models_list(v, depth + 1)
+            if got:
+                return got
+    elif isinstance(obj, list):
+        for v in obj[:20]:
+            got = _find_models_list(v, depth + 1)
+            if got:
+                return got
+    return None
+
+
+def _models_of(obj) -> list:
+    """从 /v3/config（或回退接口）响应里找出模型数组。
+
+    兼容多种包裹方式：data.models / data 本身是数组 / data 是「模型id: 对象」映射 /
+    任意层级里名为 models 的数组。找不到返回空列表。
+    """
+    if not isinstance(obj, dict):
+        return []
+    data = obj.get("data")
+    if isinstance(data, dict):
+        for key in ("models", "model_list", "modelList", "Models"):
+            if isinstance(data.get(key), list):
+                return [m for m in data[key] if isinstance(m, dict)]
+        vals = [v for v in data.values() if isinstance(v, dict)]
+        if len(vals) > 3 and all(_pick(v, ("id", "modelId", "name"))[0] for v in vals):
+            return vals
+    if isinstance(data, list):
+        # data 直接是模型数组；或包裹在 data[{"Models": [...]}] 里
+        dicts = [m for m in data if isinstance(m, dict)]
+
+        def _looks_model(m):
+            return any(_norm_key(k) in ("id", "modelid", "name") for k in m.keys())
+
+        if dicts and all(_looks_model(m) for m in dicts):
+            return dicts
+        for m in dicts:
+            got = _find_models_list(m, 1)
+            if got:
+                return [x for x in got if isinstance(x, dict)]
+        return []
+    got = _find_models_list(obj, 1)
+    if got:
+        return [m for m in got if isinstance(m, dict)]
+    return []
+
+
+def _norm_model(m: dict) -> dict:
+    """模型对象裁剪成展示字段（接口没给的留空 / 归零）。
+
+    字段对齐 dsh-our-free-model「模型与档位」页：
+    积分倍率 / 默认档 / 支持思考档位 / 上下文长度 / 最大输出 / 能力标签。
+
+    /v3/config 实测结构：
+    - credits: "x0.51 credits"        → 积分倍率
+    - reasoning: {supportedEfforts: [...], defaultEffort: "max", canDisableThinking}
+                或 {effort: "high"}   → 档位菜单 / 固定档
+    - supportsToolCall / supportsImages / supportsReasoning / onlyReasoning
+    - labels: ["enterprise:selfhost"] → 角标
+    """
+    tags = m.get("tags") if isinstance(m.get("tags"), list) else []
+    if not tags:
+        labels = m.get("labels") if isinstance(m.get("labels"), list) else []
+        tags = [str(l).split(":", 1)[-1] for l in labels]
+    mid = _pick(m, ("id", "modelId", "model_id"))[0]
+    mname = _pick(m, ("displayName", "display_name", "title", "name", "Name"))[0]
+    caps, free = _model_caps(tags, mid)
+
+    tool = _bool(_pick(m, ("supportsToolCall",))[0])
+    img = _bool(_pick(m, ("supportsImages",))[0])
+    think = _bool(_pick(m, ("supportsReasoning",))[0])
+    only_think = _bool(_pick(m, ("onlyReasoning",))[0])
+    can_off = _bool(_pick(m, ("canDisableThinking",))[0])
+    if tool and "工具" not in caps:
+        caps.append("工具")
+    if img and "视觉" not in caps and "多模态" not in caps:
+        caps.append("视觉")
+    if (think or only_think) and "思考开启" not in caps and "推理" not in caps:
+        caps.append("思考开启")
+
+    # 积分倍率：credits = "x0.51 credits" / 其他兼容键
+    rate = _pick(m, ("credits", "rate", "multiplier", "billingRate", "creditRate",
+                     "creditMultiplier", "priceRate", "Rate"))[0]
+    rate_num = None
+    if isinstance(rate, str):
+        mm = re.search(r"[x×]\s*([\d.]+)", rate, re.I)
+        if mm:
+            rate_num = _num(mm.group(1))
+    if rate_num is None:
+        rate_num = _num(rate)
+    rate_num = round(rate_num, 4) if rate_num is not None else None
+
+    # 思考档位：菜单式（supportedEfforts + defaultEffort）或固定档（effort）
+    efforts_raw = None
+    for key in ("supportedEfforts", "efforts", "reasoningEfforts"):
+        efforts_raw = _find_list(m, _norm_key(key))
+        if efforts_raw:
+            break
+    efforts = [str(e).strip() for e in (efforts_raw or [])
+               if isinstance(e, (str, int)) and str(e).strip()][:12]
+    e_def = _pick(m, ("defaultEffort", "effortDefault", "default_reasoning_effort",
+                      "reasoningEffortDefault"))[0]
+    if not e_def:
+        e_def = _pick(m, ("effort",))[0]
+    if not e_def and efforts:
+        e_def = "high" if "high" in efforts else efforts[0]
+    # 可关闭思考 → 补 off 档
+    if can_off and efforts and not any(
+            e in ("off", "disabled") for e in efforts):
+        efforts.append("off")
+
+    return {
+        "id": str(mid or mname or ""),
+        "name": str(mname or "") if mname and str(mname) != str(mid or "") else "",
+        "vendor": str(_pick(m, ("vendor", "provider", "Vendor"))[0] or ""),
+        "max_input": _num(_pick(m, ("maxInputTokens", "max_input_tokens",
+                                    "contextWindow", "context_window",
+                                    "maxTokens"))[0], 0) or 0,
+        "max_output": _num(_pick(m, ("maxOutputTokens", "max_output_tokens",
+                                     "maxOutput", "max_output",
+                                     "maxCompletionTokens"))[0], 0) or 0,
+        "rate": rate,
+        "rate_num": rate_num,
+        "efforts": efforts,
+        "effort_default": str(e_def or "").strip(),
+        "fixed_effort": bool(e_def) and not efforts_raw,
+        "preset": _bool(_pick(m, ("presetAvailable", "preset", "hasPreset"))[0]),
+        "strong_cache": _bool(_pick(m, ("strongCache", "strongCacheAvailable",
+                                        "promptCache", "cacheAvailable"))[0]),
+        "limited_free": rate_num == 0 or bool(free),
+        "tags": [str(t) for t in tags if str(t).strip()][:8],
+        "caps": caps,
+        # 免费标识：名称带 free/trial，或倍率为 0（0× 等同免费）
+        "free": free or rate_num == 0,
+        # /v3/config 返回的均为官方已上线模型；免费模型单独标注
+        "status": "免费可用" if (free or rate_num == 0) else "可用",
+    }
+
+
+def fetch_models(creds: dict) -> list:
+    """拉取当前账号可用模型列表：优先 /v3/config（CLI 渠道 UA），失败回退旧接口。"""
+    last_err = None
+    for path, ua in ((PATH_MODELS_V3, OAUTH_UA), (PATH_MODELS_FALLBACK, None)):
+        try:
+            models = _models_of(_request(creds, path, method="GET", ua=ua)["json"])
+            if models:
+                return models
+        except WorkBuddyError as e:
+            last_err = e
+            _log.warning("WorkBuddy 模型列表请求失败（%s）：%s", path, e)
+    if last_err:
+        raise last_err
+    return []
+
+
+def models_info(uid=None) -> dict:
+    """当前账号的订阅档位 + 可用模型列表（实时请求官方接口，不落缓存）。"""
+    target = str(uid or "").strip() or current_uid()
+    if not target:
+        raise WorkBuddyError("尚未添加账号")
+    creds = resolve_credentials(target)
+    creds["timeout"] = get_config()["timeout"]
+    tier, tier_err = {}, ""
+    try:
+        tier = _tier_info(_request(creds, PATH_CREDITS)["json"])
+    except WorkBuddyError as e:
+        tier_err = str(e)
+    models = [_norm_model(m) for m in fetch_models(creds)]
+    realm = "global" if str(creds.get("realm") or "") == "global" else "cn"
+    for m in models:
+        m["realm"] = realm
+    counts = {
+        "total": len(models),
+        "free": sum(1 for m in models if m["free"]),
+        "vision": sum(1 for m in models if "视觉" in m["caps"] or "多模态" in m["caps"]
+                      or "文生图" in m["caps"]),
+        "reasoning": sum(1 for m in models if "思考开启" in m["caps"] or "推理" in m["caps"]),
+        "agent": sum(1 for m in models if "智能体" in m["caps"]),
+    }
+    return {"ok": True, "uid": target, "tier": tier, "models": models,
+            "counts": counts, "total": len(models), "tier_error": tier_err,
+            "updated_at": time.time()}
+
+
 def _public_package(row, now=None) -> dict:
     now = now or time.time()
     end = float(row.get("end_at") or 0)
@@ -1760,6 +2017,8 @@ def overview(uid=None, fresh=False) -> dict:
                           "balance_key": "global.packages", "expire_at": ""}
     if out["credits"] and out["credits"].get("balance") is not None:
         _update_balance(target, out["credits"]["balance"])
+    # 余额刚写库，账号列表必须重新读取（否则返回的是刷新前的旧 last_balance）
+    out["accounts"] = list_accounts()
     out["history_recent"] = list_history(limit=30, uid=target)["items"]
     out["history_all"] = list_history(limit=hist_limit)["items"]
     out["credits_summary"] = credits_summary()   # 读本地快照，不再发外部请求

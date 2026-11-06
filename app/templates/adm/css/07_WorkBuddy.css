@@ -874,6 +874,167 @@
 .wb-exp-badge.mute { color: var(--adm-text-mute); background: rgba(90, 102, 131, .12); }
 .wb-empty { padding: 16px; text-align: center; color: var(--adm-text-mute); font-size: 12.5px; }
 
+/* ---------------- 模型与档位 ---------------- */
+.wb-tag {
+    display: inline-block;
+    padding: 1px 8px;
+    margin: 1px 3px 1px 0;
+    border-radius: 999px;
+    font-size: 10.5px;
+    color: var(--adm-text-dim);
+    background: rgba(91, 140, 255, .12);
+    border: 1px solid rgba(91, 140, 255, .18);
+}
+
+.wb-model-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+.wb-model-search {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 220px;
+    min-width: 180px;
+    padding: 0 10px;
+    border: 1px solid var(--adm-border);
+    border-radius: 8px;
+    background: var(--adm-input-bg, var(--adm-card));
+    color: var(--adm-text-mute);
+}
+.wb-model-search input {
+    flex: 1;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    padding: 8px 0;
+    font-size: 13px;
+    color: var(--adm-text);
+}
+.wb-model-capf, .wb-model-realmf {
+    display: inline-flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+.wb-capf-btn, .wb-realmf-btn {
+    padding: 5px 12px;
+    border: 1px solid var(--adm-border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--adm-text-dim);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .15s ease;
+}
+.wb-capf-btn:hover, .wb-realmf-btn:hover { color: var(--adm-text); border-color: var(--adm-text-dim); }
+.wb-capf-btn.active, .wb-realmf-btn.active {
+    color: #fff;
+    background: var(--adm-accent, #5b8cff);
+    border-color: var(--adm-accent, #5b8cff);
+}
+.wb-model-count { font-size: 12px; color: var(--adm-text-mute); margin-left: auto; }
+.wb-realm-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    color: var(--adm-text-dim);
+    background: rgba(91, 140, 255, .12);
+    border: 1px solid rgba(91, 140, 255, .18);
+}
+.wb-model-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.wb-model-table { min-width: 860px; }
+.wb-model-table th:nth-child(2), .wb-model-table td:nth-child(2) { width: 200px; }
+.wb-model-table th:nth-child(3), .wb-model-table td:nth-child(3) { width: 90px; text-align: center; }
+.wb-model-table th:nth-child(5), .wb-model-table td:nth-child(5) { width: 100px; text-align: center; }
+.wb-model-table th:nth-child(6), .wb-model-table td:nth-child(6) { width: 100px; text-align: center; }
+.wb-model-id { display: flex; align-items: center; gap: 8px; }
+.wb-mid-line { display: flex; align-items: center; gap: 8px; }
+.wb-mname { font-weight: 600; color: var(--adm-text); }
+.wb-mname.mono {
+    font-family: var(--adm-font-mono, ui-monospace, Menlo, Consolas, monospace);
+    font-size: 13px;
+    font-weight: 650;
+}
+.wb-mvendor { margin-top: 2px; font-size: 11.5px; color: var(--adm-text-mute); }
+.wb-mtags { margin-top: 4px; }
+.wb-num { font-variant-numeric: tabular-nums; color: var(--adm-text-dim); }
+
+/* 积分倍率 */
+.wb-rate-cell { white-space: nowrap; }
+.wb-rate-val {
+    font-size: 13px;
+    color: var(--adm-text);
+    margin-right: 6px;
+}
+.wb-rate-val.free { color: #fbbf24; }
+.wb-rate-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    margin: 1px 3px 1px 0;
+    border-radius: 999px;
+    font-size: 10.5px;
+    color: #34d399;
+    background: rgba(52, 211, 153, .12);
+    border: 1px solid rgba(52, 211, 153, .25);
+}
+.wb-rate-badge.warn { color: #fbbf24; background: rgba(251, 191, 36, .12); border-color: rgba(251, 191, 36, .28); }
+
+/* 思考档位徽章 */
+.wb-eff {
+    display: inline-block;
+    padding: 1px 7px;
+    margin: 1px 3px 1px 0;
+    border-radius: 999px;
+    font-size: 10.5px;
+    color: var(--adm-text-dim);
+    background: rgba(90, 102, 131, .14);
+    border: 1px solid rgba(90, 102, 131, .22);
+}
+.wb-eff.default { color: #34d399; background: rgba(52, 211, 153, .12); border-color: rgba(52, 211, 153, .25); font-weight: 650; }
+.wb-eff.fixed { color: #60a5fa; background: rgba(96, 165, 250, .12); border-color: rgba(96, 165, 250, .25); }
+.wb-eff.none { color: var(--adm-text-mute); }
+.wb-copy {
+    flex: 0 0 auto;
+    border: 0;
+    background: transparent;
+    color: var(--adm-text-mute);
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 6px;
+    font-size: 12px;
+}
+.wb-copy:hover { color: var(--adm-accent, #5b8cff); background: rgba(91, 140, 255, .1); }
+
+.wb-cap {
+    display: inline-block;
+    padding: 1px 8px;
+    margin: 1px 4px 1px 0;
+    border-radius: 999px;
+    font-size: 10.5px;
+    border: 1px solid transparent;
+}
+.wb-cap.vis { color: #34d399; background: rgba(52, 211, 153, .14); border-color: rgba(52, 211, 153, .25); }
+.wb-cap.img { color: #f0abfc; background: rgba(240, 171, 252, .14); border-color: rgba(240, 171, 252, .25); }
+.wb-cap.reason { color: #fbbf24; background: rgba(251, 191, 36, .14); border-color: rgba(251, 191, 36, .25); }
+.wb-cap.agent { color: #60a5fa; background: rgba(96, 165, 250, .14); border-color: rgba(96, 165, 250, .25); }
+/* 能力徽章行（工具 / 视觉 / 思考开启）—— 琥珀色，对齐参考项目 */
+.wb-mcaps { margin-top: 4px; }
+.wb-cap.tool, .wb-cap.think {
+    color: #d97706;
+    background: rgba(245, 158, 11, .12);
+    border-color: rgba(245, 158, 11, .3);
+}
+
+.wb-status { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 650; }
+.wb-status.ok { color: #34d399; background: rgba(52, 211, 153, .14); }
+.wb-status.free { color: #fbbf24; background: rgba(251, 191, 36, .15); }
+
 /* ---------------- 响应式 ---------------- */
 @media (max-width: 1100px) {
     .adm-stat-grid.wb-total-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }

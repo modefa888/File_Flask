@@ -274,6 +274,22 @@ function trDayStr(dt) {
         '-' + String(dt.getDate()).padStart(2, '0');
 }
 
+/* 实时倒计时（超过 1 天按天，1 天内精确到小时 / 分钟）：基于 expire_at 现算 */
+function trLeftText(p) {
+    var left = Number(p.expire_at) * 1000 - Date.now();
+    if (!(left > 0)) return '已到期';
+    var d = Math.floor(left / 86400000),
+        h = Math.floor((left % 86400000) / 3600000),
+        m = Math.floor((left % 3600000) / 60000);
+    return d > 0 ? (d + '天') : (h + '小时' + m + '分');
+}
+
+/* 过滤已过期的缓存积分包 */
+function trLivePacks(packs) {
+    var now = Date.now() / 1000;
+    return (packs || []).filter(function (p) { return Number(p.expire_at) > now; });
+}
+
 /* 按「账号 × 最近 14 天」生成签到矩阵：每个账号一行，格子显示当天签到结果与积分（同 WorkBuddy） */
 function trCalendar(today, recent, accounts, currentUid) {
     var map = {};
@@ -455,14 +471,14 @@ function trPackDetailTable(packs) {
             '<td>' + trEsc(p.start_text || '—') + '</td>' +
             '<td>' + trEsc(p.expire_text || '—') + '</td>' +
             '<td><span class="wb-exp-badge ' + tone + '">' +
-            (p.days_left <= 0 ? '已到期' : p.days_left + ' 天') + '</span></td></tr>';
+            trEsc(trLeftText(p)) + '</span></td></tr>';
     });
     return h + '</tbody></table>';
 }
 
 /* 积分构成：总积分统计 4 卡 + 最近到期提示条 + 账号构成堆叠条（同 WorkBuddy） */
 function trEntitlementsHtml(d) {
-    var packs = (d.entitlements && d.entitlements.packs) || [];
+    var packs = trLivePacks((d.entitlements && d.entitlements.packs) || []);
     var updated = d.entitlements && d.entitlements.updated_at;
     var total = 0, exp7 = 0, exp30 = 0, nearest = null;
     packs.forEach(function (p) {
@@ -489,7 +505,7 @@ function trEntitlementsHtml(d) {
             '<span>最近到期：「' + trEsc(nearest.name) + '」 <b>' +
             trFmtNum(nearest.amount) + '</b> 积分将于 ' +
             trEsc(nearest.expire_text || trFmtDay(nearest.expire_at)) + ' 失效</span>' +
-            '<span class="wb-nearest-days">' + nearest.days_left + ' 天</span></div>';
+            '<span class="wb-nearest-days">' + trEsc(trLeftText(nearest)) + '</span></div>';
     }
     h += '</div>';
 
@@ -529,7 +545,7 @@ function trEntitlementsHtml(d) {
 
 /* 到期提醒：按天到期柱状图（wb-exp-chart）+ 逐包列表（wb-exp-list）+ Token 提示 */
 function trExpiryHtml(d) {
-    var packs = (d.entitlements && d.entitlements.packs) || [];
+    var packs = trLivePacks((d.entitlements && d.entitlements.packs) || []);
     var acct = d.account || {};
     var who = trEsc((d.account && d.account.display_name) || '当前账号');
     var h = '<div class="adm-section">' + ADM.sectionHead('bi-calendar2-week', '最近过期积分',
@@ -574,7 +590,7 @@ function trExpiryHtml(d) {
                 '<b>' + trFmtNum(p.amount) + ' 积分</b>' +
                 '<span class="adm-hint">' + trEsc(p.expire_text || '—') + '</span>' +
                 '<span class="wb-exp-badge ' + tone + '">' +
-                (p.days_left <= 0 ? '已到期' : p.days_left + ' 天') + '</span></div>';
+                trEsc(trLeftText(p)) + '</span></div>';
         });
         h += '</div>';
     }

@@ -25,10 +25,12 @@ _TASK_COLS = ("id", "name", "cron", "command", "kind", "lang", "content", "ai_sy
 NOTIFY_MODES = ("status", "output", "output_only", "custom")
 _NOTIFY_LINES_MAX = 200
 
-# 任务执行方式：command（shell 命令）/ code（代码片段）/ ai（AI 提示词）
-KINDS = ("command", "code", "ai")
+# 任务执行方式：command（shell 命令）/ code（代码片段）/ ai（AI 提示词）/
+# system（系统级接口，直接调本机服务层函数，不起子进程）
+KINDS = ("command", "code", "ai", "system")
 LANGS = ("python", "node", "bash")
-KIND_LABELS = {"command": "命令", "code": "代码", "ai": "AI 提示词"}
+KIND_LABELS = {"command": "命令", "code": "代码", "ai": "AI 提示词",
+               "system": "系统接口"}
 LANG_LABELS = {"python": "Python", "node": "Node.js", "bash": "Shell"}
 
 # 可推送的通知渠道（与 cronnotify 的渠道一致）；任务里为空 = 跟随「通知设置」里已启用的渠道

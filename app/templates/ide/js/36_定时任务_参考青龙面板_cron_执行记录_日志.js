@@ -95,11 +95,12 @@
     const hit = closest(".cr-nf-chs, .cr-nf-body");
     if (hit) hit.parentElement.classList.toggle("open");
   }
-  /* 任务类型：命令 / 代码片段 / AI 提示词（值必须与后端 crondb.KINDS 一致） */
+  /* 任务类型：命令 / 代码片段 / AI 提示词 / 系统接口（值必须与后端 crondb.KINDS 一致） */
   const CRON_TASK_KINDS = [
     ["command", "Shell 命令", "bi-terminal"],
     ["code", "代码片段", "bi-code-slash"],
     ["ai", "AI 提示词", "bi-stars"],
+    ["system", "系统接口", "bi-plug"],
   ];
   /* 代码片段支持的语言（值必须与后端 crondb.LANGS 一致） */
   const CRON_CODE_LANGS = [
@@ -521,6 +522,15 @@
               '输出会写进执行日志。想把内容直接推到微信 / 钉钉 / Telegram，' +
               '把下面的「通知内容」选成「仅脚本输出」即可。「超时」留 0 时按 180 秒上限。</div>' +
           '</div>' +
+          '<div class="cd-kind-pane" id="cronPaneSystem"' + (kind === "system" ? "" : ' style="display:none"') + '>' +
+            '<div class="cd-row"><label>系统接口动作</label>' +
+              '<select id="cronSysAction" class="cd-select"><option value="">加载中…</option></select>' +
+            '</div>' +
+            '<div class="cd-hint">到点直接调用系统内置接口（如两个积分模块的全部签到），' +
+              '不起子进程，输出写进执行日志；想把输出推到微信 / 钉钉 / Telegram，' +
+              '把下面的「通知内容」选成「仅脚本输出」。自定义模板可用 ' +
+              '{action} {ok} {total} {success} {already} {failed} {credit} {detail}（每账号一行）等变量。</div>' +
+          '</div>' +
           '<div class="cd-row"><label>cron 表达式 <span class="cd-lbl-tip">分 时 日 月 周</span></label>' +
             '<div class="cd-cron-row"><input id="cronExpr" placeholder="0 9 * * *" spellcheck="false" autocomplete="off" value="' +
               escAttr(val("cron", "")) + '"><span class="cd-cron-tip" id="cronExprTip"></span></div>' +
@@ -610,11 +620,13 @@
     ov.style.display = "flex";
     // 任务类型切换：只显示对应的输入区，并同步「测试运行」按钮文案
     const kindBtns = [...ov.querySelectorAll("#cronKind button")];
-    const paneOf = { command: $("cronPaneCommand"), code: $("cronPaneCode"), ai: $("cronPaneAi") };
+    const paneOf = { command: $("cronPaneCommand"), code: $("cronPaneCode"),
+                     ai: $("cronPaneAi"), system: $("cronPaneSystem") };
     const kindHints = {
       command: "执行一条 shell 命令（支持多行，会用 bash -lc 在下面的工作目录里运行）。",
       code: "直接写代码：每次执行用对应解释器运行，输出会自动写进执行日志（不用自己重定向）。",
       ai: "固定提示词任务：到点把提示词发给 AI，输出写进执行日志；适合每日学习、知识点讲解、例行总结。",
+      system: "系统级接口任务：到点直接调用系统内置功能（如全部签到），不起子进程，输出写进执行日志。",
     };
     const syncKind = () => {
       const cur = cronEditKind();
@@ -636,6 +648,19 @@
       b.onclick = () => { CRON.editKind = b.dataset.kind; syncKind(); };
     });
     syncKind();
+    // 系统接口动作下拉：从后端拉注册表；编辑已有任务时默认选中原动作
+    const sysSel = $("cronSysAction");
+    if (sysSel) {
+      const curAction = String(src.content || "");
+      fetch("/api/cron/system-actions").then(r => r.json()).then(d => {
+        const acts = (d && d.actions) || [];
+        sysSel.innerHTML = acts.length ? acts.map(a =>
+          '<option value="' + escAttr(a.id) + '"' + (a.id === curAction ? " selected" : "") + '>' +
+          esc(a.label) + '</option>').join("")
+          : '<option value="">（暂无可用动作）</option>';
+        if (acts.some(a => a.id === curAction)) sysSel.value = curAction;
+      }).catch(() => { sysSel.innerHTML = '<option value="">（动作列表加载失败）</option>'; });
+    }
     // AI 提示词预设：点一下填进输入框（已有内容时追加到末尾，方便组合）
     ov.querySelectorAll("#cronAiPresets button").forEach(b => {
       b.onclick = () => {
@@ -1011,9 +1036,11 @@
     const cmd = $("cronCmd") ? $("cronCmd").value.trim() : "";
     const code = $("cronCode") ? $("cronCode").value : "";
     const prompt = $("cronPrompt") ? $("cronPrompt").value.trim() : "";
+    const sysAction = $("cronSysAction") ? $("cronSysAction").value : "";
     if (kind === "command" && !cmd) { toast("请先填写执行命令", "warn"); $("cronCmd").focus(); return; }
     if (kind === "code" && !code.trim()) { toast("请先填写要执行的代码", "warn"); $("cronCode").focus(); return; }
     if (kind === "ai" && !prompt) { toast("请先填写固定提示词", "warn"); $("cronPrompt").focus(); return; }
+    if (kind === "system" && !sysAction) { toast("请先选择系统接口动作", "warn"); return; }
     // 预览口径跟「末尾行数」一致（用 output / output_only / custom 时才有意义，status 也给个预览）
     let lines = 20;
     const ln = $("cronNotifyLines");
@@ -1031,7 +1058,7 @@
       const d = await cronAct("/api/cron/dry-run", {
         kind: kind,
         lang: $("cronLang") ? $("cronLang").value : "python",
-        content: kind === "code" ? code : (kind === "ai" ? prompt : ""),
+        content: kind === "code" ? code : (kind === "ai" ? prompt : (kind === "system" ? sysAction : "")),
         ai_sys: $("cronAiSys") ? $("cronAiSys").value.trim() : "",
         command: cmd,
         cwd: $("cronCwd").value.trim(),
@@ -1177,7 +1204,8 @@
       kind: kind,
       lang: $("cronLang") ? $("cronLang").value : "python",
       content: kind === "code" ? ($("cronCode") ? $("cronCode").value : "")
-        : (kind === "ai" ? ($("cronPrompt") ? $("cronPrompt").value.trim() : "") : ""),
+        : (kind === "ai" ? ($("cronPrompt") ? $("cronPrompt").value.trim() : "")
+        : (kind === "system" ? ($("cronSysAction") ? $("cronSysAction").value : "") : "")),
       ai_sys: $("cronAiSys") ? $("cronAiSys").value.trim() : "",
       command: $("cronCmd") ? $("cronCmd").value.trim() : "",
       cron: $("cronExpr").value.trim(),
@@ -1197,6 +1225,7 @@
     if (kind === "command" && !body.command) { err.textContent = "请填写要执行的命令"; return; }
     if (kind === "code" && !body.content.trim()) { err.textContent = "请填写要执行的代码"; return; }
     if (kind === "ai" && !body.content.trim()) { err.textContent = "请填写固定的 AI 提示词"; return; }
+    if (kind === "system" && !body.content.trim()) { err.textContent = "请选择要执行的系统接口动作"; return; }
     if (!body.cron) { err.textContent = "请填写 cron 表达式"; return; }
     err.textContent = "";
     const d = await cronAct("/api/cron/save", body);

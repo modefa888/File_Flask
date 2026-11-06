@@ -34,6 +34,18 @@ function wbDayStr(dt) {
 
 function wbEsc(s) { return ADM.esc(s === null || s === undefined ? '' : s); }
 
+/* 实时倒计时（超过 1 天按天，1 天内精确到小时 / 分钟）：基于 end_at 现算 */
+function wbLeftText(p) {
+    var end = Number(p.end_at);
+    if (!end || end <= 0) return '—';
+    var left = end * 1000 - Date.now();
+    if (!(left > 0)) return '已到期';
+    var d = Math.floor(left / 86400000),
+        h = Math.floor((left % 86400000) / 3600000),
+        m = Math.floor((left % 3600000) / 60000);
+    return d > 0 ? (d + '天') : (h + '小时' + m + '分');
+}
+
 /* ---------------- 首屏 ---------------- */
 /* fresh=true 才请求官方最新数据；默认只读本地库（切换账号 / 首屏即时返回） */
 async function wbRefresh(el, uid, fresh) {
@@ -335,7 +347,7 @@ function wbTotalStats(s) {
             '<span>最近到期：<b>' + wbEsc(near.display_name) + '</b> 的「' +
             wbEsc(near.name) + '」 <b>' + wbFmtNum(near.remain) + '</b> 积分将于 ' +
             wbEsc(near.end_text) + ' 失效</span>' +
-            '<span class="wb-nearest-days">' + near.days_left + ' 天</span></div>';
+            '<span class="wb-nearest-days">' + wbEsc(wbLeftText(near)) + '</span></div>';
     }
     return h + '</div>';
 }
@@ -350,14 +362,18 @@ function wbPackageTable(packs) {
     packs.forEach(function (p) {
         var tone = p.days_left === null ? 'mute' : (p.days_left <= 7 ? 'danger'
             : (p.days_left <= 30 ? 'warn' : 'mute'));
+        /* 剩余为 0 的包不再显示倒计时，直接标「已用完」 */
+        var badge = Number(p.remain) > 0
+            ? (p.end_at ? wbLeftText(p) : '—')
+            : '已用完';
+        if (badge === '已用完') tone = 'mute';
         h += '<tr>' +
             '<td><i class="wb-exp-dot" style="background:' + wbEsc(p.color) + '"></i>' +
             wbEsc(p.name) + '</td>' +
             '<td><b>' + wbFmtNum(p.remain) + '</b> / ' + wbFmtNum(p.size) + '</td>' +
             '<td>' + wbFmtNum(p.used) + '</td>' +
             '<td>' + wbEsc(p.end_text || '无到期时间') + '</td>' +
-            '<td><span class="wb-exp-badge ' + tone + '">' +
-            (p.days_left === null ? '—' : (p.days_left <= 0 ? '已到期' : p.days_left + ' 天')) +
+            '<td><span class="wb-exp-badge ' + tone + '">' + wbEsc(badge) +
             '</span></td></tr>';
     });
     return h + '</tbody></table>';
@@ -439,7 +455,7 @@ function wbExpiry(s) {
                 '<span class="wb-exp-name">' + wbEsc(r.name) + '</span>' +
                 '<b>' + wbFmtNum(r.remain) + ' 积分</b>' +
                 '<span class="adm-hint">' + wbEsc(r.end_text) + '</span>' +
-                '<span class="wb-exp-badge ' + tone + '">' + r.days_left + ' 天</span>' +
+                '<span class="wb-exp-badge ' + tone + '">' + wbEsc(wbLeftText(r)) + '</span>' +
                 '</div>';
         });
         h += '</div>';

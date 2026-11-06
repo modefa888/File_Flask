@@ -15,6 +15,7 @@ GET  /api/cron/runs            执行记录 ?task_id=&limit=
 GET  /api/cron/log             执行日志（增量）?run_id=&offset=
 POST /api/cron/clear-runs      清空某任务的执行记录 {id}
 POST /api/cron/validate        校验 cron 表达式并给出下次运行时间 {cron}
+GET  /api/cron/system-actions  系统接口动作清单（「系统接口」任务类型的下拉数据源）
 POST /api/cron/dry-run         试运行：用编辑中的命令跑一次并返回脚本输出（不落记录、不通知）
 POST /api/cron/suggest         按文件推断命令 / 名称 / 工作目录，供「从文件新建定时任务」预填 {path}
 GET  /api/cron/monitor         实时资源监控（系统 CPU / 内存 + 运行中任务的进程占用）
@@ -37,7 +38,7 @@ import urllib.request
 from flask import Blueprint, jsonify, render_template, request
 
 from ...log import get_logger
-from ...services.ide import crondb, cronnotify, cronsvc, cronutil
+from ...services.ide import crondb, cronnotify, cronsvc, cronsystem, cronutil
 from ...services.common.safety import check_command
 
 _log = get_logger()
@@ -92,7 +93,8 @@ def api_cron_save():
     name = str(data.get("name") or "").strip()
     expr = str(data.get("cron") or "").strip()
     command = str(data.get("command") or "").strip()
-    # 任务类型：command（shell 命令）/ code（代码片段）/ ai（固定提示词）
+    # 任务类型：command（shell 命令）/ code（代码片段）/ ai（固定提示词）/
+    # system（系统级接口，content 存动作 id）
     kind = str(data.get("kind") or "command").strip().lower()
     if kind not in crondb.KINDS:
         kind = "command"
@@ -111,10 +113,17 @@ def api_cron_save():
             return jsonify({"error": "请填写要执行的代码"})
         # 命令字段只做界面展示 / 日志摘要，真正执行时由 cronsvc 落脚本再跑
         command = cronsvc._display_command("code", "", lang, content)
-    else:
+    elif kind == "ai":
         if not content.strip():
             return jsonify({"error": "请填写固定的 AI 提示词"})
         command = cronsvc._display_command("ai", "", lang, content)
+    elif kind == "system":
+        # content 存动作 id，注册表校验；命令字段只做界面展示 / 日志摘要
+        if not content.strip():
+            return jsonify({"error": "请选择要执行的系统接口动作"})
+        if not cronsystem.has_action(content.strip()):
+            return jsonify({"error": "未知的系统接口动作，请重新选择"})
+        command = cronsvc._display_command("system", "", lang, content)
     ok, tip = cronutil.validate(expr)
     if not ok:
         return jsonify({"error": "cron 表达式非法：" + tip})
@@ -247,6 +256,12 @@ def api_cron_dry_run():
     except (TypeError, ValueError):
         lines = 20
     return jsonify(cronsvc.dry_run(data, max(0, min(lines, 200))))
+
+
+@bp.route("/api/cron/system-actions")
+def api_cron_system_actions():
+    """「系统接口」任务类型可选的动作清单（前端编辑框下拉用）。"""
+    return jsonify({"ok": True, "actions": cronsystem.list_actions()})
 
 
 @bp.route("/api/cron/stop", methods=["POST"])

@@ -871,8 +871,17 @@ def _parse_entitlement_packs(obj: dict) -> list:
         if not amount or not expire:
             continue
         expire = float(expire)
-        if expire <= time.time():
+        now = time.time()
+        if expire <= now:
             continue    # 已清零的旧包
+        left = expire - now
+        days = int(left // 86400)
+        hours = int((left % 86400) // 3600)
+        minutes = int((left % 3600) // 60)
+        if days > 0:
+            left_text = "%d天" % days
+        else:
+            left_text = "%d小时%d分" % (hours, minutes)
         packs.append({
             "name": str(p.get("group_name") or p.get("display_desc") or "积分包"),
             "amount": float(amount),
@@ -880,7 +889,8 @@ def _parse_entitlement_packs(obj: dict) -> list:
                                         time.localtime(_num(bi.get("start_time")) or expire)),
             "expire_at": expire,
             "expire_text": time.strftime("%Y-%m-%d %H:%M", time.localtime(expire)),
-            "days_left": max(0, int((expire - time.time()) // 86400)),
+            "days_left": days,
+            "left_text": left_text,
         })
     packs.sort(key=lambda x: x["expire_at"])
     return packs

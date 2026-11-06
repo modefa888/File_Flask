@@ -31,6 +31,7 @@ from ..common.safety import check_command
 from . import crondb
 from . import cronai
 from . import cronnotify
+from . import cronsystem
 from . import cronutil
 from . import procinfo
 
@@ -525,6 +526,8 @@ def _display_command(kind, command, lang, content):
                 first = line.strip()
                 break
         return "[AI 提示词] " + (first[:60] + ("…" if len(first) > 60 else "") if first else "（空）")
+    if kind == "system":
+        return "[系统接口] " + cronsystem.label_of(content)
     return str(command or "")
 
 
@@ -568,6 +571,15 @@ def dry_run(data, lines=20):
     kind = str(data.get("kind") or "command").strip().lower()
     if kind == "ai":
         return _dry_run_ai(data, lines)
+    if kind == "system":
+        # 系统接口：直接调服务层函数（如签到，本身幂等），输出回给前端预览
+        started = time.time()
+        try:
+            text = cronsystem.run_action(str(data.get("content") or ""))
+        except Exception as e:                             # noqa: BLE001
+            return {"error": str(e) or "调用系统接口失败"}
+        dur = int((time.time() - started) * 1000)
+        return _dry_result(data, text, True, 0, dur, lines)
     if kind == "code":
         content = str(data.get("content") or "")
         if not content.strip():
@@ -657,9 +669,12 @@ def start_run(task_id, trigger="manual"):
     with _LOCK:
         if task_id in _BY_TASK:
             return {"error": "该任务正在运行中，请先停止"}
-    # AI 提示词任务不走 shell，单独起线程问模型
-    if str(task.get("kind") or "command") == "ai":
+    # AI 提示词 / 系统接口任务不走 shell，单独起线程处理
+    kind = str(task.get("kind") or "command")
+    if kind == "ai":
         return _start_ai_run(task, trigger)
+    if kind == "system":
+        return _start_system_run(task, trigger)
     try:
         cmd = _task_command(task)
     except (ValueError, OSError) as e:
@@ -824,6 +839,64 @@ def _ai_watch(run_id, task_id, log_path, started, task, stop_ev):
         if rec and _BY_TASK.get(task_id) == run_id:
             _BY_TASK.pop(task_id, None)
         stopped = bool(rec and rec.get("stopped")) or stop_ev.is_set()
+    _finalize(run_id, task_id, log_path, started, status, code, stopped)
+
+
+def _start_system_run(task, trigger):
+    """启动一次「系统接口」任务：不开子进程，起线程调服务层函数后按常规流程收尾。"""
+    action = str(task.get("content") or "").strip()
+    task_id = task["id"]
+    run_id = uuid.uuid4().hex[:12]
+    task_dir = os.path.join(LOG_DIR, task_id)
+    _ensure_dir(task_dir)
+    log_path = os.path.join(task_dir, run_id + ".log")
+    started = time.time()
+    try:
+        with open(log_path, "wb") as fh:
+            fh.write(("\n[%s] ▶ 开始执行（%s）\n$ %s\n" % (
+                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started)),
+                "手动" if trigger == "manual" else ("重试" if trigger == "retry" else "定时"),
+                _display_command("system", "", "", action))).encode("utf-8"))
+    except OSError as e:
+        return {"error": "创建日志文件失败：%s" % e}
+    if trigger in ("cron", "manual"):
+        with _LOCK:
+            _RETRIES.pop(task_id, None)
+    with _LOCK:
+        attempt = _RETRIES.get(task_id, 0)
+    crondb.insert_run(run_id, task_id, task.get("name") or "", trigger, log_path,
+                      started, attempt)
+    stop_ev = threading.Event()
+    with _LOCK:
+        _RUNNING[run_id] = {"proc": None, "task_id": task_id, "start": started,
+                            "log_path": log_path, "stopped": False, "stop": stop_ev}
+        _BY_TASK[task_id] = run_id
+    threading.Thread(target=_sys_watch, args=(run_id, task_id, log_path, started,
+                                              action, stop_ev),
+                     name="cron-sys-%s" % run_id, daemon=True).start()
+    _log.info("定时任务启动（系统接口）：%s（%s）run=%s", task.get("name"), trigger, run_id)
+    return {"run_id": run_id, "pid": 0}
+
+
+def _sys_watch(run_id, task_id, log_path, started, action, stop_ev):
+    """系统接口任务的执行线程：调服务层函数 → 输出写日志 → 按常规流程收尾。"""
+    status, code = "success", 0
+    try:
+        text = cronsystem.run_action(action)
+        body = "\n" + text
+    except Exception as e:                         # noqa: BLE001
+        status, code = "fail", 1
+        body = "\n----- 系统接口输出 -----\n✘ %s\n" % (str(e) or "调用系统接口失败")
+    try:
+        with open(log_path, "ab") as w:
+            w.write(body.encode("utf-8"))
+    except OSError:
+        pass
+    with _LOCK:
+        rec = _RUNNING.pop(run_id, None)
+        if rec and _BY_TASK.get(task_id) == run_id:
+            _BY_TASK.pop(task_id, None)
+        stopped = bool(rec and rec.get("stopped"))
     _finalize(run_id, task_id, log_path, started, status, code, stopped)
 
 

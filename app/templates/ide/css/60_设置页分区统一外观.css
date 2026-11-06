@@ -1,0 +1,173 @@
+/* ============================================================================
+   60_设置页分区统一外观：让「外观」以外的所有设置分区共用同一套视觉主题
+   —— 大标题、分组说明、圆角卡片行、标题/说明层级、控件、开关、子卡片配色。
+
+   纯 CSS 实现：不改 DOM / ID / 事件 / data-kw，搜索过滤（JS 写 style.display）
+   与所有交互逻辑保持原样。
+   作用域排除：
+     #sec-appearance —— 已有 58_ 的完整实现；
+     #sec-notify / #sec-cron-notify / #sec-dl-notify / #sec-channels —— 24_通知设置美化.css
+       对「通知模板」有精细布局（.notify-row.stack 竖向排列、.notify-preview 预览框、
+       .notify-vars 变量胶囊），统一行皮肤会覆盖 align-items / gap / padding 导致内容被
+       水平居中、间距撑大、预览框丢边框。这几个分区只统一大标题与说明，行布局完全交给 24_。
+   用 CSS 变量同时定义深色 / 浅色两套配色，避免与最后加载的 29_浅色主题.css 抢权重。
+   ============================================================================ */
+
+/* ---------- 设计 token ---------- */
+.set-content {
+  --sec-card: #242425;
+  --sec-border: #353536;
+  --sec-line: #353536;
+  --sec-hover: rgba(255, 255, 255, .025);
+  --sec-label: #e6e6e6;
+  --sec-desc: #8f8f8f;
+  --sec-ctl-bg: #2b2b2c;
+  --sec-ctl-border: #404041;
+  --sec-ctl-fg: #e2e2e2;
+  --sec-switch-off: #4a4a4b;
+  --sec-switch-on: #0a6aa8;
+}
+:where(html.theme-light) .set-content {
+  --sec-card: #ffffff;
+  --sec-border: #e3e3e3;
+  --sec-line: #ececec;
+  --sec-hover: #fafafa;
+  --sec-label: #1f2328;
+  --sec-desc: #6b6b6b;
+  --sec-ctl-bg: #ffffff;
+  --sec-ctl-border: #d8d8d8;
+  --sec-ctl-fg: #1f2328;
+  --sec-switch-off: #c8c8c8;
+  --sec-switch-on: #1a1a1a;
+}
+
+/* ---------- 分区大标题与说明（与「外观」的 26px 大标题对齐） ---------- */
+.set-content .set-sec > h2:first-child {
+  font-size: 26px; font-weight: 700; letter-spacing: .5px;
+  color: var(--sec-label); margin: 0 0 22px; padding: 0; border: 0;
+}
+.set-content .set-sec > .set-desc {
+  font-size: 12.5px; color: var(--sec-desc); line-height: 1.6; margin: 0 0 14px;
+}
+/* 分区内的小节标题（如「快捷键」分区的「系统快捷键（固定）」）：去掉旧的下划线 */
+.set-content .set-sec > h2:not(:first-child) {
+  font-size: 15px; font-weight: 600; color: var(--sec-label);
+  margin: 26px 0 12px; padding: 0; border: 0;
+}
+
+/* ---------- 行：统一卡片皮肤 ----------
+   基础规则给出「独立卡片」外观，作为不支持 :has() 的浏览器回退。 */
+/* 不设 display：部分模块（如 .notify-preview）会把行改成 block 布局，保持它们自己的规则 */
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row {
+  align-items: center; gap: 16px;
+  background: var(--sec-card); border: 1px solid var(--sec-border); border-radius: 10px;
+  margin: 0 0 8px; padding: 16px 20px;
+  transition: background .15s ease;
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row:hover { background: var(--sec-hover); }
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row .set-info { flex: 1; min-width: 0; }
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row .set-label {
+  font-size: 13.5px; font-weight: 600; color: var(--sec-label);
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row .set-desc {
+  font-size: 12px; color: var(--sec-desc); margin: 5px 0 0; line-height: 1.6;
+}
+
+/* 连续的同级行合并成一张大卡片（文件 / 数据 / 网络代理 / 系统 AI 等分区）
+   1) 后面还有行 → 去掉下圆角与间距，用细线分隔；
+   2) 前面没有行 → 补上圆角；
+   3) 后面没有行 → 补下圆角与组间距；
+   4) 单行组 → 四个角都圆。 */
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) > .set-row:has(+ .set-row) {
+  border-radius: 0; margin-bottom: 0; border-top: 0;
+  border-bottom: 1px solid var(--sec-line);
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) > .set-row:not(.set-row + .set-row) {
+  border-radius: 10px 10px 0 0; border-top: 1px solid var(--sec-border);
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) > .set-row:not(:has(+ .set-row)) {
+  border-radius: 0 0 10px 10px; margin-bottom: 22px;
+  border-top: 0; border-bottom: 1px solid var(--sec-border);
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) > .set-row:not(.set-row + .set-row):not(:has(+ .set-row)) {
+  border-radius: 10px; border: 1px solid var(--sec-border); margin-bottom: 22px;
+}
+
+/* 已有外层容器的行（对话分组 / 文件说明列表）：
+   容器提供外框，行只保留分隔线，避免「卡片套卡片」。 */
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) :is(.set-group-bd, .fh-list) .set-row {
+  background: transparent; border: 0; border-bottom: 1px solid var(--sec-line);
+  border-radius: 0; margin: 0; padding: 14px 16px;
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) :is(.set-group-bd, .fh-list) .set-row:last-child {
+  border-bottom: 0;
+}
+
+/* 各类子卡片统一配色（只改背景 / 边框色 / 圆角，不动布局与尺寸） */
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) :is(
+  .set-group-bd, .fh-list, .kb-row, .set-key,
+  .gc-card, .sysai-mod
+) {
+  background: var(--sec-card); border-color: var(--sec-border); border-radius: 10px;
+}
+/* 有选中 / 启用状态色的卡片只统一底色与圆角，保留它们自己的边框状态色 */
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) :is(.ai-prov, .nacc-card) {
+  background: var(--sec-card); border-radius: 10px;
+}
+
+/* ---------- 控件：下拉 / 数字 / 文本 / 按钮 ---------- */
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row select,
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row input[type="number"],
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row input[type="text"],
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row input[type="password"] {
+  background: var(--sec-ctl-bg); color: var(--sec-ctl-fg);
+  border: 1px solid var(--sec-ctl-border); border-radius: 8px;
+  font-size: 12.5px; padding: 6px 10px; outline: none; flex: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row select:focus,
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row input:focus {
+  border-color: var(--sec-switch-on); box-shadow: 0 0 0 2px rgba(10, 106, 168, .18);
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-btn {
+  background: var(--sec-ctl-bg); color: var(--sec-ctl-fg);
+  border: 1px solid var(--sec-ctl-border); border-radius: 8px;
+  font-size: 12px; padding: 6px 14px; flex: none;
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-btn:hover { filter: brightness(1.12); }
+
+/* 裸 checkbox（直接作为 .set-row 子级）→ 与外观页一致的拨动开关。
+   只匹配裸框，.set-switch / .app-switch / .notify-check / .gc-check 等自定义开关不受影响。 */
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row > input[type="checkbox"] {
+  -webkit-appearance: none; appearance: none;
+  position: relative; width: 40px; height: 22px; margin: 0; flex: none;
+  border: 0; border-radius: 999px; background: var(--sec-switch-off);
+  cursor: pointer; transition: background .18s ease;
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row > input[type="checkbox"]::before {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+  background: #fff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0, 0, 0, .3);
+  transition: transform .18s ease;
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row > input[type="checkbox"]:checked {
+  background: var(--sec-switch-on);
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row > input[type="checkbox"]:checked::before {
+  transform: translateX(18px);
+}
+.set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row > input[type="checkbox"]:focus-visible {
+  box-shadow: 0 0 0 3px rgba(10, 106, 168, .35);
+}
+
+/* ---------- 通知类分区：只统一卡片容器的配色与圆角 ----------
+   绝不触碰内部 .set-row，24_ 的竖向堆叠、预览框、变量胶囊布局完整保留。 */
+.set-content .set-sec:is(#sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .notify-card {
+  background: var(--sec-card); border-color: var(--sec-border);
+  border-radius: 10px; box-shadow: none;
+}
+
+/* ---------- 浅色主题：控件与文字再兜一层（变量已覆盖，这里处理 focus 光晕等固定值） ---------- */
+:where(html.theme-light) .set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row select:focus,
+:where(html.theme-light) .set-content .set-sec:not(#sec-appearance, #sec-notify, #sec-cron-notify, #sec-dl-notify, #sec-channels) .set-row input:focus {
+  border-color: #005fb8; box-shadow: 0 0 0 2px rgba(0, 95, 184, .18);
+}

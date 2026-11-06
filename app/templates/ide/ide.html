@@ -206,6 +206,10 @@ html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacit
 <style>
 {% include 'ide/css/59_代码主题扩展.css' %}
 </style>
+{# 设置页：让「外观」以外的分区也用同一套卡片主题（纯 CSS，不改 DOM / 交互） #}
+<style>
+{% include 'ide/css/60_设置页分区统一外观.css' %}
+</style>
 {# 活动栏彩色图标：每个面板一个专属色，深浅主题各一套（内部用 html.theme-light 提高特异性压过 29_） #}
 <style>
 {% include 'ide/css/56_活动栏彩色图标.css' %}

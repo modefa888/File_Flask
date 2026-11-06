@@ -1989,6 +1989,42 @@
           }
         });
         tab.cm = cm;
+        // 已折叠的行：整行浅蓝底（含行号槽），展开后自动撤销。折叠状态取自 foldcode
+        // 创建的 __isFold TextMarker；用官方 addLineClass 把类持久化到行对象上，
+        // 虚拟滚动 / 重绘 / 换主题都不会丢，行号随编辑漂移时也能正确跟随。
+        (function () {
+          const CLS = "cm-folded-line";
+          let marked = [], timer = null;
+          function foldLines() {
+            const out = [];
+            cm.getAllMarks().forEach(m => {
+              if (!m.__isFold) return;
+              const at = m.find();
+              if (!at || !at.from) return;
+              const h = cm.getLineHandle(at.from.line);
+              if (h && out.indexOf(h) < 0) out.push(h);
+            });
+            return out;
+          }
+          function apply() {
+            timer = null;
+            const next = foldLines();
+            marked.forEach(h => {
+              if (next.indexOf(h) >= 0) return;
+              try { cm.removeLineClass(h, "background", CLS); cm.removeLineClass(h, "gutter", CLS); } catch (_) {}
+            });
+            next.forEach(h => {
+              if (marked.indexOf(h) >= 0) return;     // 已高亮的行不重复打类
+              try { cm.addLineClass(h, "background", CLS); cm.addLineClass(h, "gutter", CLS); } catch (_) {}
+            });
+            marked = next;
+          }
+          function schedule() { if (!timer) timer = setTimeout(apply, 0); }
+          cm.on("fold", schedule);
+          cm.on("unfold", schedule);
+          cm.on("change", schedule);
+          cm.on("swapDoc", schedule);
+        })();
         // JSON 文件：在编辑器右上角挂「格式化 / 压缩」浮动工具条（样式同 Markdown 预览工具条，实现见 02_）
         if (typeof jsonEnsureToolbar === "function") jsonEnsureToolbar(tab);
         // 语法模式异步套用：内容先可见，模式脚本即使慢/失败也不再阻塞打开

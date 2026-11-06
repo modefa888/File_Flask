@@ -87,18 +87,28 @@
   .cm-pip-ok { color: #6fcf8a; }
   .cm-pip-miss { color: #e0a06a; cursor: pointer; }
   .cm-pip-miss:hover { color: #f0b070; }
-  /* 启动按钮：可运行文件的「程序入口」行前（gutter），点它运行当前文件 */
+  /* 启动按钮：可运行文件的「程序入口」行前（gutter），点它运行当前文件。
+     marker 是绝对定位、撑不开父列，必须给这一列显式宽度，否则 ▶ 会直接压在行号数字上。 */
+  .CodeMirror-gutter.run-btn-gutter { width: 20px; }
   .cm-run-btn {
     display: flex; align-items: center; justify-content: center;
-    width: 15px; height: 15px; border-radius: 50%;
+    /* CodeMirror 给 marker 容器写了列宽，auto 让 16px 圆点在该列内水平居中 */
+    width: 16px; height: 16px; margin: 1px auto 0; box-sizing: border-box;
+    border-radius: 50%;
     background: #2f7d32; color: #ffffff; cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .28);
     font-size: 10px; line-height: 1; user-select: none;
+    transition: background-color .12s ease, transform .12s ease, box-shadow .12s ease;
   }
-  .cm-run-btn:hover { background: #43a047; }
-  .cm-run-btn .bi { font-size: 11px; }
+  .cm-run-btn:hover { background: #43a047; box-shadow: 0 1px 4px rgba(0, 0, 0, .35); transform: scale(1.08); }
+  .cm-run-btn:active { transform: scale(.96); }
+  .cm-run-btn:focus-visible { outline: 2px solid #64b5f6; outline-offset: 1px; }
+  .cm-run-btn .bi { font-size: 11px; line-height: 1; }
   /* 运行中：图标变 ⏸，配色改成琥珀色以示区别 */
   .cm-run-btn.running { background: #b7791f; }
   .cm-run-btn.running:hover { background: #d69e2e; }
+  html.theme-light .cm-run-btn { box-shadow: 0 1px 2px rgba(0, 0, 0, .18); }
+  html.theme-light .cm-run-btn:hover { box-shadow: 0 1px 4px rgba(0, 0, 0, .26); }
   .cm-pip-skip { color: #555; }
 
   /* .gitignore 选择器 */

@@ -24,25 +24,50 @@
   color: #9aa0a6; text-shadow: none; background: rgba(127,127,127,.20);
   border-radius: 3px; padding: 0 2px; font-family: inherit; line-height: 1; cursor: pointer;
 }
+/* 已折叠的行（行尾出现 ⋯ 折叠标记）：整行浅蓝底，行号槽也一起高亮。
+   类由 00_preamble.js 用 cm.addLineClass 打在折叠起始行上，展开自动撤销；
+   不用 :has()：浏览器对动态插入的 fold widget 上 :has() 的样式失效不可靠。 */
+.CodeMirror-linebackground.cm-folded-line,
+.CodeMirror-gutter-background.cm-folded-line {
+  background: rgba(56, 139, 253, .16);
+  border-radius: 2px;
+}
+html.theme-light .CodeMirror-linebackground.cm-folded-line,
+html.theme-light .CodeMirror-gutter-background.cm-folded-line {
+  background: rgba(9, 105, 218, .10);
+}
+/* 折叠列给足宽度：官方 .7em 太窄，三角会紧贴行号、和 ▶ 启动按钮挤在一起 */
+.CodeMirror-foldgutter { width: 1.2em; }
+/* 箭头容器 = 一块居中、可悬停的完整点击区（仿 VS Code 的折叠箭头） */
+.CodeMirror-foldgutter-open,
+.CodeMirror-foldgutter-folded {
+  display: flex; align-items: center; justify-content: center;
+  width: 1.2em; height: 1.3em; box-sizing: border-box;
+  border-radius: 4px;
+  transition: background-color .12s ease;
+}
 /* 折叠箭头：靠 CSS 边框画折线三角，content 置空以去掉默认字符 ▾/▸ */
 .CodeMirror-foldgutter-open:after,
 .CodeMirror-foldgutter-folded:after {
   content: "";
-  display: inline-block;
-  width: .42em; height: .42em;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  vertical-align: middle;
-  color: #9aa0a6; opacity: .75;
+  display: block;
+  width: .46em; height: .46em;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  color: #9aa0a6; opacity: .85;
   transform: translateY(-1px) rotate(45deg);            /* 展开：向下 */
   transition: opacity .12s ease, color .12s ease;
 }
-.CodeMirror-foldgutter-folded:after { transform: translateY(-1px) rotate(-45deg); }   /* 折叠：向右 */
+.CodeMirror-foldgutter-folded:after { transform: translateX(-1px) rotate(-45deg); }   /* 折叠：向右 */
+.CodeMirror-foldgutter-open:hover,
+.CodeMirror-foldgutter-folded:hover { background: rgba(127,127,127,.22); }
 .CodeMirror-foldgutter-open:hover:after,
-.CodeMirror-foldgutter-folded:hover:after { opacity: 1; color: #d8d8d8; }
+.CodeMirror-foldgutter-folded:hover:after { opacity: 1; color: #e6e6e6; }
 html.theme-light .CodeMirror-foldmarker { color: #555; background: rgba(0,0,0,.08); }
 html.theme-light .CodeMirror-foldgutter-open:after,
-html.theme-light .CodeMirror-foldgutter-folded:after { color: #555; opacity: .85; }
+html.theme-light .CodeMirror-foldgutter-folded:after { color: #5f6368; opacity: .9; }
+html.theme-light .CodeMirror-foldgutter-open:hover,
+html.theme-light .CodeMirror-foldgutter-folded:hover { background: rgba(0,0,0,.08); }
 html.theme-light .CodeMirror-foldgutter-open:hover:after,
 html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacity: 1; }
 </style>

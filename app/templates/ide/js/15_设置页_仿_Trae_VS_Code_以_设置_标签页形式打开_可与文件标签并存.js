@@ -124,11 +124,19 @@
       if (!t.cm) return;
       t.cm.setOption("lineWrapping", IDE_SETTINGS.lineWrap);
       t.cm.setOption("lineNumbers", lineNumbers);
-      // 关掉行号时一并去掉行号 gutter，否则左侧会留一条空白列（折叠栏按原有状态保留）
-      t.cm.setOption("gutters", [
-        ...(t.cm.getOption("foldGutter") ? ["CodeMirror-foldgutter"] : []),
-        ...(lineNumbers ? ["CodeMirror-linenumbers"] : [])
-      ]);
+      // 关掉行号时一并去掉行号 gutter，否则左侧会留一条空白列（折叠栏按原有状态保留）。
+      // 只增删折叠 / 行号两列，其余模块注册的自定义列（▶ 启动按钮、pip 安装状态等）必须保留：
+      // 整份覆盖会抹掉它们的列宽，图标又会溢出去压住行号。
+      const cur = t.cm.getOption("gutters") || [];
+      const fold = "CodeMirror-foldgutter", ln = "CodeMirror-linenumbers";
+      const AFTER_LN = ["pip-status-gutter"];        // 设计上排在行号右侧的列
+      const li = cur.indexOf(ln), before = [], after = [];
+      cur.forEach((g, i) => {
+        if (g === fold || g === ln) return;
+        (AFTER_LN.includes(g) || (li >= 0 && i > li) ? after : before).push(g);
+      });
+      const list = before.concat(lineNumbers ? [ln] : [], after);
+      t.cm.setOption("gutters", typeof window.ideGutters === "function" ? window.ideGutters(t.cm, list) : list);
       t.cm.setOption("styleActiveLine", IDE_SETTINGS.activeLine && !t.big);
       t.cm.setOption("indentUnit", IDE_SETTINGS.indent);
       t.cm.setOption("tabSize", IDE_SETTINGS.indent);

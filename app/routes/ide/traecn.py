@@ -5,6 +5,8 @@ POST /api/traecn/test               测试连接：只查签到状态，不领�
 POST /api/traecn/checkin            执行当日签到（幂等，body 可带 uid）
 POST /api/traecn/checkin/all        全部启用账号批量签到
 GET  /api/traecn/history            签到记录（q / page / page_size / uid）
+GET  /api/traecn/models             订阅档位 + 可用模型清单（?uid=）
+                                    档位来自官方用量接口，模型清单读本机客户端缓存
 
 多账号管理：
 GET  /api/traecn/accounts           账号列表（脱敏）
@@ -126,6 +128,20 @@ def traecn_accounts_refresh_all():
         return jsonify(tr.refresh_all())
     except Exception as e:
         return _fail("批量刷新失败：%s" % e, 502)
+
+
+@bp.get("/api/traecn/models")
+def traecn_models():
+    """当前账号的订阅档位 + 可用模型清单（?uid= 可指定账号）。
+
+    档位走官方用量接口；模型清单读本机 Trae CN 客户端缓存（官方无公开模型接口）。
+    """
+    try:
+        return jsonify(tr.models_info(request.args.get("uid", "")))
+    except tr.TraeError as e:
+        return _fail(e)
+    except Exception as e:                       # noqa: BLE001
+        return _fail("获取模型清单失败：%s" % e, 502)
 
 
 @bp.post("/api/traecn/connect")

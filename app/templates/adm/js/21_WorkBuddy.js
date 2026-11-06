@@ -281,7 +281,44 @@ function wbRender(el, d) {
 }
 
 /* ---------------- 模型与档位（参考 dsh-our-free-model 的模型浏览范式） ---------------- */
-var wbModelsState = { models: [], q: '', cap: 'all' };
+var wbModelsState = { models: [], q: '', cap: 'all', sortKey: '', sortDir: '' };
+
+/* 各可排序列取值：积分倍率用数值倍率（非数值视为未知排最后），容量列取数值 */
+function wbModelSortVal(m, key) {
+    if (key === 'id') return String(m.id || '').toLowerCase();
+    if (key === 'rate') {
+        if (m.rate === null || m.rate === undefined || m.rate === '') return null;
+        var r = Number(m.rate_num);
+        return Number.isFinite(r) ? r : null;
+    }
+    /* 容量列：ctx → max_input，out → max_output */
+    var field = key === 'ctx' ? 'max_input' : (key === 'out' ? 'max_output' : key);
+    var v = Number(m[field]);
+    return (Number.isFinite(v) && v > 0) ? v : null;
+}
+
+/* 表头排序指示：未排序 ↕，升序 ▲，降序 ▼（与 ADM.servTable 一致） */
+function wbModelsSyncSort() {
+    var tb = document.getElementById('wbModelsBody');
+    if (!tb) return;
+    tb.querySelectorAll('th[data-sort]').forEach(function (th) {
+        var on = th.dataset.sort === wbModelsState.sortKey && !!wbModelsState.sortDir;
+        var ind = th.querySelector('.wb-sort-ind');
+        if (!ind) return;
+        ind.className = 'wb-sort-ind' + (on ? ' on' : '');
+        ind.textContent = on ? (wbModelsState.sortDir === 'desc' ? '▼' : '▲') : '↕';
+    });
+}
+
+/* 点击表头：升序 → 降序 → 恢复默认顺序 */
+function wbModelsToggleSort(key) {
+    var s = wbModelsState;
+    if (s.sortKey !== key) { s.sortKey = key; s.sortDir = 'asc'; }
+    else if (s.sortDir === 'asc') { s.sortDir = 'desc'; }
+    else if (s.sortDir === 'desc') { s.sortKey = ''; s.sortDir = ''; }
+    else { s.sortDir = 'asc'; }
+    wbModelsRender();
+}
 
 function wbCapBadge(cap) {
     var map = { '工具': 'tool', '视觉': 'vis', '多模态': 'vis', '文生图': 'img',
@@ -365,12 +402,19 @@ function wbModelsHtml(d) {
         '</div>';
 
     return h + '<div class="adm-section">' + ADM.sectionHead('bi-cpu', '可用模型列表',
-        '<span class="adm-hint">模型来自官方 /v3/config · 能力徽章由标签推导</span>') +
+        '<span class="adm-hint">模型来自官方 /v3/config · 能力徽章由标签推导 · 点表头排序</span>') +
         filters +
         '<div class="wb-model-table-wrap"><table class="wb-pack-table wb-model-table">' +
         '<thead><tr>' +
-        '<th>模型</th><th>积分倍率</th><th>默认档</th><th>支持思考档位</th>' +
-        '<th>上下文长度</th><th>最大输出</th>' +
+        '<th class="wb-sortable" data-sort="id" tabindex="0" role="button" ' +
+        'title="按模型 ID 排序">模型<span class="wb-sort-ind">↕</span></th>' +
+        '<th class="wb-sortable" data-sort="rate" tabindex="0" role="button" ' +
+        'title="按积分倍率排序（升序 → 降序 → 默认）">积分倍率<span class="wb-sort-ind">↕</span></th>' +
+        '<th>默认档</th><th>支持思考档位</th>' +
+        '<th class="wb-sortable" data-sort="ctx" tabindex="0" role="button" ' +
+        'title="按上下文长度排序">上下文长度<span class="wb-sort-ind">↕</span></th>' +
+        '<th class="wb-sortable" data-sort="out" tabindex="0" role="button" ' +
+        'title="按最大输出排序">最大输出<span class="wb-sort-ind">↕</span></th>' +
         '</tr></thead><tbody id="wbModelsRows"></tbody></table>' +
         '<div class="wb-empty" id="wbModelsEmpty" hidden>没有符合条件的模型</div>' +
         '</div></div>';
@@ -381,6 +425,7 @@ function wbModelsRender() {
     var empty = document.getElementById('wbModelsEmpty');
     var cnt = document.getElementById('wbModelsCount');
     if (!tb) return;
+    wbModelsSyncSort();
     var q = wbModelsState.q.trim().toLowerCase();
     var list = wbModelsState.models.filter(function (m) {
         if (wbModelsState.cap === 'free' && !m.free) return false;
@@ -394,6 +439,20 @@ function wbModelsRender() {
         if (q && (m.id + ' ' + (m.name || '') + ' ' + (m.vendor || '')).toLowerCase().indexOf(q) < 0) return false;
         return true;
     });
+    /* 排序：未知值（无倍率 / 无容量）始终排在末尾，不受升降序影响 */
+    var sk = wbModelsState.sortKey, sd = wbModelsState.sortDir;
+    if (sk && sd) {
+        list = list.slice().sort(function (a, b) {
+            var va = wbModelSortVal(a, sk), vb = wbModelSortVal(b, sk);
+            if (va === null && vb === null) return 0;
+            if (va === null) return 1;
+            if (vb === null) return -1;
+            if (typeof va === 'string') {
+                return sd === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+            }
+            return sd === 'asc' ? va - vb : vb - va;
+        });
+    }
     if (cnt) cnt.textContent = '共 ' + list.length + ' / ' + wbModelsState.models.length + ' 个';
     if (!list.length) { tb.innerHTML = ''; if (empty) empty.hidden = false; return; }
     if (empty) empty.hidden = true;
@@ -452,6 +511,16 @@ function wbModelsBind(d, body) {
     var s = body.querySelector('#wbModelsSearch');
     if (s) s.addEventListener('input', function () {
         wbModelsState.q = s.value; wbModelsRender();
+    });
+    body.querySelectorAll('th[data-sort]').forEach(function (th) {
+        var key = th.dataset.sort;
+        th.addEventListener('click', function () { wbModelsToggleSort(key); });
+        th.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+                e.preventDefault();
+                wbModelsToggleSort(key);
+            }
+        });
     });
     body.querySelectorAll('.wb-capf-btn').forEach(function (b) {
         b.addEventListener('click', function () {

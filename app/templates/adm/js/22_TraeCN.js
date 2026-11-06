@@ -250,12 +250,19 @@ function trRender(el, d) {
             { id: 'history', name: '签到记录', icon: 'bi-clock-history', content: calHtml + histHtml },
             { id: 'entitlements', name: '积分构成', icon: 'bi-pie-chart', content: trEntitlementsHtml(d) },
             { id: 'expiry', name: '到期提醒', icon: 'bi-calendar2-week', content: trExpiryHtml(d) },
+            { id: 'models', name: '模型与档位', icon: 'bi-cpu',
+                content: '<div class="adm-section">' +
+                    ADM.sectionHead('bi-cpu', '可用模型与订阅档位',
+                        '<span class="adm-hint">档位来自官方用量接口 · 模型清单读本机 Trae CN 客户端缓存</span>') +
+                    '<div class="adm-card" id="trModelsBody"><div class="wb-empty">正在读取模型清单…</div></div></div>' },
             { id: 'info', name: '账户信息', icon: 'bi-info-square', content: infoHtml }
         ], { key: 'traecn-detail-tabs' }) + '</div>';
 
     el.innerHTML = html;
     ADM.mountServTables(el);
     ADM.mountTabs(el);
+    /* 模型与档位 Tab：面板已在 DOM 里，挂载后异步拉一次（隐藏面板也会渲染好） */
+    trLoadModels(el);
 }
 
 /* ---------------- 积分构成 / 到期提醒（样式对齐 WorkBuddy 积分构成 Tab） ---------------- */
@@ -955,5 +962,273 @@ async function trOpenAddAccount(el, uid) {
     if (result) {
         ADM.toast(isEdit ? '账号已保存' : '账号已添加', 'ok');
         await trRefresh(el, typeof result === 'string' ? result : '');
+    }
+}
+
+/* ---------------- 模型与档位（对齐 WorkBuddy 的「模型与档位」模块） ----------------
+ * 数据：/api/traecn/models
+ *   · 档位 / 额度 —— 官方 api.trae.cn 用量接口（订阅权益包）
+ *   · 模型清单 —— 本机 Trae CN 客户端缓存（state.vscdb 里的 model_list_map）
+ * 表格样式与徽章函数复用 WorkBuddy 的 wb-*（同一后台、同一套 CSS）。
+ */
+var trModelsState = { models: [], q: '', cap: 'all', sortKey: '', sortDir: '' };
+
+/* 各可排序列取值：无倍率 / 无容量的模型视为未知，永远排最后 */
+function trModelsSortVal(m, key) {
+    if (key === 'id') return String(m.id || '').toLowerCase();
+    if (key === 'rate') {
+        if (m.rate === null || m.rate === undefined || m.rate === '') return null;
+        var r = Number(m.rate_num);
+        return Number.isFinite(r) ? r : null;
+    }
+    var field = key === 'ctx' ? 'max_input' : (key === 'out' ? 'max_output' : key);
+    var v = Number(m[field]);
+    return (Number.isFinite(v) && v > 0) ? v : null;
+}
+
+/* 表头排序指示：未排序 ↕，升序 ▲，降序 ▼ */
+function trModelsSyncSort() {
+    var tb = document.getElementById('trModelsBody');
+    if (!tb) return;
+    tb.querySelectorAll('th[data-sort]').forEach(function (th) {
+        var on = th.dataset.sort === trModelsState.sortKey && !!trModelsState.sortDir;
+        var ind = th.querySelector('.wb-sort-ind');
+        if (!ind) return;
+        ind.className = 'wb-sort-ind' + (on ? ' on' : '');
+        ind.textContent = on ? (trModelsState.sortDir === 'desc' ? '▼' : '▲') : '↕';
+    });
+}
+
+/* 点击表头：升序 → 降序 → 恢复接口默认顺序 */
+function trModelsToggleSort(key) {
+    var s = trModelsState;
+    if (s.sortKey !== key) { s.sortKey = key; s.sortDir = 'asc'; }
+    else if (s.sortDir === 'asc') { s.sortDir = 'desc'; }
+    else if (s.sortDir === 'desc') { s.sortKey = ''; s.sortDir = ''; }
+    else { s.sortDir = 'asc'; }
+    trModelsRender();
+}
+
+/* 能力徽章：视觉 / 思考 / 自定义 / Beta（样式沿用 wb-cap） */
+function trCapBadges(caps) {
+    var cls = { '视觉': 'vis', '思考': 'think', '自定义': 'agent', 'Beta': 'img' };
+    return (caps || []).map(function (c) {
+        return '<span class="wb-cap ' + (cls[c] || '') + '">' + wbEsc(c) + '</span>';
+    }).join('');
+}
+
+function trModelsHtml(d) {
+    var tier = d.tier || {};
+    var c = d.counts || { total: 0, vision: 0, reasoning: 0, custom: 0 };
+    var h = '<div class="adm-section">' + ADM.sectionHead('bi-award', '订阅档位',
+        '<span class="adm-hint">来自官方用量接口 · 账号 ' +
+        wbEsc(String(d.uid || '').slice(0, 12)) + '</span>') +
+        '<div class="adm-stat-grid">';
+    h += ADM.stat('bi-award', '当前档位', wbEsc(tier.label || '未知'),
+        tier.is_paid ? '付费订阅账号' : '免费 / 体验账号');
+    h += ADM.stat('bi-coin', '可用积分',
+        (tier.remain === null || tier.remain === undefined) ? '—' : wbFmtNum(tier.remain),
+        (tier.total === null || tier.total === undefined)
+            ? '额度未知'
+            : '已用 ' + wbFmtNum(tier.used) + ' / 共 ' + wbFmtNum(tier.total));
+    h += ADM.stat('bi-gift', '每月赠送',
+        tier.monthly_bonus ? wbFmtNum(tier.monthly_bonus) : '—',
+        '登录赠送等权益包合计（积分 / 月）');
+    h += ADM.stat('bi-layers', '云端并行任务',
+        tier.parallel ? String(tier.parallel) : '—', 'SOLO Agent 并行上限');
+    h += ADM.stat('bi-cpu', '可用模型', wbFmtNum(c.total || 0), '读本机客户端模型缓存');
+    h += ADM.stat('bi-eye', '视觉模型', wbFmtNum(c.vision || 0), '多模态 / 图片理解模型数');
+    h += ADM.stat('bi-lightbulb', '思考模型', wbFmtNum(c.reasoning || 0), '支持思考档位的模型数');
+    h += ADM.stat('bi-sliders', '自定义模型', wbFmtNum(c.custom || 0), '自带 API Key 接入的模型数');
+    h += '</div>';
+    if (tier.in_trial || tier.trial_eligible) {
+        h += '<div class="adm-hint" style="margin-top:10px">' +
+            (tier.in_trial ? '当前处于试用期（Trial）。' : '账号可开通试用（Trial）。') + '</div>';
+    }
+    h += '</div>';
+    if (d.tier_error) {
+        h += '<div class="adm-section"><div class="wb-empty">档位信息获取失败：' +
+            wbEsc(d.tier_error) + '</div></div>';
+    }
+
+    var filters =
+        '<div class="wb-model-filters">' +
+        '<div class="wb-model-search"><i class="bi bi-search"></i>' +
+        '<input type="text" id="trModelsSearch" placeholder="搜索模型 ID / 名称 / 厂商…" ' +
+        'aria-label="搜索模型" value="' + wbEsc(trModelsState.q) + '"></div>' +
+        '<div class="wb-model-capf" role="group" aria-label="能力筛选">' +
+        [['all', '全部'], ['vis', '视觉'], ['think', '思考'], ['custom', '自定义']].map(function (p) {
+            return '<button type="button" class="wb-capf-btn' +
+                (trModelsState.cap === p[0] ? ' active' : '') +
+                '" data-cap="' + p[0] + '">' + p[1] + '</button>';
+        }).join('') + '</div>' +
+        '<span class="wb-realm-tag" title="' + wbEsc(d.source || '') + '">' +
+        '<i class="bi bi-hdd"></i> 来源：本机客户端缓存</span>' +
+        '<button class="adm-btn sm ghost" id="trModelsRefresh" type="button">' +
+        '<i class="bi bi-arrow-clockwise"></i> 刷新</button>' +
+        '<span class="wb-model-count" id="trModelsCount" role="status"></span>' +
+        '</div>';
+
+    var table = d.catalog_error
+        ? '<div class="wb-empty">' + wbEsc(d.catalog_error) + '</div>'
+        : '<div class="wb-model-table-wrap"><table class="wb-pack-table wb-model-table">' +
+          '<thead><tr>' +
+          '<th class="wb-sortable" data-sort="id" tabindex="0" role="button" ' +
+          'title="按模型 ID 排序">模型<span class="wb-sort-ind">↕</span></th>' +
+          '<th class="wb-sortable" data-sort="rate" tabindex="0" role="button" ' +
+          'title="按积分倍率排序（升序 → 降序 → 默认）">积分倍率<span class="wb-sort-ind">↕</span></th>' +
+          '<th>默认档</th><th>支持思考档位</th>' +
+          '<th class="wb-sortable" data-sort="ctx" tabindex="0" role="button" ' +
+          'title="按上下文长度排序">上下文长度<span class="wb-sort-ind">↕</span></th>' +
+          '<th class="wb-sortable" data-sort="out" tabindex="0" role="button" ' +
+          'title="按最大输出排序">最大输出<span class="wb-sort-ind">↕</span></th>' +
+          '</tr></thead><tbody id="trModelsRows"></tbody></table>' +
+          '<div class="wb-empty" id="trModelsEmpty" hidden>没有符合条件的模型</div>' +
+          '</div>';
+
+    return h + '<div class="adm-section">' + ADM.sectionHead('bi-cpu', '可用模型列表',
+        '<span class="adm-hint">清单读本机 Trae CN 客户端缓存 · 倍率取自客户端模型目录 · 点表头排序</span>') +
+        (d.catalog_error ? '' : filters) + table + '</div>';
+}
+
+function trModelsRender() {
+    var tb = document.getElementById('trModelsRows');
+    var empty = document.getElementById('trModelsEmpty');
+    var cnt = document.getElementById('trModelsCount');
+    if (!tb) return;
+    trModelsSyncSort();
+    var q = trModelsState.q.trim().toLowerCase();
+    var list = trModelsState.models.filter(function (m) {
+        if (trModelsState.cap === 'vis' && !m.multimodal) return false;
+        if (trModelsState.cap === 'think' && !m.thinking) return false;
+        if (trModelsState.cap === 'custom' && !m.custom) return false;
+        if (q && (m.id + ' ' + (m.name || '') + ' ' + (m.vendor || '')).toLowerCase().indexOf(q) < 0) return false;
+        return true;
+    });
+    var sk = trModelsState.sortKey, sd = trModelsState.sortDir;
+    if (sk && sd) {
+        list = list.slice().sort(function (a, b) {
+            var va = trModelsSortVal(a, sk), vb = trModelsSortVal(b, sk);
+            if (va === null && vb === null) return 0;
+            if (va === null) return 1;
+            if (vb === null) return -1;
+            if (typeof va === 'string') {
+                return sd === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+            }
+            return sd === 'asc' ? va - vb : vb - va;
+        });
+    }
+    if (cnt) cnt.textContent = '共 ' + list.length + ' / ' + trModelsState.models.length + ' 个';
+    if (!list.length) { tb.innerHTML = ''; if (empty) empty.hidden = false; return; }
+    if (empty) empty.hidden = true;
+    tb.innerHTML = list.map(function (m) {
+        var rateN = Number(m.rate_num);
+        var rateHtml;
+        if (m.rate === null || m.rate === undefined || m.rate === '') {
+            rateHtml = '<span class="wb-rate-val">—</span>';
+        } else if (Number.isFinite(rateN) && rateN === 0) {
+            rateHtml = '<b class="wb-rate-val free">0×</b><span class="wb-rate-badge warn">限时免费</span>';
+        } else if (Number.isFinite(rateN)) {
+            rateHtml = '<b class="wb-rate-val">×' + rateN + '</b>';
+        } else {
+            rateHtml = '<b class="wb-rate-val">×' + wbEsc(m.rate) + '</b>';
+        }
+        var memberN = Number(m.member_rate);
+        if (m.member_rate !== null && m.member_rate !== undefined && Number.isFinite(memberN) &&
+                memberN !== rateN) {
+            rateHtml += '<span class="wb-rate-badge" title="订阅会员折扣价">会员 ×' + memberN + '</span>';
+        }
+        var effs = (m.efforts || []).map(wbEffBadge).join('');
+        if (!effs) {
+            effs = m.thinking
+                ? '<span class="wb-eff fixed">固定档</span>'
+                : '<span class="wb-eff none">不支持思考</span>';
+        }
+        var defCell = m.effort_default
+            ? '<span class="wb-eff default">' + wbEsc(m.effort_default) + '</span>'
+            : '—';
+        var caps = trCapBadges(m.caps) +
+            (m.default ? '<span class="wb-cap agent">默认</span>' : '');
+        var scenes = (m.scenes || []).map(function (s) {
+            return '<span class="wb-tag">' + wbEsc(s) + '</span>';
+        }).join('');
+        return '<tr data-mid="' + wbEsc(m.id) + '">' +
+            '<td class="wb-model-id"><div class="wb-mid-line"><span class="wb-mname mono">' +
+            wbEsc(m.id || '—') + '</span>' +
+            '<button class="wb-copy" type="button" data-copy="' + wbEsc(m.id) +
+            '" title="复制模型 ID"><i class="bi bi-clipboard"></i></button></div>' +
+            ((m.name || m.vendor)
+                ? '<div class="wb-mvendor">' + wbEsc([m.vendor, m.name].filter(Boolean).join(' · ')) + '</div>'
+                : '') +
+            (caps ? '<div class="wb-mcaps">' + caps + '</div>' : '') +
+            (scenes ? '<div class="wb-mtags">' + scenes + '</div>' : '') +
+            '</td>' +
+            '<td class="wb-rate-cell">' + rateHtml + '</td>' +
+            '<td>' + defCell + '</td>' +
+            '<td>' + effs + '</td>' +
+            '<td class="wb-num">' + wbFmtK(m.max_input) + '</td>' +
+            '<td class="wb-num">' + wbFmtK(m.max_output) + '</td></tr>';
+    }).join('');
+}
+
+function trModelsBind(d, body) {
+    trModelsState.models = d.models || [];
+    var s = body.querySelector('#trModelsSearch');
+    if (s) s.addEventListener('input', function () {
+        trModelsState.q = s.value;
+        trModelsRender();
+    });
+    body.querySelectorAll('th[data-sort]').forEach(function (th) {
+        var key = th.dataset.sort;
+        th.addEventListener('click', function () { trModelsToggleSort(key); });
+        th.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+                e.preventDefault();
+                trModelsToggleSort(key);
+            }
+        });
+    });
+    body.querySelectorAll('.wb-capf-btn').forEach(function (b) {
+        b.addEventListener('click', function () {
+            trModelsState.cap = b.dataset.cap;
+            body.querySelectorAll('.wb-capf-btn').forEach(function (x) {
+                x.classList.toggle('active', x === b);
+            });
+            trModelsRender();
+        });
+    });
+    body.querySelectorAll('.wb-copy').forEach(function (b) {
+        b.addEventListener('click', function () {
+            var id = b.dataset.copy || '';
+            try {
+                navigator.clipboard.writeText(id);
+                b.innerHTML = '<i class="bi bi-check2"></i>';
+                setTimeout(function () { b.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1200);
+            } catch (_) { /* 非安全上下文忽略 */ }
+        });
+    });
+    trModelsRender();
+}
+
+/* 模型与档位：挂载后拉一次；点「刷新」强制重拉 */
+async function trLoadModels(el, force) {
+    var body = el.querySelector('#trModelsBody');
+    if (!body) return;
+    if (body.dataset.loaded && !force) return;
+    body.innerHTML = '<div class="wb-empty">正在读取模型清单…</div>';
+    try {
+        var d = await ADM.api('/api/traecn/models?uid=' + encodeURIComponent(trCurrentUid || ''));
+        if (d.error) {
+            body.innerHTML = '<div class="wb-empty">' + wbEsc(d.error) + '</div>';
+            return;
+        }
+        body.dataset.loaded = '1';
+        body.innerHTML = trModelsHtml(d);
+        trModelsBind(d, body);
+        var rb = body.querySelector('#trModelsRefresh');
+        if (rb) rb.addEventListener('click', function () { trLoadModels(el, true); });
+    } catch (e) {
+        body.innerHTML = '<div class="wb-empty">加载失败：' +
+            wbEsc((e && e.message) || String(e)) + '</div>';
     }
 }

@@ -47,8 +47,10 @@ import json
 import os
 import platform
 import re
+import sqlite3
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
@@ -64,6 +66,8 @@ HOST = "api.trae.cn"
 PATH_STATUS = "/trae/api/v2/ug/checkin_credits/status"
 PATH_CLAIM = "/trae/api/v2/ug/checkin_credits/claim"
 PATH_USAGE = "/trae/api/v2/pay/ide_user_ent_usage"
+# 网页版用量接口：与 ide_user_ent_usage 同源，额外带订阅权益（用于「模型与档位」的档位解析）
+PATH_USAGE_WEB = "/trae/api/v2/pay/web_user_ent_usage"
 
 AUTH_SCHEME = "Cloud-IDE-JWT"
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -1261,3 +1265,395 @@ def checkin_all() -> dict:
 def refresh_all() -> dict:
     """全部启用账号刷新积分余额并缓存。"""
     return _run_all(_refresh_one)
+
+
+# --------------------------------------------------------------------------- 模型与档位
+#
+# 数据来源分两路，互不替代：
+#   1) 档位：官方 api.trae.cn 的用量接口（web_user_ent_usage）里的订阅权益包
+#      （subscription_extra + display_desc）→ 免费 / 会员 Lite / Pro / Pro+ / Ultra …
+#      以及每月登录赠送积分、云端并行任务数、试用状态；
+#   2) 模型清单：官方没有对外的模型列表接口（/api/ide/v1/get_detail_param 只在客户端
+#      私有网关 trae-api-cn.mchost.guru 上，本模块不把 token 发往官方以外域名），
+#      因此改为读本机 Trae CN 客户端缓存：VS Code 同款 state.vscdb 里
+#      `<userId>_AI.agent.model.model_list_map` 就是客户端拉到的完整模型目录
+#      （含消耗倍率 / 会员折扣 / 上下文 / 最大输出 / 思考档位 / 多模态标记）。
+#      只读打开（immutable=1），不影响正在运行的客户端。
+
+# 本机客户端用户数据目录名（Trae CN 各版本 / 不同包名）
+_STATE_APP_DIRS = ("Trae CN", "Trae CN - Insiders", "Trae CN Nightly", "Trae")
+
+# 模型目录按「场景」分组：同一模型可能出现在多个场景里，展示时合并
+_SCENE_LABELS = {
+    "chat_v3": "对话",
+    "solo_agent": "SOLO Agent",
+    "builder_v3": "Builder v3",
+    "builder": "Builder",
+    "refactor": "重构",
+    "code_reviewer": "代码评审",
+    "code_review_summary": "评审摘要",
+}
+_SCENE_ORDER = ("chat_v3", "solo_agent", "builder_v3", "builder", "refactor",
+                "code_reviewer", "code_review_summary")
+
+# 订阅档位：权益包名 / 周期名 → 展示名（由粗到细匹配，命中即止）
+_TIER_RULES = (
+    ("express", "优速通 Express"),
+    ("优速通", "优速通 Express"),
+    ("ultra", "会员 Ultra"),
+    ("pro+", "会员 Pro+"),
+    ("proplus", "会员 Pro+"),
+    ("pro +", "会员 Pro+"),
+    ("lite", "会员 Lite"),
+    ("pro", "会员 Pro"),
+    ("免费", "免费版"),
+    ("free", "免费版"),
+    ("trial", "体验版"),
+    ("企业", "企业版"),
+    ("enterprise", "企业版"),
+    ("团队", "团队版"),
+    ("team", "团队版"),
+)
+
+# 厂商：按模型 id 关键词推导（客户端目录不直接给 provider）
+_VENDOR_RULES = (
+    ("doubao", "豆包"), ("seed", "豆包"),
+    ("deepseek", "DeepSeek"),
+    ("glm", "智谱"),
+    ("kimi", "月之暗面"),
+    ("qwen", "通义千问"),
+    ("minimax", "MiniMax"),
+    ("mimo", "小米"),
+    ("step", "阶跃星辰"),
+    ("claude", "Anthropic"), ("gpt", "OpenAI"), ("gemini", "Google"),
+    ("grok", "xAI"), ("sensenova", "商汤"),
+)
+
+
+def _vendor_of(mid: str) -> str:
+    hay = str(mid or "").lower()
+    for key, label in _VENDOR_RULES:
+        if key in hay:
+            return label
+    return ""
+
+
+def _plan_label(desc: str) -> str:
+    hay = str(desc or "").strip().lower()
+    if not hay:
+        return ""
+    for key, label in _TIER_RULES:
+        if key in hay:
+            return label
+    return ""
+
+
+def _plan_code(label: str) -> str:
+    """展示名 → 稳定的档位代码（供前端判断是否付费档）。"""
+    for key, val in (("Ultra", "ultra"), ("Pro+", "pro_plus"), ("Pro", "pro"),
+                     ("Lite", "lite"), ("Express", "express"),
+                     ("免费", "free"), ("体验", "trial"),
+                     ("企业", "enterprise"), ("团队", "team")):
+        if key in str(label or ""):
+            return val
+    return ""
+
+
+def _as_text(value) -> str:
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8", "replace")
+        except Exception:                        # noqa: BLE001
+            return ""
+    return str(value or "")
+
+
+def _state_db_candidates() -> list:
+    """本机 Trae CN 客户端 state.vscdb 候选路径（可用 TRAE_STATE_DB 覆盖）。"""
+    paths = []
+    env = str(os.environ.get("TRAE_STATE_DB") or "").strip()
+    if env:
+        paths.append(env)
+    home = os.path.expanduser("~")
+    system = platform.system()
+    if system == "Windows":
+        roots = [os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming")]
+    elif system == "Darwin":
+        roots = [os.path.join(home, "Library", "Application Support")]
+    else:
+        roots = [os.path.join(home, ".config"),
+                 os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")]
+    for root in roots:
+        for name in _STATE_APP_DIRS:
+            paths.append(os.path.join(root, name, "User", "globalStorage", "state.vscdb"))
+    seen, out = set(), []
+    for p in paths:
+        p = os.path.abspath(os.path.expanduser(p))
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def _read_state_rows(path: str) -> list:
+    """只读打开客户端状态库，取出所有 model_list_map 键（不写、不锁库）。"""
+    uri = "file:%s?mode=ro&immutable=1" % urllib.parse.quote(path)
+    try:
+        conn = sqlite3.connect(uri, uri=True, timeout=3)
+    except sqlite3.Error as e:
+        _log.warning("Trae CN 客户端状态库打开失败（%s）：%s", path, e)
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT key, value FROM ItemTable WHERE key LIKE '%model_list_map%'"
+        ).fetchall()
+        return rows or []
+    except sqlite3.Error as e:
+        _log.warning("Trae CN 客户端模型缓存读取失败（%s）：%s", path, e)
+        return []
+    finally:
+        conn.close()
+
+
+def _pick_catalog(rows: list, uid: str):
+    """在多条缓存里挑出当前账号的那份（键名带 userId 数字）；挑不到取内容最大的。"""
+    digits = re.sub(r"\D", "", str(uid or ""))
+    best, best_score = None, -1
+    for key, value in rows:
+        text = _as_text(value).strip()
+        if not text or not text.startswith("{"):
+            continue
+        score = 0
+        if digits and digits in str(key):
+            score += 2
+        if "chat_v3" in text:
+            score += 1
+        if score > best_score or (score == best_score and best and len(text) > len(best[1])):
+            best, best_score = (str(key), text), score
+    return best
+
+
+def _read_local_models(uid: str):
+    """从本机客户端缓存读出模型目录；返回 (catalog, source_path, 文件更新时间)。"""
+    for path in _state_db_candidates():
+        if not os.path.isfile(path):
+            continue
+        rows = _read_state_rows(path)
+        picked = _pick_catalog(rows, uid)
+        if not picked:
+            continue
+        try:
+            catalog = json.loads(picked[1])
+        except (TypeError, ValueError) as e:
+            _log.warning("Trae CN 客户端模型缓存解析失败（%s）：%s", path, e)
+            continue
+        if not isinstance(catalog, dict):
+            continue
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            mtime = 0.0
+        return catalog, path, mtime
+    return {}, "", 0.0
+
+
+def _norm_model(m: dict, mid: str) -> dict:
+    """客户端目录条目 → 展示字段（对齐 WorkBuddy「模型与档位」的列）。"""
+    feats = m.get("features") if isinstance(m.get("features"), dict) else {}
+    rate = _num(((feats.get("consumption_rate") or {}).get("data") or {}).get("rate"))
+    disc = (feats.get("activity_discount") or {}).get("data") or {}
+    member_rate = _num((disc.get("member") or {}).get("after_consumption_rate"))
+    effort_cfg = m.get("reasoning_effort_config") if isinstance(
+        m.get("reasoning_effort_config"), dict) else {}
+    efforts = [str(x).strip() for x in (effort_cfg.get("options") or [])
+               if str(x or "").strip()][:8]
+    cap_disp = m.get("context_window_size") if isinstance(
+        m.get("context_window_size"), dict) else {}
+    ctx = (_num((m.get("context_window_tokens") or {}).get("dev"))
+           or _num(cap_disp.get("default")) or _num(cap_disp.get("max")) or 0)
+    multimodal = bool(m.get("multimodal")) or bool((feats.get("multimodal") or {}).get("enable"))
+    thinking = bool(effort_cfg.get("support_thinking")) or bool(
+        (feats.get("reasoning") or {}).get("enable"))
+    custom = (str(mid).startswith("custom_") or bool(m.get("custom_model_id"))
+              or bool((m.get("display_config") or {}).get("is_custom_model")))
+    caps = []
+    if multimodal:
+        caps.append("视觉")
+    if thinking:
+        caps.append("思考")
+    if custom:
+        caps.append("自定义")
+    if m.get("is_beta"):
+        caps.append("Beta")
+    return {
+        "id": mid,
+        "name": str(m.get("display_name") or ""),
+        "vendor": _vendor_of(mid),
+        "max_input": int(ctx or 0),
+        "max_output": int(_num(m.get("max_tokens"), 0) or 0),
+        "rate": rate,
+        "rate_num": rate,
+        "member_rate": member_rate,
+        "efforts": efforts,
+        "effort_default": str(effort_cfg.get("default_level") or ""),
+        "multimodal": multimodal,
+        "thinking": thinking,
+        "custom": custom,
+        "beta": bool(m.get("is_beta")),
+        "fee_level": _num(m.get("fee_model_level"), 0) or 0,
+        "default": bool(m.get("is_default")),
+        "caps": caps,
+        "free": rate is not None and float(rate) == 0.0,
+    }
+
+
+def _merge_models(catalog: dict) -> list:
+    """把按场景分组的目录合并成一张模型表：同 id 只留一行，场景 / 容量取并集。"""
+    merged, order = {}, []
+    scenes_seen = list(_SCENE_ORDER) + [k for k in catalog if k not in _SCENE_ORDER]
+    for scene in scenes_seen:
+        items = catalog.get(scene)
+        if not isinstance(items, list):
+            continue
+        scene_label = _SCENE_LABELS.get(scene, scene)
+        for m in items:
+            if not isinstance(m, dict):
+                continue
+            if m.get("selectable") is False or m.get("status") is False:
+                continue
+            mid = str(m.get("name") or "").strip()
+            if not mid:
+                continue
+            rec = _norm_model(m, mid)
+            cur = merged.get(mid)
+            if cur is None:
+                rec["scenes"] = [scene_label]
+                merged[mid] = rec
+                order.append(mid)
+            else:
+                if scene_label not in cur["scenes"]:
+                    cur["scenes"].append(scene_label)
+                cur["max_input"] = max(cur["max_input"], rec["max_input"])
+                cur["max_output"] = max(cur["max_output"], rec["max_output"])
+                cur["default"] = cur["default"] or rec["default"]
+                cur["beta"] = cur["beta"] or rec["beta"]
+                cur["thinking"] = cur["thinking"] or rec["thinking"]
+                if cur["rate_num"] is None:
+                    cur["rate_num"] = rec["rate_num"]
+                    cur["rate"] = rec["rate"]
+                if cur["member_rate"] is None:
+                    cur["member_rate"] = rec["member_rate"]
+                if not cur["efforts"]:
+                    cur["efforts"] = rec["efforts"]
+                    cur["effort_default"] = rec["effort_default"]
+                for cap in rec["caps"]:
+                    if cap not in cur["caps"]:
+                        cur["caps"].append(cap)
+    return [merged[k] for k in order]
+
+
+def _tier_info(obj: dict) -> dict:
+    """用量响应 → 订阅档位（免费 / 会员 Lite / Pro / Pro+ / Ultra …）+ 额度信息。"""
+    packs = obj.get("user_entitlement_pack_list")
+    packs = [p for p in packs if isinstance(p, dict)] if isinstance(packs, list) else []
+    label, code = "", ""
+    parallel = 0
+    monthly_bonus = 0.0
+    charged = 0.0
+    pack_count = 0
+    for p in packs:
+        bi = p.get("entitlement_base_info") or {}
+        quota = bi.get("quota") if isinstance(bi.get("quota"), dict) else {}
+        extra = bi.get("product_extra") if isinstance(bi.get("product_extra"), dict) else {}
+        sub = extra.get("subscription_extra") if isinstance(
+            extra.get("subscription_extra"), dict) else {}
+        pkg = extra.get("package_extra") if isinstance(extra.get("package_extra"), dict) else {}
+        desc = str(p.get("display_desc") or "")
+        if str(p.get("status") or "") in ("0", "2", "3"):
+            continue
+        pack_count += 1
+        charged += _num(bi.get("charge_amount"), 0) or 0
+        amount = _num(quota.get("credits_limit"))
+        if amount is None:
+            amount = _num((pkg.get("quota") or {}).get("credits_limit"))
+        if amount and ("赠送" in desc or "登录" in desc):
+            monthly_bonus += float(amount)
+        # 订阅包：带 subscription_extra，里面是权益（并行任务数等）
+        if sub:
+            if not label:
+                label = _plan_label(desc)
+                code = _plan_code(label)
+            lim = _num((sub.get("quota") or {}).get("solo_agent_parallel_limit"))
+            if lim:
+                parallel = max(parallel, int(lim))
+        else:
+            lim = _num((pkg.get("quota") or {}).get("solo_agent_parallel_limit"))
+            if lim:
+                parallel = max(parallel, int(lim))
+    summary = obj.get("usage_summary") if isinstance(obj.get("usage_summary"), dict) else {}
+    total = _num(summary.get("total_amount"))
+    used = _num(summary.get("consumed_amount"), 0) or 0
+    trial = obj.get("trial_status") if isinstance(obj.get("trial_status"), dict) else {}
+    is_paid = bool(charged > 0) or (bool(label) and label != "免费版")
+    return {
+        "code": code,
+        "label": label or "免费版",
+        "is_paid": is_paid,
+        "parallel": parallel or None,
+        "monthly_bonus": monthly_bonus or None,
+        "pack_count": pack_count,
+        "total": total,
+        "used": used,
+        "remain": (float(total) - float(used)) if total is not None else None,
+        "in_trial": bool(trial.get("is_in_trial")),
+        "trial_eligible": bool(trial.get("is_eligible_for_trial")),
+    }
+
+
+def fetch_tier(creds: dict) -> dict:
+    """订阅档位 + 额度（官方用量接口，只读、不消耗积分）。"""
+    res = _request(creds, PATH_USAGE_WEB, body={"require_usage": True, "req_source": 1})
+    return _tier_info(res["json"])
+
+
+def models_info(uid=None) -> dict:
+    """当前账号的订阅档位 + 可用模型清单。
+
+    模型清单读本机 Trae CN 客户端缓存（官方未提供公开模型接口），
+    档位走官方用量接口；两者互不阻塞，任何一路失败都只降级、不报错。
+    """
+    target = str(uid or "").strip() or current_uid()
+    if not target:
+        raise TraeError("尚未添加 Trae CN 账号")
+    creds = resolve_credentials(target)
+
+    tier, tier_err = {}, ""
+    try:
+        tier = fetch_tier(creds)
+    except TraeError as e:
+        tier_err = str(e)
+    except Exception as e:                       # noqa: BLE001
+        tier_err = "档位信息获取失败：%s" % e
+
+    catalog, source, mtime = _read_local_models(target)
+    models = _merge_models(catalog)
+    counts = {
+        "total": len(models),
+        "vision": sum(1 for m in models if m["multimodal"]),
+        "reasoning": sum(1 for m in models if m["thinking"]),
+        "custom": sum(1 for m in models if m["custom"]),
+        "free": sum(1 for m in models if m["free"]),
+        "scenes": len([s for s in catalog if isinstance(catalog.get(s), list)]),
+    }
+    out = {
+        "ok": True, "uid": target, "tier": tier, "tier_error": tier_err,
+        "models": models, "counts": counts, "total": len(models),
+        "source": source, "source_mtime": mtime,
+        "updated_at": time.time(),
+    }
+    if not models:
+        out["catalog_error"] = (
+            "未找到本机 Trae CN 客户端的模型缓存。请确认本机装有并登录过 Trae CN 客户端"
+            "（读取 ~/.config/Trae CN/User/globalStorage/state.vscdb），"
+            "或设置环境变量 TRAE_STATE_DB 指向该文件。")
+    return out

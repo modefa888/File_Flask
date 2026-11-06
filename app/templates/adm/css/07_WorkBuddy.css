@@ -949,6 +949,26 @@
 }
 .wb-model-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .wb-model-table { min-width: 860px; }
+/* 可排序表头：点击在 升序 → 降序 → 默认 之间切换 */
+.wb-model-table th.wb-sortable {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+.wb-model-table th.wb-sortable:hover,
+.wb-model-table th.wb-sortable:focus-visible {
+    color: var(--adm-text);
+    outline: none;
+}
+.wb-sort-ind {
+    margin-left: 4px;
+    font-size: 10px;
+    opacity: .4;
+}
+.wb-sort-ind.on {
+    opacity: 1;
+    color: var(--adm-accent, #5b8cff);
+}
 .wb-model-table th:nth-child(2), .wb-model-table td:nth-child(2) { width: 200px; }
 .wb-model-table th:nth-child(3), .wb-model-table td:nth-child(3) { width: 90px; text-align: center; }
 .wb-model-table th:nth-child(5), .wb-model-table td:nth-child(5) { width: 100px; text-align: center; }

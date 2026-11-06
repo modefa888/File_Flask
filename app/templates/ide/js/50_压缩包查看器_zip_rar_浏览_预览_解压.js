@@ -171,14 +171,18 @@ function setupArchiveView(tab, host, path, name) {
     pvBody.innerHTML = '<div class="azv-pv-cm"></div>';
     const box = pvBody.querySelector(".azv-pv-cm");
     const light = (typeof window.ideThemeLight === "function") ? window.ideThemeLight() : false;
+    // 预览跟随「设置 → 外观」所选的代码主题与行号开关（此模块在大 IIFE 关闭后加载，走 window / localStorage）
+    const theme = (typeof window.ideCmTheme === "function") ? window.ideCmTheme() : (light ? "default" : "material-darker");
+    let showNums = true;
+    try { showNums = JSON.parse(localStorage.getItem("ide.settings") || "{}").showLineNumbers !== false; } catch (_) {}
     let cm = null;
     try {
       cm = CodeMirror(box, {
         value: text,
         mode: "text/plain",                        // 先纯文本立即可见，模式异步套上
-        theme: light ? "default" : "material-darker",
-        lineNumbers: true, readOnly: true, lineWrapping: wrapOn,
-        gutters: ["CodeMirror-linenumbers"], viewportMargin: 30,
+        theme: theme,
+        lineNumbers: showNums, readOnly: true, lineWrapping: wrapOn,
+        gutters: showNums ? ["CodeMirror-linenumbers"] : [], viewportMargin: 30,
         tabSize: 4, indentUnit: 4,
       });
     } catch (_) { return false; }

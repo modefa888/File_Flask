@@ -1217,7 +1217,10 @@ function openSshFileViewer(conn, fspath, name) {
       }
       const cmBox = host.querySelector(".rfv-cm");
       const cm = CodeMirror(cmBox, {
-        value: d.content || "", lineNumbers: true, lineWrapping: false,
+        value: d.content || "", theme: ideCmTheme(),
+        lineNumbers: IDE_SETTINGS.showLineNumbers !== false,
+        gutters: IDE_SETTINGS.showLineNumbers !== false ? ["CodeMirror-linenumbers"] : [],
+        lineWrapping: false,
         autofocus: false, dragDrop: false,
       });
       tab.cm = cm;

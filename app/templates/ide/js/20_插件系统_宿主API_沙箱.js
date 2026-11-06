@@ -323,8 +323,11 @@
     const readOnly = !!spec.readOnly;
     const cm = CodeMirror(tab.host, {
       value: text, mode: "text/plain",
-      theme: (typeof ideThemeLight === "function" && ideThemeLight()) ? "default" : "material-darker",
-      lineNumbers: true, lineWrapping: (typeof IDE_SETTINGS !== "undefined") ? !!IDE_SETTINGS.lineWrap : false,
+      theme: (typeof ideCmTheme === "function") ? ideCmTheme() :
+        ((typeof ideThemeLight === "function" && ideThemeLight()) ? "default" : "material-darker"),
+      lineNumbers: (typeof IDE_SETTINGS !== "undefined") ? IDE_SETTINGS.showLineNumbers !== false : true,
+      gutters: (typeof IDE_SETTINGS !== "undefined" && IDE_SETTINGS.showLineNumbers === false) ? [] : ["CodeMirror-linenumbers"],
+      lineWrapping: (typeof IDE_SETTINGS !== "undefined") ? !!IDE_SETTINGS.lineWrap : false,
       indentUnit: (typeof IDE_SETTINGS !== "undefined") ? IDE_SETTINGS.indent : 4,
       tabSize: (typeof IDE_SETTINGS !== "undefined") ? IDE_SETTINGS.indent : 4,
       readOnly: readOnly, matchBrackets: true, autoCloseBrackets: !readOnly,

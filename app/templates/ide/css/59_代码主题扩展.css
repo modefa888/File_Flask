@@ -1,0 +1,133 @@
+/* ============================================================================
+   59_代码主题扩展：设置 → 外观 → 浅色 / 深色代码主题的可选配色
+   参考常见编辑器的主题名（GitHub / Vitesse / Minimal / GitHub HC / Catppuccin）
+   自绘 CodeMirror 5 主题：类名 cm-s-xxx，配色为仿制，不依赖任何外部资源。
+   差异视图（.sd-grid）也带同一个主题类，背景与 token 一起跟随。
+   ============================================================================ */
+
+/* ---------- 主题变量：每个主题一组，浅色 / 深色各 5 套 ---------- */
+.cm-s-github-light {
+  --ext-bg:#ffffff; --ext-fg:#24292f; --ext-gutter:#ffffff; --ext-gutter-fg:#8c959f; --ext-border:#d0d7de;
+  --ext-sel:#cce0ff; --ext-active:#f6f8fa; --ext-cursor:#24292f; --ext-comment:#6e7781;
+  --ext-keyword:#cf222e; --ext-string:#0a3069; --ext-number:#0550ae; --ext-def:#8250df;
+  --ext-tag:#116329; --ext-attr:#0550ae;
+}
+.cm-s-github-dark {
+  --ext-bg:#0d1117; --ext-fg:#c9d1d9; --ext-gutter:#0d1117; --ext-gutter-fg:#8b949e; --ext-border:#30363d;
+  --ext-sel:#264f78; --ext-active:#161b22; --ext-cursor:#c9d1d9; --ext-comment:#8b949e;
+  --ext-keyword:#ff7b72; --ext-string:#a5d6ff; --ext-number:#79c0ff; --ext-def:#d2a8ff;
+  --ext-tag:#7ee787; --ext-attr:#79c0ff;
+}
+.cm-s-vitesse-light {
+  --ext-bg:#ffffff; --ext-fg:#393a34; --ext-gutter:#fafafa; --ext-gutter-fg:#a0a0a0; --ext-border:#e8e8e8;
+  --ext-sel:#d9e8f7; --ext-active:#f5f5f5; --ext-cursor:#393a34; --ext-comment:#a0ada0;
+  --ext-keyword:#8055c7; --ext-string:#4d9375; --ext-number:#2f798a; --ext-def:#b07d48;
+  --ext-tag:#3e7d5a; --ext-attr:#b07d48;
+}
+.cm-s-vitesse-dark {
+  --ext-bg:#121212; --ext-fg:#dbd7ca; --ext-gutter:#121212; --ext-gutter-fg:#6b6b6b; --ext-border:#2a2a2a;
+  --ext-sel:#2e4a63; --ext-active:#1c1c1c; --ext-cursor:#dbd7ca; --ext-comment:#758575;
+  --ext-keyword:#cb7676; --ext-string:#c98a7d; --ext-number:#4d9375; --ext-def:#bd976a;
+  --ext-tag:#80a665; --ext-attr:#bd976a;
+}
+.cm-s-minimal-light {
+  --ext-bg:#ffffff; --ext-fg:#222222; --ext-gutter:#ffffff; --ext-gutter-fg:#a5a5a5; --ext-border:#eeeeee;
+  --ext-sel:#e4e4e4; --ext-active:#f7f7f7; --ext-cursor:#222222; --ext-comment:#9a9a9a;
+  --ext-keyword:#111111; --ext-string:#555555; --ext-number:#333333; --ext-def:#333333;
+  --ext-tag:#222222; --ext-attr:#777777;
+}
+.cm-s-minimal-dark {
+  --ext-bg:#1a1a1a; --ext-fg:#d6d6d6; --ext-gutter:#1a1a1a; --ext-gutter-fg:#707070; --ext-border:#333333;
+  --ext-sel:#3a3a3a; --ext-active:#232323; --ext-cursor:#d6d6d6; --ext-comment:#8a8a8a;
+  --ext-keyword:#f0f0f0; --ext-string:#adadad; --ext-number:#d6d6d6; --ext-def:#d6d6d6;
+  --ext-tag:#e0e0e0; --ext-attr:#9a9a9a;
+}
+.cm-s-github-hc-light {
+  --ext-bg:#ffffff; --ext-fg:#000000; --ext-gutter:#ffffff; --ext-gutter-fg:#000000; --ext-border:#000000;
+  --ext-sel:#b6c9ff; --ext-active:#f0f0f0; --ext-cursor:#000000; --ext-comment:#4b4b4b;
+  --ext-keyword:#a40e11; --ext-string:#0b4f9c; --ext-number:#0b4f9c; --ext-def:#6b2db3;
+  --ext-tag:#0b6b3a; --ext-attr:#0b4f9c;
+}
+.cm-s-github-hc-dark {
+  --ext-bg:#000000; --ext-fg:#ffffff; --ext-gutter:#000000; --ext-gutter-fg:#ffffff; --ext-border:#ffffff;
+  --ext-sel:#3b5b8c; --ext-active:#1a1a1a; --ext-cursor:#ffffff; --ext-comment:#d0d0d0;
+  --ext-keyword:#ff9b95; --ext-string:#a5d6ff; --ext-number:#a5d6ff; --ext-def:#f0b3ff;
+  --ext-tag:#7ee787; --ext-attr:#a5d6ff;
+}
+.cm-s-catppuccin-latte {
+  --ext-bg:#eff1f5; --ext-fg:#4c4f69; --ext-gutter:#e6e9ef; --ext-gutter-fg:#9ca0b0; --ext-border:#dce0e8;
+  --ext-sel:#ccd0da; --ext-active:#e6e9ef; --ext-cursor:#dc8a78; --ext-comment:#9ca0b0;
+  --ext-keyword:#8839ef; --ext-string:#40a02b; --ext-number:#fe640b; --ext-def:#1e66f5;
+  --ext-tag:#1e66f5; --ext-attr:#fe640b;
+}
+.cm-s-catppuccin-mocha {
+  --ext-bg:#1e1e2e; --ext-fg:#cdd6f4; --ext-gutter:#181825; --ext-gutter-fg:#6c7086; --ext-border:#313244;
+  --ext-sel:#45475a; --ext-active:#27293a; --ext-cursor:#f5e0dc; --ext-comment:#6c7086;
+  --ext-keyword:#cba6f7; --ext-string:#a6e3a1; --ext-number:#fab387; --ext-def:#89b4fa;
+  --ext-tag:#89b4fa; --ext-attr:#fab387;
+}
+
+/* ---------- 公共规则 ----------
+   属性前缀只覆盖本文件新增的 10 个主题；vendor 自带的
+   default / eclipse / idea / material-darker / dracula / monokai 不受影响。 */
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]).CodeMirror,
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]).sd-grid {
+  background: var(--ext-bg); color: var(--ext-fg);
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) .CodeMirror-gutters {
+  background: var(--ext-gutter); border-right: 1px solid var(--ext-border); color: var(--ext-gutter-fg);
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) .CodeMirror-cursor {
+  border-left: 1px solid var(--ext-cursor);
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) .CodeMirror-selected {
+  background: var(--ext-sel);
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) .CodeMirror-activeline-background {
+  background: var(--ext-active);
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-comment {
+  color: var(--ext-comment); font-style: italic;
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-keyword {
+  color: var(--ext-keyword);
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-string,
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-string-2 {
+  color: var(--ext-string);
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-number,
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-atom,
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-builtin {
+  color: var(--ext-number);
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-def,
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-variable-2,
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-variable-3,
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-property {
+  color: var(--ext-def);
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-tag,
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-qualifier {
+  color: var(--ext-tag);
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-attribute,
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-meta,
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-operator {
+  color: var(--ext-attr);
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-bracket,
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) span.cm-link {
+  color: var(--ext-fg);
+}
+:where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) .CodeMirror-matchingbracket {
+  color: var(--ext-fg) !important; border-bottom: 1px solid var(--ext-cursor);
+}
+/* 29_浅色主题.css 后加载且带 .cm-host 前缀，这里提高一档特异性让主题自己的
+   选中色 / 当前行底色生效（浅色界面选深色代码主题时也不会出现浅蓝选区） */
+html .cm-host :where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) .CodeMirror-selected {
+  background: var(--ext-sel);
+}
+html .cm-host :where([class*="cm-s-github"], [class*="cm-s-vitesse"], [class*="cm-s-minimal"], [class*="cm-s-catppuccin"]) .CodeMirror-activeline-background {
+  background: var(--ext-active);
+}

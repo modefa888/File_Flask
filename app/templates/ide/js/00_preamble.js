@@ -239,7 +239,8 @@
     } catch (_) { }
   }
   // 是否使用浅色（白色背景）主题：由「设置 → 外观 → 界面主题」写入 localStorage
-  function ideThemeLight() { return ideSettingGet("theme", "dark") === "light"; }
+  // 统一走设置页的判定（支持「跟随系统」）；设置页模块尚未加载完成时退回原始值
+  function ideThemeLight() { return (typeof ideIsLight === "function") ? ideIsLight() : ideSettingGet("theme", "dark") === "light"; }
   /* ---------- 会话持久化：侧边栏面板 + 底部面板 + 打开的文件标签 ---------- */
   function sessionSavePanel(name) {
     if (!ideSettingGet("restoreSession", true)) return;
@@ -1075,6 +1076,15 @@
   }
   function setTreeSelFromRow(r) { // 让 treeSel 指向某行（供 F2 / Delete / Ctrl+C 等快捷键使用）
     if (r) treeSel = { path: r.dataset.path, name: r.dataset.name, isDir: r.dataset.isdir === "1" };
+  }
+  // 编辑区全部关闭（只剩欢迎页）时清掉文件树高亮：没有打开任何文件，左侧不该还有一行亮着
+  function clearTreeSelHighlight() {
+    treeSel = null;
+    treeAnchor = null;
+    explorerPanel.querySelectorAll(".tree-row.selected").forEach((r) => {
+      r.classList.remove("selected");
+      try { r.blur(); } catch (_) {}   // 顺带清掉 :focus 的内描边，避免亮色残留
+    });
   }
   function treeSelectedItems() {  // 当前选中的树行（按 DOM 顺序）：供「添加到 AI 对话」等批量操作使用
     return [...explorerPanel.querySelectorAll(".tree-row.selected")]
@@ -1957,8 +1967,9 @@
         // 容器此刻已可见（active），CodeMirror 才能测量正确，避免内容压住行号/错位
         // 先用 text/plain 让内容立即可见；语法高亮稍后异步套上，慢/失败也只是退化为纯文本
         const cm = CodeMirror(host, {
-          value: text, mode: "text/plain", theme: ideThemeLight() ? "default" : "material-darker",
-          lineNumbers: true, lineWrapping: IDE_SETTINGS.lineWrap, indentUnit: IDE_SETTINGS.indent, tabSize: IDE_SETTINGS.indent,
+          value: text, mode: "text/plain", theme: ideCmTheme(),
+          lineNumbers: IDE_SETTINGS.showLineNumbers !== false,
+          lineWrapping: IDE_SETTINGS.lineWrap, indentUnit: IDE_SETTINGS.indent, tabSize: IDE_SETTINGS.indent,
           styleActiveLine: IDE_SETTINGS.activeLine && !big, matchBrackets: !big, autoCloseBrackets: true,
           phrases: CM_PHRASES,
           // 代码折叠：行号旁出现 − / + 折叠三角，可折叠/展开函数体、代码块、注释块、按缩进折叠（如 python）。
@@ -2301,6 +2312,8 @@
     // 会话恢复中（或马上要恢复）先藏住欢迎页：避免「欢迎页 → 标签栏」整屏闪一次
     const waitingRestore = window.__ideRestoringSession || window.__ideRestorePending;
     welcome.style.display = (flat.length || waitingRestore) ? "none" : "flex";
+    // 编辑区已关闭（只剩欢迎页）时，文件树不再保留高亮
+    if (!flat.length && !waitingRestore) clearTreeSelHighlight();
     const key = rows.map(r => r.join("+")).join("|");
     if (key === builtGroupKey) return;
     builtGroupKey = key;

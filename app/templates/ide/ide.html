@@ -47,6 +47,11 @@ html.theme-light .CodeMirror-foldgutter-open:hover:after,
 html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacity: 1; }
 </style>
 <link rel="stylesheet" href="/static/vendor/codemirror/material-darker.min.css">
+{# 设置 → 外观：可选的代码高亮主题（浅色 default / eclipse / idea，深色 material-darker / dracula / monokai） #}
+<link rel="stylesheet" href="/static/vendor/codemirror/eclipse.min.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/idea.min.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/dracula.min.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/monokai.min.css">
 <link rel="stylesheet" href="/static/vendor/xterm/css/xterm.css">
 <script src="/static/vendor/xterm/lib/xterm.js"></script>
 <script src="/static/vendor/xterm/lib/addon-fit.js"></script>
@@ -193,6 +198,14 @@ html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacit
 {# 包管理器浮层（requirements.txt 工具栏 🔍：PyPI 搜索 / 安装 / 升级 / 卸载 / 下载） #}
 {% include 'ide/css/55_包管理器浮层.css' %}
 </style>
+{# 设置 → 外观：分组卡片式布局（大标题 / 分组说明 / 圆角卡片 / 开关 / 活动栏排序列表） #}
+<style>
+{% include 'ide/css/58_设置页外观美化.css' %}
+</style>
+{# 设置 → 外观：扩展的 10 套代码主题配色（GitHub / Vitesse / Minimal / Catppuccin 等） #}
+<style>
+{% include 'ide/css/59_代码主题扩展.css' %}
+</style>
 {# 活动栏彩色图标：每个面板一个专属色，深浅主题各一套（内部用 html.theme-light 提高特异性压过 29_） #}
 <style>
 {% include 'ide/css/56_活动栏彩色图标.css' %}
@@ -203,8 +216,12 @@ html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacit
 </style>
 </head>
 <body>
-<script>/* 首屏按已保存的主题立即上色，避免深色闪一下再变浅 */
-try { if (JSON.parse(localStorage.getItem('ide.settings') || '{}').theme === 'light') document.documentElement.classList.add('theme-light'); } catch (e) {}
+<script>/* 首屏按已保存的主题立即上色，避免深色闪一下再变浅；跟随系统时用 prefers-color-scheme 预判 */
+try {
+  var t = JSON.parse(localStorage.getItem('ide.settings') || '{}').theme;
+  var light = t === 'light' || (t === 'system' && window.matchMedia && !window.matchMedia('(prefers-color-scheme: dark)').matches);
+  if (light) document.documentElement.classList.add('theme-light');
+} catch (e) {}
 </script>
 <script>/* 首屏预置侧栏收起状态：body 还没渲染就读 localStorage 给 <html> 打 sb-pre 类，
    CSS 据此让侧栏从第一帧就是隐藏态，杜绝「先画出资源管理器再收起」的抖动闪烁 */

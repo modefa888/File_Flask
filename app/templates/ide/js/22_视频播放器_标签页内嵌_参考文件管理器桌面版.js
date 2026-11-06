@@ -33,7 +33,8 @@
       ide = s.theme || "dark";
     } catch (_) { }
     if (pref === "light" || pref === "dark") return pref === "light";
-    return ide === "light";
+    // 跟随编辑器：交给设置页统一判定（支持「跟随系统」主题）
+    return (typeof window.ideThemeLight === "function") ? window.ideThemeLight() : ide === "light";
   }
   // 切换主题 / 打开新播放器时调用：一次性同步页面上所有播放器实例
   function applyVideoPlayerTheme() {

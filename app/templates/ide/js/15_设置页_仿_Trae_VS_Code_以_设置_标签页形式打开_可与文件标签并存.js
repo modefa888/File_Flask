@@ -8,9 +8,30 @@
       httpProxyMode: "", httpProxy: "", httpNoProxy: "", httpTimeout: 20,
       httpInsecure: false, httpFilterMode: "", httpFilterList: "",
       httpForApiDebug: false, httpTestUrl: "",
-      theme: "dark", playerTheme: "auto", actOrder: [] },
+      // 外观：界面主题支持跟随系统；代码主题分别对应浅色 / 深色界面
+      theme: "dark", playerTheme: "auto", actOrder: [],
+      uiFontSize: 14, cmThemeLight: "default", cmThemeDark: "material-darker",
+      showLineNumbers: true },
     (() => { try { return JSON.parse(localStorage.getItem("ide.settings") || "{}"); } catch (_) { return {}; } })()
   );
+  /* 可选 CodeMirror 主题：前 3 个来自 vendor 自带主题，其余见 59_代码主题扩展.css。
+     浅色 / 深色各自独立一组：下拉只列本组主题，预览也只按本组配色渲染。 */
+  const CM_LIGHT_THEMES = ["default", "eclipse", "idea", "github-light", "vitesse-light",
+    "minimal-light", "github-hc-light", "catppuccin-latte"];
+  const CM_DARK_THEMES = ["material-darker", "dracula", "monokai", "github-dark", "vitesse-dark",
+    "minimal-dark", "github-hc-dark", "catppuccin-mocha"];
+  const CM_ALL_THEMES = CM_LIGHT_THEMES.concat(CM_DARK_THEMES);
+  /* 预览卡片上显示的简短主题名（下拉里可带「默认」等说明，预览只显示名字） */
+  const CM_THEME_LABELS = {
+    "default": "Default", "eclipse": "Eclipse", "idea": "IDEA Light",
+    "github-light": "GitHub Light", "vitesse-light": "Vitesse Light",
+    "minimal-light": "Minimal Light", "github-hc-light": "GitHub HC Light",
+    "catppuccin-latte": "Catppuccin Latte",
+    "material-darker": "Material Darker", "dracula": "Dracula", "monokai": "Monokai",
+    "github-dark": "GitHub Dark", "vitesse-dark": "Vitesse Dark",
+    "minimal-dark": "Minimal Dark", "github-hc-dark": "GitHub HC Dark",
+    "catppuccin-mocha": "Catppuccin Mocha"
+  };
   /* ---------- 网络 / 代理：模式与出站策略（设置页、插件宿主 API、API 调试共用） ---------- */
   // 代理模式：none 直连 / manual 用自定义地址 / system 跟随系统环境变量。
   // 未显式设置时按「填了地址就算 manual」推断，兼容旧版本只有 httpProxy 的存储。
@@ -36,8 +57,50 @@
       filterList: String(IDE_SETTINGS.httpFilterList || "").trim(),
     };
   }
-  function ideIsLight() { return IDE_SETTINGS.theme === "light"; }                 // 当前是否浅色（白底）主题
-  function ideCmTheme() { return ideIsLight() ? "default" : "material-darker"; }   // CodeMirror 主题名
+  // 当前是否浅色（白底）主题：system 时跟随操作系统的 prefers-color-scheme
+  function ideIsLight() {
+    if (IDE_SETTINGS.theme === "system")
+      return !(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    return IDE_SETTINGS.theme === "light";
+  }
+  // 代码主题名：浅色 / 深色界面各存一个选择，严格限制在本组主题内；
+  // 非法值（旧数据 / 导入脏数据 / 之前允许跨组时存的值）退回该组默认
+  function ideCmThemeValue(light) {
+    const list = light ? CM_LIGHT_THEMES : CM_DARK_THEMES;
+    const v = light ? IDE_SETTINGS.cmThemeLight : IDE_SETTINGS.cmThemeDark;
+    return list.indexOf(v) >= 0 ? v : list[0];
+  }
+  function ideCmTheme() { return ideCmThemeValue(ideIsLight()); }
+  window.ideCmTheme = ideCmTheme;       // 供大 IIFE 关闭后加载的模块（压缩包预览等）复用
+  /* ---------- 设置 → 外观 → 代码预览 ----------
+     两张卡片分别用当前「浅色代码主题」「深色代码主题」渲染同一段示例代码；
+     当前界面主题对应的那张标记为「当前生效」。用 document.getElementById 查询，
+     这样界面主题变化（含跟随系统）也能从模块级直接刷新，而不依赖设置页是否已打开。 */
+  function renderAppPreview() {
+    const light = ideIsLight();
+    [
+      { p: "Light", theme: ideCmThemeValue(true), isLight: true },
+      { p: "Dark", theme: ideCmThemeValue(false), isLight: false },
+    ].forEach(x => {
+      const name = document.getElementById("appPreview" + x.p + "Name");
+      const code = document.getElementById("appPreview" + x.p + "Code");
+      const badge = document.getElementById("appPreview" + x.p + "Badge");
+      if (name) name.textContent = CM_THEME_LABELS[x.theme] || x.theme;
+      if (code) {
+        [...code.classList].forEach(c => { if (c.indexOf("cm-s-") === 0) code.classList.remove(c); });
+        code.classList.add("cm-s-" + x.theme);
+      }
+      if (badge) {
+        const active = x.isLight === light;
+        badge.textContent = active ? "当前生效" : (x.isLight ? "浅色" : "深色");
+        badge.classList.toggle("on", active);
+      }
+    });
+  }
+  function uiFontSize() {
+    const n = parseInt(IDE_SETTINGS.uiFontSize, 10);
+    return isNaN(n) ? 14 : Math.max(11, Math.min(20, n));
+  }
   function saveIdeSettings() {
     // 合并写入：保留其它模块通过 ideSettingSet 写入的开关键，避免整对象覆盖丢失
     let cur = {};
@@ -45,28 +108,41 @@
     localStorage.setItem("ide.settings", JSON.stringify(Object.assign(cur, IDE_SETTINGS)));
   }
   function applyIdeSettings() {
+    const light = ideIsLight(), cmTheme = ideCmTheme(), fs = uiFontSize();
     document.documentElement.style.setProperty("--cm-font-size", IDE_SETTINGS.fontSize + "px");
+    // 界面字号：只覆盖文字，不改图标与布局；保持默认值时不挂类，避免改变既有外观
+    document.documentElement.style.setProperty("--ui-font-size", fs + "px");
+    document.documentElement.style.setProperty("--ui-font-size-sm", (fs - 1) + "px");
+    document.documentElement.classList.toggle("ui-font-custom", fs !== 14);
     document.body.classList.toggle("hide-nm-hints", !IDE_SETTINGS.hints);
     // 界面主题：在 <html> 上加 theme-light 类，浅色样式表 (29_浅色主题.css) 据此覆盖
-    document.documentElement.classList.toggle("theme-light", ideIsLight());
+    document.documentElement.classList.toggle("theme-light", light);
     // 广播给插件：iframe 插件页面的主题跟随（20_ 会同步 pl-light/pl-dark 类）
-    if (typeof ideEmit === "function") ideEmit("themeChanged", { light: ideIsLight() });
+    if (typeof ideEmit === "function") ideEmit("themeChanged", { light: light, cmTheme: cmTheme });
+    const lineNumbers = IDE_SETTINGS.showLineNumbers !== false;
     tabs.forEach(t => {
       if (!t.cm) return;
       t.cm.setOption("lineWrapping", IDE_SETTINGS.lineWrap);
+      t.cm.setOption("lineNumbers", lineNumbers);
+      // 关掉行号时一并去掉行号 gutter，否则左侧会留一条空白列（折叠栏按原有状态保留）
+      t.cm.setOption("gutters", [
+        ...(t.cm.getOption("foldGutter") ? ["CodeMirror-foldgutter"] : []),
+        ...(lineNumbers ? ["CodeMirror-linenumbers"] : [])
+      ]);
       t.cm.setOption("styleActiveLine", IDE_SETTINGS.activeLine && !t.big);
       t.cm.setOption("indentUnit", IDE_SETTINGS.indent);
       t.cm.setOption("tabSize", IDE_SETTINGS.indent);
-      t.cm.setOption("theme", ideCmTheme());
+      t.cm.setOption("theme", cmTheme);
       t.cm.refresh();
     });
-    // 已打开的差异视图：切换 CodeMirror 主题类，让语法着色跟随深浅
+    // 已打开的差异视图：清掉旧主题类再挂当前代码主题，让语法着色跟随深浅与用户选择
     document.querySelectorAll(".sd-grid").forEach(g => {
-      g.classList.toggle("cm-s-default", ideIsLight());
-      g.classList.toggle("cm-s-material-darker", !ideIsLight());
+      CM_ALL_THEMES.forEach(n => g.classList.remove("cm-s-" + n));
+      g.classList.add("cm-s-" + cmTheme);
     });
     // 视频播放器皮肤：白天 / 黑夜 / 跟随编辑器（auto 时界面主题一变播放器跟着变）
     if (typeof applyVideoPlayerTheme === "function") applyVideoPlayerTheme();
+    renderAppPreview();   // 界面主题 / 代码主题一变，预览卡片与「当前生效」标记同步刷新
   }
 
   /* ---------- 活动栏图标顺序（设置 → 外观 可修改） ----------
@@ -141,11 +217,63 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     }
     activate(tab);   // 已打开则直接聚焦；正常文件仍可随时打开
     if (section) {
-      const nav = tab.host.querySelector('.set-navitem[data-sec="' + section + '"]');
+      // 旧会话里可能还存着已删除的「编辑器」分区，回退到外观，避免导航点了却没内容
+      const nav = tab.host.querySelector('.set-navitem[data-sec="' + section + '"]') ||
+                  tab.host.querySelector('.set-navitem[data-sec="sec-appearance"]');
       if (nav) nav.click();
     }
   }
   function buildSettingsContent(host) {
+    /* 外观分区：大标题 + 分组说明 + 圆角卡片，每行「标题 / 说明 / 控件」三段式。
+       仍用 .set-row + data-kw，保证设置搜索过滤与标签页模式完全复用原有逻辑。 */
+    const appRow = (label, desc, ctl, kw) =>
+      '<div class="set-row" data-kw="' + kw + '"><div class="set-info"><div class="set-label">' + label +
+      '</div><div class="set-desc">' + desc + '</div></div><div class="app-ctl">' + ctl + '</div></div>';
+    const appSel = (id, icon, opts, narrow) =>
+      '<div class="app-select' + (icon ? '' : ' no-ic') + (narrow ? ' narrow' : '') + '">' +
+        (icon ? '<i class="bi ' + icon + ' app-ic"></i>' : '') +
+        '<select id="' + id + '">' + opts + '</select>' +
+        '<i class="bi bi-chevron-down app-chev"></i></div>';
+    const appNum = (id, min, max, unit) =>
+      '<div class="app-num"><input type="number" id="' + id + '" min="' + min + '" max="' + max +
+      '" step="1" title="可直接输入，也可用鼠标滚轮增减"><span class="app-unit">' + unit + '</span></div>';
+    const appSwitch = (id) => '<label class="app-switch"><input type="checkbox" id="' + id + '"><span></span></label>';
+    // 两个下拉各自只列本组主题：浅色下拉不出现深色主题，深色下拉不出现浅色主题
+    const CM_LIGHT_OPTIONS =
+      '<option value="default">Default（默认浅色）</option>' +
+      '<option value="github-light">GitHub Light</option>' +
+      '<option value="vitesse-light">Vitesse Light</option>' +
+      '<option value="minimal-light">Minimal Light</option>' +
+      '<option value="github-hc-light">GitHub HC Light</option>' +
+      '<option value="catppuccin-latte">Catppuccin Latte</option>' +
+      '<option value="eclipse">Eclipse</option>' +
+      '<option value="idea">IDEA Light</option>';
+    const CM_DARK_OPTIONS =
+      '<option value="material-darker">Material Darker（默认深色）</option>' +
+      '<option value="github-dark">GitHub Dark</option>' +
+      '<option value="vitesse-dark">Vitesse Dark</option>' +
+      '<option value="minimal-dark">Minimal Dark</option>' +
+      '<option value="github-hc-dark">GitHub HC Dark</option>' +
+      '<option value="catppuccin-mocha">Catppuccin Mocha</option>' +
+      '<option value="dracula">Dracula</option>' +
+      '<option value="monokai">Monokai</option>';
+    /* 代码预览：同一段示例代码，用 span.cm-* 复用各主题的 token 配色 */
+    const APP_PREVIEW_LINES = [
+      '<span class="cm-keyword">const</span> <span class="cm-def">themePreview</span>: <span class="cm-type">ThemeConfig</span> = {',
+      '    <span class="cm-property">surface</span>: <span class="cm-string">"sidebar"</span>,',
+      '    <span class="cm-property">accent</span>: <span class="cm-string">"#339CFF"</span>,',
+      '    <span class="cm-property">contrast</span>: <span class="cm-number">45</span>,',
+      '};'
+    ].map((line, i) => '<div class="pv-line"><span class="pv-ln">' + (i + 1) +
+      '</span><span class="pv-tx">' + line + '</span></div>').join("");
+    const appPreviewCard = (prefix, title, tag, pvClass) =>
+      '<div class="app-preview-card">' +
+        '<div class="app-preview-hd"><div class="app-preview-tt">' + title + '</div>' +
+          '<span class="app-preview-badge" id="appPreview' + prefix + 'Badge">' + tag + '</span></div>' +
+        '<div class="app-preview-theme" id="appPreview' + prefix + 'Name">—</div>' +
+        '<div class="app-preview-code ' + pvClass + ' cm-s-default" id="appPreview' + prefix + 'Code">' +
+          APP_PREVIEW_LINES + '</div>' +
+      '</div>';
     host.innerHTML =
     // 诱饵字段：Chrome / Edge 的密码管理器会把「文档里第一个文本框」当成登录表单的用户名，
     // 从而把已保存的账号（如 admin）自动填进下面的「搜索设置项」甚至 AI 接口地址里。
@@ -157,7 +285,6 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     '<div class="set-layout">' +
       '<div class="set-nav"><h1>设置</h1><input class="set-search" type="search" name="ide-settings-filter" placeholder="搜索设置项" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore>' +
         '<div class="set-navitem" data-sec="sec-appearance"><i class="bi bi-palette"></i>外观</div>' +
-        '<div class="set-navitem" data-sec="sec-editor"><i class="bi bi-sliders"></i>编辑器</div>' +
         '<div class="set-navitem" data-sec="sec-files"><i class="bi bi-folder2"></i>文件</div>' +
         '<div class="set-navitem" data-sec="sec-keys"><i class="bi bi-keyboard"></i>快捷键</div>' +
         '<div class="set-navitem" data-sec="sec-data"><i class="bi bi-database"></i>数据</div>' +
@@ -175,17 +302,69 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
       '</div>' +
       '<div class="set-content">' +
         '<div class="set-sec" id="sec-appearance"><h2 data-kw="外观 主题 背景 颜色 深色 浅色 白 黑 白天 黑夜 theme dark light">外观</h2>' +
-          '<div class="set-row" data-kw="外观 主题 界面 颜色 背景 深色 浅色 白 黑 白天 黑夜 theme dark light"><div class="set-info"><div class="set-label">界面主题</div><div class="set-desc">黑夜（深色，默认）与白天（白色背景）之间切换，立即生效并记住选择</div></div><select id="setTheme"><option value="dark">黑夜（深色）</option><option value="light">白天（白色背景）</option></select></div>' +
-          '<div class="set-row" data-kw="外观 主题 播放器 视频 皮肤 白天 黑夜 跟随编辑器 player video theme skin light dark auto"><div class="set-info"><div class="set-label">播放器主题</div><div class="set-desc">标签页内嵌视频播放器的皮肤：白天（浅色控制条与播放列表）/ 黑夜（深色，默认）/ 跟随编辑器（跟随上面的「界面主题」）</div></div><select id="setPlayerTheme"><option value="auto">跟随编辑器</option><option value="light">白天（浅色）</option><option value="dark">黑夜（深色）</option></select></div>' +
-          '<div class="set-row actord" data-kw="外观 活动栏 图标 顺序 排序 排列 拖动 activity bar order sort"><div class="set-info"><div class="set-label">活动栏图标顺序</div><div class="set-desc">拖动条目（或点 ↑ ↓）调整左侧活动栏图标的上下顺序；点条目右侧的电源开关启用 / 停用图标，停用后左侧活动栏不再显示；立即生效并记住选择，插件添加的图标也可一起调整</div></div><div class="actord-box"><div class="actord-list" id="setActOrder"></div><button class="set-btn" id="setActOrderReset" style="margin-top:8px;">恢复默认顺序</button></div></div>' +
-        '</div>' +
-        '<div class="set-sec" id="sec-editor"><h2>编辑器</h2>' +
-          '<div class="set-row" data-kw="字体 字号 font size"><div class="set-info"><div class="set-label">字体大小</div><div class="set-desc">编辑器代码字体大小（10–24）</div></div><input type="number" min="10" max="24" id="setFontSize"></div>' +
-          '<div class="set-row" data-kw="换行 wrap line"><div class="set-info"><div class="set-label">自动换行</div><div class="set-desc">过长的行折行显示，不出现横向滚动条</div></div><input type="checkbox" id="setLineWrap"></div>' +
-          '<div class="set-row" data-kw="高亮 当前行 active line"><div class="set-info"><div class="set-label">高亮当前行</div><div class="set-desc">光标所在行加背景色</div></div><input type="checkbox" id="setActiveLine"></div>' +
-          '<div class="set-row" data-kw="缩进 tab indent"><div class="set-info"><div class="set-label">缩进空格数</div><div class="set-desc">Tab 与自动缩进的空格宽度</div></div><select id="setIndent"><option value="2">2</option><option value="4">4</option><option value="8">8</option></select></div>' +
-          '<div class="set-row" data-kw="代码 补全 智能 提示 自动 联想 IntelliSense autocomplete suggest"><div class="set-info"><div class="set-label">代码补全</div><div class="set-desc">输入时联想文件名内符号、语言关键字、模块/类成员与文档中出现过的词；手动触发键 <kbd>Ctrl+Space</kbd>（也可用 <kbd>Alt+/</kbd>）</div></div><input type="checkbox" id="setCodeComplete"></div>' +
-          '<div class="set-row" data-kw="自动 弹出 补全 输入 触发 suggest"><div class="set-info"><div class="set-label">输入时自动弹出补全</div><div class="set-desc">关闭后只在按 Ctrl+Space 时弹出候选列表</div></div><input type="checkbox" id="setAutoComplete"></div>' +
+          '<div class="app-group">' +
+            '<h3 class="app-group-hd">界面设置</h3>' +
+            '<p class="app-group-desc">设置应用主题、界面文字大小与内嵌播放器皮肤。</p>' +
+            '<div class="app-card">' +
+              appRow("界面主题", "选择浅色、深色或跟随系统主题，立即生效并记住选择。",
+                appSel("setTheme", "bi-sun", '<option value="dark">深色（黑夜）</option><option value="light">浅色（白天）</option><option value="system">跟随系统</option>'),
+                "外观 主题 界面 颜色 背景 深色 浅色 白 黑 白天 黑夜 跟随系统 theme dark light system") +
+              appRow("界面字号", "调整应用界面的文字大小，图标和布局尺寸不受影响；可直接输入或用鼠标滚轮增减（11–20）。",
+                appNum("setUiFontSize", 11, 20, "px"),
+                "外观 界面 字号 文字 大小 ui font size") +
+              appRow("播放器主题", "标签页内嵌视频 / 音频播放器的皮肤；「跟随编辑器」跟随上面的界面主题。",
+                appSel("setPlayerTheme", "bi-play-circle", '<option value="auto">跟随编辑器</option><option value="light">白天（浅色）</option><option value="dark">黑夜（深色）</option>'),
+                "外观 主题 播放器 视频 音频 皮肤 白天 黑夜 跟随编辑器 player video theme skin light dark auto") +
+            '</div>' +
+          '</div>' +
+          '<div class="app-group">' +
+            '<h3 class="app-group-hd">代码设置</h3>' +
+            '<p class="app-group-desc">设置代码内容的高亮主题、字号和显示方式，不受界面字号影响。</p>' +
+            '<div class="app-card">' +
+              appRow("浅色代码主题", "浅色界面下代码内容、差异视图与文件预览使用的高亮主题。",
+                appSel("setCmThemeLight", "bi-brightness-high", CM_LIGHT_OPTIONS),
+                "外观 代码 高亮 主题 浅色 白天 github vitesse minimal catppuccin eclipse idea default") +
+              appRow("深色代码主题", "深色界面下代码内容、差异视图与文件预览使用的高亮主题。",
+                appSel("setCmThemeDark", "bi-moon-stars", CM_DARK_OPTIONS),
+                "外观 代码 高亮 主题 深色 黑夜 github vitesse minimal catppuccin material dracula monokai") +
+              appRow("显示行号", "在编辑器、差异视图与代码预览左侧显示行号。",
+                appSwitch("setAppLineNumbers"),
+                "外观 代码 行号 显示 隐藏 line numbers gutter") +
+              appRow("长行自动换行", "代码内容过长时自动折行，不出现横向滚动条。",
+                appSwitch("setAppLineWrap"),
+                "外观 代码 换行 折行 自动换行 wrap line") +
+              appRow("代码字号", "编辑器与差异视图的代码字号（10–24，可用鼠标滚轮增减）。",
+                appNum("setAppFontSize", 10, 24, "px"),
+                "外观 代码 字体 字号 font size") +
+              appRow("高亮当前行", "光标所在行加背景色。",
+                appSwitch("setActiveLine"),
+                "外观 代码 高亮 当前行 active line") +
+              appRow("缩进空格数", "Tab 与自动缩进的空格宽度。",
+                appSel("setIndent", "", '<option value="2">2</option><option value="4">4</option><option value="8">8</option>', true),
+                "外观 代码 缩进 tab indent 空格") +
+              appRow("代码补全", "输入时联想文件名内符号、语言关键字、模块/类成员与文档中出现过的词；手动触发键 <kbd>Ctrl+Space</kbd>（也可用 <kbd>Alt+/</kbd>）。",
+                appSwitch("setCodeComplete"),
+                "外观 代码 补全 智能 提示 自动 联想 IntelliSense autocomplete suggest") +
+              appRow("输入时自动弹出补全", "关闭后只在按 Ctrl+Space 时弹出候选列表。",
+                appSwitch("setAutoComplete"),
+                "外观 代码 自动 弹出 补全 输入 触发 suggest") +
+            '</div>' +
+          '</div>' +
+          '<div class="app-group">' +
+            '<h3 class="app-group-hd">代码预览</h3>' +
+            '<p class="app-group-desc">同时预览浅色与深色代码主题，当前界面使用的主题会标记为「当前生效」。</p>' +
+            '<div class="app-preview-grid">' +
+              appPreviewCard("Light", "浅色预览", "浅色", "pv-light") +
+              appPreviewCard("Dark", "深色预览", "深色", "pv-dark") +
+            '</div>' +
+          '</div>' +
+          '<div class="app-group">' +
+            '<h3 class="app-group-hd">活动栏设置</h3>' +
+            '<p class="app-group-desc">调整左侧活动栏图标的显示顺序与启用状态，改动立即生效并记住。</p>' +
+            '<div class="app-card">' +
+              '<div class="set-row actord" data-kw="外观 活动栏 图标 顺序 排序 排列 拖动 启用 停用 activity bar order sort"><div class="set-info"><div class="set-label">活动栏图标顺序</div><div class="set-desc">拖动条目（或点 ↑ ↓）调整左侧活动栏图标的上下顺序；点条目右侧的电源开关启用 / 停用图标，停用后左侧活动栏不再显示；立即生效并记住选择，插件添加的图标也可一起调整</div></div><div class="actord-box"><div class="actord-list" id="setActOrder"></div><button class="set-btn" id="setActOrderReset">恢复默认顺序</button></div></div>' +
+            '</div>' +
+          '</div>' +
         '</div>' +
         '<div class="set-sec" id="sec-files"><h2>文件</h2>' +
           '<div class="set-row" data-kw="显示 全部 依赖 隐藏 node_modules eye"><div class="set-info"><div class="set-label">显示全部文件</div><div class="set-desc">资源管理器中显示依赖目录（node_modules 等）与点开头隐藏文件（.gitignore、.env 等），与「眼睛」图标按钮联动</div></div><input type="checkbox" id="setShowAll"></div>' +
@@ -424,7 +603,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
   ];
 
     // ---- 标签页模式：右侧只显示当前选中的分区，其余隐藏，靠左侧导航切换 ----
-    let activeSetSec = "sec-editor";   // 默认选中「编辑器」
+    let activeSetSec = "sec-appearance";   // 默认选中「外观」
     function showSettingsSec(secId) {
       activeSetSec = secId;
       host.querySelectorAll(".set-sec").forEach(sec => {
@@ -438,6 +617,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
       if (!k) {
         // 搜索清空：恢复所有行，回到「只显示当前分区」的标签页模式
         host.querySelectorAll(".set-row, .set-key, .kb-row, .set-extra").forEach(r => { r.style.display = ""; });
+        host.querySelectorAll(".app-group").forEach(g => { g.style.display = ""; });
         showSettingsSec(activeSetSec);
         return;
       }
@@ -455,6 +635,11 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         const any = [...sec.querySelectorAll(".set-row, .set-key, .kb-row, .cg-group, .cg-crow")].some(el => el.style.display !== "none");
         sec.style.display = any ? "" : "none";
       });
+      // 外观分组：整组没有命中项时连标题一起藏掉，避免搜索结果里出现空分组
+      host.querySelectorAll("#sec-appearance .app-group").forEach(g => {
+        const any = [...g.querySelectorAll(".set-row")].some(el => el.style.display !== "none");
+        g.style.display = any ? "" : "none";
+      });
     }
     function setNavActive(secId) {
       host.querySelectorAll(".set-navitem").forEach(n => n.classList.toggle("on", n.dataset.sec === secId));
@@ -468,12 +653,60 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
       };
     });
     setNavActive(activeSetSec);
-    showSettingsSec(activeSetSec);   // 初始只显示「编辑器」分区
+    showSettingsSec(activeSetSec);   // 初始只显示「外观」分区
     setSearchInput.addEventListener("input", () => filterSettingsRows(setSearchInput.value));
     setSearchInput.addEventListener("keydown", e => e.stopPropagation());   // 面板内按键不触发全局快捷键；关闭走标签页 ×
+    /* 外观分区：控件与设置值同步（代码字号 / 自动换行等原先「编辑器」分区的设置已并入此处） */
+    const appVal = (id, v) => { const el = q(id); if (el) el.value = v; };
+    const appChk = (id, v) => { const el = q(id); if (el) el.checked = !!v; };
+    function syncAppControls() {
+      appVal("#setTheme", ["dark", "light", "system"].indexOf(IDE_SETTINGS.theme) >= 0 ? IDE_SETTINGS.theme : "dark");
+      appVal("#setUiFontSize", uiFontSize());
+      appVal("#setPlayerTheme", ["light", "dark"].indexOf(IDE_SETTINGS.playerTheme) >= 0 ? IDE_SETTINGS.playerTheme : "auto");
+      appVal("#setCmThemeLight", ideCmThemeValue(true));
+      appVal("#setCmThemeDark", ideCmThemeValue(false));
+      appChk("#setAppLineNumbers", IDE_SETTINGS.showLineNumbers !== false);
+      appVal("#setAppFontSize", IDE_SETTINGS.fontSize);
+      appChk("#setAppLineWrap", IDE_SETTINGS.lineWrap);
+      renderAppPreview();
+    }
+    function applyCodeFontSize(v) {
+      const n = Math.max(10, Math.min(24, parseInt(v, 10) || 13));
+      IDE_SETTINGS.fontSize = n; saveIdeSettings(); applyIdeSettings();
+      appVal("#setAppFontSize", n);
+    }
+    function applyUiFontSize(v) {
+      const raw = parseInt(v, 10);
+      IDE_SETTINGS.uiFontSize = isNaN(raw) ? 14 : Math.max(11, Math.min(20, raw));
+      appVal("#setUiFontSize", uiFontSize());
+      saveIdeSettings(); applyIdeSettings();
+    }
+    // 数字框上滚鼠标：向上 +1 / 向下 -1，按 input 自身的 min/max 夹取，并立即保存生效。
+    // preventDefault 同时避免 Chrome 原生 number 输入「聚焦时滚轮改值」与页面一起滚动。
+    function bindNumWheel(id, commit, def) {
+      const el = q(id);
+      if (!el) return;
+      const target = el.closest(".app-num") || el;   // 整个数字框（含 px 区域）都能滚
+      let acc = 0;
+      target.addEventListener("wheel", e => {
+        e.preventDefault();
+        acc += e.deltaY;
+        if (Math.abs(acc) < 20) return;             // 触控板细碎滚动累积成一格，避免一次跳很多
+        const dir = acc < 0 ? 1 : -1;
+        acc = 0;
+        const min = parseInt(el.min, 10), max = parseInt(el.max, 10);
+        const lo = isNaN(min) ? 1 : min, hi = isNaN(max) ? 99 : max;
+        const cur = parseInt(el.value, 10);
+        const next = Math.max(lo, Math.min(hi, (isNaN(cur) ? def : cur) + dir));
+        el.value = next;
+        commit(next);
+      }, { passive: false });
+    }
+    function applyLineWrap(on) {
+      IDE_SETTINGS.lineWrap = !!on; saveIdeSettings(); applyIdeSettings();
+      appChk("#setAppLineWrap", on);
+    }
     // 当前值填入（每次重建标签页内容时都会刷新）
-    q("#setFontSize").value = IDE_SETTINGS.fontSize;
-    q("#setLineWrap").checked = IDE_SETTINGS.lineWrap;
     q("#setActiveLine").checked = IDE_SETTINGS.activeLine;
     q("#setIndent").value = IDE_SETTINGS.indent;
     q("#setCodeComplete").checked = IDE_SETTINGS.codeComplete !== false;
@@ -493,13 +726,11 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     q("#setHttpForApiDebug").checked = !!IDE_SETTINGS.httpForApiDebug;
     q("#setHttpTestUrl").value = IDE_SETTINGS.httpTestUrl || "";
     syncProxyAddrUI();
-    q("#setTheme").value = ideIsLight() ? "light" : "dark";
-    q("#setPlayerTheme").value = ["light", "dark"].indexOf(IDE_SETTINGS.playerTheme) >= 0 ? IDE_SETTINGS.playerTheme : "auto";
-    q("#setFontSize").addEventListener("change", e => {
-      const v = Math.max(10, Math.min(24, parseInt(e.target.value, 10) || 13));
-      IDE_SETTINGS.fontSize = v; e.target.value = v; saveIdeSettings(); applyIdeSettings();
-    });
-    q("#setLineWrap").addEventListener("change", e => { IDE_SETTINGS.lineWrap = e.target.checked; saveIdeSettings(); applyIdeSettings(); });
+    syncAppControls();
+    q("#setAppFontSize").addEventListener("change", e => applyCodeFontSize(e.target.value));
+    q("#setAppLineWrap").addEventListener("change", e => applyLineWrap(e.target.checked));
+    bindNumWheel("#setUiFontSize", applyUiFontSize, 14);
+    bindNumWheel("#setAppFontSize", applyCodeFontSize, 13);
     q("#setActiveLine").addEventListener("change", e => { IDE_SETTINGS.activeLine = e.target.checked; saveIdeSettings(); applyIdeSettings(); });
     q("#setIndent").addEventListener("change", e => { IDE_SETTINGS.indent = parseInt(e.target.value, 10) || 4; saveIdeSettings(); applyIdeSettings(); });
     // 代码补全：关闭时顺手收起已弹出的候选列表（触发逻辑实时判断开关，无需重建编辑器）
@@ -654,11 +885,30 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         res.textContent = "失败：" + ((err && err.message) || err);
       });
     });
-    // 界面主题：黑夜 / 白天（白色背景）切换，立即生效
+    // 界面主题：深色 / 浅色 / 跟随系统，立即生效
     q("#setTheme").addEventListener("change", e => {
-      IDE_SETTINGS.theme = e.target.value === "light" ? "light" : "dark";
+      const v = e.target.value;
+      IDE_SETTINGS.theme = (v === "light" || v === "system") ? v : "dark";
       saveIdeSettings(); applyIdeSettings();
-      toast(ideIsLight() ? "已切换到白天主题" : "已切换到黑夜主题", "ok");
+      toast(IDE_SETTINGS.theme === "system" ? "已跟随系统主题" :
+        (ideIsLight() ? "已切换到浅色主题" : "已切换到深色主题"), "ok");
+    });
+    // 界面字号：只改界面文字，不改图标与布局（change 与滚轮都走 applyUiFontSize）
+    q("#setUiFontSize").addEventListener("change", e => applyUiFontSize(e.target.value));
+    // 浅色 / 深色代码主题：两套独立，切换界面主题时自动取对应的一套
+    const bindCmTheme = (id, key, light) => {
+      q(id).addEventListener("change", e => {
+        IDE_SETTINGS[key] = e.target.value;
+        saveIdeSettings(); applyIdeSettings();
+        toast((light ? "浅色" : "深色") + "代码主题已切换", "ok");
+      });
+    };
+    bindCmTheme("#setCmThemeLight", "cmThemeLight", true);
+    bindCmTheme("#setCmThemeDark", "cmThemeDark", false);
+    // 显示行号：对已打开的编辑器与差异视图即时生效
+    q("#setAppLineNumbers").addEventListener("change", e => {
+      IDE_SETTINGS.showLineNumbers = e.target.checked;
+      saveIdeSettings(); applyIdeSettings();
     });
     // 播放器主题：白天 / 黑夜 / 跟随编辑器（auto 跟随「界面主题」，界面一换播放器跟着换）
     q("#setPlayerTheme").addEventListener("change", e => {
@@ -801,7 +1051,9 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
           if (d.keybinds && typeof d.keybinds === "object" && !Array.isArray(d.keybinds)) {
             kbCustom = d.keybinds; saveKeybinds(); applyKeybinds(); renderKeybinds();
           }
-          applyIdeSettings();
+          // 导入后用磁盘里的最新值刷新内存设置对象，再同步外观分区控件
+          try { Object.assign(IDE_SETTINGS, JSON.parse(localStorage.getItem("ide.settings") || "{}")); } catch (_) {}
+          applyIdeSettings(); syncAppControls();
           toast("设置已导入，部分项刷新页面后生效", "ok");
           renderStorageInfo();
         } catch (_) { toast("导入失败：不是有效的设置备份文件", "err"); }
@@ -832,11 +1084,13 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
         httpProxyMode: "", httpProxy: "", httpNoProxy: "", httpTimeout: 20, httpInsecure: false,
         httpFilterMode: "", httpFilterList: "",
         httpForApiDebug: false, httpTestUrl: "",
-        theme: "dark", playerTheme: "auto", actOrder: [], actDisabled: [] });
+        theme: "dark", playerTheme: "auto", actOrder: [], actDisabled: [],
+        uiFontSize: 14, cmThemeLight: "default", cmThemeDark: "material-darker",
+        showLineNumbers: true });
       saveIdeSettings(); applyIdeSettings();
       ideSettingSet("actOrder", []); ideSettingSet("actDisabled", []);    // 顺序与启用状态都恢复默认
-      applyActOrder(); actOrderRender();
-      q("#setFontSize").value = 13; q("#setLineWrap").checked = false; q("#setActiveLine").checked = true;
+      applyActOrder(); actOrderRender(); syncAppControls();
+      q("#setActiveLine").checked = true;
       q("#setIndent").value = 4; q("#setHints").checked = true;
       q("#setCodeComplete").checked = true; q("#setAutoComplete").checked = true;
       q("#setShowAll").checked = false; q("#setGitView").value = "list"; q("#setGitCommitMode").value = "tree";
@@ -848,8 +1102,6 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
       q("#setHttpTestUrl").value = ""; q("#setHttpTestRes").textContent = "";
       q("#setHttpTestRes").className = "net-test-res";
       syncProxyAddrUI();
-      q("#setTheme").value = "dark";
-      q("#setPlayerTheme").value = "auto";
       // 同步重置各开关的运行时状态
       showAllFiles = false; showHidden = false;
       gitViewMode = "list"; gitCommitFileMode = "tree";
@@ -1010,6 +1262,13 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
 
   applyIdeSettings();   // 启动时应用一次（新开编辑器读取 IDE_SETTINGS 默认值）
   applyActOrder();      // 活动栏图标顺序（设置 → 外观 可修改；插件注册的图标稍后由 20_ 补调）
+  // 「跟随系统」：操作系统切换深浅时即时重刷界面主题与代码主题
+  if (window.matchMedia) {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSysTheme = () => { if (IDE_SETTINGS.theme === "system") applyIdeSettings(); };
+    if (mq.addEventListener) mq.addEventListener("change", onSysTheme);
+    else if (mq.addListener) mq.addListener(onSysTheme);
+  }
 
   /* ---------- 键盘快捷键 ---------- */
   let chordK = false;   // Ctrl+K 两段式快捷键（仿 VS Code）

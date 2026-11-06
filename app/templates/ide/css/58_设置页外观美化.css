@@ -1,0 +1,197 @@
+/* ============================================================================
+   58_设置页外观美化：设置 → 外观
+   参考分组卡片式外观设置：大标题 + 分组标题/说明 + 圆角边框卡片 + 逐行分隔，
+   行内左侧标题与说明、右侧控件；活动栏图标顺序沿用原有拖动逻辑，只是重新排版。
+   浅色覆盖用 #sec-appearance 提高特异性，压过 29_浅色主题.css 的通用 .set-row 规则。
+   ============================================================================ */
+
+/* ---------- 分区标题与分组 ---------- */
+#sec-appearance > h2 {
+  font-size: 26px; font-weight: 700; letter-spacing: .5px;
+  color: #ececec; margin: 0 0 26px; padding: 0; border: 0;
+}
+.app-group { margin-bottom: 26px; }
+.app-group-hd { font-size: 14.5px; font-weight: 700; color: #e6e6e6; margin: 0 0 5px; }
+.app-group-desc { font-size: 12.5px; color: #8a8a8a; line-height: 1.6; margin: 0 0 14px; }
+
+/* ---------- 卡片与行 ---------- */
+.app-card { background: #242425; border: 1px solid #353536; border-radius: 10px; overflow: hidden; }
+#sec-appearance .app-card .set-row {
+  display: flex; align-items: center; gap: 16px;
+  background: transparent; border: 0; border-bottom: 1px solid #353536; border-radius: 0;
+  margin: 0; padding: 16px 20px; transition: background .15s ease;
+}
+#sec-appearance .app-card .set-row:last-child { border-bottom: 0; }
+#sec-appearance .app-card .set-row:hover { background: rgba(255, 255, 255, .025); }
+#sec-appearance .set-row .set-info { flex: 1; min-width: 0; }
+#sec-appearance .set-row .set-label { font-size: 13.5px; font-weight: 600; color: #e6e6e6; }
+#sec-appearance .set-row .set-desc { font-size: 12px; color: #8f8f8f; margin: 5px 0 0; line-height: 1.6; }
+
+/* ---------- 右侧控件：下拉框 / 数字框 / 开关 ---------- */
+.app-ctl { flex: none; display: flex; align-items: center; justify-content: flex-end; min-width: 196px; }
+.app-select { position: relative; display: inline-flex; align-items: center; }
+.app-select .app-ic {
+  position: absolute; left: 11px; z-index: 1; color: #9a9a9a; font-size: 14px;
+  pointer-events: none;
+}
+.app-select .app-chev {
+  position: absolute; right: 11px; z-index: 1; color: #8a8a8a; font-size: 11px;
+  pointer-events: none;
+}
+.app-select select {
+  -webkit-appearance: none; appearance: none;
+  width: 196px; height: 34px; box-sizing: border-box;
+  padding: 0 30px 0 32px; border: 1px solid #404041; border-radius: 8px;
+  background: #2b2b2c; color: #e2e2e2; font-size: 12.5px; outline: none; cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.app-select.no-ic select { padding-left: 12px; }
+.app-select.narrow select { width: 96px; }          /* 只有 2 / 4 / 8 这类短选项的下拉 */
+.app-select select:focus { border-color: #0a6aa8; box-shadow: 0 0 0 2px rgba(10, 106, 168, .22); }
+
+.app-num {
+  display: inline-flex; align-items: center; gap: 6px; height: 34px; box-sizing: border-box;
+  border: 1px solid #404041; border-radius: 8px; background: #2b2b2c; padding: 0 12px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.app-num:focus-within { border-color: #0a6aa8; box-shadow: 0 0 0 2px rgba(10, 106, 168, .22); }
+/* 数字与 px 同一基线：两者用同样的字号 / 行高 / 高度，容器垂直居中，数字等宽避免跳动 */
+.app-num input[type="number"] {
+  width: 30px; height: 32px; line-height: 32px; border: 0; padding: 0;
+  background: transparent; color: #e2e2e2; font-size: 12.5px;
+  font-variant-numeric: tabular-nums; text-align: right; outline: none; flex: none;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.app-num input[type="number"]::-webkit-inner-spin-button,
+.app-num input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.app-num .app-unit {
+  color: #8a8a8a; font-size: 12.5px; line-height: 32px; height: 32px;
+  display: inline-flex; align-items: center; flex: none;
+}
+
+.app-switch { position: relative; display: inline-block; width: 40px; height: 22px; flex: none; }
+#sec-appearance .app-switch input[type="checkbox"] {
+  position: absolute; opacity: 0; width: 0; height: 0; margin: 0; accent-color: auto;
+}
+.app-switch > span {
+  position: absolute; inset: 0; background: #4a4a4b; border-radius: 999px;
+  cursor: pointer; transition: background .18s ease;
+}
+.app-switch > span::before {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+  background: #fff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+  transition: transform .18s ease;
+}
+.app-switch input:checked + span { background: #0a6aa8; }
+.app-switch input:checked + span::before { transform: translateX(18px); }
+.app-switch input:focus-visible + span { box-shadow: 0 0 0 3px rgba(10, 106, 168, .35); }
+
+/* ---------- 代码预览：浅色 / 深色两张卡片 ----------
+   代码块本身带 cm-s-xxx 类，直接复用 59_代码主题扩展.css 的 --ext-* 变量与
+   vendor 主题的 span.cm-* 配色；没有这些变量的 vendor 主题用 --pv-* 兜底。 */
+.app-preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 720px) { .app-preview-grid { grid-template-columns: 1fr; } }
+.app-preview-card {
+  background: #242425; border: 1px solid #353536; border-radius: 10px;
+  padding: 14px 16px 16px; min-width: 0;
+}
+.app-preview-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.app-preview-tt { font-size: 13.5px; font-weight: 600; color: #e6e6e6; }
+.app-preview-badge {
+  font-size: 11px; color: #9a9a9a; background: #333334; border: 1px solid #454546;
+  border-radius: 999px; padding: 2px 9px; flex: none; white-space: nowrap;
+}
+.app-preview-badge.on {
+  color: #8fd3a6; background: rgba(76, 195, 138, .12); border-color: rgba(76, 195, 138, .45);
+}
+.app-preview-theme { font-size: 12px; color: #8a8a8a; margin: 5px 0 12px; }
+.app-preview-code {
+  border-radius: 8px; border: 1px solid var(--ext-border, var(--pv-border));
+  background: var(--ext-bg, var(--pv-bg)); color: var(--ext-fg, var(--pv-fg));
+  font-family: "SF Mono", "Menlo", Consolas, monospace;
+  font-size: var(--cm-font-size, 12px); line-height: 1.8;
+  padding: 10px 0; overflow-x: auto;
+}
+.app-preview-code.pv-light {
+  --pv-bg: #ffffff; --pv-fg: #24292f; --pv-gutter: #f6f8fa;
+  --pv-border: #e8e8e8; --pv-ln: #9a9a9a;
+}
+.app-preview-code.pv-dark {
+  --pv-bg: #1e1e1e; --pv-fg: #d4d4d4; --pv-gutter: #252526;
+  --pv-border: #333333; --pv-ln: #858585;
+}
+.pv-line { display: flex; min-width: max-content; }
+.pv-ln {
+  flex: none; width: 38px; box-sizing: border-box; padding-right: 12px; text-align: right;
+  color: var(--ext-gutter-fg, var(--pv-ln));
+  background: var(--ext-gutter, var(--pv-gutter));
+  border-right: 1px solid var(--ext-border, var(--pv-border));
+  user-select: none;
+}
+.pv-tx { white-space: pre; padding: 0 12px; }
+
+/* ---------- 活动栏图标顺序：整行铺开，拖动 / 上下移动 / 启停全部保留 ---------- */
+#sec-appearance .app-card .set-row.actord { display: block; padding: 18px 20px 20px; }
+#sec-appearance .actord-box { width: 100%; margin-top: 14px; }
+#sec-appearance .actord-list { gap: 6px; }
+#sec-appearance .actord-item {
+  background: #2b2b2c; border: 1px solid #3b3b3c; border-radius: 8px;
+  padding: 7px 10px; font-size: 12.5px;
+}
+#sec-appearance .actord-item:hover { border-color: #0a6aa8; background: #303031; }
+#sec-appearance .actord-nm { font-weight: 500; }
+#sec-appearance .actord-mv { width: 22px; height: 22px; border-radius: 6px; }
+#sec-appearance #setActOrderReset {
+  margin-top: 12px; background: #2b2b2c; border: 1px solid #404041; border-radius: 8px;
+  padding: 6px 14px; font-size: 12px; color: #dcdcdc;
+}
+#sec-appearance #setActOrderReset:hover { background: #3a3a3b; }
+
+/* ---------- 界面字号：只放大/缩小界面文字，图标与布局尺寸不变 ----------
+   仅在用户选择了非默认字号时给 <html> 挂 ui-font-custom，避免改动默认外观。 */
+html.ui-font-custom { --ui-font-size: 14px; --ui-font-size-sm: 13px; }
+html.ui-font-custom :where(
+  .menubar span, .set-navitem, .set-search, .set-row .set-label,
+  .tree-row, .tree-row .nm, .tab .t-nm, .statusbar, .bp-tab, .actord-nm,
+  .app-group-hd, .side-hd, .panel-hd
+) { font-size: var(--ui-font-size) !important; }
+html.ui-font-custom :where(
+  .set-row .set-desc, .tree-row .nm-hint, .app-group-desc
+) { font-size: var(--ui-font-size-sm) !important; }
+
+/* ---------- 浅色主题覆盖（用 ID 提高特异性，压过 29_浅色主题.css） ---------- */
+:where(html.theme-light) #sec-appearance > h2 { color: #1f2328; }
+:where(html.theme-light) .app-group-hd { color: #1f2328; }
+:where(html.theme-light) .app-group-desc { color: #6b6b6b; }
+:where(html.theme-light) .app-card { background: #ffffff; border-color: #e3e3e3; }
+:where(html.theme-light) #sec-appearance .app-card .set-row { border-bottom-color: #ececec; }
+:where(html.theme-light) #sec-appearance .app-card .set-row:hover { background: #fafafa; }
+:where(html.theme-light) #sec-appearance .set-row .set-label { color: #1f2328; }
+:where(html.theme-light) #sec-appearance .set-row .set-desc { color: #6b6b6b; }
+:where(html.theme-light) #sec-appearance .app-select select,
+:where(html.theme-light) #sec-appearance .app-num { background: #ffffff; border-color: #d8d8d8; color: #1f2328; }
+:where(html.theme-light) #sec-appearance .app-num input[type="number"] { color: #1f2328; }
+:where(html.theme-light) #sec-appearance .app-select .app-ic,
+:where(html.theme-light) #sec-appearance .app-select .app-chev,
+:where(html.theme-light) #sec-appearance .app-num .app-unit { color: #6b6b6b; }
+:where(html.theme-light) #sec-appearance .app-switch > span { background: #c8c8c8; }
+:where(html.theme-light) #sec-appearance .app-switch input:checked + span { background: #1a1a1a; }
+:where(html.theme-light) #sec-appearance .actord-item {
+  background: #fafafa; border-color: #e5e5e5; color: #1f2328;
+}
+:where(html.theme-light) #sec-appearance .actord-item:hover { background: #f2f6fa; border-color: #005fb8; }
+:where(html.theme-light) #sec-appearance #setActOrderReset {
+  background: #ffffff; border-color: #d8d8d8; color: #1f2328;
+}
+/* 代码预览卡片跟随浅色界面，但代码块自身仍按所选主题配色（浅色 / 深色各一张） */
+:where(html.theme-light) #sec-appearance .app-preview-card {
+  background: #ffffff; border-color: #e3e3e3;
+}
+:where(html.theme-light) #sec-appearance .app-preview-tt { color: #1f2328; }
+:where(html.theme-light) #sec-appearance .app-preview-theme { color: #6b6b6b; }
+:where(html.theme-light) #sec-appearance .app-preview-badge {
+  background: #f2f2f2; border-color: #dedede; color: #6b6b6b;
+}
+:where(html.theme-light) #sec-appearance .app-preview-badge.on {
+  color: #1a7f4b; background: #e6f6ec; border-color: #a9dcbf;
+}

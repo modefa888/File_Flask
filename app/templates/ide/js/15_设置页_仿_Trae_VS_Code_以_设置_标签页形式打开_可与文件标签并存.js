@@ -416,7 +416,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     }
 
   const SYS_KEYS = [
-    ["重命名", "F2"], ["删除", "Delete"],
+    ["重命名", "F2"], ["删除", "Delete"], ["属性", "Alt Enter"],
     ["打开 / 展开目录", "Enter"], ["在侧边打开", "Ctrl Enter"],
     ["复制文件", "Ctrl C"], ["剪切文件", "Ctrl X"], ["粘贴", "Ctrl V"],
     ["复制绝对路径", "Ctrl Alt C"], ["复制相对路径", "Ctrl Alt Shift C"],
@@ -1021,6 +1021,7 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     if (ae && ae.classList && ae.classList.contains("tree-row") && treeSel) {
       const k = (e.key || "").toLowerCase();
       if (e.key === "F2") { e.preventDefault(); ctxTarget = treeSel; ctxAction("rename"); return; }
+      if (e.altKey && e.key === "Enter") { e.preventDefault(); ctxTarget = treeSel; ctxAction("props"); return; }
       if (e.key === "Delete") { e.preventDefault(); ctxTarget = treeSel; ctxAction("delete"); return; }
       if (e.key === "Enter" && !mod) { e.preventDefault(); ae.click(); return; }          // 文件=打开，目录=展开/收起
       if (mod && e.key === "Enter") { e.preventDefault(); ctxTarget = treeSel; ctxAction("open-side"); return; }

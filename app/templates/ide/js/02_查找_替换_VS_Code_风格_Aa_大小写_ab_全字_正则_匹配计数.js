@@ -417,6 +417,8 @@
     items.push({ divider: true });
     items.push({ label: "编辑说明…", act: () => ctxAction("edit-hint") });
     items.push({ label: "重命名…", sc: "F2", act: () => ctxAction("rename") });
+    items.push({ label: "属性", icon: "bi-info-circle", sc: "Alt+Enter", act: () => ctxAction("props") });
+    items.push({ divider: true });
     const selCount = explorerPanel.querySelectorAll(".tree-row.selected").length;
     items.push({ label: selCount > 1 ? ("删除 " + selCount + " 项") : "删除", sc: "Delete", danger: true, act: () => ctxAction("delete") });
     renderDrop(items, null, "tree-ctx", { x, y });
@@ -442,6 +444,98 @@
       }
     } catch (_) {}
     return '<div class="del-info"><table class="di-tbl">' + rows + "</table></div>";
+  }
+  /* ---------- 属性（右键 → 属性 / Alt+Enter，仿 Windows 文件属性） ----------
+     数据全部来自 /api/properties：基本（名称 / 类型 / 大小 / 占用磁盘）、位置（父目录 /
+     相对路径 / 完整路径）、时间（修改 / 创建 / 访问）、权限与所有者，以及目录统计
+     （子项数 / 递归文件数 / 最近改动 / 最大文件）或文件专属信息（图片宽高 / 行数 / MD5）。
+     目录要递归统计可能耗时，所以先弹框再回填，用户中途关掉也不会报错。 */
+  const propRow = (k, v) => (v === undefined || v === null || v === "")
+    ? "" : '<tr><td class="di-k">' + esc(k) + '</td><td class="di-v">' + esc(String(v)) + "</td></tr>";
+  function showFileProps(path, name, isDir) {
+    const nm = name || baseName(path);
+    // 连开两个属性框时，别让先发的请求回来后覆盖后一个框的内容
+    const seq = String(Date.now()) + "_" + Math.random().toString(36).slice(2);
+    // 先开框：表头几行立刻可见，其余等接口回来再回填
+    uiModal({
+      title: "属性 — " + nm,
+      icon: "bi-info-circle",
+      wide: true,
+      hideCancel: true,
+      okText: "关闭",
+      html: '<div class="del-info" id="propBox" data-seq="' + seq + '"><table class="di-tbl">' +
+        propRow("名称", nm) +
+        propRow("类型", isDir ? "目录" : "文件") +
+        propRow("完整路径", path) +
+        '</table><div class="m-msg" id="propTip" style="margin-top:10px">正在读取' +
+        (isDir ? "目录（需要递归统计大小，稍等）" : "文件") + "属性…</div></div>",
+    });
+    fetch("/api/properties?path=" + encodeURIComponent(path))
+      .then(r => r.json())
+      .then(d => {
+        const box = document.getElementById("propBox");
+        if (!box || box.dataset.seq !== seq) return;        // 弹框已关掉 / 已换成另一个
+        if (!d || d.error) {
+          const tip = document.getElementById("propTip");
+          if (tip) tip.textContent = "读取失败：" + ((d && d.error) || "接口无响应");
+          return;
+        }
+        const ex = d.extras || {};
+        const rows = [
+          propRow("名称", d.name || nm),
+          propRow("类型", d.is_dir ? "目录"
+            : "文件" + (d.ext ? "（" + d.ext.toUpperCase() + "）" : "")),
+          propRow("MIME 类型", d.is_dir ? "" : d.mime_type),
+          propRow("大小", d.size_str),
+          // 稀疏文件 / 小文件对齐后，磁盘占用常与逻辑大小不同，两者都给出
+          propRow(d.is_dir ? "" : "占用磁盘",
+            (d.disk_size_str && d.disk_size && d.disk_size !== d.size) ? d.disk_size_str : ""),
+          propRow("所在目录", d.parent),
+          propRow("相对路径", relPathOf(d.path || path)),
+          propRow("完整路径", d.path || path),
+          propRow("权限", d.mode_str ? d.mode_str + (d.permissions ? "（" + d.permissions + "）" : "") : ""),
+          propRow("所有者", d.owner ? d.owner + (d.group ? " · " + d.group : "") : ""),
+          propRow("符号链接指向", d.is_symlink ? d.link_target : ""),
+          propRow("修改时间", d.modified),
+          // ctime 在 Linux 上是 inode 状态变更时间（chmod / 重命名都会刷新），不是创建时间
+          propRow("状态变更时间", d.ctime),
+          propRow("创建时间", d.created),
+          propRow("访问时间", d.accessed),
+          propRow("硬链接数", d.links),
+          propRow("Inode", d.inode),
+        ];
+        if (d.is_dir) {
+          rows.push(propRow("直接子项", (d.sub_dirs || 0) + " 个目录 / " + (d.sub_files || 0) + " 个文件"));
+          rows.push(propRow("递归合计", (d.total_dirs || 0) + " 个目录 / " + (d.total_files || 0) + " 个文件"));
+          rows.push(propRow("隐藏项", d.hidden ? d.hidden + " 个" : ""));
+          rows.push(propRow("最近改动", d.newest));
+          rows.push(propRow("最大文件", d.largest
+            ? d.largest + (d.largest_size_str ? "（" + d.largest_size_str + "）" : "") : ""));
+        } else {
+          if (ex.image) {
+            rows.push(propRow("图片尺寸",
+              ex.image.width + " × " + ex.image.height + " px（" + ex.image.mode + "）"));
+          }
+          if (ex.text) rows.push(propRow("内容规模", ex.text.lines + " 行 · " + ex.text.chars + " 字符"));
+          rows.push(propRow("MD5", ex.md5));
+        }
+        // 时间说明：mtime 早于 ctime 是正常现象（解压 / 复制保留 mtime，之后的 chmod、
+        // 重命名、覆盖写只刷新 ctime），不解释一下容易被当成算错了
+        let note = "";
+        if (!d.created) {
+          note += '<div class="di-note">当前系统不保存创建时间（Linux 的 st_ctime 是状态变更时间，' +
+            "不是创建时间），故不显示该项。</div>";
+        }
+        if (d.ctime && d.modified && d.modified < d.ctime) {
+          note += '<div class="di-note">修改时间早于状态变更时间是正常的：复制 / 解压会保留文件的' +
+            "原修改时间，之后的 chmod、重命名、覆盖写等只刷新状态变更时间。</div>";
+        }
+        box.innerHTML = '<table class="di-tbl">' + rows.join("") + "</table>" + note;
+      })
+      .catch(e => {
+        const tip = document.getElementById("propTip");
+        if (tip) tip.textContent = "读取失败：" + (e.message || e);
+      });
   }
   async function ctxAction(act) {
     if (!ctxTarget) return;
@@ -474,6 +568,7 @@
       return;
     }
     if (act === "edit-hint") { await editFileHint(name); return; }
+    if (act === "props") { await showFileProps(path, name, isDir); return; }
     if (act === "rename") {
       const nn = await uiPrompt("重命名", name, "输入新名称"); if (!nn || nn === name) return;
       fetch("/api/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, new_name: nn }) })
@@ -883,7 +978,7 @@
         ["Ctrl+K S", "保存全部"], ["Ctrl+K W", "关闭全部标签"], ["Ctrl+K U", "关闭已保存的标签"],
         ["标签栏 ⋯", "编辑器操作菜单：暂存更改 / 显示打开的编辑器 / 关闭等"],
         ["编辑器内右键", "撤销重做、剪切复制粘贴、查找替换、转到行、查找所有引用、保存 / 运行、Markdown 预览等"],
-        ["资源管理器", "右键：打开 / 在侧边打开 / 打开方式… / 打开所在文件夹 / 选择以进行比较 / 打开时间线 / 剪切复制粘贴 / 复制路径 / 复制相对路径 / 重命名 / 删除"],
+        ["资源管理器", "右键：打开 / 在侧边打开 / 打开方式… / 打开所在文件夹 / 选择以进行比较 / 打开时间线 / 剪切复制粘贴 / 复制路径 / 复制相对路径 / 重命名 / 属性 / 删除"],
         ["资源管理器空白处", "右键：新建文件 / 新建文件夹 / 刷新 / 全部展开折叠（同一个开关项）/ 在集成终端中打开 / 在文件管理器中打开 / 添加文件夹到工作区 / 添加到 AI 对话 / 在文件夹中查找 / 粘贴 / 复制路径"],
         ["资源管理器项目行", "右键项目标题行：同上，且附加项目可「将文件夹从工作区移除」"],
         ["资源管理器按键", "选中文件后：Enter 打开，Ctrl+Enter 侧边打开，F2 重命名，Delete 删除，Ctrl+C/X/V 复制剪切粘贴，Ctrl+Alt+C 复制路径，Ctrl+Shift+Alt+C 复制相对路径"],

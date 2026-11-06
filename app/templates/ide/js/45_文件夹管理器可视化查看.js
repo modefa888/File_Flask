@@ -475,7 +475,10 @@ function fmPropsRows(tab, it) {
     rows.push(["大小", it.size_str]);
   }
   if (it.mtime) rows.push(["修改时间", it.mtime]);
-  if (it.ctime) rows.push(["创建时间", it.ctime]);
+  // ctime 在 Linux 上是状态变更时间（chmod / 重命名都会刷新），真正的创建时间只有
+  // macOS / BSD 的 st_birthtime 才有，所以分开显示
+  if (it.ctime) rows.push(["状态变更时间", it.ctime]);
+  if (it.birth && it.birth !== it.ctime) rows.push(["创建时间", it.birth]);
   if (it.ext) rows.push(["扩展名", "." + it.ext]);
   if (it.perm) rows.push(["权限", it.perm]);
   if (it.uid != null || it.gid != null) {

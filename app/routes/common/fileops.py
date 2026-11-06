@@ -1010,8 +1010,22 @@ def _prop_time(ts):
     """时间戳 → 本地时间字符串（异常值返回 -）。"""
     try:
         return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
-    except (OSError, ValueError, OverflowError):
+    except (OSError, ValueError, OverflowError, TypeError):
         return "-"
+
+
+def _prop_birth_ts(st):
+    """真·创建时间戳：macOS / BSD 有 st_birthtime，Windows 的 st_ctime 就是创建时间；
+    Linux 的 st_ctime 是 inode 状态变更时间（chmod / 重命名都会刷新），拿不到创建时间 → None。"""
+    bt = getattr(st, "st_birthtime", None)
+    if bt:
+        return bt
+    return st.st_ctime if os.name == "nt" else None
+
+
+def _prop_change_ts(st):
+    """状态变更时间：Linux / macOS 的 st_ctime；Windows 上它等于创建时间，不重复给出。"""
+    return None if os.name == "nt" else st.st_ctime
 
 
 def _prop_owner_group(st):
@@ -1038,13 +1052,17 @@ def _prop_common(target_path, st):
     except Exception:
         mode_str = "-"
     parent = os.path.dirname(target_path)
+    birth_ts = _prop_birth_ts(st)
+    change_ts = _prop_change_ts(st)
     return {
         "name": os.path.basename(target_path) or target_path,
         "path": target_path,
         "parent": parent,
         "parent_name": os.path.basename(parent) or parent,
-        # 创建时间：Linux 上没有 birthtime，用 ctime（元数据变更时间）代替
-        "created": _prop_time(st.st_ctime),
+        # 三种时间分开给，别再把 ctime（状态变更）当成创建时间：
+        # modified=mtime 内容修改 / ctime=状态变更 / created=真创建时间（系统不提供时为空）
+        "created": _prop_time(birth_ts) if birth_ts else "",
+        "ctime": _prop_time(change_ts) if change_ts else "",
         "modified": _prop_time(st.st_mtime),
         "accessed": _prop_time(st.st_atime),
         "permissions": oct(st.st_mode)[-3:],

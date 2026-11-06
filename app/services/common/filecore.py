@@ -560,12 +560,13 @@ def get_file_info(file_path, base_path, compute_size=True, compute_counts=False,
             "mtime": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
             "ext": ext,
         }
-        # 创建时间：优先 st_birthtime（真创建时间），Linux 无该字段时用 st_ctime（inode 变更时间）近似
+        # 时间字段：ctime 是 inode 状态变更时间（Linux / macOS 的 st_ctime，Windows 上即创建时间），
+        # 不能当创建时间展示；birth 只有系统提供 st_birthtime（macOS / BSD）时才有，前端据此决定显示与否
         try:
+            info["ctime"] = datetime.fromtimestamp(st.st_ctime).strftime("%Y-%m-%d %H:%M:%S")
             _birth = getattr(st, "st_birthtime", None)
-            info["ctime"] = datetime.fromtimestamp(
-                _birth if _birth else st.st_ctime
-            ).strftime("%Y-%m-%d %H:%M:%S")
+            if _birth:
+                info["birth"] = datetime.fromtimestamp(_birth).strftime("%Y-%m-%d %H:%M:%S")
         except (OSError, ValueError, OverflowError):
             pass
         if is_dir and compute_counts:

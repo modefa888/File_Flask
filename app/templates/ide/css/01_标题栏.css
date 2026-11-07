@@ -50,13 +50,22 @@
     background: #252526; border: 1px solid #454545; border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
   }
-  #tbIpPop .tb-ip-pop-head {
-    display: flex; align-items: center; justify-content: space-between; gap: 16px;
-    margin-bottom: 6px; font-size: 12px; color: #cfcfcf;
+  /* 图片加载中的占位提示：加载完成 / 失败后由 JS 切换显隐。
+     旋转用 CSS 圆环而不是 bi 字形（bi-arrow-repeat 字形在字框里不居中，rotate 起来会抖动偏摆，
+     与 32_进程资源管理器.css 的做法一致） */
+  #tbIpPop #tbIpPopLoading {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 520px; max-width: 86vw; padding: 24px 0;
+    font-size: 12px; color: #9aa0a6;
   }
-  #tbIpPop .tb-ip-pop-head a { color: #4daafc; text-decoration: none; }
-  #tbIpPop .tb-ip-pop-head a:hover { text-decoration: underline; }
+  #tbIpPop .tb-ip-ring {
+    width: 14px; height: 14px; flex: none;
+    border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%;
+    animation: tb-ip-spin .85s linear infinite;
+  }
+  @keyframes tb-ip-spin { to { transform: rotate(360deg); } }
   #tbIpPop img { display: block; width: 520px; max-width: 86vw; height: auto; border-radius: 6px; }
+  #tbIpPop img.tb-ip-hide { display: none; }
   .titlebar .tb-actions #aiToggle i { color: #c08cf5; }                        /* AI 助手：紫 */
   /* 桌宠显隐开关：开启 = 彩色图标且不铺底色，关闭 = 灰色无彩图标；
      hover 只提亮图标，同样不显示背景色块。 */

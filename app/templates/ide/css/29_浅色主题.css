@@ -46,7 +46,7 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .titlebar .tb-actions #tbIpCard i { color: #0f7d63; }
 /* 浅色主题：IP 信息悬浮框同步换浅色底 */
 :where(html.theme-light) #tbIpPop { background: #f6f6f6; border-color: #c8c8c8; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
-:where(html.theme-light) #tbIpPop .tb-ip-pop-head { color: #3b3b3b; }
+:where(html.theme-light) #tbIpPop #tbIpPopLoading { color: #6e7681; }
 :where(html.theme-light) .titlebar .tb-actions #aiToggle i { color: #7a3dba; }
 :where(html.theme-light) .titlebar .tb-actions #tbDeskie i { color: #0f7d63; }
 :where(html.theme-light) .titlebar .tb-actions #tbDeskie.off i { color: #8a8a8a; }

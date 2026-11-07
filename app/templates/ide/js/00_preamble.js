@@ -2126,6 +2126,8 @@
     tab._domSig = tabDomSig(tab);   // 记下本次渲染对应的字段快照，供 renderTabsAll 判断能否复用节点
     // 协作标记：由 43_ 协作模块按会话状态打标（解耦；未加载协作模块时无副作用）
     if (typeof window.IDECollabTabMark === "function") window.IDECollabTabMark(el, tab);
+    // 标签名被改名 / 换文件（如视频播放器原位切换）时，浏览器标题跟随刷新
+    if (active === tab) syncDocTitle();
   }
   // 视频播放器播放列表原位切换时同步标签页（22 号视频播放器 js 调用）：
   // 更新 path/name 并重绘标签节点；当前激活时顺带刷新面包屑与状态栏
@@ -2422,6 +2424,15 @@
     target.scrollIntoView({ block: "nearest" });
   }
 
+  // 浏览器标签页标题实时跟随当前激活标签：如「在线项目 IDE — 设置」；
+  // 没有激活标签（全部关闭）时回退为纯「在线项目 IDE」。
+  // cleanTabName 用于剥掉差异标签的 @提交哈希等后缀，与标签栏显示保持一致
+  function syncDocTitle() {
+    document.title = active && active.name
+      ? "在线项目 IDE — " + cleanTabName(active.name, active.path)
+      : "在线项目 IDE";
+  }
+
   function activate(tab) {
     mountHost(tab);   // 编辑器容器必须先在所属组里，切换才会真正显示内容
     tabs.forEach(t => { if (t.group === tab.group) { t.host.classList.remove("active"); t.el.classList.remove("active"); } });
@@ -2453,6 +2464,7 @@
     if (typeof sshSyncOpenMarks === "function") sshSyncOpenMarks();   // SSH 终端侧栏高亮跟随当前标签
     if (typeof runnerViewOnActivate === "function") runnerViewOnActivate();   // 后台任务轮询跟随当前标签
     if (active && typeof active.onFmActivate === "function") active.onFmActivate();   // 文件夹管理器：切回时刷新目录
+    syncDocTitle();   // 浏览器标签页标题跟随当前标签名
   }
   async function closeTab(tab) {
     const i = tabs.indexOf(tab);
@@ -2471,7 +2483,7 @@
       const rest = tabs.filter(t => t.group === g);
       const next = rest[rest.length - 1] || tabs[tabs.length - 1] || null;
       if (next) activate(next);
-      else { active = null; groupActive.delete(g); curGroup = 0; $("breadcrumbs").innerHTML = ""; updateStatus(); ffClose(); }
+      else { active = null; groupActive.delete(g); curGroup = 0; $("breadcrumbs").innerHTML = ""; updateStatus(); ffClose(); syncDocTitle(); }
     }
     sessionSaveTabs();
     renderWelcomeExtra();   // 空编辑器时欢迎页重新可见，刷新最近打开 / 扩展入口

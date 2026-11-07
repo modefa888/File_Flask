@@ -1844,14 +1844,22 @@
         if (!dlIds.length) { toast("当前列表没有「测速可用」的节点，请先全部测速", "warn"); break; }
         V2.dlProg = { done: 0, total: dlIds.length };
         if (v2vActive()) v2vRender();
-        toast("下载测速中：逐个实测 " + dlIds.length + " 个可用节点（每个起临时内核，较耗时）", "info");
-        for (const nid of dlIds) {
-          const r = await post("/api/v2ray/dl-temp", { id: nid }).catch(() => null);
-          if (r && r.ok) V2.dl[nid] = r.mbps;
-          if (V2.dlProg) V2.dlProg.done++;
-          if (v2vActive()) v2vRender();
-          v2SideRender();
-        }
+        toast("下载测速中：并发实测 " + dlIds.length + " 个可用节点（每个起临时内核，较耗时）", "info");
+        // 有限并发：原来逐个 await，每个节点都要等临时内核启动 + 下载；
+        // 现在 3 路同时在飞，接口与每个节点的测速结果都不变。
+        let dlCursor = 0;
+        const DL_PARALLEL = Math.min(3, dlIds.length);
+        const dlWorker = async () => {
+          while (dlCursor < dlIds.length) {
+            const nid = dlIds[dlCursor++];
+            const r = await post("/api/v2ray/dl-temp", { id: nid }).catch(() => null);
+            if (r && r.ok) V2.dl[nid] = r.mbps;
+            if (V2.dlProg) V2.dlProg.done++;
+            if (v2vActive()) v2vRender();
+            v2SideRender();
+          }
+        };
+        await Promise.all(Array.from({ length: DL_PARALLEL }, dlWorker));
         V2.dlProg = null;
         if (v2vActive()) v2vRender();
         v2SideRender();
@@ -1866,18 +1874,26 @@
         if (!ids.length) { toast("当前列表没有节点", "warn"); break; }
         V2.pingProg = { done: 0, total: ids.length };
         if (v2vActive()) v2vRender();
-        // 分批走后端并发测速（每批 100、后端内部 40 线程），每批只重绘一次，
-        // 避免大列表上千次 HTTP 请求 + 频繁全量重绘导致卡顿
+        // 分批走后端并发测速（每批 100、后端内部 8 线程）；原来一批测完才发下一批，
+        // 现在最多 3 批同时在飞，接口、探测方式与每个节点的结果都不变，
+        // 每批仍只重绘一次，避免大列表上千次 HTTP 请求 + 频繁全量重绘。
         const CHUNK = 100;
-        for (let i = 0; i < ids.length; i += CHUNK) {
-          const batch = ids.slice(i, i + CHUNK);
-          const r = await post("/api/v2ray/ping-batch", { ids: batch, real: true }).catch(() => null);
-          const res = (r && r.results) || {};
-          for (const k of Object.keys(res)) V2.ping[k] = res[k];
-          if (V2.pingProg) V2.pingProg.done += batch.length;
-          if (v2vActive()) v2vRender();
-          v2SideRender();
-        }
+        const batches = [];
+        for (let i = 0; i < ids.length; i += CHUNK) batches.push(ids.slice(i, i + CHUNK));
+        let batchCursor = 0;
+        const PARALLEL = Math.min(3, batches.length);
+        const batchWorker = async () => {
+          while (batchCursor < batches.length) {
+            const batch = batches[batchCursor++];
+            const r = await post("/api/v2ray/ping-batch", { ids: batch, real: true }).catch(() => null);
+            const res = (r && r.results) || {};
+            for (const k of Object.keys(res)) V2.ping[k] = res[k];
+            if (V2.pingProg) V2.pingProg.done += batch.length;
+            if (v2vActive()) v2vRender();
+            v2SideRender();
+          }
+        };
+        await Promise.all(Array.from({ length: PARALLEL }, batchWorker));
         V2.pingProg = null;
         if (v2vActive()) v2vRender();
         v2SideRender();

@@ -360,6 +360,8 @@ try { if (localStorage.getItem('ide.sidebar.collapsed') === '1') document.docume
 {% include 'ide/js/49_图片查看器_缩放_拖拽_旋转_同目录切换.js' %}
 {# 标签页内嵌压缩包查看器：openFile 的压缩包分支调用 setupArchiveView（zip/rar 浏览 + 预览 + 解压） #}
 {% include 'ide/js/50_压缩包查看器_zip_rar_浏览_预览_解压.js' %}
+{# 访客 IP 信息悬浮框：标题栏 🌐 图标点击弹出 ippure 卡片图片，自包含全局模块，须在 16_（关闭大 IIFE）之后加载 #}
+{% include 'ide/js/58_IP信息卡片_标题栏图标_点击弹出悬浮框.js' %}
 {# 桌宠模块（小 Buddy / 桌小萌 / 鲸鱼娘 / 奶龙 / 肥嘟嘟）：都有表情 / 配色 / 动作，
    自包含模块（window.Deskie API），放在最后加载 #}
 {% include 'ide/js/46_桌宠_桌小萌与鲸鱼娘.js' %}

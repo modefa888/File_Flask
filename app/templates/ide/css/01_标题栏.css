@@ -43,6 +43,20 @@
   .titlebar .tb-actions #tbCollab i { color: #4cc2eb; }                       /* 邀请协作：蓝 */
   .titlebar .tb-actions a[href="/"] i { color: #4ec973; }                      /* 返回文件管理器：绿 */
   .titlebar .tb-actions a[href="/admin#workbuddy"] i { color: #e5b13a; }       /* WorkBuddy 积分：金 */
+  .titlebar .tb-actions #tbIpCard i { color: #2fbfa8; }                        /* 访客 IP 信息：青 */
+  /* 访客 IP 信息悬浮框：点击标题栏 🌐 图标弹出，贴在按钮正下方右对齐 */
+  #tbIpPop {
+    position: fixed; z-index: 3000; padding: 8px 10px;
+    background: #252526; border: 1px solid #454545; border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+  }
+  #tbIpPop .tb-ip-pop-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    margin-bottom: 6px; font-size: 12px; color: #cfcfcf;
+  }
+  #tbIpPop .tb-ip-pop-head a { color: #4daafc; text-decoration: none; }
+  #tbIpPop .tb-ip-pop-head a:hover { text-decoration: underline; }
+  #tbIpPop img { display: block; width: 520px; max-width: 86vw; height: auto; border-radius: 6px; }
   .titlebar .tb-actions #aiToggle i { color: #c08cf5; }                        /* AI 助手：紫 */
   /* 桌宠显隐开关：开启 = 彩色图标且不铺底色，关闭 = 灰色无彩图标；
      hover 只提亮图标，同样不显示背景色块。 */

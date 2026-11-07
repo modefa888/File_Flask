@@ -32,6 +32,7 @@ SOCKS5 代理使用；如需限制范围，可在设置里改为 127.0.0.1，或
 """
 import json
 import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -215,6 +216,9 @@ def v2_core_path():
 # 节点测速结果持久化：存设置表 node_metrics（JSON），每次测试覆盖对应字段
 # ---------------------------------------------------------------------------
 
+_METRIC_LOCK = threading.RLock()
+
+
 def _metrics() -> dict:
     try:
         m = json.loads(v2raydb.all_settings().get("node_metrics") or "{}")
@@ -223,23 +227,37 @@ def _metrics() -> dict:
         return {}
 
 
+def _metric_save_many(items) -> None:
+    """批量写测速结果：一批只读一次、只写一次库，避免逐节点反复序列化全量
+    node_metrics（上千节点时这部分开销甚至比探测本身还明显）。
+    读-改-写加锁，多个批量测速请求并发时也不会互相覆盖结果。"""
+    items = [(str(n), k, v) for n, k, v in items]
+    if not items:
+        return
+    with _METRIC_LOCK:
+        m = _metrics()
+        ts = int(time.time())
+        for nid, key, val in items:
+            row = m.get(nid) if isinstance(m.get(nid), dict) else {}
+            row[key] = val
+            row["ts"] = ts
+            m[nid] = row
+        v2raydb.set_setting("node_metrics", json.dumps(m, ensure_ascii=False))
+
+
 def _metric_save(nid: str, key: str, val) -> None:
-    m = _metrics()
-    row = m.get(nid) if isinstance(m.get(nid), dict) else {}
-    row[key] = val
-    row["ts"] = int(time.time())
-    m[nid] = row
-    v2raydb.set_setting("node_metrics", json.dumps(m, ensure_ascii=False))
+    _metric_save_many([(nid, key, val)])
 
 
 def _metric_drop(ids) -> None:
-    m = _metrics()
-    hit = [i for i in ids if i in m]
-    if not hit:
-        return
-    for i in hit:
-        m.pop(i, None)
-    v2raydb.set_setting("node_metrics", json.dumps(m, ensure_ascii=False))
+    with _METRIC_LOCK:
+        m = _metrics()
+        hit = [i for i in ids if i in m]
+        if not hit:
+            return
+        for i in hit:
+            m.pop(i, None)
+        v2raydb.set_setting("node_metrics", json.dumps(m, ensure_ascii=False))
 
 
 @bp.get("/api/v2ray/nodes")
@@ -722,40 +740,49 @@ def v2_ping():
 
 @bp.post("/api/v2ray/ping-batch")
 def v2_ping_batch():
-    """批量并发测速：一次 HTTP 请求并发对多个节点做 TCP 握手，
-    避免大列表逐个请求的开销（前端分批调用，每批 ≤ 500 个）。"""
-    from concurrent.futures import ThreadPoolExecutor
+    """批量并发测速：一次 HTTP 请求并发对多个节点做 TCP 握手 / 真延迟探测。
+    前端分批调用（每批 ≤ 500 个）；整批结果一次性落库，
+    避免逐节点反复读写全量 node_metrics（上千节点时开销很明显）。"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     data = request.get_json(silent=True) or {}
     ids = data.get("ids") or []
     if not isinstance(ids, list) or not ids:
         return _fail("ids 不能为空")
     ids = [str(x) for x in ids[:500]]
 
-    if data.get("real"):
-        # 真延迟批量：每个节点起临时独立内核实例实测出网（并行 6 路，不碰主实例）
-        from concurrent.futures import ThreadPoolExecutor
-        results = {}
-        with ThreadPoolExecutor(max_workers=6) as ex:
-            for nid, res in zip(ids, ex.map(lambda x: v2raymgr.real_ping(x, timeout=6), ids)):
-                _metric_save(nid, "ping", res["ms"] if res.get("ok") else -1)
+    def collect(max_workers, probe):
+        results, saves = {}, []
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futs = {ex.submit(probe, nid): nid for nid in ids}
+            for fut in as_completed(futs):
+                nid = futs[fut]
+                try:
+                    res = fut.result()
+                except Exception as e:              # 单个节点异常不影响整批结果
+                    res = {"ok": False, "error": str(e)}
                 results[nid] = res
+                saves.append((nid, "ping", res["ms"] if res.get("ok") else -1))
+        _metric_save_many(saves)
+        return results
+
+    if data.get("real"):
+        # 真延迟：每节点起临时独立内核实例实测出网（端口分配有锁，不碰主实例）。
+        # 并发 8 路（原 6 路），配合前端批次并发，缩短大列表整体耗时；
+        # 探测地址、超时 6s、可用性判定都保持原样。
+        results = collect(8, lambda nid: v2raymgr.real_ping(nid, timeout=6))
         return jsonify({"ok": True, "results": results})
 
     def ping_one(nid):
         node = v2raydb.get_node(nid)
         if not node:
-            return nid, {"ok": False, "error": "节点不存在"}
+            return {"ok": False, "error": "节点不存在"}
         host, port = node.get("server"), _int(node.get("port"))
         if not host or not port:
-            return nid, {"ok": False, "error": "节点缺少地址或端口"}
+            return {"ok": False, "error": "节点缺少地址或端口"}
         ms, err = _tcp_ping(host, port)
-        return nid, ({"ok": True, "ms": ms} if not err else {"ok": False, "error": err})
+        return {"ok": True, "ms": ms} if not err else {"ok": False, "error": err}
 
-    results = {}
-    with ThreadPoolExecutor(max_workers=40) as ex:
-        for nid, res in ex.map(ping_one, ids):
-            _metric_save(nid, "ping", res["ms"] if res.get("ok") else -1)
-            results[nid] = res
+    results = collect(40, ping_one)
     return jsonify({"ok": True, "results": results})
 
 

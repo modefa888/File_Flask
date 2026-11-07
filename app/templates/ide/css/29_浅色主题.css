@@ -35,10 +35,19 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .titlebar .tb-clock { color: #6b6b6b; }
 :where(html.theme-light) .titlebar .tb-clock:hover { color: #000000; }
 :where(html.theme-light) .titlebar .tb-sep { background: #c8c8c8; }
-:where(html.theme-light) .titlebar .tb-actions button { color: #3b3b3b; }
-:where(html.theme-light) .titlebar .tb-actions button:hover { background: #d4d4d4; }
+:where(html.theme-light) .titlebar .tb-actions :is(button, a) { color: #3b3b3b; }
+:where(html.theme-light) .titlebar .tb-actions :is(button, a):hover { background: #d4d4d4; color: #000000; }
 :where(html.theme-light) .titlebar .tb-actions button.on { color: #005fb8; }
 :where(html.theme-light) .titlebar .tb-actions .tb-ai.on { color: #005fb8; background: #dbe6f2; }
+/* 四个快捷入口的浅色配色：同色系加深，浅色标题栏上同样清晰且仍然是彩色 */
+:where(html.theme-light) .titlebar .tb-actions #tbCollab i { color: #0a6aa8; }
+:where(html.theme-light) .titlebar .tb-actions a[href="/"] i { color: #1a7f37; }
+:where(html.theme-light) .titlebar .tb-actions a[href="/admin#workbuddy"] i { color: #9a6700; }
+:where(html.theme-light) .titlebar .tb-actions #aiToggle i { color: #7a3dba; }
+/* 浅色主题：主题切换按钮改显示月亮（点了切深色），配色同步加深 */
+:where(html.theme-light) .titlebar .tb-actions #tbTheme .tb-ic-sun { display: none; }
+:where(html.theme-light) .titlebar .tb-actions #tbTheme .tb-ic-moon { display: inline-block; }
+:where(html.theme-light) .titlebar .tb-actions #tbTheme i { color: #a9520d; }
 
 /* ---------- 工作区：活动栏 / 侧边栏 / 文件树（02） ---------- */
 :where(html.theme-light) .activitybar { background: #ffffff; }

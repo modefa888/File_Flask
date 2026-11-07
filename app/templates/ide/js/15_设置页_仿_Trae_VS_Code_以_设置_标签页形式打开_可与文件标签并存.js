@@ -151,6 +151,9 @@
     // 视频播放器皮肤：白天 / 黑夜 / 跟随编辑器（auto 时界面主题一变播放器跟着变）
     if (typeof applyVideoPlayerTheme === "function") applyVideoPlayerTheme();
     renderAppPreview();   // 界面主题 / 代码主题一变，预览卡片与「当前生效」标记同步刷新
+    // 标题栏主题切换按钮：图标显隐由 CSS 跟随 .theme-light，这里同步悬浮提示
+    const tbTheme = document.getElementById("tbTheme");
+    if (tbTheme) tbTheme.title = light ? "当前浅色主题，点击切换到深色" : "当前深色主题，点击切换到浅色";
   }
 
   /* ---------- 活动栏图标顺序（设置 → 外观 可修改） ----------
@@ -1277,6 +1280,22 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     if (mq.addEventListener) mq.addEventListener("change", onSysTheme);
     else if (mq.addListener) mq.addListener(onSysTheme);
   }
+
+  /* ---------- 标题栏主题切换图标 ----------
+     和「设置 → 外观 → 界面主题」共用同一套保存 / 应用逻辑，避免两处状态不一致。
+     点一下在深色 / 浅色间切换；原本「跟随系统」时按当前实际显示取反并固定下来。 */
+  function toggleIdeTheme() {
+    const next = ideIsLight() ? "dark" : "light";
+    IDE_SETTINGS.theme = next;
+    saveIdeSettings();
+    applyIdeSettings();
+    const sel = document.getElementById("setTheme");
+    if (sel) sel.value = next;                 // 设置页若已打开，下拉跟着同步
+    toast(next === "light" ? "已切换到浅色主题" : "已切换到深色主题", "ok");
+  }
+  window.ideToggleTheme = toggleIdeTheme;       // 供插件 / 其它模块调用
+  const tbThemeBtn = document.getElementById("tbTheme");
+  if (tbThemeBtn) tbThemeBtn.addEventListener("click", toggleIdeTheme);
 
   /* ---------- 键盘快捷键 ---------- */
   let chordK = false;   // Ctrl+K 两段式快捷键（仿 VS Code）

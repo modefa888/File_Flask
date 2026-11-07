@@ -25,15 +25,28 @@
   .titlebar .tb-clock:hover { color: #ffffff; }
   .titlebar .tb-sep { width: 1px; height: 16px; background: #3c3c3c; margin: 0 2px; }
   .titlebar .tb-actions button:disabled { opacity: .35; cursor: default; }
-  .titlebar .tb-actions button {
+  /* 两个 <a> 快捷入口（返回文件管理器 / WorkBuddy 积分）也要跟按钮同色：
+     否则会落到浏览器默认的「已访问链接紫色」，深色标题栏上几乎看不见。 */
+  .titlebar .tb-actions :is(button, a) {
     background: transparent; border: none; color: #cfcfcf; cursor: pointer; font-size: 13px; padding: 2px 8px; border-radius: 4px;
+    text-decoration: none; display: inline-flex; align-items: center; justify-content: center;
   }
-  .titlebar .tb-actions button:hover { background: #3a3a3a; }
+  .titlebar .tb-actions :is(button, a):hover { background: #3a3a3a; color: #ffffff; }
   .titlebar .tb-actions button.on { color: #4daafc; }   /* 对应面板处于打开状态 */
   /* AI 助手入口：从面包屑行移到标题栏最右侧，带文字标签，随面板开关高亮 */
   .titlebar .tb-actions .tb-ai { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 10px; font-size: 12px; }
   .titlebar .tb-actions .tb-ai i { font-size: 13px; }
   .titlebar .tb-actions .tb-ai.on { color: #4daafc; background: #2f3a45; }
+  /* 右侧四个快捷入口：各一种颜色，黑夜 / 浅色主题都保持彩色。
+     颜色打在图标 <i> 上（AI 按钮的文字仍跟随标题栏文字色），
+     高特异性保证 hover、.on、主题灰以及「已访问链接紫色」都盖不掉。 */
+  .titlebar .tb-actions #tbCollab i { color: #4cc2eb; }                       /* 邀请协作：蓝 */
+  .titlebar .tb-actions a[href="/"] i { color: #4ec973; }                      /* 返回文件管理器：绿 */
+  .titlebar .tb-actions a[href="/admin#workbuddy"] i { color: #e5b13a; }       /* WorkBuddy 积分：金 */
+  .titlebar .tb-actions #aiToggle i { color: #c08cf5; }                        /* AI 助手：紫 */
+  /* 主题切换：深色显示太阳（点了切浅色），浅色下换成月亮由 29_浅色主题.css 覆盖 */
+  .titlebar .tb-actions #tbTheme .tb-ic-moon { display: none; }
+  .titlebar .tb-actions #tbTheme i { color: #f28c4b; }                        /* 主题：橙 */
   /* 窗口很窄（如开着 DevTools）时先让中间的标题让位，保证菜单与右侧按钮都完整 */
   @media (max-width: 900px) { .titlebar .tb-title { display: none; } }
 

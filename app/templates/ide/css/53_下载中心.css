@@ -1220,6 +1220,45 @@ html.theme-light .dlc-pitem.sel .dlc-cb { color: #fff; }
 .dls-tab.on { background: #34343b; color: #f0f0f3; font-weight: 600; }
 .dls-tab.on b { opacity: 1; }
 
+/* 侧栏批量操作行：全部暂停 / 全部继续（与完整面板的 dlc-btn sm 同语义，尺寸贴 tabs 行） */
+.dls-bulk {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -2px 0 8px;
+}
+.dls-bulk-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid #3a3a41;
+  border-radius: 6px;
+  background: #28282d;
+  color: #c6c6cc;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s ease, color .12s ease, border-color .12s ease;
+}
+.dls-bulk-btn em {
+  font-style: normal;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: #3a3a41;
+  font-size: 10px;
+  line-height: 15px;
+}
+.dls-bulk-btn i { font-size: 12px; }
+.dls-bulk-btn:hover:not(:disabled) { background: #323238; color: #f0f0f3; border-color: #4a4a52; }
+.dls-bulk-btn:disabled { opacity: .45; cursor: default; }
+
 .dls-sec {
   font-size: 10.5px;
   color: #7f7f7f;
@@ -1376,6 +1415,9 @@ html.theme-light .dls-tabs { border-color: #e3e6ec; background: #f1f3f6; }
 html.theme-light .dls-tab { color: #62666d; }
 html.theme-light .dls-tab:hover { color: #1f2328; background: #e7eaef; }
 html.theme-light .dls-tab.on { background: #fff; color: #1f2328; box-shadow: 0 1px 2px rgba(15, 23, 42, .12); }
+html.theme-light .dls-bulk-btn { background: #fff; border-color: #dfe4ea; color: #414750; }
+html.theme-light .dls-bulk-btn em { background: #eef1f6; color: #414750; }
+html.theme-light .dls-bulk-btn:hover:not(:disabled) { background: #f0f3f7; color: #1f2328; border-color: #c8cfd9; }
 
 /* ---------------- 切片查看弹窗（m3u8 分片下载 / 重试情况） ---------------- */
 .dlc-segs {

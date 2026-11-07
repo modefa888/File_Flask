@@ -243,6 +243,11 @@
         </div>
         <div class="dls-sum" id="dlsSum">正在加载…</div>
         <div class="dls-tabs" id="dlsTabs"></div>
+        {# 批量操作：全部暂停 / 全部继续（带数量，随轮询刷新；与完整面板顶部按钮同逻辑） #}
+        <div class="dls-bulk">
+          <button class="dls-bulk-btn" id="dlsPauseAll" disabled title="暂停所有正在传输的任务（排队中的不受影响）"><i class="bi bi-pause-fill"></i>全部暂停<em>0</em></button>
+          <button class="dls-bulk-btn" id="dlsResumeAll" disabled title="继续所有已暂停的任务（断点续传）"><i class="bi bi-play-fill"></i>全部继续<em>0</em></button>
+        </div>
         <div class="dls-list scroll-thin" id="dlsList"></div>
         <div class="dls-foot" id="dlsFoot"></div>
       </div>

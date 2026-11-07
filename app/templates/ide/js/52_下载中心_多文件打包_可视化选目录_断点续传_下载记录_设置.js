@@ -385,6 +385,21 @@ function dlSideRender() {
       mk("act", "进行中", act.length) + mk("fin", "已结束", fin.length);
   }
 
+  // 批量操作：全部暂停（正在传输数）/ 全部继续（已暂停数），数量与禁用态随轮询刷新，
+  // 口径与完整面板顶部的 pause-all / resume-all 一致
+  const pAll = document.getElementById("dlsPauseAll");
+  const rAll = document.getElementById("dlsResumeAll");
+  if (pAll) {
+    const nRun = (DL.tasks || []).filter(function (t) { return !!DL.running[t.id] || t.status === "downloading"; }).length;
+    pAll.querySelector("em").textContent = nRun;
+    pAll.disabled = !nRun;
+  }
+  if (rAll) {
+    const nPaused = (DL.tasks || []).filter(function (t) { return t.status === "paused"; }).length;
+    rAll.querySelector("em").textContent = nPaused;
+    rAll.disabled = !nPaused;
+  }
+
   const tab = DL.sideTab;
   if (tab !== "all" && !act.length && !fin.length) {
     list.innerHTML =
@@ -2455,9 +2470,13 @@ function dlPickNetDir() {
   const newBtn = document.getElementById("dlsNew");
   const openBtn = document.getElementById("dlsOpen");
   const refreshBtn = document.getElementById("dlsRefresh");
+  const pauseAllBtn = document.getElementById("dlsPauseAll");
+  const resumeAllBtn = document.getElementById("dlsResumeAll");
   if (newBtn) newBtn.addEventListener("click", function () { dlPickOpen({}); });
   if (openBtn) openBtn.addEventListener("click", function () { openDownloadCenter(); });
   if (refreshBtn) refreshBtn.addEventListener("click", function () { dlLoadTasks(); });
+  if (pauseAllBtn) pauseAllBtn.addEventListener("click", dlPauseAll);
+  if (resumeAllBtn) resumeAllBtn.addEventListener("click", dlResumeAll);
 
   if (panel) {
     panel.addEventListener("click", function (e) {

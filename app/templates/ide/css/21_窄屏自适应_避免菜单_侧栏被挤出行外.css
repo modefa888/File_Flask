@@ -18,3 +18,93 @@
     .statusbar .sb-right .sb-item:not(#sbLang) { display: none; }
   }
 
+  /* ===== 手机窄屏（≤600px）=====
+     桌面是「活动栏 + 侧栏 + 编辑器」三栏并排，375px 下编辑器只剩百来像素。
+     这里把侧栏 / AI 面板改成覆盖式抽屉，编辑器默认占满宽度；
+     标题栏菜单横向滑动、活动栏缩窄、状态栏只留关键信息。 */
+  @media (max-width: 600px) {
+    /* 标题栏：菜单横向滑动，次要按钮让位，触摸目标放大 */
+    .titlebar { height: 40px; gap: 6px; padding: 0 6px; font-size: 12px; }
+    .menubar {
+      flex: 1 1 auto; min-width: 0; gap: 0;
+      overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+    }
+    .menubar::-webkit-scrollbar { display: none; }
+    .menubar span { padding: 8px 5px; font-size: 12px; }
+    .titlebar .tb-actions { gap: 1px; }
+    .titlebar .tb-actions :is(button, a) { padding: 4px 6px; font-size: 15px; min-width: 30px; min-height: 32px; }
+    .titlebar .tb-actions .tb-ai { height: 30px; padding: 0 6px; }
+    .titlebar .tb-sep,
+    #tbNavBack, #tbNavFwd, #tbBottom, #tbZen, #tbCollab,
+    .titlebar .tb-actions a[href="/admin#workbuddy"] { display: none; }
+
+    /* 活动栏：缩窄并允许纵向滚动，图标不再挤出屏幕 */
+    .activitybar { width: 38px; padding-top: 2px; gap: 0; overflow-y: auto; scrollbar-width: none; }
+    .activitybar::-webkit-scrollbar { display: none; }
+    .activitybar .act { width: 38px; height: 38px; font-size: 18px; flex: none; }
+
+    /* 侧栏 / AI 面板改覆盖式抽屉：不再占用编辑区宽度 */
+    .workbench { position: relative; }
+    #splitter, #aiSplitter { display: none; }
+    .sidebar {
+      position: absolute; z-index: 25; left: 38px; top: 0; bottom: 0;
+      width: min(84vw, 300px) !important;
+      box-shadow: 6px 0 24px rgba(0, 0, 0, .55);
+      border-right: 1px solid #111;
+    }
+    .sidebar .side-header { height: 38px; }
+    .ai-panel.open {
+      position: absolute; z-index: 28; inset: 0;
+      width: auto; min-width: 0; border-left: 0;
+      box-shadow: -6px 0 20px rgba(0, 0, 0, .5);
+    }
+
+    /* 编辑区：面包屑 / 标签栏瘦身，底部面板限高 */
+    .breadcrumbs { height: 24px; padding: 0 6px; font-size: 11px; }
+    .tabbar { height: 34px; }
+    .bottom-panel.show { height: 38vh; max-height: 240px; }
+
+    /* 状态栏：只留分支 / 光标位置 / 语言 */
+    .statusbar { height: 20px; gap: 8px; padding: 0 6px; font-size: 11px; }
+    .statusbar #sbSpaces, .statusbar #sbEnc, .statusbar #sbRoot, .statusbar #sbPath { display: none; }
+    .statusbar .sb-right { gap: 8px; }
+
+    /* 编辑器区域的大页视图（后台任务 / 定时任务 / 运行环境 / API 调试 / 下载中心…）：
+       窄屏下内容保持可用最小宽度，容器底部出现横向滚动条，左右拖动即可用到全部功能。
+       各面板可用 --view-min-w 覆盖。终端 / 差异视图 / 插件 / V2Ray 有专用滚动容器，不纳入。 */
+    :is(.runner-view-host, .cron-view-host, .fm-view-host, .api-host,
+        .dlc-host, .dbc-host, .scr-host, .set-host, .sshfile-host) {
+      --view-min-w: 720px;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      scrollbar-width: thin;
+      scrollbar-color: #5a5a5a #2a2a2a;
+    }
+    :is(.runner-view-host, .cron-view-host, .fm-view-host, .api-host,
+        .dlc-host, .dbc-host, .scr-host, .set-host, .sshfile-host) > * {
+      min-width: var(--view-min-w, 720px);
+    }
+    /* 运行管理：.env-view 自带 overflow-x:hidden + 绝对定位铺满，横向手势会被它吃掉，
+       host 上的滚动条拖了也看不到右侧；改为让它自己横向滚动，滚动条同样落在面板底部。 */
+    .env-view-host { overflow-x: hidden; --view-min-w: 720px; }
+    .env-view-host > .env-view {
+      min-width: 0; overflow-x: auto;
+      scrollbar-width: thin; scrollbar-color: #5a5a5a #2a2a2a;
+    }
+    .env-view-host > .env-view > * { min-width: var(--view-min-w, 720px); }
+    :is(.runner-view-host, .cron-view-host, .fm-view-host, .api-host,
+        .dlc-host, .dbc-host, .scr-host, .set-host, .sshfile-host,
+        .env-view)::-webkit-scrollbar { height: 10px; }
+    :is(.runner-view-host, .cron-view-host, .fm-view-host, .api-host,
+        .dlc-host, .dbc-host, .scr-host, .set-host, .sshfile-host,
+        .env-view)::-webkit-scrollbar-track { background: #2a2a2a; }
+    :is(.runner-view-host, .cron-view-host, .fm-view-host, .api-host,
+        .dlc-host, .dbc-host, .scr-host, .set-host, .sshfile-host,
+        .env-view)::-webkit-scrollbar-thumb {
+      background: #5a5a5a; border: 2px solid #2a2a2a; border-radius: 5px;
+    }
+
+    /* 浮动菜单别超出屏幕 */
+    .ctx-menu, .bc-pop { max-width: calc(100vw - 16px); }
+  }
+

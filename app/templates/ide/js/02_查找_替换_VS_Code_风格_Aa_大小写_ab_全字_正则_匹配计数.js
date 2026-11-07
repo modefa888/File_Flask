@@ -1531,13 +1531,27 @@
   window.sidebarRestoreCollapsed = function () {
     let c = "0";
     try { c = localStorage.getItem("ide.sidebar.collapsed") || "0"; } catch (_) {}
-    if (c === "1") $("sidebar").classList.add("collapsed");
+    // 手机窄屏：侧栏是覆盖式抽屉，默认收起让编辑器占满宽度；点顶部按钮 / 活动栏图标仍可展开
+    if (c === "1" || window.innerWidth <= 600) $("sidebar").classList.add("collapsed");
     // 首帧预置类使命完成：显示控制交给 #sidebar 上的 .collapsed，之后展开/收起才正常生效
     document.documentElement.classList.remove("sb-pre");
     const b = $("tbSide");
     if (b) b.classList.toggle("on", !$("sidebar").classList.contains("collapsed"));
   };
   $("sideCollapse").onclick = toggleSidebar;
+  // 手机窄屏：侧栏是覆盖式抽屉，点抽屉外（编辑区 / 标题栏 / AI 面板）自动收起，
+  // 避免它一直盖住代码；点侧栏自身或侧栏开关按钮时不干预。
+  document.addEventListener("pointerdown", (e) => {
+    if (window.innerWidth > 600) return;
+    const sb = $("sidebar");
+    if (!sb || sb.classList.contains("collapsed") || sb.contains(e.target)) return;
+    if (e.target.closest && e.target.closest("#tbSide, #activitybar")) return;
+    sb.classList.add("collapsed");
+    document.documentElement.classList.remove("sb-pre");
+    sidebarSyncState();
+    const b = $("tbSide");
+    if (b) b.classList.remove("on");
+  }, true);
   // 页面加载时立即恢复上次的收起状态：如果等会话恢复（异步）再收，
   // 侧栏会先按默认状态画出「资源管理器」再收起，产生明显的抖动闪烁。
   window.sidebarRestoreCollapsed();

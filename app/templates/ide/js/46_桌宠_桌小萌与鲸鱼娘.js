@@ -1302,6 +1302,7 @@
     wanderPauseUntil = Date.now() + 4000;       // 刚召唤回来先站一会儿再溜达
     try { localStorage.setItem(LS_HIDDEN, '0'); } catch (e) {}
     say('我回来啦！', 2200);
+    syncDeskieBtn();
   }
   function hide() {
     stopWander();                               // 隐身了就别在半路上飘
@@ -1310,9 +1311,27 @@
     closeMenu();
     summon.classList.add('show');
     try { localStorage.setItem(LS_HIDDEN, '1'); } catch (e) {}
+    syncDeskieBtn();
   }
   summon.addEventListener('click', show);
   try { if (localStorage.getItem(LS_HIDDEN) === '1') { el.classList.add('hide'); summon.classList.add('show'); } } catch (e) {}
+
+  /* 标题栏 #tbDeskie：点一下显示 / 隐藏桌宠，复用上面的 show / hide，
+     隐身状态、右下角召唤小圆钮、localStorage 记忆都保持同一套。 */
+  var tbDeskie = document.getElementById('tbDeskie');
+  function syncDeskieBtn() {
+    if (!tbDeskie) return;
+    var vis = !el.classList.contains('hide');
+    tbDeskie.classList.toggle('on', vis);
+    tbDeskie.classList.toggle('off', !vis);
+    tbDeskie.title = vis ? '隐藏桌宠（小 Buddy）' : '显示桌宠（小 Buddy）';
+  }
+  window.ideToggleDeskie = function () {
+    if (el.classList.contains('hide')) show(); else hide();
+    return !el.classList.contains('hide');
+  };
+  if (tbDeskie) tbDeskie.addEventListener('click', window.ideToggleDeskie);
+  syncDeskieBtn();
 
   // ---------- 桌宠 AI 对话（带记忆 + 可选联网） ----------
   // 记忆：每个伙伴一份，存在 localStorage（key = ide.deskie.chat.<id>），最多 80 条；
@@ -1818,7 +1837,11 @@
       return { ok: true, msg: '已关闭标签' };
     }
 
-    if (act === 'save') return ideClick(ideQ('#tbSave')) ? { ok: true, msg: '已保存当前文件' } : { ok: false, msg: '找不到保存按钮' };
+    // 标题栏保存按钮已换成桌宠显隐开关，这里直接走 saveTab，不再模拟点击按钮
+    if (act === 'save') {
+      if (typeof saveTab === 'function' && active) { saveTab(active); return { ok: true, msg: '已保存当前文件' }; }
+      return { ok: false, msg: '当前没有可保存的文件' };
+    }
     if (act === 'run') return ideClick(ideQ('#runPanelRun')) ? { ok: true, msg: '已运行当前文件' } : { ok: false, msg: '找不到运行按钮' };
     if (act === 'stop') return ideClick(ideQ('#bpKill')) ? { ok: true, msg: '已终止运行' } : { ok: false, msg: '找不到终止按钮' };
     if (act === 'refresh') return ideClick(ideQ('#sideRefresh')) ? { ok: true, msg: '已刷新资源管理器' } : { ok: false, msg: '找不到刷新按钮' };

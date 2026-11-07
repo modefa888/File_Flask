@@ -44,6 +44,13 @@
   .titlebar .tb-actions a[href="/"] i { color: #4ec973; }                      /* 返回文件管理器：绿 */
   .titlebar .tb-actions a[href="/admin#workbuddy"] i { color: #e5b13a; }       /* WorkBuddy 积分：金 */
   .titlebar .tb-actions #aiToggle i { color: #c08cf5; }                        /* AI 助手：紫 */
+  /* 桌宠显隐开关：开启 = 彩色图标且不铺底色，关闭 = 灰色无彩图标；
+     hover 只提亮图标，同样不显示背景色块。 */
+  .titlebar .tb-actions #tbDeskie,
+  .titlebar .tb-actions #tbDeskie:hover { background: transparent; }
+  .titlebar .tb-actions #tbDeskie:hover { filter: brightness(1.15); }
+  .titlebar .tb-actions #tbDeskie i { color: #3fc7b4; }
+  .titlebar .tb-actions #tbDeskie.off i { color: #8a8a8a; }
   /* 主题切换：深色显示太阳（点了切浅色），浅色下换成月亮由 29_浅色主题.css 覆盖 */
   .titlebar .tb-actions #tbTheme .tb-ic-moon { display: none; }
   .titlebar .tb-actions #tbTheme i { color: #f28c4b; }                        /* 主题：橙 */

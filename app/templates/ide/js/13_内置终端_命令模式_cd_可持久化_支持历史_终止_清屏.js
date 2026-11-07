@@ -1656,5 +1656,5 @@
     btn.title = on ? "隐藏全部（依赖目录与隐藏文件）" : "显示全部（含 node_modules、.gitignore 等）";
     refreshTree(ROOT);
   };
-  $("tbSave").onclick = () => { if (active) saveTab(active); };
+  // 标题栏原「保存」按钮已换成桌宠显隐开关；保存统一走 Ctrl+S / 文件菜单 / 欢迎页快捷项
 

@@ -44,6 +44,8 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .titlebar .tb-actions a[href="/"] i { color: #1a7f37; }
 :where(html.theme-light) .titlebar .tb-actions a[href="/admin#workbuddy"] i { color: #9a6700; }
 :where(html.theme-light) .titlebar .tb-actions #aiToggle i { color: #7a3dba; }
+:where(html.theme-light) .titlebar .tb-actions #tbDeskie i { color: #0f7d63; }
+:where(html.theme-light) .titlebar .tb-actions #tbDeskie.off i { color: #8a8a8a; }
 /* 浅色主题：主题切换按钮改显示月亮（点了切深色），配色同步加深 */
 :where(html.theme-light) .titlebar .tb-actions #tbTheme .tb-ic-sun { display: none; }
 :where(html.theme-light) .titlebar .tb-actions #tbTheme .tb-ic-moon { display: inline-block; }

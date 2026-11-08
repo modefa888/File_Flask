@@ -394,7 +394,7 @@
         }
         // 内网穿透网页面板（虚拟路径 \u0000tunnel:web）：按快照里的网址重开
         if (t.path === "\u0000tunnel:web") {
-          try { if (typeof window.openTunnelWebPanel === "function") window.openTunnelWebPanel(t.webUrl); } catch (e) {}
+          try { if (typeof window.openTunnelWebPanel === "function") window.openTunnelWebPanel(t.webUrl, true); } catch (e) {}
           continue;
         }
         // 远程文件管理器（虚拟路径 \u0000sshfm:<连接id>）：按 id 找回 SSH 连接后重开。

@@ -42,8 +42,24 @@
                         class="bi bi-arrow-clockwise"></i></button>
                 <a class="btn btn-outline-primary btn-sm btn-icon-only" href="/admin#workbuddy"
                     title="WorkBuddy 积分与每日签到"><i class="bi bi-coin"></i></a>
-                <a class="btn btn-outline-dark btn-sm btn-icon-only" href="/logout" title="退出登录"><i
-                        class="bi bi-box-arrow-right"></i></a>
+                <div class="user-menu-wrap" id="userMenuWrap">
+                    <button class="btn btn-outline-dark btn-sm btn-icon-only" id="userMenuBtn" type="button"
+                        title="账户" aria-haspopup="true" aria-expanded="false"><i
+                            class="bi bi-person-circle"></i></button>
+                    <div class="user-menu-pop" id="userMenuPop" hidden>
+                        <div class="ump-head"><i class="bi bi-person-circle"></i><span>当前账户</span></div>
+                        <button class="ump-item danger" id="userLogoutBtn" type="button"><i
+                                class="bi bi-box-arrow-right"></i> 注销</button>
+                    </div>
+                    <div class="user-confirm-pop" id="userConfirmPop" hidden>
+                        <div class="ucp-title">确认注销</div>
+                        <div class="ucp-msg">确定要退出登录吗？</div>
+                        <div class="ucp-foot">
+                            <button class="ucp-btn" type="button" data-ucp="cancel">取消</button>
+                            <button class="ucp-btn danger" type="button" data-ucp="ok">注销</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </nav>

@@ -196,7 +196,7 @@ if (typeof titles !== "undefined") titles.tunnel = "内网穿透";
     });
   }
 
-  function openTunnelWebPanel(url) {
+  function openWebPanelNow(url) {
     let tab = findTab(TNL_WEB_PATH);
     const created = !tab;
     if (!tab) {
@@ -235,6 +235,25 @@ if (typeof titles !== "undefined") titles.tunnel = "内网穿透";
       load();
     });
     return tab;
+  }
+  /* 打开网页面板前先查一次服务状态：没启动 / 9200 未就绪时只提示，不建标签页。
+     silent 供会话恢复使用，刷新页面时不弹提示。 */
+  function openTunnelWebPanel(url, silent) {
+    return api("/api/tunnel/status").then(function (st) {
+      renderStatus(st);
+      const down = !st || st.service !== "active";
+      const pending = !down && !st.api_ok;
+      if (down || pending) {
+        if (!silent) toast(down
+          ? "请先启动 cpolar 服务，再打开网页面板"
+          : "cpolar 服务正在启动（9200 未就绪），请稍后再打开网页面板", "warn");
+        return null;
+      }
+      return openWebPanelNow(url);
+    }).catch(function () {
+      if (!silent) toast("无法获取 cpolar 服务状态，请稍后重试", "err");
+      return null;
+    });
   }
   window.openTunnelWebPanel = openTunnelWebPanel;
 

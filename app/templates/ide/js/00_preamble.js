@@ -306,6 +306,7 @@
           try { o.settingsSec = localStorage.getItem("ide.session.settingsSec") || ""; } catch (_) {}
         }
         if (t.isDownloads && typeof window.dlCurrentView === "function") o.view = window.dlCurrentView();
+        if (t.isTunnelWeb) o.webUrl = t.tnlWebUrl || "";   // 内网穿透网页面板：记住上次打开的网址
         return o;
       });
       localStorage.setItem("ide.session.tabs", JSON.stringify(list));
@@ -389,6 +390,11 @@
         // 数据采集工作台（虚拟路径 \u0000scraper）：直接重开；选择器草稿由模块自己的 localStorage 恢复
         if (t.path === "\u0000scraper") {
           try { if (typeof window.openScraperWorkbench === "function") window.openScraperWorkbench(); } catch (e) {}
+          continue;
+        }
+        // 内网穿透网页面板（虚拟路径 \u0000tunnel:web）：按快照里的网址重开
+        if (t.path === "\u0000tunnel:web") {
+          try { if (typeof window.openTunnelWebPanel === "function") window.openTunnelWebPanel(t.webUrl); } catch (e) {}
           continue;
         }
         // 远程文件管理器（虚拟路径 \u0000sshfm:<连接id>）：按 id 找回 SSH 连接后重开。

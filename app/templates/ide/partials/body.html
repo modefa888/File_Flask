@@ -54,6 +54,8 @@
       <div class="act" data-panel="downloads" id="actDownloads" title="下载中心（多文件打包 / 可视化选目录 / 断点续传 / 下载记录）"><i class="bi bi-cloud-arrow-down"></i><span class="runner-badge" id="actDlBadge" style="display:none">0</span></div>
       {# 数据采集：点图标在编辑区打开「可视化采集」工作台，侧栏同时给出已保存的采集方案 #}
       <div class="act" data-panel="scraper" id="actScraper" title="数据采集（可视化点选任意网站元素，批量采集并导出表格）"><i class="bi bi-radar"></i></div>
+      {# 内网穿透（cpolar）：侧栏面板管理隧道（安装检测 / authtoken / 创建 / 停止 / 公网地址） #}
+      <div class="act" data-panel="tunnel" id="actTunnel" title="内网穿透（cpolar 隧道：把本机端口映射到公网）"><i class="bi bi-broadcast-pin"></i><span class="runner-badge" id="actTunnelBadge" style="display:none">0</span></div>
       <div class="act" data-panel="ext" title="扩展"><i class="bi bi-puzzle"></i></div>
       {# 底部两个图标：进程资源管理器在设置之上，设置永远在最底下。
          act-spacer 让「组内第一个」吸收上方全部空白，把整组顶到活动栏最底部（若两个都写 margin-top:auto，
@@ -250,6 +252,56 @@
         </div>
         <div class="dls-list scroll-thin" id="dlsList"></div>
         <div class="dls-foot" id="dlsFoot"></div>
+      </div>
+      {# 内网穿透（侧栏）：cpolar 状态 / authtoken / 隧道列表与创建；完整用法参考 cpolar 官网 Ubuntu 教程 #}
+      <div class="side-panel" id="tunnelPanel">
+        {# 上半部分：固定区，内容过多时只在这里滚动；下半部分列表独立滚动，避免整栏抖动 #}
+        <div class="tnl-top" id="tnlTop">
+          <div class="tnl-tools">
+            <button class="g-btn block" id="tnlNew" title="用下面的表单创建并启动一条隧道"><i class="bi bi-plus-lg"></i> 新建隧道</button>
+            <button class="g-ico" id="tnlRefresh" title="刷新状态与隧道列表"><i class="bi bi-arrow-clockwise"></i></button>
+            <button class="g-ico" id="tnlWeb" title="在编辑区打开网页面板（cpolar Web 管理界面）"><i class="bi bi-window-stack"></i></button>
+          </div>
+          <div class="tnl-status" id="tnlStatus"><div class="tnl-empty"><i class="bi bi-arrow-repeat tnl-spin"></i>正在检测 cpolar 状态…</div></div>
+          <div class="tnl-sec" id="tnlAuthSec" hidden>
+            <div class="tnl-sec-h"><i class="bi bi-key"></i>配置 authtoken<button class="tnl-mini" id="tnlAuthToggle" title="收起">收起</button></div>
+            <input type="password" id="tnlAuthToken" placeholder="官网后台「验证」页复制 authtoken" autocomplete="off">
+            <button class="g-btn block outline" id="tnlAuthSave"><i class="bi bi-save"></i> 保存 authtoken</button>
+            <div class="tnl-hint">官网 https://dashboard.cpolar.com → 验证 → 复制 authtoken</div>
+          </div>
+          <div class="tnl-sec" id="tnlFormSec" hidden>
+            <div class="tnl-sec-h"><i class="bi bi-plus-circle"></i>新建隧道</div>
+            <div class="tnl-row">
+              <input type="text" id="tnlName" placeholder="隧道名称（如 web / ssh）" autocomplete="off">
+            </div>
+            <div class="tnl-row">
+              <select id="tnlProto">
+                <option value="http">HTTP（网站 / API）</option>
+                <option value="tcp">TCP（SSH / 远程桌面）</option>
+              </select>
+              <input type="text" id="tnlAddr" placeholder="本地端口（8080）" autocomplete="off">
+            </div>
+            <button class="g-btn block" id="tnlStart"><i class="bi bi-plus-lg"></i> 创建隧道</button>
+          </div>
+          {# Web 面板账号：保存后打开右侧网页面板会自动登录 cpolar Web UI #}
+          <div class="tnl-sec tnl-cred-sec" id="tnlCredSec">
+            <div class="tnl-sec-h"><i class="bi bi-person-badge"></i>Web 面板自动登录
+              <span class="tnl-cred-state" id="tnlCredState"></span>
+              <button class="tnl-mini" id="tnlCredToggle" title="展开 / 收起">设置</button>
+            </div>
+            <div id="tnlCredForm" hidden>
+              <input type="text" id="tnlCredEmail" placeholder="cpolar 邮箱账号" autocomplete="username" spellcheck="false">
+              <input type="password" id="tnlCredPwd" placeholder="登录密码" autocomplete="current-password">
+              <button class="g-btn block" id="tnlCredSave"><i class="bi bi-save"></i> 保存并自动登录</button>
+              <button class="tnl-mini danger" id="tnlCredClear" title="删除已保存的账号密码">清除已保存</button>
+              <div class="tnl-hint">账号密码经加密后保存在本机服务端（文件权限 600），浏览器不保存密码；打开网页面板时自动登录。</div>
+            </div>
+          </div>
+        </div>
+        <div class="tnl-sec tnl-list-sec" id="tnlListSec">
+          <div class="tnl-sec-h"><i class="bi bi-hdd-network"></i>在线隧道<span class="tnl-count" id="tnlCount"></span><button class="tnl-mini" id="tnlListRefresh" title="刷新列表">刷新</button></div>
+          <div id="tnlList" class="tnl-list scroll-thin"></div>
+        </div>
       </div>
       {# 数据采集（侧栏）：已保存的采集方案列表；完整工作台在编辑区标签页 #}
       <div class="side-panel" id="scraperPanel">

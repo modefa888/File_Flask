@@ -18,7 +18,7 @@
 
 /* ---------- 顶部按钮区紧贴侧栏标题 ---------- */
 #runPanel, #runnerPanel, #envPanel, #fmPanel, #dbconnPanel, #apiPanel,
-#v2rayPanel, #downloadsPanel { padding-top: 0; }
+#v2rayPanel, #downloadsPanel, #tunnelPanel { padding-top: 0; }
 
 /* 工具行自带的上下 / 左右内边距也收掉，宽度交给 .side-panel 的 12px */
 .side-panel .dbc-tools,
@@ -64,18 +64,18 @@
 
 /* ---------- 工具行里的图标按钮：同高描边方块 ---------- */
 .side-panel :is(.ssh-tools, .cron-tools, .dbc-tools, .api-tools, .fm-tools,
-                .env-tools, .dls-tools, .runner-head) .g-ico {
+                .env-tools, .dls-tools, .runner-head, .tnl-tools) .g-ico {
   flex: none; width: 30px; height: 30px; padding: 0; border-radius: 6px;
   display: inline-flex; align-items: center; justify-content: center;
   background: #2b2e31; border: 1px solid #3a3e42; color: #c4c9ce; font-size: 14px;
   transition: background .14s ease, border-color .14s ease, color .14s ease;
 }
 .side-panel :is(.ssh-tools, .cron-tools, .dbc-tools, .api-tools, .fm-tools,
-                .env-tools, .dls-tools, .runner-head) .g-ico:hover {
+                .env-tools, .dls-tools, .runner-head, .tnl-tools) .g-ico:hover {
   background: #35393d; border-color: #4a4f55; color: #ffffff;
 }
 .side-panel :is(.ssh-tools, .cron-tools, .dbc-tools, .api-tools, .fm-tools,
-                .env-tools, .dls-tools, .runner-head) .g-ico:active { transform: translateY(1px); }
+                .env-tools, .dls-tools, .runner-head, .tnl-tools) .g-ico:active { transform: translateY(1px); }
 /* 保持「只看已安装」这类开关态的配色，别被上面的方块样式盖掉 */
 .side-panel .env-tools .g-ico.on {
   background: #0d5a8a; border-color: #1b7fc0; color: #ffffff;
@@ -99,11 +99,11 @@ html.theme-light .side-panel .g-btn.block.outline:not(.fm-remote-item):hover {
   background: #e7ebef; border-color: #c6ccd4; color: #1f2328;
 }
 html.theme-light .side-panel :is(.ssh-tools, .cron-tools, .dbc-tools, .api-tools, .fm-tools,
-                                 .env-tools, .dls-tools, .runner-head) .g-ico {
+                                 .env-tools, .dls-tools, .runner-head, .tnl-tools) .g-ico {
   background: #f2f4f6; border-color: #d6dae0; color: #5a6572;
 }
 html.theme-light .side-panel :is(.ssh-tools, .cron-tools, .dbc-tools, .api-tools, .fm-tools,
-                                 .env-tools, .dls-tools, .runner-head) .g-ico:hover {
+                                 .env-tools, .dls-tools, .runner-head, .tnl-tools) .g-ico:hover {
   background: #e7ebef; border-color: #c6ccd4; color: #1f2328;
 }
 html.theme-light .side-panel .env-tools .g-ico.on {

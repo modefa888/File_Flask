@@ -49,6 +49,10 @@
 .azv-crumb:last-child { color: #f0f0f0; font-weight: 600; }
 .azv-crumb-sep { flex: none; font-size: 10px; color: #6b6b6b; }
 
+/* 远程压缩包：头部显示 user@host（与远程文件查看器工具行同色，不可点击） */
+.azv-src { flex: none; color: #e2a04a; cursor: default; }
+.azv-src:hover { background: transparent; }
+
 .azv-tools { flex: none; display: flex; align-items: center; gap: 6px; }
 .azv-filter {
   width: 150px;
@@ -327,3 +331,39 @@
   border-left: none;
   border-top: 1px solid #2b2b2b;
 }
+
+/* ---------- 分栏拖动条：调整列表 / 预览宽度 ---------- */
+.azv-resizer {
+  flex: 0 0 6px;
+  align-self: stretch;
+  cursor: col-resize;
+  background: #2b2b2b;
+  border-left: 1px solid #333333;
+  border-right: 1px solid #333333;
+  touch-action: none;
+  z-index: 3;
+}
+.azv-resizer:hover, .azv-resizer.dragging { background: #0a6aa8; border-color: #0a6aa8; }
+.azv-narrow .azv-resizer { display: none; }
+/* 拖动写入的内联宽度优先级更高，窄屏时强制还原成上下布局 */
+.azv-narrow .azv-preview { width: auto !important; max-width: none !important; min-width: 0 !important; }
+body.azv-resizing, body.azv-resizing * { user-select: none !important; cursor: col-resize !important; }
+
+/* 分隔条只显示成一条线：用更高特异性 + !important 覆盖上面的柱状外观，
+   视觉上只剩 .azv-preview 原有的 1px 左边框；命中区由透明伪元素向左右各扩 4px。 */
+.azv-body > .azv-resizer {
+  flex: 0 0 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  position: relative;
+}
+.azv-body > .azv-resizer::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  width: 9px;
+  top: 0;
+  bottom: 0;
+}
+.azv-body > .azv-resizer:hover + .azv-preview,
+.azv-body > .azv-resizer.dragging + .azv-preview { border-left-color: #0a6aa8 !important; }

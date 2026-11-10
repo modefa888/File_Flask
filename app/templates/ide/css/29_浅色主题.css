@@ -457,6 +457,8 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .azv-crumb { color: #5a5a5a; }
 :where(html.theme-light) .azv-crumb:hover { background: #e6e6e6; }
 :where(html.theme-light) .azv-crumb:last-child { color: #1f2328; }
+:where(html.theme-light) .azv-src { color: #a55d00; }
+:where(html.theme-light) .azv-resizer:hover + .azv-preview, :where(html.theme-light) .azv-resizer.dragging + .azv-preview { border-left-color: #0a6aa8; }
 :where(html.theme-light) .azv-filter { background: #ffffff; border-color: #cecece; color: #333333; }
 :where(html.theme-light) .azv-btn { background: #ececec; border-color: #cecece; color: #333333; }
 :where(html.theme-light) .azv-btn:hover { background: #e0e0e0; color: #000000; }

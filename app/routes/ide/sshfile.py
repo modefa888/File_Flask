@@ -18,6 +18,13 @@ POST /api/ssh/fs/upload    multipart: id, path(目标目录), file
 SFTP 客户端按连接 id 缓存（默认 15 分钟 TTL，惰性清理），请求出错自动重建一次。
 """
 import mimetypes
+import base64
+import bz2
+import gzip
+import io
+import lzma
+import tarfile
+import zipfile
 import os
 import re
 import stat as _stat
@@ -728,3 +735,461 @@ def fs_upload():
         return jsonify({"error": err}), 400
     _log.info("ssh fs upload: cid=%s path=%s", cid, res["path"])
     return jsonify(res)
+
+
+# --------------------------------------------------------------------------
+# 远程压缩包在线浏览（zip / tar 系）
+#
+# 不把整个压缩包下载到服务器：zipfile 要先跳到文件尾读中央目录、再跳回中央目录，
+# tarfile / gzip 解压时还会反复 seek(0)。_SftpRandomFile 把 SFTP 文件包装成可随机读
+# 对象并按块缓存，回跳命中内存，一次请求只传真正用到的字节。
+# --------------------------------------------------------------------------
+# 压缩包解析依赖（与文件顶部的 SSH/SFTP 依赖分开，便于按模块查阅）
+import base64
+import bz2
+import gzip
+import io
+import lzma
+import tarfile
+import zipfile
+
+from ..common.zip import _decode_zip_name, _ext_icon
+
+_ARCHIVE_PREVIEW_MAX = 20 * 1024 * 1024   # 单成员在线预览上限（base64 还会再涨 1/3）
+_ARCHIVE_TAR_MAX = 300 * 1024 * 1024      # tar 系要顺序解压，过大就让用户下载
+_ARCHIVE_MAX_MEMBERS = 50000              # 成员数上限，防超大包把内存打爆
+_ARCHIVE_BLOCK = 64 * 1024
+_ARCHIVE_CACHE_BLOCKS = 512               # 每请求最多缓存 32MB
+
+# 业务异常（压缩包损坏 / 不支持 / 加密 / 成员不存在）：直接回给用户，不重建 SSH 连接；
+# 其余（网络、认证、SFTP 断开）交给 _run 自动重建重试一次。
+_ARCHIVE_BIZ_ERR = (ValueError, RuntimeError, zipfile.BadZipFile, tarfile.ReadError,
+                    EOFError, gzip.BadGzipFile, lzma.LZMAError)
+
+
+class _SftpRandomFile(io.RawIOBase):
+    """SFTPFile → 支持 seek / tell / read 的只读随机访问对象（64KB 块缓存）。"""
+
+    def __init__(self, fp, size):
+        super().__init__()
+        self._fp = fp
+        self._size = int(size or 0)
+        self._pos = 0
+        self._blocks = {}
+        self._order = []
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self._pos
+
+    def seek(self, offset, whence=0):
+        if whence == 0:
+            pos = int(offset)
+        elif whence == 1:
+            pos = self._pos + int(offset)
+        elif whence == 2:
+            pos = self._size + int(offset)
+        else:
+            raise ValueError("无效的 seek 模式")
+        if pos < 0:
+            raise ValueError("负的文件偏移")
+        self._pos = pos
+        return pos
+
+    def _block(self, idx):
+        data = self._blocks.get(idx)
+        if data is None:
+            parts, left = [], _ARCHIVE_BLOCK
+            self._fp.seek(idx * _ARCHIVE_BLOCK)
+            while left > 0:
+                chunk = self._fp.read(left)
+                if not chunk:
+                    break
+                parts.append(chunk)
+                left -= len(chunk)
+            data = b"".join(parts)
+            if len(self._order) >= _ARCHIVE_CACHE_BLOCKS:
+                self._blocks.pop(self._order.pop(0), None)
+            self._blocks[idx] = data
+            self._order.append(idx)
+        return data
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            size = self._size - self._pos
+        size = min(int(size), max(0, self._size - self._pos))
+        parts, left = [], size
+        while left > 0:
+            idx, off = divmod(self._pos, _ARCHIVE_BLOCK)
+            chunk = self._block(idx)[off:off + left]
+            if not chunk:
+                break
+            parts.append(chunk)
+            self._pos += len(chunk)
+            left -= len(chunk)
+        return b"".join(parts)
+
+    def close(self):
+        try:
+            self._fp.close()
+        except Exception:  # noqa: BLE001
+            pass
+        super().close()
+
+
+def _archive_kind(name):
+    """按远程文件名判断压缩包类型：zip / tar / 单文件压缩；不支持返回 None。"""
+    low = (name or "").lower()
+    if low.endswith((".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tbz", ".tbz2", ".txz", ".tar")):
+        return "tar"
+    if low.endswith(".zip"):
+        return "zip"
+    for suf in (".gz", ".bz2", ".xz"):
+        if low.endswith(suf):
+            return "single" + suf
+    return None
+
+
+def _safe_member_name(name):
+    """规范化包内成员名：统一分隔符、去掉绝对路径 / .. 段（只用于匹配与下载名）。"""
+    name = (name or "").replace("\\", "/").strip("/")
+    parts = [p for p in name.split("/") if p]
+    if not name or any(p in (".", "..") for p in parts) or "" in name.split("/"):
+        return ""
+    return "/".join(parts)
+
+
+def _archive_dir_item(name):
+    return {"name": name, "size": 0, "compressed": 0, "is_dir": True,
+            "icon": "bi-folder-fill", "type": "directory", "ext": "", "is_empty": True}
+
+
+class _ZipArc:
+    """zip 成员：名字解码修正与本地 /api/zip/contents 保持一致。"""
+
+    def __init__(self, rf, pwd):
+        self.zf = zipfile.ZipFile(rf)
+        if len(self.zf.infolist()) > _ARCHIVE_MAX_MEMBERS:
+            raise ValueError("压缩包成员超过 %d 个，在线浏览会占用过多资源，请下载后查看" % _ARCHIVE_MAX_MEMBERS)
+        self.pwd = (pwd or "").encode("utf-8") or None
+        self._map = {}
+        self.members = []
+        for info in self.zf.infolist():
+            name = _safe_member_name(_decode_zip_name(info))
+            if not name or name in self._map:
+                continue
+            self._map[name] = info
+            self.members.append({"name": name, "size": int(info.file_size or 0),
+                                 "compressed": int(info.compress_size or 0),
+                                 "is_dir": bool(info.is_dir())})
+
+    def open(self, name):
+        info = self._map.get(name)
+        if info is None:
+            raise ValueError("压缩包中没有该成员：" + name)
+        if info.is_dir():
+            raise ValueError("目录无法预览 / 下载")
+        return self.zf.open(info, pwd=self.pwd), int(info.file_size or 0)
+
+    def close(self):
+        self.zf.close()
+
+
+class _TarArc:
+    """tar / tar.gz / tar.bz2 / tar.xz：r:* 自动识别压缩层。"""
+
+    def __init__(self, rf):
+        self.tf = tarfile.open(fileobj=rf, mode="r:*")
+        self._map = {}
+        self.members = []
+        for m in self.tf:
+            if len(self.members) >= _ARCHIVE_MAX_MEMBERS:
+                raise ValueError("压缩包成员超过 %d 个，在线浏览会占用过多资源，请下载后查看" % _ARCHIVE_MAX_MEMBERS)
+            name = _safe_member_name(m.name)
+            if not name or name in self._map:
+                continue
+            self._map[name] = m
+            self.members.append({"name": name, "size": int(m.size or 0),
+                                 "compressed": int(m.size or 0), "is_dir": bool(m.isdir())})
+
+    def open(self, name):
+        m = self._map.get(name)
+        if m is None:
+            raise ValueError("压缩包中没有该成员：" + name)
+        if not m.isfile():
+            raise ValueError("该成员不是普通文件，无法预览 / 下载")
+        f = self.tf.extractfile(m)
+        if f is None:
+            raise ValueError("无法读取该成员：" + name)
+        return f, int(m.size or 0)
+
+    def close(self):
+        self.tf.close()
+
+
+class _SingleArc:
+    """单个 .gz / .bz2 / .xz 压缩文件：当成只含一个成员的压缩包。"""
+
+    def __init__(self, rf, suffix, name, size):
+        self.rf = rf
+        self.suffix = suffix
+        self.inner = name[:-len(suffix)] or (name + ".out")
+        self.members = [{"name": self.inner, "size": 0,
+                         "compressed": int(size or 0), "is_dir": False}]
+
+    def open(self, name):
+        if name != self.inner:
+            raise ValueError("压缩包中没有该成员：" + name)
+        self.rf.seek(0)
+        if self.suffix == ".gz":
+            return gzip.GzipFile(fileobj=self.rf, mode="rb"), 0
+        if self.suffix == ".bz2":
+            return bz2.BZ2File(self.rf, mode="rb"), 0
+        return lzma.LZMAFile(self.rf, mode="rb"), 0
+
+    def close(self):
+        pass
+
+
+def _archive_open(sftp, real, size, pwd):
+    """打开远程压缩包，返回 (随机读文件对象, 归档对象)；调用方负责依次 close。"""
+    name = os.path.basename(real.rstrip("/")) or "archive"
+    kind = _archive_kind(name)
+    if not kind:
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else "未知"
+        raise ValueError("暂不支持在线浏览 .%s 格式，可点右上角「下载」后用本地工具打开"
+                         "（当前支持：zip / tar / tgz / gz / bz2 / xz）" % ext)
+    if not size:
+        raise ValueError("文件为空，无法作为压缩包读取")
+    if kind == "tar" and size > _ARCHIVE_TAR_MAX:
+        raise ValueError("tar 包超过 %s，在线浏览需传输并解压整个文件，请下载后查看"
+                         % format_size(_ARCHIVE_TAR_MAX))
+    rf = _SftpRandomFile(sftp.open(real, "rb"), size)
+    try:
+        if kind == "zip":
+            arc = _ZipArc(rf, pwd)
+        elif kind == "tar":
+            arc = _TarArc(rf)
+        else:
+            arc = _SingleArc(rf, kind[len("single"):], name, size)
+        return rf, arc
+    except Exception:
+        rf.close()
+        raise
+
+
+def _archive_entries(members, dir_param):
+    """把全量成员整理成「当前目录的直接子项」，字段与 /api/zip/contents 一致。"""
+    cur = _safe_member_name(dir_param)
+    prefix = (cur + "/") if cur else ""
+    dirs, files = {}, {}
+    for m in members:
+        name = m["name"]
+        if not name.startswith(prefix):
+            continue
+        rest = name[len(prefix):]
+        if not rest:
+            continue
+        if "/" in rest:
+            top, child = rest.split("/", 1)
+            d = dirs.setdefault(top, _archive_dir_item(top))
+            if child:
+                d["is_empty"] = False
+            if not m["is_dir"]:
+                d["size"] += int(m["size"] or 0)
+                d["compressed"] += int(m["compressed"] or 0)
+            continue
+        if m["is_dir"]:
+            dirs.setdefault(rest, _archive_dir_item(rest))
+            continue
+        ext = rest.rsplit(".", 1)[-1].lower() if "." in rest else ""
+        files[rest] = {"name": rest, "size": int(m["size"] or 0),
+                       "compressed": int(m["compressed"] or 0), "is_dir": False,
+                       "icon": _ext_icon(ext), "type": "file", "ext": ext, "is_empty": False}
+    entries = list(dirs.values()) + list(files.values())
+    entries.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+    return entries
+
+
+def _archive_msg(e):
+    """压缩包相关异常 → 可执行的中文提示；其余交给 SSH 错误映射。"""
+    msg = str(e)
+    if isinstance(e, zipfile.BadZipFile):
+        return "无效的 zip 文件（文件可能损坏或不是标准 zip）"
+    if isinstance(e, (tarfile.ReadError, gzip.BadGzipFile, lzma.LZMAError, EOFError)):
+        return "无法解析该压缩包（格式不受支持或文件已损坏），可下载后用本地工具打开"
+    low = msg.lower()
+    if "password" in low or "encrypted" in low or "密码" in msg:
+        return "压缩包已加密或密码错误，请下载后用本地工具打开"
+    return _ssh_err(e)
+
+
+def _archive_read_member(arc, entry, limit):
+    """读取单个成员到内存（预览用），返回 (bytes, error)。"""
+    f, size = arc.open(entry)
+    try:
+        if size and size > limit:
+            return None, "成员过大（%s），无法在线预览，可点「下载」后用本地程序打开" % format_size(size)
+        parts, total = [], 0
+        while total <= limit:
+            chunk = f.read(min(512 * 1024, limit + 1 - total))
+            if not chunk:
+                break
+            parts.append(chunk)
+            total += len(chunk)
+        if total > limit:
+            return None, "成员过大（超过 %s），无法在线预览，可点「下载」后用本地程序打开" % format_size(limit)
+        return b"".join(parts), None
+    finally:
+        try:
+            f.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _archive_stat(sftp, path):
+    real = sftp.normalize(path)
+    st = sftp.stat(real)
+    return real, int(st.st_size or 0)
+
+
+@bp.route("/api/ssh/fs/archive/contents")
+def fs_archive_contents():
+    """列远程压缩包内某层目录（zip / tar 系），结构与 /api/zip/contents 一致。"""
+    cid = request.args.get("id", "")
+    path = request.args.get("path", "")
+    dir_param = request.args.get("dir", "")
+    pwd = request.args.get("pwd", "")
+    if not cid or not path:
+        return jsonify({"error": "缺少 id 或 path"}), 400
+    if not _PARAMIKO_OK:
+        return jsonify({"error": "后端未安装 paramiko，无法访问远程文件"}), 400
+
+    def op(sftp):
+        try:
+            real, size = _archive_stat(sftp, path)
+            rf, arc = _archive_open(sftp, real, size, pwd)
+            try:
+                entries = _archive_entries(arc.members, dir_param)
+                return {"success": True, "zip_name": os.path.basename(real.rstrip("/")),
+                        "zip_size": size, "zip_size_str": format_size(size),
+                        "entry_count": len(entries), "entries": entries}
+            finally:
+                arc.close()
+                rf.close()
+        except _ARCHIVE_BIZ_ERR as e:
+            return {"error": _archive_msg(e)}
+
+    res, err = _run(cid, op)
+    if err:
+        return jsonify({"error": err}), 400
+    if res.get("error"):
+        return jsonify({"error": res["error"]}), 400
+    return jsonify(res)
+
+
+@bp.route("/api/ssh/fs/archive/preview")
+def fs_archive_preview():
+    """读取远程压缩包内单个成员（base64），供查看器内嵌预览文本 / 图片 / 音视频。"""
+    cid = request.args.get("id", "")
+    path = request.args.get("path", "")
+    entry = request.args.get("entry", "")
+    pwd = request.args.get("pwd", "")
+    if not cid or not path or not entry:
+        return jsonify({"error": "缺少 id / path / entry"}), 400
+    if not _PARAMIKO_OK:
+        return jsonify({"error": "后端未安装 paramiko，无法访问远程文件"}), 400
+
+    def op(sftp):
+        try:
+            real, size = _archive_stat(sftp, path)
+            rf, arc = _archive_open(sftp, real, size, pwd)
+            try:
+                data, err = _archive_read_member(arc, entry, _ARCHIVE_PREVIEW_MAX)
+                if err:
+                    return {"error": err}
+                ext = entry.rsplit(".", 1)[-1].lower() if "." in entry else ""
+                return {"success": True, "ext": ext,
+                        "content_type": mimetypes.guess_type(entry)[0] or "application/octet-stream",
+                        "size": len(data), "size_str": format_size(len(data)),
+                        "content": base64.b64encode(data).decode("ascii")}
+            finally:
+                arc.close()
+                rf.close()
+        except _ARCHIVE_BIZ_ERR as e:
+            return {"error": _archive_msg(e)}
+
+    res, err = _run(cid, op)
+    if err:
+        return jsonify({"error": err}), 400
+    if res.get("error"):
+        return jsonify({"error": res["error"]}), 400
+    return jsonify(res)
+
+
+@bp.route("/api/ssh/fs/archive/file")
+def fs_archive_file():
+    """流式下载远程压缩包内的单个成员（不落盘，边解压边发）。"""
+    cid = request.args.get("id", "")
+    path = request.args.get("path", "")
+    entry = request.args.get("entry", "")
+    pwd = request.args.get("pwd", "")
+    if not cid or not path or not entry:
+        return jsonify({"error": "缺少 id / path / entry"}), 400
+    if not _PARAMIKO_OK:
+        return jsonify({"error": "后端未安装 paramiko，无法访问远程文件"}), 400
+
+    rf = arc = f = None
+    try:
+        sftp, _client = _sftp_for(cid)
+        real, size = _archive_stat(sftp, path)
+        rf, arc = _archive_open(sftp, real, size, pwd)
+        f, member_size = arc.open(entry)
+    except Exception as e:  # noqa: BLE001
+        for x in (f, arc, rf):
+            try:
+                if x:
+                    x.close()
+            except Exception:  # noqa: BLE001
+                pass
+        _drop(cid)
+        return jsonify({"error": _archive_msg(e)}), 400
+
+    dl_name = os.path.basename(entry.replace("\\", "/")) or "download"
+    mime = mimetypes.guess_type(dl_name)[0] or "application/octet-stream"
+    state = {"closed": False}
+
+    def cleanup():
+        if state["closed"]:
+            return
+        state["closed"] = True
+        for x in (f, arc, rf):
+            try:
+                if x:
+                    x.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def gen():
+        try:
+            while True:
+                chunk = f.read(512 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        except Exception as e:  # noqa: BLE001
+            _log.warning("ssh archive member interrupted: cid=%s path=%s %s", cid, path, e)
+        finally:
+            cleanup()
+
+    headers = {"Content-Disposition": "attachment; filename*=UTF-8''%s" % quote(dl_name)}
+    if member_size:
+        headers["Content-Length"] = str(member_size)
+    resp = Response(stream_with_context(gen()), mimetype=mime, headers=headers)
+    resp.call_on_close(cleanup)
+    return resp

@@ -66,9 +66,40 @@ function setupArchiveView(tab, host, path, name) {
   const ext = (fileName.split(".").pop() || "").toLowerCase();
   const viewable = IDE_ARCHIVE_VIEWABLE.indexOf(ext) >= 0;
 
+  /* ---------- 数据源：本机 / SSH 远程 ----------
+     第 5 个参数 opts.remote = {id, path, label}，由 45_ 的远程文件查看器传入；
+     函数签名保持 4 个形参（兼容 openFile 的旧调用），用 arguments[4] 读取。
+     远程压缩包走 /api/ssh/fs/archive/*（SFTP 按块随机读，不把整包下载到服务器），
+     本机压缩包仍走 /api/zip/*；下面列表、预览、下载逻辑完全共用。 */
+  const opts = arguments[4] || {};
+  const remote = opts.remote || null;
+  const archiveViewable = (remote
+    ? ["zip", "tar", "gz", "tgz", "tbz", "tbz2", "bz2", "xz", "txz"]
+    : IDE_ARCHIVE_VIEWABLE).indexOf(ext) >= 0;
+  const hint = remote ? "当前支持在线浏览：zip / tar / tgz / gz / bz2 / xz" : "当前支持在线浏览：zip / rar";
+  const rq = remote
+    ? "id=" + encodeURIComponent(remote.id) + "&path=" + encodeURIComponent(remote.path || path)
+    : "";
+  const urlContents = dir => remote
+    ? "/api/ssh/fs/archive/contents?" + rq + (dir ? "&dir=" + encodeURIComponent(dir) : "")
+    : "/api/zip/contents?path=" + encodeURIComponent(path) + (dir ? "&dir=" + encodeURIComponent(dir) : "");
+  const urlPreview = entry => remote
+    ? "/api/ssh/fs/archive/preview?" + rq + "&entry=" + encodeURIComponent(entry)
+    : "/api/zip/preview?zip_path=" + encodeURIComponent(path) + "&entry=" + encodeURIComponent(entry);
+  const urlFile = entry => remote
+    ? "/api/ssh/fs/archive/file?" + rq + "&entry=" + encodeURIComponent(entry)
+    : "/api/zip/file?zip_path=" + encodeURIComponent(path) + "&entry=" + encodeURIComponent(entry);
+  const urlDownload = remote
+    ? "/api/ssh/fs/download?" + rq
+    : "/api/download?path=" + encodeURIComponent(path);
+  const srcHtml = remote
+    ? '<span class="azv-crumb azv-src" title="' + _azvEsc(remote.path || path) + '">' +
+        '<i class="bi bi-hdd-network"></i>' + _azvEsc(remote.label || "远程主机") + '</span>'
+    : '';
+
   host.innerHTML =
     '<div class="azv-wrap">' +
-      '<div class="azv-head">' +
+      '<div class="azv-head">' + srcHtml +
         '<div class="azv-crumbs"></div>' +
         '<div class="azv-tools">' +
           '<input class="azv-filter" type="search" placeholder="过滤当前目录…" ' + (viewable ? "" : "disabled") + '>' +
@@ -145,7 +176,7 @@ function setupArchiveView(tab, host, path, name) {
     }
     crumbsEl.innerHTML = html;
     crumbsEl.querySelectorAll(".azv-crumb").forEach(el => {
-      el.onclick = () => { if (!viewable) return; load(el.dataset.p || ""); };
+      el.onclick = () => { if (!archiveViewable) return; load(el.dataset.p || ""); };
     });
   };
 
@@ -233,13 +264,13 @@ function setupArchiveView(tab, host, path, name) {
       (size ? '<span class="azv-pv-size">' + _azvFmt(size) + '</span>' : "");
     pvAct.innerHTML = '<button class="azv-btn azv-pv-dl" title="下载该文件"><i class="bi bi-download"></i>下载</button>';
     pvAct.querySelector(".azv-pv-dl").onclick = () => {
-      const url = "/api/zip/file?zip_path=" + encodeURIComponent(path) + "&entry=" + encodeURIComponent(clean);
+      const url = urlFile(clean);
       askConfirm(pvAct.querySelector(".azv-pv-dl"), "下载确认", nm + "（" + _azvFmt(size) + "）", "下载")
         .then(ok => { if (ok) httpDownload(url, nm); });
     };
     curCm = null;                                   // 上一个文件的编辑器实例随 DOM 一起丢弃
     pvBody.innerHTML = '<div class="azv-pv-load">正在读取 <b>' + _azvEsc(nm) + '</b> …</div>';
-    fetch("/api/zip/preview?zip_path=" + encodeURIComponent(path) + "&entry=" + encodeURIComponent(clean))
+    fetch(urlPreview(clean))
       .then(r => r.json())
       .then(d => {
         if (selected !== clean) return;                 // 期间用户已切到别的文件
@@ -355,12 +386,10 @@ function setupArchiveView(tab, host, path, name) {
     if (!viewable) {
       rowsEl.innerHTML = '<div class="azv-empty"><i class="bi bi-exclamation-circle"></i>' +
         '暂不支持在线浏览 .' + _azvEsc(ext) + ' 格式，可点右上角「下载」后用本地工具打开<br>' +
-        '<span class="azv-empty-sub">当前支持在线浏览：zip / rar</span></div>';
+        '<span class="azv-empty-sub">' + _azvEsc(hint) + '</span></div>';
       return;
     }
-    const url = "/api/zip/contents?path=" + encodeURIComponent(path) +
-      (curDir ? "&dir=" + encodeURIComponent(curDir) : "");
-    fetch(url)
+    fetch(urlContents(curDir))
       .then(r => r.json())
       .then(d => {
         if (seq !== loadSeq) return;
@@ -405,19 +434,22 @@ function setupArchiveView(tab, host, path, name) {
     renderRows();
   };
 
-  // 下载整个压缩包（二次确认）
+  // 下载整个压缩包（二次确认）：本机 /api/download，远程 /api/ssh/fs/download
   dlBtn.onclick = () => {
     askConfirm(dlBtn, "下载压缩包", fileName + "（" + _azvFmt(tab._azvZipSize || 0) + "）", "下载")
-      .then(ok => { if (ok) httpDownload("/api/download?path=" + encodeURIComponent(path), fileName); });
+      .then(ok => { if (ok) httpDownload(urlDownload, fileName); });
   };
 
-  // 解压到压缩包所在目录（仅 zip；rar 后端只支持浏览/预览）
-  if (ext !== "zip") {
+  // 解压到压缩包所在目录（仅本机 zip；远程解压属于写操作，暂只提供浏览 / 下载）
+  if (remote) {
+    extractBtn.disabled = true;
+    extractBtn.title = "远程压缩包暂不支持一键解压，可下载后用本地工具解压";
+  } else if (ext !== "zip") {
     extractBtn.disabled = true;
     extractBtn.title = "仅 zip 支持一键解压；rar / 其它格式请下载后解压";
   }
   extractBtn.onclick = () => {
-    if (ext !== "zip" || extractBtn.disabled) return;
+    if (remote || ext !== "zip" || extractBtn.disabled) return;
     askConfirm(extractBtn, "解压确认", "把 " + fileName + " 解压到它所在的目录？同名目录会自动加序号。", "开始解压")
       .then(ok => {
         if (!ok) return;
@@ -492,3 +524,117 @@ function setupArchiveView(tab, host, path, name) {
   host._azvObserver = cleanObserver;
   if (host.parentNode) cleanObserver.observe(host.parentNode, { childList: true });
 }
+
+/* ================================================================
+ * 列表 / 预览分栏拖动（全局事件委托，本机 + 远程压缩包查看器共用）
+ *   · 查看器标签是点击后才创建的，用 MutationObserver 给每个 .azv-body 注入分隔条
+ *   · 拖动改变预览区宽度，比例记在 localStorage；双击分隔条恢复默认
+ *   · 窄屏（上下布局）自动禁用；拖动结束刷新 CodeMirror 避免行号错位
+ * ================================================================ */
+(function azvSplitInit() {
+  const KEY = "ide.archiveSplitPct";
+  const MIN = 240;
+  const bodyOf = el => el && el.closest ? el.closest(".azv-body") : null;
+  const savedPct = () => {
+    try {
+      const v = parseFloat(localStorage.getItem(KEY));
+      return (v > 0.1 && v < 0.9) ? v : 0;
+    } catch (_) { return 0; }
+  };
+  const isNarrow = body => {
+    const wrap = body.closest(".azv-wrap");
+    return !!(wrap && wrap.classList.contains("azv-narrow"));
+  };
+  const applyPct = (body, pct) => {
+    const pv = body.querySelector(".azv-preview");
+    if (!pv) return;
+    if (isNarrow(body)) {
+      pv.style.width = ""; pv.style.maxWidth = ""; pv.style.minWidth = "";
+      return;
+    }
+    const w = body.clientWidth;
+    if (!w) return;
+    const px = Math.max(MIN, Math.min(w - MIN, pct * w));
+    pv.style.width = px + "px";
+    pv.style.maxWidth = "none";
+    pv.style.minWidth = "0";
+  };
+  const refreshCm = body => {
+    body.querySelectorAll(".CodeMirror").forEach(el => {
+      try { if (el.CodeMirror) el.CodeMirror.refresh(); } catch (_) {}
+    });
+  };
+  const inject = body => {
+    if (body.dataset.azvSplit) return;
+    const pv = body.querySelector(".azv-preview");
+    if (!pv) return;
+    body.dataset.azvSplit = "1";
+    const bar = document.createElement("div");
+    bar.className = "azv-resizer";
+    bar.title = "左右拖动调整宽度 · 双击恢复默认";
+    body.insertBefore(bar, pv);
+    const pct = savedPct();
+    if (pct) applyPct(body, pct);
+  };
+  const scan = root => {
+    if (!root || !root.querySelectorAll) return;
+    if (root.matches && root.matches(".azv-body")) inject(root);
+    root.querySelectorAll(".azv-body").forEach(inject);
+  };
+  const mo = new MutationObserver(recs => {
+    recs.forEach(r => r.addedNodes.forEach(n => scan(n)));
+  });
+  const startObserver = () => {
+    mo.observe(document.body, { childList: true, subtree: true });
+    scan(document.body);
+  };
+  if (document.body) startObserver();
+  else document.addEventListener("DOMContentLoaded", startObserver);
+
+  let drag = null;
+  document.addEventListener("pointerdown", e => {
+    const bar = e.target && e.target.closest ? e.target.closest(".azv-resizer") : null;
+    if (!bar) return;
+    const body = bodyOf(bar);
+    const pv = body && body.querySelector(".azv-preview");
+    if (!body || !pv || isNarrow(body)) return;
+    drag = { bar, body, pv, x: e.clientX, w: pv.getBoundingClientRect().width,
+             bw: body.clientWidth, id: e.pointerId };
+    bar.classList.add("dragging");
+    document.body.classList.add("azv-resizing");
+    try { bar.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+  });
+  document.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const w = Math.max(MIN, Math.min(drag.bw - MIN, drag.w + (drag.x - e.clientX)));
+    drag.pv.style.width = w + "px";
+    drag.pv.style.maxWidth = "none";
+    drag.pv.style.minWidth = "0";
+    e.preventDefault();
+  });
+  const endDrag = () => {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    d.bar.classList.remove("dragging");
+    document.body.classList.remove("azv-resizing");
+    try { d.bar.releasePointerCapture(d.id); } catch (_) {}
+    try {
+      const pct = d.pv.getBoundingClientRect().width / (d.bw || 1);
+      if (pct > 0.1 && pct < 0.9) localStorage.setItem(KEY, String(pct));
+    } catch (_) {}
+    refreshCm(d.body);
+  };
+  document.addEventListener("pointerup", endDrag);
+  document.addEventListener("pointercancel", endDrag);
+  document.addEventListener("dblclick", e => {
+    const bar = e.target && e.target.closest ? e.target.closest(".azv-resizer") : null;
+    const body = bar && bodyOf(bar);
+    if (!body) return;
+    const pv = body.querySelector(".azv-preview");
+    if (pv) { pv.style.width = ""; pv.style.maxWidth = ""; pv.style.minWidth = ""; }
+    try { localStorage.removeItem(KEY); } catch (_) {}
+    refreshCm(body);
+  });
+})();

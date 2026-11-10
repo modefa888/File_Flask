@@ -1192,6 +1192,21 @@ function openSshFileViewer(conn, fspath, name) {
   /* 拉取内容 → 建 CodeMirror */
   (async () => {
     try {
+      /* 压缩包：SFTP 按需随机读（/api/ssh/fs/archive/*），复用 50_ 的查看器浏览 /
+         预览 / 下载单个成员；不走文本读取，否则 zip 必然被判成二进制文件。 */
+      if (["zip", "rar", "7z", "tar", "gz", "tgz", "tbz", "tbz2", "bz2", "xz", "txz", "zst"].indexOf(getExt(String(name).toLowerCase())) >= 0 &&
+          typeof window.setupArchiveView === "function") {
+        /* 查看器按 IDE_ARCHIVE_VIEWABLE 判断能否浏览；远程支持 zip + tar 系，
+           这里临时换成远程列表，函数同步建完视图后立即恢复（不影响本机压缩包）。 */
+        const savedView = window.IDE_ARCHIVE_VIEWABLE;
+        window.IDE_ARCHIVE_VIEWABLE = ["zip", "tar", "gz", "tgz", "tbz", "tbz2", "bz2", "xz", "txz"];
+        try {
+          window.setupArchiveView(tab, host, fspath, name, {
+            remote: { id: conn.id, path: fspath, label: (conn.user || "root") + "@" + conn.host },
+          });
+        } finally { window.IDE_ARCHIVE_VIEWABLE = savedView; }
+        return;
+      }
       /* 视频：走带 Range 的流接口内嵌播放，不读文本（否则必然判为二进制） */
       if (FM_VIDEO_EXTS.indexOf(getExt(String(name).toLowerCase())) >= 0) {
         fmSshVideoPreview(host, conn, fspath, name, tab);
@@ -1267,8 +1282,11 @@ function openSshFileViewer(conn, fspath, name) {
       if (typeof ensureMode === "function") ensureMode(ext).then(m => { if (m && tab.cm === cm) { cm.setOption("mode", m); if (typeof scheduleRefresh === "function") scheduleRefresh(tab); } }).catch(() => {});
       if (typeof scheduleRefresh === "function") scheduleRefresh(tab);
     } catch (e) {
-      host.querySelector(".rfv-cm").innerHTML = '<div class="rfv-bin"><p>加载失败：' + esc(e.message || String(e)) + '</p></div>';
-      host.querySelector(".rfv-save").style.display = "none";
+      /* 压缩包视图会重写 host，此时已没有 .rfv-cm / .rfv-save，做空值兜底 */
+      const box = host.querySelector(".rfv-cm") || host.querySelector(".azv-rows") || host;
+      box.innerHTML = '<div class="rfv-bin"><p>加载失败：' + esc(e.message || String(e)) + '</p></div>';
+      const sb = host.querySelector(".rfv-save");
+      if (sb) sb.style.display = "none";
     }
   })();
   return tab;

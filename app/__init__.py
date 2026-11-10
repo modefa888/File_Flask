@@ -246,7 +246,11 @@ def _init_cron_engine(app=None) -> None:
 
 
 def _init_index_engine() -> None:
-    """初始化持久化索引：建表、加载元信息、启动后台扫描调度器。"""
+    """初始化持久化索引：加载元信息、启动后台扫描调度器。
+
+    索引库已被清空 / 尚未创建时，建表与查表都只会作用于内存空库，
+    不会在磁盘生成 .db；只有用户手动重建索引完成才会重新落盘。
+    """
     from .services.common.db import _init_index_db
     from .services.common.indexer import (
         _load_index_meta, _schedule_index_scan, _build_index, _INDEX_META,

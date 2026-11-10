@@ -32,6 +32,10 @@
                         text.textContent = '扫描失败';
                         badge.className = 'badge bg-danger text-white border';
                         if (statusDetail) badge.title = statusDetail;
+                    } else if (status === 'cleared') {
+                        text.textContent = '索引已清空 (点击重建)';
+                        badge.className = 'badge bg-light text-muted border';
+                        badge.title = '索引数据库已清空，点击「重建索引」才会重新创建';
                     } else if (totalFiles === 0 && (lastScan === '从未扫描' || lastScan === '等待中...')) {
                         text.textContent = '未扫描 (点击重建)';
                         badge.className = 'badge bg-light text-muted border';

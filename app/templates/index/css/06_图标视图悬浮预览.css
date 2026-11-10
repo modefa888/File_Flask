@@ -2755,6 +2755,23 @@
             background: #fecaca;
         }
 
+        /* 清空索引库：靠左放置，与右侧的重建/取消按钮区分开 */
+        .idx-btn-clear {
+            margin-right: auto;
+            background: #fff1f2;
+            color: #e11d48;
+            border: 1px solid #fecdd3;
+        }
+
+        .idx-btn-clear:hover:not(:disabled) {
+            background: #ffe4e6;
+        }
+
+        .idx-btn-clear:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
         /* 新建按钮下拉 */
         .btn-create-new {
             font-size: 0.8rem;

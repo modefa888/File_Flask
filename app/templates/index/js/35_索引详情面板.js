@@ -48,6 +48,7 @@
                 </div>
             </div>
             <div class="panel-footer">
+                <button class="idx-btn idx-btn-clear" id="idxClearBtn" title="删除索引主库、临时库及 WAL/SHM 文件；清空后只有再次点击「重建索引」才会重新创建"><i class="bi bi-trash3"></i> 清空索引库</button>
                 <button class="idx-btn idx-btn-primary" id="idxRebuildBtn"><i class="bi bi-arrow-clockwise"></i> 重建索引</button>
                 <button class="idx-btn idx-btn-cancel" id="idxCancelBtn" style="display:none;"><i class="bi bi-x-lg"></i> 取消扫描</button>
             </div>
@@ -63,8 +64,9 @@
                 if (e.target === overlay) closeIndexDetail();
             });
 
-            // 重建索引按钮
+            // 重建 / 清空索引按钮
             overlay.querySelector('#idxRebuildBtn').addEventListener('click', _handleIndexRebuild);
+            overlay.querySelector('#idxClearBtn').addEventListener('click', _handleIndexClear);
             overlay.querySelector('#idxCancelBtn').addEventListener('click', _handleIndexCancel);
             // 可视化面板按钮
             overlay.querySelector('#idxVizBtn').addEventListener('click', showIndexCharts);

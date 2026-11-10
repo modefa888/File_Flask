@@ -52,6 +52,8 @@
         '<button class="idx-cancel" id="idxCancel">✕ 取消扫描</button>';
     } else if (status === "error") {
       h += '<div class="idx-status err">❌ 上次扫描失败，可点击右上角「重建」重试</div>';
+    } else if (status === "cleared") {
+      h += '<div class="idx-status" style="background:#f1f5f9;color:#64748b">🗑️ 索引已清空，点击右上角「重建」才会重新创建</div>';
     } else {
       h += '<div class="idx-status ok">✅ 索引就绪</div>';
     }

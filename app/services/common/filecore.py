@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime
 
 from ...config import DEFAULT_START_PATH, _DIR_SIZE_CACHE_FILE, _LIST_CACHE_FILE
-from .db import _get_index_conn
+from .db import _get_index_conn, _index_db_generation
 from .store_db import store_conn, store_tx, migrate_json_once
 
 
@@ -352,11 +352,22 @@ _local_index = threading.local()
 
 def _get_index_conn_cached():
     """线程本地复用索引连接：list_directory 会给每个子目录查一次索引，
-    反复新建/关闭连接开销很大，这里按线程复用单连接。"""
+    反复新建/关闭连接开销很大，这里按线程复用单连接。
+
+    索引库被清空 / 重建替换后（代次递增），必须丢弃旧连接：
+    否则会继续读已被删除的旧库 inode，或一直用清空时的内存空库。
+    """
+    gen = _index_db_generation()
     conn = getattr(_local_index, "conn", None)
-    if conn is None:
+    if conn is None or getattr(_local_index, "gen", None) != gen:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
         conn = _get_index_conn()
         _local_index.conn = conn
+        _local_index.gen = gen
     return conn
 
 

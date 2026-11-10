@@ -800,6 +800,37 @@
             }
         }
 
+        function _handleIndexClear() {
+            const btn = document.getElementById('idxClearBtn');
+            if (!btn || btn.disabled) return;
+            showConfirm('确定要清空索引数据库吗？<br>将删除索引主库、临时库（.new）以及 WAL/SHM 等全部索引文件。<br><b>清空后不会自动重建，只有再次点击「重建索引」并完成扫描才会重新创建。</b>', '确认清空')
+                .then(confirmed => {
+                    if (!confirmed) return;
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> 清空中...';
+                    fetch('/api/index/clear', { method: 'POST' })
+                        .then(r => r.json())
+                        .then(data => {
+                            btn.innerHTML = '<i class="bi bi-trash3"></i> 清空索引库';
+                            if (!data.success) {
+                                btn.disabled = false;
+                                showToast('错误', data.error || (data.errors || []).join('; ') || '清空失败', 'danger');
+                                _loadIndexDetail();
+                                return;
+                            }
+                            const warn = (data.errors || []).length ? '（' + data.errors.length + ' 个附属文件未能删除）' : '';
+                            showToast('已清空', '已删除 ' + (data.removed || []).length + ' 个索引文件，释放 ' + (data.freed_str || '0 B') + warn + '；点击「重建索引」才会重新创建', 'success');
+                            _loadIndexDetail();
+                            updateIndexBadge();
+                        })
+                        .catch(e => {
+                            btn.disabled = false;
+                            btn.innerHTML = '<i class="bi bi-trash3"></i> 清空索引库';
+                            showToast('错误', '清空失败: ' + e.message, 'danger');
+                        });
+                });
+        }
+
         function _handleIndexRebuild() {
             const status = document.getElementById('idxStatus').textContent;
             if (status === '扫描中...') return;
@@ -858,6 +889,7 @@
             const totalSizeStr = data.total_size_str || '--';
             const lastScan = data.last_scan || '--';
             const statusDetail = data.status_detail || '';
+            const cleared = status === 'cleared';
 
             document.getElementById('idxFileCount').textContent = totalFiles.toLocaleString();
             document.getElementById('idxDirCount').textContent = totalDirs.toLocaleString();
@@ -874,6 +906,10 @@
                 document.getElementById('idxProgressText').textContent = progress + '% ' + (statusDetail || '扫描中');
                 document.getElementById('idxProgressFill').style.width = progress + '%';
                 cancelBtn.style.display = '';
+            } else if (cleared) {
+                statusEl.textContent = '🗑️ 已清空 · 待重建';
+                progressArea.style.display = 'none';
+                cancelBtn.style.display = 'none';
             } else if (status === 'error') {
                 statusEl.textContent = '❌ 失败';
                 progressArea.style.display = 'none';
@@ -884,11 +920,15 @@
                 cancelBtn.style.display = 'none';
             }
 
+            const clearBtn = document.getElementById('idxClearBtn');
+            if (clearBtn) clearBtn.disabled = cleared;
+            const emptyHint = cleared ? '索引已清空，点击「重建索引」重新生成' : '暂无数据';
+
             // Top 15 目录
             const topDirsEl = document.getElementById('idxTopDirs');
             const topDirs = data.top_dirs || [];
             if (topDirs.length === 0) {
-                topDirsEl.innerHTML = '<div class="idx-empty"><i class="bi bi-inbox"></i>暂无数据</div>';
+                topDirsEl.innerHTML = `<div class="idx-empty"><i class="bi bi-inbox"></i>${emptyHint}</div>`;
             } else {
                 let html = '<table class="idx-table"><thead><tr><th>#</th><th>目录</th><th>文件数</th><th class="num">大小</th></tr></thead><tbody>';
                 topDirs.forEach((item, idx) => {
@@ -909,7 +949,7 @@
             const typeDistEl = document.getElementById('idxTypeDist');
             const typeDist = data.type_distribution || [];
             if (typeDist.length === 0) {
-                typeDistEl.innerHTML = '<div class="idx-empty"><i class="bi bi-inbox"></i>暂无数据</div>';
+                typeDistEl.innerHTML = `<div class="idx-empty"><i class="bi bi-inbox"></i>${emptyHint}</div>`;
             } else {
                 let html = '<table class="idx-table"><thead><tr><th>后缀</th><th>数量</th><th class="num">总大小</th></tr></thead><tbody>';
                 typeDist.forEach(item => {
@@ -923,7 +963,7 @@
             const topFilesEl = document.getElementById('idxTopFiles');
             const topFiles = data.top_files || [];
             if (topFiles.length === 0) {
-                topFilesEl.innerHTML = '<div class="idx-empty"><i class="bi bi-inbox"></i>暂无数据</div>';
+                topFilesEl.innerHTML = `<div class="idx-empty"><i class="bi bi-inbox"></i>${emptyHint}</div>`;
             } else {
                 let html = '<table class="idx-table"><thead><tr><th>文件名</th><th>后缀</th><th class="num">大小</th></tr></thead><tbody>';
                 topFiles.forEach(item => {

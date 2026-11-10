@@ -1,6 +1,7 @@
 """全盘索引引擎：SQLite 索引、构建/扫描、检索、详情统计。"""
 import os
 import sys
+import glob
 import json
 import time
 import threading
@@ -8,8 +9,13 @@ from datetime import datetime
 
 from ...config import _INDEX_DB_FILE, _INDEX_DB_NEW
 from ...log import get_logger
-from .db import _get_index_conn, _init_index_db, _index_has_data
-from .filecore import format_size, get_file_info, _DIR_SIZE_CACHE, _in_pseudo_fs
+from .db import (
+    _get_index_conn, _init_index_db, _index_has_data,
+    _index_db_exists, _bump_index_db_generation,
+)
+from .filecore import (
+    format_size, get_file_info, _DIR_SIZE_CACHE, _INDEX_SIZE_CACHE, _in_pseudo_fs,
+)
 
 
 _log = get_logger()
@@ -57,9 +63,10 @@ def _load_index_meta():
         _INDEX_META["total_files"] = int(meta.get("total_files", 0))
         _INDEX_META["total_dirs"] = int(meta.get("total_dirs", 0))
         _INDEX_META["total_size"] = int(meta.get("total_size", 0))
-        _INDEX_META["last_scan"] = meta.get("last_scan", "从未扫描")
-        _INDEX_META["status"] = "idle"
-        _INDEX_META["progress"] = 100
+        cleared = not _index_db_exists()
+        _INDEX_META["last_scan"] = "已清空（待重建）" if cleared else meta.get("last_scan", "从未扫描")
+        _INDEX_META["status"] = "cleared" if cleared else "idle"
+        _INDEX_META["progress"] = 0 if cleared else 100
         _INDEX_META["scanned_files"] = 0
         _INDEX_META["scanned_dirs"] = 0
         _INDEX_META["scanned_size"] = 0
@@ -245,6 +252,12 @@ def _get_index_meta():
             "status_detail": status_detail,
         }
 
+    # 主库文件不存在 = 已被清空。连接层此时返回内存空库，不会在磁盘重建 db
+    cleared = not _index_db_exists()
+    if cleared:
+        status = "cleared"
+    elif status == "cleared":
+        status = "idle"          # 库文件已重新出现（重建完成）但状态尚未同步
     conn = _get_index_conn()
     try:
         rows = conn.execute("SELECT key, value FROM index_meta").fetchall()
@@ -254,10 +267,13 @@ def _get_index_meta():
         total_dirs = int(meta.get("total_dirs", 0))
         total_size = int(meta.get("total_size", 0))
 
-        if total_files == 0 and last_scan == "从未扫描":
+        if cleared:
+            last_scan = "已清空（待重建）"
+        elif total_files == 0 and last_scan == "从未扫描":
             last_scan = "等待中..."
 
         return {
+            "index_exists": not cleared,
             "total_files": total_files,
             "total_dirs": total_dirs,
             "total_size": total_size,
@@ -401,6 +417,8 @@ def _build_index(roots):
                     # 原子替换：新库一次性顶替旧库（POSIX rename 原子生效）。
                     # 替换完成前旧索引始终完整可查；替换失败旧索引原封不动。
                     os.replace(_INDEX_DB_NEW, _INDEX_DB_FILE)
+                    # 主库已重新生成：让线程本地缓存的内存空库/旧库连接失效
+                    _bump_index_db_generation()
                     _log.info("索引构建完成，已替换主索引: %d 文件, %d 目录", total_files, total_dirs)
                 except Exception as e:
                     _log.error("索引替换失败: %s", e)
@@ -455,6 +473,57 @@ def _build_index(roots):
 def _cancel_index_scan():
     """取消正在进行的扫描"""
     _CANCEL_EVENT.set()
+
+
+def _clear_index():
+    """清空索引数据库：删除主库、临时库以及它们的 WAL/SHM 等全部附属文件。
+
+    清空后主库文件不存在，连接层改用内存空库响应查询（不会再隐式创建 .db），
+    启动初始化和后台调度器也不会自动重建索引；只有用户再次手动「重建索引」
+    并完成扫描后，临时库才会原子替换成主库，磁盘上才重新出现索引 db。
+    """
+    if _INDEX_META.get("status") == "scanning":
+        _cancel_index_scan()
+    # 与构建线程互斥：必须等它退出（含 os.replace / 临时库清理）后再删文件，
+    # 否则扫描线程会在清空之后又把 .new 替换成主库
+    if not _INDEX_BUILD_LOCK.acquire(timeout=15):
+        return {"success": False, "error": "索引正在构建中，请取消扫描后再清空"}
+    try:
+        _CANCEL_EVENT.set()
+        removed, errors, freed = [], [], 0
+        # 以主库路径为前缀，覆盖 .db / .db-wal / .db-shm / .db.new / .db.new-wal ... 全部索引库文件
+        for path in sorted(glob.glob(glob.escape(_INDEX_DB_FILE) + "*")):
+            try:
+                freed += os.path.getsize(path)
+                os.remove(path)
+                removed.append(os.path.basename(path))
+            except OSError as e:
+                errors.append(f"{os.path.basename(path)}: {e}")
+
+        _INDEX_META.update({
+            "total_files": 0, "total_dirs": 0, "total_size": 0,
+            "last_scan": "已清空（待重建）", "status": "cleared", "progress": 0,
+            "status_detail": "索引数据库已清空，等待手动重建",
+            "scanned_files": 0, "scanned_dirs": 0, "scanned_size": 0,
+        })
+        _invalidate_detail_cache()
+        _DIR_SIZE_CACHE.clear()
+        _INDEX_SIZE_CACHE.clear()
+        # 让各线程缓存的旧索引连接失效，改为使用内存空库
+        _bump_index_db_generation()
+        _log.info("索引数据库已清空：删除 %d 个文件，释放 %s", len(removed), format_size(freed))
+        # 主库文件消失即视为清空成功；WAL/SHM 等附属文件删除失败只作为警告返回，
+        # 它们不影响「索引库不存在」这一状态，也不阻碍重新重建
+        return {
+            "success": not os.path.exists(_INDEX_DB_FILE),
+            "removed": removed,
+            "freed_bytes": freed,
+            "freed_str": format_size(freed),
+            "errors": errors,
+            "status": "cleared",
+        }
+    finally:
+        _INDEX_BUILD_LOCK.release()
 
 
 def _schedule_index_scan():

@@ -9,7 +9,7 @@ from flask import Blueprint, request, jsonify
 
 from ...log import get_logger
 from ...services.common.indexer import (
-    _build_index, _cancel_index_scan, _get_index_meta, _query_index,
+    _build_index, _cancel_index_scan, _clear_index, _get_index_meta, _query_index,
     _search_walk, _load_detail_stats, _load_scanning_detail_stats, _get_chart_stats,
     _query_media_collection,
     _INDEX_META, _SEARCH_RESULTS, _SEARCH_LOCK,
@@ -263,6 +263,17 @@ def api_index_cancel():
     """取消索引扫描"""
     _cancel_index_scan()
     return jsonify({"success": True, "status": "cancelled"})
+
+
+@bp.route("/api/index/clear", methods=["POST"])
+def api_index_clear():
+    _log.info("POST /api/index/clear")
+    """清空索引数据库（主库 + 临时库 + WAL/SHM），清空后不会自动重建，
+    只有再次手动触发 /api/index/build 完成扫描才会重新生成。"""
+    result = _clear_index()
+    if not result.get("success"):
+        return jsonify(result), 409
+    return jsonify(result)
 
 
 @bp.route("/api/index/status")

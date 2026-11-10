@@ -34,17 +34,40 @@ ADM.modules.push({
             ['deps', '依赖'],
             ['restart', '重启']
         ];
+        /* store.db 同步：校验来源 → 备份 → 补表结构 → 逐表同步 */
+        var DB_SYNC_STEPS = [
+            ['init', '校验来源'],
+            ['backup', '备份当前库'],
+            ['schema', '结构更新'],
+            ['merge', '同步数据'],
+            ['done', '完成']
+        ];
+        var DB_LIGHT_STEPS = [
+            ['init', '准备'],
+            ['done', '完成']
+        ];
         var DONE_TEXT = {
             init: 'Git 仓库初始化完成',
             zip: 'ZIP 包更新完成',
             backup: '代码备份完成',
-            restore: '已恢复到所选备份'
+            restore: '已恢复到所选备份',
+            dbsync: 'store.db 同步完成',
+            dbschema: '表结构已是最新',
+            dbbackup: '快照已保存',
+            dbdelete: '快照已删除'
+        };
+        /* 任务 action → 后端任务 kind（决定进度面板的步骤文案） */
+        var DB_KIND_OF = {
+            sync: 'dbsync', restore: 'dbsync', schema: 'dbschema',
+            backup: 'dbbackup', delete: 'dbdelete'
         };
 
         function stepsFor(kind) {
             if (kind === 'zip') return ZIP_STEPS;
             if (kind === 'backup') return BACKUP_STEPS;
             if (kind === 'restore') return RESTORE_STEPS;
+            if (kind === 'dbsync') return DB_SYNC_STEPS;
+            if (kind === 'dbschema' || kind === 'dbbackup' || kind === 'dbdelete') return DB_LIGHT_STEPS;
             return STEPS;
         }
         var RESTART_TIPS = {
@@ -59,6 +82,8 @@ ADM.modules.push({
             cfg: null, local: null, env: null,
             updateAvailable: false, runId: '', busy: false,
             zipFile: null,
+            dbFile: null, store: null,
+            inspect: null, inspectBusy: false, inspectSeq: 0, picked: {},
             sfx: 'git',                /* 当前任务写入哪个 Tab 的进度面板 */
             poll: null, wait: null
         };
@@ -158,7 +183,119 @@ ADM.modules.push({
             恢复前会先给当前代码做一份 <code>restore_*.zip</code> 快照，恢复后按配置的重启方式重启。</div>
     </section>`;
 
-        /* 每个 Tab 各自一份「执行进度」面板：sfx 用来区分元素 ID（git / zip / bk） */
+        /* store.db 数据同步 / 更新：状态 + 导出 + 三类来源的同步操作 + 服务器快照 */
+        var DB_PANEL = `
+    <section class="adm-card">
+        <div class="adm-section-head">
+            <h3><i class="bi bi-database"></i> 本地 store.db</h3>
+            <span class="adm-spacer"></span>
+            <span class="adm-hint upd-bk-dir" id="uDbPath"></span>
+            <button class="adm-btn ghost sm" id="uBtnDbRefresh" type="button" style="margin-left:8px">
+                <i class="bi bi-arrow-repeat"></i> 刷新
+            </button>
+            <a class="adm-btn ghost sm" id="uBtnDbExport" href="/api/adm/update/store/export">
+                <i class="bi bi-download"></i> 下载快照
+            </a>
+            <button class="adm-btn primary sm" id="uBtnDbBackup" type="button" style="margin-left:8px">
+                <i class="bi bi-archive"></i> 备份到服务器
+            </button>
+        </div>
+        <div class="upd-db-stats" id="uDbStats"><div class="upd-empty">正在读取 store.db 状态…</div></div>
+        <div class="upd-db-acts">
+            <button class="adm-btn ghost sm" id="uBtnDbSchema" type="button">
+                <i class="bi bi-wrench"></i> 检查并更新表结构
+            </button>
+            <span class="adm-hint" id="uDbSchemaHint">代码升级后补齐新增的表 / 列，可重复执行</span>
+        </div>
+    </section>
+    <section class="adm-card">
+        <div class="adm-section-head"><h3><i class="bi bi-arrow-left-right"></i> 数据同步</h3></div>
+        <div class="upd-form upd-db-form">
+            <div class="upd-field wide">
+                <label for="uDbFile">来源一：上传另一台机器导出的 .db 快照</label>
+                <div class="upd-db-drop" id="uDbDrop">
+                    <input id="uDbFile" type="file" accept=".db,.sqlite,.sqlite3" hidden>
+                    <div class="upd-db-drop-icon"><i class="bi bi-cloud-arrow-up"></i></div>
+                    <div class="upd-db-drop-main">
+                        <div class="upd-db-drop-title" id="uDbFileName">点击选择，或把 .db 文件拖到这里</div>
+                        <div class="upd-db-drop-sub" id="uDbFileSub">支持 store.db / .sqlite 快照，最大 512MB</div>
+                    </div>
+                    <button class="adm-btn ghost sm" id="uBtnDbClear" type="button" style="display:none">
+                        <i class="bi bi-x-lg"></i> 移除
+                    </button>
+                </div>
+                <div class="upd-tip">先在另一台机器点「下载快照」拿到 .db 文件；已选择文件时优先于远程 URL。</div>
+            </div>
+            <div class="upd-field wide">
+                <label for="uDbUrl">来源二：远程 URL（可下载 .db 快照的直链）</label>
+                <input class="adm-input mono" id="uDbUrl" type="text"
+                    placeholder="http://192.168.1.2:5001/xxx/store.db">
+                <div class="upd-tip">填写远程地址时可选填 Token（作为 <code>Authorization: Bearer</code> 发送）。上传文件优先于远程 URL。</div>
+            </div>
+            <div class="upd-field">
+                <label for="uDbToken">远程 Token（可选）</label>
+                <input class="adm-input" id="uDbToken" type="password" placeholder="需要鉴权的下载源才填">
+            </div>
+            <div class="upd-field">
+                <label for="uDbMode">同步模式</label>
+                <select class="adm-select" id="uDbMode">
+                    <option value="merge">合并补齐（保留本地已有）</option>
+                    <option value="replace">覆盖更新（同主键以来源为准）</option>
+                    <option value="overwrite">整库替换（先清空本地表）</option>
+                </select>
+                <div class="upd-tip">按主键 / 唯一键判断重复；同步前会自动备份当前库并补齐表结构。</div>
+            </div>
+            <div class="upd-field wide">
+                <label for="uDbTables">同步范围（由下方勾选自动填入，可手动编辑；留空 = 全部共有表）</label>
+                <input class="adm-input mono" id="uDbTables" type="text" placeholder="favorites, users, cron_tasks …">
+            </div>
+            <div class="upd-field wide">
+                <label class="upd-check"><input type="checkbox" id="uDbSkipCache" checked>
+                <span>跳过可重建的缓存 / 日志表（目录缓存、操作日志、AI 用量、封面索引等）</span></label>
+            </div>
+            <div class="upd-form-foot">
+                <button class="adm-btn primary" id="uBtnDbInspect" type="button">
+                    <i class="bi bi-clipboard2-data"></i> 校验并预览差异
+                </button>
+                <span class="adm-hint">选好文件会自动校验；也可填远程 URL 后点此校验。确认差异后再同步。</span>
+            </div>
+        </div>
+        <div class="upd-tip upd-bk-tip">通过 SQLite ATTACH 按「两边共有的表 + 共有的列」逐表搬运，不会替换 store.db 文件本身；每次同步前都会把当前库快照存到 <code>data/update_backup/</code>。</div>
+    </section>
+    <section class="adm-card upd-db-diff" id="uDbDiffCard" style="display:none">
+        <div class="adm-section-head">
+            <h3><i class="bi bi-table"></i> 校验结果 · 逐表差异</h3>
+            <span class="adm-spacer"></span>
+            <span class="adm-hint upd-bk-dir" id="uDbDiffSource"></span>
+        </div>
+        <div class="upd-db-diff-summary" id="uDbDiffSummary"></div>
+        <div class="upd-db-diff-tools">
+            <label class="upd-check"><input type="checkbox" id="uDbDiffOnlyDiff" checked>
+                <span>只显示有差异 / 结构不同的表</span></label>
+            <span class="adm-spacer"></span>
+            <button class="adm-btn ghost sm" id="uBtnDbPickAll" type="button">全选可见</button>
+            <button class="adm-btn ghost sm" id="uBtnDbPickDiff" type="button">仅选差异表</button>
+            <button class="adm-btn ghost sm" id="uBtnDbPickNone" type="button">清空选择</button>
+        </div>
+        <div class="upd-db-diff-list" id="uDbDiffList"></div>
+        <div class="upd-form-foot">
+            <button class="adm-btn primary" id="uBtnDbApply" type="button">
+                <i class="bi bi-arrow-left-right"></i> 按勾选的表开始同步
+            </button>
+            <span class="adm-hint" id="uDbDiffHint">勾选的表会写入上方「只同步这些表」。</span>
+        </div>
+    </section>
+    <section class="adm-card">
+        <div class="adm-section-head">
+            <h3><i class="bi bi-clock-history"></i> 服务器快照</h3>
+            <span class="adm-spacer"></span>
+            <span class="adm-hint" id="uDbBkDir"></span>
+        </div>
+        <div class="upd-bk-list" id="uDbBkList"><div class="upd-empty">正在读取快照…</div></div>
+        <div class="upd-tip upd-bk-tip">快照是一致性 .db 文件，可下载留存，也可点「恢复」按上面的同步模式把数据同步回来；只保留最近 10 份。</div>
+    </section>`;
+
+        /* 每个 Tab 各自一份「执行进度」面板：sfx 用来区分元素 ID（git / zip / bk / db） */
         function progressPanel(sfx) {
             return `
     <section class="adm-card upd-progress-card">
@@ -175,7 +312,10 @@ ADM.modules.push({
     </section>`;
         }
         /* 任务类型 → 所属 Tab 的进度面板后缀 */
-        var TAB_OF = { update: 'git', init: 'git', restart: 'git', zip: 'zip', backup: 'bk', restore: 'bk' };
+        var TAB_OF = {
+            update: 'git', init: 'git', restart: 'git', zip: 'zip', backup: 'bk', restore: 'bk',
+            dbsync: 'db', dbschema: 'db', dbbackup: 'db', dbdelete: 'db'
+        };
         /* 每个 Tab 回显「上次结果」时，在这些类型里取最近完成的一条 */
         var TAB_KINDS = { git: ['update', 'init', 'restart'], zip: ['zip'], bk: ['backup', 'restore'] };
 
@@ -330,6 +470,11 @@ ADM.modules.push({
                             id: 'backup', name: '备份', icon: 'bi-clock-history',
                             content: '<div class="upd-pane">' + BACKUP_PANEL + progressPanel('bk') + '</div>',
                             onShow: function () { loadBackups(); }
+                        },
+                        {
+                            id: 'dbsync', name: 'store.db 同步', icon: 'bi-database',
+                            content: '<div class="upd-pane">' + DB_PANEL + progressPanel('db') + '</div>',
+                            onShow: function () { loadStoreStatus(); }
                         }
                     ], { key: 'upd-method' }) +
                     TOP_ACTIONS +
@@ -602,7 +747,11 @@ ADM.modules.push({
             if (!alive()) { stopPoll(); stopWait(); return; }
             if (!S.runId) return;
             try {
-                var run = await ADM.api('/api/adm/update/status?run_id=' + encodeURIComponent(S.runId));
+                /* store.db 任务有独立的进度接口，代码更新任务沿用在线更新的 */
+                var statusUrl = (S.sfx === 'db')
+                    ? '/api/adm/update/store/task?run_id='
+                    : '/api/adm/update/status?run_id=';
+                var run = await ADM.api(statusUrl + encodeURIComponent(S.runId));
                 if (!alive()) { stopPoll(); return; }
                 renderRun(run, S.sfx);
                 if (run.status === 'done') {
@@ -615,6 +764,13 @@ ADM.modules.push({
                         reloadState().catch(function () { });
                     }
                     if (run.kind === 'backup' || run.kind === 'restore') loadBackups();
+                    if (S.sfx === 'db') {
+                        loadStoreStatus();
+                        /* 同步完成后用同一来源重新比对，差异面板立即反映最新状态 */
+                        if (S.inspect && S.inspect.src_token && run.action === 'sync') {
+                            inspectStore({ token: S.inspect.src_token, silent: true });
+                        }
+                    }
                 } else if (run.status === 'error') {
                     stopPoll();
                     setBusy(false);
@@ -624,8 +780,15 @@ ADM.modules.push({
                     waitServer();
                 }
             } catch (e) {
-                /* 任务不存在或网络中断：很可能是进程正在重启 */
+                /* 任务不存在或网络中断：代码更新任务多半是进程正在重启 */
                 stopPoll();
+                if (S.sfx === 'db') {
+                    /* store.db 同步不会重启服务，任务丢失只可能是服务重启过 */
+                    setBusy(false);
+                    toast('同步任务状态丢失（服务可能已重启）', 'warn');
+                    loadStoreStatus();
+                    return;
+                }
                 waitServer();
             }
         }
@@ -664,6 +827,10 @@ ADM.modules.push({
             q('uBtnSave').disabled = S.busy;
             q('uBtnZip').disabled = S.busy || !S.zipFile;
             q('uBtnApply').disabled = S.busy || !S.updateAvailable;
+            ['uBtnDbRefresh', 'uBtnDbBackup', 'uBtnDbSchema', 'uBtnDbInspect', 'uBtnDbApply'].forEach(function (id) {
+                var btn = q(id);
+                if (btn) btn.disabled = S.busy;
+            });
         }
 
         /* ------------------------------------------------------------ 连接测试 */
@@ -1068,6 +1235,302 @@ ADM.modules.push({
             }
         }
 
+        /* ------------------------------------------------------------ store.db 同步 / 更新 */
+        function dbFormParams() {
+            return {
+                mode: q('uDbMode').value,
+                skip_cache: q('uDbSkipCache').checked,
+                tables: q('uDbTables').value.trim()
+            };
+        }
+        var DB_MODE_TEXT = { merge: '合并补齐', replace: '覆盖更新', overwrite: '整库替换' };
+
+        /* 选完文件自动校验：只上传一次，之后用 src_token 复用；勾选表后才执行同步 */
+        async function inspectStore(opts) {
+            opts = opts || {};
+            var f = S.dbFile;
+            var url = q('uDbUrl').value.trim();
+            var params = dbFormParams();
+            params.tables = '';          // 差异报告始终覆盖全部表，不受同步范围影响
+            var req;
+            if (opts.token) {
+                req = { body: Object.assign({}, params, {
+                    src_token: opts.token,
+                    display_name: (S.inspect && S.inspect.source && S.inspect.source.name) || '已校验来源'
+                }) };
+            } else if (opts.name) {
+                req = { body: Object.assign({}, params, { name: opts.name }) };
+            } else if (f) {
+                var fd = new FormData();
+                fd.append('file', f);
+                fd.append('mode', params.mode);
+                fd.append('skip_cache', params.skip_cache ? 'true' : 'false');
+                fd.append('tables', params.tables || '');
+                req = { form: fd };
+            } else if (url) {
+                req = { body: Object.assign({}, params, { url: url, token: q('uDbToken').value }) };
+            } else {
+                toast('请选择 .db 文件或填写远程 URL', 'warn');
+                return;
+            }
+            S.inspectBusy = true;
+            var seq = ++S.inspectSeq;
+            q('uDbDiffCard').style.display = '';
+            q('uDbDiffSummary').innerHTML = '<div class="upd-empty">正在校验来源并逐表比对，请稍候…</div>';
+            q('uDbDiffList').innerHTML = '';
+            q('uBtnDbInspect').disabled = true;
+            try {
+                var res = await ADM.api('/api/adm/update/store/inspect', {
+                    method: 'POST', body: req.body, form: req.form
+                });
+                if (!alive() || seq !== S.inspectSeq) return;   // 已有更新的校验，丢弃旧结果
+                S.inspect = res;
+                renderDbDiff(res);
+                if (!opts.silent) toast('校验完成，请确认差异后同步', 'ok');
+            } catch (e) {
+                if (!alive() || seq !== S.inspectSeq) return;
+                q('uDbDiffSummary').innerHTML =
+                    '<div class="upd-empty">校验失败：' + ADM.esc(e.message) + '</div>';
+                q('uDbDiffList').innerHTML = '';
+                toast(e.message, 'err');
+            } finally {
+                if (seq === S.inspectSeq) {
+                    S.inspectBusy = false;
+                    if (alive()) q('uBtnDbInspect').disabled = false;
+                }
+            }
+        }
+
+        function dbDiffBadge(t) {
+            if (t.skip) return '<span class="adm-badge mute">跳过</span>';
+            if (t.status === 'diff') return '<span class="adm-badge warn">有差异</span>';
+            if (t.status === 'schema') return '<span class="adm-badge warn">结构不同</span>';
+            if (t.status === 'src_only') return '<span class="adm-badge info">仅来源</span>';
+            if (t.status === 'local_only') return '<span class="adm-badge mute">仅本地</span>';
+            if (t.status === 'large') return '<span class="adm-badge info">数据量大</span>';
+            return '<span class="adm-badge ok">一致</span>';
+        }
+
+        function renderDbDiff(res) {
+            var sum = res.summary || {};
+            var srcName = (res.source && res.source.name) || '';
+            q('uDbDiffSource').textContent = '来源 ' + srcName + ' · ' +
+                fmtSize(res.source ? res.source.size : 0);
+            q('uDbDiffSource').title = srcName;
+            var cells = [
+                ['来源 / 本地表', (sum.src_tables || 0) + ' / ' + (sum.local_tables || 0)],
+                ['有差异', (sum.diff || 0) + ' 张'],
+                ['结构不同', (sum.schema || 0) + ' 张'],
+                ['数据一致', (sum.same || 0) + ' 张'],
+                ['仅来源 / 仅本地', (sum.src_only || 0) + ' / ' + (sum.local_only || 0)],
+                ['可同步 / 跳过', (sum.syncable || 0) + ' / ' + (sum.skipped || 0)],
+                ['预计变更行', (sum.change || 0).toLocaleString() + ' 行'],
+                ['同步模式', ADM.esc(DB_MODE_TEXT[res.mode] || res.mode || '—')]
+            ];
+            q('uDbDiffSummary').innerHTML = cells.map(function (c) {
+                return '<div class="upd-db-stat"><span>' + c[0] + '</span><b>' + c[1] + '</b></div>';
+            }).join('');
+            S.picked = {};
+            (res.tables || []).forEach(function (t) {
+                S.picked[t.name] = !t.skip && t.status !== 'same' &&
+                    t.status !== 'local_only' && t.status !== 'src_only';
+            });
+            renderDbDiffRows(res);
+            if (sum.estimated) toast(sum.estimated + ' 张表数据较大，仅按行数估算差异', 'warn');
+        }
+
+        function renderDbDiffRows(res) {
+            var only = q('uDbDiffOnlyDiff').checked;
+            var rows = (res.tables || []).filter(function (t) {
+                return !only || t.status !== 'same';
+            });
+            if (!rows.length) {
+                q('uDbDiffList').innerHTML = '<div class="upd-empty">没有符合筛选条件的表。</div>';
+                updatePickedTables();
+                return;
+            }
+            var max = 1;
+            rows.forEach(function (t) {
+                max = Math.max(max, t.local_rows || 0, t.src_rows || 0);
+            });
+            q('uDbDiffList').innerHTML = rows.map(function (t) {
+                var lw = Math.max(1, Math.round((t.local_rows || 0) / max * 100));
+                var sw = Math.max(1, Math.round((t.src_rows || 0) / max * 100));
+                var chips = '';
+                if ((t.src_only_cols || []).length) {
+                    chips += '<span class="upd-db-chip add">来源多列：' +
+                        ADM.esc(t.src_only_cols.join('、')) + '</span>';
+                }
+                if ((t.local_only_cols || []).length) {
+                    chips += '<span class="upd-db-chip del">本地多列：' +
+                        ADM.esc(t.local_only_cols.join('、')) + '</span>';
+                }
+                chips += t.src_diff >= 0
+                    ? '<span class="upd-db-chip">来源多 ' + t.src_diff + ' 行 · 本地多 ' + t.local_diff + ' 行</span>'
+                    : '<span class="upd-db-chip mute">数据量大，未逐行比对</span>';
+                if (t.skip_reason) {
+                    chips += '<span class="upd-db-chip mute">' + ADM.esc(t.skip_reason) + '</span>';
+                }
+                return '<div class="upd-db-row' + (t.skip ? ' is-skip' : '') + '">' +
+                    '<label class="upd-db-pick"><input type="checkbox" data-db-table="' +
+                        ADM.esc(t.name) + '"' + (S.picked[t.name] ? ' checked' : '') +
+                        (t.skip ? ' disabled' : '') + '></label>' +
+                    '<div class="upd-db-row-main">' +
+                        '<div class="upd-db-row-head"><b>' + ADM.esc(t.name) + '</b>' + dbDiffBadge(t) +
+                            '<span class="adm-hint">预计变更 ' + (t.change || 0).toLocaleString() + ' 行</span></div>' +
+                        '<div class="upd-db-bars">' +
+                            '<div class="upd-db-bar"><i class="local" style="width:' + lw + '%"></i>' +
+                                '<span>本地 ' + (t.local_rows || 0).toLocaleString() + '</span></div>' +
+                            '<div class="upd-db-bar"><i class="src" style="width:' + sw + '%"></i>' +
+                                '<span>来源 ' + (t.src_rows || 0).toLocaleString() + '</span></div>' +
+                        '</div>' +
+                        '<div class="upd-db-chips">' + chips + '</div>' +
+                    '</div>' +
+                '</div>';
+            }).join('');
+            updatePickedTables();
+        }
+
+        function updatePickedTables() {
+            if (!S.inspect) return;
+            var names = (S.inspect.tables || []).filter(function (t) {
+                return S.picked[t.name];
+            }).map(function (t) { return t.name; });
+            q('uDbTables').value = names.join(', ');
+            q('uDbDiffHint').textContent = '已勾选 ' + names.length +
+                ' 张表；范围已写入上方输入框，可直接编辑后同步。';
+        }
+
+        async function syncSelected() {
+            if (S.inspectBusy) { toast('正在校验来源，请稍候', 'warn'); return; }
+            if (!S.inspect) { toast('请先校验来源', 'warn'); return; }
+            /* 勾选结果已写入输入框，也允许手动微调后再同步 */
+            var names = q('uDbTables').value.split(/[,，\s]+/).filter(function (x) { return x; });
+            if (!names.length) { toast('请至少勾选一张表', 'warn'); return; }
+            var mode = q('uDbMode').value;
+            var extra = (mode === 'overwrite')
+                ? '<b>整库替换会清空选中表的数据，务必确认已备份！</b>'
+                : '同步前会自动备份当前库并补齐表结构。';
+            var go = await ADM.confirm('按勾选的表开始同步',
+                '来源：<b>' + ADM.esc(S.inspect.source.name) + '</b><br>已勾选 <b>' + names.length +
+                '</b> 张表 · 模式：' + ADM.esc(DB_MODE_TEXT[mode] || mode) + '<br>' +
+                '<span class="adm-hint">' + extra + '</span>', '开始同步');
+            if (!go) return;
+            var params = dbFormParams();
+            params.action = 'sync';
+            params.src_token = S.inspect.src_token;
+            params.tables = names.join(',');
+            runDbTask(params, false);
+        }
+
+        function renderStoreStatus(st) {
+            q('uDbPath').textContent = '文件 ' + (st.path || '');
+            q('uDbPath').title = st.path || '';
+            q('uDbBkDir').textContent = st.backup_dir ? '目录 ' + st.backup_dir : '';
+            q('uDbBkDir').title = st.backup_dir || '';
+            var missing = st.missing_tables || [];
+            var health = missing.length
+                ? '<span class="adm-badge warn">缺 ' + missing.length + ' 张表</span>'
+                : '<span class="adm-badge ok">表结构完整</span>';
+            var cells = [
+                ['文件大小', ADM.esc(fmtSize(st.size || 0))],
+                ['表数量', ADM.esc(String(st.table_count || 0)) + ' 张'],
+                ['总行数', (st.row_count || 0).toLocaleString() + ' 行'],
+                ['WAL 大小', ADM.esc(fmtSize(st.wal_size || 0))],
+                ['最后修改', ADM.esc(fmtDate(st.mtime) || '—')],
+                ['结构检查', health]
+            ];
+            q('uDbStats').innerHTML = cells.map(function (c) {
+                return '<div class="upd-db-stat"><span>' + c[0] + '</span><b>' + c[1] + '</b></div>';
+            }).join('');
+            q('uDbSchemaHint').textContent = missing.length
+                ? '检测到缺少：' + missing.join('、') + '，点左侧按钮补齐'
+                : '代码升级后补齐新增的表 / 列，可重复执行';
+        }
+
+        function renderStoreBackups(list) {
+            if (!list.length) {
+                q('uDbBkList').innerHTML =
+                    '<div class="upd-empty">还没有快照。点「备份到服务器」或执行一次同步会自动生成。</div>';
+                return;
+            }
+            q('uDbBkList').innerHTML = list.map(function (b, i) {
+                return '<div class="upd-bk">' +
+                    '<div class="upd-bk-main">' +
+                        '<div class="upd-bk-name">' + ADM.esc(b.name) +
+                            (i === 0 ? ' <span class="adm-badge ok">最新</span>' : '') + '</div>' +
+                        '<div class="upd-bk-meta">' +
+                            '<span class="adm-badge info">' + ADM.esc(b.label || '快照') + '</span> · ' +
+                            ADM.esc(fmtDate(b.ts)) + ' · ' + ADM.esc(fmtSize(b.size)) +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="upd-bk-acts">' +
+                        '<button class="adm-btn ghost sm" type="button" data-db-restore="' +
+                            ADM.esc(b.name) + '"><i class="bi bi-arrow-counterclockwise"></i> 恢复</button>' +
+                        '<a class="adm-btn ghost sm" href="/api/adm/update/store/backup/download?name=' +
+                            encodeURIComponent(b.name) + '"><i class="bi bi-download"></i> 下载</a>' +
+                        '<button class="adm-btn danger sm" type="button" data-db-del="' +
+                            ADM.esc(b.name) + '"><i class="bi bi-trash"></i> 删除</button>' +
+                    '</div>' +
+                '</div>';
+            }).join('');
+        }
+
+        async function loadStoreStatus() {
+            try {
+                var st = await ADM.api('/api/adm/update/store?ts=' + Date.now());
+                if (!alive()) return;
+                S.store = st;
+                renderStoreStatus(st);
+                renderStoreBackups(st.backups || []);
+            } catch (e) {
+                if (!alive()) return;
+                var msg = '<div class="upd-empty">读取失败：' + ADM.esc(e.message) + '</div>';
+                q('uDbStats').innerHTML = msg;
+                q('uDbBkList').innerHTML = msg;
+            }
+        }
+
+        /* 所有 store.db 操作都跑在后台任务里，统一复用本 Tab 的进度面板轮询 */
+        async function runDbTask(params, withFile) {
+            setBusy(true);
+            S.sfx = 'db';
+            pq('uRunState').textContent = '执行中…';
+            pq('uRunLog').innerHTML = '<span class="ln dim">正在启动 store.db 任务…</span>';
+            try {
+                var res;
+                if (withFile) {
+                    var fd = new FormData();
+                    fd.append('file', S.dbFile);
+                    fd.append('mode', params.mode);
+                    fd.append('skip_cache', params.skip_cache ? 'true' : 'false');
+                    fd.append('tables', params.tables || '');
+                    res = await ADM.api('/api/adm/update/store/upload', { method: 'POST', form: fd });
+                } else {
+                    res = await ADM.api('/api/adm/update/store/task', { method: 'POST', body: params });
+                }
+                if (!alive()) return;
+                startPoll(res.run_id, DB_KIND_OF[params.action] || 'dbsync');
+            } catch (e) {
+                if (!alive()) return;
+                setBusy(false);
+                pq('uRunLog').innerHTML = '<span class="ln error">' + ADM.esc(e.message) + '</span>';
+                toast(e.message, 'err');
+            }
+        }
+
+        async function restoreStoreBackup(name) {
+            /* 恢复也先走校验：把服务器快照当作来源做差异预览，确认后才同步 */
+            await inspectStore({ name: name });
+        }
+
+        async function deleteStoreBackup(name) {
+            var go = await ADM.confirm('删除快照',
+                '确定删除 <code>' + ADM.esc(name) + '</code> 吗？删除后无法找回。', '删除');
+            if (!go) return;
+            runDbTask({ action: 'delete', name: name }, false);
+        }
+
         /* ------------------------------------------------------------ 启动 */
         async function boot() {
             try {
@@ -1109,6 +1572,17 @@ ADM.modules.push({
                     openCfg();
                 }
                 loadBackups();      /* 备份 Tab 的列表（切到该 Tab 时也会再刷新一次） */
+                loadStoreStatus();  /* 初始就选中 store.db Tab 时 onShow 不会触发，这里主动加载 */
+                /* store.db 任务进行中刷新了页面：续上进度轮询（不与代码更新任务抢同一个定时器） */
+                if (!(st.run && st.run.status === 'running')) {
+                    ADM.api('/api/adm/update/store/task').then(function (run) {
+                        if (!alive() || !run || run.status !== 'running') return;
+                        S.sfx = 'db';
+                        setBusy(true);
+                        renderRun(run, 'db');
+                        startPoll(run.id, run.kind);
+                    }).catch(function () { });
+                }
             } catch (e) {
                 if (!alive()) return;
                 toast(e.message, 'err');
@@ -1150,6 +1624,109 @@ ADM.modules.push({
             if (r) { restoreBackup(r.dataset.bkRestore); return; }
             var d = e.target.closest('[data-bk-del]');
             if (d) deleteBackup(d.dataset.bkDel);
+        });
+        /* 隐藏原生 file input：自定义拖放区负责展示已选文件与移除 */
+        function setDbFile(f) {
+            if (f && !/\.(db|sqlite|sqlite3)$/i.test(f.name || '')) {
+                toast('请选择 .db / .sqlite / .sqlite3 数据库文件', 'warn');
+                return;
+            }
+            if (f && f.size > 512 * 1024 * 1024) {
+                toast('文件超过 512MB，无法上传', 'warn');
+                return;
+            }
+            S.dbFile = f || null;
+            q('uDbDrop').classList.toggle('has-file', !!f);
+            q('uDbFileName').textContent = f ? f.name : '点击选择，或把 .db 文件拖到这里';
+            q('uDbFileSub').textContent = f
+                ? ('已选择 · ' + fmtSize(f.size) + ' · 点击可重新选择')
+                : '支持 store.db / .sqlite 快照，最大 512MB';
+            q('uBtnDbClear').style.display = f ? '' : 'none';
+            if (f) {
+                inspectStore({ file: true });       /* 选完文件立即上传校验并预览差异 */
+            } else {
+                S.inspect = null;
+                q('uDbDiffCard').style.display = 'none';
+            }
+        }
+        q('uDbDrop').addEventListener('click', function (e) {
+            if (e.target.closest('#uBtnDbClear')) return;
+            q('uDbFile').click();
+        });
+        q('uDbFile').addEventListener('change', function () {
+            setDbFile((this.files && this.files[0]) || null);
+        });
+        q('uBtnDbClear').addEventListener('click', function (e) {
+            e.stopPropagation();
+            q('uDbFile').value = '';
+            setDbFile(null);
+        });
+        ['dragenter', 'dragover'].forEach(function (evt) {
+            q('uDbDrop').addEventListener(evt, function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                q('uDbDrop').classList.add('drag-over');
+            });
+        });
+        ['dragleave', 'drop'].forEach(function (evt) {
+            q('uDbDrop').addEventListener(evt, function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                q('uDbDrop').classList.remove('drag-over');
+                if (evt === 'drop') {
+                    var files = e.dataTransfer && e.dataTransfer.files;
+                    if (files && files.length) setDbFile(files[0]);
+                }
+            });
+        });
+        q('uBtnDbRefresh').addEventListener('click', loadStoreStatus);
+        q('uBtnDbBackup').addEventListener('click', function () {
+            runDbTask({ action: 'backup' }, false);
+        });
+        q('uBtnDbSchema').addEventListener('click', function () {
+            runDbTask({ action: 'schema' }, false);
+        });
+        q('uBtnDbInspect').addEventListener('click', function () { inspectStore(); });
+        q('uBtnDbApply').addEventListener('click', syncSelected);
+        q('uBtnDbPickAll').addEventListener('click', function () {
+            Array.prototype.forEach.call(q('uDbDiffList').querySelectorAll('[data-db-table]'), function (b) {
+                if (!b.disabled) { b.checked = true; S.picked[b.dataset.dbTable] = true; }
+            });
+            updatePickedTables();
+        });
+        q('uBtnDbPickDiff').addEventListener('click', function () {
+            if (!S.inspect) return;
+            (S.inspect.tables || []).forEach(function (t) {
+                S.picked[t.name] = !t.skip && ['diff', 'schema', 'large'].indexOf(t.status) >= 0;
+            });
+            renderDbDiffRows(S.inspect);
+        });
+        q('uBtnDbPickNone').addEventListener('click', function () {
+            Object.keys(S.picked).forEach(function (k) { S.picked[k] = false; });
+            if (S.inspect) renderDbDiffRows(S.inspect);
+        });
+        q('uDbDiffOnlyDiff').addEventListener('change', function () {
+            if (S.inspect) renderDbDiffRows(S.inspect);
+        });
+        q('uDbDiffList').addEventListener('change', function (e) {
+            var box = e.target.closest('[data-db-table]');
+            if (!box) return;
+            S.picked[box.dataset.dbTable] = box.checked;
+            updatePickedTables();
+        });
+        /* 模式 / 跳过缓存变了：用同一来源重新分析，不必重传文件 */
+        ['uDbMode', 'uDbSkipCache'].forEach(function (id) {
+            q(id).addEventListener('change', function () {
+                if (S.inspect && S.inspect.src_token && !S.inspectBusy) {
+                    inspectStore({ token: S.inspect.src_token, silent: true });
+                }
+            });
+        });
+        q('uDbBkList').addEventListener('click', function (e) {
+            var r = e.target.closest('[data-db-restore]');
+            if (r) { restoreStoreBackup(r.dataset.dbRestore); return; }
+            var d = e.target.closest('[data-db-del]');
+            if (d) deleteStoreBackup(d.dataset.dbDel);
         });
 
         /* Esc 关闭配置框；模块被切走时移除监听，避免重复绑定 */

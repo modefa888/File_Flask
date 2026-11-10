@@ -261,6 +261,302 @@ html[data-theme="light"] .adm-btn.git:hover {
     padding-top: 4px;
 }
 
+/* ---------------- store.db 同步 Tab ---------------- */
+.upd-db-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.upd-db-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+    padding: 9px 11px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 10px;
+    background: rgba(13, 19, 36, .4);
+}
+
+.upd-db-stat span {
+    font-size: 11.5px;
+    color: var(--adm-text-mute);
+}
+
+.upd-db-stat b {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--adm-text);
+    word-break: break-all;
+}
+
+.upd-db-acts {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+.upd-db-form {
+    margin-top: 4px;
+}
+
+/* 自定义文件拖放区：替代浏览器原生「选择文件 / 未选择任何文件」控件 */
+.upd-db-drop {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 74px;
+    padding: 12px 14px;
+    border: 1.5px dashed var(--adm-border);
+    border-radius: 12px;
+    background: rgba(13, 19, 36, .35);
+    cursor: pointer;
+    transition: border-color .18s, background .18s, transform .18s;
+}
+
+.upd-db-drop:hover {
+    border-color: var(--adm-brand);
+    background: rgba(91, 140, 255, .09);
+}
+
+.upd-db-drop.drag-over {
+    border-color: var(--adm-brand);
+    background: rgba(91, 140, 255, .18);
+    transform: scale(1.005);
+}
+
+.upd-db-drop.has-file {
+    border-style: solid;
+    border-color: rgba(34, 197, 94, .5);
+    background: rgba(34, 197, 94, .08);
+}
+
+.upd-db-drop-icon {
+    width: 42px;
+    height: 42px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 11px;
+    font-size: 20px;
+    color: var(--adm-brand);
+    background: rgba(91, 140, 255, .15);
+}
+
+.upd-db-drop-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.upd-db-drop-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--adm-text);
+    word-break: break-all;
+}
+
+.upd-db-drop-sub {
+    margin-top: 4px;
+    font-size: 11.5px;
+    color: var(--adm-text-mute);
+}
+
+.upd-db-drop .adm-btn {
+    flex: none;
+}
+
+html[data-theme="light"] .upd-db-drop {
+    background: rgba(241, 245, 253, .85);
+}
+
+html[data-theme="light"] .upd-db-drop:hover {
+    background: rgba(91, 140, 255, .09);
+}
+
+@media (max-width: 760px) {
+    .upd-db-drop {
+        flex-wrap: wrap;
+    }
+}
+
+html[data-theme="light"] .upd-db-stat {
+    background: rgba(241, 245, 253, .8);
+}
+
+@media (max-width: 760px) {
+    .upd-db-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* ---------------- 校验结果 · 逐表差异 ---------------- */
+.upd-db-diff-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.upd-db-diff-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 14px 0 8px;
+}
+
+.upd-db-diff-tools .upd-check {
+    padding: 5px 10px;
+}
+
+.upd-db-diff-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 460px;
+    overflow: auto;
+}
+
+.upd-db-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--adm-border-soft);
+    border-radius: 10px;
+    background: rgba(13, 19, 36, .4);
+}
+
+.upd-db-row.is-skip {
+    opacity: .62;
+}
+
+.upd-db-pick {
+    flex: none;
+    padding-top: 3px;
+}
+
+.upd-db-pick input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    accent-color: var(--adm-brand);
+    cursor: pointer;
+}
+
+.upd-db-pick input:disabled {
+    cursor: not-allowed;
+}
+
+.upd-db-row-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.upd-db-row-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.upd-db-row-head b {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    color: var(--adm-text);
+    word-break: break-all;
+}
+
+.upd-db-bars {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 6px 12px;
+    margin-top: 8px;
+}
+
+.upd-db-bar {
+    position: relative;
+    height: 18px;
+    border-radius: 5px;
+    background: rgba(127, 127, 127, .12);
+    overflow: hidden;
+}
+
+.upd-db-bar i {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 5px;
+    opacity: .55;
+}
+
+.upd-db-bar i.local {
+    background: #3b82f6;
+}
+
+.upd-db-bar i.src {
+    background: #a855f7;
+}
+
+.upd-db-bar span {
+    position: relative;
+    display: block;
+    padding: 0 6px;
+    font-size: 11px;
+    line-height: 18px;
+    color: var(--adm-text);
+    white-space: nowrap;
+}
+
+.upd-db-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 8px;
+}
+
+.upd-db-chip {
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--adm-border-soft);
+    font-size: 11px;
+    color: var(--adm-text-dim);
+    background: rgba(127, 127, 127, .08);
+}
+
+.upd-db-chip.add {
+    color: #86efac;
+    border-color: rgba(34, 197, 94, .35);
+    background: rgba(34, 197, 94, .1);
+}
+
+.upd-db-chip.del {
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, .35);
+    background: rgba(239, 68, 68, .1);
+}
+
+.upd-db-chip.mute {
+    opacity: .75;
+}
+
+html[data-theme="light"] .upd-db-row {
+    background: rgba(241, 245, 253, .8);
+}
+
+@media (max-width: 900px) {
+    .upd-db-diff-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .upd-db-bars {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
 /* ---------------- 备份记录 ---------------- */
 .upd-bk-dir {
     max-width: 44%;

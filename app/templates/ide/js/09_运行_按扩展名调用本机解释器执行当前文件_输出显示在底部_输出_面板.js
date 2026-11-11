@@ -224,11 +224,11 @@
         ".rh-item{display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer}" +
         ".rh-item:hover{background:rgba(255,255,255,.06)}" +
         ".rh-item.on{background:rgba(34,118,74,.28)}" +
-        ".rh-dot{width:8px;height:8px;border-radius:50%;flex:none}" +
+        ".rh-dot{width:8px;height:8px;border-radius:50%;flex:none;transform:translateY(2px)}" +   /* 下移 2px：与小字号文字的视觉中线对齐 */
         ".rh-dot.ok{background:#3fbf6f}.rh-dot.err{background:#e05656}" +
         ".rh-dot.run{background:#4c8dff;animation:rhPulse 1.2s infinite}" +
-        ".rh-nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
-        ".rh-tm{color:#6d7482;font-size:10px;flex:none}" +
+        ".rh-nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:16px}" +
+        ".rh-tm{color:#6d7482;font-size:10px;line-height:16px;flex:none;margin-left:auto;transform:translateY(1.5px)}" +   /* 靠右对齐；下移 1.5px 与名称基线齐 */
         "@keyframes rhPulse{50%{opacity:.35}}" +
         "html.theme-light #runHistBox{background:rgba(255,255,255,.97);border-color:#d5d7dc;color:#333a45}" +
         "html.theme-light #runHistBox .rh-head{border-bottom-color:#d5d7dc;color:#6b7280}" +

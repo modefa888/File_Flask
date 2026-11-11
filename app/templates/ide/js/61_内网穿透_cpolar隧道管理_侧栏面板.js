@@ -892,5 +892,21 @@ if (typeof titles !== "undefined") titles.tunnel = "内网穿透";
     }
   }
 
+  /* 项目进程结束（输出面板在跟的任务退出）：后端会自动删除为它创建的一键隧道，
+     这里同步收尾——清掉本地缓存的公网地址、收起工具条按钮；
+     输出里的「隧道已就绪」行保留作历史。若该隧道是手动建的（后端不会动它），
+     下次运行时 svcLookup 会重新找到并回显，无副作用。 */
+  function svcTaskEnded() {
+    const p = String(svcTunnel.port || "");
+    if (p) {
+      try {
+        const m = JSON.parse(localStorage.getItem(SVC_SAVE_KEY) || "{}");
+        if (m && m[p]) { delete m[p]; localStorage.setItem(SVC_SAVE_KEY, JSON.stringify(m)); }
+      } catch (_) { /* 忽略 */ }
+    }
+    svcHide();
+  }
+  window.svcTaskEnded = svcTaskEnded;   // 10_ 进程退出时调用
+
   svcWatch();
 })();

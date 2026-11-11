@@ -489,6 +489,7 @@
     if (d.done) {
       const okExit = d.exit_code === 0;
       histFinish(d.exit_code);                         // 运行记录标记结束状态
+      if (typeof window.svcTaskEnded === "function") window.svcTaskEnded();   // 一键隧道：后端已自动关闭，收起按钮与本地缓存
       opLine((okExit ? "✔ " : "✘ ") + "进程已退出，代码 " + d.exit_code +
              " · 用时 " + d.duration + "s", okExit ? "op-ok op-result" : "op-err op-result");
       // 运行完：把本次输出交给「AI 分享项目报错」浮框（仅报错时自动弹出）

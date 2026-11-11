@@ -517,9 +517,11 @@ def t_start():
         return _fail("未找到 cpolar 配置文件，无法创建隧道")
     try:
         if not _add_config_tunnel(cfg, name, proto, addr):
+            _bind_ide_tunnel(name)          # 已存在：也补挂到当前运行的任务（老隧道补登记）
             return _fail("隧道名称 " + name + " 已存在")
     except OSError as e:
         return _fail("写入 cpolar 配置失败：" + str(e))
+    _bind_ide_tunnel(name)                  # 一键隧道（ide_<端口>）挂到运行任务：任务退出时自动关闭
     body = {"name": name, "proto": proto, "addr": addr}
     if region:
         body["region"] = region
@@ -529,6 +531,21 @@ def t_start():
         "hint": "" if ok else "隧道已写入 cpolar 配置；9200 未响应创建请求，请在 Web 面板点「启动」",
         "tunnel": data if isinstance(data, dict) else {},
     })
+
+
+def _bind_ide_tunnel(name: str) -> None:
+    """ide_<端口> 形式的隧道 → 挂到正在监听该端口的运行任务，任务退出时自动删除。
+
+    放在 try 里静默失败：找不到任务（隧道先于服务创建）或端口探测异常都不影响创建本身。
+    """
+    m = re.fullmatch(r"ide_(\d{1,5})", name or "")
+    if not m:
+        return
+    try:
+        from . import run as _ide_run       # 延迟导入：run 与 tunnel 不互相依赖模块级加载
+        _ide_run.bind_auto_tunnel_for_port(int(m.group(1)), name)
+    except Exception:
+        pass
 
 
 @bp.post("/api/tunnel/stop")

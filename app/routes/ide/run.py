@@ -442,6 +442,8 @@ class _BgTask:
         self.runs = []                  # 运行历史：每次「启动 → 停止」记一条（起止时间 / 时长 / 退出码）
         self.tail_thread = None         # 跟随日志的线程句柄（替换记录前可等待其收尾）
         self.archived = False           # 本次运行的日志是否已归档（避免重启接管后重复归档）
+        self.auto_tunnels = []          # 为本任务创建的一键隧道（ide_<端口>）：任务退出时自动删除
+        self.tunnels_closed = False     # 自动关闭隧道只执行一次（finish 可能被多个路径调用）
 
     # ---- 序列化 ------------------------------------------------------
     def to_record(self) -> dict:
@@ -452,6 +454,7 @@ class _BgTask:
             "promoted": self.promoted, "stopped_by_user": self.stopped_by_user,
             "timed_out": self.timed_out, "exit_code": self.exit_code, "done": self.done,
             "paused": self.paused,
+            "auto_tunnels": (self.auto_tunnels or [])[:10],
             "runs": (self.runs or [])[-_MAX_RUNS:],
         }
 
@@ -484,6 +487,7 @@ class _BgTask:
             except (TypeError, ValueError):
                 t.runs = []
         t.tail_thread = None
+        t.auto_tunnels = [str(x) for x in (rec.get("auto_tunnels") or [])[:10] if isinstance(x, str)]
         return t
 
     # ---- 输出缓冲 ----------------------------------------------------
@@ -529,6 +533,7 @@ class _BgTask:
             if not self.ended_at:
                 self.ended_at = time.time()
             self.cond.notify_all()
+        _close_auto_tunnels(self)   # 任务结束：自动关掉为它创建的一键隧道（后台线程，不拖慢退出）
 
     def begin_run(self):
         """开始一次新的运行：重置本次运行状态，并在历史里追加一条（结束时间待收尾时补）。"""
@@ -564,6 +569,12 @@ class _BgTask:
         r["exit_code"] = self.exit_code
         r["stopped_by_user"] = bool(self.stopped_by_user)
         r["timed_out"] = bool(self.timed_out)
+
+    def bind_auto_tunnel(self, name: str) -> None:
+        """登记「一键隧道」（ide_<端口>）：任务退出时由 _close_auto_tunnels 自动删除。"""
+        if name and name not in self.auto_tunnels:
+            self.auto_tunnels.append(name)
+            _persist()
 
     # ---- 状态 --------------------------------------------------------
     def is_alive(self) -> bool:
@@ -797,6 +808,98 @@ def _check_addr_in_use(task, line: str) -> None:
     hint = f"⚠ 端口 {m} 已被占用" if m else "⚠ 端口已被占用"
     task.add(hint + "：上次启动的旧进程可能还在运行（所以你现在仍能访问），新进程因此启动失败退出。"
              "可在「后台任务」面板顶部搜索该端口，强制停止旧进程后再重新运行。", "err")
+
+
+def _task_listen_ports(task) -> set:
+    """任务进程树当前监听的端口（与 /api/run/tasks 同口径：/proc 直读 + ss 叠加 + 日志反推兜底）。"""
+    pids = [task.pid] if task.pid else []
+    if task.pid:
+        try:
+            from ...services.ide import procinfo
+            pids = procinfo.tree_pids(task.pid) or pids
+        except Exception:
+            pass
+    ports = set()
+    try:
+        from ...services.ide import portinfo
+        ports |= set(portinfo.ports_for_pids(pids))
+        for p in portinfo.list_ports():
+            for pid in (p.get("pids") or ([p["pid"]] if p.get("pid") else [])):
+                if pid in pids:
+                    ports.add(p["port"])
+    except Exception:
+        pass
+    if not ports and task.is_alive():
+        try:
+            from ...services.ide import portinfo
+            listen_set = portinfo.listening_ports()
+            if listen_set:
+                ports |= set(task.log_ports(listen_set))
+        except Exception:
+            pass
+    return ports
+
+
+def running_task_for_port(port):
+    """找到正在监听 port 的运行任务（启动时间最新的优先），没有则 None。"""
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return None
+    if port <= 0:
+        return None
+    with _LOCK:
+        cands = [t for t in _TASKS.values() if t.is_alive()]
+    for t in sorted(cands, key=lambda x: -x.started):
+        if port in _task_listen_ports(t):
+            return t
+    return None
+
+
+def bind_auto_tunnel_for_port(port, name: str) -> bool:
+    """把「一键隧道」挂到正在监听该端口的运行任务上：任务退出时后端会自动删除该隧道。"""
+    t = running_task_for_port(port)
+    if t is None:
+        return False
+    t.bind_auto_tunnel(name)
+    return True
+
+
+def _close_auto_tunnels(task) -> None:
+    """任务退出后自动删除为它创建的 ide_<端口> 隧道。
+
+    只动 ide_ 前缀的自动隧道，用户手动创建的（website / ssh 等）不受影响。
+    配置写入与 9200 删除请求放后台线程，不拖慢退出路径；
+    finish 可能被多条路径调用（正常退出 / 替换重启 / 停止），用 tunnels_closed 保证只执行一次。
+    """
+    if getattr(task, "tunnels_closed", False) or not task.auto_tunnels:
+        return
+    task.tunnels_closed = True
+    names, task.auto_tunnels = list(task.auto_tunnels), []
+
+    def _work():
+        try:
+            from . import tunnel as _tunnel
+            cfg = _tunnel._active_config_path()
+            for name in names:
+                try:
+                    if cfg:
+                        _tunnel._remove_config_tunnel(cfg, name)
+                    _tunnel._api("/api/tunnels/" + name, method="DELETE")
+                    try:
+                        task.add("— 已自动关闭隧道 " + name + " —", "dim")
+                    except Exception:
+                        pass
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        try:
+            _persist()
+        except Exception:
+            pass
+
+    threading.Thread(target=_work, name="tunnel-autoclose", daemon=True).start()
 
 
 def _on_task_exit(task) -> None:

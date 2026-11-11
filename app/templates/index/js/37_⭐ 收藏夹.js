@@ -874,14 +874,22 @@
                 .catch(() => { });
         }
 
+        let _idxDetailBusy = false;
         function _loadIndexDetail() {
+            // 扫描期间统计由后台线程计算（可能几十秒），上一轮没回来就别重复发，
+            // 否则请求会无限堆积；响应到达时面板若已关闭/重建，renderIndexDetail 会丢弃
+            if (_idxDetailBusy) return;
+            _idxDetailBusy = true;
             fetch('/api/index/detail')
                 .then(r => r.json())
                 .then(renderIndexDetail)
-                .catch(() => { });
+                .catch(() => { })
+                .finally(() => { _idxDetailBusy = false; });
         }
 
         function renderIndexDetail(data) {
+            // 响应到达时面板可能已被关闭/重建（DOM 已换），元素不存在就丢弃这次结果
+            if (!document.getElementById('idxFileCount') || !document.getElementById('idxStatus')) return;
             const status = data.status || 'idle';
             const progress = data.progress || 0;
             const totalFiles = data.total_files || 0;
@@ -922,7 +930,8 @@
 
             const clearBtn = document.getElementById('idxClearBtn');
             if (clearBtn) clearBtn.disabled = cleared;
-            const emptyHint = cleared ? '索引已清空，点击「重建索引」重新生成' : '暂无数据';
+            const emptyHint = cleared ? '索引已清空，点击「重建索引」重新生成'
+                : (data.detail_computing ? '扫描期间正在后台计算实时统计，约一分钟后自动刷新…' : '暂无数据');
 
             // Top 15 目录
             const topDirsEl = document.getElementById('idxTopDirs');

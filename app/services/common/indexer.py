@@ -789,37 +789,43 @@ def _load_detail_stats():
 
 def _load_scanning_detail_stats():
     """扫描期间的详情统计：旧索引有数据则用旧索引统计；
-    无旧索引（首次构建）时从临时库节流计算实时统计。"""
-    # 旧索引仍有数据：直接用旧索引统计（重建期间旧索引有效，开销最小）
-    try:
-        conn = _get_index_conn()
-        try:
-            row = conn.execute("SELECT value FROM index_meta WHERE key='total_files'").fetchone()
-        finally:
-            conn.close()
-        if row and int(row[0] or 0) > 0:
-            return _load_detail_stats()
-    except Exception:
-        pass
+    无旧索引（首次构建）时由后台线程从临时库计算实时统计。
 
-    # 无旧索引：从临时库计算实时统计，20 秒节流一次（全量聚合较重，不宜每次轮询都算）
+    几百万行时全量聚合（GROUP BY / ORDER BY）一次要数十秒，绝不能在请求
+    线程里同步算，否则每次轮询都挂起几十秒，前端面板会一直显示空。
+    这里只立即返回上次算好的缓存；还没有就返回空（带 detail_computing 标记，
+    前端据此显示「统计计算中」），并把计算任务丢给后台线程。"""
     now = time.time()
     with _INDEX_SCANNING_DETAIL_LOCK:
-        cached = _INDEX_SCANNING_DETAIL
-        if cached["data"] is not None and (now - cached["time"]) < 20:
-            return cached["data"]
-
+        cached = _INDEX_SCANNING_DETAIL["data"]
+        cached_time = _INDEX_SCANNING_DETAIL.get("time", 0.0)
+        fresh = cached is not None and (now - cached_time) < 60
+        computing = _INDEX_SCANNING_DETAIL.get("computing", False)
+        if not fresh and not computing:
+            _INDEX_SCANNING_DETAIL["computing"] = True
+            threading.Thread(target=_scanning_detail_worker, daemon=True).start()
+    if fresh:
+        return cached
     data = {"top_dirs": [], "type_distribution": [], "top_files": []}
-    if os.path.exists(_INDEX_DB_NEW):
-        try:
-            data = _compute_detail_stats_in_memory(_INDEX_DB_NEW)
-        except Exception as e:
-            _log.warning("扫描期间实时统计失败: %s", e)
-
-    with _INDEX_SCANNING_DETAIL_LOCK:
-        _INDEX_SCANNING_DETAIL["time"] = time.time()
-        _INDEX_SCANNING_DETAIL["data"] = data
+    data["detail_computing"] = True
     return data
+
+
+def _scanning_detail_worker():
+    """后台计算扫描期间的实时统计（耗时可达数十秒），结果写入节流缓存。"""
+    data = {"top_dirs": [], "type_distribution": [], "top_files": []}
+    try:
+        if os.path.exists(_INDEX_DB_NEW):
+            try:
+                data = _compute_detail_stats_in_memory(_INDEX_DB_NEW)
+            except Exception as e:
+                _log.warning("扫描期间实时统计失败: %s", e)
+        with _INDEX_SCANNING_DETAIL_LOCK:
+            _INDEX_SCANNING_DETAIL["time"] = time.time()
+            _INDEX_SCANNING_DETAIL["data"] = data
+    finally:
+        with _INDEX_SCANNING_DETAIL_LOCK:
+            _INDEX_SCANNING_DETAIL["computing"] = False
 
 
 def _compute_chart_stats(conn):

@@ -20,7 +20,7 @@
                 <span class="panel-title"><i class="bi bi-database"></i> 索引详情</span>
                 <div style="display:flex;gap:6px;">
                     <button class="panel-close" id="idxVizBtn" title="可视化面板"><i class="bi bi-graph-up"></i></button>
-                    <button class="panel-close" title="关闭"><i class="bi bi-x-lg"></i></button>
+                    <button class="panel-close" id="idxCloseBtn" title="关闭"><i class="bi bi-x-lg"></i></button>
                 </div>
             </div>
             <div class="panel-body">
@@ -59,7 +59,8 @@
             _indexPanelRef = overlay;
 
             // 关闭按钮
-            overlay.querySelector('.panel-close').addEventListener('click', closeIndexDetail);
+            // 注意：头部第一个 .panel-close 是「可视化」按钮，关闭按钮要用 ID 绑定
+            overlay.querySelector('#idxCloseBtn').addEventListener('click', closeIndexDetail);
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) closeIndexDetail();
             });

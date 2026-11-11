@@ -29,7 +29,7 @@
           lines.unshift({ m: "…（本地仅保留最近 " + HIST_LINES + " 行输出）", c: "op-dim" });
         }
         return {
-          name: rec.name, target: rec.target,
+          name: rec.name, target: rec.target, taskId: rec.taskId || null,
           time: (rec.time instanceof Date ? rec.time.getTime() : Date.now()),
           running: false,
           exit: rec.running ? -1 : (rec.exit == null ? -1 : rec.exit),
@@ -59,7 +59,7 @@
       RUN_HISTORY = arr.slice(0, HIST_MAX).map(function (d) {
         const t = new Date(d.time || Date.now());
         return {
-          taskId: null,                               // 旧任务不复活：点记录一律回看本地缓存
+          taskId: d.taskId || null,                   // 保留任务 id：刷新后同一任务接回时凭它认领旧记录，不新建
           name: String(d.name || "运行"), target: String(d.target || ""),
           time: isNaN(t.getTime()) ? new Date() : t,
           running: false, exit: (d.exit == null ? -1 : d.exit), bg: !!d.bg,
@@ -108,6 +108,61 @@
     curHist.running = false;
     curHist.exit = exit;
     histRender();
+  }
+  // 按任务 id 结束对应的运行记录：跟踪某个任务的可能不止 curHist 一处，
+  // 也不能假设 curHist 还指着它（后台任务结束前用户可能又启动过别的运行）
+  function histFinishTaskId(taskId, exit) {
+    var hit = false;
+    RUN_HISTORY.forEach(function (r) {
+      if (taskId && r.taskId === taskId && r.running) { r.running = false; r.exit = exit; hit = true; }
+    });
+    if (hit) histRender();
+  }
+  /* 刷新后接回仍在运行的前台任务：认领本地缓存里的同一条记录而不是新建 ——
+     否则每刷新一次就多出一条（旧记录在上次关闭页面时被快照成「退出码 -1」的红点残留）。
+     ① taskId 精确匹配（本版本起会存）；② 旧数据没存 taskId：按「同入口文件 + 退出码未知
+     （-1 = 关页面时还在跑）」认最近一条。认领后清空 buf，输出面板会从 offset 0 回放重填
+     （后端每任务留 4000 行，不比本地缓存的 200 行少）。 */
+  function histReattach(target, taskId, mode) {
+    var rec = null, i, r;
+    if (taskId) {
+      for (i = 0; i < RUN_HISTORY.length; i++) {
+        if (RUN_HISTORY[i].taskId === taskId) { rec = RUN_HISTORY[i]; break; }
+      }
+    }
+    if (!rec) {
+      for (i = 0; i < RUN_HISTORY.length; i++) {
+        r = RUN_HISTORY[i];
+        if (!r.taskId && r.exit === -1 && sameRunPath(r.target, target)) { rec = r; break; }
+      }
+    }
+    if (!rec) return histAdd(target, taskId, mode);    // 没有可认领的（清过记录等）→ 照旧新建一条
+    rec.taskId = taskId || rec.taskId;
+    rec.running = true; rec.exit = null; rec.bg = mode === "bg";
+    rec.buf = [];
+    // 顺带清掉同一次运行更早的残留：无 taskId、退出码 -1、同一文件、又排在被认领记录之后 ——
+    // 只能是旧版本每次刷新各留一条的结果（真正跑完 / 被终止的运行都有明确退出码，不会是 -1）
+    for (i = RUN_HISTORY.indexOf(rec) + 1; i < RUN_HISTORY.length; i++) {
+      r = RUN_HISTORY[i];
+      if (!r.taskId && r.exit === -1 && sameRunPath(r.target, target)) { RUN_HISTORY.splice(i, 1); i--; }
+    }
+    curHist = rec; viewHist = null;
+    histRender();
+    return rec;
+  }
+  // 只认领、不新建、不动 curHist：刷新恢复 / 查看后台任务日志时，把本地已有的记录
+  // 从「退出码 -1」改回「运行中」（红点回蓝点）；结束时由 endLog → histFinishTaskId 收尾。
+  function histClaim(taskId, mode) {
+    if (!taskId) return;
+    var hit = false;
+    RUN_HISTORY.forEach(function (r) {
+      if (r.taskId === taskId && !r.running) {
+        r.running = true; r.exit = null;
+        if (mode) r.bg = mode === "bg";
+        hit = true;
+      }
+    });
+    if (hit) histRender();
   }
   // 回看某次运行的输出（后台任务 → 直接切到它的日志标签）
   function viewHistory(rec) {

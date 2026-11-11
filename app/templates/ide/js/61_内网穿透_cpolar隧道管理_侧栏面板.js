@@ -605,4 +605,292 @@ if (typeof titles !== "undefined") titles.tunnel = "内网穿透";
     load();
     pollStart();
   });
+
+  /* ---------------- 服务启动 → 一键创建隧道 ----------------
+     输出面板出现 "Running on http://127.0.0.1:5000" 之类的服务日志时，
+     底部工具条显示「一键创建隧道」；点击自动建 cpolar 隧道并回显公网连接。 */
+  const SVC_RUN_RE = /(running on|listening on|listening|serving|serve_forever|local:|started server|启动服务|端口)/i;
+  const SVC_URL_RE = /https?:\/\/[^/\s:'"]+:(\d{2,5})/i;
+  const SVC_WORD_RE = /(?:port|端口|on)[^\d]{0,20}(\d{2,5})/i;
+  const svcTunnel = { port: 0, busy: false, checking: 0, verified: 0 };
+  const SVC_SAVE_KEY = "ide.tunnel.onekey";
+
+  function svcDetectPort(text) {
+    const t = String(text || "");
+    if (!t || !SVC_RUN_RE.test(t)) return 0;
+    const m = t.match(SVC_URL_RE) || t.match(SVC_WORD_RE);
+    if (!m) return 0;
+    const p = parseInt(m[1], 10);
+    return (p > 0 && p <= 65535) ? p : 0;
+  }
+
+  function svcBtn() {
+    let b = $("bpTunnelBtn");
+    if (b) return b;
+    const tabs = document.querySelector(".bp-tabs");
+    if (!tabs) return null;
+    b = document.createElement("button");
+    b.id = "bpTunnelBtn";
+    b.className = "bp-btn";
+    b.style.display = "none";
+    const clear = $("bpClear");
+    tabs.insertBefore(b, clear ? clear.nextSibling : null);
+    b.onclick = svcCreate;
+    return b;
+  }
+
+  /* 已建隧道的连接按端口记在本地，刷新后不必再创建一次 */
+  function svcSaved(port) {
+    try {
+      const m = JSON.parse(localStorage.getItem(SVC_SAVE_KEY) || "{}");
+      const v = m && m[String(port)];
+      return (v && v.url) ? v : null;
+    } catch (_) { return null; }
+  }
+  function svcSave(port, url) {
+    try {
+      const m = JSON.parse(localStorage.getItem(SVC_SAVE_KEY) || "{}");
+      m[String(port)] = { url: url, at: Date.now() };
+      localStorage.setItem(SVC_SAVE_KEY, JSON.stringify(m));
+    } catch (_) { /* 忽略 */ }
+  }
+
+  /* 侧栏已经渲染出来的公网地址是最可靠的数据源（cpolar Web UI 在线实例） */
+  function svcDomUrl(name, port) {
+    const items = document.querySelectorAll("#tnlList .tnl-item");
+    for (let i = 0; i < items.length; i++) {
+      const nm = String(items[i].dataset.name || "");
+      const meta = items[i].querySelector(".tnl-item-meta");
+      if (nm !== name && !(port && meta && meta.textContent.indexOf(":" + port) >= 0)) continue;
+      const u = items[i].querySelector(".tnl-url");
+      if (u && u.textContent.trim()) return u.textContent.trim();
+    }
+    return "";
+  }
+
+  /* 直接读 9200 在线实例，绕过 fetchWebUiTunnels 的 15s 节流 */
+  function svcWebList() {
+    const token = webUiToken();
+    const h = (!location.hostname || location.hostname === "localhost") ? "127.0.0.1" : location.hostname;
+    const opts = { credentials: "include" };
+    if (token) opts.headers = { Authorization: "Bearer " + token };
+    return fetch("http://" + h + ":9200/api/v1/tunnels", opts)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        const arr = webUiInstances(d);
+        return arr ? arr.map(webUiTunnel).filter(Boolean) : [];
+      })
+      .catch(function () { return []; });
+  }
+
+  /* 按端口找已有隧道的公网地址：侧栏 DOM → 9200 在线实例 → 后端隧道列表 */
+  async function svcLookup(port) {
+    const name = "ide_" + port;
+    let url = svcDomUrl(name, port);
+    if (url) return url;
+    const match = function (t) {
+      return t && t.public_url && (String(t.name) === name ||
+        String(t.addr) === String(port) || String(t.addr).indexOf(":" + port) >= 0 ||
+        String(t.addr).indexOf(String(port)) >= 0);
+    };
+    try {
+      const web = await svcWebList();
+      const hit = web.filter(match)[0];
+      if (hit) return hit.public_url;
+    } catch (_) { /* 忽略 */ }
+    try {
+      const ls = await api("/api/tunnel/list");
+      const t = ((ls && ls.tunnels) || []).filter(match)[0];
+      if (t) return t.public_url;
+    } catch (_) { /* 忽略 */ }
+    return "";
+  }
+
+  function svcOffer(port) {
+    const b = svcBtn();
+    if (!b) return;
+    b.style.display = "";
+    b.title = "为本地 :" + port + " 一键创建 cpolar 公网隧道";
+    b.innerHTML = '<i class="bi bi-cloud-arrow-up"></i> 一键创建隧道 :' + port;
+    b.onclick = svcCreate;
+  }
+
+  async function svcShow(port) {
+    if (!port) return;
+    const b = svcBtn();
+    if (!b) return;
+    svcTunnel.port = port;
+    b.style.display = "";
+    b.disabled = false;
+    const saved = svcSaved(port);
+    if (saved && saved.url) {                   // 刷新后直接回显连接，不再提示重新创建
+      svcResult(port, saved.url, true);
+      if (svcTunnel.verified !== port) {
+        svcTunnel.verified = port;
+        svcLookup(port).then(function (u) {
+          if (u && u !== saved.url) { svcSave(port, u); svcResult(port, u, true); }
+          else if (!u) svcOffer(port);         // 隧道已被删除 → 恢复创建按钮
+        });
+      }
+      return;
+    }
+    if (svcTunnel.checking === port) return;    // 同一端口不重复查
+    svcTunnel.checking = port;
+    const url = await svcLookup(port);
+    svcTunnel.checking = 0;
+    if (svcTunnel.port !== port) return;
+    if (url) { svcSave(port, url); svcResult(port, url, true); }
+    else svcOffer(port);
+  }
+
+  function svcHide() {
+    const b = $("bpTunnelBtn");
+    if (b) b.style.display = "none";
+    svcTunnel.port = 0;
+  }
+
+  function svcWatch() {
+    const body = $("opBody");
+    if (!body || !window.MutationObserver) return;
+    new MutationObserver(function (list) {
+      if (!body.childElementCount) { svcHide(); return; }
+      list.forEach(function (rec) {
+        Array.prototype.forEach.call(rec.addedNodes || [], function (n) {
+          if (n.nodeType !== 1) return;
+          const p = svcDetectPort(n.textContent || "");
+          if (p) svcShow(p);
+        });
+      });
+    }).observe(body, { childList: true });
+  }
+
+  async function svcCreate() {
+    if (svcTunnel.busy) return;
+    const b = svcBtn();
+    let port = svcTunnel.port;
+    try {                                     // 后端 /proc 检测到的真实监听端口更准
+      const r = await fetch("/api/run/tasks").then(function (x) { return x.json(); });
+      const cand = (r.tasks || []).filter(function (x) {
+        return x && x.running && (x.ports || []).length;
+      });
+      const t = cand.filter(function (x) {
+        return x.ports.indexOf(Number(svcTunnel.port)) >= 0;
+      })[0] || cand[0];
+      if (t && t.ports && t.ports[0]) port = t.ports[0];
+    } catch (_) { /* 拿不到就用日志里识别的端口 */ }
+    if (!port) { toast("未识别到服务端口，请先在输出里确认监听地址", "warn"); return; }
+    svcTunnel.busy = true;
+    if (b) {
+      b.disabled = true;
+      /* 纯 CSS 圆环 spinner：中心对称，旋转不会像字体图标那样抖动 */
+      if (!document.getElementById("svcSpinStyle")) {
+        const st = document.createElement("style");
+        st.id = "svcSpinStyle";
+        st.textContent =
+          '#bpTunnelBtn .svc-spin{display:inline-block;width:11px;height:11px;box-sizing:border-box;' +
+          'border:2px solid currentColor;border-right-color:transparent;border-radius:50%;' +
+          'vertical-align:-1px;margin-right:4px;animation:svcSpin .7s linear infinite}' +
+          '@keyframes svcSpin{to{transform:rotate(360deg)}}';
+        document.head.appendChild(st);
+      }
+      b.innerHTML = '<span class="svc-spin"></span> 正在创建隧道…';
+    }
+    const step = function (txt) {
+      if (b) b.innerHTML = '<span class="svc-spin"></span> ' + esc(txt);
+    };
+    const limit = function (p, ms, label) {
+      return Promise.race([
+        p,
+        new Promise(function (_, reject) {
+          setTimeout(function () {
+            reject(new Error(label + "超时（" + Math.round(ms / 1000) + "s）"));
+          }, ms);
+        }),
+      ]);
+    };
+    try {
+      step("检查 cpolar 状态…");
+      let st = await limit(api("/api/tunnel/status"), 8000, "检查 cpolar 状态");
+      if (!st.installed) {
+        toast("cpolar 未安装，正在尝试一键安装…", "warn");
+        step("正在安装 cpolar…");
+        const ins = await limit(post("/api/tunnel/install", {}), 25000, "安装 cpolar");
+        if (!ins.ok && !ins.installed) throw new Error(ins.hint || "安装失败，请在服务器终端安装 cpolar");
+        st = await limit(api("/api/tunnel/status"), 8000, "检查 cpolar 状态");
+      }
+      if (st.service !== "active") {
+        step("正在启动 cpolar 服务…");
+        const sv = await limit(post("/api/tunnel/service", { action: "start" }), 20000, "启动 cpolar 服务");
+        if (!sv.ok) throw new Error(sv.hint || sv.error || "cpolar 服务启动失败");
+        st = sv.status || await limit(api("/api/tunnel/status"), 8000, "检查 cpolar 状态");
+      }
+      for (let i = 0; i < 8 && st && !st.api_ok; i++) {
+        step("等待 9200 就绪…");
+        await new Promise(function (r) { setTimeout(r, 700); });
+        st = await limit(api("/api/tunnel/status"), 8000, "检查 cpolar 状态");
+      }
+      const name = "ide_" + port;
+      step("正在创建隧道…");
+      const cr = await limit(post("/api/tunnel/start", { name: name, proto: "http", addr: String(port) }),
+        10000, "创建隧道");
+      if (cr.error && !/已存在/.test(cr.error)) throw new Error(cr.error);
+      step("正在获取公网连接…");
+      await limit(ensureWebUiLogin().catch(function () { return false; }), 8000, "登录 Web 面板");
+      let url = "";
+      for (let i = 0; i < 6 && !url; i++) {
+        url = await limit(svcLookup(port), 6000, "读取在线隧道");
+        if (!url) await new Promise(function (r) { setTimeout(r, 1200); });
+      }
+      if (url) svcSave(port, url);
+      svcResult(port, url, false);
+      load();
+    } catch (e) {
+      const msg = (e && e.message) ? e.message : String(e);
+      toast("创建隧道失败：" + msg, "err");
+      if (b) { b.innerHTML = '<i class="bi bi-cloud-arrow-up"></i> 重试创建隧道 :' + port; b.onclick = svcCreate; }
+    } finally {
+      svcTunnel.busy = false;
+      if (b) b.disabled = false;
+    }
+  }
+
+  function svcResult(port, url, quiet) {
+    const b = svcBtn();
+    const host = location.hostname || "127.0.0.1";
+    const webui = "http://" + host + ":9200/";
+    if (b) {
+      b.style.display = "";
+      b.innerHTML = '<i class="bi bi-link-45deg"></i> ' + (url ? "公网连接（点复制）" : "查看 Web 面板");
+      b.title = url ? (url + "（点击复制）") : ("公网地址请在 cpolar Web 面板查看：" + webui);
+      b.onclick = function () {
+        if (url) copyText(url, "公网连接已复制：" + url);
+        else window.open(webui, "_blank", "noopener");
+      };
+    }
+    const body = $("opBody");
+    if (body) {
+      let span = body.querySelector("[data-svc-url]");   // 同一行复用，避免刷新/更新时重复追加
+      if (!span) {
+        span = document.createElement("span");
+        span.setAttribute("data-svc-url", "1");
+        span.className = "op-ok op-result";
+        body.appendChild(span);
+      }
+      span.innerHTML = url
+        ? '✔ 隧道已就绪（本地 :' + esc(String(port)) + '）→ 公网连接：<a class="op-link" href="' +
+          esc(url) + '" target="_blank" rel="noopener">' + esc(url) +
+          '</a> <button class="bp-btn" style="padding:0 4px" data-svc-copy="1">复制</button>'
+        : '✔ 隧道已创建（本地 :' + esc(String(port)) + '），公网地址请在 <a class="op-link" href="' +
+          esc(webui) + '" target="_blank" rel="noopener">cpolar Web 面板</a> 查看';
+      const cp = span.querySelector("[data-svc-copy]");
+      if (cp) cp.onclick = function () { copyText(url, "公网连接已复制：" + url); };
+      body.scrollTop = body.scrollHeight;
+    }
+    if (!quiet) {
+      if (url) toast("公网连接：" + url, "ok");
+      else toast("隧道已创建，公网地址请在 cpolar Web 面板查看", "warn");
+    }
+  }
+
+  svcWatch();
 })();

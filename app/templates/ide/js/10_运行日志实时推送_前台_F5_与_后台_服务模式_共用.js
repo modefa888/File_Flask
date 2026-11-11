@@ -107,12 +107,8 @@
     if (L.es) { try { L.es.close(); } catch (e) { /* 忽略 */ } L.es = null; }
     clearTimeout(L.timer);
     if (L.el) L.el.classList.add("ended");
-    if (typeof curHist !== "undefined" && curHist && curHist.taskId === id) {
-      curHist.running = false;
-      curHist.exit = (d && d.exit_code !== null && d.exit_code !== undefined) ? d.exit_code
-                   : (d && (d.stopped_by_user || d.timed_out)) ? 1 : 0;
-      histRender();
-    }
+    histFinishTaskId(id, (d && d.exit_code !== null && d.exit_code !== undefined) ? d.exit_code
+                   : (d && (d.stopped_by_user || d.timed_out)) ? 1 : 0);
     // 只有「本会话里亲眼看着它结束」才提示；刷新后恢复历史标签属于回看，不重复打扰
     if (!L.replay && d && (d.stopped_by_user || d.timed_out || d.exit_code !== null)) {
       toast(d.stopped_by_user ? "已手动终止：" + L.name
@@ -389,7 +385,7 @@
     viewHist = null;
     if (typeof opAiReset === "function") opAiReset();            // 刷新接回：清掉上一次的 AI 分析结论
     $("opBody").innerHTML = ""; $("bpTitle").textContent = "";   // 接回时也先清空，不与旧内容累计
-    histAdd(fg.target, fg.id, "fg");                   // 刷新恢复的前台任务也进运行记录
+    histReattach(fg.target, fg.id, "fg");              // 刷新接回：认领已有记录，不新建（否则每刷新一次多一条）
     autoShowBottom("output");                          // 用户上次已关闭底部面板则不自动弹出（内容照常回放，重开后可见）
     opLine("$ " + fg.command + "    （工作目录：" + fg.cwd + "）", "op-cmd");
     opLine("  pid " + (fg.pid || "-") + " · 刷新前就在运行，已接回输出并继续跟踪", "op-dim");

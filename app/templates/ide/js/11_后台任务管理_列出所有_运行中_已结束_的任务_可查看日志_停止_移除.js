@@ -297,6 +297,7 @@
   // auto=true（刷新后自动恢复）：不强行打开被用户关闭的底部面板
   function attachTask(t, auto) {
     ensureLogTab(t, auto);              // 内部会 selectLogTab（auto 时按需打开底部面板）
+    if (t.running) histClaim(t.id, t.mode || "bg");   // 仍在跑：把本地记录从「退出码 -1」改回运行中
     if (!LOGS[t.id].es && !LOGS[t.id].done) streamLog(t.id);
     RUNBG.id = t.id; RUNBG.name = t.name; RUNBG.target = t.target;
     RUNBG.mode = t.mode || "bg";

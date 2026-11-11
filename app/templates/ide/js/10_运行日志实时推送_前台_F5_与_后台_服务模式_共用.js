@@ -119,6 +119,16 @@
            : d.timed_out ? "执行超时已终止：" + L.name
            : (d.exit_code === 0 ? "运行完成：" : "进程已退出（代码 " + d.exit_code + "）：") + L.name,
            d.stopped_by_user || d.timed_out ? "warn" : (d.exit_code === 0 ? "ok" : "warn"));
+      // 后台任务运行结束：把本次日志交给「AI 分享项目报错」浮框（仅报错时自动弹出）
+      if (typeof opAiOnFinish === "function") {
+        opAiOnFinish({
+          target: L.target || "", name: L.name || "",
+          exit_code: (d.exit_code !== null && d.exit_code !== undefined) ? d.exit_code : 1,
+          duration: d.duration || 0,
+          stopped: !!(d.stopped_by_user || d.timed_out),
+          lines: (L.buf || []).map(x => x.m).join("\n"),
+        });
+      }
     }
     if (RUNBG.id === id && RUNBG.mode === "bg") bgReset();
     loadRunnerList({ silent: true });
@@ -285,7 +295,45 @@
     return map;
   }
 
+  /* ---------- 启动按钮的「暂停 / 继续」 ----------
+     /api/run/pause 用 SIGSTOP 挂起进程组（CPU 归零、端口仍占用），
+     /api/run/resume 用 SIGCONT 从挂起点恢复。F5 前台任务不一定出现在后台任务
+     列表里，所以按入口文件在本地记一份暂停态，与后端任务表的 paused 合并后推给 01_。 */
+  const RUN_PAUSED = {};                             // target → true（本地记录，任务结束自动清）
+
+  function runningPausedTargets() {
+    const live = runningTargets();
+    Object.keys(RUN_PAUSED).forEach(t => { if (!live[t]) delete RUN_PAUSED[t]; });
+    const map = {};
+    Object.keys(live).forEach(t => { if (RUN_PAUSED[t]) map[t] = true; });
+    ((RUNNER && (RUNNER.all || RUNNER.tasks)) || []).forEach(t => {
+      if (t && t.running && t.paused && t.target) map[t.target] = true;
+    });
+    return map;
+  }
+
+  async function toggleRunPause(target) {
+    const id = runningTargets()[target];
+    if (!id) { toast("当前没有正在运行的程序", "warn"); return; }
+    const paused = !!runningPausedTargets()[target];
+    try {
+      const r = await fetch(paused ? "/api/run/resume" : "/api/run/pause", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: id }),
+      });
+      const d = await r.json();
+      if (d.error) { toast((paused ? "继续" : "暂停") + "失败：" + d.error, "err"); return; }
+      if (paused) delete RUN_PAUSED[target]; else RUN_PAUSED[target] = true;
+      toast(paused ? "已继续运行" : "已暂停运行（进程挂起，端口仍占用）", paused ? "ok" : "warn");
+      syncRunButtons();
+      loadRunnerList({ silent: true });              // 同步「后台任务」面板里的暂停态
+    } catch (e) {
+      toast((paused ? "继续" : "暂停") + "失败：" + (e.message || e), "err");
+    }
+  }
+
   function syncRunButtons() {
+    if (typeof window.setRunningPaused === "function") window.setRunningPaused(runningPausedTargets());
     if (typeof window.setRunningTargets === "function") window.setRunningTargets(runningTargets());
   }
   window.syncRunButtons = syncRunButtons;              // 11_ 后台任务面板恢复任务后也要刷一次
@@ -339,6 +387,7 @@
     RUNBG.name = fg.name || ""; RUNBG.target = fg.target || "";
     RUNBG.mode = "fg"; RUNBG.timeout = 0; RUNBG.args = ""; RUNBG.promoted = false;
     viewHist = null;
+    if (typeof opAiReset === "function") opAiReset();            // 刷新接回：清掉上一次的 AI 分析结论
     $("opBody").innerHTML = ""; $("bpTitle").textContent = "";   // 接回时也先清空，不与旧内容累计
     histAdd(fg.target, fg.id, "fg");                   // 刷新恢复的前台任务也进运行记录
     autoShowBottom("output");                          // 用户上次已关闭底部面板则不自动弹出（内容照常回放，重开后可见）
@@ -355,6 +404,7 @@
   // 输出看该面板右侧的实时日志；底部面板本来开着就照常写进去，只是不再抢着弹出来）。
   function startRunStream(d, target, mode, argsStr, opts) {
     const quiet = !!(opts && opts.quiet);
+    if (typeof opAiReset === "function") opAiReset();   // 新一轮运行：收起并清空上次的 AI 分析结论
     RUNBG.id = d.id; RUNBG.offset = 0;
     RUNBG.name = baseName(target); RUNBG.target = target;
     RUNBG.mode = mode; RUNBG.timeout = d.timeout || 0; RUNBG.args = argsStr || "";
@@ -444,7 +494,15 @@
       const okExit = d.exit_code === 0;
       histFinish(d.exit_code);                         // 运行记录标记结束状态
       opLine((okExit ? "✔ " : "✘ ") + "进程已退出，代码 " + d.exit_code +
-             " · 用时 " + d.duration + "s", okExit ? "op-ok" : "op-err");
+             " · 用时 " + d.duration + "s", okExit ? "op-ok op-result" : "op-err op-result");
+      // 运行完：把本次输出交给「AI 分享项目报错」浮框（仅报错时自动弹出）
+      if (typeof opAiOnFinish === "function") {
+        const lines = (curHist ? curHist.buf : []).map(l => l.m).join("\n");
+        opAiOnFinish({
+          target: RUNBG.target, name: RUNBG.name, exit_code: d.exit_code,
+          duration: d.duration, stopped: !!(d.stopped_by_user || d.timed_out), lines: lines,
+        });
+      }
       toast(okExit ? "运行完成" : "运行结束（退出码 " + d.exit_code + "）", okExit ? "ok" : "warn");
       bgReset();
       loadRunnerList({ silent: true });

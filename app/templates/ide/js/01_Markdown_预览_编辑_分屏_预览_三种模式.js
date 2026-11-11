@@ -601,16 +601,35 @@
     check();
   }
 
-  /* 启动按钮：在「程序入口」那一行的行号「前面」放 ▶ / ⏸，点它运行或停止当前文件。
+  /* 启动按钮：在「程序入口」那一行的行号「前面」放 ▶ / ⏸，点它运行、暂停或继续当前文件。
      入口按各语言常见写法识别；识别不到就不标 —— 宁可不显，也不标错行。 */
   const RUN_BTN_TABS = [];          // 已挂启动按钮的标签
   let RUNNING_TASKS = {};           // target → taskId，由 10_ 运行模块同步过来
+  let RUNNING_PAUSED = {};          // target → true（已挂起），由 10_ 运行模块同步过来
 
   // 运行状态只有 10_ 运行模块知道（RUNBG / LOGS），这里只负责画：它推送状态，按钮跟着变
+  function redrawRunButtons() {
+    RUN_BTN_TABS.forEach(t => { if (t.runBtnMark) t.runBtnMark(); });
+  }
   window.setRunningTargets = function (map) {
     RUNNING_TASKS = map || {};
-    RUN_BTN_TABS.forEach(t => { if (t.runBtnMark) t.runBtnMark(); });
+    redrawRunButtons();
   };
+  window.setRunningPaused = function (map) {
+    RUNNING_PAUSED = map || {};
+    redrawRunButtons();
+  };
+  /* 行内 / 悬浮按钮共用入口：没在跑 → 运行；在跑 → 暂停（SIGSTOP）；已暂停 → 继续（SIGCONT）。
+     暂停态与后端任务表统一由 10_ 维护，停止仍可用底部面板的 ⊘ 或「后台任务」面板。 */
+  function runBtnClick(tab) {
+    const target = tab.displayPath || tab.path;
+    if (!RUNNING_TASKS[target]) {
+      if (active !== tab) activate(tab);        // runCurrentFile 用的是 active，先切过来
+      runCurrentFile();
+      return;
+    }
+    if (typeof toggleRunPause === "function") toggleRunPause(target);
+  }
 
   function setupRunButtonView(tab) {
     if (tab.runBtnReady) return;                 // 每个标签只挂一次
@@ -661,26 +680,16 @@
       }
       const target = tab.displayPath || tab.path;
       const running = !!RUNNING_TASKS[target];
+      const paused = !!RUNNING_PAUSED[target];
       const label = (RUN_LABELS[ext] || ext) + " " + baseName(target);
       const el = document.createElement("div");
-      el.className = "cm-run-btn" + (running ? " running" : "");
-      el.title = running ? "停止：" + label + "（正在运行）" : "启动：" + label;
-      el.innerHTML = '<i class="bi ' + (running ? "bi-pause-fill" : "bi-play-fill") + '"></i>';
+      el.className = "cm-run-btn" + (running ? (paused ? " paused" : " running") : "");
+      el.title = paused ? "继续：" + label + "（已暂停）"
+               : running ? "暂停：" + label + "（正在运行）" : "运行：" + label;
+      el.innerHTML = '<i class="bi ' + (running && !paused ? "bi-pause-fill" : "bi-play-fill") + '"></i>';
       el.addEventListener("click", (e) => {
         e.stopPropagation();
-        const tid = RUNNING_TASKS[target];
-        if (tid) {                                // 运行中：再点一下 = 停止
-          fetch("/api/run/stop", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: tid })
-          }).then(r => r.json()).then(d => {
-            if (d.error) toast("停止失败：" + d.error, "err");
-            else toast("已停止运行", "ok");
-          }).catch(err => toast("停止失败：" + (err.message || err), "err"));
-          return;
-        }
-        if (active !== tab) activate(tab);        // runCurrentFile 用的是 active，先切过来
-        runCurrentFile();
+        runBtnClick(tab);
       });
       tab.cm.setGutterMarker(line, "run-btn-gutter", el);
       tab.entryLine = line;                      // 记录入口行，供悬浮按钮判断可见性
@@ -698,25 +707,10 @@
         if (btn && btn.parentNode) btn.parentNode.removeChild(btn);
         btn = document.createElement("div");
         btn.className = "cm-run-float-btn";
-        btn.style.cssText = "position:absolute;left:50%;transform:translateX(-50%);bottom:12px;z-index:30;display:none;align-items:center;gap:6px;padding:7px 16px;border-radius:999px;background:#22764a;color:#fff;font-size:12px;line-height:1;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.2);white-space:nowrap;user-select:none;";
-        btn.addEventListener("mouseenter", () => { btn.style.background = "#2b8f5a"; });
-        btn.addEventListener("mouseleave", () => { btn.style.background = "#22764a"; });
+        btn.style.cssText = "position:absolute;left:50%;transform:translateX(-50%);bottom:12px;z-index:30;display:none;align-items:center;gap:6px;padding:7px 16px;border-radius:999px;color:#fff;font-size:12px;line-height:1;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.2);white-space:nowrap;user-select:none;";
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
-          const target = tab.displayPath || tab.path;
-          const tid = RUNNING_TASKS[target];
-          if (tid) {                              // 与行内按钮一致：运行中再点 = 停止
-            fetch("/api/run/stop", {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id: tid })
-            }).then(r => r.json()).then(d => {
-              if (d.error) toast("停止失败：" + d.error, "err");
-              else toast("已停止运行", "ok");
-            }).catch(err => toast("停止失败：" + (err.message || err), "err"));
-            return;
-          }
-          if (active !== tab) activate(tab);      // runCurrentFile 用的是 active，先切过来
-          runCurrentFile();
+          runBtnClick(tab);                       // 没在跑 → 运行；在跑 → 暂停；已暂停 → 继续
         });
         wrap.appendChild(btn);                    // 挂在 CodeMirror wrapper 内：固定于可视区，不随内容滚动
         tab.floatRunBtn = btn;
@@ -724,15 +718,19 @@
       if (tab.entryLine < 0) { btn.style.display = "none"; return; }
       const target = tab.displayPath || tab.path;
       const running = !!RUNNING_TASKS[target];
+      const paused = !!RUNNING_PAUSED[target];
       const label = (RUN_LABELS[ext] || ext) + " " + baseName(target);
+      btn.classList.toggle("running", running && !paused);
+      btn.classList.toggle("paused", running && paused);
       btn.innerHTML = "";
       const icon = document.createElement("i");
-      icon.className = "bi " + (running ? "bi-pause-fill" : "bi-play-fill");
+      icon.className = "bi " + (running && !paused ? "bi-pause-fill" : "bi-play-fill");
       const txt = document.createElement("span");
-      txt.textContent = (running ? "停止 " : "启动 ") + label;
+      txt.textContent = (paused ? "继续 " : running ? "暂停 " : "运行 ") + label;
       btn.appendChild(icon);
       btn.appendChild(txt);
-      btn.title = running ? "停止：" + label + "（正在运行）" : "启动：" + label;
+      btn.title = paused ? "继续：" + label + "（已暂停）"
+                : running ? "暂停：" + label + "（正在运行）" : "运行：" + label;
       // 入口行在可视区内 → 隐藏（行内 ▶ 已可见）；滚出 → 悬浮显示
       let inView = false;
       try {

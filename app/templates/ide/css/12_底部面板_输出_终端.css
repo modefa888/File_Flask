@@ -50,6 +50,7 @@
   .op-body .op-head { color: #dcdcaa; }
   .op-body .op-link { color: #4fc1ff; text-decoration: underline; cursor: pointer; }
   .op-body .op-link:hover { color: #7fd4ff; }
+  /* 输出分区背景：环境运行 / 代码输出 / 运行结果（:where 降权，搜索命中黄底仍优先） */ .op-body{--obg-env:rgba(76,141,255,.12);--obg-code:rgba(255,255,255,.04);--obg-ok:rgba(63,191,111,.14);--obg-err:rgba(224,86,86,.14)} html.theme-light .op-body{--obg-env:rgba(37,99,235,.09);--obg-code:rgba(0,0,0,.035);--obg-ok:rgba(34,118,74,.11);--obg-err:rgba(220,53,69,.11)} :where(.op-body)>span{display:block;box-sizing:border-box;padding:2px 10px;border-left:3px solid transparent;background:var(--obg-code)} :where(.op-body) .op-cmd,:where(.op-body) .op-dim,:where(.op-body) .op-head{background:var(--obg-env);border-left-color:#4c8dff} :where(.op-body) .op-result{background:var(--obg-ok);border-left-color:#3fbf6f} :where(.op-body) .op-result.op-err{background:var(--obg-err);border-left-color:#e05656}
 
   /* ----- 「输出」面板内置搜索（🔍）：工具条高 32px 固定，搜索条 20px 不撑高、开关不抖动 ----- */
   .op-find {
@@ -124,3 +125,59 @@
     color: #ffffff; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
   }
 
+  /* ===== 运行结束后的「AI 分享项目报错」悬浮框（挂在底部面板内，随面板显隐） ===== */
+  .bottom-panel { position: relative; }
+  #opAiBox {
+    position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 901;
+    width: 420px; max-width: calc(100% - 28px); max-height: calc(100% - 40px); box-sizing: border-box;
+    display: flex; flex-direction: column;
+    background: rgba(28, 30, 36, .97); border: 1px solid #3a3e48; border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .45); color: #d4d7de;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 12px; overflow: hidden;
+  }
+  #opAiBox[hidden] { display: none; }
+  #opAiBox .op-ai-hd { display: flex; align-items: center; gap: 6px; padding: 7px 10px;
+    border-bottom: 1px solid #3a3e48; color: #e6e8ee; font-weight: 600;
+    cursor: move; user-select: none; }
+  #opAiBox.dragging { box-shadow: 0 12px 34px rgba(0, 0, 0, .55); }
+  #opAiBox.collapsed .op-ai-hd { border-bottom: none; }
+  #opAiBox.collapsed .op-ai-tools, #opAiBox.collapsed .op-ai-md { display: none; }
+  #opAiBox.collapsed .op-ai-st { max-width: 150px; }
+  #opAiBox .op-ai-hd > .bi { color: #d2a8ff; flex: none; }
+  #opAiBox .op-ai-st { font-weight: 400; font-size: 11px; color: #8b93a3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #opAiBox.has-err .op-ai-st { color: #f48771; }
+  #opAiBox .op-ai-flex { flex: 1; }
+  #opAiBox .op-ai-icon { background: none; border: none; color: #8b93a3; cursor: pointer;
+    font-size: 12px; padding: 0 2px; flex: none; }
+  #opAiBox .op-ai-icon:hover { color: #fff; }
+  #opAiBox .op-ai-tools { display: flex; gap: 6px; padding: 7px 10px; border-bottom: 1px solid #33373f; }
+  #opAiBox .op-ai-btn {
+    display: inline-flex; align-items: center; gap: 4px; background: #33373f;
+    border: 1px solid #454a55; color: #d4d7de; border-radius: 5px;
+    padding: 4px 9px; cursor: pointer; font-size: 11.5px; font-family: inherit;
+  }
+  #opAiBox .op-ai-btn:hover { background: #414753; color: #fff; }
+  #opAiBox .op-ai-btn:disabled { opacity: .5; cursor: default; }
+  #opAiBox .op-ai-btn.main { background: #3a2d5c; border-color: #6b4fa3; color: #e9d9ff; }
+  #opAiBox .op-ai-btn.main:hover { background: #4b3a75; }
+  #opAiBox .op-ai-btn[hidden] { display: none; }
+  #opAiBox .op-ai-md { display: none; max-height: 220px; min-height: 0; overflow: auto; padding: 8px 10px 10px;
+    line-height: 1.6; white-space: normal; word-break: break-word; }
+  #opAiBox.open .op-ai-md { display: block; }
+  #opAiBox .op-ai-md p { margin: 0 0 6px; }
+  #opAiBox .op-ai-md pre { background: #20222a; border: 1px solid #3a3e48; border-radius: 5px;
+    padding: 6px 8px; overflow: auto; white-space: pre; }
+  #opAiBox .op-ai-md code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  #opAiBox .op-ai-empty, #opAiBox .op-ai-err { color: #8b93a3; }
+  #opAiBox .op-ai-err { margin-top: 6px; color: #f48771; }
+  html.theme-light #opAiBox { background: rgba(255, 255, 255, .98); border-color: #d5d7dc;
+    color: #333a45; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+  html.theme-light #opAiBox .op-ai-hd { border-bottom-color: #e3e5e9; color: #24292f; }
+  html.theme-light #opAiBox .op-ai-st, html.theme-light #opAiBox .op-ai-empty { color: #8a919c; }
+  html.theme-light #opAiBox .op-ai-tools { border-bottom-color: #e3e5e9; }
+  html.theme-light #opAiBox .op-ai-btn { background: #f2f3f5; border-color: #d5d7dc; color: #333a45; }
+  html.theme-light #opAiBox .op-ai-btn:hover { background: #e8eaee; color: #111; }
+  html.theme-light #opAiBox .op-ai-btn.main { background: #efe7ff; border-color: #b79ae6; color: #4b2b83; }
+  html.theme-light #opAiBox .op-ai-md pre { background: #f5f6f8; border-color: #e0e2e7; }

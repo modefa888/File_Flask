@@ -45,14 +45,14 @@
     if (!rec.buf.length) {
       var tip = document.createElement("span");
       tip.style.color = "#6d7482";
-      tip.textContent = "（无输出）\n";
+      tip.textContent = "（无输出）";
       body.appendChild(tip);
     } else {
       var frag = document.createDocumentFragment();
       rec.buf.forEach(function(l) {
         var s = document.createElement("span");
         if (l.c) s.className = l.c;
-        s.textContent = l.m + "\n";
+        s.textContent = l.m;
         frag.appendChild(s);
       });
       body.appendChild(frag);
@@ -70,7 +70,7 @@
     (curHist ? curHist.buf : []).forEach(function(l) {
       var s = document.createElement("span");
       if (l.c) s.className = l.c;
-      s.textContent = l.m + "\n";
+      s.textContent = l.m;
       body.appendChild(s);
     });
     body.scrollTop = body.scrollHeight;
@@ -83,6 +83,7 @@
     if (!box) {
       var st = document.createElement("style");
       st.textContent = ".bottom-panel{position:relative}" +
+        ".op-body{--obg-env:rgba(76,141,255,.12);--obg-code:rgba(255,255,255,.04);--obg-ok:rgba(63,191,111,.14);--obg-err:rgba(224,86,86,.14)} html.theme-light .op-body{--obg-env:rgba(37,99,235,.09);--obg-code:rgba(0,0,0,.035);--obg-ok:rgba(34,118,74,.11);--obg-err:rgba(220,53,69,.11)} :where(.op-body)>span{display:block;box-sizing:border-box;padding:2px 10px;border-left:3px solid transparent;background:var(--obg-code)} :where(.op-body) .op-cmd,:where(.op-body) .op-dim,:where(.op-body) .op-head{background:var(--obg-env);border-left-color:#4c8dff} :where(.op-body) .op-result{background:var(--obg-ok);border-left-color:#3fbf6f} :where(.op-body) .op-result.op-err{background:var(--obg-err);border-left-color:#e05656}" +
         "#runHistBox{position:absolute;right:14px;top:50%;transform:translateY(-50%);" +
         "z-index:900;width:172px;background:rgba(28,30,36,.96);border:1px solid #3a3e48;" +
         "border-radius:10px;box-shadow:-4px 8px 24px rgba(0,0,0,.35);" +
@@ -103,12 +104,25 @@
         "html.theme-light #runHistBox .rh-head{border-bottom-color:#d5d7dc;color:#6b7280}" +
         "html.theme-light .rh-item:hover{background:rgba(0,0,0,.05)}" +
         "html.theme-light .rh-item.on{background:rgba(34,118,74,.14)}" +
-        "html.theme-light .rh-tm{color:#9aa0aa}";
+        "html.theme-light .rh-tm{color:#9aa0aa}" +
+        "#runHistBox .rh-flex{flex:1}" +
+        "#runHistBox .rh-clear{background:none;border:none;color:#8b93a3;cursor:pointer;font-size:11px;padding:0 2px}" +
+        "#runHistBox .rh-clear:hover{color:#f48771}" +
+        "html.theme-light #runHistBox .rh-clear{color:#9aa0aa}";
       document.head.appendChild(st);
       box = document.createElement("div");
       box.id = "runHistBox";
-      box.innerHTML = '<div class="rh-head"><i class="bi bi-clock-history"></i><span>运行记录</span></div>' +
+      box.innerHTML = '<div class="rh-head"><i class="bi bi-clock-history"></i><span>运行记录</span>' +
+                      '<span class="rh-flex"></span>' +
+                      '<button class="rh-clear" title="清空运行记录"><i class="bi bi-trash3"></i></button></div>' +
                       '<div class="rh-list"></div>';
+      box.querySelector(".rh-clear").onclick = function (e) {
+        e.stopPropagation();
+        RUN_HISTORY.length = 0;                 // 只清记录，当前输出与 AI 分析用的缓冲仍保留
+        if (viewHist) viewLive();               // 正在回看历史 → 回到实时输出
+        histRender();
+        toast("运行记录已清空", "ok");
+      };
       ($("bottomPanel") || document.body).appendChild(box);   // 挂到底部面板内：随面板显隐并定位在其右侧
     }
     var list = box.querySelector(".rh-list");
@@ -157,7 +171,7 @@
     $("paneLog").classList.toggle("active", bottomPane === "log");
     if (bottomPane === "term") termEnsure().then(ok => { if (ok) $("termInput").focus(); });
     if (bottomPane === "log") { const lb = $("logBody"); if (lb) lb.scrollTop = lb.scrollHeight; }
-    if (bottomPane === "output" && typeof viewHist !== "undefined" && viewHist) viewLive();
+    // 切回「输出」页签不再自动复位回看：viewHistory 打开面板时也会走这里，否则会把刚设的 viewHist 冲掉
     bpKillMode();                                      // 右侧按钮随当前标签刷新状态
     // 搜索按钮归「输出」「运行日志」两个页签（终端页签隐藏）
     if (typeof opFindShow === "function") opFindShow(bottomPane === "output" || bottomPane === "log");
@@ -186,6 +200,7 @@
   }
   function toggleOutput(force) { toggleBottom(force, "output"); }
   function clearOutput() {
+    if (typeof opAiReset === "function") opAiReset();  // 清空输出时，AI 分析结论一起清掉
     if (bottomPane === "term") { if (curTerm) curTerm.body.innerHTML = ""; return; }
     if (bottomPane === "log" && currentLogId && LOGS[currentLogId]) {
       LOGS[currentLogId].buf = [];                      // 清当前标签的缓冲与显示
@@ -201,12 +216,13 @@
     histRender();
   }
   function opLine(text, cls) {
+    if (/进程已退出，代码/.test(text || "")) cls = ((cls || "") + " op-result").trim();   // 运行结果单独一类
     if (curHist) histPush(curHist, text, cls);                  // 运行记录缓存
     if (viewHist && viewHist !== curHist) return;               // 正在回看历史：实时行只进缓存
     const body = $("opBody");
     const span = document.createElement("span");
     if (cls) span.className = cls;
-    span.textContent = (text || "") + "\n";
+    span.textContent = (text || "");
     body.appendChild(span);
     if (typeof opFindNewLine === "function") opFindNewLine(span);   // 搜索条开着时新行实时参与匹配
     body.scrollTop = body.scrollHeight;
@@ -217,7 +233,7 @@
     const body = $("opBody");
     const span = document.createElement("span");
     if (cls) span.className = cls;
-    span.innerHTML = html + "\n";
+    span.innerHTML = html;
     body.appendChild(span);
     if (typeof opFindNewLine === "function") opFindNewLine(span);
     body.scrollTop = body.scrollHeight;
@@ -277,4 +293,278 @@
     if (s === null) return;
     runCurrentFile(s);
   }
+
+  /* ==================================================================
+     运行结束后的「AI 分享项目报错」悬浮框
+     · 默认隐藏，只有「运行报错」才自动弹出（平时点工具条「✦ AI 报错」手动打开）；
+     · 标题栏可拖动，位置记在 localStorage，松手即固定；
+     · 「收起」折叠成一条标题栏（再点展开），「×」完全关闭浮框；
+     · 「AI 分享项目报错」把本次命令、退出码与完整输出交给 /api/ai/chat
+       流式分析，结论（Markdown）显示在浮框里；「清空」清掉结论。
+     ================================================================== */
+  var OP_AI = { el: null, busy: false, ac: null, text: "", info: null, pos: null };
+
+  function opAiClip(s, n) {
+    s = String(s || "");
+    return s.length > n ? s.slice(0, n) + "\n…（输出过长已截断）" : s;
+  }
+
+  /* 这次运行算不算「报错」：非 0 退出码 / 手动终止 / 超时；
+     退出码为 0 但日志里出现 Traceback、XXXError、[ERROR] 等明显异常时也算。 */
+  function opAiHasError(info) {
+    if (!info) return false;
+    const code = info.exit_code;
+    if (code !== 0 && code !== null && code !== undefined) return true;
+    if (info.stopped || info.timed_out) return true;
+    return /Traceback \(most recent call last\)|\[ERROR\]|\bERROR\b|\bFATAL\b|\bException\b|\b[A-Za-z.]+Error\b/
+      .test(String(info.lines || ""));
+  }
+
+  function opAiSetCollapsed(collapsed) {
+    const box = opAiEnsure();
+    box.classList.toggle("collapsed", collapsed);
+    const fold = box.querySelector(".op-ai-fold");
+    fold.title = collapsed ? "展开浮框" : "收起（只留标题栏）";
+    fold.innerHTML = '<i class="bi ' + (collapsed ? "bi-chevron-up" : "bi-chevron-down") + '"></i>';
+  }
+
+  /* 拖标题栏移动浮框：首次拖动把「居中 + transform」切成相对面板的 left/top；
+     面板高度可被分隔条调整，所以每次显示时再夹回可视范围。 */
+  function opAiClamp() {
+    const box = OP_AI.el;
+    if (!box || !OP_AI.pos || !box.parentNode) return;
+    const p = box.parentNode;
+    const maxX = Math.max(0, p.clientWidth - box.offsetWidth);
+    const maxY = Math.max(0, p.clientHeight - box.offsetHeight);
+    const x = Math.max(0, Math.min(OP_AI.pos.x, maxX));
+    const y = Math.max(0, Math.min(OP_AI.pos.y, maxY));
+    OP_AI.pos = { x: x, y: y };
+    box.style.left = x + "px";
+    box.style.top = y + "px";
+  }
+
+  function opAiDrag(box, head) {
+    head.addEventListener("mousedown", function (e) {
+      if (e.target.closest("button")) return;       // 收起 / 关闭按钮不触发拖动
+      const panel = box.parentNode;
+      const pr = panel.getBoundingClientRect();
+      const br = box.getBoundingClientRect();
+      const dx = e.clientX - br.left, dy = e.clientY - br.top;
+      box.style.left = (br.left - pr.left) + "px";
+      box.style.top = (br.top - pr.top) + "px";
+      box.style.right = "auto";
+      box.style.bottom = "auto";
+      box.style.transform = "none";
+      const move = function (ev) {
+        const maxX = Math.max(0, pr.width - box.offsetWidth);
+        const maxY = Math.max(0, pr.height - box.offsetHeight);
+        const x = Math.max(0, Math.min(ev.clientX - pr.left - dx, maxX));
+        const y = Math.max(0, Math.min(ev.clientY - pr.top - dy, maxY));
+        OP_AI.pos = { x: x, y: y };
+        box.style.left = x + "px";
+        box.style.top = y + "px";
+      };
+      const up = function () {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        box.classList.remove("dragging");
+        try { localStorage.setItem("ide.opai.pos", JSON.stringify(OP_AI.pos)); } catch (_) { /* 忽略 */ }
+      };
+      box.classList.add("dragging");
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+      e.preventDefault();
+    });
+  }
+
+  function opAiEnsure() {
+    if (OP_AI.el && OP_AI.el.parentNode) return OP_AI.el;
+    const box = document.createElement("div");
+    box.id = "opAiBox";
+    box.style.display = "none";                     // 默认不打开
+    box.innerHTML =
+      '<div class="op-ai-hd"><i class="bi bi-stars"></i><span class="op-ai-tt">AI 报错分析</span>' +
+        '<span class="op-ai-st"></span><span class="op-ai-flex"></span>' +
+        '<button class="op-ai-icon op-ai-fold" title="收起（只留标题栏）"><i class="bi bi-chevron-down"></i></button>' +
+        '<button class="op-ai-icon op-ai-close" title="关闭浮框（工具条 ✦ AI 报错 可再打开）"><i class="bi bi-x-lg"></i></button></div>' +
+      '<div class="op-ai-tools">' +
+        '<button class="op-ai-btn main op-ai-go"><i class="bi bi-share"></i> AI 分享项目报错</button>' +
+        '<button class="op-ai-btn op-ai-clear"><i class="bi bi-trash3"></i> 清空</button>' +
+        '<button class="op-ai-btn op-ai-stop" hidden><i class="bi bi-stop-fill"></i> 停止</button>' +
+      '</div><div class="op-ai-md"></div>';
+    ($("bottomPanel") || document.body).appendChild(box);
+    box.querySelector(".op-ai-fold").onclick = function () {
+      opAiSetCollapsed(!box.classList.contains("collapsed"));
+    };
+    box.querySelector(".op-ai-close").onclick = function () { box.style.display = "none"; };
+    box.querySelector(".op-ai-go").onclick = function () { opAiAnalyze(); };
+    box.querySelector(".op-ai-clear").onclick = function () { opAiClear(); };
+    box.querySelector(".op-ai-stop").onclick = function () { if (OP_AI.ac) OP_AI.ac.abort(); };
+    const tabBtn = $("bpAiBtn");
+    if (tabBtn) tabBtn.onclick = function () { opAiToggle(); };
+    opAiDrag(box, box.querySelector(".op-ai-hd"));
+    try {
+      const saved = JSON.parse(localStorage.getItem("ide.opai.pos") || "null");
+      if (saved && isFinite(saved.x) && isFinite(saved.y)) {
+        OP_AI.pos = { x: saved.x, y: saved.y };
+        box.style.left = saved.x + "px";
+        box.style.top = saved.y + "px";
+        box.style.bottom = "auto";
+        box.style.transform = "none";
+      }
+    } catch (_) { /* 隐私模式等，忽略 */ }
+    OP_AI.el = box;
+    return box;
+  }
+
+  function opAiToggle() {
+    const box = opAiEnsure();
+    if (box.style.display === "none") {
+      box.style.display = "";
+      opAiClamp();                                 // 面板尺寸可能变过，夹回可视范围
+    } else {
+      box.style.display = "none";
+    }
+  }
+
+  function opAiBusyUI() {
+    const box = OP_AI.el;
+    if (!box) return;
+    const go = box.querySelector(".op-ai-go");
+    const stop = box.querySelector(".op-ai-stop");
+    if (go) go.disabled = OP_AI.busy;
+    if (stop) stop.hidden = !OP_AI.busy;
+  }
+
+  function opAiPaint(extra) {
+    const md = OP_AI.el && OP_AI.el.querySelector(".op-ai-md");
+    if (!md) return;
+    md.innerHTML = (typeof aiMd === "function" ? aiMd(OP_AI.text)
+                    : esc(OP_AI.text).replace(/\n/g, "<br>")) +
+      (extra ? '<div class="op-ai-err">' + esc(extra) + "</div>" : "");
+    md.scrollTop = md.scrollHeight;
+  }
+
+  function opAiClear() {
+    if (OP_AI.ac) { try { OP_AI.ac.abort(); } catch (_) { /* 忽略 */ } OP_AI.ac = null; }
+    OP_AI.busy = false; OP_AI.text = "";
+    const box = opAiEnsure();
+    box.classList.remove("open");
+    box.querySelector(".op-ai-md").innerHTML =
+      '<div class="op-ai-empty">已清空。点「AI 分享项目报错」可重新分析本次运行输出。</div>';
+    opAiBusyUI();
+  }
+
+  function opAiReset() {
+    if (OP_AI.ac) { try { OP_AI.ac.abort(); } catch (_) { /* 忽略 */ } OP_AI.ac = null; }
+    OP_AI.busy = false; OP_AI.text = ""; OP_AI.info = null;
+    const box = opAiEnsure();
+    box.style.display = "none";
+    box.classList.remove("open", "has-err");
+    box.querySelector(".op-ai-md").innerHTML = "";
+    opAiBusyUI();
+  }
+
+  function opAiOnFinish(info) {
+    OP_AI.info = info || null;
+    opAiClear();                                    // 丢掉上一次的分析结论
+    const box = opAiEnsure();
+    const hasErr = opAiHasError(info);
+    const code = (info && info.exit_code !== null && info.exit_code !== undefined)
+      ? info.exit_code : "?";
+    box.classList.toggle("has-err", hasErr);
+    box.querySelector(".op-ai-st").textContent = hasErr
+      ? "运行报错 · 退出码 " + code + " · 可分享给 AI"
+      : "运行完成 · 可分析本次输出";
+    box.querySelector(".op-ai-md").innerHTML =
+      '<div class="op-ai-empty">' +
+      (hasErr ? "检测到运行报错，点「AI 分享项目报错」把命令与完整输出交给 AI 分析。"
+              : "本次运行成功，也可以把输出交给 AI 分析。") +
+      "</div>";
+    box.classList.add("open");                     // 展开一行提示，AI 结论稍后写在同一区域
+    if (!hasErr) return;                           // 默认不打开：成功运行不自动弹出
+    opAiSetCollapsed(false);                      // 报错自动弹出时总是展开
+    box.style.display = "";
+    opAiClamp();
+  }
+
+  async function opAiAnalyze() {
+    if (OP_AI.busy) { toast("AI 正在分析，请稍候", "warn"); return; }
+    const info = OP_AI.info;
+    if (!info) { toast("请先运行一次文件再分析", "warn"); return; }
+    const out = opAiClip(info.lines || "", 12000);
+    if (!out.trim()) { toast("本次运行没有输出可分析", "warn"); return; }
+    const box = opAiEnsure();
+    if (typeof sysAiOff === "function" && sysAiOff("chat")) {
+      toast("AI 助手对话已在「设置 → 系统 AI」中关闭", "warn");
+      box.classList.add("open");
+      box.querySelector(".op-ai-md").innerHTML =
+        '<div class="op-ai-err">AI 助手对话已在「设置 → 系统 AI」中关闭，开启后即可分析本次报错。</div>';
+      return;
+    }
+    const sys = "你是 IDE 内置的项目报错分析助手。用户会把一次运行的命令、退出码和完整控制台输出给你。" +
+      "请用简体中文、按 Markdown 输出：① 报错或异常的根因（引用关键报错行）；② 可能相关的文件与代码位置；" +
+      "③ 具体可执行的修复步骤；④ 必要时给出可直接复制的命令或代码。不要复述全部日志，不要编造不存在的报错。";
+    const user = "项目文件：" + (info.target || "未知") + "\n运行名称：" + (info.name || "") +
+      "\n退出码：" + (info.exit_code === null || info.exit_code === undefined ? "未知" : info.exit_code) +
+      "\n用时：" + (info.duration || 0) + "s\n\n本次运行完整输出：\n```text\n" + out + "\n```";
+    OP_AI.busy = true; OP_AI.text = "";
+    const ac = OP_AI.ac = new AbortController();
+    opAiSetCollapsed(false);                       // 若之前收起了，分析时自动展开
+    box.classList.add("open");
+    box.querySelector(".op-ai-md").innerHTML = "";
+    box.querySelector(".op-ai-st").textContent = "AI 分析中…";
+    opAiBusyUI();
+    try {
+      const r = await fetch("/api/ai/chat", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          use_tools: false, perm: "readonly", web_search: false,
+          messages: [{ role: "system", content: sys }, { role: "user", content: user }],
+        }),
+        signal: ac.signal,
+      });
+      if (!r.ok || !r.body) {
+        let msg = "HTTP " + r.status;
+        try { const j = await r.json(); msg = j.error || msg; } catch (_) { /* 忽略 */ }
+        throw new Error(msg);
+      }
+      const reader = r.body.getReader(), dec = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const part = await reader.read();
+        if (part.done) break;
+        buf += dec.decode(part.value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const evt = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          const lines = evt.split("\n");
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.indexOf("data:") !== 0) continue;
+            const data = line.slice(5).trim();
+            if (!data || data === "[DONE]") continue;
+            let obj; try { obj = JSON.parse(data); } catch (_) { continue; }
+            if (obj.error) throw new Error(obj.error);
+            if (obj.delta) { OP_AI.text += obj.delta; opAiPaint(); }
+          }
+        }
+      }
+      if (!OP_AI.text.trim()) opAiPaint("（AI 没有返回分析内容）");
+      box.querySelector(".op-ai-st").textContent = "分析完成 · 可清空后重新分析";
+    } catch (e) {
+      const msg = (e && e.message) ? e.message : String(e);
+      const aborted = (e && e.name === "AbortError") || /abort/i.test(msg);
+      if (!aborted) toast("AI 分析失败：" + msg, "err");
+      opAiPaint(aborted ? "（已停止分析）" : "分析失败：" + msg);
+      box.querySelector(".op-ai-st").textContent = aborted ? "已停止分析" : "分析失败";
+    } finally {
+      if (OP_AI.ac === ac) OP_AI.ac = null;
+      OP_AI.busy = false;
+      opAiBusyUI();
+    }
+  }
+
+  // 页面加载即创建浮框（此时 body.html 已渲染完），工具条「✦ AI 报错」随时可打开
+  opAiEnsure();
 

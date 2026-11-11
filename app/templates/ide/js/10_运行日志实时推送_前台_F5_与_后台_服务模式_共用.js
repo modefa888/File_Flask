@@ -22,6 +22,7 @@
   function logPush(id, m, cls) {
     const L = LOGS[id];
     if (!L) return;
+    if (typeof curHist !== "undefined" && curHist && curHist.taskId === id) histPush(curHist, m, cls || "");
     L.buf.push({ m: String(m), c: cls || "" });
     if (L.buf.length > LOG_BUF_MAX) L.buf.splice(0, 500);
     if (currentLogId !== id) return;
@@ -106,6 +107,12 @@
     if (L.es) { try { L.es.close(); } catch (e) { /* 忽略 */ } L.es = null; }
     clearTimeout(L.timer);
     if (L.el) L.el.classList.add("ended");
+    if (typeof curHist !== "undefined" && curHist && curHist.taskId === id) {
+      curHist.running = false;
+      curHist.exit = (d && d.exit_code !== null && d.exit_code !== undefined) ? d.exit_code
+                   : (d && (d.stopped_by_user || d.timed_out)) ? 1 : 0;
+      histRender();
+    }
     // 只有「本会话里亲眼看着它结束」才提示；刷新后恢复历史标签属于回看，不重复打扰
     if (!L.replay && d && (d.stopped_by_user || d.timed_out || d.exit_code !== null)) {
       toast(d.stopped_by_user ? "已手动终止：" + L.name
@@ -331,6 +338,9 @@
     RUNBG.id = fg.id; RUNBG.offset = 0;
     RUNBG.name = fg.name || ""; RUNBG.target = fg.target || "";
     RUNBG.mode = "fg"; RUNBG.timeout = 0; RUNBG.args = ""; RUNBG.promoted = false;
+    viewHist = null;
+    $("opBody").innerHTML = ""; $("bpTitle").textContent = "";   // 接回时也先清空，不与旧内容累计
+    histAdd(fg.target, fg.id, "fg");                   // 刷新恢复的前台任务也进运行记录
     autoShowBottom("output");                          // 用户上次已关闭底部面板则不自动弹出（内容照常回放，重开后可见）
     opLine("$ " + fg.command + "    （工作目录：" + fg.cwd + "）", "op-cmd");
     opLine("  pid " + (fg.pid || "-") + " · 刷新前就在运行，已接回输出并继续跟踪", "op-dim");
@@ -352,6 +362,10 @@
     closeLogTabsForTarget(target, d.id);               // 同一文件的旧日志标签先关掉，避免堆积
     syncRunButtons();                                  // 启动按钮变成 ⏸
     if (mode === "fg") {
+      viewHist = null;
+      $("opBody").innerHTML = ""; $("bpTitle").textContent = "";   // 每次运行先清空，不与上次累计
+      if (typeof opFindReset === "function") opFindReset();
+      histAdd(target, d.id, "fg");                     // 新建运行记录（右侧悬浮列表）
       if (!quiet) toggleBottom(true, "output");
       opLine("$ " + d.command + "    （工作目录：" + d.cwd + "）", "op-cmd");
       opLine("  pid " + d.pid + " · 超时提醒 " + (d.timeout || 0) + "s（到点只提醒，不会自动转后台或终止；可点右上「↓」手动转后台）", "op-dim");
@@ -361,6 +375,7 @@
     }
     // 后台运行：生成「任务名」日志标签并实时推送
     RUNBG.id = d.id; RUNBG.name = baseName(target);
+    histAdd(target, d.id, "bg");                       // 后台运行也进运行记录
     ensureLogTab({ id: d.id, name: baseName(target), target: target }, false, quiet);
     logPush(d.id, "▶ 后台运行：" + baseName(target) + "（pid " + d.pid + "）· 点右上 ⊘ 可终止", "op-cmd");
     bpKillMode();
@@ -427,6 +442,7 @@
     }
     if (d.done) {
       const okExit = d.exit_code === 0;
+      histFinish(d.exit_code);                         // 运行记录标记结束状态
       opLine((okExit ? "✔ " : "✘ ") + "进程已退出，代码 " + d.exit_code +
              " · 用时 " + d.duration + "s", okExit ? "op-ok" : "op-err");
       toast(okExit ? "运行完成" : "运行结束（退出码 " + d.exit_code + "）", okExit ? "ok" : "warn");

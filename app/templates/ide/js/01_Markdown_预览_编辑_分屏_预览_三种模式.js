@@ -17,7 +17,7 @@
     // 行内语法（内容均已转义）
     text = text.replace(/`([^`\n]+)`/g, (m, c) => keep("<code>" + c + "</code>"));
     text = text.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, url) => keep('<img src="' + url.replace(/"/g, "") + '" alt="' + alt + '">'));
-    text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, url) => keep('<a href="' + url.replace(/"/g, "") + '" target="_blank" rel="noopener">' + t + "</a>"));
+    text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, url) => keep('<a href="' + url + '" target="_blank" rel="noopener">' + t + "</a>"));
     text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     text = text.replace(/(^|[^*\w])\*([^*\n]+)\*/g, "$1<em>$2</em>");
     text = text.replace(/~~([^~]+)~~/g, "<del>$1</del>");
@@ -654,7 +654,11 @@
       const last = tab.cm.lineCount();
       for (let i = 0; i < last; i++) tab.cm.setGutterMarker(i, "run-btn-gutter", null);
       const line = findEntry();
-      if (line < 0) return;
+      if (line < 0) {                            // 识别不到入口：行内按钮没了，悬浮按钮也要藏起来
+        tab.entryLine = -1;
+        updateFloatRun();
+        return;
+      }
       const target = tab.displayPath || tab.path;
       const running = !!RUNNING_TASKS[target];
       const label = (RUN_LABELS[ext] || ext) + " " + baseName(target);
@@ -679,10 +683,68 @@
         runCurrentFile();
       });
       tab.cm.setGutterMarker(line, "run-btn-gutter", el);
+      tab.entryLine = line;                      // 记录入口行，供悬浮按钮判断可见性
+      updateFloatRun();                          // 运行状态 / 入口行变化时同步悬浮按钮
     }
     tab.runBtnMark = mark;
 
+    /* —— 悬浮启动按钮：入口行滚出可视区时固定悬浮在编辑器底部，不用滚动到底去找 —— */
+    function updateFloatRun() {
+      const cm = tab.cm;
+      if (!cm) return;
+      const wrap = cm.getWrapperElement();
+      let btn = tab.floatRunBtn;
+      if (!btn || btn.parentNode !== wrap) {     // 首次创建，或标签重建后重新挂载
+        if (btn && btn.parentNode) btn.parentNode.removeChild(btn);
+        btn = document.createElement("div");
+        btn.className = "cm-run-float-btn";
+        btn.style.cssText = "position:absolute;left:50%;transform:translateX(-50%);bottom:12px;z-index:30;display:none;align-items:center;gap:6px;padding:7px 16px;border-radius:999px;background:#22764a;color:#fff;font-size:12px;line-height:1;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.2);white-space:nowrap;user-select:none;";
+        btn.addEventListener("mouseenter", () => { btn.style.background = "#2b8f5a"; });
+        btn.addEventListener("mouseleave", () => { btn.style.background = "#22764a"; });
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const target = tab.displayPath || tab.path;
+          const tid = RUNNING_TASKS[target];
+          if (tid) {                              // 与行内按钮一致：运行中再点 = 停止
+            fetch("/api/run/stop", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: tid })
+            }).then(r => r.json()).then(d => {
+              if (d.error) toast("停止失败：" + d.error, "err");
+              else toast("已停止运行", "ok");
+            }).catch(err => toast("停止失败：" + (err.message || err), "err"));
+            return;
+          }
+          if (active !== tab) activate(tab);      // runCurrentFile 用的是 active，先切过来
+          runCurrentFile();
+        });
+        wrap.appendChild(btn);                    // 挂在 CodeMirror wrapper 内：固定于可视区，不随内容滚动
+        tab.floatRunBtn = btn;
+      }
+      if (tab.entryLine < 0) { btn.style.display = "none"; return; }
+      const target = tab.displayPath || tab.path;
+      const running = !!RUNNING_TASKS[target];
+      const label = (RUN_LABELS[ext] || ext) + " " + baseName(target);
+      btn.innerHTML = "";
+      const icon = document.createElement("i");
+      icon.className = "bi " + (running ? "bi-pause-fill" : "bi-play-fill");
+      const txt = document.createElement("span");
+      txt.textContent = (running ? "停止 " : "启动 ") + label;
+      btn.appendChild(icon);
+      btn.appendChild(txt);
+      btn.title = running ? "停止：" + label + "（正在运行）" : "启动：" + label;
+      // 入口行在可视区内 → 隐藏（行内 ▶ 已可见）；滚出 → 悬浮显示
+      let inView = false;
+      try {
+        const coords = cm.charCoords({ line: tab.entryLine, ch: 0 });
+        const rect = wrap.getBoundingClientRect();
+        inView = coords.top >= rect.top && coords.top <= rect.bottom;
+      } catch (err) { inView = false; }
+      btn.style.display = inView ? "none" : "flex";
+    }
+
     mark();
+    tab.cm.on("scroll", updateFloatRun);          // 滚动时实时切换「行内 / 悬浮」
     tab.cm.on("change", () => {
       if (tab.runTimer) clearTimeout(tab.runTimer);
       tab.runTimer = setTimeout(mark, 400);       // 行号会随编辑变化，稍后重扫
@@ -1144,4 +1206,3 @@
       r.classList.toggle("dirty", !!(t && t.dirty));
     });
   }
-

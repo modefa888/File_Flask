@@ -11,6 +11,81 @@
   var curHist = null;                 // 当前实时输出写入的记录
   var viewHist = null;                // 正在回看的记录（null = 跟随实时输出）
 
+  /* ---------- 运行记录持久化到浏览器本地（localStorage） ----------
+     按项目根目录隔离；定时做快照而不是每写一行就序列化，日志再多也不拖慢输出。
+     只保留最近 20 次、每次最近 200 行，配额不够时自动减半重试。 */
+  const HIST_KEY = "ide.run.history." + ((typeof ROOT !== "undefined" && ROOT) ? ROOT : location.pathname);
+  const HIST_MAX = 20;
+  const HIST_LINES = 200;
+  let histLastJson = "";
+
+  function histSaveNow() {
+    try {
+      let list = RUN_HISTORY.slice(0, HIST_MAX).map(function (rec) {
+        const lines = rec.buf.slice(-HIST_LINES).map(function (l) {
+          return { m: String(l.m == null ? "" : l.m).slice(0, 2000), c: l.c || "" };
+        });
+        if (rec.buf.length > HIST_LINES) {
+          lines.unshift({ m: "…（本地仅保留最近 " + HIST_LINES + " 行输出）", c: "op-dim" });
+        }
+        return {
+          name: rec.name, target: rec.target,
+          time: (rec.time instanceof Date ? rec.time.getTime() : Date.now()),
+          running: false,
+          exit: rec.running ? -1 : (rec.exit == null ? -1 : rec.exit),
+          bg: !!rec.bg, buf: lines,
+        };
+      });
+      let txt = JSON.stringify(list);
+      if (txt === histLastJson) return;                 // 内容没变就不写盘
+      while (list.length) {
+        try { localStorage.setItem(HIST_KEY, txt); histLastJson = txt; return; }
+        catch (e) {                                     // 配额不足 → 少存几条再试
+          list = list.slice(0, Math.floor(list.length / 2));
+          txt = JSON.stringify(list);
+        }
+      }
+      localStorage.setItem(HIST_KEY, "[]");
+      histLastJson = "[]";
+    } catch (e) { /* 隐私模式 / 存储异常：忽略，不影响运行 */ }
+  }
+
+  function histLoad() {
+    try {
+      const raw = localStorage.getItem(HIST_KEY);
+      histLastJson = raw || "";
+      const arr = JSON.parse(raw || "[]");
+      if (!Array.isArray(arr)) return;
+      RUN_HISTORY = arr.slice(0, HIST_MAX).map(function (d) {
+        const t = new Date(d.time || Date.now());
+        return {
+          taskId: null,                               // 旧任务不复活：点记录一律回看本地缓存
+          name: String(d.name || "运行"), target: String(d.target || ""),
+          time: isNaN(t.getTime()) ? new Date() : t,
+          running: false, exit: (d.exit == null ? -1 : d.exit), bg: !!d.bg,
+          buf: Array.isArray(d.buf) ? d.buf.map(function (l) {
+            return { m: String(l && l.m != null ? l.m : ""), c: (l && l.c) || "" };
+          }) : [],
+        };
+      });
+    } catch (e) { /* 本地数据损坏：忽略，不影响运行 */ }
+  }
+
+  histLoad();
+  histRender();                                        // 恢复后立刻把记录画到右侧悬浮框
+  setInterval(histSaveNow, 2000);                      // 定时快照：运行中的输出也会逐步存下来
+  window.addEventListener("beforeunload", histSaveNow);
+  document.addEventListener("click", function (e) {     // 清空按钮：本地记录一起清掉
+    if (e.target && e.target.closest && e.target.closest(".rh-clear")) {
+      try { localStorage.removeItem(HIST_KEY); } catch (_) { /* 忽略 */ }
+      histLastJson = "";
+    }
+  }, true);
+  const histHead = document.querySelector("#runHistBox .rh-head > span");
+  if (histHead) histHead.title = "运行记录已保存在浏览器本地，刷新页面后仍可回看";
+  const histClr = document.querySelector("#runHistBox .rh-clear");
+  if (histClr) histClr.title = "清空运行记录（同时清除浏览器本地保存）";
+
   function histTime(d) {
     var p = function(n) { return (n < 10 ? "0" : "") + n; };
     return p(d.getHours()) + ":" + p(d.getMinutes());
@@ -322,17 +397,31 @@
 
   function opAiSetCollapsed(collapsed) {
     const box = opAiEnsure();
+    if (collapsed) opAiSetMax(false);               // 收起前先还原，避免留下一大片空标题栏
     box.classList.toggle("collapsed", collapsed);
     const fold = box.querySelector(".op-ai-fold");
     fold.title = collapsed ? "展开浮框" : "收起（只留标题栏）";
     fold.innerHTML = '<i class="bi ' + (collapsed ? "bi-chevron-up" : "bi-chevron-down") + '"></i>';
   }
 
+  /* 放大 / 还原：撑满底部面板，长篇 AI 分析不用在小窗里来回滚 */
+  function opAiSetMax(on) {
+    const box = opAiEnsure();
+    box.classList.toggle("max", !!on);
+    const btn = box.querySelector(".op-ai-max");
+    if (btn) {
+      btn.title = on ? "还原大小" : "放大浮框（便于查看长分析）";
+      btn.innerHTML = '<i class="bi ' + (on ? "bi-arrows-angle-contract" : "bi-arrows-angle-expand") + '"></i>';
+    }
+    if (on) opAiSetCollapsed(false);               // 放大时总是展开内容
+    try { localStorage.setItem("ide.opai.max", on ? "1" : "0"); } catch (_) { /* 忽略 */ }
+  }
+
   /* 拖标题栏移动浮框：首次拖动把「居中 + transform」切成相对面板的 left/top；
-     面板高度可被分隔条调整，所以每次显示时再夹回可视范围。 */
+     面板高度可被分隔条调整，所以每次显示时再夹回可视范围。放大态由 CSS 定位，不参与拖动/钳制。 */
   function opAiClamp() {
     const box = OP_AI.el;
-    if (!box || !OP_AI.pos || !box.parentNode) return;
+    if (!box || !OP_AI.pos || !box.parentNode || box.classList.contains("max")) return;
     const p = box.parentNode;
     const maxX = Math.max(0, p.clientWidth - box.offsetWidth);
     const maxY = Math.max(0, p.clientHeight - box.offsetHeight);
@@ -345,7 +434,7 @@
 
   function opAiDrag(box, head) {
     head.addEventListener("mousedown", function (e) {
-      if (e.target.closest("button")) return;       // 收起 / 关闭按钮不触发拖动
+      if (e.target.closest("button") || box.classList.contains("max")) return;   // 按钮 / 放大态不拖动
       const panel = box.parentNode;
       const pr = panel.getBoundingClientRect();
       const br = box.getBoundingClientRect();
@@ -379,12 +468,15 @@
 
   function opAiEnsure() {
     if (OP_AI.el && OP_AI.el.parentNode) return OP_AI.el;
+    const old = document.getElementById("opAiBox");
+    if (old) { OP_AI.el = old; return old; }        // 防御：创建过程中被重入时不生成第二个浮框
     const box = document.createElement("div");
     box.id = "opAiBox";
     box.style.display = "none";                     // 默认不打开
     box.innerHTML =
       '<div class="op-ai-hd"><i class="bi bi-stars"></i><span class="op-ai-tt">AI 报错分析</span>' +
         '<span class="op-ai-st"></span><span class="op-ai-flex"></span>' +
+        '<button class="op-ai-icon op-ai-max" title="放大浮框（便于查看长分析）"><i class="bi bi-arrows-angle-expand"></i></button>' +
         '<button class="op-ai-icon op-ai-fold" title="收起（只留标题栏）"><i class="bi bi-chevron-down"></i></button>' +
         '<button class="op-ai-icon op-ai-close" title="关闭浮框（工具条 ✦ AI 报错 可再打开）"><i class="bi bi-x-lg"></i></button></div>' +
       '<div class="op-ai-tools">' +
@@ -393,6 +485,9 @@
         '<button class="op-ai-btn op-ai-stop" hidden><i class="bi bi-stop-fill"></i> 停止</button>' +
       '</div><div class="op-ai-md"></div>';
     ($("bottomPanel") || document.body).appendChild(box);
+    box.querySelector(".op-ai-max").onclick = function () {
+      opAiSetMax(!box.classList.contains("max"));
+    };
     box.querySelector(".op-ai-fold").onclick = function () {
       opAiSetCollapsed(!box.classList.contains("collapsed"));
     };
@@ -413,6 +508,14 @@
         box.style.transform = "none";
       }
     } catch (_) { /* 隐私模式等，忽略 */ }
+    try {
+      if (localStorage.getItem("ide.opai.max") === "1") {   // 恢复放大态（不调 opAiSetMax，避免重入创建）
+        box.classList.add("max");
+        const mb = box.querySelector(".op-ai-max");
+        mb.title = "还原大小";
+        mb.innerHTML = '<i class="bi bi-arrows-angle-contract"></i>';
+      }
+    } catch (_) { /* 忽略 */ }
     OP_AI.el = box;
     return box;
   }

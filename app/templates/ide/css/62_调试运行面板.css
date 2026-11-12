@@ -1,0 +1,143 @@
+  /* ===== 调试运行（pdb）：侧栏断点列表 + 底部交互调试面板 ===== */
+
+  /* --- 侧栏「运行和调试」里的断点区 --- */
+  .dbg-bp-box { margin: 8px 0 4px; border: 1px solid #3a3e48; border-radius: 6px; overflow: hidden; }
+  .dbg-bp-head { display: flex; align-items: center; gap: 5px; padding: 5px 7px;
+                 background: rgba(127,127,127,.09); font-size: 11px; color: #cfd3dc; }
+  .dbg-bp-head .bi { color: #e05656; }
+  .dbg-bp-cnt { display: inline-block; min-width: 16px; padding: 0 4px; border-radius: 8px;
+                background: rgba(224,86,86,.22); color: #f48771; text-align: center; }
+  .dbg-bp-flex { flex: 1; }
+  .dbg-bp-mini { background: none; border: 1px solid #4a4f5a; border-radius: 4px;
+                 color: #cfd3dc; font-size: 10px; padding: 2px 5px; cursor: pointer; font-family: inherit; }
+  .dbg-bp-mini:hover { background: #3a3d41; color: #fff; }
+  .dbg-bp-list { max-height: 150px; overflow-y: auto; padding: 4px; }
+  .dbg-bp-empty { font-size: 11px; color: #8a8a8a; padding: 4px 6px; line-height: 1.5; }
+  .dbg-bp-item { display: flex; align-items: center; gap: 6px; font-size: 11px;
+                 color: #d4d4d4; padding: 3px 5px; border-radius: 4px; }
+  .dbg-bp-item:hover { background: rgba(127,127,127,.16); }
+  .dbg-bp-item .dbg-bp-dot { width: 8px; height: 8px; border-radius: 50%; background: #e05656; flex: none; }
+  .dbg-bp-item .dbg-bp-ln { color: #f48771; font-family: "SF Mono", Menlo, Consolas, monospace; width: 42px; flex: none; }
+  .dbg-bp-item .dbg-bp-nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .dbg-bp-item .dbg-bp-x { background: none; border: none; color: #8a8a8a; cursor: pointer; padding: 0 2px; }
+  .dbg-bp-item .dbg-bp-x:hover { color: #f48771; }
+
+  /* --- 底部「调试」页签：工具条 --- */
+  #paneDebug { position: relative; }               /* 变量弹层的定位基准 */
+  .dbg-bar { flex: none; display: flex; align-items: center; gap: 4px; padding: 4px 8px;
+             border-bottom: 1px solid #333; background: rgba(127,127,127,.06); overflow-x: auto; }
+  .dbg-state { flex: none; font-size: 11px; color: #8a8a8a; padding: 2px 7px;
+               border: 1px solid #454545; border-radius: 10px; white-space: nowrap; }
+  .dbg-state.live { color: #6fcf8a; border-color: rgba(111,207,138,.55); }
+  .dbg-state.pause { color: #e2c08a; border-color: rgba(226,192,138,.55); }
+  .dbg-state.dead { color: #f48771; border-color: rgba(244,135,113,.45); }
+  .dbg-file { flex: none; max-width: 190px; font-size: 11px; color: #9d9d9d;
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dbg-btn { flex: none; background: #33373d; border: 1px solid #454a52; border-radius: 4px;
+             color: #d4d4d4; font-size: 11px; padding: 3px 7px; cursor: pointer;
+             font-family: inherit; white-space: nowrap; }
+  .dbg-btn:hover { background: #45494e; color: #fff; }
+  .dbg-btn:disabled { opacity: .45; cursor: not-allowed; }
+  .dbg-btn kbd { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 9px;
+                 color: #9d9d9d; margin-left: 3px; }
+  #dbgBtnStop { color: #f48771; }
+
+  /* --- 输出区：按行分色。pdb 调试输出 / 程序输出 / 错误 / 提示 各自背景 --- */
+  .dbg-body { flex: 1; margin: 0; padding: 6px 0; overflow: auto; min-height: 0;
+              font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+              line-height: 1.5; color: #d4d4d4; white-space: pre-wrap; word-break: break-word; }
+  .dbg-line { padding: 0 12px; min-height: 1.5em; }
+  .dbg-line-out  { background: rgba(127,127,127,.07); }               /* 程序 print / 正常输出 */
+  .dbg-line-pdb  { background: rgba(122,162,247,.11); }               /* pdb 调试器输出：(Pdb) / > 行 / -> 行 / 断点 */
+  .dbg-line-err  { background: rgba(244,135,113,.13); color: #f48771; } /* Traceback / 错误 */
+  .dbg-line-hint { background: rgba(226,192,138,.12); color: #e2c08a; } /* 模块给出的操作提示 */
+
+  /* --- 命令输入行 --- */
+  .dbg-input-row { flex: none; display: flex; align-items: center; gap: 7px;
+                   padding: 5px 10px; border-top: 1px solid #333; background: #202124; }
+  .dbg-prompt { flex: none; font-family: "SF Mono", Menlo, Consolas, monospace;
+                font-size: 12px; color: #dcdcaa; }
+  .dbg-input-row input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0;
+                         color: #e6e6e6; font-family: "SF Mono", Menlo, Consolas, monospace;
+                         font-size: 12px; }
+  .dbg-input-row input::placeholder { color: #6f6f6f; font-family: inherit; }
+  .dbg-send { flex: none; background: #0e639c; border: 0; border-radius: 4px; color: #fff;
+              font-size: 11px; padding: 3px 10px; cursor: pointer; font-family: inherit; }
+  .dbg-send:hover { background: #1177bb; }
+
+  /* --- 变量查看弹层（工具条「变量」按钮触发） ---
+     标题栏可按住拖动（62_ JS）；右下角原生缩放柄可拖拽放大缩小 */
+  .dbg-var-pop { position: absolute; left: 10px; bottom: 42px; width: 340px; min-width: 300px;
+                 min-height: 180px; resize: both; display: none; flex-direction: column;
+                 z-index: 40; background: #25262b; border: 1px solid #3a3e48; border-radius: 6px;
+                 box-shadow: 0 6px 24px rgba(0,0,0,.45); overflow: hidden; }
+  .dbg-var-head { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 9px;
+                  font-size: 11px; color: #cfd3dc; border-bottom: 1px solid #333;
+                  background: rgba(127,127,127,.08); }
+  .dbg-var-head .bi { color: #dcdcaa; }
+  .dbg-var-list { flex: none; max-height: 120px; overflow-y: auto; padding: 6px;
+                  display: flex; flex-wrap: wrap; gap: 4px; }
+  .dbg-var-empty { font-size: 11px; color: #8a8a8a; padding: 3px 5px; line-height: 1.5; }
+  .dbg-var-chip { background: #33373d; border: 1px solid #454a52; border-radius: 10px;
+                  color: #d4d4d4; font-family: "SF Mono", Menlo, Consolas, monospace;
+                  font-size: 11px; padding: 2px 9px; cursor: pointer; }
+  .dbg-var-chip:hover { background: #45494e; color: #fff; border-color: #dcdcaa; }
+  .dbg-var-view { flex: 1; min-height: 0; margin: 0; padding: 7px 9px; border-top: 1px solid #333;
+                  overflow: auto; font-family: "SF Mono", Menlo, Consolas, monospace;
+                  font-size: 11px; line-height: 1.5; color: #d4d4d4; white-space: pre-wrap; word-break: break-all; }
+
+  /* --- 变量分组标题 + 类型胶囊配色 --- */
+  .dbg-var-head { cursor: move; user-select: none; }               /* 标题栏即拖动柄 */
+  .dbg-var-group { flex: 0 0 100%; display: flex; align-items: center; gap: 5px;
+                   font-size: 10px; padding: 5px 4px 2px; color: #9aa0ac; }
+  .dbg-var-group .bi { font-size: 10px; }
+  .dbg-var-gcnt { background: rgba(127,127,127,.22); border-radius: 8px;
+                  padding: 0 6px; color: #cfd3dc; }
+  .dbg-var-chips { flex: 0 0 100%; display: flex; flex-wrap: wrap; gap: 4px; }
+  .dbg-var-type { margin-left: 5px; font-size: 9px; opacity: .72; font-weight: normal; }
+  .dbg-var-chip.t-coll { border-color: rgba(111,207,138,.55); }    /* 数组/元组/集合：绿 */
+  .dbg-var-chip.t-dict { border-color: rgba(220,188,140,.65); }    /* 字典：黄 */
+  .dbg-var-chip.t-func { border-color: rgba(197,134,192,.55); }    /* 方法/函数/类：紫 */
+  .dbg-var-chip.t-str  { border-color: rgba(206,145,120,.6); }     /* 字符串：橙 */
+  .dbg-var-chip.t-num  { border-color: rgba(108,153,247,.55); }    /* 数字：蓝 */
+  .dbg-var-chip.t-bool { border-color: rgba(224,86,86,.55); }      /* 布尔/空值：红 */
+  .dbg-var-chip.t-obj  { border-color: #454a52; }                  /* 其它对象：灰 */
+
+  /* --- 编辑器行号左侧的断点列（dbg-bp-col）：点击切换断点，红点用 setGutterMarker 放置 --- */
+  .CodeMirror-gutter.dbg-bp-col { width: 13px; cursor: pointer; }
+  .CodeMirror-gutter.dbg-bp-col:hover { background: rgba(224,86,86,.10); }
+  .dbg-bp-dot { width: 9px; height: 9px; margin: 5px auto 0; border-radius: 50%;
+                background: #e05656; box-shadow: 0 0 0 1px rgba(224,86,86,.35); }
+  .CodeMirror-linebackground.dbg-bp-line { background: rgba(224,86,86,.13); }
+
+  /* --- 浅色主题（29_浅色主题.css 最后加载，这里用 html.theme-light 提高特异性） --- */
+  html.theme-light .dbg-bp-box { border-color: #d5d7dc; }
+  html.theme-light .dbg-bp-head { background: rgba(0,0,0,.04); color: #333a45; }
+  html.theme-light .dbg-bp-mini { border-color: #c8ccd2; color: #333a45; }
+  html.theme-light .dbg-bp-mini:hover { background: rgba(0,0,0,.07); color: #111; }
+  html.theme-light .dbg-bp-item { color: #333a45; }
+  html.theme-light .dbg-bp-item .dbg-bp-ln { color: #c0392b; }
+  html.theme-light #paneDebug { position: relative; }
+  html.theme-light .dbg-bar { border-bottom-color: #e1e3e7; background: rgba(0,0,0,.03); }
+  html.theme-light .dbg-btn { background: #f2f3f5; border-color: #d5d7dc; color: #333a45; }
+  html.theme-light .dbg-btn:hover { background: #e4e6ea; color: #111; }
+  html.theme-light .dbg-btn kbd { color: #6b7280; }
+  html.theme-light .dbg-body { color: #24292f; }
+  html.theme-light .dbg-line-out  { background: rgba(0,0,0,.045); }
+  html.theme-light .dbg-line-pdb  { background: rgba(9,105,218,.10); }
+  html.theme-light .dbg-line-err  { background: rgba(207,34,46,.10); color: #c0392b; }
+  html.theme-light .dbg-line-hint { background: rgba(154,103,0,.12); color: #8a6d00; }
+  html.theme-light .dbg-input-row { border-top-color: #e1e3e7; background: #f7f8fa; }
+  html.theme-light .dbg-input-row input { color: #24292f; }
+  html.theme-light .dbg-prompt { color: #8a6d00; }
+  html.theme-light .dbg-var-pop { background: #fff; border-color: #d5d7dc;
+                                  box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+  html.theme-light .dbg-var-head { border-bottom-color: #e1e3e7; background: rgba(0,0,0,.03); color: #333a45; }
+  html.theme-light .dbg-var-chip { background: #f2f3f5; border-color: #d5d7dc; color: #333a45; }
+  html.theme-light .dbg-var-chip:hover { background: #e4e6ea; color: #111; border-color: #8a6d00; }
+  html.theme-light .dbg-var-view { border-top-color: #e1e3e7; color: #24292f; }
+  html.theme-light .dbg-var-group { color: #6b7280; }
+  html.theme-light .dbg-var-gcnt { background: rgba(0,0,0,.08); color: #333a45; }
+  html.theme-light .dbg-bp-dot { background: #dc3545; box-shadow: 0 0 0 1px rgba(220,53,69,.3); }
+  html.theme-light .CodeMirror-gutter.dbg-bp-col:hover { background: rgba(220,53,69,.08); }
+  html.theme-light .CodeMirror-linebackground.dbg-bp-line { background: rgba(220,53,69,.10); }

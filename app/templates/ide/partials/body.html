@@ -135,6 +135,17 @@
       <div class="side-panel" id="runPanel">
         <button class="g-btn block" id="runPanelRun" title="运行当前打开的文件 (F5)"><i class="bi bi-play-fill"></i> 运行当前文件</button>
         <button class="g-btn block outline" id="runPanelBg" title="常驻运行（Web 服务等），不超时、可随时停止 (Ctrl+F5)"><i class="bi bi-broadcast"></i> 后台运行（服务模式）</button>
+        <button class="g-btn block outline" id="runPanelDebug" title="用 pdb 交互调试当前 Python 文件 (Alt+F5)"><i class="bi bi-bug"></i> 调试运行（pdb）</button>
+        {# 断点列表：按文件保存在浏览器本地，F9 在光标行切换；点击行号可跳转 #}
+        <div class="dbg-bp-box">
+          <div class="dbg-bp-head">
+            <span><i class="bi bi-record-circle"></i> 断点 <span class="dbg-bp-cnt" id="dbgBpCnt">0</span></span>
+            <span class="dbg-bp-flex"></span>
+            <button class="dbg-bp-mini" id="dbgBpAdd" title="在当前光标所在行添加 / 移除断点 (F9)">＋ 光标行</button>
+            <button class="dbg-bp-mini" id="dbgBpClear" title="清空当前文件的断点">清空</button>
+          </div>
+          <div class="dbg-bp-list scroll-thin" id="dbgBpList"></div>
+        </div>
         <div class="s-hint" id="runRuntimes">正在检测可用运行时…</div>
         <div class="run-list" id="runList"></div>
       </div>
@@ -376,6 +387,7 @@
       <div class="bottom-panel" id="bottomPanel">
         <div class="bp-tabs">
           <button class="bp-tab active" data-pane="output" id="tabOutput">输出</button>
+          <button class="bp-tab" data-pane="debug" id="tabDebug" title="交互式调试（pdb）">调试</button>
           <span id="bpTermTabs" style="display:none"></span>
           <span id="bpLogTabs" style="display:none"></span>
           <button class="bp-btn bp-plus" id="bpNewTerm" title="新建终端（bash）"><i class="bi bi-plus-lg"></i></button>
@@ -408,6 +420,42 @@
             <span class="term-prompt" id="termPrompt">$</span>
             <input id="termInput" spellcheck="false" autocomplete="off"
                    placeholder="输入命令并回车（↑↓ 历史 · Ctrl+L 清屏 · Ctrl+C 终止）">
+          </div>
+        </div>
+        {# 调试运行：pdb 交互控制台。输出直接来自 PTY，输入写回 PTY #}
+        <div class="bp-pane" id="paneDebug">
+          <div class="dbg-bar">
+            <span class="dbg-state" id="dbgState">未启动</span>
+            <span class="dbg-file" id="dbgFile"></span>
+            <span class="op-spacer"></span>
+            <button class="dbg-btn" id="dbgBtnCont" title="继续运行到下一个断点 (c)">▶ 继续 <kbd>c</kbd></button>
+            <button class="dbg-btn" id="dbgBtnNext" title="执行下一行，不进入函数 (n)">↷ 下一步 <kbd>n</kbd></button>
+            <button class="dbg-btn" id="dbgBtnStep" title="步入函数 (s)">↓ 步入 <kbd>s</kbd></button>
+            <button class="dbg-btn" id="dbgBtnWhere" title="查看调用堆栈 (w)">堆栈 <kbd>w</kbd></button>
+            <button class="dbg-btn" id="dbgBtnVar" title="打印变量 / 表达式 (p 表达式)">变量 <kbd>p</kbd></button>
+            <button class="dbg-btn" id="dbgBtnBp" title="在光标行切换断点 (F9)">断点 <kbd>F9</kbd></button>
+            <button class="dbg-btn" id="dbgBtnInt" title="中断当前执行，回到 (Pdb) 提示符 (Ctrl+C)">中断</button>
+            <button class="dbg-btn" id="dbgBtnStop" title="结束调试会话"><i class="bi bi-stop-fill"></i> 停止</button>
+            <button class="dbg-btn" id="dbgBtnClear" title="清空调试输出">清空</button>
+          </div>
+          <pre class="dbg-body scroll-thin" id="dbgBody"></pre>
+          <div class="dbg-input-row">
+            <span class="dbg-prompt" id="dbgPrompt">(Pdb)</span>
+            <input id="dbgInput" spellcheck="false" autocomplete="off"
+                   placeholder="输入 pdb 命令并回车（n / s / c / r / p 变量 / b 行号 / l / q · ↑↓ 历史 · Ctrl+C 中断）">
+            <button class="dbg-send" id="dbgSendBtn" title="发送命令">发送</button>
+          </div>
+          {# 变量查看弹层：读取当前作用域变量列表，点击变量用 pp 查看内容 #}
+          <div class="dbg-var-pop" id="dbgVarPop">
+            <div class="dbg-var-head" title="按住标题栏可拖动 · 右下角可缩放">
+              <i class="bi bi-boxes"></i><span>当前作用域变量</span>
+              <span class="op-spacer"></span>
+              <button class="dbg-bp-mini" id="dbgVarClose" title="关闭（Esc）">关闭</button>
+            </div>
+            <div class="dbg-var-list scroll-thin" id="dbgVarList">
+              <span class="dbg-var-empty">点击工具条「变量」读取变量列表</span>
+            </div>
+            <pre class="dbg-var-view scroll-thin" id="dbgVarView"></pre>
           </div>
         </div>
       </div>

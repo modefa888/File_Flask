@@ -342,6 +342,7 @@
   $("bpClose").onclick = () => toggleBottom(false);
   $("bpKill").onclick = () => {
     if (bottomPane === "term") { termKill(); return; }  // 终端标签：结束终端会话
+    if (bottomPane === "debug") { if (typeof dbgStop === "function") dbgStop(); return; }  // 调试：结束 pdb 会话
     if (activeKillId()) stopBackground();               // 输出/运行日志：终止对应程序
   };
 

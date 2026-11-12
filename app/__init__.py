@@ -62,6 +62,7 @@ def _register_blueprints(app: Flask) -> None:
     from .routes.ide.port import bp as port_bp
     from .routes.ide.term import bp as term_bp
     from .routes.ide.termai import bp as termai_bp
+    from .routes.ide.debug import bp as debug_bp
     from .routes.ide.env import bp as env_bp
     from .routes.ide.proc import bp as proc_bp
     from .routes.common.shares import bp as shares_bp
@@ -89,7 +90,7 @@ def _register_blueprints(app: Flask) -> None:
     from .routes.adm.update import bp as update_bp
     for bp in (auth_bp, pages_bp, browser_bp, zip_bp, delete_bp, vault_bp, archive_history_bp,
                fileops_bp, index_bp, progress_stream_bp, grep_bp, git_bp, run_bp, port_bp,
-               term_bp, termai_bp, env_bp, proc_bp, shares_bp, ai_bp, agent_bp, chat_history_bp, pip_bp, npm_bp,
+               term_bp, termai_bp, debug_bp, env_bp, proc_bp, shares_bp, ai_bp, agent_bp, chat_history_bp, pip_bp, npm_bp,
                plugins_bp, dbconn_bp, httpreq_bp, cron_bp, sshconn_bp, sshfile_bp, hints_bp, collab_bp,
                v2ray_bp, iptv_bp, downloads_bp, scraper_bp, workbuddy_bp, traecn_bp, tunnel_bp,
                adm_bp, update_bp):

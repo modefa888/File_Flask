@@ -1077,6 +1077,9 @@
     run: [
       { label: "运行当前文件", sc: "F5", icon: "bi-play-circle", act: () => runCurrentFile() },
       { label: "运行并传入参数…", icon: "bi-sliders", act: runWithArgs },
+      { label: "调试运行（pdb）", sc: "Alt+F5", icon: "bi-bug", act: () => dbgStart() },
+      { label: "切换断点（光标行）", sc: "F9", icon: "bi-record-circle", act: () => dbgToggleBpAtCursor() },
+      { label: "停止调试", icon: "bi-stop-circle", act: () => dbgStop() },
       { divider: true },
       { label: "后台运行（服务模式）", sc: "Ctrl+F5", icon: "bi-broadcast", act: () => runBackground() },
       { label: "停止运行的程序", icon: "bi-stop-circle", act: () => stopBackground() },

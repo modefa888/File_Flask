@@ -291,7 +291,8 @@
   } catch (_) { /* 忽略 */ }
 
   function setBottomPane(name) {
-    bottomPane = (name === "term") ? "term" : (name === "log") ? "log" : "output";
+    bottomPane = (name === "term") ? "term" : (name === "log") ? "log"
+               : (name === "debug") ? "debug" : "output";
     document.querySelectorAll(".bp-tab[data-pane]").forEach(b => b.classList.toggle("active", b.dataset.pane === bottomPane));
     // 切换 pane 时取消其它动态标签的选中态（互斥，避免两个同时高亮）
     if (bottomPane !== "log") document.querySelectorAll(".bp-log-tab").forEach(b => b.classList.remove("active"));
@@ -299,6 +300,8 @@
     $("paneOutput").classList.toggle("active", bottomPane === "output");
     $("paneTerm").classList.toggle("active", bottomPane === "term");
     $("paneLog").classList.toggle("active", bottomPane === "log");
+    if ($("paneDebug")) $("paneDebug").classList.toggle("active", bottomPane === "debug");
+    if (bottomPane === "debug" && typeof dbgOnShow === "function") dbgOnShow();
     if (bottomPane === "term") termEnsure().then(ok => { if (ok) $("termInput").focus(); });
     if (bottomPane === "log") { const lb = $("logBody"); if (lb) lb.scrollTop = lb.scrollHeight; }
     // 切回「输出」页签不再自动复位回看：viewHistory 打开面板时也会走这里，否则会把刚设的 viewHist 冲掉
@@ -331,6 +334,7 @@
   function toggleOutput(force) { toggleBottom(force, "output"); }
   function clearOutput() {
     if (typeof opAiReset === "function") opAiReset();  // 清空输出时，AI 分析结论一起清掉
+    if (bottomPane === "debug") { if (typeof dbgClear === "function") dbgClear(); return; }
     if (bottomPane === "term") { if (curTerm) curTerm.body.innerHTML = ""; return; }
     if (bottomPane === "log" && currentLogId && LOGS[currentLogId]) {
       LOGS[currentLogId].buf = [];                      // 清当前标签的缓冲与显示

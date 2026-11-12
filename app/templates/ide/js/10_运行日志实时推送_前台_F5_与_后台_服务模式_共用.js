@@ -202,7 +202,7 @@
 
   // 终止按钮的目标：跟随当前所在标签——输出=前台运行，运行日志=当前查看的任务，终端=由 termKill 处理
   function activeKillId() {
-    if (bottomPane === "term") return null;
+    if (bottomPane === "term" || bottomPane === "debug") return null;   // 调试页签的 ⊘ 由 dbgStop 处理
     if (bottomPane === "log") {
       return (currentLogId && LOGS[currentLogId] && !LOGS[currentLogId].done) ? currentLogId : null;
     }
@@ -229,6 +229,15 @@
       kill.innerHTML = '<i class="bi bi-stop-fill"></i>';
       kill.title = running ? "终止「" + L.name + "」" : "";
       noBg();                                          // 后台任务 / 日志标签无需再转
+    } else if (bottomPane === "debug") {
+      // DBG 定义在 62_（本模块之后加载），页面初始化阶段可能还在 TDZ，故用 try 兜住
+      let running = false;
+      try { running = !!(DBG.id && !DBG.done); } catch (_) { /* 模块尚未加载 */ }
+      kill.style.display = running ? "" : "none";
+      kill.classList.toggle("danger", running);
+      kill.innerHTML = '<i class="bi bi-stop-fill"></i>';
+      kill.title = running ? "停止调试会话" : "";
+      noBg();
     } else {                                           // 输出
       // 前台运行中，或已转后台但仍在运行（输出面板显示的就是它的输出）→ 都显示 ⊘
       const running = !!(RUNBG.id && (!LOGS[RUNBG.id] || !LOGS[RUNBG.id].done));

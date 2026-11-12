@@ -1980,7 +1980,9 @@
           phrases: CM_PHRASES,
           // 代码折叠：行号旁出现 − / + 折叠三角，可折叠/展开函数体、代码块、注释块、按缩进折叠（如 python）。
           // 大文件关闭折叠，避免逐行计算卡顿。折叠控制列放在最左侧（仿 VS Code）。
-          gutters: big ? ["CodeMirror-linenumbers"] : ["CodeMirror-foldgutter", "CodeMirror-linenumbers"],
+          // dbg-bp-col：行号左侧的断点点击列（点击添加/取消断点，红点见 62_ 调试模块）
+          gutters: big ? ["dbg-bp-col", "CodeMirror-linenumbers"]
+                       : ["dbg-bp-col", "CodeMirror-foldgutter", "CodeMirror-linenumbers"],
           foldGutter: !big,
           foldOptions: { minFoldSize: 1, widget: "…" },
           extraKeys: {
@@ -1995,6 +1997,7 @@
           }
         });
         tab.cm = cm;
+        if (typeof dbgBindGutter === "function") dbgBindGutter(cm);   // 断点列点击（实现见 62_ 调试模块）
         // 已折叠的行：整行浅蓝底（含行号槽），展开后自动撤销。折叠状态取自 foldcode
         // 创建的 __isFold TextMarker；用官方 addLineClass 把类持久化到行对象上，
         // 虚拟滚动 / 重绘 / 换主题都不会丢，行号随编辑漂移时也能正确跟随。

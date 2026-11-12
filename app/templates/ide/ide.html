@@ -41,10 +41,10 @@ html.theme-light .CodeMirror-gutter-background.cm-folded-line {
 /* 箭头容器 = 一块居中、可悬停的完整点击区（仿 VS Code 的折叠箭头） */
 .CodeMirror-foldgutter-open,
 .CodeMirror-foldgutter-folded {
+  position: relative;
   display: flex; align-items: center; justify-content: center;
   width: 1.2em; height: 1.3em; box-sizing: border-box;
   border-radius: 4px;
-  transition: background-color .12s ease;
 }
 /* 折叠箭头：靠 CSS 边框画折线三角，content 置空以去掉默认字符 ▾/▸ */
 .CodeMirror-foldgutter-open:after,
@@ -59,15 +59,22 @@ html.theme-light .CodeMirror-gutter-background.cm-folded-line {
   transition: opacity .12s ease, color .12s ease;
 }
 .CodeMirror-foldgutter-folded:after { transform: translateX(-1px) rotate(-45deg); }   /* 折叠：向右 */
-.CodeMirror-foldgutter-open:hover,
-.CodeMirror-foldgutter-folded:hover { background: rgba(127,127,127,.22); }
+/* 悬停底衬画在 ::before 上并允许溢出列宽：主编辑器折叠列只有 9px，直接给元素
+   加背景会被压成 9px 细条（用户反馈"背景区域太小"）；::before 左右各溢出 4px、
+   上下各溢出 1px，视觉面积接近 VS Code；pointer-events:none 保证不会把鼠标事件
+   劫持到相邻的断点列 / 行号上，点击判定范围维持原列宽不变 */
+.CodeMirror-foldgutter-open:hover::before,
+.CodeMirror-foldgutter-folded:hover::before {
+  content: ""; position: absolute; inset: -1px -4px;
+  border-radius: 4px; background: rgba(127,127,127,.22); pointer-events: none;
+}
 .CodeMirror-foldgutter-open:hover:after,
 .CodeMirror-foldgutter-folded:hover:after { opacity: 1; color: #e6e6e6; }
 html.theme-light .CodeMirror-foldmarker { color: #555; background: rgba(0,0,0,.08); }
 html.theme-light .CodeMirror-foldgutter-open:after,
 html.theme-light .CodeMirror-foldgutter-folded:after { color: #5f6368; opacity: .9; }
-html.theme-light .CodeMirror-foldgutter-open:hover,
-html.theme-light .CodeMirror-foldgutter-folded:hover { background: rgba(0,0,0,.08); }
+html.theme-light .CodeMirror-foldgutter-open:hover::before,
+html.theme-light .CodeMirror-foldgutter-folded:hover::before { background: rgba(0,0,0,.08); }
 html.theme-light .CodeMirror-foldgutter-open:hover:after,
 html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacity: 1; }
 </style>

@@ -103,11 +103,20 @@
   .dbg-var-chip.t-bool { border-color: rgba(224,86,86,.55); }      /* 布尔/空值：红 */
   .dbg-var-chip.t-obj  { border-color: #454a52; }                  /* 其它对象：灰 */
 
-  /* --- 编辑器行号左侧的断点列（dbg-bp-col）：点击切换断点，红点用 setGutterMarker 放置 --- */
-  .CodeMirror-gutter.dbg-bp-col { width: 13px; cursor: pointer; }
-  .CodeMirror-gutter.dbg-bp-col:hover { background: rgba(224,86,86,.10); }
-  .dbg-bp-dot { width: 9px; height: 9px; margin: 5px auto 0; border-radius: 50%;
+  /* --- 编辑器行号左侧的断点列（dbg-bp-col）：点击切换断点，红点用 setGutterMarker 放置 ---
+     收窄到 9px：折叠列 + 断点列 + 行号内边距叠起来曾占 ~27px，压到 ~18px。
+     不做悬停背景高亮：gutter 元素是全高的，鼠标一停整列都会被染成粉色柱子 */
+  .CodeMirror-gutter.dbg-bp-col { width: 9px; cursor: pointer; }
+  .dbg-bp-dot { width: 8px; height: 8px; margin: 4px auto 0; border-radius: 50%;
                 background: #e05656; box-shadow: 0 0 0 1px rgba(224,86,86,.35); }
+  /* --- 行号槽整体收窄（主编辑器 cm-host）：折叠列压到 9px、行号左右内边距各 3px --- */
+  .cm-host .CodeMirror-foldgutter { width: 9px; }
+  /* ide.html 把箭头容器写成 1.2em（随字号放大），列宽固定 9px 后字体会让箭头溢出到
+     相邻列上：点箭头正中时 CodeMirror 按坐标派发到相邻 gutter，第一次点击就"没反应"。
+     把容器宽度也钉在列宽上，箭头始终完整落在折叠列内，任何字号下都点得中 */
+  .cm-host .CodeMirror-foldgutter-open,
+  .cm-host .CodeMirror-foldgutter-folded { width: 9px; }
+  .cm-host .CodeMirror-linenumber { padding: 0 3px 0 3px; }
   .CodeMirror-linebackground.dbg-bp-line { background: rgba(224,86,86,.13); }
 
   /* --- 浅色主题（29_浅色主题.css 最后加载，这里用 html.theme-light 提高特异性） --- */
@@ -139,5 +148,4 @@
   html.theme-light .dbg-var-group { color: #6b7280; }
   html.theme-light .dbg-var-gcnt { background: rgba(0,0,0,.08); color: #333a45; }
   html.theme-light .dbg-bp-dot { background: #dc3545; box-shadow: 0 0 0 1px rgba(220,53,69,.3); }
-  html.theme-light .CodeMirror-gutter.dbg-bp-col:hover { background: rgba(220,53,69,.08); }
   html.theme-light .CodeMirror-linebackground.dbg-bp-line { background: rgba(220,53,69,.10); }

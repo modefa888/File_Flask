@@ -1984,7 +1984,15 @@
           gutters: big ? ["dbg-bp-col", "CodeMirror-linenumbers"]
                        : ["dbg-bp-col", "CodeMirror-foldgutter", "CodeMirror-linenumbers"],
           foldGutter: !big,
-          foldOptions: { minFoldSize: 1, widget: "…" },
+          foldOptions: {
+            minFoldSize: 1, widget: "…",
+            // 空行 / 纯空白行不折叠：不显示折叠箭头、点击也不生效（行号前不出现无意义箭头）
+            rangeFinder: function (cm2, start) {
+              const text = cm2.getLine(start.line);
+              if (!text || !text.trim()) return null;
+              return CodeMirror.fold.auto(cm2, start);
+            }
+          },
           extraKeys: {
             "Ctrl-Alt-]": function (c) { c.foldCode(c.getCursor()); },                 // 折叠光标所在块（再按展开）
             "Cmd-Alt-]":  function (c) { c.foldCode(c.getCursor()); },

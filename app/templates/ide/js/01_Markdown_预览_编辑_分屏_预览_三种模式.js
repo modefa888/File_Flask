@@ -636,8 +636,22 @@
     tab.runBtnReady = true;
     RUN_BTN_TABS.push(tab);
 
-    tab.cm.setOption("gutters", window.ideGutters(tab.cm, ["run-btn-gutter", "CodeMirror-linenumbers"]));   // ▶ 在行号前面（折叠列在最左）
-    tab.cm.refresh();
+    /* ▶ 列按需显隐：找到入口行才占位，找不到就撤掉（不再常驻 20px 空白）。
+       只增删 run-btn-gutter，保留既有列（dbg-bp-col 断点列 / foldgutter 折叠列）——
+       之前整表替换会把断点列挤掉，run.py 这类可运行文件就没法点断点了 */
+    function setRunGutter(on) {
+      const cm = tab.cm;
+      const cur = (cm.getOption("gutters") || []);
+      if (cur.includes("run-btn-gutter") === !!on) return;           // 状态没变不重建（mark 在每次输入都会跑）
+      const next = cur.filter(g => g !== "run-btn-gutter");
+      if (on) {
+        const li = next.indexOf("CodeMirror-linenumbers");
+        next.splice(li < 0 ? next.length : li, 0, "run-btn-gutter");   // ▶ 在行号前面
+      }
+      cm.setOption("gutters", next);
+      cm.refresh();
+    }
+    tab.runBtnGutter = setRunGutter;
 
     const ext = getExt(tab.displayPath || tab.path);
     const PATTERNS = {
@@ -670,9 +684,10 @@
 
     function mark() {
       if (!tab.cm) return;
+      const line = findEntry();
+      if (tab.runBtnGutter) tab.runBtnGutter(line >= 0);        // 有入口才占 20px 列宽
       const last = tab.cm.lineCount();
       for (let i = 0; i < last; i++) tab.cm.setGutterMarker(i, "run-btn-gutter", null);
-      const line = findEntry();
       if (line < 0) {                            // 识别不到入口：行内按钮没了，悬浮按钮也要藏起来
         tab.entryLine = -1;
         updateFloatRun();

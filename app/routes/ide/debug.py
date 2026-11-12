@@ -397,6 +397,10 @@ def api_debug_stream():
                 yield "data: " + json.dumps(s.payload(chunks, off), ensure_ascii=False) + "\n\n"
                 if s.done:
                     return
+                # 合帧限流：被调试程序狂打印时 reader 每读 4KB 就 notify 一次，
+                # 上面会变成每秒成百上千个 SSE 事件，前端主线程被事件回调打满
+                # （页面卡死的主因之一）。50ms 间隔对单步交互无感知，洪峰下事件率降 20 倍。
+                time.sleep(0.05)
             if not s.wait(rev, 15.0):
                 yield ": ping\n\n"
 

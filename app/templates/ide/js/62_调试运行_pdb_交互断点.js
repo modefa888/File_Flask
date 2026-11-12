@@ -205,21 +205,31 @@
       const body = $("dbgBody");
       if (!body) return;
       const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
+      // 增量渲染：只追加新增行；行数被裁剪（超上限）或刚清空过才整体重建。
+      // 之前每帧 innerHTML 全量重建最多 1200 行，输出洪峰（程序狂打印 / pdb 刷屏）时
+      // 主线程被持续打满，整个页面像死住一样——增量后每帧成本只与新增行数相关。
+      if ((body._dbgRendered || 0) > DBG.lines.length) {
+        body.innerHTML = "";
+        body._dbgRendered = 0;
+      }
       const frag = document.createDocumentFragment();
-      DBG.lines.forEach(it => {
+      for (let i = body._dbgRendered || 0; i < DBG.lines.length; i++) {
+        const it = DBG.lines[i];
         const div = document.createElement("div");
         div.className = "dbg-line dbg-line-" + it.cls;
         div.textContent = it.text;
         frag.appendChild(div);
-      });
-      if (DBG.pending) {                                     // 没换行结尾的 (Pdb) 提示符
+      }
+      const pend = body.querySelector(".dbg-pending");       // 没换行结尾的 (Pdb) 提示符：
+      if (pend) pend.remove();                               // 先撤掉上一帧的临时行再补
+      if (DBG.pending) {
         const div = document.createElement("div");
-        div.className = "dbg-line dbg-line-" + (DBG.pending.indexOf("(Pdb") === 0 ? "pdb" : "out");
+        div.className = "dbg-line dbg-line-" + (DBG.pending.indexOf("(Pdb") === 0 ? "pdb" : "out") + " dbg-pending";
         div.textContent = DBG.pending;
         frag.appendChild(div);
       }
-      body.innerHTML = "";
       body.appendChild(frag);
+      body._dbgRendered = DBG.lines.length;
       if (nearBottom) body.scrollTop = body.scrollHeight;    // 只有本来就在底部才跟随滚动
     });
   }
@@ -227,7 +237,7 @@
     DBG.lines = [];
     DBG.pending = "";
     const body = $("dbgBody");
-    if (body) body.innerHTML = "";
+    if (body) { body.innerHTML = ""; body._dbgRendered = 0; }
   }
   function dbgSetState(text, cls) {
     const el = $("dbgState");

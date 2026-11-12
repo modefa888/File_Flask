@@ -686,8 +686,14 @@
       if (!tab.cm) return;
       const line = findEntry();
       if (tab.runBtnGutter) tab.runBtnGutter(line >= 0);        // 有入口才占 20px 列宽
-      const last = tab.cm.lineCount();
-      for (let i = 0; i < last; i++) tab.cm.setGutterMarker(i, "run-btn-gutter", null);
+      /* 只清掉上一次标记的那一行：之前每次 mark 都全文件逐行 setGutterMarker(null)，
+         而 CodeMirror 对每次调用都会做一次 gutter 变更处理——几千行的文件每敲一个字
+         都是 O(全文) 次，输入明显卡顿。标记记在行句柄上，编辑后索引漂移也能准确清掉 */
+      if (tab._runMarkedHandle) {
+        const old = tab.cm.getLineNumber(tab._runMarkedHandle);
+        if (old != null) { try { tab.cm.setGutterMarker(old, "run-btn-gutter", null); } catch (_) { /* 行已删除 */ } }
+        tab._runMarkedHandle = null;
+      }
       if (line < 0) {                            // 识别不到入口：行内按钮没了，悬浮按钮也要藏起来
         tab.entryLine = -1;
         updateFloatRun();
@@ -707,6 +713,7 @@
         runBtnClick(tab);
       });
       tab.cm.setGutterMarker(line, "run-btn-gutter", el);
+      tab._runMarkedHandle = tab.cm.getLineHandle(line);   // 记住标记所在的行句柄，下次精准清除
       tab.entryLine = line;                      // 记录入口行，供悬浮按钮判断可见性
       updateFloatRun();                          // 运行状态 / 入口行变化时同步悬浮按钮
     }

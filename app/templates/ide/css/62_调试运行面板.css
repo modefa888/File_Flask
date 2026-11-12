@@ -16,7 +16,8 @@
   .dbg-bp-item { display: flex; align-items: center; gap: 6px; font-size: 11px;
                  color: #d4d4d4; padding: 3px 5px; border-radius: 4px; }
   .dbg-bp-item:hover { background: rgba(127,127,127,.16); }
-  .dbg-bp-item .dbg-bp-dot { width: 8px; height: 8px; border-radius: 50%; background: #e05656; flex: none; }
+  .dbg-bp-item .dbg-bp-dot { width: 8px; height: 8px; border-radius: 50%; background: #e05656;
+                             box-shadow: 0 0 0 1px rgba(224,86,86,.35); flex: none; }
   .dbg-bp-item .dbg-bp-ln { color: #f48771; font-family: "SF Mono", Menlo, Consolas, monospace; width: 42px; flex: none; }
   .dbg-bp-item .dbg-bp-nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
   .dbg-bp-item .dbg-bp-x { background: none; border: none; color: #8a8a8a; cursor: pointer; padding: 0 2px; }
@@ -103,12 +104,24 @@
   .dbg-var-chip.t-bool { border-color: rgba(224,86,86,.55); }      /* 布尔/空值：红 */
   .dbg-var-chip.t-obj  { border-color: #454a52; }                  /* 其它对象：灰 */
 
-  /* --- 编辑器行号左侧的断点列（dbg-bp-col）：点击切换断点，红点用 setGutterMarker 放置 ---
-     收窄到 9px：折叠列 + 断点列 + 行号内边距叠起来曾占 ~27px，压到 ~18px。
-     不做悬停背景高亮：gutter 元素是全高的，鼠标一停整列都会被染成粉色柱子 */
-  .CodeMirror-gutter.dbg-bp-col { width: 9px; cursor: pointer; }
-  .dbg-bp-dot { width: 8px; height: 8px; margin: 4px auto 0; border-radius: 50%;
-                background: #e05656; box-shadow: 0 0 0 1px rgba(224,86,86,.35); }
+  /* --- 断点红点直接画在行号位置（仿 VS Code，不再占独立列）：addLineClass(n,"gutter","dbg-bp-gutter") ---
+     已设断点的行：行号文字隐藏，::before 画实心红点；悬停其他行号：半透明幽灵点 + pointer 光标。
+     点击行号切换断点由 62_ 调试模块的 gutterClick 处理（仅 py 文件挂 dbg-bp-avail）。
+     实心红点选择器带 .dbg-bp-avail 一份（特异性与幽灵点相同且排在后面），保证悬停断点行不会变半透明 */
+  .dbg-bp-avail .CodeMirror-linenumber { cursor: pointer; }
+  .dbg-bp-avail .CodeMirror-linenumber:hover { color: transparent; }
+  .dbg-bp-avail .CodeMirror-linenumber:hover::before {
+    content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 9px; height: 9px; border-radius: 50%;
+    background: rgba(224,86,86,.45);
+  }
+  .dbg-bp-gutter .CodeMirror-linenumber { color: transparent !important; }
+  .dbg-bp-avail .dbg-bp-gutter .CodeMirror-linenumber::before,
+  .dbg-bp-gutter .CodeMirror-linenumber::before {
+    content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 9px; height: 9px; border-radius: 50%;
+    background: #e05656; box-shadow: 0 0 0 2px rgba(224,86,86,.22);
+  }
   /* --- 行号槽整体收窄（主编辑器 cm-host）：折叠列压到 9px、行号左右内边距各 3px --- */
   .cm-host .CodeMirror-foldgutter { width: 9px; }
   /* ide.html 把箭头容器写成 1.2em（随字号放大），列宽固定 9px 后字体会让箭头溢出到
@@ -118,6 +131,9 @@
   .cm-host .CodeMirror-foldgutter-folded { width: 9px; }
   .cm-host .CodeMirror-linenumber { padding: 0 3px 0 3px; }
   .CodeMirror-linebackground.dbg-bp-line { background: rgba(224,86,86,.13); }
+  /* --- pdb 停驻行（> 路径(行号)）：琥珀黄背景，调试运行时自动跳到这里并高亮。
+     排在断点淡红（dbg-bp-line）之后：同一行既是断点又是当前停驻行时，琥珀黄胜出 --- */
+  .CodeMirror-linebackground.dbg-cur-line { background: rgba(255, 205, 0, .20); }
 
   /* --- 浅色主题（29_浅色主题.css 最后加载，这里用 html.theme-light 提高特异性） --- */
   html.theme-light .dbg-bp-box { border-color: #d5d7dc; }
@@ -136,6 +152,9 @@
   html.theme-light .dbg-line-pdb  { background: rgba(9,105,218,.10); }
   html.theme-light .dbg-line-err  { background: rgba(207,34,46,.10); color: #c0392b; }
   html.theme-light .dbg-line-hint { background: rgba(154,103,0,.12); color: #8a6d00; }
+  /* 「细节」开关激活态（正在显示 pdb 协议细节）：蓝色描边提示当前处于原始输出视图 */
+  .dbg-btn.active { background: rgba(56,139,253,.16); border-color: #3b82f6; color: #9ecbfe; }
+  html.theme-light .dbg-btn.active { background: rgba(9,105,218,.10); border-color: #0969da; color: #0969da; }
   html.theme-light .dbg-input-row { border-top-color: #e1e3e7; background: #f7f8fa; }
   html.theme-light .dbg-input-row input { color: #24292f; }
   html.theme-light .dbg-prompt { color: #8a6d00; }
@@ -148,4 +167,7 @@
   html.theme-light .dbg-var-group { color: #6b7280; }
   html.theme-light .dbg-var-gcnt { background: rgba(0,0,0,.08); color: #333a45; }
   html.theme-light .dbg-bp-dot { background: #dc3545; box-shadow: 0 0 0 1px rgba(220,53,69,.3); }
+  html.theme-light .dbg-bp-avail .CodeMirror-linenumber:hover::before { background: rgba(220,53,69,.4); }
+  html.theme-light .dbg-bp-gutter .CodeMirror-linenumber::before { background: #dc3545; box-shadow: 0 0 0 2px rgba(220,53,69,.2); }
   html.theme-light .CodeMirror-linebackground.dbg-bp-line { background: rgba(220,53,69,.10); }
+  html.theme-light .CodeMirror-linebackground.dbg-cur-line { background: rgba(250, 173, 20, .24); }

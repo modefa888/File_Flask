@@ -619,12 +619,18 @@
     RUNNING_PAUSED = map || {};
     redrawRunButtons();
   };
-  /* 行内 / 悬浮按钮共用入口：没在跑 → 运行；在跑 → 暂停（SIGSTOP）；已暂停 → 继续（SIGCONT）。
+  /* 行内 / 悬浮按钮共用入口：没在跑 → 运行 / 调试运行（文件设了断点时）；在跑 → 暂停（SIGSTOP）；已暂停 → 继续（SIGCONT）。
      暂停态与后端任务表统一由 10_ 维护，停止仍可用底部面板的 ⊘ 或「后台任务」面板。 */
   function runBtnClick(tab) {
     const target = tab.displayPath || tab.path;
     if (!RUNNING_TASKS[target]) {
-      if (active !== tab) activate(tab);        // runCurrentFile 用的是 active，先切过来
+      if (active !== tab) activate(tab);        // runCurrentFile / dbgStart 用的是 active，先切过来
+      // 该文件的调试会话进行中（程序没跑完）→ 不重复启动，只唤起底部调试面板；
+      // 已结束等待（DBG.finished）不算进行中 → 走下面的 dbgStart，确认后停止旧的并重新调试
+      if (DBG.id && !DBG.done && !DBG.finished && DBG.target === target) { toggleBottom(true, "debug"); return; }
+      // 文件设了断点 → 这个键变成「调试运行」：启动 pdb 并注入断点（见 62_ dbgStart）；
+      // 没断点 → 普通运行。想普通运行设了断点的文件：清掉断点，或用运行菜单 / 后台模式。
+      if (getExt(target) === "py" && dbgBpOf(target).length) { dbgStart(); return; }
       runCurrentFile();
       return;
     }
@@ -702,12 +708,20 @@
       const target = tab.displayPath || tab.path;
       const running = !!RUNNING_TASKS[target];
       const paused = !!RUNNING_PAUSED[target];
+      // 程序已结束（DBG.finished）不算调试中：按钮回到「调试运行 / 运行」，点击走确认重启
+      const debugging = !running && DBG.id && !DBG.done && !DBG.finished && DBG.target === target;
+      const hasBp = !running && !debugging && getExt(target) === "py" && dbgBpOf(target).length > 0;
       const label = (RUN_LABELS[ext] || ext) + " " + baseName(target);
       const el = document.createElement("div");
-      el.className = "cm-run-btn" + (running ? (paused ? " paused" : " running") : "");
+      el.className = "cm-run-btn" + (running ? (paused ? " paused" : " running")
+                                             : (debugging || hasBp) ? " debugging" : "");
       el.title = paused ? "继续：" + label + "（已暂停）"
-               : running ? "暂停：" + label + "（正在运行）" : "运行：" + label;
-      el.innerHTML = '<i class="bi ' + (running && !paused ? "bi-pause-fill" : "bi-play-fill") + '"></i>';
+               : running ? "暂停：" + label + "（正在运行）"
+               : debugging ? "调试中：" + label + "（点击打开调试面板）"
+               : hasBp ? "调试运行：" + label + "（已设 " + dbgBpOf(target).length + " 个断点，启动 pdb 并注入）"
+               : "运行：" + label;
+      el.innerHTML = '<i class="bi ' + (running && !paused ? "bi-pause-fill"
+                                           : (debugging || hasBp) ? "bi-bug-fill" : "bi-play-fill") + '"></i>';
       el.addEventListener("click", (e) => {
         e.stopPropagation();
         runBtnClick(tab);
@@ -741,18 +755,28 @@
       const target = tab.displayPath || tab.path;
       const running = !!RUNNING_TASKS[target];
       const paused = !!RUNNING_PAUSED[target];
+      // 调试态优先于断点态：该文件的 pdb 会话进行中显示「调试中」，否则有断点显示「调试运行」；
+      // 程序已结束（DBG.finished）不算调试中 → 回到「调试运行 / 运行」，点击走确认重启
+      const debugging = !running && !paused && DBG.id && !DBG.done && !DBG.finished && DBG.target === target;
+      const hasBp = !running && !paused && !debugging && getExt(target) === "py" && dbgBpOf(target).length > 0;
       const label = (RUN_LABELS[ext] || ext) + " " + baseName(target);
       btn.classList.toggle("running", running && !paused);
       btn.classList.toggle("paused", running && paused);
+      btn.classList.toggle("debugging", debugging || hasBp);
       btn.innerHTML = "";
       const icon = document.createElement("i");
-      icon.className = "bi " + (running && !paused ? "bi-pause-fill" : "bi-play-fill");
+      icon.className = "bi " + (running && !paused ? "bi-pause-fill"
+                                 : (debugging || hasBp) ? "bi-bug-fill" : "bi-play-fill");
       const txt = document.createElement("span");
-      txt.textContent = (paused ? "继续 " : running ? "暂停 " : "运行 ") + label;
+      txt.textContent = (running ? (paused ? "继续 " : "暂停 ")
+                        : debugging ? "调试中 " : hasBp ? "调试运行 " : "运行 ") + label;
       btn.appendChild(icon);
       btn.appendChild(txt);
       btn.title = paused ? "继续：" + label + "（已暂停）"
-                : running ? "暂停：" + label + "（正在运行）" : "运行：" + label;
+                : running ? "暂停：" + label + "（正在运行）"
+                : debugging ? "调试中：" + label + "（点击打开调试面板）"
+                : hasBp ? "调试运行：" + label + "（已设 " + dbgBpOf(target).length + " 个断点，启动 pdb 并注入）"
+                : "运行：" + label;
       // 入口行在可视区内 → 隐藏（行内 ▶ 已可见）；滚出 → 悬浮显示
       let inView = false;
       try {

@@ -109,13 +109,19 @@
   .cm-run-btn.running:hover { background: #d69e2e; }
   .cm-run-btn.paused { background: #7a4fb3; }
   .cm-run-btn.paused:hover { background: #9163cc; }
-  /* 编辑器内悬浮启动按钮：底色随「运行 / 暂停 / 继续」切换（位置等样式由 JS 内联设置） */
+  /* 调试态（🐛）：文件设了断点 → 运行键变「调试运行」（pdb）；该文件调试进行中 → 「调试中」。
+     配色取断点红的深色版，与绿色（运行）/琥珀（运行中）/紫（已暂停）区分 */
+  .cm-run-btn.debugging { background: #a63d40; }
+  .cm-run-btn.debugging:hover { background: #bf4a4e; }
+  /* 编辑器内悬浮启动按钮：底色随「运行 / 调试运行 / 暂停 / 继续」切换（位置等样式由 JS 内联设置） */
   .cm-run-float-btn { background: #22764a; transition: background-color .15s ease; }
   .cm-run-float-btn:hover { background: #2b8f5a; }
   .cm-run-float-btn.running { background: #b7791f; }
   .cm-run-float-btn.running:hover { background: #d69e2e; }
   .cm-run-float-btn.paused { background: #7a4fb3; }
   .cm-run-float-btn.paused:hover { background: #9163cc; }
+  .cm-run-float-btn.debugging { background: #a63d40; }
+  .cm-run-float-btn.debugging:hover { background: #bf4a4e; }
   html.theme-light .cm-run-btn { box-shadow: 0 1px 2px rgba(0, 0, 0, .18); }
   html.theme-light .cm-run-btn:hover { box-shadow: 0 1px 4px rgba(0, 0, 0, .26); }
   .cm-pip-skip { color: #555; }

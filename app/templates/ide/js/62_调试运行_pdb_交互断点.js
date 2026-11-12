@@ -6,8 +6,8 @@
      - 输出按行渲染并分色：pdb 调试输出 / 程序输出 / 错误 / 操作提示
        各用不同背景（dbgClassifyLine 分类，见 62_ CSS）；
      - 输入框 / 工具按钮把 n / s / c / r / p / b / q 等命令写回 PTY；
-     - 断点按文件保存在浏览器本地：编辑器行号左侧有专门的「断点列」，
-       点击即添加 / 再点取消（dbgBindGutter，列在 00_preamble gutters 里），
+     - 断点按文件保存在浏览器本地：行号本身即断点列（仿 VS Code）——悬停行号出现幽灵红点，
+       点击行号即添加 / 再点取消（dbgBindGutter 只认 CodeMirror-linenumbers 列），
        F9 / 侧栏按钮也可操作；启动时自动把断点注入 pdb；
      - 「变量」按钮弹层：读取当前作用域变量列表（locals+globals），
        点击某个变量用 pdb 的 pp 命令查看内容（dbgSys* 状态机解析回显）。
@@ -18,7 +18,11 @@
      ================================================================== */
   const DBG_BP_KEY = "ide.debug.breakpoints." + ((typeof ROOT !== "undefined" && ROOT) ? ROOT : location.pathname);
   const DBG_SESSION_KEY = "ide.debug.session";
+  const DBG_DETAILS_KEY = "ide.debug.showPdbDetails";
   const DBG_MAX_LINES = 1200;                          // 输出区保留的行数上限
+  /* pdb 协议细节（定位行 / 源码行 / 命令回显 / (Pdb) 提示符）默认隐藏，工具栏「细节」可切换 */
+  let DBG_SHOW_DETAILS = false;
+  try { DBG_SHOW_DETAILS = localStorage.getItem(DBG_DETAILS_KEY) === "1"; } catch (_) { /* 忽略 */ }
   const DBG = {
     id: null, target: "", pid: 0, offset: 0,
     es: null, timer: null, lines: [], pending: "", raf: 0,
@@ -65,7 +69,7 @@
       if (!lines.length) {
         const empty = document.createElement("div");
         empty.className = "dbg-bp-empty";
-        empty.textContent = "暂无断点。点击编辑器行号左侧空白即可添加（再点取消），或按 F9。";
+        empty.textContent = "暂无断点。点击编辑器行号即可添加（再点取消），或按 F9。";
         box.appendChild(empty);
       } else {
         lines.forEach(n => {
@@ -98,18 +102,23 @@
       }
     }
     dbgSyncGutter();
+    // 断点增删 / 切标签都会走这里：行内 ▶ 与悬浮按钮的「调试运行」态跟着刷新
+    if (typeof redrawRunButtons === "function") redrawRunButtons();
   }
 
-  /* 编辑器行号槽红点：setGutterMarker 只打在 dbg-bp-col 这一列，不污染行号 / 折叠列；
-     整行淡红背景用 addLineClass（跟行走，虚拟滚动 / 重绘不丢） */
+  /* 行号槽红点：断点直接画在行号位置（仿 VS Code，不占独立列）——
+     addLineClass(n, "gutter", "dbg-bp-gutter") 只给该行的行号槽包装层加类，
+     CSS（62_调试运行面板.css）据此隐藏行号文字、用 ::before 画红点；
+     整行淡红背景用 addLineClass background（跟行走，虚拟滚动 / 重绘不丢）。
+     仅 py 文件挂 dbg-bp-avail：控制行号 pointer 光标与悬停幽灵红点 */
   function dbgSyncGutter() {
     (typeof tabs !== "undefined" ? tabs : []).forEach(t => {
       const cm = t && t.cm;
-      if (!cm || typeof cm.setGutterMarker !== "function") return;
+      if (!cm || typeof cm.addLineClass !== "function") return;
       const path = t.displayPath || t.path;
-      const prev = cm._dbgBpMarked || [];
-      prev.forEach(n => {
-        try { cm.setGutterMarker(n - 1, "dbg-bp-col", null); } catch (_) { /* 忽略 */ }
+      const prevGt = cm._dbgBpGutters || [];
+      prevGt.forEach(n => {
+        try { cm.removeLineClass(n - 1, "gutter", "dbg-bp-gutter"); } catch (_) { /* 忽略 */ }
       });
       const prevBg = cm._dbgBpLines || [];
       prevBg.forEach(n => {
@@ -117,26 +126,24 @@
       });
       const lines = dbgBpOf(path).filter(n => n <= cm.lineCount());
       lines.forEach(n => {
-        try {
-          const dot = document.createElement("div");
-          dot.className = "dbg-bp-dot";
-          dot.title = "断点：行 " + n;
-          cm.setGutterMarker(n - 1, "dbg-bp-col", dot);
-          cm.addLineClass(n - 1, "background", "dbg-bp-line");
-        } catch (_) { /* 忽略 */ }
+        try { cm.addLineClass(n - 1, "gutter", "dbg-bp-gutter"); } catch (_) { /* 忽略 */ }
       });
-      cm._dbgBpMarked = lines;
+      cm._dbgBpGutters = lines;
       cm._dbgBpLines = lines;
+      try {
+        cm.getWrapperElement().classList.toggle("dbg-bp-avail", getExt(path) === "py");
+      } catch (_) { /* 忽略 */ }
     });
   }
 
-  /* 断点列点击：添加 / 取消断点。由 00_preamble 创建编辑器时调用。
-     只认 dbg-bp-col 列，折叠箭头与行号点击不受影响 */
+  /* 行号点击：添加 / 取消断点。由 00_preamble 创建编辑器时调用。
+     只认行号列（CodeMirror-linenumbers）；折叠箭头有自己的 mousedown 处理，不受影响。
+     仅 py 文件生效（非 py 直接 return；行号上也没有 pointer / 幽灵点，见 dbgSyncGutter） */
   function dbgBindGutter(cm) {
     if (!cm || cm._dbgGutterBound) return;
     cm._dbgGutterBound = true;
     cm.on("gutterClick", (cm2, line, gutter) => {
-      if (gutter !== "dbg-bp-col") return;
+      if (gutter !== "CodeMirror-linenumbers") return;
       const tabsArr = (typeof tabs !== "undefined" ? tabs : []);
       const t = tabsArr.find(x => x && x.cm === cm2);
       const path = t ? (t.displayPath || t.path) : dbgCurPath();
@@ -179,7 +186,7 @@
     if (/^(->|--Return--|--Call--)/.test(t)) return "pdb";   // 当前行源码 / 函数返回
     if (/^Breakpoint \d+/.test(t)) return "pdb";             // 断点设置信息
     if (/^\^C/.test(t)) return "pdb";                        // Ctrl+C 中断标记
-    if (t.indexOf("[提示]") === 0 || /^The program finished/.test(t)) return "hint";
+    if (t.indexOf("[提示]") === 0 || /^The program (finished|exited via sys\.exit)/.test(t)) return "hint";
     if (/^Traceback \(/.test(t) || /^\*\*\*/.test(t) || /[A-Za-z](Error|Exception):/.test(t)) return "err";
     return "out";                                            // 程序 print / 正常输出
   }
@@ -197,7 +204,51 @@
     DBG.lines.push({ cls: dbgClassifyLine(line), text: line });
     if (DBG.lines.length > DBG_MAX_LINES) DBG.lines.splice(0, DBG.lines.length - DBG_MAX_LINES);
     if (DBG.sys) dbgSysFeed(line);                           // 变量读取状态机吃同一份输出
+    // pdb 停在某个位置会输出 "> 路径(行号)函数()"：据此让编辑器跳到该行并高亮
+    const loc = /^>+\s+(\S+)\((\d+)\)/.exec(line);
+    if (loc) dbgCurShow(loc[1], Number(loc[2]));
   }
+
+  /* pdb 停驻行定位：解析出「文件 + 行号」后，在目标文件的编辑器里
+     加 dbg-cur-line 琥珀黄背景（区别于断点淡红）并滚动到可视区。
+     用行句柄记录位置——调试期间用户编辑代码行号漂移也能准确清掉。
+     pdb 打印的是绝对路径，DBG.target 是工作区相对路径：按文件名匹配；
+     新停驻自动清掉上一处；会话结束 / 重置时清除（dbgOnDone / dbgResetView）。 */
+  let DBG_CUR = null;                                        // { cm, handle } 当前定位
+  function dbgCurClear() {
+    if (!DBG_CUR) return;
+    try {
+      const n = DBG_CUR.cm.getLineNumber(DBG_CUR.handle);
+      if (n != null) DBG_CUR.cm.removeLineClass(n, "background", "dbg-cur-line");
+    } catch (_) { /* 忽略 */ }
+    DBG_CUR = null;
+  }
+  function dbgCurShow(absPath, lineNo) {
+    // 程序已结束（pdb 只在入口等待）后不再点亮：重启位置没有调试意义
+    if (!DBG.id || DBG.done || DBG.finished || !absPath) return;
+    if (baseName(absPath) !== baseName(DBG.target)) return;  // u/d 切帧时可能是其它文件
+    const tabsArr = (typeof tabs !== "undefined" ? tabs : []);
+    const t = tabsArr.find(x => x && x.cm && (x.displayPath || x.path) === DBG.target)
+           || tabsArr.find(x => x && x.cm && baseName(x.displayPath || x.path) === baseName(DBG.target));
+    if (!t || !t.cm || typeof t.cm.addLineClass !== "function") return;
+    const cm = t.cm;
+    if (!(lineNo >= 1) || lineNo > cm.lineCount()) return;
+    dbgCurClear();
+    try {
+      const handle = cm.getLineHandle(lineNo - 1);
+      cm.addLineClass(lineNo - 1, "background", "dbg-cur-line");
+      DBG_CUR = { cm, handle };
+      cm.scrollIntoView({ line: lineNo - 1, ch: 0 }, 80);    // 自动跳到当前停驻行
+    } catch (_) { /* 忽略 */ }
+  }
+  /* pdb 协议噪音行（定位 / 源码 / 命令回显 / (Pdb) 提示符）默认不渲染——
+     只显示程序输出、变量结果、报错和提示。^C 中断标记保留（它是状态信号）。
+     过滤在渲染层做：缓冲区仍存全量原文，「细节」开关切换后整体重绘即可，
+     行号跳转解析（dbgPushLine）也不受影响。 */
+  function dbgIsNoise(it) {
+    return !DBG_SHOW_DETAILS && it.cls === "pdb" && !/^\^C/.test(it.text);
+  }
+
   function dbgRenderLines() {
     if (DBG.raf) return;                                     // rAF 合帧，避免高频重建
     DBG.raf = requestAnimationFrame(() => {
@@ -215,6 +266,7 @@
       const frag = document.createDocumentFragment();
       for (let i = body._dbgRendered || 0; i < DBG.lines.length; i++) {
         const it = DBG.lines[i];
+        if (dbgIsNoise(it)) continue;                        // 默认隐藏 pdb 协议细节
         const div = document.createElement("div");
         div.className = "dbg-line dbg-line-" + it.cls;
         div.textContent = it.text;
@@ -223,10 +275,13 @@
       const pend = body.querySelector(".dbg-pending");       // 没换行结尾的 (Pdb) 提示符：
       if (pend) pend.remove();                               // 先撤掉上一帧的临时行再补
       if (DBG.pending) {
-        const div = document.createElement("div");
-        div.className = "dbg-line dbg-line-" + (DBG.pending.indexOf("(Pdb") === 0 ? "pdb" : "out") + " dbg-pending";
-        div.textContent = DBG.pending;
-        frag.appendChild(div);
+        const pendCls = DBG.pending.indexOf("(Pdb") === 0 ? "pdb" : "out";
+        if (!dbgIsNoise({ cls: pendCls, text: DBG.pending })) {
+          const div = document.createElement("div");
+          div.className = "dbg-line dbg-line-" + pendCls + " dbg-pending";
+          div.textContent = DBG.pending;
+          frag.appendChild(div);
+        }
       }
       body.appendChild(frag);
       body._dbgRendered = DBG.lines.length;
@@ -244,13 +299,21 @@
     if (!el) return;
     el.textContent = text;
     el.className = "dbg-state" + (cls ? " " + cls : "");
+    // 调试状态变化（启动中 / 调试中 / 已结束 / 启动失败）→ 行内 ▶ 与悬浮按钮的
+    // 「调试中」样式跟着变（实现见 01_ 运行按钮模块）
+    if (typeof redrawRunButtons === "function") redrawRunButtons();
   }
   function dbgRefreshButtons() {
     const ids = ["dbgBtnCont", "dbgBtnNext", "dbgBtnStep", "dbgBtnWhere",
                  "dbgBtnVar", "dbgBtnInt", "dbgBtnStop", "dbgSendBtn"];
+    const dead = !!(DBG.done || !DBG.id);
+    // 程序执行完毕（pdb 回到入口等待）：禁用「继续 c」——此时按 c 只会把整个
+    // 脚本从头再跑一遍，设了断点的文件会陷入循环执行；查变量 / 单步 / 停止仍可用
+    const finished = !!(DBG.finished && !DBG.done);
     ids.forEach(id => {
       const b = $(id);
-      if (b) b.disabled = !!(DBG.done || !DBG.id);
+      if (!b) return;
+      b.disabled = dead || (finished && id === "dbgBtnCont");
     });
     const inp = $("dbgInput");
     if (inp) inp.disabled = !!(DBG.done || !DBG.id);
@@ -266,8 +329,10 @@
     DBG.timer = null;
   }
   function dbgResetView() {
+    if (DBG.autoStopTimer) { clearTimeout(DBG.autoStopTimer); DBG.autoStopTimer = null; }
     dbgCloseStreams();
     dbgVarClose();
+    dbgCurClear();                                           // 清掉上一会话的停驻行高亮
     dbgClear();
     DBG.id = null; DBG.target = ""; DBG.pid = 0; DBG.offset = 0;
     DBG.done = true; DBG.paused = false; DBG.finished = false; DBG.hist = []; DBG.hi = -1;
@@ -284,9 +349,21 @@
     if (typeof d.pid === "number") DBG.pid = d.pid;
     // python -m pdb 在脚本跑完后会「重启」回第一行继续等命令，不会自己退出：
     // 明确告诉用户此时可以查变量，也可以输入 q / 点「停止」结束会话
-    if (!DBG.finished && incoming.indexOf("The program finished and will be restarted") >= 0) {
+    // python -m pdb 在脚本跑完后会「重启」回第一行继续等命令，不会自己退出，
+    // 结束消息有两种（Lib/pdb.py）：正常结束 finished / sys.exit 退出 exited via sys.exit()。
+    // 两种都要按「已结束」处理——否则「继续」按钮不禁用，按 c 就会从头循环再跑
+    if (!DBG.finished && /The program (finished|exited via sys\.exit)/.test(incoming)) {
       DBG.finished = true;
-      dbgAppend("\n[提示] 脚本已执行完，pdb 回到入口等待输入：可继续用 p 查看变量，输入 q 或点「停止」结束调试。\n");
+      dbgCurClear();         // 程序结束：pdb 重启停在入口，停驻行高亮没有调试意义，撤掉
+      dbgRefreshButtons();   // 立即禁用「继续」：程序跑完后按 c 只会从头循环再跑
+      dbgAppend("\n[提示] 脚本已执行完，本次调试将自动结束（断点已保留，可再次点「调试运行」重跑）。\n");
+      // 自动结束：程序跑完后 pdb 只会在入口空等，继续调试没有意义——短暂延时
+      // 等尾部输出（重启位置 / (Pdb) 提示符）落盘后，自动停止整个调试会话
+      if (DBG.autoStopTimer) clearTimeout(DBG.autoStopTimer);
+      DBG.autoStopTimer = setTimeout(() => {
+        DBG.autoStopTimer = null;
+        if (DBG.id && !DBG.done && DBG.finished) dbgStop(true, true);
+      }, 800);
     }
     const f = $("dbgFile");
     if (f && DBG.target) f.textContent = baseName(DBG.target) + (DBG.pid ? " · pid " + DBG.pid : "");
@@ -298,8 +375,10 @@
   function dbgOnDone(d) {
     if (DBG.done) return;
     DBG.done = true;
+    if (DBG.autoStopTimer) { clearTimeout(DBG.autoStopTimer); DBG.autoStopTimer = null; }
     dbgCloseStreams();
     dbgVarClose();
+    dbgCurClear();                                           // 会话结束：撤掉停驻行高亮
     dbgAppend("\n[调试会话结束 · 退出码 " + ((d && d.exit_code != null) ? d.exit_code : -1) + "]\n");
     dbgSetState("已结束", "dead");
     dbgRefreshButtons();
@@ -382,7 +461,7 @@
       const bps = d.breakpoints || [];
       dbgAppend(bps.length
         ? "（已注入 " + bps.length + " 个断点并 continue，命中断点后会自动停在 (Pdb)）\n\n"
-        : "（已停在脚本入口；可直接单步，或先在行号左侧点击设断点再点「继续」）\n\n");
+        : "（已停在脚本入口；可直接单步，或先点击行号设断点再点「继续」）\n\n");
       dbgSetState("调试中", "live");
       dbgRefreshButtons();
       dbgStream();
@@ -430,7 +509,7 @@
     } catch (e) { toast("中断失败：" + (e.message || e), "err"); }
   }
 
-  async function dbgStop(quiet) {
+  async function dbgStop(quiet, auto) {
     if (!DBG.id) { if (!quiet) toast("当前没有调试会话", "warn"); return; }
     const id = DBG.id;
     dbgVarClose();
@@ -442,12 +521,14 @@
     } catch (_) { /* 忽略 */ }
     try { localStorage.removeItem(DBG_SESSION_KEY); } catch (_) {}
     if (DBG.id !== id) return;
+    if (DBG.autoStopTimer) { clearTimeout(DBG.autoStopTimer); DBG.autoStopTimer = null; }
     DBG.done = true;
     dbgCloseStreams();
-    dbgAppend("\n[已手动停止调试]\n");
-    dbgSetState("已结束", "dead");
+    dbgCurClear();                                       // 保险：停驻行高亮一并撤掉
+    dbgAppend(auto ? "\n[脚本已执行完，调试会话已自动结束]\n" : "\n[已手动停止调试]\n");
+    dbgSetState(auto ? "已自动结束" : "已结束", "dead");
     dbgRefreshButtons();
-    if (!quiet) toast("已停止调试", "ok");
+    if (!quiet && !auto) toast("已停止调试", "ok");
   }
 
   /* 刷新页面后接回仍在运行的会话（后端会话在内存，服务重启则需重新调试） */
@@ -658,6 +739,27 @@
   if ($("dbgBtnInt")) $("dbgBtnInt").onclick = () => dbgInterrupt();
   if ($("dbgBtnStop")) $("dbgBtnStop").onclick = () => dbgStop();
   if ($("dbgBtnClear")) $("dbgBtnClear").onclick = () => dbgClear();
+  /* 「细节」开关：默认隐藏 pdb 协议噪音（定位 / 源码 / 命令回显 / (Pdb) 提示符），
+     只看程序输出、变量结果、报错与提示。偏好写入 localStorage，切换后整体重绘 */
+  if ($("dbgBtnDetails")) {
+    const btnDetails = $("dbgBtnDetails");
+    const syncDetailsBtn = () => {
+      btnDetails.classList.toggle("active", DBG_SHOW_DETAILS);
+      btnDetails.innerHTML = '<i class="bi ' + (DBG_SHOW_DETAILS ? "bi-eye" : "bi-eye-slash") + '"></i> 细节';
+      btnDetails.title = DBG_SHOW_DETAILS
+        ? "隐藏 pdb 协议细节（定位行 / 源码行 / 命令回显 / (Pdb) 提示符），只看程序输出与结果"
+        : "显示 pdb 协议细节（定位行 / 源码行 / 命令回显 / (Pdb) 提示符）";
+    };
+    syncDetailsBtn();
+    btnDetails.onclick = () => {
+      DBG_SHOW_DETAILS = !DBG_SHOW_DETAILS;
+      try { localStorage.setItem(DBG_DETAILS_KEY, DBG_SHOW_DETAILS ? "1" : "0"); } catch (_) { /* 忽略 */ }
+      syncDetailsBtn();
+      const body = $("dbgBody");
+      if (body) { body.innerHTML = ""; body._dbgRendered = 0; }
+      dbgRenderLines();
+    };
+  }
   if ($("dbgSendBtn")) $("dbgSendBtn").onclick = () => {
     const inp = $("dbgInput");
     if (!inp || inp.disabled) return;

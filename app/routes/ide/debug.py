@@ -148,7 +148,11 @@ class _Session:
                 return False
 
     def close_fd(self):
+        """关闭 PTY 主端。必须先标记 done：读取线程可能正阻塞在 select 上，
+        fd 关闭后编号会被进程内其它连接（如 HTTP 请求 socket）立刻复用，
+        不标记的话线程会从复用后的 fd 读出 HTTP 请求原文，混进调试输出。"""
         with self.io_lock:
+            self.done = True
             if self.fd >= 0:
                 try:
                     os.close(self.fd)
@@ -195,7 +199,12 @@ def _reader(s):
         try:
             ready, _, _ = select.select([fd], [], [], 0.2)
             if ready:
-                data = os.read(fd, 4096)
+                # select 就绪 ≠ fd 还属于本会话：关闭瞬间编号可能已被其它连接复用，
+                # 必须在 io_lock 里复查归属后再读（close_fd 用同一把锁，互斥无竞态）
+                with s.io_lock:
+                    if s.done or s.fd != fd:
+                        break
+                    data = os.read(fd, 4096)
                 if not data:
                     break
                 s.append(decoder.decode(data))
@@ -210,12 +219,15 @@ def _reader(s):
                     ready, _, _ = select.select([fd], [], [], 0.05)
                     if not ready:
                         break
-                    data = os.read(fd, 4096)
+                    with s.io_lock:
+                        if s.done or s.fd != fd:
+                            break
+                        data = os.read(fd, 4096)
+                    if not data:
+                        break
+                    s.append(decoder.decode(data))
                 except (OSError, ValueError):
                     break
-                if not data:
-                    break
-                s.append(decoder.decode(data))
             break
     try:
         s.append(decoder.decode(b"", final=True))
@@ -312,8 +324,22 @@ def api_debug_start():
 
     _gc()
     with _LOCK:
+        # 已结束的会话只剩输出缓冲和文件描述符（进程早已退出）：满了就自动从最旧的
+        # 开始腾位，不再要求用户去「调试」面板手动点停止。腾不出来——8 个会话全在
+        # 活跃调试中——才拒绝启动。
         if len(_SESSIONS) >= _MAX_SESSIONS:
-            return _fail("调试会话过多，请先停止旧的调试（页面「调试」面板点停止）", 429)
+            stale = sorted((s for s in _SESSIONS.values() if s.done),
+                           key=lambda x: x.last_active)
+            for s in stale:
+                if len(_SESSIONS) < _MAX_SESSIONS:
+                    break
+                try:
+                    s.close_fd()
+                except Exception:
+                    pass
+                _SESSIONS.pop(s.id, None)
+            if len(_SESSIONS) >= _MAX_SESSIONS:
+                return _fail("调试会话过多（%d 个调试均在进行中），请先停止不再使用的调试" % len(_SESSIONS), 429)
 
     cwd = os.path.dirname(os.path.abspath(target)) or "."
     cmd = [exe, "-u", "-m", "pdb", target] + raw_args

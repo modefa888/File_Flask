@@ -687,6 +687,18 @@ def restart() -> dict:
 # 状态汇总
 # ---------------------------------------------------------------------------
 
+def _route_assets(core: str) -> dict:
+    """当前内核目录里有没有 geo 资源（决定大陆分流能做到多完整）。
+
+    Xray 官方包自带 geoip.dat / geosite.dat；自定义路径或精简安装可能没有，
+    配置生成会退回只按 .cn 域名分流，这里把检测结果告诉前端便于提示。
+    """
+    d = os.path.dirname(os.path.abspath(core)) if core else _CORE_DIR
+    return {"geoip": os.path.isfile(os.path.join(d, "geoip.dat")),
+            "geosite": os.path.isfile(os.path.join(d, "geosite.dat")),
+            "dir": d}
+
+
 def status() -> dict:
     with _lock:
         _boot_check()
@@ -730,6 +742,7 @@ def status() -> dict:
             "port_free": _port_free(port),
             "settings": {k: v for k, v in st.items() if k != "socks_pass"},
             "has_pass": bool(str(st.get("socks_pass") or "").strip()),
+            "route_assets": _route_assets(core),
             "log_file": _LOG_FILE,
         }
 
@@ -1740,6 +1753,31 @@ def core_download_job(url: str = "", kind: str = "xray") -> str:
     jid = job_new("download")
     threading.Thread(target=_run_download, args=(jid, str(url or "")),
                      kwargs={"kind": kind}, daemon=True).start()
+    return jid
+
+
+def _run_geo_download(jid: str, dest: str):
+    try:
+        _job_patch(jid, phase="正在下载 geo 数据", pct=0)
+        files = v2raycfg.download_geo(
+            dest,
+            progress=lambda got, total: _job_patch(
+                jid, got=got, total=total,
+                pct=int(got * 100 / total) if total else 0),
+            on_log=lambda line: _job_log(jid, line),
+        )
+        _job_patch(jid, phase="下载完成", pct=100, done=True, ok=True,
+                   result={"dir": dest, "files": files})
+    except Exception as e:                     # noqa: BLE001
+        _job_patch(jid, phase="下载失败", done=True, ok=False, error=str(e))
+
+
+def geo_download_job() -> str:
+    """后台下载 geoip.dat / geosite.dat 到当前内核目录（只补数据，不重下内核）。"""
+    core = pick_core(_settings())
+    dest = os.path.dirname(os.path.abspath(core)) if core else _CORE_DIR
+    jid = job_new("geo")
+    threading.Thread(target=_run_geo_download, args=(jid, dest), daemon=True).start()
     return jid
 
 

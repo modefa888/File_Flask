@@ -629,6 +629,10 @@
 }
 :where(html.theme-light) .v2v-kindtab.on > .bi { color: #0f9d78; }
 
+/* 路由模式分段控件：三个模式平分宽度，避免只占左边一小段 */
+.v2v-routetabs { display: flex; width: 100%; }
+.v2v-routetabs .v2v-kindtab { flex: 1 1 0; justify-content: center; }
+
 /* --- 卡片 --- */
 .v2v-sec {
   position: relative;
@@ -1251,6 +1255,11 @@
 .v2v-hint.err .bi { color: #f0616d; }
 /* 顶部横幅提示（页面第一个元素）与下方卡片拉开间距 */
 .v2-view > .v2v-hint { margin-bottom: 16px; }
+
+/* 「下载 geo 数据」：提示条右侧的小按钮，只补数据不重下内核 */
+.v2v-geo-hint { align-items: center; }
+.v2v-geo-hint > .v2v-btn { flex: none; margin-left: auto; align-self: center; }
+.v2v-geo-hint > .v2v-btn .bi { margin-top: 0; color: inherit; font-size: 12px; }
 
 /* 表格化的小清单（分享地址） */
 .v2v-code {

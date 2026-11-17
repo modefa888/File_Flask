@@ -50,7 +50,7 @@ bp = Blueprint("v2ray", __name__)
 # 允许通过设置接口写入的键（其余一律忽略）
 _SETTING_KEYS = ("core_path", "core_url", "core_kind", "socks_port", "socks_listen",
                  "socks_user", "http_port", "log_level", "sub_proxy", "auto_start",
-                 "api_port", "auth_enabled")
+                 "api_port", "auth_enabled", "route_mode", "bypass_cn")
 _LISTEN_CHOICES = ("0.0.0.0", "127.0.0.1")
 
 
@@ -115,6 +115,12 @@ def v2_core_download():
     data = request.get_json(silent=True) or {}
     return jsonify({"ok": True, "job": v2raymgr.core_download_job(
         str(data.get("url") or ""), str(data.get("kind") or "xray"))})
+
+
+@bp.post("/api/v2ray/geo/download")
+def v2_geo_download():
+    """启动后台任务：只下载 geoip.dat / geosite.dat 到当前内核目录（补全大陆分流数据）。"""
+    return jsonify({"ok": True, "job": v2raymgr.geo_download_job()})
 
 
 def _kind(v) -> str:
@@ -541,6 +547,13 @@ def v2_settings_save():
         elif k == "auto_start":
             items[k] = 1 if data.get(k) else 0
         elif k == "auth_enabled":
+            items[k] = 1 if data.get(k) else 0
+        elif k == "route_mode":
+            v = str(data.get(k) or "").strip().lower()
+            if v not in ("global", "rule", "direct"):
+                return _fail("路由模式只能是 全局代理 / 智能分流 / 全局直连")
+            items[k] = v
+        elif k == "bypass_cn":
             items[k] = 1 if data.get(k) else 0
         elif k == "core_kind":
             items[k] = kind

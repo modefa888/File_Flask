@@ -185,6 +185,17 @@
         v2JobClose();
         V2.instVer = "";
         if (j.ok) {
+          if (j.kind === "geo") {
+            toast("geo 数据已下载，重启内核后生效", "ok");
+            v2Reload().catch(() => {});
+            uiModal({
+              title: "geo 数据已就绪", icon: "bi-check2-circle",
+              html: '<div class="m-msg">大陆分流所需的 <strong>geoip.dat</strong> / <strong>geosite.dat</strong> ' +
+                "已下载到内核目录，重启内核后生效。</div>",
+              okText: "重启内核", cancelText: "稍后",
+            }).then(ok => { if (ok) v2vAction("restart", {}); });
+            return;
+          }
           const found = ((j.result || {}).found || []).length;
           toast(j.kind === "detect" ? ("探测完成，找到 " + found + " 个可用内核")
                                     : ("内核已就绪：" + ((j.result || {}).version || "")), "ok");
@@ -221,7 +232,7 @@
       }, 8000);
     }
     // 下载时拿不到 Content-Length 就退化为「不确定态」来回滑动的条纹
-    const indet = j.kind === "download" && !j.done && !(j.total > 0);
+    const indet = (j.kind === "download" || j.kind === "geo") && !j.done && !(j.total > 0);
     box.classList.toggle("indet", indet);
     const pct = indet ? 100 : Math.max(0, Math.min(100, Number(j.pct) || 0));
     const ico = $("v2ProgIco");
@@ -230,8 +241,11 @@
     if (ph) ph.textContent = j.phase || "处理中";
     const pc = $("v2ProgPct");
     if (pc) {
-      if (j.kind === "download" && j.total > 0) pc.textContent = fmtBytes(j.got) + " / " + fmtBytes(j.total) + " · " + pct + "%";
-      else pc.textContent = pct + "%";
+      if ((j.kind === "download" || j.kind === "geo") && j.total > 0) {
+        pc.textContent = fmtBytes(j.got) + " / " + fmtBytes(j.total) + " · " + pct + "%";
+      } else {
+        pc.textContent = pct + "%";
+      }
     }
     const fill = $("v2ProgFill");
     if (fill) fill.style.width = pct + "%";
@@ -512,7 +526,8 @@
     const box = $("v2View"); if (!box) return;
     const secs = [["overview", "概览", "bi-speedometer2"], ["nodes", "节点", "bi-diagram-3"],
                   ["subs", "订阅", "bi-rss"], ["settings", "设置", "bi-sliders"],
-                  ["clients", "连接", "bi-people"], ["log", "日志", "bi-journal-text"]];
+                  ["clients", "连接", "bi-people"], ["log", "日志", "bi-journal-text"],
+                  ["module", "路由分流", "bi-signpost-split"]];
     const st = V2.st || {}, running = !!st.running;
     const inb = st.inbound || {}, c = st.core || {}, n = st.node;
     // 页头副标题：把「节点 / 订阅 / 内核」的关键信息压成一行胶囊
@@ -560,6 +575,7 @@
     else if (V2.sec === "subs") body = v2vSubs();
     else if (V2.sec === "settings") body = v2vSettings(st);
     else if (V2.sec === "clients") body = v2vClients();
+    else if (V2.sec === "module") body = v2vModule(st);
     else body = v2vLog();
     box.innerHTML = head + tabbar + body;
     v2ProgPaint();
@@ -1392,6 +1408,73 @@
     return h;
   }
 
+  /* ---------- 路由分流：路由模式 / 大陆分流 / 始终直连 ---------- */
+  function v2ModeName(m) {
+    return m === "global" ? "全局代理" : (m === "direct" ? "全局直连" : "智能分流");
+  }
+  function v2vModule(st) {
+    const s = (st && st.settings) || {};
+    const mode = ["global", "rule", "direct"].indexOf(s.route_mode) >= 0 ? s.route_mode : "rule";
+    const cn = Number(s.bypass_cn === undefined ? 1 : s.bypass_cn) ? 1 : 0;
+    const kind = v2CoreKind();
+    const assets = (st && st.route_assets) || {};
+    const geoFull = !!(assets.geoip && assets.geosite);
+    const modes = [
+      ["global", "全局代理", "bi-globe2", "除本机 / 局域网外，所有流量都走代理节点"],
+      ["rule", "智能分流", "bi-signpost-split", "大陆直连，其余流量走代理（推荐）"],
+      ["direct", "全局直连", "bi-arrow-right-circle", "所有流量直连；代理入口保留，便于随时切回"],
+    ];
+    const cur = modes.filter(m => m[0] === mode)[0] || modes[1];
+    // 只有 Xray 需要 geo 文件；没拿到检测结果（旧后端 / 正在加载）时也给出下载入口，避免卡在「检测中」
+    const needGeo = kind !== "sing-box" && !geoFull;
+    let h = v2vBanner();
+    h += '<div class="v2v-sec">' +
+      v2vSecHead("bi-signpost-split", "路由模式", "决定哪些流量走代理、哪些直接连接；保存并重启内核后生效") +
+      '<div class="v2v-kindtabs v2v-routetabs">' + modes.map(m =>
+        '<button type="button" class="v2v-kindtab' + (mode === m[0] ? " on" : "") +
+        '" data-act="route-mode" data-mode="' + m[0] + '" title="' + escA(m[3]) + '">' +
+        '<i class="bi ' + m[2] + '"></i>' + m[1] + "</button>").join("") +
+      "</div>" +
+      '<div class="v2v-tip" id="v2vRouteTip">' + esc(cur[3]) + "</div>" +
+      "</div>";
+
+    h += '<div class="v2v-sec">' +
+      v2vSecHead("bi-geo-alt", "大陆分流", "过滤大陆：大陆域名 / IP 直接连接，其余流量走代理") +
+      '<div class="v2v-grid">' +
+      '<label class="v2v-field"><span>过滤大陆</span><select id="v2vModBypass"' +
+      (mode !== "rule" ? " disabled" : "") + ">" +
+      '<option value="1"' + (cn ? " selected" : "") + ">开启（大陆直连）</option>" +
+      '<option value="0"' + (!cn ? " selected" : "") + ">关闭（全部走代理）</option>" +
+      "</select></label></div>" +
+      '<div class="v2v-hint v2v-geo-hint"><i class="bi bi-info-circle"></i><div>' +
+      (kind === "sing-box"
+        ? "sing-box 内核按 <strong>.cn 域名</strong>直连；需要完整的大陆 IP / 域名分流，请切换到 Xray-core。"
+        : (geoFull
+            ? "已检测到 geo 数据：大陆域名 + 大陆 IP 网段双重判断，未收录的视频 CDN 也会自动直连。"
+            : (st.route_assets
+                ? "内核目录缺少 geo 文件，将退回按 <strong>.cn 域名</strong>直连；点右侧按钮可只下载 geo 数据（不用重下整个内核）。"
+                : "未获取到 geo 数据状态（后端可能尚未重启）；点右侧按钮可直接下载 geo 数据到内核目录。"))) +
+      "</div>" +
+      (needGeo
+        ? '<button type="button" class="v2v-btn sm v2v-geo-dl" data-act="geo-download"' +
+          (v2JobBusy() ? " disabled" : "") +
+          ' title="只下载 geoip.dat / geosite.dat 到内核目录，不用重下整个内核">' +
+          '<i class="bi bi-cloud-arrow-down"></i>下载 geo 数据</button>'
+        : "") +
+      "</div></div></div>";
+
+    h += '<div class="v2v-sec">' +
+      v2vSecHead("bi-shield-lock", "始终直连", "以下地址不会被代理，避免内网访问绕远路") +
+      '<div class="v2v-tip">127.0.0.0/8 · 10.0.0.0/8 · 172.16.0.0/12 · 192.168.0.0/16 · 169.254.0.0/16 · localhost</div>' +
+      "</div>";
+
+    h += '<div class="v2v-actions">' +
+      '<button class="v2v-btn primary" data-act="save-route"><i class="bi bi-arrow-repeat"></i>保存并重启内核</button>' +
+      '<span class="v2v-sub-note">路由规则写入内核配置，保存后会立即重启内核生效</span>' +
+      "</div>";
+    return h;
+  }
+
   function v2vLog() {
     const core = V2.logTab !== "conn";
     const ctl =
@@ -1462,7 +1545,7 @@
   function v2vBind(box) {
     if (!box || box.dataset.v2bound) return;
     box.dataset.v2bound = "1";
-    box.addEventListener("click", (e) => {
+    box.addEventListener("click", async (e) => {
       const tb = e.target.closest(".v2v-tab[data-sec]");
       if (tb) {
         V2.sec = tb.dataset.sec;
@@ -1504,7 +1587,19 @@
         return;
       }
       const btn = e.target.closest("[data-act]");
-      if (btn) v2vAction(btn.dataset.act, btn.dataset);
+      if (!btn || btn.disabled) return;
+      // 连接 / 重启 / 刷新 / 保存并重启：请求期间图标旋转并禁用，防止重复点击
+      const slow = { toggle: 1, restart: 1, refresh: 1, "save-route": 1 };
+      if (!slow[btn.dataset.act]) { v2vAction(btn.dataset.act, btn.dataset); return; }
+      const ic = btn.querySelector("i");
+      btn.disabled = true;
+      if (ic) ic.classList.add("spin");
+      try {
+        await v2vAction(btn.dataset.act, btn.dataset);
+      } finally {
+        btn.disabled = false;
+        if (ic) ic.classList.remove("spin");
+      }
     });
     // 监听地址 / 认证开关联动：不用等保存，下拉切到哪边认证选项即时跟着变
     const authNoteSync = () => {
@@ -2190,6 +2285,55 @@
           okText: "重启内核", cancelText: "稍后",
         });
         if (ok) return v2vAction("restart", {});
+        break;
+      }
+      /* -------- 路由分流：路由模式 / 大陆分流 -------- */
+      case "route-mode": {
+        const m = ds.mode;
+        if (["global", "rule", "direct"].indexOf(m) < 0) return;
+        if (V2.st && V2.st.settings) V2.st.settings.route_mode = m;
+        document.querySelectorAll('#v2View [data-act="route-mode"]').forEach(b =>
+          b.classList.toggle("on", b.dataset.mode === m));
+        const sel = $("v2vModBypass");
+        if (sel) sel.disabled = m !== "rule";
+        const tip = $("v2vRouteTip");
+        const tips = {
+          global: "除本机 / 局域网外，所有流量都走代理节点",
+          rule: "大陆直连，其余流量走代理（推荐）",
+          direct: "所有流量直连；代理入口保留，便于随时切回",
+        };
+        if (tip) tip.textContent = tips[m] || "";
+        break;
+      }
+      case "save-route": {
+        const m = (V2.st && V2.st.settings && V2.st.settings.route_mode) || "rule";
+        const cn = val("v2vModBypass") === "1" ? 1 : 0;
+        const r = await post("/api/v2ray/settings", { route_mode: m, bypass_cn: cn });
+        if (r.error) return toast(r.error, "err");
+        // 先只更新本地状态，不整页重绘：让按钮的旋转 / 禁用一直持续到重启结束
+        if (V2.st && V2.st.settings) {
+          V2.st.settings.route_mode = m;
+          V2.st.settings.bypass_cn = cn;
+        }
+        if (!(V2.st && V2.st.running)) {
+          await v2Reload();
+          return toast("路由设置已保存，连接节点后生效", "ok");
+        }
+        // 路由规则写在生成的内核配置里：内核在跑就顺手重启，避免「保存了但没生效」
+        toast("路由设置已保存，正在重启内核…", "info");
+        const rr = await post("/api/v2ray/restart");
+        if (rr && rr.error) {
+          await v2Reload();
+          return toast("设置已保存，但重启失败：" + rr.error, "err");
+        }
+        await v2Reload();
+        toast("路由设置已生效：" + v2ModeName(m) +
+              (m === "rule" && cn ? " · 大陆直连" : ""), "ok");
+        break;
+      }
+      case "geo-download": {
+        if (v2JobBusy()) return toast("已有任务在进行中，请稍候", "warn");
+        v2JobRun("geo", "/api/v2ray/geo/download");
         break;
       }
       case "clear-pass": {

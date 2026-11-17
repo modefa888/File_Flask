@@ -80,6 +80,8 @@ DEFAULT_SETTINGS = {
     "sub_proxy": "",            # 拉取订阅时使用的代理（如 socks5://127.0.0.1:10808）
     "api_port": 15490,          # 内核统计 API 端口（实时网速 / 流量统计依赖它；0 = 关闭）
     "auth_enabled": 1,          # SOCKS5 认证开关（1 = 启用；仅本机监听时可关闭，0.0.0.0 强制启用）
+    "route_mode": "rule",       # 路由模式：global 全局代理 / rule 智能分流 / direct 全局直连
+    "bypass_cn": 1,             # 智能分流时过滤大陆：大陆域名 / IP 直连，其余走代理
 }
 
 _LISTEN_CHOICES = ("0.0.0.0", "127.0.0.1")

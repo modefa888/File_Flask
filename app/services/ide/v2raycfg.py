@@ -676,6 +676,86 @@ def download_core(dest_dir: str, url: str = "", progress=None, on_phase=None, on
     return exe
 
 
+# 大陆分流数据：Loyalsoldier 维护的 geoip.dat / geosite.dat（两个文件同源、更新频繁），
+# v2fly 官方仓库作为备选。Xray 从可执行文件所在目录加载它们，所以只要补数据、不用重下内核。
+# v2fly 的 geosite 资产叫 dlc.dat，但内容就是 geosite 格式，下载后按 geosite.dat 落盘即可。
+_GEO_ASSETS = (
+    ("geoip.dat", (
+        "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
+        "https://github.com/v2fly/geoip/releases/latest/download/geoip.dat",
+    )),
+    ("geosite.dat", (
+        "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
+        "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat",
+    )),
+)
+
+
+def _download_asset(url: str, dst: str, progress=None, on_log=None) -> int:
+    """流式下载一个数据文件到 dst（直连 / 镜像 / 代理依次试），返回字节数。"""
+    last_err = ""
+    for proxy, target in _attempts(url):
+        host = urllib.parse.urlsplit(target).netloc
+        label = ("经代理 " + proxy) if proxy else (
+            "GitHub 官方直连" if host == "github.com" else "加速镜像 " + host)
+        _notify(on_log, "尝试下载源：" + label)
+        got = 0
+        try:
+            with _open(target, proxy, 30) as resp:
+                total = int(resp.headers.get("Content-Length") or 0)
+                with open(dst, "wb") as f:
+                    while True:
+                        chunk = resp.read(64 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        got += len(chunk)
+                        _notify(progress, got, total)
+            size = os.path.getsize(dst) if os.path.isfile(dst) else 0
+            if size < 100 * 1024:
+                raise ValueError("只收到 %s，不像 geo 数据文件" % _size_text(size))
+            with open(dst, "rb") as f:
+                head = f.read(64).lstrip().lower()
+            if head.startswith(b"<!doctype") or head.startswith(b"<html"):
+                raise ValueError("响应是网页而不是数据文件（多半是镜像错误页）")
+            return size
+        except Exception as e:                 # noqa: BLE001
+            last_err = str(e) or e.__class__.__name__
+            _notify(on_log, "该源失败：" + last_err)
+            _part_remove(dst)
+    raise ValueError(last_err or "下载失败")
+
+
+def download_geo(dest_dir: str, progress=None, on_phase=None, on_log=None) -> list:
+    """只下载大陆分流所需的 geoip.dat / geosite.dat 到 dest_dir（内核同目录）。
+
+    Xray 启动时从可执行文件所在目录加载这两个文件；缺失时 geoip:cn / geosite:cn
+    会让配置校验失败。这里单独补数据文件，不必重下整个内核；失败自动换源重试。
+    """
+    os.makedirs(dest_dir, exist_ok=True)
+    saved = []
+    for name, urls in _GEO_ASSETS:
+        tmp = os.path.join(dest_dir, name + ".tmp")
+        _notify(on_log, "开始下载 " + name)
+        last_err = ""
+        size = 0
+        for url in urls:                       # 多个上游：一个仓库不可用就换下一个
+            try:
+                size = _download_asset(url, tmp, progress, on_log)
+                break
+            except Exception as e:             # noqa: BLE001
+                last_err = str(e) or e.__class__.__name__
+                _notify(on_log, "换下一个上游：" + last_err)
+        else:
+            _part_remove(tmp)
+            raise ValueError("%s 下载失败（最后错误：%s）" % (name, last_err or "未知"))
+        os.replace(tmp, os.path.join(dest_dir, name))
+        _notify(on_log, "已保存 %s（%s）" % (name, _size_text(size)))
+        saved.append(os.path.join(dest_dir, name))
+    _notify(on_phase, "done")
+    return saved
+
+
 def _size_text(n) -> str:
     """字节数 → 「13.9 MB」这样的可读文本（日志 / 错误提示用）。"""
     try:
@@ -1139,10 +1219,207 @@ def build_config(node: dict, opts: dict) -> dict:
         http_port    HTTP 入站端口（0 = 不开启）
         api_port     统计接口端口（0 = 不开启）
         log_level    日志级别
+        route_mode   路由模式：global 全局代理 / rule 智能分流 / direct 全局直连
+        bypass_cn    rule 模式下是否过滤大陆（1 = 大陆域名 / IP 直连）
     """
     if core_kind(str(opts.get("core_path") or "")) == "sing-box":
         return build_singbox_config(node, opts)
     return _build_xray_config(node, opts)
+
+
+# ---------------------------------------------------------------------------
+# 路由 / 大陆分流
+# ---------------------------------------------------------------------------
+
+# 大陆直连依赖内核同目录的 geoip.dat / geosite.dat（Xray 官方包自带）；
+# 精简安装没有这两个文件时退回只按 .cn 域名分流，避免 -test 校验直接失败。
+_CN_DOMAIN_FALLBACK = ["domain:cn"]
+
+# Xray 26 已不再支持 `geosite:cn` / `geoip:cn` 这类旧 geo 规则：不仅匹配不到，遇到无法
+# 识别的 geo 标记还会把整条 routing 规则丢掉（表现为「过滤大陆」完全失效）。所以这里
+# 直接从 geosite.dat 的 CN 分类里提取域名，生成显式 domain 列表；另外补一份常见大陆
+# 站点，避免不同版本 geosite.dat 分类差异导致主流站点漏掉（例如新版 CN 分类没有 B 站）。
+_CN_EXTRA_DOMAINS = (
+    "bilibili.com", "bilibili.tv", "b23.tv", "acgvideo.com", "hdslb.com",
+    "bilivideo.com", "bilivideo.cn", "biliapi.net", "biliapi.com", "bilicdn.com",
+    "biligame.com", "bilibiligame.co", "bilibiligame.net", "bilibilipay.cn",
+    "qq.com", "tencent.com", "qpic.cn", "gtimg.cn", "qcloud.com", "myqcloud.com",
+    "taobao.com", "tmall.com", "alicdn.com", "aliyun.com", "alipay.com", "alibaba.com",
+    "alipayobjects.com", "jd.com", "jd.hk", "360buyimg.com", "pinduoduo.com",
+    "yangkeduo.com", "baidu.com", "bdstatic.com", "bdimg.com", "weibo.com", "weibo.cn",
+    "sina.com.cn", "sinaimg.cn", "zhihu.com", "zhimg.com", "douyin.com", "douyinpic.com",
+    "douyinvod.com", "bytedance.com", "byteimg.com", "bytecdn.cn", "toutiao.com",
+    "kuaishou.com", "gifshow.com", "iqiyi.com", "qiyipic.com", "youku.com", "163.com",
+    "126.net", "netease.com", "xiaomi.com", "mi.com", "miui.com", "huawei.com",
+    "hicloud.com", "meituan.com", "dianping.com", "ctrip.com", "qunar.com",
+    "cnblogs.com", "csdn.net", "gitee.com", "oschina.net", "jianshu.com", "douban.com",
+    "doubanio.com", "ximalaya.com", "qingting.fm", "51job.com", "zhaopin.com",
+    "lagou.com", "bosszhipin.com", "gov.cn", "edu.cn", "com.cn", "net.cn", "org.cn",
+)
+
+# geosite.dat 解析结果缓存：key = (路径, mtime)，避免每次生成配置都重新解析几 MB 文件
+_GEOSITE_CACHE = {}
+
+
+def _pb_varint(buf: bytes, i: int):
+    """读一个 protobuf varint，返回 (值, 新下标)。"""
+    val = shift = 0
+    while True:
+        b = buf[i]
+        i += 1
+        val |= (b & 0x7F) << shift
+        if not b & 0x80:
+            return val, i
+        shift += 7
+
+
+def _pb_fields(buf: bytes):
+    """极简 protobuf 字段遍历（只用于读 geosite.dat，不依赖第三方库）。"""
+    i, n = 0, len(buf)
+    while i < n:
+        key, i = _pb_varint(buf, i)
+        field, wt = key >> 3, key & 7
+        if wt == 0:
+            val, i = _pb_varint(buf, i)
+            yield field, val
+        elif wt == 2:
+            ln, i = _pb_varint(buf, i)
+            yield field, buf[i:i + ln]
+            i += ln
+        elif wt == 5:
+            yield field, buf[i:i + 4]
+            i += 4
+        elif wt == 1:
+            yield field, buf[i:i + 8]
+            i += 8
+        else:
+            raise ValueError("bad protobuf wire type: %s" % wt)
+
+
+def _read_geosite_cn(path: str) -> list:
+    """从 geosite.dat 里取出 CN 分类的域名规则（domain: / full: / regexp:）。"""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return []
+    out = []
+    try:
+        for field, site in _pb_fields(data):
+            if field != 1 or not isinstance(site, (bytes, bytearray)):
+                continue
+            code, doms = "", []
+            for f2, v2 in _pb_fields(site):
+                if f2 == 1 and isinstance(v2, (bytes, bytearray)):
+                    code = bytes(v2).decode("utf-8", "replace")
+                elif f2 == 2 and isinstance(v2, (bytes, bytearray)):
+                    typ, val = 0, ""
+                    for f3, v3 in _pb_fields(v2):
+                        if f3 == 1 and not isinstance(v3, (bytes, bytearray)):
+                            typ = v3
+                        elif f3 == 2 and isinstance(v3, (bytes, bytearray)):
+                            val = bytes(v3).decode("utf-8", "replace")
+                    if val:
+                        doms.append((typ, val))
+            if code.upper() == "CN":
+                out = [("full:" if t == 2 else ("regexp:" if t == 1 else "domain:")) + v
+                       for t, v in doms]
+    except (IndexError, ValueError):
+        return out
+    return out
+
+
+def _read_geoip_cn(path: str) -> list:
+    """从 geoip.dat 里取出 CN 的网段列表（CIDR 字符串）。"""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return []
+    out = []
+    try:
+        for field, entry in _pb_fields(data):
+            if field != 1 or not isinstance(entry, (bytes, bytearray)):
+                continue
+            code, cidrs = "", []
+            for f2, v2 in _pb_fields(entry):
+                if f2 == 1 and isinstance(v2, (bytes, bytearray)):
+                    code = bytes(v2).decode("utf-8", "replace")
+                elif f2 == 2 and isinstance(v2, (bytes, bytearray)):
+                    ipb, prefix = b"", 0
+                    for f3, v3 in _pb_fields(v2):
+                        if f3 == 1 and isinstance(v3, (bytes, bytearray)):
+                            ipb = bytes(v3)
+                        elif f3 == 2 and not isinstance(v3, (bytes, bytearray)):
+                            prefix = v3
+                    if len(ipb) == 4:
+                        cidrs.append("%d.%d.%d.%d/%d" % (ipb[0], ipb[1], ipb[2], ipb[3], prefix))
+                    elif len(ipb) == 16:
+                        try:
+                            cidrs.append("%s/%d" % (socket.inet_ntop(socket.AF_INET6, ipb), prefix))
+                        except OSError:
+                            pass
+            if code.upper() == "CN":
+                out = cidrs
+    except (IndexError, ValueError):
+        return out
+    return out
+
+
+def _geoip_cn_cidrs(opts: dict) -> list:
+    """带缓存的 geoip CN 网段读取（文件变化后自动重新解析）。"""
+    path = os.path.join(_geo_dir(opts), "geoip.dat")
+    try:
+        key = (path, os.path.getmtime(path))
+    except OSError:
+        return []
+    if key not in _GEOSITE_CACHE:
+        _GEOSITE_CACHE.clear()
+        _GEOSITE_CACHE[key] = _read_geoip_cn(path)
+    return _GEOSITE_CACHE[key]
+
+
+def _geo_dir(opts: dict) -> str:
+    """在内核实际所在目录找 geo 资源（自定义路径 / versions 目录都适用）。"""
+    p = str(opts.get("core_path") or "").strip()
+    return os.path.dirname(os.path.abspath(p)) if p else ""
+
+
+def _has_geo(opts: dict, name: str) -> bool:
+    d = _geo_dir(opts)
+    return bool(d) and os.path.isfile(os.path.join(d, name))
+
+
+def _geosite_cn_domains(opts: dict) -> list:
+    """带缓存的 geosite CN 分类读取（文件变化后自动重新解析）。"""
+    path = os.path.join(_geo_dir(opts), "geosite.dat")
+    try:
+        key = (path, os.path.getmtime(path))
+    except OSError:
+        return []
+    if key not in _GEOSITE_CACHE:
+        _GEOSITE_CACHE.clear()
+        _GEOSITE_CACHE[key] = _read_geosite_cn(path)
+    return _GEOSITE_CACHE[key]
+
+
+def _cn_route_rule(opts: dict) -> dict:
+    """Xray 的大陆直连规则：显式域名列表 + 大陆 IP 网段（不依赖 Xray 的 geosite 支持）。
+
+    域名列表覆盖已收录的站点；配合 routing.domainStrategy = IPIfNonMatch，没收录的域名
+    （视频 CDN 这类随机子域）会解析成 IP 再按 geoip CN 网段判断，命中即直连。
+    """
+    doms = list(_CN_DOMAIN_FALLBACK) + list(_CN_EXTRA_DOMAINS) + _geosite_cn_domains(opts)
+    seen, uniq = set(), []
+    for d in doms:
+        if d and d not in seen:
+            seen.add(d)
+            uniq.append(d)
+    rule = {"type": "field", "outboundTag": "direct", "domain": uniq}
+    cidrs = _geoip_cn_cidrs(opts)
+    if cidrs:
+        rule["ip"] = cidrs
+    return rule
 
 
 def _build_xray_config(node: dict, opts: dict) -> dict:
@@ -1181,6 +1458,25 @@ def _build_xray_config(node: dict, opts: dict) -> dict:
     if level not in _LOG_LEVELS:
         level = "warning"
 
+    route_mode = str(opts.get("route_mode") or "rule").strip().lower()
+    if route_mode not in ("global", "rule", "direct"):
+        route_mode = "rule"
+    bypass_cn = bool(_as_int(opts.get("bypass_cn")))
+    # 局域网 / 本机地址直连，避免把内网访问也绕进代理。
+    # 这里刻意不用 geoip:private —— 它依赖内核同目录的 geoip.dat，
+    # 精简安装常常没有该文件，会导致配置校验直接失败。
+    route_rules = [
+        {"type": "field", "outboundTag": "direct",
+         "domain": ["localhost"],
+         "ip": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10"]},
+    ]
+    if route_mode == "direct":
+        # 全局直连：所有 TCP / UDP 都走 freedom（代理入站仍保留，方便随时切回代理模式）
+        route_rules.append({"type": "field", "network": "tcp,udp", "outboundTag": "direct"})
+    elif route_mode == "rule" and bypass_cn:
+        route_rules.append(_cn_route_rule(opts))
+
     cfg = {
         "log": {"loglevel": level, "access": "none", "error": ""},
         "inbounds": inbounds,
@@ -1190,16 +1486,10 @@ def _build_xray_config(node: dict, opts: dict) -> dict:
             {"tag": "block", "protocol": "blackhole"},
         ],
         "routing": {
-            "domainStrategy": "AsIs",
-            "rules": [
-                # 局域网 / 本机地址直连，避免把内网访问也绕进代理。
-                # 这里刻意不用 geoip:private —— 它依赖内核同目录的 geoip.dat，
-                # 精简安装常常没有该文件，会导致配置校验直接失败。
-                {"type": "field", "outboundTag": "direct",
-                 "domain": ["localhost"],
-                 "ip": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
-                        "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10"]},
-            ],
+            # IPIfNonMatch：域名没命中直连列表时解析 IP，再按大陆网段判断——
+            # 这样没被 geosite 收录的视频 CDN 子域（如 upos-xxx.bilivideo.com）也能自动直连
+            "domainStrategy": "IPIfNonMatch" if (route_mode == "rule" and bypass_cn) else "AsIs",
+            "rules": route_rules,
         },
     }
 
@@ -1344,6 +1634,22 @@ def build_singbox_config(node: dict, opts: dict) -> dict:
 
     level = _SB_LOG_LEVELS.get(str(opts.get("log_level") or "warning").lower(), "warn")
 
+    route_mode = str(opts.get("route_mode") or "rule").strip().lower()
+    if route_mode not in ("global", "rule", "direct"):
+        route_mode = "rule"
+    bypass_cn = bool(_as_int(opts.get("bypass_cn")))
+    route_rules = [
+        # 局域网 / 本机地址直连，避免把内网访问也绕进代理。
+        # 这里只用 ip_cidr（不依赖 sing-box 1.11 才有的 action 写法）。
+        {"ip_cidr": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12",
+                     "192.168.0.0/16", "169.254.0.0/16",
+                     "::1/128", "fc00::/7", "fe80::/10"],
+         "outbound": "direct"},
+    ]
+    if route_mode == "rule" and bypass_cn:
+        # sing-box 用后缀匹配（.cn + 常见大陆站点），不依赖 geo 文件
+        route_rules.append({"domain_suffix": [".cn"] + list(_CN_EXTRA_DOMAINS),
+                            "outbound": "direct"})
     cfg = {
         "log": {"level": level, "timestamp": True},
         "inbounds": inbounds,
@@ -1352,15 +1658,8 @@ def build_singbox_config(node: dict, opts: dict) -> dict:
             {"type": "direct", "tag": "direct"},
         ],
         "route": {
-            "rules": [
-                # 局域网 / 本机地址直连，避免把内网访问也绕进代理。
-                # 这里只用 ip_cidr（不依赖 sing-box 1.11 才有的 action 写法）。
-                {"ip_cidr": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12",
-                             "192.168.0.0/16", "169.254.0.0/16",
-                             "::1/128", "fc00::/7", "fe80::/10"],
-                 "outbound": "direct"},
-            ],
-            "final": "proxy",
+            "rules": route_rules,
+            "final": "direct" if route_mode == "direct" else "proxy",
             "auto_detect_interface": True,
         },
     }

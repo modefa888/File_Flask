@@ -712,12 +712,73 @@ CREATE TABLE IF NOT EXISTS traecn_entitlements (
 """
 
 
+def _store_db_error(err):
+    """把 sqlite 的 "unable to open database file" 翻译成能直接照着排查的提示。
+
+    这个报错本身不含任何细节，常见成因只有三类：目录不存在 / 没写权限 /
+    残留的 -wal、-shm 目录项损坏（多见于 NTFS 挂载盘未正常卸载、被 Windows 占用）。
+    """
+    path = _STORE_DB_FILE
+    hints = ["store.db 打开失败：%s" % err, "  数据库路径：%s" % path]
+
+    parent = os.path.dirname(path)
+    if not os.path.isdir(parent):
+        hints.append("  目录不存在：%s（检查 data/storage 是否被删除或未挂载）" % parent)
+    elif not os.access(parent, os.W_OK):
+        hints.append("  目录不可写：%s（检查属主/权限，必要时 chown 给当前用户）" % parent)
+    else:
+        try:
+            probe = os.path.join(parent, ".write_probe")
+            with open(probe, "w"):
+                pass
+            os.remove(probe)
+        except OSError as e:
+            hints.append("  目录无法创建文件：%s" % e)
+
+    for suffix in ("-wal", "-shm", "-journal"):
+        p = path + suffix
+        try:
+            os.stat(p)
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            hints.append(
+                "  残留文件损坏：%s（%s）—— 多半是 NTFS 分区未正常卸载/被 Windows 占用，"
+                "需在 Windows 下运行 chkdsk 或卸载后执行 ntfsfix 修复" % (p, e)
+            )
+            continue
+        if not os.access(p, os.W_OK):
+            hints.append("  残留文件不可写：%s（检查属主，可能被 root 进程创建过）" % p)
+
+    return RuntimeError("\n".join(hints))
+
+
 def store_conn():
-    """打开 store.db 连接（调用方负责关闭）。WAL 下读不阻塞写。"""
+    """打开 store.db 连接（调用方负责关闭）。WAL 下读不阻塞写。
+
+    部分文件系统（NTFS / FAT 挂载盘、网络共享）不支持 WAL：此时 SQLite 会报
+    "unable to open database file"。这里先试 WAL，失败后回退到传统回滚日志模式，
+    宁可并发差一点，也不让整个服务起不来。
+    """
     conn = sqlite3.connect(_STORE_DB_FILE, timeout=30)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.OperationalError as e:
+        conn.close()
+        try:
+            conn = sqlite3.connect(_STORE_DB_FILE, timeout=30)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=DELETE")
+            conn.execute("PRAGMA synchronous=FULL")
+        except sqlite3.Error as e2:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            raise _store_db_error(e2) from e2
+        _log.warning("store.db 无法启用 WAL（%s），已回退到 DELETE 日志模式", e)
     return conn
 
 

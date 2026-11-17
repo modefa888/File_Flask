@@ -41,6 +41,19 @@ class JsonFormatter(logging.Formatter):
             return super().format(record)
 
 
+def _open_file_handler(path):
+    """创建轮转文件句柄；无法写入时返回 None（而不是让整个进程启动失败）。"""
+    try:
+        handler = TimedRotatingFileHandler(
+            path, when="midnight", backupCount=15, encoding="utf-8",
+        )
+    except OSError as e:
+        return None, e
+    handler.suffix = "%Y%m%d"
+    handler.setFormatter(JsonFormatter())
+    return handler, None
+
+
 def _build_logger(name: str = "fm") -> logging.Logger:
     logger = logging.getLogger(name)
     if logger.handlers:                     # 幂等：避免重复挂载句柄
@@ -52,12 +65,25 @@ def _build_logger(name: str = "fm") -> logging.Logger:
     console.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s"))
     logger.addHandler(console)
 
-    file_handler = TimedRotatingFileHandler(
-        os.path.join(_LOG_DIR, "app.log"), when="midnight", backupCount=15, encoding="utf-8",
-    )
-    file_handler.suffix = "%Y%m%d"
-    file_handler.setFormatter(JsonFormatter())
-    logger.addHandler(file_handler)
+    # app.log 可能被别的用户（例如曾经用 sudo 启动过）创建成 root 所有，
+    # 此时普通用户无法追加。降级到带用户后缀的文件，仍失败则只写控制台，
+    # 绝不让「日志写不进去」把整个服务启动搞崩。
+    candidates = [
+        os.path.join(_LOG_DIR, "app.log"),
+        os.path.join(_LOG_DIR, "app_%s.log" % (os.environ.get("USER") or os.getuid())),
+    ]
+    first_err = None
+    for path in candidates:
+        handler, err = _open_file_handler(path)
+        if first_err is None:
+            first_err = err
+        if handler is not None:
+            logger.addHandler(handler)
+            if path != candidates[0]:
+                logger.warning("日志文件 %s 不可写（%s），已改写到 %s", candidates[0], first_err, path)
+            break
+    else:
+        logger.warning("日志文件不可写，仅输出到控制台：%s", first_err)
     return logger
 
 

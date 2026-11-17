@@ -106,13 +106,32 @@ def _preflight(url, timeout=_CONNECT_TIMEOUT):
         raise OSError("连接 %s:%s 失败：%s" % (host, port, e))
 
 
+# 系统环境里的 http_proxy 可能指向本机代理端口，而代理没启动时 urllib 会走它并
+# 直接 Connection refused（AI 接口看起来全线不可用）。AI 接口多为国内服务或本机
+# 服务，直连最可靠：先显式关闭环境代理直连，直连不通再退回系统代理。
+_DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _ai_urlopen(req, timeout):
+    """AI 接口请求：直连优先，失败后再尝试系统代理。"""
+    try:
+        return _DIRECT_OPENER.open(req, timeout=timeout)
+    except urllib.error.HTTPError:
+        raise                                     # 4xx/5xx 是接口返回，不要重试
+    except (urllib.error.URLError, OSError):
+        proxies = urllib.request.getproxies()
+        if not (proxies.get("https") or proxies.get("http") or proxies.get("all")):
+            raise
+        return urllib.request.urlopen(req, timeout=timeout)
+
+
 def _open_stream(req, url, connect_timeout=_CONNECT_TIMEOUT, read_timeout=_READ_TIMEOUT):
     """打开模型接口请求：连接阶段短超时，连上后读超时放宽。
 
     注意 urlopen 的 timeout 对连接和读取都生效：只给 15 秒会把「首字慢」的
     模型判成「无法连接 AI 接口：The read operation timed out」。"""
     _preflight(url, connect_timeout)
-    return urllib.request.urlopen(req, timeout=read_timeout)
+    return _ai_urlopen(req, timeout=read_timeout)
 _MAX_IMAGE_DATAURL = 9_000_000        # 单张图片 data URL 上限（约 6.7MB 原图）
 _MAX_IMAGE_PARTS = 8                  # 单次请求最多图片部件数
 
@@ -1586,7 +1605,7 @@ def api_ai_summarize():
     req = urllib.request.Request(url, data=payload, method="POST", headers={
         "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
     try:
-        resp = urllib.request.urlopen(req, timeout=_SUMMARY_TIMEOUT)
+        resp = _ai_urlopen(req, timeout=_SUMMARY_TIMEOUT)
         obj = json.loads(resp.read().decode("utf-8"))
         choices = obj.get("choices") or [{}]
         text = ((choices[0] or {}).get("message") or {}).get("content") or ""
@@ -1631,7 +1650,7 @@ def api_ai_title():
     req = urllib.request.Request(url, data=payload, method="POST", headers={
         "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
     try:
-        resp = urllib.request.urlopen(req, timeout=_TITLE_TIMEOUT)
+        resp = _ai_urlopen(req, timeout=_TITLE_TIMEOUT)
         obj = json.loads(resp.read().decode("utf-8"))
         choices = obj.get("choices") or [{}]
         text = ((choices[0] or {}).get("message") or {}).get("content") or ""
@@ -1688,7 +1707,7 @@ def api_ai_inline():
     req = urllib.request.Request(url, data=payload, method="POST", headers={
         "Content-Type": "application/json", "Authorization": "Bearer " + provider["api_key"]})
     try:
-        resp = urllib.request.urlopen(req, timeout=_INLINE_TIMEOUT)
+        resp = _ai_urlopen(req, timeout=_INLINE_TIMEOUT)
         obj = json.loads(resp.read().decode("utf-8"))
         choices = obj.get("choices") or [{}]
         text = ((choices[0] or {}).get("message") or {}).get("content") or ""
@@ -1875,7 +1894,7 @@ def _commit_call(url, api_key, model, messages, stream):
     req = urllib.request.Request(url, data=payload, method="POST", headers={
         "Content-Type": "application/json", "Authorization": "Bearer " + api_key})
     try:
-        resp = urllib.request.urlopen(req, timeout=_COMMIT_TIMEOUT)
+        resp = _ai_urlopen(req, timeout=_COMMIT_TIMEOUT)
     except urllib.error.HTTPError as e:
         try:
             detail = e.read().decode("utf-8", "replace")[:200]
@@ -2016,7 +2035,7 @@ def api_ai_models():
         headers["Authorization"] = "Bearer " + key
     req = urllib.request.Request(url, headers=headers)
     try:
-        resp = urllib.request.urlopen(req, timeout=30)
+        resp = _ai_urlopen(req, timeout=30)
         obj = json.loads(resp.read().decode("utf-8"))
         items = obj.get("data") if isinstance(obj, dict) else obj if isinstance(obj, list) else None
         ids = []

@@ -31,6 +31,7 @@ POST /api/v2ray/traffic/reset    流量统计清零
 SOCKS5 代理使用；如需限制范围，可在设置里改为 127.0.0.1，或给入站加用户名密码。
 """
 import json
+import secrets
 import socket
 import threading
 import time
@@ -42,7 +43,7 @@ from flask import Blueprint, Response, jsonify, request
 
 from ...log import get_logger
 from ...services.common import proxyutil, secret, transport
-from ...services.ide import v2raycfg, v2raydb, v2raymgr
+from ...services.ide import v2raycfg, v2raydb, v2raymgr, v2rayfloat
 
 _log = get_logger()
 bp = Blueprint("v2ray", __name__)
@@ -968,3 +969,104 @@ def v2_traffic():
 def v2_traffic_reset():
     """流量统计清零。"""
     return jsonify(v2raymgr.reset_traffic())
+
+
+# ---------------------------------------------------------------------------
+# 桌面悬浮胶囊（系统级 tkinter 进程）
+# ---------------------------------------------------------------------------
+
+def _float_auth_ok() -> bool:
+    """悬浮窗接口鉴权：只允许本机 + 正确 token（不走登录会话）。"""
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        return False
+    tok = str(request.headers.get("X-Float-Token") or "")
+    good = v2rayfloat.token()
+    return bool(tok) and bool(good) and secrets.compare_digest(tok, good)
+
+
+def _float_payload() -> dict:
+    """悬浮窗需要的精简状态：速度 / 节点 / 模式 / 节点列表。"""
+    st = v2raymgr.status()
+    tr = v2raymgr.traffic()
+    s = st.get("settings") or {}
+    nodes = [{"id": n.get("id"), "name": n.get("name") or n.get("server") or n.get("id")}
+             for n in v2raydb.list_nodes()]
+    return {
+        "ok": True,
+        "running": bool(st.get("running")),
+        "pid": int(st.get("pid") or 0),
+        "mode": str(s.get("route_mode") or "rule"),
+        "bypass_cn": int(s.get("bypass_cn") or 0),
+        "node": st.get("node") or {},
+        "speed": tr.get("speed") or {"up": 0, "down": 0},
+        "total": tr.get("total") or {},
+        "nodes": nodes,
+    }
+
+
+@bp.get("/api/v2ray/float/status")
+def v2_float_status():
+    """桌面胶囊进程状态（前端按钮用）。"""
+    return jsonify(v2rayfloat.status())
+
+
+@bp.post("/api/v2ray/float/start")
+def v2_float_start():
+    """启动桌面悬浮胶囊。"""
+    return jsonify(v2rayfloat.start())
+
+
+@bp.post("/api/v2ray/float/stop")
+def v2_float_stop():
+    """关闭桌面悬浮胶囊。"""
+    return jsonify(v2rayfloat.stop())
+
+
+@bp.get("/api/v2ray/float/info")
+def v2_float_info():
+    """悬浮窗轮询接口（本机 token 鉴权）。"""
+    if not _float_auth_ok():
+        return jsonify({"ok": False, "error": "未授权"}), 403
+    return jsonify(_float_payload())
+
+
+@bp.post("/api/v2ray/float/action")
+def v2_float_action():
+    """悬浮窗操作：切换路由模式 / 节点 / 连接状态（本机 token 鉴权）。"""
+    if not _float_auth_ok():
+        return jsonify({"ok": False, "error": "未授权"}), 403
+    data = request.get_json(silent=True) or {}
+    action = str(data.get("action") or "")
+    if action == "mode":
+        mode = str(data.get("mode") or "").strip().lower()
+        if mode not in ("global", "rule", "direct"):
+            return jsonify({"ok": False, "error": "无效的路由模式"}), 400
+        v2raydb.set_settings({"route_mode": mode,
+                              "bypass_cn": 1 if mode == "rule" else 0})
+        if (v2raymgr.status() or {}).get("running"):
+            err = (v2raymgr.restart() or {}).get("error")
+            if err:
+                return jsonify({"ok": False, "error": err}), 400
+    elif action == "node":
+        nid = str(data.get("id") or "")
+        if not nid:
+            return jsonify({"ok": False, "error": "缺少节点 id"}), 400
+        err = (v2raymgr.start(nid) or {}).get("error")
+        if err:
+            return jsonify({"ok": False, "error": err}), 400
+    elif action == "toggle":
+        if (v2raymgr.status() or {}).get("running"):
+            v2raymgr.stop()
+        else:
+            nid = str(v2raydb.all_settings().get("active_node") or "")
+            if not nid:
+                nodes = v2raydb.list_nodes()
+                nid = nodes[0].get("id") if nodes else ""
+            if not nid:
+                return jsonify({"ok": False, "error": "还没有节点，请先在主界面添加"}), 400
+            err = (v2raymgr.start(nid) or {}).get("error")
+            if err:
+                return jsonify({"ok": False, "error": err}), 400
+    else:
+        return jsonify({"ok": False, "error": "未知操作"}), 400
+    return jsonify(_float_payload())

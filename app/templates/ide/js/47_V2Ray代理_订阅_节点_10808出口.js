@@ -74,11 +74,12 @@
      统一拉取：状态 + 节点 + 订阅 + 内核（侧栏与大页共用同一份数据）
      ================================================================== */
   async function v2FetchAll() {
-    const [st, nd, sb, co] = await Promise.all([
+    const [st, nd, sb, co, fl] = await Promise.all([
       api("/api/v2ray/status"), api("/api/v2ray/nodes"), api("/api/v2ray/subs"),
-      api("/api/v2ray/core"),
+      api("/api/v2ray/core"), api("/api/v2ray/float/status"),
     ]);
     if (!st.error) V2.st = st;
+    if (fl && !fl.error) V2.floatOn = !!fl.running;
     if (!nd.error) {
       V2.nodes = nd.nodes || [];
       V2.groups = nd.groups || [];                // 手动新建的自定义分组（可能还是空的）
@@ -607,6 +608,10 @@
       v2vSecHead("bi-activity", "运行状态",
         running ? "已稳定运行 " + esc(fmtUp(st.uptime)) : "内核未启动，点右上角「连接」即可启动",
         '<span class="v2v-flex"></span>' +
+        '<button class="v2v-tab' + (V2.floatOn ? " on" : "") + '" data-act="float-toggle"' +
+        ' title="在桌面悬浮一个流量胶囊：点击胶囊可展开菜单，切换节点 / 路由模式">' +
+        '<i class="bi ' + (V2.floatOn ? "bi-pip-fill" : "bi-pip") + '"></i>' +
+        (V2.floatOn ? "关闭悬浮" : "桌面悬浮") + "</button>" +
         '<button class="v2v-tab' + (v2FailOn() ? " on" : "") + '" data-act="auto-fail"' +
         ' title="由后端持续守护：开启后每 60 秒探测当前节点，连续两次超时自动切换到最优可用节点（关掉网页也生效）">' +
         '<i class="bi bi-shield-check"></i>失效自动切换</button>') +
@@ -770,6 +775,267 @@
       V2.trafTimer = setTimeout(tick, 5000);
     };
     tick();
+  }
+
+  /* ==================================================================
+     桌面悬浮流量胶囊（Document Picture-in-Picture）
+       · 胶囊常驻桌面最上层：上行 / 下行速度 + 当前节点 + 路由模式；
+       · 点击胶囊展开菜单：切路由模式（全局 / 绕过大陆 / 直连）、切节点、断开 / 连接；
+       · Chrome / Edge 116+ 支持，窗口可拖动、始终置顶。
+     ================================================================== */
+  const V2_FLOAT_CSS = [
+    '*{box-sizing:border-box}',
+    'html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#1b1c21;color:#e6e6e6;',
+    'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif}',
+    '.vf-host{display:flex;flex-direction:column;height:100%;padding:8px;gap:8px}',
+    '.vf-pill{display:flex;align-items:center;gap:10px;height:56px;padding:0 12px;border-radius:14px;',
+    'background:#24262d;border:1px solid #3a3d46;cursor:pointer;user-select:none;flex:none}',
+    '.vf-pill:hover{border-color:#4a4e59}',
+    '.vf-dot{width:8px;height:8px;border-radius:50%;background:#6b7280;flex:none}',
+    '.vf-dot.on{background:#35d0a5;box-shadow:0 0 8px rgba(53,208,165,.7)}',
+    '.vf-spd{display:flex;flex-direction:column;gap:1px;min-width:0}',
+    '.vf-spd b{font-size:13px;font-weight:600;white-space:nowrap}',
+    '.vf-spd span{font-size:10.5px;color:#8b93a1;white-space:nowrap}',
+    '.vf-node{flex:1;min-width:0;text-align:right}',
+    '.vf-node b{display:block;font-size:11.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.vf-node span{font-size:10px;color:#8b93a1}',
+    '.vf-caret{flex:none;font-size:11px;color:#8b93a1}',
+    '.vf-menu{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;background:#1e2027;',
+    'border:1px solid #343742;border-radius:12px;padding:8px}',
+    '.vf-sec{font-size:10px;color:#7f8794;margin-top:2px;display:flex;justify-content:space-between}',
+    '.vf-sec em{font-style:normal;color:#5f6673}',
+    '.vf-modes{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}',
+    '.vf-modes button{height:28px;border-radius:7px;border:1px solid #3a3d46;background:#262931;',
+    'color:#aeb6c2;font-size:11px;cursor:pointer;font-family:inherit}',
+    '.vf-modes button:hover{border-color:#4a4e59;color:#e6e6e6}',
+    '.vf-modes button.on{background:rgba(53,208,165,.16);border-color:#35d0a5;color:#eafff8}',
+    '.vf-modes button:disabled{opacity:.55;cursor:default}',
+    '.vf-nodes{flex:1;min-height:80px;overflow:auto;display:flex;flex-direction:column;gap:3px;padding-right:2px}',
+    '.vf-nodes button{display:flex;align-items:center;gap:6px;min-height:26px;padding:3px 8px;border-radius:6px;',
+    'border:1px solid transparent;background:transparent;color:#b9c0cc;font-size:11px;text-align:left;',
+    'cursor:pointer;font-family:inherit}',
+    '.vf-nodes button span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.vf-nodes button:hover{background:#262931;color:#fff}',
+    '.vf-nodes button.on{background:rgba(53,208,165,.14);color:#eafff8}',
+    '.vf-nodes button:disabled{opacity:.55;cursor:default}',
+    '.vf-nodes .bi{flex:none;font-size:10px;color:#5f6673}',
+    '.vf-nodes button.on .bi{color:#35d0a5}',
+    '.vf-empty{padding:14px;text-align:center;font-size:11px;color:#7f8794}',
+    '.vf-acts{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;flex:none}',
+    '.vf-acts button{height:28px;border-radius:7px;border:1px solid #3a3d46;background:#262931;',
+    'color:#aeb6c2;font-size:11px;cursor:pointer;font-family:inherit}',
+    '.vf-acts button:hover{border-color:#4a4e59;color:#fff}',
+    '.vf-acts button.danger{color:#f28d96;border-color:rgba(240,97,109,.38)}',
+    'html.theme-light,html.theme-light body{background:#fff;color:#1f2328}',
+    'html.theme-light .vf-pill{background:#f6f8fa;border-color:#d8dee4}',
+    'html.theme-light .vf-spd span,html.theme-light .vf-node span,html.theme-light .vf-sec{color:#8c959f}',
+    'html.theme-light .vf-menu{background:#fafbfc;border-color:#d8dee4}',
+    'html.theme-light .vf-modes button,html.theme-light .vf-acts button{background:#fff;border-color:#d0d7de;color:#57606a}',
+    'html.theme-light .vf-modes button.on{background:#e8f1fb;border-color:#0969da;color:#0969da}',
+    'html.theme-light .vf-nodes button{color:#33404d}',
+    'html.theme-light .vf-nodes button:hover{background:#f0f3f6;color:#1f2328}',
+    'html.theme-light .vf-nodes button.on{background:#e8f1fb;color:#0969da}',
+  ].join("");
+
+  function v2FloatModeName(m) {
+    return m === "global" ? "全局代理" : (m === "direct" ? "全局直连" : "绕过大陆");
+  }
+  function v2FloatAlive() { return !!(V2.floatWin && !V2.floatWin.closed); }
+
+  async function v2FloatToggle() {
+    // 系统级悬浮窗：由后端启动一个独立的 tkinter 桌面进程（不是浏览器小窗）
+    // 顺手关掉旧版浏览器 PiP 小窗，避免两个胶囊同时在桌面上
+    try {
+      if (window.documentPictureInPicture && window.documentPictureInPicture.window) {
+        window.documentPictureInPicture.window.close();
+      }
+    } catch (_) { /* 忽略 */ }
+    try {
+      const cur = await api("/api/v2ray/float/status");
+      if (cur && cur.running) {
+        const r = await post("/api/v2ray/float/stop");
+        if (r.error) return toast(r.error, "err");
+        V2.floatOn = false;
+        toast("桌面胶囊已关闭", "ok");
+      } else {
+        const r = await post("/api/v2ray/float/start");
+        if (r.error) return toast(r.error, "err");
+        V2.floatOn = !!r.running;
+        toast("桌面胶囊已启动：屏幕右下角，可拖动，点击展开菜单", "ok");
+      }
+      if (v2vActive()) v2vRender();
+    } catch (e) {
+      toast("操作失败：" + ((e && e.message) || e), "err");
+    }
+  }
+
+  function v2FloatClosed() {
+    v2FloatStop();
+    V2.floatWin = null;
+    V2.floatOpen = false;
+    if (v2vActive()) v2vRender();
+  }
+
+  function v2FloatStart() {
+    v2FloatStop();
+    V2.floatTimer = setInterval(async () => {
+      if (!v2FloatAlive()) { v2FloatStop(); return; }
+      const tr = await api("/api/v2ray/traffic").catch(() => null);
+      if (tr && !tr.error) { V2.traffic = tr; v2FloatTick(); }
+    }, 1500);
+    V2.floatStTimer = setInterval(async () => {
+      if (!v2FloatAlive()) return;
+      const st = await api("/api/v2ray/status").catch(() => null);
+      if (st && !st.error) { V2.st = st; v2FloatTick(); }
+    }, 5000);
+  }
+  function v2FloatStop() {
+    clearInterval(V2.floatTimer); V2.floatTimer = null;
+    clearInterval(V2.floatStTimer); V2.floatStTimer = null;
+  }
+
+  function v2FloatBuild() {
+    const win = V2.floatWin;
+    if (!win || win.closed) return;
+    const doc = win.document;
+    const st = V2.st || {};
+    const s = st.settings || {};
+    const mode = ["global", "rule", "direct"].indexOf(s.route_mode) >= 0 ? s.route_mode : "rule";
+    const node = st.node;
+    const all = V2.nodes || [];
+    const nodes = all.slice(0, 40);
+    let html = '<div class="vf-host">' +
+      '<div class="vf-pill" id="vfPill" title="点击展开 / 收起菜单">' +
+      '<span class="vf-dot' + (st.running ? " on" : "") + '" id="vfDot"></span>' +
+      '<div class="vf-spd"><b id="vfUp">↑ 0 B/s</b><span id="vfDown">↓ 0 B/s</span></div>' +
+      '<div class="vf-node"><b id="vfNodeName">' + esc(node ? (node.name || node.server) : "未连接") + "</b>" +
+      '<span id="vfModeName">' + esc(v2FloatModeName(mode)) + "</span></div>" +
+      '<i class="bi bi-chevron-' + (V2.floatOpen ? "up" : "down") + ' vf-caret"></i>' +
+      "</div>";
+    if (V2.floatOpen) {
+      html += '<div class="vf-menu">' +
+        '<div class="vf-sec"><span>路由模式</span></div>' +
+        '<div class="vf-modes">' + ["global", "rule", "direct"].map(m =>
+          '<button data-vf-mode="' + m + '"' + (m === mode ? ' class="on"' : "") + ">" +
+          { global: "全局", rule: "绕过大陆", direct: "直连" }[m] + "</button>").join("") + "</div>" +
+        '<div class="vf-sec"><span>切换节点</span><em>' + all.length + " 个</em></div>" +
+        '<div class="vf-nodes">' + (nodes.length
+          ? nodes.map(n => '<button data-vf-node="' + escA(n.id) + '"' +
+              (node && node.id === n.id ? ' class="on"' : "") +
+              ' title="' + escA(n.name || n.server) + '">' +
+              '<i class="bi bi-record-circle"></i><span>' + esc(n.name || n.server) + "</span></button>").join("")
+          : '<div class="vf-empty">还没有节点</div>') + "</div>" +
+        '<div class="vf-acts">' +
+        '<button data-vf-act="toggle">' + (st.running ? "断开" : "连接") + "</button>" +
+        '<button data-vf-act="open">主界面</button>' +
+        '<button data-vf-act="close" class="danger">关闭胶囊</button>' +
+        "</div></div>";
+    }
+    html += "</div>";
+    doc.body.innerHTML = html;
+
+    const pill = doc.getElementById("vfPill");
+    if (pill) pill.onclick = () => {
+      V2.floatOpen = !V2.floatOpen;
+      try { win.resizeTo(320, V2.floatOpen ? 470 : 86); } catch (_) { /* 部分浏览器不允许，忽略 */ }
+      v2FloatBuild();
+    };
+    doc.querySelectorAll("[data-vf-mode]").forEach(b => {
+      b.onclick = () => { if (b.dataset.vfMode !== mode) v2FloatSetMode(b.dataset.vfMode); };
+    });
+    doc.querySelectorAll("[data-vf-node]").forEach(b => {
+      b.onclick = () => { if (!node || node.id !== b.dataset.vfNode) v2FloatConnect(b.dataset.vfNode); };
+    });
+    const act = (name, fn) => {
+      const el = doc.querySelector('[data-vf-act="' + name + '"]');
+      if (el) el.onclick = fn;
+    };
+    act("toggle", () => v2FloatToggleConnect());
+    act("open", () => { try { window.focus(); } catch (_) { /* 忽略 */ } v2OpenView("overview"); });
+    act("close", () => { try { V2.floatWin.close(); } catch (_) { v2FloatClosed(); } });
+    v2FloatTick();
+  }
+
+  function v2FloatTick() {
+    const win = V2.floatWin;
+    if (!win || win.closed) return;
+    const doc = win.document;
+    const sp = (V2.traffic && V2.traffic.speed) || { up: 0, down: 0 };
+    const up = doc.getElementById("vfUp"), down = doc.getElementById("vfDown");
+    if (up) up.textContent = "↑ " + fmtBytes(sp.up || 0) + "/s";
+    if (down) down.textContent = "↓ " + fmtBytes(sp.down || 0) + "/s";
+    const st = V2.st || {}, node = st.node;
+    const dot = doc.getElementById("vfDot");
+    if (dot) dot.classList.toggle("on", !!st.running);
+    const nm = doc.getElementById("vfNodeName");
+    if (nm) nm.textContent = node ? (node.name || node.server) : "未连接";
+    const md = doc.getElementById("vfModeName");
+    if (md) md.textContent = v2FloatModeName((st.settings || {}).route_mode || "rule");
+  }
+
+  async function v2FloatSetMode(m) {
+    const doc = V2.floatWin && V2.floatWin.document;
+    if (doc) doc.querySelectorAll("[data-vf-mode]").forEach(b => {
+      b.disabled = true;
+      b.classList.toggle("on", b.dataset.vfMode === m);
+    });
+    try {
+      const r = await post("/api/v2ray/settings",
+        { route_mode: m, bypass_cn: m === "rule" ? 1 : 0 });
+      if (r.error) throw new Error(r.error);
+      if (V2.st && V2.st.settings) {
+        V2.st.settings.route_mode = m;
+        V2.st.settings.bypass_cn = m === "rule" ? 1 : 0;
+      }
+      if (V2.st && V2.st.running) {
+        toast("正在重启内核切换模式…", "info");
+        const rr = await post("/api/v2ray/restart");
+        if (rr && rr.error) throw new Error(rr.error);
+      }
+      await v2Reload();
+      toast("已切换为「" + v2FloatModeName(m) + "」", "ok");
+    } catch (e) {
+      toast("切换失败：" + ((e && e.message) || e), "err");
+    } finally {
+      v2FloatBuild();
+    }
+  }
+
+  async function v2FloatConnect(id) {
+    const doc = V2.floatWin && V2.floatWin.document;
+    if (doc) doc.querySelectorAll("[data-vf-node]").forEach(b => { b.disabled = true; });
+    try {
+      const r = await post("/api/v2ray/connect", { id: id });
+      if (r.error) throw new Error(r.error);
+      await v2Reload();
+      toast("已切换节点：" + ((nodeOf(id) || {}).name || id), "ok");
+    } catch (e) {
+      toast("切换节点失败：" + ((e && e.message) || e), "err");
+    } finally {
+      v2FloatBuild();
+    }
+  }
+
+  async function v2FloatToggleConnect() {
+    const running = !!(V2.st && V2.st.running);
+    try {
+      if (running) {
+        const r = await post("/api/v2ray/disconnect");
+        if (r.error) throw new Error(r.error);
+        toast("已断开", "ok");
+      } else {
+        const id = pickNodeId();
+        if (!id) { toast("还没有节点，请先在主界面添加", "warn"); return; }
+        const r = await post("/api/v2ray/connect", { id: id });
+        if (r.error) throw new Error(r.error);
+        toast("已连接：" + ((nodeOf(id) || {}).name || id), "ok");
+      }
+      await v2Reload();
+    } catch (e) {
+      toast("操作失败：" + ((e && e.message) || e), "err");
+    } finally {
+      v2FloatBuild();
+    }
   }
 
   /* ---------- 实时连接：连到代理入站端口（SOCKS5 / HTTP）的客户端 ---------- */
@@ -1744,6 +2010,7 @@
     switch (act) {
       case "refresh": await v2Reload(); toast("已刷新", "ok"); break;
       case "toggle": await v2ToggleConnect(); break;
+      case "float-toggle": await v2FloatToggle(); break;
       case "node-tab": {
         V2.nodeTab = ds.tab || "__all__";
         V2.nodeShow = 60;   // 过滤条件变了，重置回首屏批量

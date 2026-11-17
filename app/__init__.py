@@ -2,8 +2,11 @@
 
 负责装配配置、注册蓝图、安装请求日志中间件，并初始化持久化索引。
 """
+import os
+import socket
 import threading
 import time as _time
+import urllib.parse
 
 from flask import Flask, g
 
@@ -14,7 +17,38 @@ from .log import get_logger
 _log = get_logger()
 
 
+def _sanitize_dead_proxy_env() -> None:
+    """清掉「指向本机、但端口没在监听」的代理环境变量。
+
+    开发机 / IDE 终端常预设 http_proxy=http://127.0.0.1:10809 留给代理内核；
+    代理没启动时 urllib 会走它并直接 Connection refused，表现为
+    「AI 接口连不上 / 网络请求全失败」，但直连其实是通的。这里启动时自检一次，
+    失效就清掉（只影响本进程，no_proxy 保留）。
+    """
+    keys = ("http_proxy", "https_proxy", "all_proxy", "ftp_proxy",
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY")
+    for k in keys:
+        raw = str(os.environ.get(k) or "").strip()
+        if not raw:
+            continue
+        try:
+            u = urllib.parse.urlsplit(raw if "://" in raw else "http://" + raw)
+            host = (u.hostname or "").lower()
+            port = int(u.port or (443 if u.scheme == "https" else 80))
+        except (TypeError, ValueError):
+            continue
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            continue
+        try:
+            with socket.create_connection((host, port), timeout=0.25):
+                pass
+        except OSError:
+            os.environ.pop(k, None)
+            _log.info("已清理失效的代理环境变量 %s=%s（本机端口未监听）", k, raw)
+
+
 def create_app(test_config=None) -> Flask:
+    _sanitize_dead_proxy_env()
     app = Flask(
         __name__,
         template_folder=config.TEMPLATE_FOLDER,

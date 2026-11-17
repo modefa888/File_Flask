@@ -89,7 +89,10 @@ _FORCE_PW_PASS_PATHS = (CHANGE_PW_PATH, "/logout", "/login")
 #   预览 iframe 是 sandbox 不透明源，跨源请求带不上登录 Cookie，只能靠 token 做凭证
 #   （uuid 随机、30 分钟过期，只读，不会改动本地文件）。
 _PUBLIC_PATHS = ("/login", "/register", "/static", "/share/", "/n/", "/ws/", "/api/collab/",
-                 "/api/scraper/preview/", "/api/scraper/mirror/")
+                 "/api/scraper/preview/", "/api/scraper/mirror/",
+                 # 桌面悬浮胶囊（独立的 tkinter 进程）轮询 / 操作接口：
+                 # 不走登录会话，改用 data/v2ray/float.token + 仅本机 IP 自行鉴权
+                 "/api/v2ray/float/info", "/api/v2ray/float/action")
 
 
 def _is_public_path(path: str) -> bool:

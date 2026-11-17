@@ -423,6 +423,7 @@
     return ov;
   }
   function cronCloseModal() {
+    cronCloseOutputSpec();                            // 顺带收起「输出规范」浮层
     const ov = $("cronModal");
     if (ov) { ov.style.display = "none"; ov.innerHTML = ""; }
     clearTimeout(CRON.logTimer);
@@ -431,6 +432,7 @@
   }
   /* t：编辑已有任务；prefill：新建时的预填内容（如从文件右键「添加定时任务」带过来） */
   function cronOpenEditor(t, prefill) {
+    cronCloseOutputSpec();                            // 重开表单时先收起上一次的规范浮层
     const ov = cronEnsureModal();
     CRON.editing = t || null;
     const isNew = !t;
@@ -489,9 +491,16 @@
             '</div>' +
             '<div class="cd-hint" id="cronKindHint"></div></div>' +
           '<div class="cd-kind-pane" id="cronPaneCommand"' + (kind === "command" ? "" : ' style="display:none"') + '>' +
-            '<div class="cd-row"><label>执行命令</label>' +
+            '<div class="cd-row cd-cmd-row">' +
+              '<div class="cd-cmd-head"><label>执行命令</label>' +
+                '<button type="button" class="cd-mini cd-pick-file" id="cronPickFile" ' +
+                  'title="浏览服务器上的脚本文件，按类型自动填入命令与工作目录（会替换当前命令）">' +
+                  '<i class="bi bi-folder2-open"></i> 选择运行文件</button></div>' +
               '<textarea id="cronCmd" rows="3" spellcheck="false" placeholder="例如：python /path/to/job.py &gt;&gt; out.log 2&gt;&amp;1">' +
-                esc(val("command", "")) + '</textarea></div>' +
+                esc(val("command", "")) + '</textarea>' +
+              '<div class="cd-hint">点「选择运行文件」可浏览服务器目录；选中脚本后自动填好解释器与路径，' +
+                '工作目录为空时一并补上，仍可手动改命令。</div>' +
+            '</div>' +
           '</div>' +
           '<div class="cd-kind-pane" id="cronPaneCode"' + (kind === "code" ? "" : ' style="display:none"') + '>' +
             '<div class="cd-row cd-code-row">' +
@@ -550,6 +559,9 @@
             '<div class="cd-notify-head">' +
               '<label>通知内容</label>' +
               '<span class="cd-nh-right">' +
+                '<button type="button" class="cd-try-btn cd-out-spec" id="cronOutSpec" ' +
+                  'title="查看脚本输出规范：按规范输出，通知里可直接引用字段">' +
+                  '<i class="bi bi-braces"></i> 输出规范</button>' +
                 '<button type="button" class="cd-try-btn" id="cronTryRun" title="用上面的命令试跑一次（不写执行记录、不发通知），先看看脚本输出什么">' +
                   '<i class="bi bi-play-circle"></i> 测试运行</button>' +
                 '<label class="cd-check"><input type="checkbox" id="cronNotify"' + (nOn ? " checked" : "") +
@@ -648,6 +660,38 @@
       b.onclick = () => { CRON.editKind = b.dataset.kind; syncKind(); };
     });
     syncKind();
+    // 「选择运行文件」：浏览服务器目录 → 用 /api/cron/suggest 推断解释器与工作目录 → 填入表单
+    const pickBtn = $("cronPickFile");
+    if (pickBtn) pickBtn.onclick = async () => {
+      const cwdInput = $("cronCwd");
+      const cwdVal = cwdInput ? cwdInput.value.trim() : "";
+      const start = /^\//.test(cwdVal) ? cwdVal
+        : ((typeof ROOT !== "undefined" && ROOT && ROOT.startsWith("/")) ? ROOT : "/");
+      const picked = await cronPickRunFile(start);
+      if (!picked) return;
+      let sug = {};
+      try {
+        const r = await fetch("/api/cron/suggest", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: picked }),
+        });
+        sug = await r.json();
+        if (sug.error) sug = {};
+      } catch (_) { sug = {}; }
+      const cmd = $("cronCmd");
+      if (cmd) { cmd.value = sug.command || picked; cmd.focus(); }
+      if (cwdInput && !cwdInput.value.trim() && sug.cwd) cwdInput.value = sug.cwd;
+      const nameInput = $("cronName");
+      if (nameInput && !nameInput.value.trim() && sug.name) nameInput.value = sug.name;
+      toast(sug.runner ? ("已按 " + sug.runner + " 填入命令，可继续修改后保存")
+                       : "已填入文件路径，可补全命令后保存", "ok");
+    };
+    // 「输出规范」：点开悬浮说明（再点一次关闭）
+    const specBtn = $("cronOutSpec");
+    if (specBtn) specBtn.onclick = (e) => {
+      e.stopPropagation();
+      cronShowOutputSpec(specBtn);
+    };
     // 系统接口动作下拉：从后端拉注册表；编辑已有任务时默认选中原动作
     const sysSel = $("cronSysAction");
     if (sysSel) {
@@ -1233,6 +1277,270 @@
     cronCloseModal();
     toast((CRON.editing ? "已保存：" : "已创建：") + d.task.name, "ok");
     loadCron({ silent: true });
+  }
+
+  /* 脚本输出规范（悬浮说明）：告诉写脚本的人 / AI 该怎么输出，
+     这样执行日志好读，JSON 字段还能自动变成通知模板变量。
+     浮层挂 body + fixed 定位，避免被弹窗的 overflow 裁剪。 */
+  const CRON_SPEC_JSON = '{"ok": true, "total": 12, "success": 11, "failed": 1, "detail": "3 个账号积分已到账"}';
+  const CRON_SPEC_TEXT =
+    "脚本输出规范：\n" +
+    "1. 退出码 0 = 成功，非 0 = 失败（会触发失败通知）。\n" +
+    "2. stdout 就是执行日志，stderr 也会一并收集，不会被吞掉。\n" +
+    "3. 推荐最后一行输出单行 JSON，例如：\n" +
+    "   " + CRON_SPEC_JSON + "\n" +
+    "   字段会自动变成通知变量 {ok} {total} {success} {failed} {detail}。\n" +
+    "4. 纯文本时每行一条结果，例如：账号 a@b.com 签到成功，积分 +5\n" +
+    "5. 不要输出 ANSI 颜色码、\\r 进度条、超长单行，以及密码 / Token 等敏感信息。";
+
+  function cronCloseOutputSpec() {
+    const pop = document.querySelector(".cron-spec-pop");
+    if (pop) pop.remove();
+    document.removeEventListener("mousedown", cronSpecOutside, true);
+    document.removeEventListener("keydown", cronSpecKey, true);
+    window.removeEventListener("resize", cronCloseOutputSpec);
+  }
+  function cronSpecKey(e) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      cronCloseOutputSpec();
+    }
+  }
+  function cronSpecOutside(e) {
+    const pop = document.querySelector(".cron-spec-pop");
+    if (!pop) return;
+    if (pop.contains(e.target)) return;
+    if (e.target && e.target.closest && e.target.closest("#cronOutSpec")) return;
+    cronCloseOutputSpec();
+  }
+  function cronShowOutputSpec(anchor) {
+    if (document.querySelector(".cron-spec-pop")) { cronCloseOutputSpec(); return; }   // 再点一次收起
+    const pop = document.createElement("div");
+    pop.className = "cron-spec-pop";
+    pop.innerHTML =
+      '<div class="csp-head"><i class="bi bi-braces"></i><span>脚本输出规范</span>' +
+        '<button type="button" class="csp-x" title="关闭"><i class="bi bi-x-lg"></i></button></div>' +
+      '<div class="csp-body scroll-thin">' +
+        '<div class="csp-lead">定时任务会把脚本输出写进执行日志；按下面的约定输出，' +
+          '日志更好读，字段还能直接在通知里引用。</div>' +
+        '<div class="csp-sec"><div class="csp-t"><i class="bi bi-check-circle"></i>基本约定</div>' +
+          '<ul class="csp-ul">' +
+            '<li>退出码 <code>0</code> = 成功，非 <code>0</code> = 失败（会触发失败 / 超时通知）。</li>' +
+            '<li><code>stdout</code> 就是日志正文，<code>stderr</code> 也会一并收集，不会被吞掉。</li>' +
+            '<li>每次输出一段简短摘要即可，避免整篇日志或进度条。</li>' +
+          '</ul></div>' +
+        '<div class="csp-sec"><div class="csp-t"><i class="bi bi-braces"></i>推荐：最后一行输出单行 JSON</div>' +
+          '<pre class="csp-code">' + esc(CRON_SPEC_JSON) + '</pre>' +
+          '<div class="csp-hint">输出是 JSON 对象时，字段会自动变成通知变量：' +
+            '<code>{ok}</code> <code>{total}</code> <code>{success}</code> <code>{failed}</code> <code>{detail}</code>，' +
+            '可在「通知内容 → 自定义模板」里直接使用。</div></div>' +
+        '<div class="csp-sec"><div class="csp-t"><i class="bi bi-list-ul"></i>纯文本也可以</div>' +
+          '<pre class="csp-code">账号 a@b.com 签到成功，积分 +5\n账号 c@d.com 已签到，跳过</pre>' +
+          '<div class="csp-hint">每行一条结果；需要固定解析时用 <code>key=value</code>，例如 <code>success=11</code>。</div></div>' +
+        '<div class="csp-sec"><div class="csp-t bad"><i class="bi bi-exclamation-triangle"></i>不建议</div>' +
+          '<ul class="csp-ul">' +
+            '<li>ANSI 颜色码、<code>\\r</code> 进度条、超长单行（通知里会很难读）。</li>' +
+            '<li>输出密码 / Token 等敏感信息（会进日志和通知）。</li>' +
+          '</ul></div>' +
+        '<div class="csp-sec"><div class="csp-t"><i class="bi bi-bell"></i>和通知怎么配合</div>' +
+          '<ul class="csp-ul">' +
+            '<li>「仅脚本输出」：把日志末尾 N 行直接发到通知渠道。</li>' +
+            '<li>「自定义模板」：<code>{output}</code> 嵌全文，JSON 字段当变量。</li>' +
+            '<li>末尾行数和长度上限在「设置 → 定时任务通知」里调。</li>' +
+          '</ul></div>' +
+      '</div>' +
+      '<div class="csp-foot"><span class="csp-spacer"></span>' +
+        '<button type="button" class="csp-btn" data-act="copy-spec"><i class="bi bi-clipboard-check"></i> 复制规范</button>' +
+        '<button type="button" class="csp-btn" data-act="copy-json"><i class="bi bi-clipboard"></i> 复制示例</button>' +
+        '<button type="button" class="csp-btn primary" data-act="close">知道了</button></div>';
+    document.body.appendChild(pop);
+    // 先按按钮定位：默认放在按钮下方并右对齐，空间不够就翻到上方
+    const r = anchor.getBoundingClientRect();
+    const w = Math.min(420, window.innerWidth - 24);
+    pop.style.width = w + "px";
+    const h = pop.offsetHeight;
+    let left = Math.round(r.right - w);
+    left = Math.max(12, Math.min(left, window.innerWidth - w - 12));
+    let top = Math.round(r.bottom + 8);
+    if (top + h > window.innerHeight - 12) top = Math.max(12, Math.round(r.top - h - 8));
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    pop.querySelector(".csp-x").onclick = () => cronCloseOutputSpec();
+    pop.querySelector('[data-act="close"]').onclick = () => cronCloseOutputSpec();
+    pop.querySelector('[data-act="copy-json"]').onclick = () => cronCopyText(CRON_SPEC_JSON, "JSON 示例已复制");
+    pop.querySelector('[data-act="copy-spec"]').onclick =
+      () => cronCopyText(CRON_SPEC_TEXT, "输出规范已复制，可直接发给脚本作者或 AI");
+    document.addEventListener("mousedown", cronSpecOutside, true);
+    document.addEventListener("keydown", cronSpecKey, true);
+    window.addEventListener("resize", cronCloseOutputSpec);
+  }
+
+  /* 可视化选择「运行文件」：浏览服务器目录，单击文件选中，确认后返回绝对路径。
+     独立浮层，不复用 cronEnsureModal()，避免清空正在编辑的任务表单；
+     Escape 在捕获阶段拦截，防止顺带关掉底层的任务编辑器。 */
+  function cronPickRunFile(startPath) {
+    return new Promise((resolve) => {
+      const ov = document.createElement("div");
+      ov.className = "cron-modal-overlay";
+      const box = document.createElement("div");
+      box.className = "cron-dialog cron-pick-dialog";
+      box.innerHTML =
+        '<div class="cd-head"><i class="bi bi-file-earmark-play"></i><span>选择运行文件</span>' +
+          '<button type="button" class="cd-x" title="关闭"><i class="bi bi-x-lg"></i></button></div>' +
+        '<div class="cd-body cd-pick-body">' +
+          '<div class="fp-bar">' +
+            '<button type="button" class="fp-nav fp-up" title="上一级"><i class="bi bi-arrow-up"></i></button>' +
+            '<div class="fp-path" title="当前目录"></div>' +
+            '<button type="button" class="fp-nav fp-project">当前项目</button>' +
+            '<button type="button" class="fp-nav fp-root">根目录</button>' +
+          '</div>' +
+          '<div class="fp-filter"><i class="bi bi-search"></i>' +
+            '<input type="text" class="fp-filter-input" spellcheck="false" ' +
+              'placeholder="按文件名过滤，例如 job.py"></div>' +
+          '<div class="fp-notice" hidden></div>' +
+          '<div class="fp-list"></div>' +
+          '<div class="cd-hint">单击文件夹进入目录，单击文件选中（再点一次取消，双击直接确定）。' +
+            '可浏览服务器全盘，选中的是真实路径。</div>' +
+        '</div>' +
+        '<div class="cd-foot"><span class="cd-pick-detail"></span><span class="cd-spacer"></span>' +
+          '<button type="button" class="cd-btn" data-act="cancel">取消</button>' +
+          '<button type="button" class="cd-btn primary" data-act="ok" disabled>使用此文件</button></div>';
+      ov.appendChild(box);
+      document.body.appendChild(ov);
+      const list = box.querySelector(".fp-list");
+      const pathEl = box.querySelector(".fp-path");
+      const noticeEl = box.querySelector(".fp-notice");
+      const filterEl = box.querySelector(".fp-filter-input");
+      const okBtn = box.querySelector('[data-act="ok"]');
+      const detailEl = box.querySelector(".cd-pick-detail");
+      let cur = String(startPath || "").replace(/\/+$/, "");
+      if (!cur.startsWith("/")) {
+        cur = (typeof ROOT !== "undefined" && ROOT && ROOT.startsWith("/"))
+          ? ROOT.replace(/\/+$/, "") : "/";
+      }
+      if (!cur) cur = "/";
+      let selected = "";
+      let lastItems = [];
+      let busy = false;
+
+      function onKey(e) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          close(null);
+        } else if (e.key === "Enter" && document.activeElement !== filterEl && selected) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          close(selected);
+        }
+      }
+      function close(val) {
+        document.removeEventListener("keydown", onKey, true);
+        ov.remove();
+        resolve(val);
+      }
+      function notice(msg) {
+        noticeEl.textContent = msg || "";
+        noticeEl.hidden = !msg;
+      }
+      const parentOf = (p) => {
+        const s = String(p || "").replace(/\/+$/, "");
+        const i = s.lastIndexOf("/");
+        return i <= 0 ? "/" : s.slice(0, i);
+      };
+      const fullOf = (it) => (it.path && it.path.startsWith("/"))
+        ? it.path : (cur === "/" ? "/" + it.name : cur + "/" + it.name);
+      function mark() {
+        list.querySelectorAll(".fp-item").forEach(el =>
+          el.classList.toggle("picked", el.dataset.path === selected));
+        okBtn.disabled = !selected;
+        detailEl.textContent = selected || "";
+      }
+      function render() {
+        const q = filterEl.value.trim().toLowerCase();
+        const hit = lastItems.filter(it => !q || String(it.name).toLowerCase().includes(q));
+        const dirs = hit.filter(it => it.is_dir).sort((a, b) => a.name.localeCompare(b.name, "zh"));
+        const files = hit.filter(it => !it.is_dir).sort((a, b) => a.name.localeCompare(b.name, "zh"));
+        if (!dirs.length && !files.length) {
+          list.innerHTML = '<div class="fp-empty">' + (q ? "没有匹配的文件或文件夹" : "这个文件夹是空的") + '</div>';
+          return;
+        }
+        const exes = ["py", "sh", "js", "ts", "php", "go", "rb", "lua", "pl", "ps1", "bat", "cmd"];
+        list.innerHTML =
+          dirs.map(it => '<div class="fp-item fp-dir" data-path="' + escAttr(fullOf(it)) + '">' +
+            '<i class="bi bi-folder2"></i><span class="fp-name">' + esc(it.name) + '</span>' +
+            '<span class="fp-kind">文件夹</span></div>').join("") +
+          files.map(it => {
+            const p = fullOf(it);
+            const ext = String(it.name).split(".").pop().toLowerCase();
+            const icon = exes.includes(ext) ? "bi-file-earmark-code" : "bi-file-earmark";
+            return '<div class="fp-item fp-file' + (p === selected ? " picked" : "") +
+              '" data-path="' + escAttr(p) + '">' +
+              '<i class="bi ' + icon + '"></i><span class="fp-name">' + esc(it.name) + '</span>' +
+              '<span class="fp-kind">' + (ext && ext !== String(it.name).toLowerCase() ? "." + ext : "文件") +
+              '</span></div>';
+          }).join("");
+        list.querySelectorAll(".fp-item").forEach(el => {
+          el.onclick = () => {
+            if (el.classList.contains("fp-dir")) { go(el.dataset.path); return; }
+            selected = (selected === el.dataset.path) ? "" : el.dataset.path;
+            mark();
+          };
+          el.ondblclick = () => {
+            if (el.classList.contains("fp-file")) close(el.dataset.path);
+          };
+        });
+      }
+      async function go(path) {
+        if (busy) return;
+        let target = String(path || "").replace(/\/+$/, "");
+        if (!target.startsWith("/")) {
+          target = (typeof ROOT !== "undefined" && ROOT && ROOT.startsWith("/"))
+            ? ROOT.replace(/\/+$/, "") : "/";
+        }
+        if (!target) target = "/";
+        busy = true;
+        pathEl.textContent = target;
+        filterEl.value = "";
+        notice("");
+        list.innerHTML = '<div class="fp-empty">加载中…</div>';
+        try {
+          const d = await apiFiles(target, false);
+          const actual = String(d.current_path_abs || "").replace(/\/+$/, "");
+          if (actual && actual !== target) {
+            cur = actual;
+            pathEl.textContent = actual;
+            notice("「" + target + "」不存在，已回到 " + actual);
+          } else {
+            cur = target;
+          }
+          lastItems = d.items || [];
+          render();
+          list.scrollTop = 0;
+          mark();
+        } catch (e) {
+          lastItems = [];
+          list.innerHTML = '<div class="fp-empty fp-err">' + esc(e.message || "无法读取该目录") + '</div>';
+        } finally {
+          busy = false;
+        }
+      }
+
+      box.querySelector(".fp-up").onclick = () => go(parentOf(cur));
+      box.querySelector(".fp-project").onclick = () => {
+        if (typeof ROOT !== "undefined" && ROOT) go(ROOT);
+      };
+      box.querySelector(".fp-root").onclick = () => go("/");
+      box.querySelector(".cd-x").onclick = () => close(null);
+      box.querySelector('[data-act="cancel"]').onclick = () => close(null);
+      okBtn.onclick = () => { if (selected) close(selected); };
+      filterEl.oninput = render;
+      ov.onmousedown = (e) => { if (e.target === ov) close(null); };
+      document.addEventListener("keydown", onKey, true);
+      go(cur);
+      filterEl.focus();
+    });
   }
 
   /* 从文件右键「添加定时任务…」：按文件类型推断解释器，预填名称 / 命令 / 工作目录。

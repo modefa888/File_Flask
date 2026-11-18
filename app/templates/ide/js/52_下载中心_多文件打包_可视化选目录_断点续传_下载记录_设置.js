@@ -523,6 +523,15 @@ function dlByTsDesc(a, b) {
 function dlRenderTasks() {
   const box = $("dlScroll");
   if (!box || DL.renamingId) return;   // 行内改名中不重建列表（1.5s 轮询会冲掉输入框）
+  // 正在列表里拖选文字时跳过本次重建：否则选区被 innerHTML 冲掉，页面看着像卡住
+  try {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.rangeCount) {
+      const anc = sel.getRangeAt(0).commonAncestorContainer;
+      const ancEl = anc && anc.nodeType === 1 ? anc : (anc ? anc.parentNode : null);
+      if (ancEl && box.contains(ancEl)) return;
+    }
+  } catch (_) {}
   box.classList.remove("rec-mode");
   const st = DL.stats || {};
   // 「正在下载」只数真正在跑的：传输中 + 排队 / 解析 / 打包 / 合并；已暂停不算
@@ -1146,7 +1155,8 @@ function dlBeginRename(nameEl, id) {
         method: "POST", body: JSON.stringify({ name: val })
       });
       if (!d.ok) toast(d.error || "重命名失败", "err");
-      else toast("已重命名为：" + (d.task && d.task.name || val), "ok");
+      else toast((d.file_renamed ? "已重命名文件和记录：" : "已重命名：") +
+        (d.task && d.task.name || val), "ok");
     } catch (e) {
       toast("重命名失败：" + ((e && e.message) || e), "err");
     }
@@ -1465,11 +1475,12 @@ async function dlResumeAll() {
 }
 
 async function dlDeleteTask(id) {
-  const ok = await uiConfirm("删除下载任务",
-    "会同时移除这条下载记录，并删除打包产生的 zip 文件（源文件不受影响）。", "删除", true);
-  if (!ok) return;
+  const res = await dlAskDelSel(1, true);
+  if (!res || !res.ok) return;
   const d = await dlReq("/api/dl/tasks/" + encodeURIComponent(id) + "/action", {
-    method: "POST", body: JSON.stringify({ action: "delete" }),
+    method: "POST", body: JSON.stringify({
+      action: "delete", keep_file: !res.delFiles,
+    }),
   });
   if (!d.ok) { toast(d.error || "删除失败", "err"); return; }
   delete DL.running[id];
@@ -1505,18 +1516,19 @@ function dlSelRefresh() {                     // 不重绘表格，只刷新选�
     if (ck) ck.checked = on;               // 同步行内勾选框（全选 / 全不选 / 右键菜单触发时）
   });
 }
-/* 批量删除确认（带「是否删除服务器上的下载文件」勾选）：
+/* 删除确认（带「是否删除本地下载内容」勾选，默认不勾选）：
  * 返回 Promise<{ok:true, delFiles:boolean}> 或 {ok:false} */
-function dlAskDelSel(n) {
+function dlAskDelSel(n, single) {
   return new Promise(function (resolve) {
     const m = document.createElement("div");
     m.className = "dlc-mask";
     m.innerHTML =
       '<div class="dlc-delbox">' +
-        '<div class="dlc-cpop-tt"><i class="bi bi-exclamation-triangle"></i>批量删除下载记录</div>' +
+        '<div class="dlc-cpop-tt"><i class="bi bi-exclamation-triangle"></i>' +
+          (single ? "删除下载任务" : "批量删除下载记录") + '</div>' +
         '<div class="dlc-cpop-msg" id="dlDelMsg"></div>' +
-        '<label class="dlc-delck"><input type="checkbox" id="dlDelFilesChk" checked>' +
-          '<span>同时删除服务器上的下载文件</span></label>' +
+        '<label class="dlc-delck"><input type="checkbox" id="dlDelFilesChk">' +
+          '<span>同时删除本地下载的内容（服务器上的文件）</span></label>' +
         '<div class="dlc-cpop-btns">' +
           '<button class="dlc-cpop-no">取消</button>' +
           '<button class="dlc-cpop-ok"><i class="bi bi-trash3"></i>删除</button>' +
@@ -1526,9 +1538,10 @@ function dlAskDelSel(n) {
     const msg = m.querySelector("#dlDelMsg");
     const ck = m.querySelector("#dlDelFilesChk");
     const paintMsg = function () {
+      const who = single ? '这条记录' : ('选中的 <b>' + n + '</b> 条记录');
       msg.innerHTML = ck.checked
-        ? '将删除选中的 <b>' + n + '</b> 条记录，<b>服务器上的下载文件会被一并删除</b>（来源源文件不受影响）。'
-        : '将删除选中的 <b>' + n + '</b> 条记录，服务器上的下载文件会保留，源文件不受影响。';
+        ? '将删除' + who + '，<b>本地下载的文件会被一并删除</b>（来源源文件不受影响）。'
+        : '将只删除' + who + '，本地下载的文件会保留，源文件不受影响。';
       msg.classList.toggle("warn", ck.checked);
     };
     ck.addEventListener("change", paintMsg);

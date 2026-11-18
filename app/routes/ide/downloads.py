@@ -290,7 +290,8 @@ def api_dl_task(tid):
 
 @bp.route("/api/dl/tasks/<tid>/rename", methods=["POST"])
 def api_dl_task_rename(tid):
-    """行内重命名：只改任务显示名 / 下载文件名，不移动服务器上的产物文件。"""
+    """行内重命名：同步改任务显示名、下载文件名和磁盘上的产物文件名。
+    单文件直传任务的 artifact 是用户源文件，只改显示名，绝不动原文件。"""
     task = dl.get(tid)
     if not task:
         return jsonify({"error": "任务不存在"}), 404
@@ -303,8 +304,25 @@ def api_dl_task_rename(tid):
     name = dl._safe_name(raw)
     if not name:
         return jsonify({"error": "文件名不合法"}), 400
-    dl._update(tid, name=name)
-    return jsonify({"ok": True, "task": dl.get(tid)})
+
+    file_renamed = False
+    art = task.get("artifact") or ""
+    # 只有下载产物（zip / 文本 / 网络任务）才动磁盘；直传任务的产物就是源文件
+    if str(task.get("kind") or "") in ("zip", "text", "url", "torrent", "hls") and \
+            art and os.path.isfile(art):
+        new_path = os.path.join(os.path.dirname(art), name)
+        if os.path.abspath(new_path) != os.path.abspath(art):
+            if os.path.exists(new_path):
+                return jsonify({"error": "同名文件已存在，请换一个文件名"}), 409
+            try:
+                os.rename(art, new_path)
+            except OSError as e:
+                return jsonify({"error": "重命名文件失败：%s" % e}), 500
+            dl._update(tid, name=name, artifact=new_path)
+            file_renamed = True
+    if not file_renamed:
+        dl._update(tid, name=name)
+    return jsonify({"ok": True, "task": dl.get(tid), "file_renamed": file_renamed})
 
 
 @bp.route("/api/dl/tasks/<tid>/segs")

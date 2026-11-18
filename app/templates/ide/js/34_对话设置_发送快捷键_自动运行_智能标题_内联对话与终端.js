@@ -395,21 +395,37 @@ function iceHintElGet() {
   return iceHintEl;
 }
 function iceHintUpdate() {
-  const el = iceHintElGet();
-  if (!chatBool("chatInlineHint") || $("iceBox") || !active || !active.cm) { el.style.display = "none"; return; }
+  const hide = () => { if (iceHintEl) iceHintEl.style.display = "none"; };
+  if (!chatBool("chatInlineHint") || $("iceBox") || !active || !active.cm) { hide(); return; }
   const ae = document.activeElement;
   const cmHost = ae && ae.closest ? ae.closest(".CodeMirror") : null;
-  if (!cmHost) { el.style.display = "none"; return; }
+  if (!cmHost) { hide(); return; }
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) { el.style.display = "none"; return; }
-  const r = sel.getRangeAt(0).getBoundingClientRect();
-  if (!r || (r.width === 0 && r.height === 0)) { el.style.display = "none"; return; }
+  // 整页拖选会跨越海量 DOM 节点，Range.getBoundingClientRect() 极慢；
+  // 这里只服务编辑器内、长度有限的选区，其余直接收起提示。
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed ||
+      String(sel.toString()).length > 500) { hide(); return; }
+  const r0 = sel.getRangeAt(0);
+  const anc = r0.commonAncestorContainer;
+  const ancEl = anc && anc.nodeType === 1 ? anc : (anc ? anc.parentNode : null);
+  if (!ancEl || !cmHost.contains(ancEl)) { hide(); return; }
+  const r = r0.getBoundingClientRect();
+  if (!r || (r.width === 0 && r.height === 0)) { hide(); return; }
+  const el = iceHintElGet();
   el.style.display = "";
   el.style.left = Math.min(window.innerWidth - 150, r.left + r.width - 10) + "px";
   el.style.top = (r.bottom + 6) + "px";
 }
+let iceHintRaf = 0;
 function iceHintInit() {
-  document.addEventListener("selectionchange", () => { try { iceHintUpdate(); } catch (_) {} });
+  // selectionchange 在拖选过程中每次鼠标移动都会触发，合并到下一帧，避免反复强制重排卡死
+  document.addEventListener("selectionchange", () => {
+    if (iceHintRaf) return;
+    iceHintRaf = requestAnimationFrame(function () {
+      iceHintRaf = 0;
+      try { iceHintUpdate(); } catch (_) {}
+    });
+  });
   window.addEventListener("blur", () => { if (iceHintEl) iceHintEl.style.display = "none"; });
 }
 

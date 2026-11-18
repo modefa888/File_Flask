@@ -408,6 +408,17 @@ html.theme-light .dlc-task.running::before {
   max-width: 62%;
 }
 .dlc-tname:hover { color: var(--dlc-acc); text-decoration: underline; cursor: pointer; }
+.dlc-tname.static, .dlc-tname.static:hover { color: var(--dlc-fg); text-decoration: none; cursor: default; }
+.dlc-tname.editing { overflow: visible; max-width: none; flex: 1; text-decoration: none; }
+.dlc-tname-input {
+  width: 100%; min-width: 120px;
+  font: inherit; color: var(--dlc-fg);
+  background: var(--dlc-card2);
+  border: 1px solid var(--dlc-acc);
+  border-radius: 5px;
+  padding: 2px 6px;
+  outline: none;
+}
 .dlc-tsize {
   display: inline-flex;
   align-items: center;

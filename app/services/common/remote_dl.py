@@ -336,34 +336,47 @@ def _hls_playlist(url, opts=None, depth=0):
 
     segs, enc, init, duration, endlist = [], None, None, 0.0, False
     key_line = ""
+    cur_key = ""          # 当前生效的 KEY 行（拼接时按分片还原，可能有多个不同密钥）
+    seg_keys, seg_durs, seg_disc = [], [], []
+    pending_dur, pending_disc = 3.0, False
     for ln in lines:
         if ln.startswith("#EXT-X-KEY") or ln.startswith("#EXT-X-SESSION-KEY"):
             m = re.search(r"METHOD=([A-Za-z0-9-]+)", ln)
             method = (m.group(1) if m else "NONE").upper()
             if method == "NONE":
                 enc = None
+                cur_key = ""
             else:
                 u = re.search(r'URI="([^"]+)"', ln)
                 enc = urllib.parse.urljoin(final, u.group(1)) if u else "?"
+                cur_key = ln
                 if not key_line:
-                    key_line = ln          # 原样保留 KEY 行，拼接解密时要用
+                    key_line = ln          # 兼容旧播放列表：首个 KEY 行
         elif ln.startswith("#EXT-X-MAP"):
             m = re.search(r'URI="([^"]+)"', ln)
             if m:
                 init = urllib.parse.urljoin(final, m.group(1))
         elif ln == "#EXT-X-ENDLIST":
             endlist = True
+        elif ln == "#EXT-X-DISCONTINUITY":
+            pending_disc = True
         elif ln.startswith("#EXTINF"):
             m = re.search(r"#EXTINF:([\d.]+)", ln)
             if m:
                 try:
-                    duration += float(m.group(1))
+                    pending_dur = float(m.group(1))
+                    duration += pending_dur
                 except ValueError:
                     pass
         elif not ln.startswith("#"):
             segs.append(urllib.parse.urljoin(final, ln))
+            seg_keys.append(cur_key)
+            seg_durs.append(pending_dur)
+            seg_disc.append(pending_disc)
+            pending_dur, pending_disc = 3.0, False
     return {"media": final, "segs": segs, "enc": enc, "init": init,
-            "duration": duration, "endlist": endlist, "key_line": key_line}
+            "duration": duration, "endlist": endlist, "key_line": key_line,
+            "seg_keys": seg_keys, "seg_durs": seg_durs, "seg_disc": seg_disc}
 
 
 def _hls_stem(url):
@@ -1073,8 +1086,8 @@ def _run_hls(tid, t):
                    status="downloading", phase="", error="",
                    srv_done=0, srv_size=0, speed=0)
         t = dl.get(tid) or t
-    elif pl.get("enc") and not pl.get("key_line"):
-        # 旧版本断点播放列表没保存 KEY 行（没法本地解密）→ 重新解析一次
+    elif pl.get("enc") and (not pl.get("key_line") or not pl.get("seg_keys")):
+        # 旧版本断点播放列表没保存 KEY 行 / 没有逐分片密钥表 → 重新解析一次
         try:
             pl2 = _hls_playlist(url, opts)
             if pl2.get("segs"):
@@ -1226,7 +1239,9 @@ def _run_hls(tid, t):
                srv_done=state["bytes"], note="HLS · %d 分片" % total,
                phase="正在拼接封装…" if ff else "正在拼接 TS…")
     final_path = _hls_merge(parts_dir, total, init_path, out_path, ff,
-                            key_line=pl.get("key_line") or "", opts=opts, src_url=url)
+                            key_line=pl.get("key_line") or "", opts=opts, src_url=url,
+                            seg_keys=pl.get("seg_keys"), seg_durs=pl.get("seg_durs"),
+                            seg_disc=pl.get("seg_disc"))
     if not final_path:
         dl._update(tid, status="failed", phase="", speed=0,
                    error="分片拼接失败（ffmpeg 返回错误" +
@@ -1307,10 +1322,11 @@ def _hls_fetch(tid, seg_url, opts, path, state, lock, stop_evt, retries=3, stat=
     return False
 
 
-def _hls_merge(parts_dir, total, init_path, out_path, ff, key_line="", opts=None, src_url=""):
+def _hls_merge(parts_dir, total, init_path, out_path, ff, key_line="", opts=None, src_url="",
+               seg_keys=None, seg_durs=None, seg_disc=None):
     """拼接：优先 ffmpeg 无损封装 MP4，失败退回二进制拼 TS。
-    key_line 非空表示分片是 AES-128 加密的：写一个指向本地分片的 m3u8（带上原 KEY 行），
-    交给 ffmpeg 的 HLS demuxer 一边取密钥一边解密拼接（必须成功，加密分片没法二进制直拼）。"""
+    加密流按分片还原各自的 KEY 行 / EXTINF / DISCONTINUITY 写成本地 m3u8，交给
+    ffmpeg 的 HLS demuxer 解密拼接；同一条流可能中途换密钥，不能用首个 KEY 一拼到底。"""
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     entries = ([init_path] if init_path and os.path.exists(init_path) else []) + \
               [os.path.join(parts_dir, "seg_%05d.ts" % i) for i in range(total)]
@@ -1321,30 +1337,55 @@ def _hls_merge(parts_dir, total, init_path, out_path, ff, key_line="", opts=None
     tmp_out = stem + ".dlmerge" + (ext or ".mp4")
     fmt = ["-f", "mp4"] if ext.lower() in ("", ".mp4", ".mov") else []
 
-    if ff and key_line:
+    if ff and (key_line or any(seg_keys or [])):
         # 密钥自己下载到本地（带请求头 / 代理），ffmpeg 全程只读本地文件：
         # 避免 -headers 等 HTTP 选项作用在本地文件输入上导致「Option not found」
-        km = re.search(r'URI="([^"]+)"', key_line)
-        if not km:
-            return ""
-        try:
-            key_url = urllib.parse.urljoin(src_url or "", km.group(1))
-            key_path = os.path.join(parts_dir, "enc.key")
-            with open(key_path, "wb") as kf:
-                kf.write(_fetch_bytes(key_url, opts))
-            key_line = key_line[:km.start(1)] + key_path + key_line[km.end(1):]
-        except Exception as e:
-            _log.warning("下载解密密钥失败：%s", e)
-            return ""
+        keys = list(seg_keys or ([key_line] * total))
+        durs = list(seg_durs or ([6.0] * total))
+        discs = list(seg_disc or ([False] * total))
+        key_cache = {}
+
+        def local_key(line):
+            if not line:
+                return ""
+            if line in key_cache:
+                return key_cache[line]
+            km = re.search(r'URI="([^"]+)"', line)
+            if not km:
+                key_cache[line] = ""
+                return ""
+            try:
+                key_url = urllib.parse.urljoin(src_url or "", km.group(1))
+                key_path = os.path.join(parts_dir, "enc_%02d.key" % len(key_cache))
+                with open(key_path, "wb") as kf:
+                    kf.write(_fetch_bytes(key_url, opts))
+                key_cache[line] = line[:km.start(1)] + key_path + line[km.end(1):]
+            except Exception as e:
+                _log.warning("下载解密密钥失败：%s", e)
+                key_cache[line] = ""
+            return key_cache[line]
+
+        max_dur = max([float(d or 0) for d in durs] + [1.0])
         lst = os.path.join(parts_dir, "decrypt.m3u8")
         with open(lst, "w", encoding="utf-8") as f:
-            f.write("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n"
-                    "#EXT-X-MEDIA-SEQUENCE:0\n")
-            f.write(key_line + "\n")
-            if init_path and os.path.exists(init_path):
-                f.write('#EXT-X-MAP:URI="%s"\n' % init_path.replace('"', "%22"))
-            for p in entries:
-                f.write("#EXTINF:6.0,\n%s\n" % p)
+            f.write("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:%d\n"
+                    "#EXT-X-MEDIA-SEQUENCE:0\n" % int(max_dur + 0.999))
+            last_key, wrote = None, False
+            for i in range(total):
+                p = os.path.join(parts_dir, "seg_%05d.ts" % i)
+                if not os.path.exists(p):
+                    continue
+                line = local_key(keys[i] if i < len(keys) else key_line)
+                if line != last_key:
+                    f.write((line or "#EXT-X-KEY:METHOD=NONE") + "\n")
+                    last_key = line
+                if not wrote and init_path and os.path.exists(init_path):
+                    f.write('#EXT-X-MAP:URI="%s"\n' % init_path.replace('"', "%22"))
+                if i < len(discs) and discs[i]:
+                    f.write("#EXT-X-DISCONTINUITY\n")
+                dur = float(durs[i]) if i < len(durs) else 0
+                f.write("#EXTINF:%.3f,\n%s\n" % (dur if dur > 0 else 3.0, p))
+                wrote = True
             f.write("#EXT-X-ENDLIST\n")
         cmd = [ff, "-y", "-nostdin", "-loglevel", "error",
                "-protocol_whitelist", "file,crypto,data",

@@ -8,6 +8,7 @@ GET  /api/dl/tasks?q=&status=&page=   任务 / 记录列表（含汇总）
 POST /api/dl/tasks                    新建下载任务（多文件、文件夹、文本）
 GET  /api/dl/tasks/<id>               单个任务
 POST /api/dl/tasks/<id>/action        操作：start / pause / cancel / retry / delete / reset
+POST /api/dl/tasks/<id>/rename        重命名任务显示名 / 下载文件名（body: {name}）
 POST /api/dl/progress                 前端回报断点续传游标
 GET  /api/dl/stream/<id>              下发产物（支持 Range → 206，可断点续传）
 GET  /api/dl/settings                 模块设置
@@ -285,6 +286,25 @@ def api_dl_task(tid):
     if not task:
         return jsonify({"error": "任务不存在"}), 404
     return jsonify({"ok": True, "task": task})
+
+
+@bp.route("/api/dl/tasks/<tid>/rename", methods=["POST"])
+def api_dl_task_rename(tid):
+    """行内重命名：只改任务显示名 / 下载文件名，不移动服务器上的产物文件。"""
+    task = dl.get(tid)
+    if not task:
+        return jsonify({"error": "任务不存在"}), 404
+    if not task.get("exists") and task.get("status") in ("ready", "done"):
+        return jsonify({"error": "产物已清理，无法重命名"}), 409
+    data = request.get_json(silent=True) or {}
+    raw = str(data.get("name") or "").strip()
+    if not raw:
+        return jsonify({"error": "文件名不能为空"}), 400
+    name = dl._safe_name(raw)
+    if not name:
+        return jsonify({"error": "文件名不合法"}), 400
+    dl._update(tid, name=name)
+    return jsonify({"ok": True, "task": dl.get(tid)})
 
 
 @bp.route("/api/dl/tasks/<tid>/segs")

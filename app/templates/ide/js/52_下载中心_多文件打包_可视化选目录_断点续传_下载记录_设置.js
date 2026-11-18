@@ -19,6 +19,7 @@ const DL = {
   sel: {},              // 记录多选：id -> 1（仅当前列表内的选中项有效）
   pendingAuto: [],      // 新建后待自动开始的任务 id
   notify: null,         // 下载通知配置（/api/dl/notify）
+  renamingId: "",       // 正在行内改名的任务 id（改名期间暂停列表重建，避免输入框失焦）
   poll: null, view: "tasks", pick: null,
 };
 
@@ -521,7 +522,7 @@ function dlByTsDesc(a, b) {
 }
 function dlRenderTasks() {
   const box = $("dlScroll");
-  if (!box) return;
+  if (!box || DL.renamingId) return;   // 行内改名中不重建列表（1.5s 轮询会冲掉输入框）
   box.classList.remove("rec-mode");
   const st = DL.stats || {};
   // 「正在下载」只数真正在跑的：传输中 + 排队 / 解析 / 打包 / 合并；已暂停不算
@@ -649,11 +650,14 @@ function dlTaskCard(t) {
   const ic = dlIcon(t);
   const waitBar = st === "building" || st === "probing" || st === "merging";
   const speed = srv ? (t.speed || 0) : (live ? live.speed : 0);
+  const cleaned = t.exists === false && (st === "ready" || st === "done");
   return '<div class="dlc-task ' + dlTaskClass(st, t) + '" data-id="' + dlA(t.id) + '">' +
     '<div class="dlc-tico ' + ic.cls + '"><i class="bi ' + ic.i + '"></i></div>' +
     '<div class="dlc-tbody">' +
       '<div class="dlc-trow1">' +
-        '<span class="dlc-tname" data-act="copy" title="' + dlA(t.name) + '">' + esc(t.name) + '</span>' +
+        (cleaned
+          ? '<span class="dlc-tname static" title="' + dlA(t.name) + '（产物已清理，不可重命名）">' + esc(t.name) + '</span>'
+          : '<span class="dlc-tname" data-act="rename" title="点击重命名">' + esc(t.name) + '</span>') +
         '<span class="dlc-pill ' + st + '">' + dlStatusText(st, t) + '</span>' +
         (t.opts && t.opts.proxy
           ? '<span class="dlc-pill proxy" title="经代理下载：' + dlA(t.opts.proxy) + '">' +
@@ -1113,6 +1117,51 @@ function dlInfoOpen(id) {
     if (a === "copy-src") return dlCopyText(srcTxt, "来源已复制");
   });
 }
+/* 点击文件名 → 行内输入框；Enter / 失焦保存，Esc 取消 */
+function dlBeginRename(nameEl, id) {
+  const t = dlFindTask(id);
+  if (!t || !nameEl || DL.renamingId) return;
+  if (t.exists === false && (t.status === "ready" || t.status === "done")) {
+    toast("产物已清理，无法重命名", "warn");
+    return;
+  }
+  const old = String(t.name || "");
+  DL.renamingId = id;
+  nameEl.classList.add("editing");
+  nameEl.innerHTML = '<input class="dlc-tname-input" type="text" maxlength="180" spellcheck="false" value="' + dlA(old) + '">';
+  const input = nameEl.querySelector("input");
+  if (!input) { DL.renamingId = ""; return; }
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async function (save) {
+    if (done) return;
+    done = true;
+    const val = (input.value || "").trim();
+    document.removeEventListener("mousedown", outside, true);
+    DL.renamingId = "";
+    if (!save || !val || val === old) { dlRenderTasks(); return; }
+    try {
+      const d = await dlReq("/api/dl/tasks/" + encodeURIComponent(id) + "/rename", {
+        method: "POST", body: JSON.stringify({ name: val })
+      });
+      if (!d.ok) toast(d.error || "重命名失败", "err");
+      else toast("已重命名为：" + (d.task && d.task.name || val), "ok");
+    } catch (e) {
+      toast("重命名失败：" + ((e && e.message) || e), "err");
+    }
+    dlReload(true);
+  };
+  const outside = function (e) { if (e.target !== input) finish(true); };
+  document.addEventListener("mousedown", outside, true);
+  input.addEventListener("click", function (e) { e.stopPropagation(); });
+  input.addEventListener("keydown", function (e) {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", function () { finish(true); }, { once: true });
+}
 function dlOnClick(e) {
   const el = e.target.closest("[data-act]");
   if (!el) return;
@@ -1120,6 +1169,7 @@ function dlOnClick(e) {
   const row = el.closest("[data-id]");
   const id = row ? row.dataset.id : "";
   const t = id ? dlFindTask(id) : null;
+  if (act === "rename") return dlBeginRename(el, id);
   if (act === "new") return dlPickOpen({});
   // 「详细设置」→ 设置页的下载通知分区
   if (act === "dln-open") {

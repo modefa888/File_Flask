@@ -621,7 +621,10 @@ function trAccountBar(d) {
         '<div class="adm-btn-row">' +
         '<button class="adm-btn sm primary" id="trAddAcc" type="button"><i class="bi bi-person-plus"></i> 添加账号</button>' +
         '<button class="adm-btn sm ghost" id="trConnect" type="button"><i class="bi bi-link-45deg"></i> 网站连接登录</button>' +
-        '<button class="adm-btn sm ghost" id="trCheckinAll" type="button"><i class="bi bi-check2-all"></i> 全部签到</button>' +
+        '<button class="adm-btn sm ghost" id="trCheckinAll" type="button"' +
+        (d.checkin_all_done ? ' disabled title="今日所有账号均已签到"' : '') + '>' +
+        '<i class="bi bi-check2-all"></i> ' +
+        (d.checkin_all_done ? '今日已全部签到' : '全部签到') + '</button>' +
         '<button class="adm-btn sm ghost" id="trRefreshAll" type="button"><i class="bi bi-arrow-repeat"></i> 刷新余额</button>' +
         '</div>') + '<div class="wb-accounts">';
     if (!accounts.length) {

@@ -1122,6 +1122,25 @@ def _local_status(uid: str, today: str) -> dict:
             "cached": True}
 
 
+def _checkin_all_done(accounts, today, extra_checked=()) -> bool:
+    """所有启用账号今天是否都已签到。"""
+    enabled = [str(a.get("uid") or "") for a in (accounts or []) if a.get("enabled")]
+    if not enabled:
+        return False
+    conn = store_db.store_conn()
+    try:
+        rows = [r[0] for r in conn.execute(
+            "SELECT uid FROM traecn_checkin "
+            "WHERE day=? AND status IN ('success','already')", (today,))]
+    except Exception as e:
+        _log.warning("Trae CN 批量签到状态读取失败：%s", e)
+        return False
+    finally:
+        conn.close()
+    checked = set(rows) | {str(u) for u in extra_checked if u}
+    return all(uid in checked for uid in enabled)
+
+
 def overview(uid=None, fresh=False) -> dict:
     """首屏：指定账号的余额 / 签到状态 + 全部账号列表 + 签到记录。
 
@@ -1134,6 +1153,7 @@ def overview(uid=None, fresh=False) -> dict:
            "errors": {}, "history_recent": [], "history_all": [],
            "accounts": list_accounts(), "current_uid": target,
            "account": public_account(acc) if acc else None}
+    out["checkin_all_done"] = _checkin_all_done(out["accounts"], out["today"])
     hist_limit = 14 * max(1, len(out["accounts"])) + 60
     if not acc:
         out["configured"] = False
@@ -1199,6 +1219,11 @@ def overview(uid=None, fresh=False) -> dict:
     out["history_recent"] = list_history(limit=30, uid=target)["items"]
     out["history_all"] = list_history(limit=hist_limit)["items"]
     out["credits_summary"] = credits_summary()
+    # 官方状态可能比本地记录新（例如在别处已签到），当前账号按实时结果再判一次
+    status = out.get("status") or {}
+    live_checked = status.get("checked_in") is True or status.get("already") is True
+    out["checkin_all_done"] = _checkin_all_done(
+        out["accounts"], out["today"], (target,) if live_checked else ())
     return out
 
 

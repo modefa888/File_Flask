@@ -577,7 +577,10 @@ function wbAccountBar(d) {
         '<button class="adm-btn sm primary" id="wbAddQr" type="button"><i class="bi bi-qr-code"></i> 扫码添加</button>' +
         '<button class="adm-btn sm ghost" id="wbAddGlobal" type="button"><i class="bi bi-globe2"></i> 国际版登录</button>' +
         '<button class="adm-btn sm ghost" id="wbAddManual" type="button"><i class="bi bi-plus-lg"></i> 手动添加</button>' +
-        '<button class="adm-btn sm ghost" id="wbCheckinAll" type="button"><i class="bi bi-check2-all"></i> 全部签到</button>' +
+        '<button class="adm-btn sm ghost" id="wbCheckinAll" type="button"' +
+        (d.checkin_all_done ? ' disabled title="今日所有账号均已签到"' : '') + '>' +
+        '<i class="bi bi-check2-all"></i> ' +
+        (d.checkin_all_done ? '今日已全部签到' : '全部签到') + '</button>' +
         '<button class="adm-btn sm ghost" id="wbRefreshAll" type="button"><i class="bi bi-arrow-repeat"></i> 刷新余额</button>' +
         '</div>') + '<div class="wb-accounts">';
     if (!accounts.length) {

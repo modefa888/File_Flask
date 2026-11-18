@@ -592,7 +592,7 @@
                 '<span class="cd-spacer"></span>' +
                 '<button type="button" class="cd-mini ai" id="cronTryAi" title="用 AI 根据这次输出生成一版好看的通知文案（保留 {task} 等变量）">' +
                   '<i class="bi bi-stars"></i> AI 生成文案</button>' +
-                '<button type="button" class="cd-mini" id="cronTryToTpl" title="切到「自定义模板」并把 {output} 加进正文">写进通知正文</button>' +
+                '<button type="button" class="cd-mini" id="cronTryToTpl" title="不用 AI：按万能公式一键生成自定义标题 + 正文（含状态、关键字段、脚本输出）">一键生成标题+正文</button>' +
                 '<button type="button" class="cd-mini" id="cronTryCopy">复制输出</button>' +
                 '<button type="button" class="cd-mini" id="cronTryClear">收起</button>' +
               '</div>' +
@@ -1166,24 +1166,45 @@
     catch (_) { toast("复制失败，请手动选中文本", "err"); }
     ta.remove();
   }
-  /* 把试运行结果接进自定义通知：切到「自定义模板」，按输出字段生成一段骨架 */
+  /* 万能通知公式（纯本地，不调用 AI）：一键生成「自定义标题 + 自定义正文」。
+     公式 = 身份（任务 / 时间） + 状态（成败 / 退出码 / 耗时） + 关键指标（脚本 JSON 字段自动带入） + 原始输出。
+     模板里保留 {task} / {event} 等变量，之后每次执行都会替换成当次真实结果，做到一次生成、长期通用。 */
   function cronTryToTpl() {
     const sel = $("cronNotifyContent");
     if (sel && sel.value !== "custom") sel.value = "custom";
     if (sel) cronTaskNotifySync();
-    const bodyEl = $("cronNotifyBody");
-    if (bodyEl) {
-      if (!bodyEl.value.trim()) {
-        const keys = Object.keys(CRON.tryFields || {});
-        // 有 JSON 字段就顺手写成「order_count：{order_count}，error_count：{error_count}」
-        const line = keys.slice(0, 6).map(k => k + "：{" + k + "}").join("，");
-        bodyEl.value = "任务「{task}」{event}。" + (line ? "\n" + line : "") + "\n\n{output}";
-      } else if (bodyEl.value.indexOf("{output}") < 0) {
-        bodyEl.value = bodyEl.value.replace(/\s*$/, "") + "\n\n{output}";
-      }
-      bodyEl.focus();
+
+    const snap = CRON.trySnap;
+    const fields = (snap && snap.fields) || CRON.tryFields || {};
+    // 只取合法的 JSON 字段名，最多 6 个，避免把噪声字段塞进模板
+    const keys = Object.keys(fields)
+      .filter(k => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)).slice(0, 6);
+
+    // 标题公式：任务 · 状态（· 前两个关键指标）
+    const tEl = $("cronNotifyTitle");
+    if (tEl) {
+      const metric = keys.slice(0, 2).map(k => k + " {" + k + "}").join(" · ");
+      tEl.value = "{task} · {event}" + (metric ? " · " + metric : "");
     }
-    toast("已切到「自定义模板」，改改文案即可", "ok");
+
+    // 正文公式：四段式——身份 / 状态 / 关键数据 / 原始输出（每段带 emoji 图标，纯文本渠道也能显示）
+    const bEl = $("cronNotifyBody");
+    if (bEl) {
+      const lines = [
+        "📋 【任务】{task}",
+        "🔔 【状态】{event} · 退出码 {exit} · 耗时 {duration}",
+        "🕐 【时间】{date} {time}",
+      ];
+      if (keys.length) {
+        lines.push("📊 【关键数据】");
+        keys.forEach(k => lines.push("  • " + k + "：{" + k + "}"));
+      }
+      lines.push("📄 【脚本输出】", "{output}");
+      bEl.value = lines.join("\n");
+    }
+
+    cronTryPreview();                       // 直接赋值不触发 input，手动刷一次预览
+    toast("已按万能公式生成标题和正文，微调后保存即可", "ok");
   }
 
   /* AI 生成一版好看的自定义通知文案（需要先在「设置 → AI 助手」配好接口） */

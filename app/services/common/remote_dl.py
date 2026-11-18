@@ -253,14 +253,16 @@ def _name_from_url(url, fallback="download.bin"):
 
 
 def _unique_path(folder, name):
+    """目标目录已有同名文件时自动加序号：`影片.mp4` → `影片(2).mp4` → `影片(3).mp4`……
+    与任务记录的编号风格保持一致，绝不覆盖用户已有的文件。"""
     os.makedirs(folder, exist_ok=True)
     p = os.path.join(folder, name)
     if not os.path.exists(p):
         return p
     stem, ext = os.path.splitext(name)
-    i = 1
+    i = 2
     while True:
-        cand = os.path.join(folder, "%s-%d%s" % (stem, i, ext))
+        cand = os.path.join(folder, "%s(%d)%s" % (stem, i, ext))
         if not os.path.exists(cand):
             return cand
         i += 1
@@ -379,10 +381,63 @@ def _hls_playlist(url, opts=None, depth=0):
             "seg_keys": seg_keys, "seg_durs": seg_durs, "seg_disc": seg_disc}
 
 
+# m3u8 链接末尾常见「通用名」，没有辨识度：自动命名时往前找真正的标识段
+_GENERIC_STEMS = {
+    "index", "playlist", "master", "main", "media", "video", "videos", "hls",
+    "chunklist", "prog_index", "manifest", "stream", "out", "play", "player",
+    "default", "live", "vod", "m3u8",
+}
+
+
 def _hls_stem(url):
-    stem = _name_from_url(url, "video")
-    stem = re.sub(r"\.m3u8$", "", stem, flags=re.I)
-    return dl._safe_name(stem or "video")
+    """从 m3u8 链接推断文件名（不带扩展名）。
+
+    `.../2026/11/17/97b58f87/index.m3u8` → `97b58f87`（不再千篇一律叫 index）；
+    末尾是 index / playlist / master / chunklist 这类通用名时，往前找有辨识度的一段。
+    """
+    try:
+        path = urllib.parse.urlsplit(url).path or ""
+    except Exception:                                  # noqa: BLE001
+        path = ""
+    segs = [urllib.parse.unquote(s).strip() for s in path.split("/") if s.strip()]
+    if segs:
+        segs[-1] = re.sub(r"\.m3u8?$", "", segs[-1], flags=re.I).strip()
+    picked = ""
+    for seg in reversed(segs):
+        low = seg.lower()
+        if not seg or low in _GENERIC_STEMS:
+            continue
+        if re.fullmatch(r"\d{1,4}", seg):              # 年份 / 月 / 日 / 序号，辨识度太低
+            continue
+        picked = seg
+        break
+    if not picked:                                     # 整条路径都没可用段 → 用原逻辑兜底
+        picked = re.sub(r"\.m3u8?$", "", _name_from_url(url, ""), flags=re.I).strip()
+        if picked.lower() in _GENERIC_STEMS:
+            picked = ""
+    return dl._safe_name(picked or "video")
+
+
+# 视频容器扩展名：命中就认为文件名已经带了想要的扩展名
+_MEDIA_EXTS = (".mp4", ".ts", ".mkv", ".mov", ".flv", ".m4v", ".webm", ".avi", ".wmv", ".mpg")
+# 这些「看起来是扩展名」的尾巴确实是占位/错误类型，可以换成正确的容器扩展名
+_REPLACE_EXTS = (".m3u8", ".m3u", ".part", ".tmp", ".downloading", ".crdownload", ".txt")
+
+
+def _with_media_ext(name, want):
+    """给名字补上媒体扩展名，且绝不因为名字中间的「点」而截断。
+
+    例：`第1集.下集预告` → `第1集.下集预告.mp4`（旧实现会被 splitext 截成 `第1集.mp4`）；
+    `影片.m3u8` → `影片.mp4`；`影片.mkv` 原样保留。
+    """
+    n = str(name or "").strip() or "video"
+    low = n.lower()
+    if low.endswith(_MEDIA_EXTS):
+        return n
+    for ext in _REPLACE_EXTS:
+        if low.endswith(ext):
+            return n[: -len(ext)] + want
+    return n + want
 
 
 def _probe_hls(url, opts=None):
@@ -824,6 +879,7 @@ def _run_http(tid, t):
             return _run_hls(tid, dl.get(tid) or t)
         name = dl._safe_name(opts.get("filename") or info.get("name") or "download.bin")
         out_path = _unique_path(t.get("save_dir") or dl.ARTIFACT_ROOT, name)
+        name = os.path.basename(out_path)          # 目录里已有同名文件时，(2)/(3) 后缀要体现在记录上
         meta = {"probed": 1, "size": int(info.get("size") or 0),
                 "range": bool(info.get("range")), "type": info.get("type") or "",
                 "final_url": info.get("final_url") or url}
@@ -835,7 +891,7 @@ def _run_http(tid, t):
         if not out_path:
             name = dl._safe_name(opts.get("filename") or t.get("name") or "download.bin")
             out_path = _unique_path(t.get("save_dir") or dl.ARTIFACT_ROOT, name)
-            dl._update(tid, artifact=out_path)
+            dl._update(tid, artifact=out_path, name=os.path.basename(out_path))
 
     size = int(meta.get("size") or 0)
     rng = bool(meta.get("range"))
@@ -902,7 +958,7 @@ def _run_http(tid, t):
     except OSError:
         final = done
     dl._update(tid, status="ready", phase="", size=final, srv_size=final, srv_done=final,
-               done=0, artifact=out_path,
+               done=0, artifact=out_path, name=os.path.basename(out_path),
                note="%s · 服务器端 %d 线程完成" % (meta.get("type") or "文件", len(segs)))
 
 
@@ -1074,11 +1130,10 @@ def _run_hls(tid, t):
                 json.dump(pl, f)
         except OSError:
             pass
-        name = dl._safe_name(opts.get("filename") or t.get("name") or "video")
-        stem, ext = os.path.splitext(name)
-        if ext.lower() not in (".mp4", ".ts", ".mkv", ".mov", ".flv"):
-            name = (stem or "video") + (".mp4" if ff else ".ts")
+        name = _with_media_ext(dl._safe_name(opts.get("filename") or t.get("name") or "video"),
+                               ".mp4" if ff else ".ts")
         out_path = _unique_path(t.get("save_dir") or dl.ARTIFACT_ROOT, name)
+        name = os.path.basename(out_path)          # 同名文件已存在 → 记录里也显示带序号的真实文件名
         meta = {"ok": 1, "total": len(pl["segs"]), "enc": bool(pl.get("enc")),
                 "init": pl.get("init") or "", "duration": round(pl.get("duration") or 0, 1),
                 "ff": bool(ff)}
@@ -1110,7 +1165,8 @@ def _run_hls(tid, t):
     total = len(segs)
     out_path = t.get("artifact") or _unique_path(
         t.get("save_dir") or dl.ARTIFACT_ROOT,
-        dl._safe_name(opts.get("filename") or t.get("name") or "video.ts"))
+        _with_media_ext(dl._safe_name(opts.get("filename") or t.get("name") or "video"),
+                        ".mp4" if ff else ".ts"))
 
     # 2) 统计已完成分片（断点续传：完整分片直接跳过）
     lock = threading.Lock()
@@ -1259,6 +1315,7 @@ def _run_hls(tid, t):
     is_mp4 = out_path.lower().endswith(".mp4")
     dl._update(tid, status="ready", phase="", size=final, srv_size=final,
                srv_done=final, done=0, speed=0, artifact=out_path,
+               name=os.path.basename(out_path),
                note=("HLS · %d 分片 · 拼接 MP4" if is_mp4 else "HLS · %d 分片 · 拼接 TS") % total)
 
 
@@ -1327,6 +1384,7 @@ def _hls_merge(parts_dir, total, init_path, out_path, ff, key_line="", opts=None
     """拼接：优先 ffmpeg 无损封装 MP4，失败退回二进制拼 TS。
     加密流按分片还原各自的 KEY 行 / EXTINF / DISCONTINUITY 写成本地 m3u8，交给
     ffmpeg 的 HLS demuxer 解密拼接；同一条流可能中途换密钥，不能用首个 KEY 一拼到底。"""
+    out_path = _with_media_ext(out_path, ".mp4")     # 名字中间的「点」不是扩展名，别被截断
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     entries = ([init_path] if init_path and os.path.exists(init_path) else []) + \
               [os.path.join(parts_dir, "seg_%05d.ts" % i) for i in range(total)]
@@ -1455,10 +1513,8 @@ def _run_hls_ffmpeg(tid, t, pl):
     url = t.get("url") or ""
     out_path = t.get("artifact") or _unique_path(
         t.get("save_dir") or dl.ARTIFACT_ROOT,
-        dl._safe_name(opts.get("filename") or t.get("name") or "video.mp4"))
-    stem, ext = os.path.splitext(out_path)
-    if ext.lower() not in (".mp4", ".ts", ".mkv", ".mov"):
-        out_path = stem + ".mp4"
+        dl._safe_name(opts.get("filename") or t.get("name") or "video"))
+    out_path = _with_media_ext(out_path, ".mp4")
     _stem, _ext = os.path.splitext(out_path)
     tmp_out = _stem + ".dlmerge" + (_ext or ".mp4")
     fmt = ["-f", "mp4"] if _ext.lower() in ("", ".mp4", ".mov") else []
@@ -1665,6 +1721,7 @@ def _run_ftp(tid, t):
     path = urllib.parse.unquote(u.path or "/")
     name = dl._safe_name(opts.get("filename") or os.path.basename(path) or "download.bin")
     out_path = t.get("artifact") or _unique_path(t.get("save_dir") or dl.ARTIFACT_ROOT, name)
+    name = os.path.basename(out_path)              # 同名文件已存在时用带序号的名字
 
     part = os.path.join(dl.ARTIFACT_ROOT, tid + ".part")
     os.makedirs(os.path.dirname(part), exist_ok=True)
@@ -1720,7 +1777,8 @@ def _run_ftp(tid, t):
         return
     final = os.path.getsize(out_path)
     dl._update(tid, status="ready", phase="", size=final, srv_size=final, srv_done=final,
-               done=0, artifact=out_path, note="FTP · 单连接完成")
+               done=0, artifact=out_path, name=os.path.basename(out_path),
+               note="FTP · 单连接完成")
 
 
 # ----------------------------------------------------------------------

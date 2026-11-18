@@ -13,6 +13,7 @@ GET  /api/ssh/fs/raw       ?id=&path=             原始字节（内嵌图片缩
 GET  /api/ssh/fs/stream    ?id=&path=             音视频流（支持 Range，可拖动进度）
 POST /api/ssh/fs/size      {id, path}             递归统计目录占用（条目 / 耗时都有上限）
 POST /api/ssh/fs/upload    multipart: id, path(目标目录), file
+POST /api/ssh/fs/download_zip {id, paths:[...]}  流式打包下载多选文件 / 文件夹
 
 连接复用 sshconn 的存储（.ssh_connections.json，密码 / 私钥 secret 加密）。
 SFTP 客户端按连接 id 缓存（默认 15 分钟 TTL，惰性清理），请求出错自动重建一次。
@@ -26,10 +27,12 @@ import lzma
 import tarfile
 import zipfile
 import os
+import queue
 import re
 import stat as _stat
 import threading
 import time
+import uuid
 from datetime import datetime
 from urllib.parse import quote
 
@@ -56,6 +59,9 @@ _SFTP_TIMEOUT = 15                # SFTP 通道操作超时（秒）：防止连
 
 _SFTP_LOCK = threading.Lock()
 _SFTP = {}                        # cid -> {"client": SSHClient, "sftp": SFTPClient, "ts": float}
+
+_ZIP_PROGRESS = {}                # token -> {read, total, done, error, ts}
+_ZIP_PROGRESS_LOCK = threading.Lock()
 
 
 def _close_ent(ent):
@@ -516,6 +522,134 @@ def fs_download():
     except Exception as e:  # noqa: BLE001
         _drop(cid)
         return jsonify({"error": _ssh_err(e)}), 400
+
+
+class _ZipSink(io.RawIOBase):
+    """把 zipfile 的写入转成队列块，边打边下发，不必整包占满内存。"""
+    def __init__(self, q):
+        self.q = q
+        self.n = 0
+
+    def writable(self):
+        return True
+
+    def seekable(self):
+        return False
+
+    def tell(self):
+        return self.n
+
+    def write(self, b):
+        if b:
+            self.q.put(bytes(b))
+            self.n += len(b)
+        return len(b)
+
+    def flush(self):
+        pass
+
+
+@bp.route("/api/ssh/fs/download_zip", methods=["POST"])
+def fs_download_zip():
+    """多选打包：把选中的远程文件 / 文件夹实时压成 zip 流式返回。"""
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("id") or "")
+    paths = data.get("paths") or []
+    if not cid or not isinstance(paths, list) or not paths:
+        return jsonify({"error": "缺少 id 或 paths"}), 400
+    paths = [str(p or "").strip() for p in paths[:200]]
+    paths = [p for p in paths if p]
+    if not paths:
+        return jsonify({"error": "未选择任何文件"}), 400
+    try:
+        sftp, _client = _sftp_for(cid)
+    except Exception as e:  # noqa: BLE001
+        _drop(cid)
+        return jsonify({"error": _ssh_err(e)}), 400
+
+    # 预估源字节总数，供前端显示真实百分比（压缩后体积不同，用读取进度更准）
+    def calc_total(p):
+        st = sftp.stat(p)
+        if _stat.S_ISDIR(st.st_mode):
+            return sum(calc_total(p.rstrip("/") + "/" + e.filename)
+                       for e in sftp.listdir_attr(p))
+        return int(getattr(st, "st_size", 0) or 0)
+
+    try:
+        total = sum(calc_total(p) for p in paths)
+    except Exception:  # noqa: BLE001
+        total = 0
+    token = uuid.uuid4().hex[:12]
+    now = time.time()
+    with _ZIP_PROGRESS_LOCK:
+        for k, v in list(_ZIP_PROGRESS.items()):
+            if now - v.get("ts", 0) > 600:
+                _ZIP_PROGRESS.pop(k, None)
+        _ZIP_PROGRESS[token] = {"read": 0, "total": total, "done": False,
+                                "error": "", "ts": now}
+    q = queue.Queue(maxsize=16)
+
+    def add(zf, remote, arc):
+        st = sftp.stat(remote)
+        if _stat.S_ISDIR(st.st_mode):
+            for ent in sftp.listdir_attr(remote):
+                child = remote.rstrip("/") + "/" + ent.filename
+                add(zf, child, arc.rstrip("/") + "/" + ent.filename)
+        else:
+            with sftp.open(remote, "rb") as src, zf.open(arc, "w") as dst:
+                while True:
+                    buf = src.read(64 * 1024)
+                    if not buf:
+                        break
+                    dst.write(buf)
+                    with _ZIP_PROGRESS_LOCK:
+                        rec = _ZIP_PROGRESS.get(token)
+                        if rec:
+                            rec["read"] += len(buf)
+
+    def producer():
+        try:
+            with zipfile.ZipFile(_ZipSink(q), "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+                for p in paths:
+                    add(zf, p, os.path.basename(p.rstrip("/")) or "download")
+        except Exception as e:  # noqa: BLE001
+            with _ZIP_PROGRESS_LOCK:
+                rec = _ZIP_PROGRESS.get(token)
+                if rec:
+                    rec["error"] = str(e)[:200]
+            _log.warning("SSH 多选打包失败：%s", e)
+        finally:
+            with _ZIP_PROGRESS_LOCK:
+                rec = _ZIP_PROGRESS.get(token)
+                if rec:
+                    rec["done"] = True
+                    rec["total"] = max(rec.get("total") or 0, rec.get("read") or 0)
+            q.put(None)
+
+    def gen():
+        th = threading.Thread(target=producer, daemon=True, name="ssh-zip")
+        th.start()
+        while True:
+            chunk = q.get()
+            if chunk is None:
+                break
+            yield chunk
+        th.join(timeout=2)
+
+    name = "download_%s.zip" % datetime.now().strftime("%Y%m%d_%H%M%S")
+    return Response(stream_with_context(gen()), mimetype="application/zip",
+                    headers={"Content-Disposition": "attachment; filename*=UTF-8''%s" % quote(name),
+                             "X-DL-Zip-Token": token})
+
+
+@bp.route("/api/ssh/fs/download_zip_progress", methods=["GET"])
+def fs_download_zip_progress():
+    token = request.args.get("token", "")
+    with _ZIP_PROGRESS_LOCK:
+        rec = dict(_ZIP_PROGRESS.get(token) or {})
+    if not rec:
+        return jsonify({"error": "未知打包任务"}), 404
+    return jsonify({"ok": True, **rec})
 
 
 @bp.route("/api/ssh/fs/raw", methods=["GET"])

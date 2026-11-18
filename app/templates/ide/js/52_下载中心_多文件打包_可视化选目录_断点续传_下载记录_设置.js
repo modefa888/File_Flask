@@ -29,6 +29,36 @@ if (typeof titles !== "undefined") titles.downloads = "下载中心";
 
 /* ---------------- 工具 ---------------- */
 function dlA(s) { return esc(s).replace(/"/g, "&quot;"); }
+/* 下载文件名规则：留空 = 服务端自动识别；填了就必须符合通用命名规则，
+   否则保存到磁盘时会被系统 / 服务端静默改名，这里提前拦住。返回错误文案，空串=合法。 */
+function dlNameErr(name) {
+  const s = String(name == null ? "" : name);
+  if (!s.trim()) return "";                                   // 留空：自动识别
+  if (s.length > 180) return "文件名最多 180 个字符（当前 " + s.length + " 个）";
+  const bad = s.match(/[\\/:*?"<>|]/g);
+  if (bad) return "不能包含 " + Array.from(new Set(bad)).join(" ") + " 这些字符";
+  if (/[\u0000-\u001f\u007f]/.test(s)) return "不能包含换行、制表符等控制字符";
+  if (/^[. ]/.test(s)) return "开头不能是空格或点号";
+  if (/[. ]$/.test(s)) return "结尾不能是空格或点号";
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(s)) return "「" + s + "」是系统保留名，请换一个";
+  return "";
+}
+/* 兜底清洗：来源文件名（探测到的 Content-Disposition 名）里带非法字符时先净化再填入 */
+function dlNameClean(name) {
+  return String(name || "").replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, "")
+    .replace(/^[. ]+/, "").replace(/[. ]+$/, "").slice(0, 180);
+}
+/* 把链接框内容拆成链接列表（换行分隔；逗号仅在后接协议头时才算分隔符） */
+function dlUrlLines(raw) {
+  const urls = [];
+  String(raw || "").split(/[\r\n]+/).forEach(function (line) {
+    line.split(/,(?=\s*(?:https?|ftp|magnet):)/).forEach(function (s) {
+      const t = s.trim();
+      if (t) urls.push(t);
+    });
+  });
+  return urls;
+}
 function dlSize(n) {
   n = Number(n) || 0;
   if (n < 1024) return n + " B";
@@ -299,14 +329,19 @@ async function dlLoadUsage(silent) {
   if (silent) dlPaintUsage();
   else dlRenderSettings();
 }
-// 只刷新「存储 → 当前占用」这三个数字
+// 只刷新「存储 → 当前占用」这几个数字（不重建页面，避免开关跳动）
 function dlPaintUsage() {
   const u = DL.usage;
   if (!u) return;
-  const a = $("dlUArt"), b = $("dlUBytes"), r = $("dlURec");
+  const a = $("dlUArt"), b = $("dlUBytes"), r = $("dlURec"), d = $("dlUDisk");
   if (a) a.textContent = (u.artifacts || 0) + " 个";
   if (b) b.textContent = dlSize(u.artifact_bytes || 0);
   if (r) r.textContent = (u.records || 0) + " 条";
+  const lbl = $("dlURecLbl");
+  if (lbl) lbl.textContent = u.records_cleaned
+    ? '记录条数 · 已清理 ' + u.records_cleaned : '记录条数';
+  if (d) d.textContent = u.disk_free
+    ? (dlSize(u.disk_free) + (u.disk_total ? ' / ' + dlSize(u.disk_total) : '')) : '—';
 }
 async function dlLoadEnv() {
   const d = await dlReq("/api/dl/env");
@@ -950,17 +985,22 @@ function dlRenderSettings() {
     '<div class="dlc-sec"><h3><i class="bi bi-hdd-stack"></i>存储' +
       '<small>产物与记录占用</small></h3>' +
       '<div class="dlc-srow"><div class="dlc-sinfo"><div class="dlc-slabel">当前占用</div>' +
-        '<div class="dlc-sdesc">产物目录里未被清理的 zip / 文本文件</div>' +
+        '<div class="dlc-sdesc">只统计下载中心生成的产物文件，不含该目录里的其它文件</div>' +
         '<div class="dlc-usage">' +
           '<div><span>产物文件</span><b id="dlUArt">' + (u.artifacts || 0) + ' 个</b></div>' +
-          '<div><span>磁盘占用</span><b id="dlUBytes">' + dlSize(u.artifact_bytes || 0) + '</b></div>' +
-          '<div><span>记录条数</span><b id="dlURec">' + (u.records || 0) + ' 条</b></div>' +
+          '<div><span>下载占用</span><b id="dlUBytes">' + dlSize(u.artifact_bytes || 0) + '</b></div>' +
+          '<div><span id="dlURecLbl">' + (u.records_cleaned
+            ? '记录条数 · 已清理 ' + u.records_cleaned : '记录条数') +
+            '</span><b id="dlURec">' + (u.records || 0) + ' 条</b></div>' +
+          '<div><span>磁盘可用</span><b id="dlUDisk">' +
+            (u.disk_free ? (dlSize(u.disk_free) + ' / ' + dlSize(u.disk_total)) : '—') +
+            '</b></div>' +
         '</div></div>' +
         '<div class="dlc-sctl"><button class="dlc-btn sm danger" data-act="clean">' +
           '<i class="bi bi-eraser"></i>清理产物</button></div></div>' +
       '<div style="margin-top:10px;font-size:11px;color:var(--dlc-dim);line-height:1.8">' +
-        '提示：单文件下载直接读源文件，不复制；只有「多文件 / 文件夹」才生成 zip 产物。' +
-        '清理产物后记录仍在，重新下载会提示「请重新创建任务」。</div>' +
+        '提示：单文件下载直接读源文件，不复制；「已清理」指记录还在但本地文件已删除。' +
+        '磁盘可用 = 当前产物目录所在分区的剩余空间，与该目录里的其它文件无关。</div>' +
     '</div>';
   dlLoadNotify();          // 通知分区：拉配置 + 渲染可勾选的渠道账号
 }
@@ -1637,15 +1677,57 @@ async function dlClearRecords() {
   if (DL.view === "records") dlLoadRecords();
 }
 
+/* 清理产物确认：可勾选是否连带删除已结束的下载记录，默认只清理文件 */
+function dlAskCleanArtifacts() {
+  return new Promise(function (resolve) {
+    const u = DL.usage || {};
+    const m = document.createElement("div");
+    m.className = "dlc-mask";
+    m.innerHTML =
+      '<div class="dlc-delbox">' +
+        '<div class="dlc-cpop-tt"><i class="bi bi-eraser"></i>清理产物文件</div>' +
+        '<div class="dlc-cpop-msg">将删除已结束任务的产物文件：<b>' + (u.artifacts || 0) +
+          '</b> 个 / <b>' + dlSize(u.artifact_bytes) + '</b>。</div>' +
+        '<label class="dlc-delck"><input type="checkbox" id="dlCleanRecChk">' +
+          '<span>同时删除对应的下载记录（不勾选则只清理文件、保留记录）</span></label>' +
+        '<div class="dlc-cpop-btns">' +
+          '<button class="dlc-cpop-no">取消</button>' +
+          '<button class="dlc-cpop-ok"><i class="bi bi-eraser"></i>清理</button></div>' +
+      '</div>';
+    document.body.appendChild(m);
+    const done = function (val) {
+      m.classList.remove("show");
+      setTimeout(function () { m.remove(); }, 180);
+      document.removeEventListener("keydown", onKey, true);
+      resolve(val);
+    };
+    const onKey = function (ev) { if (ev.key === "Escape") { ev.stopPropagation(); done({ ok: false }); } };
+    document.addEventListener("keydown", onKey, true);
+    m.addEventListener("click", function (ev) {
+      if (ev.target === m) return done({ ok: false });
+      if (ev.target.closest(".dlc-cpop-no")) return done({ ok: false });
+      if (ev.target.closest(".dlc-cpop-ok")) {
+        return done({ ok: true, delRecords: !!m.querySelector("#dlCleanRecChk").checked });
+      }
+    });
+    requestAnimationFrame(function () { m.classList.add("show"); });
+  });
+}
 async function dlCleanArtifacts() {
-  const ok = await uiConfirm("清理产物文件",
-    "删除所有已结束任务的 zip / 文本产物，释放磁盘空间；下载记录会保留。", "清理", true);
-  if (!ok) return;
+  const res = await dlAskCleanArtifacts();
+  if (!res || !res.ok) return;
   const d = await dlReq("/api/dl/clean", { method: "POST", body: JSON.stringify({ what: "artifacts" }) });
   if (!d.ok) { toast(d.error || "清理失败", "err"); return; }
-  toast(d.message || "已清理", "ok");
+  let msg = d.message || "已清理";
+  if (res.delRecords) {
+    const r = await dlReq("/api/dl/clean", { method: "POST", body: JSON.stringify({ what: "finished" }) });
+    if (r.ok) msg += "，" + (r.message || "已清除记录");
+    else toast(r.error || "清除记录失败", "warn");
+  }
+  toast(msg, "ok");
   dlLoadUsage();
   dlLoadTasks(true);
+  if (DL.view === "records") dlLoadRecords();
 }
 
 const DL_CFG_DEFAULT = {
@@ -2042,8 +2124,8 @@ function dlPickOpen(opts) {
     if (!P) return;
     const id = e.target.id;
     if (id === "dlPkQ") { P.q = e.target.value.trim().toLowerCase(); dlPickRenderList(); return; }
-    if (id === "dlPkUrl") { P.url = e.target.value; return; }
-    if (id === "dlPkUrlName") { P.urlName = e.target.value; return; }
+    if (id === "dlPkUrl") { P.url = e.target.value; dlUrlNameCheck(); return; }
+    if (id === "dlPkUrlName") { P.urlName = e.target.value; dlUrlNameCheck(); return; }
     if (id === "dlPkReferer") { P.referer = e.target.value; return; }
     if (id === "dlPkCookie") { P.cookie = e.target.value; return; }
     if (id === "dlPkProxy") { P.proxy = e.target.value; return; }
@@ -2113,6 +2195,7 @@ function dlPickTabSet(tab) {
     if (body) body.style.display = "none";
     if (page) { page.hidden = false; page.innerHTML = dlUrlPageHtml(); }
     if (foot) foot.innerHTML = dlUrlFootHtml();
+    dlUrlNameCheck();              // 回填已有文件名时同步校验状态
   } else {
     if (body) body.style.display = "";
     if (page) page.hidden = true;
@@ -2140,6 +2223,32 @@ function dlDirFootHtml() {
     '<button class="dlc-btn primary" data-pk="ok"><i class="bi bi-check2"></i>使用此目录</button>' +
   '</div>';
 }
+/* 实时校验文件名：提示规则 / 标红输入框 / 不合法时禁用「开始下载」。返回错误文案。 */
+function dlUrlNameCheck() {
+  const P = DL.pick;
+  const inp = document.getElementById("dlPkUrlName");
+  const hint = document.getElementById("dlPkUrlNameHint");
+  if (!inp || !hint) return "";
+  // 批量（多个链接）时文件名不生效，按链接自动命名，不做拦截
+  const many = dlUrlLines(P ? P.url : "").length > 1;
+  const err = many ? "" : dlNameErr(inp.value);
+  inp.classList.toggle("bad", !!err);
+  hint.className = "dlc-namehint" + (err ? " bad" : "");
+  if (err) {
+    hint.innerHTML = '<i class="bi bi-exclamation-circle"></i> ' + esc(err) + "，改好才能开始下载";
+  } else if (many) {
+    hint.innerHTML = '<i class="bi bi-info-circle"></i> 批量下载按链接自动命名，这个文件名不生效';
+  } else {
+    hint.innerHTML = '<i class="bi bi-info-circle"></i> 可用中文 / 英文 / 数字 / 空格 / 点号等；' +
+      "不能含 \\ / : * ? \" &lt; &gt; | ，首尾不能是空格或点号，最长 180 字；留空则由服务器自动识别";
+  }
+  const btn = document.querySelector('#dlcPickMask [data-pk="url-ok"]');
+  if (btn) {
+    btn.disabled = !!err;
+    btn.title = err || "";
+  }
+  return err;
+}
 function dlUrlPageHtml() {
   const P = DL.pick || {};
   const c = DL.cfg || {};
@@ -2161,10 +2270,13 @@ function dlUrlPageHtml() {
     '<div class="dlc-urlinfo" id="dlPkUrlInfo">' + (P.probeInfo ||
       '<span style="color:var(--dlc-dim)">点「探测」可先看文件大小、是否支持多线程</span>') + '</div>' +
     '<div class="dlc-urlrow">' +
-      '<label>文件名 <input class="dlc-input" id="dlPkUrlName" type="text" placeholder="留空自动识别" style="width:170px" value="' + dlA(P.urlName || "") + '"></label>' +
+      '<label class="dlc-namefield"><span class="dlc-namelab">文件名</span>' +
+        '<input class="dlc-input" id="dlPkUrlName" type="text" maxlength="180" spellcheck="false"' +
+        ' placeholder="留空自动识别（可含空格、点号）" value="' + dlA(P.urlName || "") + '"></label>' +
       '<label>线程数 <select class="dlc-select" id="dlPkThreads">' + opts + '</select></label>' +
       '<button class="dlc-btn sm" data-pk="url-adv"><i class="bi bi-sliders2"></i>高级</button>' +
     '</div>' +
+    '<div class="dlc-namehint" id="dlPkUrlNameHint"></div>' +
     '<div class="dlc-urladv' + (P.urlAdv ? " show" : "") + '" id="dlPkUrlAdv">' +
       '<label>Referer <input class="dlc-input" id="dlPkReferer" type="text" style="width:200px" value="' + dlA(P.referer || "") + '"></label>' +
       '<label>Cookie <input class="dlc-input" id="dlPkCookie" type="text" style="width:200px" value="' + dlA(P.cookie || "") + '"></label>' +
@@ -2203,10 +2315,12 @@ async function dlPickProbe() {
       (i.range ? '<b style="color:var(--dlc-ok)">支持多线程分段</b>' : '<b style="color:var(--dlc-warn)">不支持分段（单线程）</b>') +
       (i.type ? ' · ' + esc(i.type) : "");
   }
-  if (!P.urlName && i.name) P.urlName = i.name;
+  const probed = dlNameClean(i.name);            // 探测名可能带非法字符，先净化再回填
+  if (!P.urlName && probed) P.urlName = probed;
   box.innerHTML = P.probeInfo;
   const nm = document.getElementById("dlPkUrlName");
-  if (nm && !nm.value && i.name) nm.value = i.name;
+  if (nm && !nm.value && probed) nm.value = probed;
+  dlUrlNameCheck();
 }
 async function dlUrlConfirm() {
   const P = DL.pick;
@@ -2215,14 +2329,16 @@ async function dlUrlConfirm() {
   if (!raw) { toast("请先粘贴下载链接", "warn"); return; }
   // 按行拆分批量；逗号只在后面紧跟新链接协议头时才算分隔符——
   // 很多直链签名里带逗号（如 cdn77 的 secure=哈希,过期时间），不能见逗号就拆
-  const urls = [];
-  raw.split(/[\r\n]+/).forEach(function (line) {
-    line.split(/,(?=\s*(?:https?|ftp|magnet):)/).forEach(function (s) {
-      const t = s.trim();
-      if (t) urls.push(t);
-    });
-  });
+  const urls = dlUrlLines(raw);
   if (urls.length > 20) { toast("一次最多 20 个链接", "warn"); return; }
+  // 文件名不符合规则时不允许提交（按钮此时也是禁用态，这里再兜一层）
+  const nameErr = dlUrlNameCheck();
+  if (nameErr) {
+    toast("文件名不合规：" + nameErr, "warn");
+    const nmEl = document.getElementById("dlPkUrlName");
+    if (nmEl) nmEl.focus();
+    return;
+  }
   const btn = document.querySelector('#dlcPickMask [data-pk="url-ok"]');
   if (btn) btn.disabled = true;
   let ok = 0, errMsg = "";

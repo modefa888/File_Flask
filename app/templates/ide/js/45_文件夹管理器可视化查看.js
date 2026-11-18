@@ -121,7 +121,9 @@ function _fmMakeTab(conn, startPath) {
         '<button class="g-ico" data-fm="hidden" title="显示 / 隐藏隐藏文件"><i class="bi bi-eye-slash"></i></button>' +
         '<button class="g-ico" data-fm="mode" title="切换 网格 / 列表 视图"><i class="bi bi-list-ul"></i></button>' +
         (remote ? '<button class="g-ico" data-fm="mkdir" title="新建文件夹"><i class="bi bi-folder-plus"></i></button>' +
-                  '<button class="g-ico" data-fm="upload" title="上传文件到当前目录"><i class="bi bi-upload"></i></button>' : "") +
+                  '<button class="g-ico" data-fm="upload" title="上传文件到当前目录"><i class="bi bi-upload"></i></button>' +
+                  '<button class="g-btn outline fm-zip" data-fm="zip" disabled title="先勾选文件 / 文件夹，再打包下载">' +
+                    '<i class="bi bi-file-earmark-zip"></i> 打包下载</button>' : "") +
       '</div>' +
       '<div class="fmv-crumbs"></div>' +
       '<div class="fmv-body scroll-thin"><div class="fmv-ph">正在加载…</div></div>' +
@@ -156,7 +158,7 @@ function _fmMakeTab(conn, startPath) {
     conn: remote ? { id: conn.id, name: conn.name, host: conn.host, user: conn.user } : null,
     path: "", home: "",
     mode: FM_PREFS.mode, hidden: FM_PREFS.hidden,
-    items: [], back: [], fwd: [], sel: "", loading: false, seq: 0,
+    items: [], back: [], fwd: [], sel: "", checked: {}, loading: false, seq: 0,
     loaded: false,                              // 是否已成功拉取过一次（用于判断切回标签要不要重新加载）
   };
   const tab = {
@@ -233,6 +235,7 @@ function fmBindTab(tab) {
   });
   on("mkdir", () => fmRemoteMkdir(tab));
   on("upload", () => fmUpOpen(tab));
+  on("zip", () => fmZipDownload(tab));
   if (fm.conn) {
     fmBindDrag(tab);
     fmUpBind(tab);
@@ -251,6 +254,13 @@ function fmBindTab(tab) {
     if (e.target === body || e.target.classList.contains("fmv-grid") || e.target.classList.contains("fmv-list")) {
       fm.sel = ""; fmPaintSel(tab);
     }
+  });
+  if (body) body.addEventListener("change", (e) => {
+    if (!e.target.classList.contains("fmv-all")) return;
+    fm.checked = {};
+    if (e.target.checked) fm.items.forEach((it) => { fm.checked[it.name] = 1; });
+    fmPaintSel(tab);
+    fmPaintStatus(tab);
   });
   /* 切回本标签不自动重新拉目录：远程目录每次切换都重连 SFTP 重列一遍，既慢又会丢滚动位置 /
      选中状态。需要看最新内容时点工具栏的刷新按钮（首次打开仍由 openFolderManagerView 导航）。 */
@@ -271,6 +281,7 @@ async function fmNavigate(tab, path, opts) {
   }
   const seq = ++fm.seq;
   fm.loading = true;
+  if (path !== fm.path) { fm.checked = {}; fm.sel = ""; }   // 换目录清空勾选，避免跨目录误打包
   fmCloseProps();                            // 换目录：属性悬浮框里是上一层的条目，关掉避免看着像当前目录
   fmPaintNav(tab);
   const body = fmQ(tab, ".fmv-body");
@@ -394,6 +405,99 @@ function fmConfirmDownload(tab, it, anchor, at) {
     document.body.appendChild(a);
     a.click();
     a.remove();
+  });
+}
+/* ---------- 多选打包下载（远程 SFTP：边压边传，不占本地内存） ---------- */
+/* 打包中：按钮变成蓝色百分比进度条，禁用点击 */
+function fmZipBtnProgress(btn, pct) {
+  if (!btn) return;
+  btn.classList.add("working");
+  btn.disabled = true;
+  const known = pct !== null && pct !== undefined && isFinite(pct);
+  const val = known ? Math.max(0, Math.min(100, pct)) : 0;
+  btn.innerHTML = '<span class="fm-zip-spin"></span> 打包中 ' +
+    (known ? Math.round(val) + '%' : '…') +
+    '<span class="fm-zip-bar"><i' + (known
+      ? (' class="fm-zip-bar-fixed" style="width:' + val.toFixed(1) + '%"')
+      : '') + '></i></span>';
+}
+function fmZipDownload(tab) {
+  const fm = tab.fm;
+  if (!fm.conn) { toast("本机文件请用下载中心的「新建下载」打包", "warn"); return; }
+  const names = fmCheckedNames(tab);
+  if (!names.length) { toast("请先勾选要打包的文件 / 文件夹", "warn"); return; }
+  const items = names.map((n) => fm.items.find((x) => x.name === n)).filter(Boolean);
+  let bytes = 0;
+  items.forEach((it) => { if (!it.is_dir) bytes += Number(it.size) || 0; });
+  uiConfirmPop(fmQ(tab, '[data-fm="zip"]') || document.body, {
+    title: "打包下载",
+    msg: "将打包 " + items.length + " 项" +
+      (bytes ? "（文件约 " + fmFmtBytes(bytes) + "，文件夹大小未计入）" : "") + "，确定继续？",
+    okText: "开始打包",
+  }).then(async (ok) => {
+    if (!ok) return;
+    const btn = fmQ(tab, '[data-fm="zip"]');
+    fmZipBtnProgress(btn, 0);
+    const paths = items.map((it) => fmJoin(fm.path, it.name));
+    let poll = 0;
+    try {
+      const r = await fetch("/api/ssh/fs/download_zip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: fm.conn.id, paths: paths }),
+      });
+      if (!r.ok) {
+        let d = {};
+        try { d = await r.json(); } catch (_) {}
+        throw new Error(d.error || ("打包失败 HTTP " + r.status));
+      }
+      const cd = r.headers.get("Content-Disposition") || "";
+      const mm = /filename\*=UTF-8''([^;]+)/.exec(cd);
+      const fname = mm ? decodeURIComponent(mm[1]) : "download.zip";
+      const token = r.headers.get("X-DL-Zip-Token") || "";
+      const total = Number(r.headers.get("Content-Length") || 0) || 0;
+      // 服务端按「已读取源文件字节 / 源总字节」汇报真实打包进度
+      if (token) {
+        const tick = async function () {
+          try {
+            const p = await fetch("/api/ssh/fs/download_zip_progress?token=" + encodeURIComponent(token));
+            const d = await p.json();
+            if (d.ok && d.total) fmZipBtnProgress(btn, (d.read || 0) * 100 / d.total);
+          } catch (_) {}
+        };
+        tick();
+        poll = setInterval(tick, 250);
+      }
+      const chunks = [];
+      if (r.body && r.body.getReader) {
+        const reader = r.body.getReader();
+        let got = 0;
+        for (;;) {
+          const step = await reader.read();
+          if (step.done) break;
+          chunks.push(step.value);
+          got += step.value.length;
+          if (!token && total) fmZipBtnProgress(btn, got * 100 / total);
+        }
+      } else {
+        chunks.push(await r.blob());
+      }
+      fmZipBtnProgress(btn, 100);
+      const url = URL.createObjectURL(new Blob(chunks, { type: "application/zip" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      toast("打包下载完成", "ok");
+    } catch (e) {
+      toast("打包下载失败：" + ((e && e.message) || e), "err");
+    } finally {
+      if (poll) clearInterval(poll);
+      if (btn) { btn.classList.remove("working"); fmPaintZipBtn(tab); }
+    }
   });
 }
 /* ---------- 右键菜单（自建轻量版，本机 / 远程通用） ---------- */
@@ -582,6 +686,18 @@ function fmShowProps(tab, it, at) {
 function fmBindItem(tab, el, it) {
   const fm = tab.fm;
   const doOpen = () => fmOpenItem(tab, it);
+  const ck = el.querySelector(".fmv-ck");
+  if (ck) {
+    ck.onclick = (e) => { e.stopPropagation(); };
+    ck.onchange = (e) => {
+      e.stopPropagation();
+      if (ck.checked) fm.checked[it.name] = 1;
+      else delete fm.checked[it.name];
+      fm.sel = it.name;
+      fmPaintSel(tab);
+      fmPaintStatus(tab);
+    };
+  }
   el.onclick = () => {
     fm.sel = it.name; fmPaintSel(tab);
     doOpen();                                   // 单击即打开 / 进入（操作统一走右键菜单）
@@ -601,6 +717,7 @@ function fmPaint(tab) {
   if (!fm.items.length) {
     body.innerHTML = '<div class="fmv-ph">此目录为空</div>';
     fmPaintStatus(tab);
+    fmPaintZipBtn(tab);
     return;
   }
   if (fm.mode === "grid") {
@@ -610,6 +727,7 @@ function fmPaint(tab) {
         ? '<span class="fmv-thumb"><img loading="lazy" alt="" src="' + fmItemSrc(fm, it) + '"></span>'
         : '<span class="fmv-ic">' + fmItemIcon(it) + '</span>';
       html += '<div class="fmv-cell" data-n="' + escAttr(it.name) + '">' +
+        (fm.conn ? '<input type="checkbox" class="fmv-ck" data-n="' + escAttr(it.name) + '" title="勾选打包下载">' : '') +
         thumb +
         '<span class="fmv-nm" title="' + escAttr(it.name) + '">' + esc(it.name) + '</span>' +
         '<span class="fmv-sub">' + esc(fmItemSub(tab, it)) + '</span>' +
@@ -621,10 +739,13 @@ function fmPaint(tab) {
       if (it) fmBindItem(tab, el, it);
     });
   } else {
-    let html = '<div class="fmv-list">' +
-      '<div class="fmv-row fmv-head"><span class="c-nm">名称</span><span class="c-sz">大小</span><span class="c-mt">修改时间</span><span class="c-ty">类型</span></div>';
+    let html = '<div class="fmv-list' + (fm.conn ? ' with-ck' : '') + '">' +
+      '<div class="fmv-row fmv-head">' +
+        (fm.conn ? '<span class="c-ck"><input type="checkbox" class="fmv-all" title="全选 / 全不选"></span>' : '') +
+        '<span class="c-nm">名称</span><span class="c-sz">大小</span><span class="c-mt">修改时间</span><span class="c-ty">类型</span></div>';
     fm.items.forEach((it) => {
       html += '<div class="fmv-row fmv-item" data-n="' + escAttr(it.name) + '">' +
+        (fm.conn ? '<span class="c-ck"><input type="checkbox" class="fmv-ck" data-n="' + escAttr(it.name) + '"></span>' : '') +
         '<span class="c-nm"><span class="fmv-ic-sm">' + fmItemIcon(it) + '</span>' + esc(it.name) + '</span>' +
         '<span class="c-sz">' + esc(it.is_dir ? "—" : (it.size_str || "")) + '</span>' +
         '<span class="c-mt">' + esc(it.mtime || "") + '</span>' +
@@ -639,14 +760,28 @@ function fmPaint(tab) {
   }
   fmPaintSel(tab);
   fmPaintStatus(tab);
+  fmPaintZipBtn(tab);
 }
+function fmCheckedNames(tab) { return Object.keys((tab.fm && tab.fm.checked) || {}); }
 function fmPaintSel(tab) {
   const fm = tab.fm;
   const body = fmQ(tab, ".fmv-body");
   if (!body) return;
   body.querySelectorAll(".fmv-cell,.fmv-item").forEach((el) => {
     el.classList.toggle("sel", el.dataset.n === fm.sel);
+    el.classList.toggle("checked", !!fm.checked[el.dataset.n]);
   });
+  body.querySelectorAll(".fmv-ck").forEach((ck) => { ck.checked = !!fm.checked[ck.dataset.n]; });
+  const all = body.querySelector(".fmv-all");
+  if (all) all.checked = !!fm.items.length && fmCheckedNames(tab).length === fm.items.length;
+  fmPaintZipBtn(tab);
+}
+function fmPaintZipBtn(tab) {
+  const b = fmQ(tab, '[data-fm="zip"]');
+  if (!b || b.classList.contains("working")) return;   // 打包中保持进度条，不被勾选变化重绘
+  const n = fmCheckedNames(tab).length;
+  b.disabled = !n;
+  b.innerHTML = '<i class="bi bi-file-earmark-zip"></i> 打包下载' + (n ? '（' + n + '）' : '');
 }
 function fmPaintStatus(tab) {
   const fm = tab.fm;
@@ -655,7 +790,18 @@ function fmPaintStatus(tab) {
   if (fm.loading) { el.textContent = "加载中…"; return; }
   const dirs = fm.items.filter(x => x.is_dir).length;
   const files = fm.items.length - dirs;
-  el.textContent = "共 " + fm.items.length + " 项：" + dirs + " 个文件夹 · " + files + " 个文件";
+  const picked = fmCheckedNames(tab);
+  let txt = "共 " + fm.items.length + " 项：" + dirs + " 个文件夹 · " + files + " 个文件";
+  if (picked.length) {
+    let bytes = 0;
+    picked.forEach((n) => {
+      const it = fm.items.find(x => x.name === n);
+      if (it && !it.is_dir) bytes += Number(it.size) || 0;
+    });
+    txt = "已勾选 " + picked.length + " 项（文件约 " + fmFmtBytes(bytes) +
+      "，文件夹大小未计入） · " + txt;
+  }
+  el.textContent = txt;
 }
 
 /* ---------- 远程操作：新建文件夹 / 重命名 / 删除 / 上传 ---------- */

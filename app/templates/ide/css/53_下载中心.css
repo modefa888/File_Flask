@@ -876,7 +876,7 @@ html.theme-light .dlc-select {
 
 .dlc-usage {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin-top: 8px;
 }
@@ -1142,6 +1142,23 @@ html.theme-light .dlc-pitem.sel .dlc-cb { color: #fff; }
 .dlc-urllab { font-size: 11.5px; color: var(--dlc-dim); flex: none; }
 .dlc-urlrow label { font-size: 11.5px; color: var(--dlc-dim); display: flex; align-items: center; gap: 5px; }
 .dlc-urlrow .dlc-input { width: 150px; }
+/* 文件名字段：占满剩余宽度，长文件名（含空格 / 点号）能整段看清 */
+.dlc-urlrow .dlc-namefield { flex: 1 1 340px; min-width: 220px; }
+.dlc-urlrow .dlc-namefield .dlc-namelab { flex: none; white-space: nowrap; }
+.dlc-urlrow .dlc-namefield .dlc-input { flex: 1 1 auto; width: auto; min-width: 0; }
+/* 文件名不合法：输入框标红 + 下方实时提示 */
+.dlc-input.bad, .dlc-input.bad:focus { border-color: var(--dlc-bad); }
+.dlc-namehint {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin-top: -3px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--dlc-dim);
+}
+.dlc-namehint .bi { font-size: 12px; margin-top: 2px; flex: none; }
+.dlc-namehint.bad { color: var(--dlc-bad); font-weight: 500; }
 .dlc-urlinfo {
   font-size: 11.5px;
   color: var(--dlc-dim);

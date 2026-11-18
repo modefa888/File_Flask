@@ -91,6 +91,39 @@
 .fmv-row .c-sz, .fmv-row .c-mt, .fmv-row .c-ty { color: #8b949d; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fmv-row .fmv-ic-sm { flex: none; display: inline-flex; font-size: 15px; }
 
+/* ---------- 多选打包 ---------- */
+.fmv-tools .fm-zip { flex: none; margin-left: 2px; min-width: 104px; position: relative; overflow: hidden; }
+.fmv-tools .fm-zip.working, .fmv-tools .fm-zip.working:disabled {
+  opacity: 1; cursor: progress; color: #4fc1ff !important; border-color: rgba(79,193,255,.45);
+}
+.fm-zip-spin {
+  display: inline-block; width: 10px; height: 10px; margin-right: 4px;
+  border: 2px solid rgba(79,193,255,.25); border-top-color: #4fc1ff;
+  border-radius: 50%; vertical-align: -1px;
+  animation: fmZipSpin .8s linear infinite;
+}
+@keyframes fmZipSpin { to { transform: rotate(360deg); } }
+.fm-zip-bar {
+  position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
+  background: rgba(255,255,255,.10);
+}
+.fm-zip-bar i {
+  display: block; height: 100%; width: 34%; background: #4fc1ff;
+  animation: fmZipSlide 1.1s ease-in-out infinite;
+}
+.fm-zip-bar i.fm-zip-bar-fixed { animation: none; transition: width .2s linear; }
+@keyframes fmZipSlide {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(300%); }
+}
+.fmv-list.with-ck .fmv-row { grid-template-columns: 24px minmax(0,1fr) 90px 150px 90px; }
+.fmv-row .c-ck { display: flex; align-items: center; }
+.fmv-row .c-ck input, .fmv-cell .fmv-ck {
+  width: 13px; height: 13px; margin: 0; accent-color: #4fc1ff; cursor: pointer;
+}
+.fmv-cell .fmv-ck { position: absolute; top: 5px; left: 5px; z-index: 2; }
+.fmv-item.checked, .fmv-cell.checked { background: rgba(103,176,248,.10); }
+
 /* ---------- 状态栏 ---------- */
 .fmv-status {
   flex: none; padding: 4px 10px; border-top: 1px solid rgba(255,255,255,.07);

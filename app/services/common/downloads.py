@@ -866,21 +866,48 @@ def save_settings(patch):
 
 
 def usage():
-    """产物目录占用 + 记录条数（设置页展示）。"""
+    """设置页统计：只算下载中心自己生成的产物，不把用户自选目录里的其它文件算进来；
+    同时给出记录里产物文件已清理的条数，以及该文件夹所在磁盘的剩余空间。"""
     cfg = get_settings()
     art = cfg.get("artifact_dir") or ARTIFACT_ROOT
+    try:
+        du = shutil.disk_usage(art if os.path.isdir(art) else (os.path.dirname(art) or "."))
+        disk_total, disk_free = int(du.total), int(du.free)
+    except Exception:
+        disk_total, disk_free = 0, 0
+
     size, files = 0, 0
-    for dirpath, _dirnames, filenames in os.walk(art):
-        for fn in filenames:
-            fp = os.path.join(dirpath, fn)
+    with_file, cleaned, no_artifact = 0, 0, 0
+    try:
+        conn = store_conn()
+        try:
+            rows = conn.execute("SELECT kind, artifact FROM dl_tasks").fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        rows = []
+    for r in rows:
+        path = r["artifact"] or ""
+        if not path:
+            no_artifact += 1
+            continue
+        if not os.path.isfile(path):
+            cleaned += 1
+            continue
+        with_file += 1
+        # 单文件直传的 artifact 是用户源文件，不算「下载产物」，避免把整个盘算进来
+        if str(r["kind"] or "") in ("zip", "text", "url", "torrent", "hls"):
             try:
-                size += os.path.getsize(fp)
+                size += os.path.getsize(path)
                 files += 1
             except OSError:
                 pass
     st = stats()
     return {"artifact_dir": art, "artifacts": files, "artifact_bytes": size,
-            "records": st["total"], "done_bytes": st["done_bytes"], "bytes": st["bytes"]}
+            "records": st["total"], "records_with_file": with_file,
+            "records_cleaned": cleaned, "records_no_artifact": no_artifact,
+            "disk_total": disk_total, "disk_free": disk_free,
+            "done_bytes": st["done_bytes"], "bytes": st["bytes"]}
 
 
 # ----------------------------------------------------------------------

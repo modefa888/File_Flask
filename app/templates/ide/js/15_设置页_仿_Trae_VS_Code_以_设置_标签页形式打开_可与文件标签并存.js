@@ -290,8 +290,8 @@ const SETTINGS_PATH = "\u0000settings";   // 设置页虚拟路径（不与真�
     // 从而把已保存的账号（如 admin）自动填进下面的「搜索设置项」甚至 AI 接口地址里。
     // 这里放一对离屏的诱饵用户名 + 密码框，让自动填充落到诱饵上，不污染真实输入框。
     '<div class="pwd-decoy" aria-hidden="true" style="position:fixed;left:0;top:0;width:1px;height:1px;opacity:.01;overflow:hidden;pointer-events:none;z-index:-1;">' +
-      '<input type="text" name="pwd-decoy-username" tabindex="-1" autocomplete="username">' +
-      '<input type="password" name="pwd-decoy-password" tabindex="-1" autocomplete="current-password">' +
+      '<input type="text" name="pwd-decoy-username" tabindex="-1" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other">' +
+      '<input type="text" name="pwd-decoy-password" tabindex="-1" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other">' +
     '</div>' +
     '<div class="set-layout">' +
       '<div class="set-nav"><h1>设置</h1><input class="set-search" type="search" name="ide-settings-filter" placeholder="搜索设置项" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore>' +

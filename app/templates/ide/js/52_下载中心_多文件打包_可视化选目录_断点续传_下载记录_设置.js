@@ -744,7 +744,10 @@ function dlTaskCard(t) {
         '<span class="dlc-eta">' + (speed > 0 ? dlEta((size - done) / speed) : "") + '</span>' +
       '</div>' +
     '</div>' +
-    '<div class="dlc-tacts">' + dlTaskActs(t, st) + '</div>' +
+    '<div class="dlc-tacts">' +
+      ((st === "downloading" || st === "paused" || st === "merging") && !noSize
+        ? '<span class="dlc-tpct" title="该任务下载进度">' + pct.toFixed(1) + '%</span>' : "") +
+      dlTaskActs(t, st) + '</div>' +
   '</div>';
 }
 function dlHasSegs(t) {
@@ -821,6 +824,8 @@ function dlPaintLive(id) {
   if (bar) bar.style.width = pct.toFixed(2) + "%";
   const p = card.querySelector(".dlc-pct");
   if (p) p.textContent = pct.toFixed(1) + "%";
+  const tp = card.querySelector(".dlc-tpct");
+  if (tp) tp.textContent = pct.toFixed(1) + "%";
   const b = card.querySelector(".dlc-bytes");
   if (b) b.textContent = dlSize(st.bytes) + " / " + dlSize(size);
   const s = card.querySelector(".dlc-speed");

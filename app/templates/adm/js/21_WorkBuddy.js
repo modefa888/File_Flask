@@ -65,6 +65,15 @@ async function wbRefresh(el, uid, fresh) {
         return;
     }
     d = d || {};
+    // 定时签到任务（复用内置定时任务）：找到就显示开关与下次运行时间
+    try {
+        var cr = await ADM.api('/api/cron/tasks');
+        d.wbCron = ((cr && cr.tasks) || []).find(function (t) {
+            return t && t.kind === 'system' && t.content === 'workbuddy_checkin_all';
+        }) || null;
+    } catch (e) {
+        d.wbCron = null;
+    }
     wbCurrentUid = d.current_uid || '';
     wbRender(el, d);
     wbBind(el, d);
@@ -581,6 +590,15 @@ function wbAccountBar(d) {
         (d.checkin_all_done ? ' disabled title="今日所有账号均已签到"' : '') + '>' +
         '<i class="bi bi-check2-all"></i> ' +
         (d.checkin_all_done ? '今日已全部签到' : '全部签到') + '</button>' +
+        '<button class="adm-btn sm ' + (d.wbCron && d.wbCron.enabled ? 'primary' : 'ghost') +
+        '" id="wbAutoCheckin" type="button" title="' +
+        (d.wbCron
+            ? '每 6 小时执行一次；今日全部签到后自动跳过。下次：' +
+              wbEsc((d.wbCron.next || [])[0] || '待计算')
+            : '创建每 6 小时执行一次的定时签到任务；今日全部签到后自动跳过') + '">' +
+        '<i class="bi bi-clock-history"></i> ' +
+        (d.wbCron ? (d.wbCron.enabled ? '定时签到：已开启' : '定时签到：已关闭') : '开启定时签到') +
+        '</button>' +
         '<button class="adm-btn sm ghost" id="wbRefreshAll" type="button"><i class="bi bi-arrow-repeat"></i> 刷新余额</button>' +
         '</div>') + '<div class="wb-accounts">';
     if (!accounts.length) {
@@ -1048,6 +1066,40 @@ function wbBind(el, d) {
         } catch (e) {
             ADM.toast((e && e.message) || String(e), 'err');
             all.disabled = false;
+        }
+    });
+    var auto = el.querySelector('#wbAutoCheckin');
+    if (auto) auto.addEventListener('click', async function () {
+        auto.disabled = true;
+        try {
+            var task = d.wbCron;
+            var r;
+            if (task) {
+                r = await ADM.api('/api/cron/toggle', {
+                    method: 'POST', body: { id: task.id, enabled: !task.enabled }
+                });
+            } else {
+                r = await ADM.api('/api/cron/save', {
+                    method: 'POST', body: {
+                        name: 'WorkBuddy 定时签到（每6小时）',
+                        cron: '0 */6 * * *',
+                        kind: 'system',
+                        content: 'workbuddy_checkin_all',
+                        enabled: true,
+                        notify: false,
+                        remark: '每 6 小时批量签到；今日全部签过后自动跳过',
+                        timeout: 600
+                    }
+                });
+            }
+            if (r && r.error) throw new Error(r.error);
+            ADM.toast(task
+                ? (task.enabled ? '定时签到已关闭' : '定时签到已开启')
+                : '定时签到已开启（每 6 小时，静默运行）', 'ok');
+            await wbRefresh(el);
+        } catch (e) {
+            ADM.toast((e && e.message) || String(e), 'err');
+            auto.disabled = false;
         }
     });
     var refreshAll = el.querySelector('#wbRefreshAll');

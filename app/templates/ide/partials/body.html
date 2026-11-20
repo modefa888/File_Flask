@@ -2,8 +2,8 @@
        从而把已保存的账号自动填进 IDE 的搜索框 / 接口地址等输入框。这里放一对离屏的诱饵
        用户名 + 密码框，让自动填充落在诱饵上，不污染真实输入框。 -->
   <div class="pwd-decoy" aria-hidden="true" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;">
-    <input type="text" name="pwd-decoy-username" tabindex="-1" autocomplete="username" style="width:1px;height:1px;">
-    <input type="password" name="pwd-decoy-password" tabindex="-1" autocomplete="current-password" style="width:1px;height:1px;">
+    <input type="text" name="pwd-decoy-username" tabindex="-1" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" style="width:1px;height:1px;">
+    <input type="text" name="pwd-decoy-password" tabindex="-1" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" style="width:1px;height:1px;">
   </div>
   <div class="titlebar">
     <div class="traffic"><span class="r"></span><span class="y"></span><span class="g"></span></div>
@@ -276,7 +276,7 @@
           <div class="tnl-status" id="tnlStatus"><div class="tnl-empty"><i class="bi bi-arrow-repeat tnl-spin"></i>正在检测 cpolar 状态…</div></div>
           <div class="tnl-sec" id="tnlAuthSec" hidden>
             <div class="tnl-sec-h"><i class="bi bi-key"></i>配置 authtoken<button class="tnl-mini" id="tnlAuthToggle" title="收起">收起</button></div>
-            <input type="password" id="tnlAuthToken" placeholder="官网后台「验证」页复制 authtoken" autocomplete="off">
+            <input type="password" id="tnlAuthToken" placeholder="官网后台「验证」页复制 authtoken" autocomplete="new-password" data-lpignore="true" data-1p-ignore data-form-type="other">
             <button class="g-btn block outline" id="tnlAuthSave"><i class="bi bi-save"></i> 保存 authtoken</button>
             <div class="tnl-hint">官网 https://dashboard.cpolar.com → 验证 → 复制 authtoken</div>
           </div>
@@ -301,8 +301,8 @@
               <button class="tnl-mini" id="tnlCredToggle" title="展开 / 收起">设置</button>
             </div>
             <div id="tnlCredForm" hidden>
-              <input type="text" id="tnlCredEmail" placeholder="cpolar 邮箱账号" autocomplete="username" spellcheck="false">
-              <input type="password" id="tnlCredPwd" placeholder="登录密码" autocomplete="current-password">
+              <input type="text" id="tnlCredEmail" placeholder="cpolar 邮箱账号" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other">
+              <input type="password" id="tnlCredPwd" placeholder="登录密码" autocomplete="new-password" data-lpignore="true" data-1p-ignore data-form-type="other">
               <button class="g-btn block" id="tnlCredSave"><i class="bi bi-save"></i> 保存并自动登录</button>
               <button class="tnl-mini danger" id="tnlCredClear" title="删除已保存的账号密码">清除已保存</button>
               <div class="tnl-hint">账号密码经加密后保存在本机服务端（文件权限 600），浏览器不保存密码；打开网页面板时自动登录。</div>

@@ -1283,7 +1283,21 @@ def _run_all(worker) -> dict:
 
 
 def checkin_all() -> dict:
-    """全部启用账号逐个签到（幂等，已签到自动跳过）。"""
+    """全部启用账号逐个签到（幂等，已签到自动跳过）。
+
+    定时任务每 6 小时会调用一次；本地记录显示今天全部签过时直接跳过，
+    不再逐个账号请求官方接口。第二天记录不再命中，任务会自动恢复执行。
+    """
+    accounts = [a for a in list_accounts() if a.get("enabled")]
+    if accounts and _checkin_all_done(accounts, time.strftime("%Y-%m-%d")):
+        return {
+            "ok": True, "skipped": True,
+            "items": [{"uid": a.get("uid") or "", "nickname": a.get("display_name") or "",
+                       "ok": True, "status": "already", "credit": 0,
+                       "message": "今日已签到，定时任务跳过"} for a in accounts],
+            "summary": {"total": len(accounts), "success": 0,
+                        "already": len(accounts), "failed": 0, "credit": 0},
+        }
     return _run_all(_checkin_one)
 
 

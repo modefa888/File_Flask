@@ -537,6 +537,20 @@ html.theme-light .dlc-task.running::before {
 
 .dlc-tacts { flex: none; display: flex; align-items: center; gap: 3px; }
 .dlc-tacts .dlc-iconbtn { width: 30px; height: 30px; }
+/* 单个任务卡片上的百分比徽标（红框位置，随实时进度更新） */
+.dlc-tacts .dlc-tpct {
+  flex: none;
+  margin-right: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(79, 193, 255, .15);
+  color: var(--dlc-acc);
+  font-size: 11.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.dlc-task.done .dlc-tacts .dlc-tpct,
+.dlc-task.cleaned .dlc-tacts .dlc-tpct { background: rgba(46, 204, 143, .15); color: var(--dlc-ok); }
 
 /* ---------- 空态 ---------- */
 .dlc-empty {

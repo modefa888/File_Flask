@@ -23,7 +23,7 @@
   const V2 = { st: null, nodes: [], subs: [], cores: [], coreInfo: null, sec: "overview",
                pick: "", selSub: null, logTimer: null, autoLog: true, log: "", logTab: "core",
                trafTimer: null, traffic: null, usage: [],
-               busy: false, showManual: false, nodeForm: false, exit: null, ping: {}, dl: {}, kw: "",
+               busy: false, connPhase: "", showManual: false, nodeForm: false, exit: null, ping: {}, dl: {}, kw: "",
                nodeTab: "__all__", sortPing: false, hideFail: false,
                subBusy: {}, subAllBusy: false, subForm: false,
                job: null, es: null, pendingUrl: "", versKind: "xray", coreKind: "",
@@ -111,6 +111,13 @@
     v2SideRender();
     // 标签存在就渲染（包括后台标签）：会话恢复时可能先开标签又被别的标签抢走焦点，
     // 若只在「激活中」才渲染，竞态会让大页内容永远空白
+    if (findTab(VIEW_PATH)) v2vRender();
+  }
+
+  /* 侧栏按钮与大页按钮共用同一份连接状态：连接 / 断开期间两处同步显示
+     「启动中… / 停止中…」并禁用，避免一处已在操作、另一处还点得动。 */
+  function v2ConnPaint() {
+    v2SideRender();
     if (findTab(VIEW_PATH)) v2vRender();
   }
 
@@ -291,15 +298,24 @@
     }
     const hero = $("v2Hero");
     if (hero) hero.classList.toggle("on", running);
+    const phase = V2.connPhase;
+    const busy = !!phase;
+    const phaseTxt = phase === "start" ? "启动中…" : phase === "stop" ? "停止中…" : "";
     const bt = $("v2Connect");
     if (bt) {
-      bt.className = "v2-btn " + (running ? "danger" : "v2-btn-pri");
-      bt.innerHTML = running
-        ? '<i class="bi bi-stop-fill"></i><span>断开</span>'
-        : '<i class="bi bi-play-fill"></i><span>连接</span>';
+      bt.className = "v2-btn " + (busy ? "" : running ? "danger" : "v2-btn-pri");
+      bt.disabled = busy;
+      bt.innerHTML = busy
+        ? '<i class="v2-spin"></i><span>' + phaseTxt + "</span>"
+        : running
+          ? '<i class="bi bi-stop-fill"></i><span>断开</span>'
+          : '<i class="bi bi-play-fill"></i><span>连接</span>';
     }
     const run = $("v2StRun");
-    if (run) run.textContent = running ? "运行中" : "未运行";
+    if (run) {
+      run.textContent = phaseTxt || (running ? "运行中" : "未运行");
+      run.classList.toggle("busy", busy);
+    }
     const port = $("v2StPort");
     if (port) {
       const inb = st.inbound || {};
@@ -380,25 +396,35 @@
 
   async function v2ToggleConnect() {
     if (V2.busy) return;
+    const running = !!(V2.st && V2.st.running);
+    const id = running ? "" : pickNodeId();
+    if (running) {
+      const ok = await uiConfirm("断开连接", "停止内核后，正在使用 10808 代理的用户会立即断网。", "断开", true);
+      if (!ok) return;
+    } else if (!id) {
+      toast("请先在管理面板里添加节点", "warn");
+      return v2OpenView("nodes");
+    }
     V2.busy = true;
+    V2.connPhase = running ? "stop" : "start";
+    v2ConnPaint();                 // 侧栏与大页按钮同时进入「启动中 / 停止中」
     try {
-      const running = !!(V2.st && V2.st.running);
       if (running) {
-        const ok = await uiConfirm("断开连接", "停止内核后，正在使用 10808 代理的用户会立即断网。", "断开", true);
-        if (!ok) return;
         const r = await post("/api/v2ray/disconnect");
         if (r.error) return toast(r.error, "err");
         toast("已断开", "ok");
       } else {
-        const id = pickNodeId();
-        if (!id) { toast("请先在管理面板里添加节点", "warn"); return v2OpenView("nodes"); }
         const r = await post("/api/v2ray/connect", { id: id });
         if (r.error) return toast(r.error, "err");
         toast("已连接：" + ((nodeOf(id) || {}).name || id), "ok");
         v2PingRefresh(id);               // 服务端正在实测该节点延迟，稍后补拉更新
       }
       await v2Reload();
-    } finally { V2.busy = false; }
+    } finally {
+      V2.busy = false;
+      V2.connPhase = "";
+      v2ConnPaint();                 // 两处按钮同时退出过渡态
+    }
   }
 
   (function v2SideInit() {
@@ -530,6 +556,9 @@
                   ["clients", "连接", "bi-people"], ["log", "日志", "bi-journal-text"],
                   ["module", "路由分流", "bi-signpost-split"]];
     const st = V2.st || {}, running = !!st.running;
+    const phase = V2.connPhase, busy = !!phase;
+    const phaseTxt = phase === "start" ? "启动中…" : phase === "stop" ? "停止中…" : "";
+    const stateTxt = phaseTxt || (running ? "运行中" : "未运行");
     const inb = st.inbound || {}, c = st.core || {}, n = st.node;
     // 页头副标题：把「节点 / 订阅 / 内核」的关键信息压成一行胶囊
     const bits = [];
@@ -550,13 +579,18 @@
       '<span class="v2v-logo' + (running ? " on" : "") + '"><i class="bi bi-shield-shaded"></i></span>' +
       '<div class="v2v-brand">' +
       '<div class="v2v-title">V2Ray 代理' +
-      '<span class="v2v-state' + (running ? " on" : "") + '">' + (running ? "运行中" : "未运行") + "</span></div>" +
+      '<span class="v2v-state' + (busy ? " busy" : running ? " on" : "") + '">' +
+      (busy ? '<i class="v2-spin"></i>' : "") + stateTxt + "</span></div>" +
       '<div class="v2v-sub">' + bits.join('<i class="v2v-dotsep"></i>') + "</div>" +
       "</div>" +
       '<div class="v2v-head-ops">' +
-      '<button class="v2v-btn ' + (running ? "danger" : "primary") + '" data-act="toggle">' +
-      '<i class="bi ' + (running ? "bi-stop-fill" : "bi-play-fill") + '"></i>' + (running ? "断开" : "连接") + "</button>" +
-      '<button class="v2v-btn" data-act="restart"' + (running ? "" : " disabled") + '><i class="bi bi-arrow-repeat"></i>重启</button>' +
+      '<button class="v2v-btn ' + (busy ? "" : running ? "danger" : "primary") + '" data-act="toggle"' +
+      (busy ? " disabled" : "") + ">" +
+      (busy ? '<i class="v2-spin"></i>' + phaseTxt
+            : '<i class="bi ' + (running ? "bi-stop-fill" : "bi-play-fill") + '"></i>' +
+              (running ? "断开" : "连接")) + "</button>" +
+      '<button class="v2v-btn" data-act="restart"' + ((busy || !running) ? " disabled" : "") +
+      '><i class="bi bi-arrow-repeat"></i>重启</button>' +
       '<button class="v2v-btn" data-act="refresh" title="刷新状态、节点与订阅"><i class="bi bi-arrow-clockwise"></i>刷新</button>' +
       "</div></div>";
     const tabbar = '<div class="v2v-tabs">' + secs.map(s => {
@@ -1854,8 +1888,9 @@
       }
       const btn = e.target.closest("[data-act]");
       if (!btn || btn.disabled) return;
-      // 连接 / 重启 / 刷新 / 保存并重启：请求期间图标旋转并禁用，防止重复点击
-      const slow = { toggle: 1, restart: 1, refresh: 1, "save-route": 1 };
+      // 重启 / 刷新 / 保存并重启：请求期间图标旋转并禁用，防止重复点击；
+      // 连接 / 断开由 v2ToggleConnect 统一处理，两处按钮同步显示过渡态
+      const slow = { restart: 1, refresh: 1, "save-route": 1 };
       if (!slow[btn.dataset.act]) { v2vAction(btn.dataset.act, btn.dataset); return; }
       const ic = btn.querySelector("i");
       btn.disabled = true;
@@ -1944,6 +1979,7 @@
           fd("v2vENHost", "Host 头", n.host, "可留空") +
           fd("v2vENPath", "路径 / serviceName", n.path, "可留空") +
           fd("v2vENSni", "SNI", n.sni, "可留空") +
+          fd("v2vENPin", "证书指纹 pin（可选）", n.pin, "Xray 26 自签证书：SHA256 hex，多个用逗号分隔") +
           '<div id="v2vENReality" style="display:' + (n.tls === "reality" ? "contents" : "none") + '">' +
           fd("v2vENPbk", "Reality publicKey", n.pbk) + fd("v2vENSid", "Reality shortId", n.sid) + "</div>";
       }
@@ -1987,6 +2023,7 @@
             data.fields.host = g("v2vENHost");
             data.fields.path = g("v2vENPath");
             data.fields.sni = g("v2vENSni");
+            data.fields.pin = g("v2vENPin");
             if (data.fields.tls === "reality") {
               data.fields.pbk = g("v2vENPbk");
               data.fields.sid = g("v2vENSid");

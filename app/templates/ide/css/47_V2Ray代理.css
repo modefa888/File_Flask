@@ -62,6 +62,7 @@
 .v2-hero-tx { flex: 1; min-width: 0; }
 .v2-hero-t { font-size: 12.5px; font-weight: 600; color: var(--v2-fg); }
 .v2-hero.on .v2-hero-t { color: #7df0be; }
+.v2-hero-t.busy { color: #9dc2ff; }
 .v2-hero-s {
   margin-top: 2px;
   font-size: 11px;
@@ -414,6 +415,23 @@
   color: #5fe3b0;
 }
 .v2v-state.on::before { animation: v2-pulse 2.2s ease-out infinite; }
+/* 启动中 / 停止中：纯 CSS 转圈，旋转字体图标会引起基线偏移和抖动 */
+.v2v-state.busy {
+  background: rgba(120, 170, 255, .14);
+  border-color: rgba(120, 170, 255, .34);
+  color: #9dc2ff;
+}
+.v2v-state.busy::before { display: none; }
+.v2-spin {
+  display: inline-block;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: v2Spin .75s linear infinite;
+}
 
 /* 页头副标题（信息胶囊行） */
 .v2v-sub {
@@ -1291,6 +1309,7 @@
 }
 :where(html.theme-light) .v2-hero-t { color: #1f2328; }
 :where(html.theme-light) .v2-hero.on .v2-hero-t { color: #146c47; }
+:where(html.theme-light) .v2-hero-t.busy { color: #2b5fc1; }
 :where(html.theme-light) .v2-btn { background: #fff; border-color: #d9dade; color: #33373d; }
 :where(html.theme-light) .v2-btn:hover { background: #f1f2f4; }
 :where(html.theme-light) .v2-btn-pri {
@@ -1351,6 +1370,7 @@
 :where(html.theme-light) .v2v-dotsep { background: #c9cdd4; }
 :where(html.theme-light) .v2v-state { background: #eceef2; color: #5d626b; }
 :where(html.theme-light) .v2v-state.on { background: #e3f7ee; border-color: #b6e6d3; color: #0f7d63; }
+:where(html.theme-light) .v2v-state.busy { background: #eef3ff; border-color: #c9d8ff; color: #2b5fc1; }
 :where(html.theme-light) .v2v-btn {
   background: #fff; border-color: #d9dce2; color: #343941;
   box-shadow: 0 1px 2px rgba(15, 23, 42, .05);

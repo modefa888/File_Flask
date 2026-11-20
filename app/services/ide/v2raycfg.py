@@ -256,6 +256,17 @@ def core_version(path: str) -> str:
     return _probe(path)
 
 
+def _xray_removed_insecure(core_path: str) -> bool:
+    """Xray 26.2.6+ 移除了 TLS 的 allowInsecure，写进配置会导致内核启动失败。
+
+    版本取不到时按新内核处理：严格校验证书最多连不上，旧字段却会直接起不来。
+    """
+    m = re.match(r"^(\d+)\.(\d+)(?:\.(\d+))?", core_version(core_path))
+    if not m:
+        return True
+    return tuple(int(x or 0) for x in m.groups()) >= (26, 2, 6)
+
+
 def platform_arch() -> tuple:
     """当前平台 / 架构（拼下载地址用）。"""
     return _plat_arch()
@@ -934,6 +945,7 @@ def _stream_of(q: dict) -> dict:
         "alpn": _split_alpn(q.get("alpn")),
         "fp": q.get("fp") or "",
         "insecure": str(q.get("allowInsecure") or q.get("insecure") or "") in ("1", "true"),
+        "pin": str(q.get("pin") or q.get("pinnedPeerCertSha256") or q.get("hash") or ""),
         "pbk": q.get("pbk") or "",
         "sid": q.get("sid") or "",
         "spx": q.get("spx") or "",
@@ -1004,6 +1016,7 @@ def _parse_vmess(raw: str) -> dict:
         "fp": str(j.get("fp") or ""),
         "tls": "tls" if str(j.get("tls") or "").lower() in ("tls", "reality") else "none",
         "insecure": False,
+        "pin": str(j.get("pin") or j.get("pinnedPeerCertSha256") or ""),
     })
     if not node["uuid"]:
         raise ValueError("vmess 链接缺少 id（uuid）")
@@ -1089,7 +1102,8 @@ def node_to_share(node: dict) -> str:
              "scy": node.get("scy") or "auto", "net": node.get("net") or "tcp",
              "type": node.get("header") or "none", "host": node.get("host") or "",
              "path": node.get("path") or "", "tls": node.get("tls") or "none",
-             "sni": node.get("sni") or "", "fp": node.get("fp") or ""}
+             "sni": node.get("sni") or "", "fp": node.get("fp") or "",
+             "pin": node.get("pin") or ""}
         b = base64.b64encode(json.dumps(j, ensure_ascii=False).encode("utf-8")).decode()
         return "vmess://" + b
     if proto == "vless":
@@ -1110,7 +1124,8 @@ def _query_of(node: dict) -> str:
     """由节点拼出 vless / trojan 的 query 串。"""
     q = {"type": node.get("net") or "tcp", "security": node.get("tls") or "none"}
     for k, src in (("sni", "sni"), ("host", "host"), ("path", "path"),
-                   ("fp", "fp"), ("pbk", "pbk"), ("sid", "sid"), ("flow", "flow")):
+                   ("fp", "fp"), ("pin", "pin"), ("pbk", "pbk"), ("sid", "sid"),
+                   ("flow", "flow")):
         v = node.get(src)
         if v:
             q[k] = v
@@ -1128,8 +1143,8 @@ def _query_of(node: dict) -> str:
 _LOG_LEVELS = ("debug", "info", "warning", "error", "none")
 
 
-def _stream_settings(node: dict) -> dict:
-    """由节点得出 outbound 的 streamSettings。"""
+def _stream_settings(node: dict, core_path: str = "") -> dict:
+    """由节点得出 outbound 的 streamSettings。core_path 用于按内核版本生成 TLS 字段。"""
     net = str(node.get("net") or "tcp").lower()
     st = {"network": net}
     if net == "ws":
@@ -1153,8 +1168,14 @@ def _stream_settings(node: dict) -> dict:
         }
     sec = str(node.get("tls") or "none").lower()
     if sec == "tls":
-        tls = {"serverName": node.get("sni") or node.get("host") or node.get("server") or "",
-               "allowInsecure": bool(node.get("insecure"))}
+        tls = {"serverName": node.get("sni") or node.get("host") or node.get("server") or ""}
+        if _xray_removed_insecure(core_path):
+            # Xray 26.2.6 起 allowInsecure 已被移除；只有显式给出证书指纹时才固定证书
+            pin = str(node.get("pin") or node.get("pinnedPeerCertSha256") or "").strip()
+            if pin:
+                tls["pinnedPeerCertSha256"] = pin.replace("~", ",")
+        else:
+            tls["allowInsecure"] = bool(node.get("insecure"))
         if node.get("alpn"):
             tls["alpn"] = node["alpn"]
         if node.get("fp"):
@@ -1173,8 +1194,8 @@ def _stream_settings(node: dict) -> dict:
     return st
 
 
-def build_outbound(node: dict) -> dict:
-    """按节点生成一条 Xray outbound。"""
+def build_outbound(node: dict, core_path: str = "") -> dict:
+    """按节点生成一条 Xray outbound。core_path 用于按内核版本生成 TLS 字段。"""
     proto = str(node.get("proto") or "").lower()
     addr, port = node.get("server"), _as_int(node.get("port"))
     if not addr or not port:
@@ -1203,7 +1224,7 @@ def build_outbound(node: dict) -> dict:
         }]}}
     else:
         raise ValueError("不支持的协议：%s" % (proto or "(空)"))
-    ob["streamSettings"] = _stream_settings(node)
+    ob["streamSettings"] = _stream_settings(node, core_path)
     ob["tag"] = "proxy"
     return ob
 
@@ -1481,7 +1502,7 @@ def _build_xray_config(node: dict, opts: dict) -> dict:
         "log": {"loglevel": level, "access": "none", "error": ""},
         "inbounds": inbounds,
         "outbounds": [
-            build_outbound(node),
+            build_outbound(node, str(opts.get("core_path") or "")),
             {"tag": "direct", "protocol": "freedom"},
             {"tag": "block", "protocol": "blackhole"},
         ],

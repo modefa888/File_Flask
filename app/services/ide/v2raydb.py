@@ -401,7 +401,7 @@ def clear_grp(name: str) -> int:
 # 允许通过 update_node(fields=...) 直接修改的连接参数（存进 node_json，连接时生效）
 _NODE_JSON_FIELDS = ("uuid", "aid", "scy", "flow", "method", "password",
                      "net", "header", "path", "host", "sni", "tls",
-                     "fp", "pbk", "sid", "spx", "insecure")
+                     "fp", "pbk", "sid", "spx", "insecure", "pin")
 
 
 def update_node(nid, name=None, remark=None, server=None, port=None, fields=None, grp=None):

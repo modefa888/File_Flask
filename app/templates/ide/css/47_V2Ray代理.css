@@ -996,6 +996,20 @@
 
 /* --- 列表项 --- */
 .v2v-list { display: flex; flex-direction: column; gap: 8px; }
+/* 流量统计列表：只露出 5 行，其余滚动查看（实际高度由 v2TrafListFit 按行高计算） */
+.v2v-traf-list {
+  max-height: 420px;              /* 首屏兜底；渲染后由 JS 覆盖为 5 行高度 */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+.v2v-traf-list::-webkit-scrollbar { width: 6px; }
+.v2v-traf-list::-webkit-scrollbar-thumb {
+  background: rgba(150, 151, 161, .35);
+  border-radius: 99px;
+}
+.v2v-traf-list::-webkit-scrollbar-thumb:hover { background: rgba(150, 151, 161, .55); }
 /* 「加载更多」分页按钮：节点量大时列表分批渲染，按钮居中放在列表末尾 */
 .v2v-more { display: flex; justify-content: center; padding: 12px 0 4px; }
 .v2v-item {
@@ -1574,6 +1588,7 @@ html.theme-light .v2-view select option { background: #fff; color: #1f2328; }
 :where(html.theme-light) .v2v-tsp.up > .bi { color: #0f9d78; }
 :where(html.theme-light) .v2v-tsp.down > .bi { color: #2563eb; }
 :where(html.theme-light) .v2v-tbar { background: rgba(15, 23, 42, .09); }
+:where(html.theme-light) .v2v-traf-list::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, .22); }
 
 /* ---------- 节点编辑悬浮框（挂在 .v2-view 内，随主题走） ---------- */
 .v2v-modal-ov {

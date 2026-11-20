@@ -242,7 +242,7 @@ html.theme-light .dlc-btn.primary:hover { color: #fff; }
 /* ---------- 统计卡 ---------- */
 .dlc-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 16px;
 }
@@ -1183,6 +1183,11 @@ html.theme-light .dlc-pitem.sel .dlc-cb { color: #fff; }
 .dlc-urlhint b { color: var(--dlc-warn); }
 
 .dlc-loading { padding: 26px; text-align: center; color: var(--dlc-dim); font-size: 12px; }
+
+/* 统计卡较多：中等宽度排成 3 列，避免数值被挤换行 */
+@media (max-width: 1280px) {
+  .dlc-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 
 /* 窄屏 */
 @media (max-width: 900px) {

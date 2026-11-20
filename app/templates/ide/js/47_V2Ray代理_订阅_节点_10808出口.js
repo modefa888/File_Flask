@@ -121,6 +121,17 @@
     if (findTab(VIEW_PATH)) v2vRender();
   }
 
+  /* 只重画侧栏「今日流量」：定时刷新时不整块重绘节点列表，避免滚动位置被重置 */
+  function v2TodayPaint(st) {
+    const td = $("v2Today"); if (!td) return;
+    const t = (st && st.today) || {};
+    const up = Number(t.up) || 0, down = Number(t.down) || 0;
+    td.innerHTML = '<span class="v2-today-k"><i class="bi bi-calendar2-range"></i>今日流量</span>' +
+      '<span class="v2-today-v">↑ ' + esc(fmtBytes(up)) + " · ↓ " + esc(fmtBytes(down)) + "</span>";
+    td.title = "今日（" + (t.day || "本地日期") + "）累计：上行 " + fmtBytes(up) +
+      " / 下行 " + fmtBytes(down);
+  }
+
   /* 切换 / 连接节点后：服务端会异步实测一次真延迟并写入测速台账（几秒），
      本地缓存的旧延迟要先清掉，补拉时才会采纳服务端新值，界面即时更新 */
   function v2PingRefresh(id) {
@@ -347,15 +358,7 @@
           (V2.shareOpen ? "收起地址" : "共 " + list.length + " 个地址") + "</button>"
         : "");
     }
-    const td = $("v2Today");
-    if (td) {
-      const t = st.today || {};
-      const up = Number(t.up) || 0, down = Number(t.down) || 0;
-      td.innerHTML = '<span class="v2-today-k"><i class="bi bi-calendar2-range"></i>今日流量</span>' +
-        '<span class="v2-today-v">↑ ' + esc(fmtBytes(up)) + " · ↓ " + esc(fmtBytes(down)) + "</span>";
-      td.title = "今日（" + (t.day || "本地日期") + "）累计：上行 " + fmtBytes(up) +
-        " / 下行 " + fmtBytes(down);
-    }
+    v2TodayPaint(st);
     const num = $("v2NodeNum");
     if (num) {
       const okN = V2.nodes.filter(n => V2.ping[n.id] && V2.ping[n.id].ok).length;
@@ -445,6 +448,8 @@
       v2SideRender();
       if (id === curNodeId() || V2.busy) return;
       V2.busy = true;
+      V2.connPhase = "start";
+      v2ConnPaint();                   // 节点快选切换也走同一套过渡态，两处按钮同步
       try {
         toast("正在切换节点…", "info");
         const r = await post("/api/v2ray/connect", { id: id });
@@ -452,11 +457,19 @@
         toast("已连接：" + ((nodeOf(id) || {}).name || id), "ok");
         await v2Reload();
         v2PingRefresh(id);               // 服务端正在实测该节点延迟，稍后补拉更新
-      } finally { V2.busy = false; }
+      } finally { V2.busy = false; V2.connPhase = ""; v2ConnPaint(); }
     });
     // 活动栏图标：点一下补一次实时刷新（面板显隐由 02_ 的通用机制驱动）
     const act = document.querySelector('.activitybar .act[data-panel="v2ray"]');
     if (act) act.addEventListener("click", () => { v2Reload(); });
+    // 侧栏「今日流量」每 60 秒补拉一次状态：服务端持续采样落库，不必等手动刷新
+    setInterval(async () => {
+      if (document.hidden || V2.busy) return;
+      const st = await api("/api/v2ray/status").catch(() => null);
+      if (!st || st.error) return;
+      V2.st = st;
+      v2TodayPaint(st);                // 只更新流量数字，节点列表滚动位置保持不变
+    }, 60000);
     v2FetchAll().then(v2SideRender).catch(() => {});
   })();
 
@@ -614,6 +627,7 @@
     else body = v2vLog();
     box.innerHTML = head + tabbar + body;
     v2ProgPaint();
+    v2TrafListFit();
   }
 
   function v2vBanner() {
@@ -764,7 +778,7 @@
         "<span>连接节点并产生流量后，这里会按节点分别统计</span></div>";
     } else {
       const max = Math.max(1, nodes[0].up + nodes[0].down);
-      h += '<div class="v2v-list">' + nodes.map(nd => {
+      h += '<div class="v2v-list v2v-traf-list">' + nodes.map(nd => {
         const sum = nd.up + nd.down;
         const pct = Math.max(2, Math.round(sum * 100 / max));
         const cur = nd.id === curNodeId();
@@ -786,6 +800,19 @@
     return h;
   }
 
+  /* 流量列表只露出 5 行：按实际行高计算 max-height，主题 / 窄屏下也不会写死像素跑偏 */
+  function v2TrafListFit() {
+    const list = document.querySelector("#v2vTrafSec .v2v-traf-list");
+    if (!list) return;
+    const first = list.querySelector(".v2v-item");
+    if (!first) { list.style.maxHeight = ""; return; }
+    const row = first.getBoundingClientRect().height || first.offsetHeight;
+    if (!row) return;                       // 标签隐藏时分不到高度，等下次渲染再算
+    const gap = parseFloat(getComputedStyle(list).rowGap) || 0;
+    list.style.maxHeight = (Math.ceil(row) * 5 + gap * 4) + "px";
+  }
+  window.addEventListener("resize", v2TrafListFit);
+
   async function v2TrafficFetch() {
     const r = await api("/api/v2ray/traffic");
     if (r.error) return;
@@ -797,6 +824,7 @@
     if (mt) mt.textContent = Number(r.mem) ? fmtBytes(r.mem) : "-";
     const sec = $("v2vTrafSec");
     if (sec) sec.innerHTML = v2vTrafSecHTML();
+    v2TrafListFit();
   }
 
   function v2TrafStop() { clearTimeout(V2.trafTimer); V2.trafTimer = null; }

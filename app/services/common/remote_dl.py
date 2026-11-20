@@ -554,9 +554,9 @@ def create_task(url, save_dir="", filename="", threads=0, opts=None, user="", ip
     except OSError as e:
         raise ValueError("保存目录不可用：%s" % e)
     try:
-        n = int(threads or cfg.get("threads") or 8)
+        n = int(threads or cfg.get("threads") or 2)
     except (TypeError, ValueError):
-        n = 8
+        n = 2
     n = max(1, min(_MAX_THREADS, n))
     opts = dict(opts or {})
     px = _effective_proxy(opts, url)
@@ -895,7 +895,7 @@ def _run_http(tid, t):
 
     size = int(meta.get("size") or 0)
     rng = bool(meta.get("range"))
-    threads = max(1, int(t.get("threads") or 8)) if rng else 1
+    threads = max(1, int(t.get("threads") or 2)) if rng else 1
     if not rng:
         threads = 1
     segs = _make_segs(size, threads, t.get("segs"))
@@ -1240,7 +1240,7 @@ def _run_hls(tid, t):
                               stat=_segs_stat_entry(tid, i)):
                 return
 
-    nw = max(1, min(_MAX_THREADS, int(t.get("threads") or 8), total))
+    nw = max(1, min(_MAX_THREADS, int(t.get("threads") or 2), total))
     ths = [threading.Thread(target=worker, daemon=True, name="dl-hls-%s" % tid)
            for _ in range(nw)]
     for th in ths:
@@ -1791,7 +1791,7 @@ def _run_torrent(tid, t):
                            "（Ubuntu/Debian：sudo apt install aria2；macOS：brew install aria2）")
     folder = t.get("save_dir") or dl.ARTIFACT_ROOT
     os.makedirs(folder, exist_ok=True)
-    threads = max(1, int(t.get("threads") or 8))
+    threads = max(1, int(t.get("threads") or 2))
     opts = dict(t.get("opts") or {})
     meta = dict(t.get("meta") or {})
 

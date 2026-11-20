@@ -605,12 +605,27 @@ function dlRenderTasks() {
   const sub = $("dlQueSub");
   if (sub) sub.textContent = " · " + run.length + " 个正在下载 / 共 " + (st.total || 0) + " 条记录";
 
+  // 总速度 / 总进度：只汇总真正在传输的任务，与任务卡片用同一套进度算法
+  let sumSpeed = 0, sumSize = 0, sumDone = 0;
+  DL.tasks.forEach(function (t) {
+    const live = DL.running[t.id];
+    const ts = live ? "downloading" : t.status;
+    if (ts !== "downloading") return;
+    const pr = dlCalcProg(t, live, ts);
+    sumSpeed += Number(pr.srv ? (t.speed || 0) : (live ? live.speed : 0)) || 0;
+    if (pr.size > 0) { sumSize += pr.size; sumDone += pr.done; }
+  });
+  const allSpeedText = dlSize(sumSpeed) + "/s";
+  const allPctText = sumSize > 0 ? Math.min(100, sumDone * 100 / sumSize).toFixed(1) + "%" : "0%";
+
   let html =
     '<div class="dlc-stats">' +
       dlStatCard("bi-arrow-down-circle", "正在下载", run.length, "dlc-stat") +
       dlStatCard("bi-hourglass-split", "等待下载", wait, "dlc-stat warn") +
       dlStatCard("bi-check2-circle", "下载成功", st.done || 0, "dlc-stat ok") +
       dlStatCard("bi-exclamation-octagon", "下载失败", st.fail || 0, "dlc-stat bad") +
+      dlStatCard("bi-speedometer2", "总下载速度", allSpeedText, "dlc-stat") +
+      dlStatCard("bi-bar-chart-line", "总下载进度", allPctText, "dlc-stat ok") +
     '</div>' +
     '<div class="dlc-tabs">' +
       '<button class="dlc-tab' + (DL.tab === "act" ? " on" : "") + '" data-act="tab-act">' +
@@ -1732,17 +1747,17 @@ async function dlCleanArtifacts() {
 
 const DL_CFG_DEFAULT = {
   keep_days: 7, max_rows: 500, resume: true, use_fs: true, auto_start: true,
-  notify: true, concurrency: 2, throttle_kbps: 0, zip_level: 6,
+  notify: true, concurrency: 2, throttle_kbps: 0, zip_level: 6, threads: 2,
   include_hidden: false, keep_structure: true,
 };
 
-async function dlSaveCfg(patch) {
+async function dlSaveCfg(patch, silent) {
   const d = await dlReq("/api/dl/settings", { method: "POST", body: JSON.stringify(patch) });
   if (!d.ok) { toast(d.error || "保存失败", "err"); return; }
   DL.cfg = d.settings || DL.cfg;
   DL.usage = d.usage || DL.usage;
   dlPaintNav();
-  toast("设置已保存", "ok");
+  if (!silent) toast("设置已保存", "ok");
 }
 async function dlResetCfg() {
   const ok = await uiConfirm("恢复默认设置", "所有下载设置（除产物目录外）恢复为默认值。", "恢复", false);
@@ -1995,7 +2010,7 @@ function dlPickOpen(opts) {
     path: opts.path || (typeof ROOT !== "undefined" ? ROOT : ""),
     sep: "/", parent: null, items: [], roots: [], recent: [], sel: [],
     q: "", hidden: false, adv: false,
-    url: "", urlName: "", threads: (DL.cfg || {}).threads || 8,
+    url: "", urlName: "", threads: (DL.cfg || {}).threads || 2,
     saveDir: opts.saveDir || (DL.cfg || {}).save_dir || (DL.cfg || {}).artifact_dir || "",
     referer: "", cookie: "", proxy: "", urlAdv: false,
     probe: null, probeInfo: "", footHtml: "", footVal: null,
@@ -2113,7 +2128,10 @@ function dlPickOpen(opts) {
       dlPickLoad(P.path);
     }
     if (e.target.id === "dlPkKind") dlPickSum();
-    if (e.target.id === "dlPkThreads") P.threads = Number(e.target.value) || 8;
+    if (e.target.id === "dlPkThreads") {
+      P.threads = Number(e.target.value) || 2;
+      dlSaveCfg({ threads: P.threads }, true).catch(() => {});   // 记住为下次新建任务的默认线程数
+    }
     if (e.target.id === "dlPkUrlName") P.urlName = e.target.value;
     if (e.target.id === "dlPkReferer") P.referer = e.target.value;
     if (e.target.id === "dlPkCookie") P.cookie = e.target.value;
@@ -2253,7 +2271,7 @@ function dlUrlPageHtml() {
   const P = DL.pick || {};
   const c = DL.cfg || {};
   const th = [1, 2, 4, 8, 12, 16, 24, 32];
-  const cur = Number(P.threads || c.threads || 8);
+  const cur = Number(P.threads || c.threads || 2);
   const opts = th.map(function (n) {
     return '<option value="' + n + '"' + (n === cur ? " selected" : "") + '>' + n + ' 线程</option>';
   }).join("");

@@ -69,7 +69,7 @@ _DEFAULTS = {
     "zip_level": 6,                  # zip 压缩级别（0 = 仅存储）
     "include_hidden": False,         # 打包时包含点开头的隐藏文件
     "keep_structure": True,          # 保留目录结构（关掉 = 扁平化）
-    "threads": 8,                    # 网络下载默认线程数（1–32）
+    "threads": 2,                    # 网络下载默认线程数（1–32）
     "save_dir": ARTIFACT_ROOT,       # 网络下载默认保存目录
     "user_agent": "",                # 网络下载默认 UA（空 = 内置浏览器 UA）
     "proxy": "",                     # 网络下载代理（如 http://127.0.0.1:7890）

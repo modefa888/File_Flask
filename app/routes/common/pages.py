@@ -37,7 +37,13 @@ def index():
     elif force == "mobile":
         is_mobile = True
     template = "mobile/mobile.html" if is_mobile else "index/index.html"
-    return _render_page(template)
+    return _render_page(template, **_mobile_ctx())
+
+
+def _mobile_ctx():
+    """移动版模板额外需要的上下文：is_admin 用于只给管理员显示「工具台」入口。"""
+    from .auth import is_admin
+    return {"is_admin": is_admin()}
 
 
 def _render_page(template, **ctx):
@@ -53,7 +59,7 @@ def _render_page(template, **ctx):
 @bp.route("/mobile")
 def mobile_entry():
     _log.info("GET /m (mobile entry)")
-    return _render_page("mobile/mobile.html")
+    return _render_page("mobile/mobile.html", **_mobile_ctx())
 
 
 # 电脑版独立入口：访问 /desktop 强制打开桌面版
@@ -61,6 +67,14 @@ def mobile_entry():
 def desktop_entry():
     _log.info("GET /desktop (desktop entry)")
     return _render_page("index/index.html")
+
+
+# 移动版「代理 + 下载」工具台：独立页面，只包含 V2Ray 代理与下载中心两个模块
+@bp.route("/mtools")
+@bp.route("/m/tools")
+def mobile_tools_entry():
+    _log.info("GET /m/tools (mobile tools entry)")
+    return _render_page("mtools/mtools.html")
 
 
 # 受限协作编辑页：受邀协作者（member）的专属页面 —— 只有文件树 + 协作编辑，

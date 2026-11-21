@@ -12,6 +12,7 @@
                     .then(r => r.json()).then(data => {
                         if (data.error) { showToast('错误', data.error, 'danger'); return; }
                         showToast('成功', `已重命名为 ${finalName}`, 'success');
+                        if (typeof window.fmClearPropCache === 'function') window.fmClearPropCache();
                         loadFiles(currentPath);
                     }).catch(e => { showToast('错误', e.message, 'danger'); });
             });

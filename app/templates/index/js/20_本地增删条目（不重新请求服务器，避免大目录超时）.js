@@ -36,6 +36,7 @@
             applyFiltersAndSort();
             _recomputeStats();
             updateBatchDeleteBtn();
+            if (typeof window.fmClearPropCache === 'function') window.fmClearPropCache();
         }
 
         function localRemoveItems(paths) {
@@ -48,4 +49,5 @@
             _recomputeStats();
             updateSelectedCount();
             updateBatchDeleteBtn();
+            if (typeof window.fmClearPropCache === 'function') window.fmClearPropCache();
         }

@@ -56,6 +56,25 @@
             overflow: hidden;
         }
 
+        /* ===== 页面禁用误选文字 =====
+           顶栏 / 工具栏 / 面包屑统计条 / 文件列表 / 底部操作栏：拖动或连点时
+           不要出现蓝色文字选区。弹窗、编辑器、预览等独立面板（body 下的其他
+           容器）不受影响；输入框等可编辑元素保留正常的文字选择与复制。 */
+        body > .navbar,
+        body > .container-fluid.px-4,
+        body > .sel-bar {
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        body > .navbar input,
+        body > .container-fluid.px-4 input,
+        body > .container-fluid.px-4 textarea,
+        body > .container-fluid.px-4 [contenteditable="true"] {
+            -webkit-user-select: text;
+            user-select: text;
+        }
+
         /* ===== 列表区域动态撑满视口：文件再少也延伸到屏幕底部，内容多时内部滚动 ===== */
         body {
             height: 100vh;          /* 锁定视口高度：页面本身不滚动，只有列表内部滚动 */

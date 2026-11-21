@@ -256,6 +256,74 @@ def _git_exe():
     return shutil.which("git")
 
 
+_RE_INDEX_LOCK = re.compile(r"index\.lock", re.I)
+
+
+def _git_index_lock_error(proc):
+    """识别 git 的 index.lock 冲突（中英文报错都算）"""
+    if not proc or proc.returncode == 0:
+        return False
+    text = ((proc.stderr or "") + (proc.stdout or "")).lower()
+    return "index.lock" in text and any(
+        k in text for k in ("file exists", "文件已存在", "cannot create", "无法创建", "unable to create"))
+
+
+def _git_dir(root):
+    """取仓库真正的 git 目录（兼容 worktree 以及 .git 是文件的情况）"""
+    exe = _git_exe()
+    if exe:
+        try:
+            p = subprocess.run(
+                [exe, "-c", "safe.directory=*", "rev-parse", "--absolute-git-dir"],
+                cwd=root, capture_output=True, text=True, errors="replace",
+                timeout=5, stdin=subprocess.DEVNULL)
+            if p.returncode == 0 and p.stdout.strip():
+                return p.stdout.strip()
+        except Exception:
+            pass
+    return os.path.join(root, ".git")
+
+
+def _git_running_for(root):
+    """是否有其它 git 进程正在操作该仓库（避免误删正在使用的锁）"""
+    try:
+        import psutil
+        me = os.getpid()
+        root_abs = os.path.abspath(root)
+        for p in psutil.process_iter():
+            if p.pid == me:
+                continue
+            try:
+                if (p.name() or "").lower() not in ("git", "git.exe"):
+                    continue
+                cwd = os.path.abspath(p.cwd() or "")
+                cmd = " ".join(p.cmdline() or [])
+            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+                continue
+            if cwd == root_abs or root_abs in cmd:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _clear_stale_index_lock(root, min_age=10):
+    """清理上次异常退出遗留的 .git/index.lock；只在没有其它 git 进程占用时动手。"""
+    try:
+        lock = os.path.join(_git_dir(root), "index.lock")
+        if not os.path.isfile(lock):
+            return False
+        age = time.time() - os.path.getmtime(lock)
+        if age < min_age or _git_running_for(root):
+            return False
+        os.remove(lock)
+        _log.warning("已清理残留的 Git 索引锁：%s（已存在 %.0f 秒）", lock, age)
+        return True
+    except Exception as e:
+        _log.warning("清理 Git 索引锁失败：%s", e)
+        return False
+
+
 def _git(cwd, args, timeout=_TIMEOUT, proxy=""):
     """执行 git 命令，返回 (CompletedProcess, error)。
 
@@ -281,15 +349,32 @@ def _git(cwd, args, timeout=_TIMEOUT, proxy=""):
     conf = [exe, "-c", "safe.directory=*", "-c", "core.quotepath=false"]
     if proxy:
         conf += ["-c", "http.proxy=" + proxy, "-c", "https.proxy=" + proxy]
-    try:
-        proc = subprocess.run(conf + args,
+
+    def _run():
+        return subprocess.run(conf + args,
                               cwd=cwd, capture_output=True,
                               text=True, errors="replace", timeout=timeout,
                               stdin=subprocess.DEVNULL, env=env)
+
+    # 先清理上次异常退出遗留的锁（有其它 git 进程占用时不会动）
+    _clear_stale_index_lock(cwd)
+    try:
+        proc = _run()
     except subprocess.TimeoutExpired:
+        # 超时被强杀的 git 可能留下锁，立刻清理（仍会检查是否有其它进程占用）
+        _clear_stale_index_lock(cwd, min_age=0)
         return None, "git 命令执行超时"
     except OSError as e:
         return None, f"git 执行失败：{e}"
+
+    # 仍然撞上 index.lock：确认是陈旧锁后清理并自动重试一次
+    if _git_index_lock_error(proc) and _clear_stale_index_lock(cwd, min_age=0):
+        try:
+            proc = _run()
+        except subprocess.TimeoutExpired:
+            return None, "git 命令执行超时"
+        except OSError as e:
+            return None, f"git 执行失败：{e}"
     return proc, None
 
 
@@ -328,6 +413,8 @@ def _git_live(cwd, args, timeout=_TIMEOUT, proxy="", lkey=""):
     conf = [exe, "-c", "safe.directory=*", "-c", "core.quotepath=false"]
     if proxy:
         conf += ["-c", "http.proxy=" + proxy, "-c", "https.proxy=" + proxy]
+    # pull/fetch 也可能被遗留的 index.lock 卡住，先尝试清理
+    _clear_stale_index_lock(cwd)
     live = _REMOTE_LIVE.setdefault(lkey, {"lines": [], "status": "idle", "ts": 0})
     live.update({"lines": [], "status": "running", "ts": time.time()})
     try:
@@ -1117,6 +1204,10 @@ def api_git_commit():
         # 对已知错误场景给出更直接的提示
         if "nothing added to commit" in stderr or "no changes added to commit" in stderr:
             return _fail("没有已暂存的文件。请先暂存要提交的文件，然后再提交。", 400)
+        if _git_index_lock_error(proc):
+            return _fail("Git 索引被锁住（.git/index.lock）。请确认没有其它 Git 程序正在操作此仓库；"
+                         "若确认是上次异常退出遗留的锁，稍后重试即可（系统会在安全时自动清理）。"
+                         "原始错误：" + stderr[:200], 500)
         return _fail(stderr, 500)
     out = (proc.stdout.strip().splitlines() or [""])[0]
     return jsonify({"ok": True, "message": out})

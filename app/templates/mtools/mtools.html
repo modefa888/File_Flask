@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#1f6feb" />
+<meta name="format-detection" content="telephone=no" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
+<title>代理与下载 · 移动版</title>
+<link rel="stylesheet" href="/static/vendor/bootstrap-icons/bootstrap-icons.css">
+<style>{% include "mtools/css/00_基础与变量.css" %}</style>
+<style>{% include "mtools/css/01_外壳_顶栏_底部导航.css" %}</style>
+<style>{% include "mtools/css/02_代理页.css" %}</style>
+<style>{% include "mtools/css/03_下载页.css" %}</style>
+<style>{% include "mtools/css/04_弹层_对话框_Toast.css" %}</style>
+<style>{% include "mtools/css/05_视频播放器.css" %}</style>
+</head>
+<body>
+{% include 'mtools/partials/body.html' %}
+<script>
+{% include "mtools/js/00_基础工具.js" %}
+{% include "mtools/js/01_代理.js" %}
+{% include "mtools/js/02_下载.js" %}
+{% include "mtools/js/03_启动与轮询.js" %}
+{% include "mtools/js/04_内嵌视频播放器.js" %}
+</script>
+</body>
+</html>

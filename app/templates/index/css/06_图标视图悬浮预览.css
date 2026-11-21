@@ -414,6 +414,56 @@
             overflow: hidden;
         }
 
+        /* 加载态：/api/properties 对大目录要递归统计，先显示进度再回填内容 */
+        .prop-loading-body {
+            flex: 1;
+            min-height: 260px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            padding: 40px 24px;
+            text-align: center;
+        }
+
+        .prop-loading-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #334155;
+        }
+
+        .prop-loading-progress {
+            width: 220px;
+            height: 4px;
+            border-radius: 4px;
+            background: #e2e8f0;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .prop-loading-progress::after {
+            content: '';
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 40%;
+            border-radius: inherit;
+            background: #2563eb;
+            animation: propLoadingSlide 1.1s ease-in-out infinite;
+        }
+
+        @keyframes propLoadingSlide {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(350%); }
+        }
+
+        .prop-loading-tip {
+            max-width: 380px;
+            font-size: 0.78rem;
+            line-height: 1.6;
+            color: #94a3b8;
+        }
+
         /* 头部 */
         .prop-header {
             display: flex;

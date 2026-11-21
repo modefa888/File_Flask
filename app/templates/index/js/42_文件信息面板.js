@@ -1,13 +1,98 @@
         // ========== 文件信息面板 ==========
-        function showPropertiesDialog(absPath) {
-            fetch(`/api/properties?path=${encodeURIComponent(absPath)}`)
-                .then(r => r.json()).then(data => {
-                    if (data.error) { showToast('错误', data.error, 'danger'); return; }
-                    _showPropPanel(data);
-                }).catch(e => { showToast('错误', e.message, 'danger'); });
+        // 大目录的 /api/properties 要递归统计，耗时较久：
+        // 结果按路径缓存（5 分钟内复用），同一路径并发查看共用一个请求，避免反复扫描
+        const _propCache = new Map();     // absPath -> { data, at }
+        const _propPending = new Map();   // absPath -> { promise, ctrl, waiters }
+        const _PROP_CACHE_TTL = 5 * 60 * 1000;
+
+        function _propCached(absPath) {
+            const hit = _propCache.get(absPath);
+            if (!hit) return null;
+            if (Date.now() - hit.at > _PROP_CACHE_TTL) { _propCache.delete(absPath); return null; }
+            return hit.data;
         }
 
-        function _showPropPanel(data) {
+        function _propRemember(absPath, data) {
+            _propCache.set(absPath, { data, at: Date.now() });
+        }
+
+        // 文件增删/重命名等本地更新后调用，避免缓存里显示过期统计
+        window.fmClearPropCache = function () { _propCache.clear(); };
+
+        function showPropertiesDialog(absPath) {
+            const cached = _propCached(absPath);
+            if (cached) { _showPropPanel(cached); return; }   // 命中缓存：直接弹出，无加载等待
+
+            const overlay = document.createElement('div');
+            overlay.className = 'custom-modal-overlay';
+            overlay.innerHTML = `
+            <div class="prop-panel prop-loading-panel">
+                <div class="prop-header">
+                    <span class="prop-title"><i class="bi bi-info-circle"></i>文件信息</span>
+                    <button class="prop-close" title="关闭并停止读取"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="prop-loading-body">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <div class="prop-loading-title">正在读取文件信息…</div>
+                    <div class="prop-loading-progress"></div>
+                    <div class="prop-loading-tip">大文件夹需要递归统计大小与文件数量，请稍候；点击右上角 × 可随时停止读取。</div>
+                </div>
+            </div>`;
+            document.body.appendChild(overlay);
+            _bindPropPanel(overlay);
+
+            // 同一路径正在读取时直接复用那个请求，不重复向后端发起递归统计
+            let pending = _propPending.get(absPath);
+            if (!pending) {
+                const ctrl = new AbortController();
+                const promise = fetch(`/api/properties?path=${encodeURIComponent(absPath)}`, { signal: ctrl.signal })
+                    .then(r => r.json());
+                pending = { promise, ctrl, waiters: new Set() };
+                _propPending.set(absPath, pending);
+                promise.then(data => {
+                    if (data && !data.error) _propRemember(absPath, data);
+                }).catch(() => {}).then(() => {
+                    if (_propPending.get(absPath) === pending) _propPending.delete(absPath);
+                });
+            }
+            pending.waiters.add(overlay);
+            overlay._propPendingKey = absPath;
+
+            pending.promise.then(data => {
+                if (!document.body.contains(overlay)) return;   // 用户已关闭面板
+                if (data.error) { showToast('错误', data.error, 'danger'); overlay.remove(); return; }
+                _showPropPanel(data, overlay);
+            }).catch(e => {
+                if (!document.body.contains(overlay) || (e && e.name === 'AbortError')) return;
+                showToast('错误', e.message, 'danger');
+                overlay.remove();
+            });
+        }
+
+        // 面板事件：只有关闭按钮能关闭面板；没有其它面板等同一路径时才中止请求
+        function _bindPropPanel(overlay) {
+            const close = overlay.querySelector('.prop-close');
+            if (close) close.addEventListener('click', () => {
+                const key = overlay._propPendingKey;
+                if (key && _propPending.has(key)) {
+                    const pending = _propPending.get(key);
+                    pending.waiters.delete(overlay);
+                    if (pending.waiters.size === 0) {
+                        pending.ctrl.abort();
+                        _propPending.delete(key);
+                    }
+                }
+                overlay.remove();
+            });
+            overlay.querySelectorAll('[data-copy]').forEach(el => {
+                el.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    _copyToClipboard(el.dataset.copy, '已复制到剪切板');
+                });
+            });
+        }
+
+        function _showPropPanel(data, overlay) {
             const isDir = !!data.is_dir;
             const esc = s => _escHtml(String(s == null ? '' : s));
             const escAttr = s => esc(s).replace(/"/g, '&quot;');
@@ -97,8 +182,11 @@
                     `<div class="prop-cards">${cards}</div>${rows}</div>`;
             }
 
-            const overlay = document.createElement('div');
-            overlay.className = 'custom-modal-overlay';
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.className = 'custom-modal-overlay';
+                document.body.appendChild(overlay);
+            }
             overlay.innerHTML = `
             <div class="prop-panel">
                 <div class="prop-header">
@@ -121,13 +209,5 @@
                 </div>
             </div>
         `;
-            document.body.appendChild(overlay);
-            overlay.querySelector('.prop-close').addEventListener('click', () => overlay.remove());
-            overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-            overlay.querySelectorAll('[data-copy]').forEach(el => {
-                el.addEventListener('click', (ev) => {
-                    ev.stopPropagation();
-                    _copyToClipboard(el.dataset.copy, '已复制到剪切板');
-                });
-            });
+            _bindPropPanel(overlay);
         }

@@ -1,0 +1,233 @@
+  <div class="app">
+    <!-- ================= 顶栏 ================= -->
+    <header class="appbar">
+      <div class="ab-brand">
+        <a class="ab-logo" href="/m" title="返回文件管理"><i class="bi bi-arrow-left"></i></a>
+        <div class="ab-tx">
+          <h1 id="appTitle">代理</h1>
+          <p id="appSub">V2Ray 出口 · 下载中心</p>
+        </div>
+      </div>
+      <button class="ab-btn" id="refreshBtn" title="刷新"><i class="bi bi-arrow-clockwise"></i></button>
+    </header>
+
+    <main class="content" id="content">
+      <!-- ================= 代理页 ================= -->
+      <section class="page active" id="pageProxy">
+        <div class="hero" id="proxyHero">
+          <div class="hero-top">
+            <span class="hero-dot" id="p2Dot"></span>
+            <div class="hero-tx">
+              <div class="hero-t" id="p2State">未运行</div>
+              <div class="hero-s" id="p2Node">正在读取代理状态…</div>
+            </div>
+            <button class="btn hero-btn" id="p2Toggle" type="button">
+              <i class="bi bi-play-fill"></i><span>连接</span>
+            </button>
+          </div>
+          <div class="hero-meta">
+            <div class="hm-cell">
+              <span class="hm-k"><i class="bi bi-activity"></i>实时</span>
+              <b class="hm-v" id="p2Speed">↑ 0 B/s · ↓ 0 B/s</b>
+            </div>
+            <div class="hm-cell">
+              <span class="hm-k"><i class="bi bi-calendar2-range"></i>今日</span>
+              <b class="hm-v" id="p2Today">—</b>
+            </div>
+            <div class="hm-cell">
+              <span class="hm-k"><i class="bi bi-cpu"></i>内核</span>
+              <b class="hm-v" id="p2Core">探测中…</b>
+            </div>
+          </div>
+        </div>
+
+        <!-- 代理地址（跑起来后可复制到其它设备） -->
+        <div class="card share-card">
+          <div class="card-head">
+            <span class="ch-t"><i class="bi bi-broadcast-pin"></i>代理地址</span>
+            <button class="linkbtn" id="p2ShareMore" type="button" hidden></button>
+          </div>
+          <div class="share-list" id="p2Share">
+            <div class="share-empty">连接节点后显示可共享的 SOCKS5 / HTTP 地址</div>
+          </div>
+          <div class="share-tip">同网段的其他设备把本机 IP 与端口填成 SOCKS5 代理即可共用出口。</div>
+        </div>
+
+        <div class="sec-head">
+          <h2>节点快选 <span class="pill" id="p2NodeNum">0</span></h2>
+          <div class="sec-acts">
+            <button class="linkbtn" id="p2PingAll" type="button"><i class="bi bi-speedometer2"></i>测速</button>
+            <button class="linkbtn" id="p2SetBtn" type="button"><i class="bi bi-sliders2"></i>设置</button>
+          </div>
+        </div>
+
+        <div class="search-row" id="p2SearchRow" hidden>
+          <i class="bi bi-search"></i>
+          <input id="p2Search" type="search" placeholder="搜索节点名称 / 地址…" autocomplete="off" />
+          <button class="search-clear" id="p2SearchClear" type="button" hidden><i class="bi bi-x-circle-fill"></i></button>
+        </div>
+
+        <div class="node-list" id="p2Nodes">
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+        </div>
+      </section>
+
+      <!-- ================= 下载页 ================= -->
+      <section class="page" id="pageDl">
+        <div class="dl-stats">
+          <div class="ds-cell">
+            <b id="dlActive">0</b>
+            <span>进行中</span>
+          </div>
+          <div class="ds-sep"></div>
+          <div class="ds-cell">
+            <b id="dlDone">0</b>
+            <span>已完成</span>
+          </div>
+          <div class="ds-sep"></div>
+          <div class="ds-cell">
+            <b id="dlBytes">0 B</b>
+            <span>累计传输</span>
+          </div>
+        </div>
+
+        <div class="dl-toolbar">
+          <button class="btn primary" id="dlNewBtn" type="button">
+            <i class="bi bi-plus-lg"></i><span>新建下载</span>
+          </button>
+          <button class="icon-btn" id="dlSetBtn" type="button" title="下载设置"><i class="bi bi-sliders2"></i></button>
+          <button class="icon-btn" id="dlRefreshBtn" type="button" title="刷新"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+
+        <div class="seg" id="dlTabs">
+          <button class="on" data-tab="all" type="button">全部<span id="dlCntAll">0</span></button>
+          <button data-tab="active" type="button">进行中<span id="dlCntActive">0</span></button>
+          <button data-tab="ended" type="button">已结束<span id="dlCntEnded">0</span></button>
+        </div>
+
+        <div class="dl-bulk">
+          <button id="dlPauseAll" type="button"><i class="bi bi-pause-fill"></i>全部暂停 <b id="dlPauseNum">0</b></button>
+          <span class="dl-bulk-sep"></span>
+          <button id="dlResumeAll" type="button"><i class="bi bi-play-fill"></i>全部继续 <b id="dlResumeNum">0</b></button>
+        </div>
+
+        <div class="dl-list" id="dlList">
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ================= 底部导航 ================= -->
+    <nav class="tabbar" id="tabbar">
+      <button class="tab on" data-page="proxy" type="button">
+        <span class="tab-ic"><i class="bi bi-shield-shaded"></i><i class="tab-dot" id="tabProxyDot"></i></span>
+        <span class="tab-tx">代理</span>
+      </button>
+      <button class="tab" data-page="dl" type="button">
+        <span class="tab-ic"><i class="bi bi-cloud-arrow-down"></i><i class="tab-badge" id="tabDlBadge" hidden>0</i></span>
+        <span class="tab-tx">下载</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- ================= 通用底部弹层 ================= -->
+  <div class="sheet-mask" id="sheetMask"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head">
+      <b id="sheetTitle">操作</b>
+      <button class="sheet-x" id="sheetClose" type="button" aria-label="关闭"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="sheet-body" id="sheetBody"></div>
+  </div>
+
+  <!-- ================= 自定义确认框 ================= -->
+  <div class="confirm" id="confirmBox">
+    <div class="confirm-card">
+      <h3 id="confirmTitle">提示</h3>
+      <p id="confirmMsg"></p>
+      <div class="confirm-actions">
+        <button class="btn ghost" id="confirmCancel" type="button">取消</button>
+        <button class="btn danger" id="confirmOk" type="button">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 内嵌视频播放器（自定义控制条） ================= -->
+  <div class="player-mask" id="playerMask"></div>
+  <div class="player" id="playerPage" role="dialog" aria-modal="true">
+    <div class="pl-head">
+      <button class="pl-btn" id="plClose" type="button" aria-label="关闭播放器">
+        <i class="bi bi-chevron-down"></i>
+      </button>
+      <div class="pl-title" id="plTitle">视频</div>
+      <a class="pl-btn" id="plSave" href="#" title="保存到本地"><i class="bi bi-download"></i></a>
+    </div>
+
+    <div class="pl-stage" id="plStage">
+      <video id="plVideo" playsinline webkit-playsinline preload="metadata"></video>
+
+      <button class="pl-big" id="plBig" type="button" aria-label="播放 / 暂停">
+        <i class="bi bi-play-fill"></i>
+      </button>
+
+      <div class="pl-tip" id="plTip" hidden></div>
+      <div class="pl-flash" id="plFlash"></div>
+
+      <!-- 自定义控制条（点画面显示 / 隐藏） -->
+      <div class="pl-ctrl" id="plCtrl">
+        <div class="pl-meta" id="plMeta"></div>
+        <div class="pl-seek-row">
+          <span class="pl-time" id="plCur">0:00</span>
+          <input class="pl-seek" id="plSeek" type="range" min="0" max="1000" step="1" value="0"
+                 aria-label="播放进度" />
+          <span class="pl-time" id="plDur">0:00</span>
+        </div>
+        <div class="pl-ops">
+          <div class="pl-opgroup">
+            <button class="pl-op" id="plBack5" type="button" title="后退 5 秒">
+              <i class="bi bi-arrow-counterclockwise"></i><b>5</b>
+            </button>
+            <button class="pl-op main" id="plPlay" type="button" title="播放 / 暂停">
+              <i class="bi bi-play-fill"></i>
+            </button>
+            <button class="pl-op" id="plFwd5" type="button" title="快进 5 秒">
+              <i class="bi bi-arrow-clockwise"></i><b>5</b>
+            </button>
+          </div>
+          <div class="pl-opgroup right">
+            <button class="pl-op text" id="plRateBtn" type="button" title="播放速度">1.0×</button>
+            <button class="pl-op text" id="plEpBtn" type="button" title="选集" hidden>
+              <i class="bi bi-collection-play"></i>选集
+            </button>
+            <button class="pl-op" id="plFullBtn" type="button" title="全屏">
+              <i class="bi bi-arrows-fullscreen"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 倍速面板 -->
+      <div class="pl-rate" id="plRatePop">
+        <div class="pl-rate-t">播放速度</div>
+        <div class="pl-rate-list" id="plRateList"></div>
+      </div>
+    </div>
+
+    <!-- 选集面板 -->
+    <div class="pl-eps-mask" id="plEpsMask"></div>
+    <div class="pl-eps" id="plEps">
+      <div class="pl-eps-head">
+        <b>选集</b>
+        <button class="pl-btn" id="plEpsClose" type="button" aria-label="关闭选集">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+      <div class="pl-eps-list" id="plEpsList"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>

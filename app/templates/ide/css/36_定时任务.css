@@ -1,96 +1,149 @@
   /* ===== 定时任务（参考青龙面板） ===== */
-  /* 面板本身不横向滚：按钮行收窄时也不会把刷新按钮挤出面板外 */
-  /* padding-top 归零：原来 .side-panel 的 10px 让标题和按钮之间空出一块，
-     现在按钮紧贴侧栏标题（与「终端连接」面板一致） */
-  #cronPanel { overflow-x: hidden; padding-top: 0; }
-  .cron-tools { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; }
-  /* g-btn.block 默认 width:100%，放进 flex 行里会和刷新按钮一起撑破容器，
-     这里改成弹性占满剩余宽度（与 .api-tools 的做法一致） */
+  /* 侧栏面板结构与「下载中心」一致：工具行 / 汇总行固定在顶部，任务列表自己滚动
+     （.side-panel.active 默认 display:block，这里改成纵向 flex）
+     min-height:0 必须加：flex 子项默认 min-height:auto，任务一多面板会被内容撑高，
+     列表就撑到侧栏外面去了（看不到滚动条，底部卡片和操作按钮被裁掉） */
+  #cronPanel { overflow-x: hidden; padding-top: 0; min-width: 0; min-height: 0; }
+  #cronPanel.active { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+
+  /* 工具行：主按钮吃掉剩余宽度，右侧两个图标按钮（管理面板 / 刷新）
+     与下载中心的 .dls-tools 完全同一套（配色由 54_ 统一按钮样式提供） */
+  .cron-tools { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; }
+  /* g-btn.block 默认 width:100%，放进 flex 行里会和图标按钮一起撑破容器，
+     这里改成弹性占满剩余宽度（与 .dls-tools / .api-tools 的做法一致） */
   .cron-tools .g-btn.block { flex: 1 1 auto; width: auto; min-width: 0; margin-top: 0; }
   .cron-tools .g-ico { flex: none; }
 
-  /* ---------- 顶部按钮区：与「终端连接」面板同一套按钮语言 ----------
-     主按钮 30px 高 / 6px 圆角 / 轻渐变；刷新换成同高的描边方块；
-     「打开管理面板」是同高的次级描边按钮，三者在同一条视觉节奏上。 */
-  #cronPanel .cron-tools .g-btn.block {
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-    height: 30px; padding: 0 12px; border-radius: 6px;
-    background: linear-gradient(180deg, #189ae6, #0b71b4);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .14);
-    font-size: 12.5px; letter-spacing: .2px;
-    transition: background .14s ease, box-shadow .14s ease;
-  }
-  #cronPanel .cron-tools .g-btn.block > i { font-size: 13px; line-height: 1; }
-  #cronPanel .cron-tools .g-btn.block:hover {
-    background: linear-gradient(180deg, #1ea6f5, #0c7cbf);
-    box-shadow: 0 2px 7px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .2);
-  }
-  #cronPanel .cron-tools .g-btn.block:active { transform: translateY(1px); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .45); }
-  #cronPanel .cron-tools .g-ico {
-    flex: none; width: 30px; height: 30px; padding: 0; border-radius: 6px;
-    display: inline-flex; align-items: center; justify-content: center;
-    background: #2b2e31; border: 1px solid #3a3e42; color: #c4c9ce; font-size: 14px;
-    transition: background .14s ease, border-color .14s ease, color .14s ease;
-  }
-  #cronPanel .cron-tools .g-ico:hover { background: #35393d; border-color: #4a4f55; color: #ffffff; }
-  #cronPanel .cron-tools .g-ico:active { transform: translateY(1px); }
-  /* 次级按钮「打开管理面板」：贴住上面一行，不再留 6px 的默认上外边距 */
-  #cronOpenView {
-    box-sizing: border-box; width: 100%; height: 30px; margin: 0 0 2px; padding: 0 12px;
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    border-radius: 6px; border: 1px solid #3a3e42; background: #26292c; color: #c8ced4;
-    font-family: inherit; font-size: 12.5px; cursor: pointer;
-    transition: background .14s ease, border-color .14s ease, color .14s ease;
-  }
-  #cronOpenView > i { font-size: 13px; line-height: 1; }
-  #cronOpenView:hover { background: #303337; border-color: #4a4f55; color: #ffffff; }
-  #cronOpenView:active { transform: translateY(1px); }
-  /* 浅色主题：描边方块 / 次级按钮换成浅灰描边，主按钮保持蓝色主色 */
-  html.theme-light #cronPanel .cron-tools .g-ico { background: #f2f4f6; border-color: #d6dae0; color: #5a6572; }
-  html.theme-light #cronPanel .cron-tools .g-ico:hover { background: #e7ebef; border-color: #c6ccd4; color: #1f2328; }
-  html.theme-light #cronOpenView { background: #f2f4f6; border-color: #d6dae0; color: #40474e; }
-  html.theme-light #cronOpenView:hover { background: #e7ebef; border-color: #c6ccd4; color: #1f2328; }
-  .cron-list { display: flex; flex-direction: column; gap: 8px; min-width: 0;
-    overflow-y: auto; overflow-x: hidden; padding-right: 2px; }
-  .cron-item { background: #2a2d2e; border: 1px solid #37373d; border-left: 2px solid #6fcf8a;
-    border-radius: 4px; padding: 8px; min-width: 0; overflow: hidden; }
-  .cron-item.off { border-left-color: #6a6a6a; opacity: .72; }
-  .cron-item.running { border-left-color: #4fc1ff; box-shadow: inset 0 0 0 1px rgba(79, 193, 255, .18); }
-  .cron-item .ci-top { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: #cccccc; }
+  /* 汇总行：与下载中心 .dls-sum 同一套观感（10.5px 灰字 + 深色数值） */
+  .cron-sum { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; flex: none;
+    font-size: 10.5px; color: #8a8a8a; margin-bottom: 8px; }
+  .cron-sum b { color: #cfcfcf; font-weight: 600; font-variant-numeric: tabular-nums; }
+  /* 说明文字固定高度：不给 flex 收缩，避免被下面的任务列表挤扁 */
+  #cronPanel .s-hint { flex: none; }
+
+  /* 列表：自身滚动 + 保留滚动条槽位，任务增减时卡片宽度不抖 */
+  .cron-list { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px;
+    min-width: 0; overflow-y: auto; overflow-x: hidden; padding-right: 4px;
+    scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #4d4d56 transparent; }
+  /* 滚动条比全局默认稍亮一档，任务多时也能一眼看到「这里还能往下滚」 */
+  .cron-list::-webkit-scrollbar { width: 8px; }
+  .cron-list::-webkit-scrollbar-track { background: transparent; }
+  .cron-list::-webkit-scrollbar-thumb { background: #4d4d56; border-radius: 4px;
+    border: 2px solid transparent; background-clip: content-box; }
+  .cron-list::-webkit-scrollbar-thumb:hover { background: #64646f; border: 2px solid transparent; background-clip: content-box; }
+  :where(html.theme-light) .cron-list { scrollbar-color: #c3c9d2 transparent; }
+  :where(html.theme-light) .cron-list::-webkit-scrollbar-thumb { background: #c3c9d2;
+    border: 2px solid transparent; background-clip: content-box; }
+  :where(html.theme-light) .cron-list::-webkit-scrollbar-thumb:hover { background: #a7b0bc;
+    border: 2px solid transparent; background-clip: content-box; }
+
+  /* 任务卡：沿用下载中心侧栏 .dls-item 的卡片语言
+     （#262628 底 / 7px 圆角 / 细边框 / hover 提亮 / 左侧 2px 状态竖线）
+     flex:none 必须加：列表是 flex 纵向容器，任务一多时卡片会被压缩高度，
+     卡片自己 overflow:hidden 就把底部操作行裁掉了（滚动条也不会出现） */
+  .cron-item { flex: none; background: #262628; border: 1px solid #333336; border-radius: 7px;
+    padding: 7px 8px; min-width: 0; overflow: hidden;
+    box-shadow: inset 2px 0 0 #6fcf8a;
+    transition: background .14s, border-color .14s; }
+  .cron-item:hover { background: #2a2a2d; border-color: #4a4a4f; }
+  .cron-item.off { box-shadow: inset 2px 0 0 #4a4a4f; opacity: .72; }
+  .cron-item.running { box-shadow: inset 2px 0 0 #4fc1ff; }
+  .cron-item .ci-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .cron-item .ci-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    color: #e6e6e6; }
-  .cron-item .ci-st { flex: none; font-size: 10px; border-radius: 3px; padding: 0 5px; color: #9d9d9d;
-    border: 1px solid #454545; }
-  .cron-item .ci-st.ok { color: #7fd88f; border-color: #3d6b47; }
-  .cron-item .ci-st.bad { color: #e08a8a; border-color: #6b3d3d; }
-  .cron-item .ci-st.warn { color: #e2c08a; border-color: #6b5a34; }
-  .cron-item .ci-st.run { color: #7ec4ff; border-color: #3a5a7c; }
-  /* 启用开关 */
+    font-size: 11.5px; color: #d9d9dc; }
+  /* 状态标签：与 .dls-tag 同一套（9.5px / 4px 方角 / 细描边 + 淡色底） */
+  .cron-item .ci-st { flex: none; font-size: 9.5px; line-height: 16px; padding: 0 5px; border-radius: 4px;
+    border: 1px solid #3c3c40; background: #2d2d31; color: #9d9d9d; white-space: nowrap; }
+  .cron-item .ci-st.ok { color: #6fcf8a; border-color: rgba(111, 207, 138, .4); background: rgba(111, 207, 138, .1); }
+  .cron-item .ci-st.bad { color: #e08a8a; border-color: rgba(224, 138, 138, .4); background: rgba(224, 138, 138, .1); }
+  .cron-item .ci-st.warn { color: #e2c08a; border-color: rgba(226, 192, 138, .4); background: rgba(226, 192, 138, .1); }
+  .cron-item .ci-st.run { color: #7ec4ff; border-color: rgba(79, 193, 255, .4); background: rgba(79, 193, 255, .1); }
+  /* 启用开关：小号胶囊开关，开启态用下载中心的青蓝渐变（与 .dlc-sw 同一套色） */
   .cron-item .ci-switch { flex: none; position: relative; width: 26px; height: 15px; cursor: pointer; }
   .cron-item .ci-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-  .cron-item .ci-switch span { position: absolute; inset: 0; background: #4a4a4a; border-radius: 8px; transition: background .15s; }
+  .cron-item .ci-switch span { position: absolute; inset: 0; background: #3a3a41; border-radius: 8px;
+    transition: background .16s; }
   .cron-item .ci-switch span::after { content: ""; position: absolute; left: 2px; top: 2px; width: 11px; height: 11px;
-    border-radius: 50%; background: #e6e6e6; transition: transform .15s; }
-  .cron-item .ci-switch input:checked + span { background: #2f7d43; }
+    border-radius: 50%; background: #ffffff; box-shadow: 0 1px 2px rgba(0, 0, 0, .35); transition: transform .16s; }
+  .cron-item .ci-switch input:checked + span { background: linear-gradient(90deg, #4fc1ff, #3aa9e0); }
   .cron-item .ci-switch input:checked + span::after { transform: translateX(11px); }
-  .cron-item .ci-cron { display: flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 11px; color: #9aa4b2;
-    min-width: 0; flex-wrap: wrap; }
-  .cron-item .ci-cron .bi { color: #7fb3e0; font-size: 11px; }
-  .cron-item .ci-cron code { background: #1b1b1e; border: 1px solid #333; border-radius: 4px; padding: 0 5px;
-    color: #e8c07a; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; }
-  .cron-item .ci-next { color: #7fd88f; font-size: 10.5px; }
-  .cron-item .ci-cmd { margin-top: 5px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px;
-    color: #b9c6d4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .cron-item .ci-meta { margin-top: 4px; font-size: 10.5px; color: #8a8a8a; }
-  .cron-item .ci-acts { display: flex; gap: 6px; margin-top: 7px; }
-  .cron-item .ci-btn { flex: 1 1 0; background: #37373d; border: none; border-radius: 3px; cursor: pointer;
-    font-size: 13px; padding: 4px 0; display: inline-flex; align-items: center; justify-content: center; color: #cccccc; }
-  .cron-item .ci-btn:hover { background: #45494e; filter: brightness(1.3); }
+
+  /* 计划行 / 命令 / 统计：统一压到 10px 灰字，与下载卡片的 .dlc-trow2 / .dlc-trow3 同层级 */
+  .cron-item .ci-cron { display: flex; align-items: center; gap: 5px; margin-top: 5px; min-width: 0;
+    flex-wrap: wrap; font-size: 10px; color: #8a8a8a; }
+  .cron-item .ci-cron .bi { color: #4fc1ff; font-size: 10px; opacity: .8; }
+  .cron-item .ci-cron code { background: #1d1d20; border: 1px solid #333336; border-radius: 4px;
+    padding: 0 5px; line-height: 15px; color: #e2c08a;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px; }
+  .cron-item .ci-next { color: #6fcf8a; font-size: 10px; }
+  .cron-item .ci-cmd { margin-top: 4px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px;
+    color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cron-item .ci-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    margin-top: 4px; font-size: 10px; color: #8a8a8a; font-variant-numeric: tabular-nums; }
+  .cron-item .ci-meta > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cron-item .ci-meta .ci-count { flex: none; color: #7f7f7f; }
+
+  /* 操作行：贴底的细分割线上、右对齐的彩色图标按钮
+     无边框无底色，图标本身带语义色（运行绿 / 记录蓝 / 编辑黄 / 删除红），
+     hover 才铺一层淡色底，悬停区比图标大一圈，方便点 */
+  .cron-item .ci-acts { display: flex; align-items: center; justify-content: flex-end; gap: 2px;
+    margin-top: 6px; padding-top: 6px; border-top: 1px dashed #2f2f33; }
+  .cron-item .ci-btn { flex: none; width: 24px; height: 22px; padding: 0; cursor: pointer; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid transparent; border-radius: 5px; background: transparent; font-size: 12.5px;
+    transition: background .12s, color .12s, border-color .12s; }
   .cron-item .ci-btn.v-run { color: #6fcf8a; }
-  .cron-item .ci-btn.v-stop { color: #f14c4c; }
-  .cron-item .ci-btn.v-log { color: #9ecbff; }
-  .cron-item .ci-btn.v-edit { color: #4fc1ff; }
+  .cron-item .ci-btn.v-stop { color: #e08a8a; }
+  .cron-item .ci-btn.v-log { color: #7ec4ff; }
+  .cron-item .ci-btn.v-edit { color: #e2c08a; }
   .cron-item .ci-btn.v-del { color: #e08a8a; }
+  .cron-item .ci-btn:hover { background: #34343a; border-color: #45454d; }
+  .cron-item .ci-btn.v-run:hover { color: #a6e8b8; background: rgba(111, 207, 138, .16); border-color: rgba(111, 207, 138, .38); }
+  .cron-item .ci-btn.v-stop:hover,
+  .cron-item .ci-btn.v-del:hover { color: #f0aaaa; background: rgba(224, 138, 138, .16); border-color: rgba(224, 138, 138, .38); }
+  .cron-item .ci-btn.v-log:hover { color: #a8d4ff; background: rgba(79, 193, 255, .16); border-color: rgba(79, 193, 255, .38); }
+  .cron-item .ci-btn.v-edit:hover { color: #f0dcb0; background: rgba(226, 192, 138, .16); border-color: rgba(226, 192, 138, .38); }
+
+  /* 空态：与下载中心 .dls-empty 同一套（图标 + 标题 + 说明） */
+  .cron-empty { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px;
+    text-align: center; padding: 26px 8px; color: #7f7f7f; }
+  .cron-empty .bi { font-size: 26px; color: #4a4a4f; }
+  .cron-empty b { font-size: 11.5px; color: #a9a9ae; font-weight: 600; }
+  .cron-empty p { margin: 0; font-size: 10.5px; line-height: 1.6; }
+  .cron-empty p code { color: #e2c08a; font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+  /* 浅色主题：与下载中心的浅色卡片保持一致 */
+  :where(html.theme-light) .cron-sum b { color: #1f2328; }
+  :where(html.theme-light) .cron-item { background: #ffffff; border-color: #e3e7ee; }
+  :where(html.theme-light) .cron-item:hover { background: #f7f9fc; border-color: #cfd6df; }
+  :where(html.theme-light) .cron-item.off { box-shadow: inset 2px 0 0 #d6dae0; }
+  :where(html.theme-light) .cron-item .ci-name { color: #1f2328; }
+  :where(html.theme-light) .cron-item .ci-cmd,
+  :where(html.theme-light) .cron-item .ci-meta,
+  :where(html.theme-light) .cron-item .ci-cron { color: #6b7280; }
+  :where(html.theme-light) .cron-item .ci-meta .ci-count { color: #8c959f; }
+  :where(html.theme-light) .cron-item .ci-cron code { background: #f4f6f8; border-color: #e3e7ee; color: #8a5a00; }
+  :where(html.theme-light) .cron-item .ci-next { color: #1a7f37; }
+  :where(html.theme-light) .cron-item .ci-st { background: #f2f4f6; border-color: #e0e4ea; color: #6b7280; }
+  :where(html.theme-light) .cron-item .ci-st.ok { color: #1a7f37; border-color: rgba(26, 127, 55, .3); background: rgba(26, 127, 55, .08); }
+  :where(html.theme-light) .cron-item .ci-st.bad { color: #cf222e; border-color: rgba(207, 34, 46, .3); background: rgba(207, 34, 46, .08); }
+  :where(html.theme-light) .cron-item .ci-st.warn { color: #9a6700; border-color: rgba(154, 103, 0, .3); background: rgba(154, 103, 0, .08); }
+  :where(html.theme-light) .cron-item .ci-st.run { color: #0969da; border-color: rgba(9, 105, 218, .3); background: rgba(9, 105, 218, .08); }
+  :where(html.theme-light) .cron-item .ci-acts { border-top-color: #eef1f6; }
+  /* 浅色下彩色图标换成更深一档，白底上对比够 */
+  :where(html.theme-light) .cron-item .ci-btn.v-run { color: #1a7f37; }
+  :where(html.theme-light) .cron-item .ci-btn.v-stop,
+  :where(html.theme-light) .cron-item .ci-btn.v-del { color: #cf222e; }
+  :where(html.theme-light) .cron-item .ci-btn.v-log { color: #0969da; }
+  :where(html.theme-light) .cron-item .ci-btn.v-edit { color: #9a6700; }
+  :where(html.theme-light) .cron-item .ci-btn:hover { background: #f0f3f7; border-color: #dfe4ea; }
+  :where(html.theme-light) .cron-item .ci-btn.v-run:hover { color: #116329; background: #eaf7ee; border-color: #a6d5b4; }
+  :where(html.theme-light) .cron-item .ci-btn.v-stop:hover,
+  :where(html.theme-light) .cron-item .ci-btn.v-del:hover { color: #a40e26; background: #fdeef0; border-color: #f0b8bb; }
+  :where(html.theme-light) .cron-item .ci-btn.v-log:hover { color: #0550ae; background: #e8f1fb; border-color: #b6d4ea; }
+  :where(html.theme-light) .cron-item .ci-btn.v-edit:hover { color: #7d4e00; background: #fdf6e6; border-color: #e3d2ac; }
+  :where(html.theme-light) .cron-empty b { color: #414750; }
+  :where(html.theme-light) .cron-empty p code { color: #9a6700; }
 
   /* 浮层：任务编辑器 / 执行记录 */
   .cron-modal-overlay { position: fixed; inset: 0; z-index: 500; background: rgba(0, 0, 0, .5);
@@ -142,8 +195,10 @@
   .cron-dialog .cd-btn:hover { border-color: #555; color: #fff; }
   .cron-dialog .cd-btn.primary { background: #0d7ec4; border-color: #0d7ec4; color: #fff; }
   .cron-dialog .cd-btn.primary:hover { background: #0a6aa8; }
-  /* 执行记录 + 日志 */
-  .cron-runs-dialog { width: 860px; }
+  /* 执行记录 + 日志
+     固定宽高：切换不同记录时（日志几行 / 几千行、通知 0 条 / 十几条）窗口尺寸完全不变，
+     内容多了只在内部滚动。之前只给了 max-height，高度由内容撑开，切记录时整窗会跳。 */
+  .cron-runs-dialog { width: 860px; height: min(680px, 88vh); }
   .cron-dialog .cr-body { flex: 1; min-height: 0; display: flex; }
   .cron-dialog .cr-list { flex: 0 0 230px; border-right: 1px solid #33333a; overflow-y: auto; padding: 6px; }
   .cron-dialog .cr-row { display: flex; align-items: center; gap: 7px; padding: 6px 7px; border-radius: 5px; cursor: pointer; }
@@ -161,15 +216,48 @@
   .cron-dialog .cr-row-t .cr-by .bi { font-size: 10px; margin-right: 2px; }
   .cron-view .cv-trigger .bi { font-size: 10px; margin-right: 2px; }
   .cron-dialog .cr-row-s { font-size: 10.5px; color: #8a8a8a; margin-top: 1px; }
-  .cron-dialog .cr-logwrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .cron-dialog .cr-logwrap { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .cron-dialog .cr-log-head { display: flex; align-items: center; gap: 6px; padding: 7px 10px; font-size: 11.5px;
     color: #b9c6d4; border-bottom: 1px solid #33333a; }
   .cron-dialog .cr-mini { background: #2d2d31; border: 1px solid #3c3c3c; border-radius: 5px; color: #9aa4b2;
     cursor: pointer; font-size: 12px; padding: 2px 7px; }
   .cron-dialog .cr-mini:hover { border-color: #555; color: #fff; }
-  .cron-dialog .cr-log { flex: 1; min-height: 300px; margin: 0; padding: 10px; overflow: auto;
+  .cron-dialog .cr-log { flex: 1; min-height: 0; margin: 0; padding: 8px 0; overflow: auto;
     background: #17171a; color: #cfe3d8; font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 11.5px; line-height: 17px; white-space: pre-wrap; word-break: break-word; }
+
+  /* ---------- 日志按输出类型着色 ----------
+     每行一个块级元素，背景色铺满整行（左右 padding 放在行上，pre 只留上下 padding），
+     一眼能分出：命令回显 / 执行头 / 分隔标题 / 成功 / 失败 / JSON 结构化输出。 */
+  .cr-line { display: block; min-height: 17px; padding: 0 10px;
+    white-space: pre-wrap; word-break: break-word; }
+  /* 不同类型块之间的空隙行：给一块呼吸空间，否则命令 / 输出 / 结果挤成一坨 */
+  .cr-line.gap { min-height: 10px; }
+  /* 命令回显（$ 开头）：蓝色 + 左侧竖条 */
+  .cr-line.cmd { background: rgba(79, 193, 255, .16); color: #b6dcff;
+    box-shadow: inset 2px 0 0 rgba(79, 193, 255, .65); }
+  /* 执行头 / 结束行（[时间] ▶ 开始执行 / ✅ 执行完成） */
+  .cr-line.head { background: rgba(124, 92, 255, .18); color: #d3c9ff; }
+  .cr-line.head.ok { background: rgba(111, 207, 138, .17); color: #b0ecc0; }
+  .cr-line.head.err { background: rgba(224, 138, 138, .19); color: #f5b8b8; }
+  /* 分隔标题 ------ 系统接口输出（xxx） ------ */
+  .cr-line.sec { background: rgba(226, 192, 138, .14); color: #e2c894; font-weight: 600; }
+  /* 成功 / 失败 */
+  .cr-line.ok { background: rgba(111, 207, 138, .14); color: #b0ecc0; }
+  .cr-line.err { background: rgba(224, 138, 138, .17); color: #f5b8b8; }
+  /* JSON / 结构化输出（整块同色，缩进靠 white-space 保留） */
+  .cr-line.json { background: rgba(120, 150, 190, .15); color: #c8d4e2;
+    box-shadow: inset 2px 0 0 rgba(120, 150, 190, .35); }
+  /* 浅色主题：换成淡底 + 深字 */
+  :where(html.theme-light) .cr-line.cmd { background: #e3f0fd; color: #0550ae;
+    box-shadow: inset 2px 0 0 #7fb8ea; }
+  :where(html.theme-light) .cr-line.head { background: #ebe6ff; color: #4c2fa8; }
+  :where(html.theme-light) .cr-line.head.ok { background: #e2f4e8; color: #0d5423; }
+  :where(html.theme-light) .cr-line.head.err { background: #fbe1e4; color: #a40e26; }
+  :where(html.theme-light) .cr-line.sec { background: #faf0da; color: #7d4e00; }
+  :where(html.theme-light) .cr-line.ok { background: #e2f4e8; color: #116329; }
+  :where(html.theme-light) .cr-line.err { background: #fbe1e4; color: #a40e26; }
+  :where(html.theme-light) .cr-line.json { background: #eceff4; color: #2f3a46; }
   /* 日志下方的「通知记录」：本次执行推送了哪些渠道 / 成功与否。
      列表高度固定，内容多少都不改变上面的日志高度（否则切换记录时会上下抖） */
   .cron-dialog .cr-nf { flex: none; display: flex; flex-direction: column;
@@ -422,7 +510,7 @@
   .cron-view .cv-run-t { color: #b9c6d4; white-space: nowrap; }
   .cron-view .cv-run-s { color: #9aa4b2; white-space: nowrap; }
   .cron-view .cv-d-empty-line { padding: 10px; color: #7d7d7d; font-size: 11.5px; text-align: center; }
-  .cron-view .cv-log { flex: 1; min-height: 80px; margin: 0; padding: 9px 12px; overflow: auto;
+  .cron-view .cv-log { flex: 1; min-height: 80px; margin: 0; padding: 8px 0; overflow: auto;
     background: #17171a; color: #cfe3d8; font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 11.5px; line-height: 17px; white-space: pre-wrap; word-break: break-word; }
   /* 大页详情：日志下方的通知记录（高度随条目自适应，最多 200px，再多内部滚动；

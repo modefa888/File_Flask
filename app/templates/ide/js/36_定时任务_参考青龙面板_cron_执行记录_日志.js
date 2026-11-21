@@ -328,8 +328,19 @@
     const box = $("cronList");
     if (!box) return;
     const list = CRON.tasks || [];
+    /* 汇总行：与下载中心侧栏的 .dls-sum 同一套（共 N 个 · 启用 N · 运行中 N） */
+    const sum = $("cronSum");
+    if (sum) {
+      const nOn = list.filter(x => x.enabled).length;
+      const nRun = list.filter(x => x.running).length;
+      sum.innerHTML = '<span>共 <b>' + list.length + '</b> 个</span>' +
+        '<span>启用 <b>' + nOn + '</b></span>' +
+        '<span>运行中 <b>' + nRun + '</b></span>';
+    }
     if (!list.length) {
-      box.innerHTML = '<div class="ph">还没有定时任务。<br>点上方「新建任务」，用 cron 表达式设定运行时间（如 <code>0 9 * * *</code> 表示每天 9 点）。</div>';
+      box.innerHTML = '<div class="cron-empty"><i class="bi bi-alarm"></i>' +
+        '<b>还没有定时任务</b>' +
+        '<p>点上面的「新建任务」，用 cron 表达式设定运行时间（如 <code>0 9 * * *</code> 表示每天 9 点）。</p></div>';
       return;
     }
     box.innerHTML = "";
@@ -352,8 +363,10 @@
         '<div class="ci-cmd" title="' + escAttr(t.command) + '">' +
           (t.kind === "code" || t.kind === "ai" ? "" : "$ ") + esc(t.command) + '</div>' +
         '<div class="ci-meta">' +
-          (t.last_at ? '上次 ' + cronFmtTime(t.last_at) + ' · ' + cronFmtDur(t.last_ms) +
-            ' · 共 ' + (t.run_count || 0) + ' 次（成功 ' + (t.ok_count || 0) + '）' : '从未运行过') +
+          '<span class="ci-last">' +
+            (t.last_at ? '上次 ' + cronFmtTime(t.last_at) + ' · ' + cronFmtDur(t.last_ms) : '从未运行过') +
+          '</span>' +
+          (t.last_at ? '<span class="ci-count">共 ' + (t.run_count || 0) + ' 次 · 成功 ' + (t.ok_count || 0) + '</span>' : '') +
         '</div>' +
         '<div class="ci-acts">' +
           (t.running
@@ -1669,7 +1682,7 @@
     if (!runs.length) {
       box.innerHTML = '<div class="ph">还没有执行记录</div>';
       $("cronLogTitle").textContent = "还没有执行记录";
-      $("cronLog").textContent = "";
+      cronPaintLog($("cronLog"), "");
       const nf = $("cronNotifyList");
       if (nf) nf.innerHTML = '<div class="cr-nf-empty">还没有执行记录</div>';
       return;
@@ -1697,13 +1710,100 @@
     });
     if (target) cronLoadLog(target);
   }
+  /* ---------- 日志按输出类型着色 ----------
+     把日志按行拆成 <div class="cr-line 类型">，用不同背景色区分：
+     命令回显 / 执行头 / 分隔标题 / 成功 / 失败 / JSON 结构化输出（样式见 36_定时任务.css）。 */
+  function cronLogLineCls(line) {
+    const t = line.trim();
+    if (!t) return "";
+    /* 执行头 / 结束行：只有脚本自己打印的结构性行才染色，
+       带时间戳的普通输出（如「[时间] Flexus 实例…」）仍按内容判类型 */
+    if (/^\[\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\]/.test(t) &&
+        /开始执行|执行完成|执行失败|执行超时|已停止|执行中断|已中断|安排重试|自动重试/.test(t)) {
+      if (/成功|执行完成|已完成/.test(t) && !/失败|超时|错误/.test(t)) return "head ok";
+      if (/失败|超时|错误|中断/.test(t)) return "head err";
+      return "head";
+    }
+    /* 命令回显（脚本里以「$ 」开头的行） */
+    if (/^\$ /.test(t)) return "cmd";
+    /* 分隔标题：------ 系统接口输出（xxx） ------ */
+    if (/^[-=]{3,}.*[-=]{3,}$/.test(t)) return "sec";
+    /* JSON / 结构化输出：单独一行的括号、{"key" 开头、带缩进的 "key": value
+       这一条必须排在成功 / 失败关键词之前，否则 '"success": 0' 会被整行染绿；
+       括号判定要求整行只有括号，避免把「[2026-11-21 …] 输出」误当成 JSON */
+    if (/^[\{\}\[\]]\s*,?$/.test(t) || /^[{\[]\s*"/.test(t) || /^"[^"]+"\s*:/.test(t)) return "json";
+    /* 结果标记行优先：「✓ … failed 0」不能因为出现 failed 就判成失败 */
+    if (/^[✓✔]|✅/.test(t)) return "ok";
+    if (/^[✗✘]|❌/.test(t)) return "err";
+    /* 失败 / 错误 */
+    if (/Traceback|Exception|Error\b|error:|failed|failure|失败|超时|错误|退出码 [1-9]/.test(t)) return "err";
+    /* 成功 / 完成 */
+    if (/success|\bok\b|成功|已完成|done\b/.test(t)) return "ok";
+    return "";
+  }
+  /* 不同类型之间补一行空隙（.cr-line.gap）：否则命令 / 输出 / 结果块挤在一起看不清界线。
+     state 跨增量调用保存上一行的类型，避免在分块拉取时把同一个块切断。
+     原文里本来就有空行时不再重复补，免得空白过多。 */
+  /* 悬停提示文案：鼠标停在任意一行日志上都能看到这行属于哪种输出（title 由 16_ 统一美化） */
+  const CRON_LOG_TYPE = {
+    "": "普通输出",
+    cmd: "命令回显",
+    head: "执行开始",
+    "head ok": "执行完成",
+    "head err": "执行失败 / 超时",
+    sec: "分区标题",
+    ok: "成功输出",
+    err: "错误输出",
+    json: "JSON / 结构化输出"
+  };
+  function cronLogLinesHtml(text, extra, state) {
+    const lines = String(text == null ? "" : text).split("\n");
+    if (lines.length && lines[lines.length - 1] === "") lines.pop();
+    const st = state || {};
+    let out = "";
+    lines.forEach(function (l) {
+      const cls = cronLogLineCls(l);
+      const has = l.trim() !== "";
+      if (has && st.prev && st.prev !== cls && !st.lastEmpty) out += '<div class="cr-line gap"></div>';
+      out += '<div class="cr-line' + (cls ? " " + cls : "") + (extra ? " " + extra : "") +
+        '" title="' + (CRON_LOG_TYPE[cls] || "普通输出") + '">' +
+        (l ? esc(l) : "") + '</div>';
+      /* 普通输出行也记成一种类型（out），这样「普通输出 → 成功 / 失败」之间同样留白 */
+      if (has) st.prev = cls || "out";
+      st.lastEmpty = !has;
+    });
+    return out;
+  }
+  /* 增量追加：只渲染到最后一个换行为止的完整行，
+     剩下半行留作临时行（下次拉取时先移除再加），避免 JSON 半行被提前染色后闪烁 */
+  function cronAppendLog(pre, chunk) {
+    if (!pre) return;
+    const buf = (pre.__tail || "") + chunk;
+    const i = buf.lastIndexOf("\n");
+    const done = i >= 0 ? buf.slice(0, i + 1) : "";
+    const tail = i >= 0 ? buf.slice(i + 1) : buf;
+    pre.__tail = tail;
+    pre.__logState = pre.__logState || { prev: "", lastEmpty: true };
+    const old = pre.querySelector(".cr-line.is-tail");
+    if (old) old.remove();
+    if (done) pre.insertAdjacentHTML("beforeend", cronLogLinesHtml(done, "", pre.__logState));
+    /* 临时半行不补空隙：它随时会被移除重画，插了会在下一次残留一条空行 */
+    if (tail) pre.insertAdjacentHTML("beforeend", cronLogLinesHtml(tail, "is-tail"));
+  }
+  /* 整段重绘（切换记录 / 详情重建） */
+  function cronPaintLog(pre, text) {
+    if (!pre) return;
+    pre.__tail = "";
+    pre.__logState = { prev: "", lastEmpty: true };
+    pre.innerHTML = cronLogLinesHtml(text, "", pre.__logState);
+  }
   function cronLoadLog(run, force) {
     if (!run) return;
     CRON.logRun = run;
     const pre = $("cronLog");
     const title = $("cronLogTitle");
     if (!pre) return;
-    if (force) { CRON.logOffset = 0; pre.textContent = ""; }
+    if (force) { CRON.logOffset = 0; cronPaintLog(pre, ""); }
     const [sText] = cronStatusInfo(run.status);
     title.textContent = cronFmtTime(run.started_at) + " · " + sText +
       (run.exit_code === null || run.exit_code === undefined ? "" : " · 退出码 " + run.exit_code);
@@ -1712,11 +1812,11 @@
     const pull = () => {
       fetch("/api/cron/log?run_id=" + encodeURIComponent(run.id) + "&offset=" + CRON.logOffset)
         .then(r => r.json()).then(d => {
-          if (d.error) { pre.textContent += "\n[读取失败] " + d.error; return; }
+          if (d.error) { cronAppendLog(pre, "\n[读取失败] " + d.error + "\n"); return; }
           if (d.text) {
             CRON.logOffset = d.offset;
             const nearBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 60;
-            pre.textContent += d.text;
+            cronAppendLog(pre, d.text);
             if (nearBottom) pre.scrollTop = pre.scrollHeight;
           }
           if (d.running) CRON.logTimer = setTimeout(pull, 1000);
@@ -2329,7 +2429,7 @@
         (CRON.view.logRun ? ' <span class="cv-sub">' + esc(cronFmtTime(CRON.view.logRun.started_at)) + '</span>' : "") +
         '<span class="cv-sp"></span>' +
         '<button class="cv-btn" data-dact="logrefresh" title="重新加载日志"><i class="bi bi-arrow-clockwise"></i></button></div>' +
-      '<pre class="cv-log scroll-thin" id="cvLog">' + esc(CRON.view.log || "") + '</pre>' +
+      '<pre class="cv-log scroll-thin" id="cvLog">' + cronLogLinesHtml(CRON.view.log) + '</pre>' +
       '<div class="cv-d-sub">通知记录<span class="cv-sub" id="cvNotifySum">' + cronNotifySumInner() + '</span>' +
         '<span class="cv-sp"></span>' +
         '<button class="cv-btn" data-dact="notifyrefresh" title="刷新通知记录"><i class="bi bi-bell"></i></button>' +
@@ -2449,7 +2549,7 @@
     if (force) { CRON.view.log = ""; CRON.view.logOffset = 0; }
     clearTimeout(CRON.view.logTimer);
     const pre = $("cvLog");
-    if (pre) pre.textContent = CRON.view.log;
+    if (pre) cronPaintLog(pre, CRON.view.log);
     const pull = () => {
       if (!findTab(CRON_VIEW_PATH)) return;
       fetch("/api/cron/log?run_id=" + encodeURIComponent(run.id) + "&offset=" + CRON.view.logOffset)
@@ -2460,7 +2560,7 @@
           if (el && (d.text || d.error)) {
             const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
             const keep = el.scrollTop;
-            el.textContent = CRON.view.log;
+            cronPaintLog(el, CRON.view.log);
             el.scrollTop = nearBottom ? el.scrollHeight : keep;
           }
           if (d.running) CRON.view.logTimer = setTimeout(pull, 1000);

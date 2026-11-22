@@ -120,6 +120,7 @@ def _register_blueprints(app: Flask) -> None:
     from .routes.ide.scraper import bp as scraper_bp
     from .routes.ide.workbuddy import bp as workbuddy_bp
     from .routes.ide.traecn import bp as traecn_bp
+    from .routes.ide.codearts import bp as codearts_bp
     from .routes.ide.tunnel import bp as tunnel_bp
     from .routes.adm.admin import bp as adm_bp
     from .routes.adm.update import bp as update_bp
@@ -127,7 +128,8 @@ def _register_blueprints(app: Flask) -> None:
                fileops_bp, index_bp, progress_stream_bp, grep_bp, git_bp, run_bp, port_bp,
                term_bp, termai_bp, debug_bp, env_bp, proc_bp, shares_bp, ai_bp, agent_bp, chat_history_bp, pip_bp, npm_bp,
                plugins_bp, dbconn_bp, httpreq_bp, cron_bp, sshconn_bp, sshfile_bp, hints_bp, collab_bp,
-               v2ray_bp, iptv_bp, downloads_bp, scraper_bp, workbuddy_bp, traecn_bp, tunnel_bp,
+               v2ray_bp, iptv_bp, downloads_bp, scraper_bp, workbuddy_bp, traecn_bp,
+               codearts_bp, tunnel_bp,
                adm_bp, update_bp):
         app.register_blueprint(bp)
 

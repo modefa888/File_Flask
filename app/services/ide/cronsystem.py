@@ -16,6 +16,7 @@ _log = get_logger()
 _ACTIONS = {
     "workbuddy_checkin_all": ("WorkBuddy 全部签到", "workbuddy", "checkin_all"),
     "traecn_checkin_all": ("Trae CN 全部签到", "traecn", "checkin_all"),
+    "codearts_checkin_all": ("CodeArts 全部签到", "codearts", "checkin_all"),
 }
 
 

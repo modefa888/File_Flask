@@ -1148,3 +1148,121 @@
     .wb-popconfirm { width: calc(100vw - 24px); max-width: 272px; }
     .wb-history-account { min-width: 120px; }
 }
+
+/* =========================================================================
+   CodeArts 链接登录弹窗（ca- 前缀，供 23_CodeArts.js 使用；纯新增不影响 wb- 既有样式）
+   ========================================================================= */
+.ca-login-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    margin-bottom: 14px;
+}
+.ca-login-step {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px 13px;
+    border-radius: 10px;
+    border: 1px solid var(--adm-border-soft, #1c2740);
+    background: rgba(255, 255, 255, .03);
+    font-size: 12.5px;
+    line-height: 1.75;
+    color: var(--adm-text, #e6ebf5);
+    word-break: break-all;
+}
+.ca-login-step code {
+    font-size: 11.5px;
+    padding: 1px 5px;
+    border-radius: 5px;
+    background: rgba(91, 140, 255, .14);
+    color: #8fb3ff;
+    word-break: break-all;
+}
+.ca-step-badge {
+    flex: none;
+    width: 21px;
+    height: 21px;
+    margin-top: 1px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(135deg, #5b8cff, #7c5cff);
+    box-shadow: 0 2px 6px rgba(91, 140, 255, .35);
+}
+.ca-login-step.meta {
+    align-items: center;
+    border-style: dashed;
+    background: transparent;
+    color: var(--adm-text-mute, #6b7893);
+    font-size: 12px;
+}
+.ca-login-step.meta i { flex: none; }
+.ca-login-url {
+    width: 100%;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-sizing: border-box;
+}
+.ca-login-url:focus { text-overflow: clip; }    /* 聚焦全选时露出光标位置 */
+.ca-login-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.ca-login-actions .adm-hint { margin-left: auto; }
+.ca-login-status { margin-top: 12px; }
+.ca-login-status i { animation: ca-spin 1s linear infinite; }
+.ca-login-status.done i { animation: none; }
+@keyframes ca-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* 浅色主题覆盖：去掉深色系的硬编码底色，保持与 wb- 组件一致的观感 */
+html[data-theme="light"] .ca-login-step {
+    background: #f6f8fd;
+    border-color: var(--adm-border-soft);
+    color: var(--adm-text);
+}
+html[data-theme="light"] .ca-login-step code {
+    background: rgba(91, 140, 255, .12);
+    color: #3b6ae0;
+}
+html[data-theme="light"] .ca-login-step.meta {
+    background: transparent;
+    color: var(--adm-text-mute);
+}
+html[data-theme="light"] .ca-login-url {
+    background: #fff;
+    color: var(--adm-text);
+    border-color: var(--adm-border);
+}
+
+/* CodeArts 到期提醒：积分口径说明块 */
+.ca-expiry-note {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 4px 2px;
+}
+.ca-expiry-note > div {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 12.5px;
+    line-height: 1.8;
+    color: var(--adm-text-dim, #96a3bd);
+}
+.ca-expiry-note > div i {
+    flex: none;
+    margin-top: 3px;
+    color: var(--adm-text-mute, #6b7893);
+}

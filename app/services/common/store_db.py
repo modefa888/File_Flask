@@ -709,6 +709,50 @@ CREATE TABLE IF NOT EXISTS traecn_entitlements (
     packs      TEXT DEFAULT '[]',   -- JSON 数组：来源 / 面额 / 到期时间
     updated_at REAL DEFAULT 0
 );
+
+-- CodeArts（华为云）多账号：STS 临时凭据整体打包加密落库。
+-- credential 是 JSON（access_key_id / secret_access_key / security_token /
+-- expires_at / refresh_token / code_verifier / dpop_private_key_jwk / 身份字段），
+-- 华为 STS 每签发一次旧 refresh_token 立即作废，续期时整体替换该 JSON。
+CREATE TABLE IF NOT EXISTS codearts_accounts (
+    uid           TEXT PRIMARY KEY,  -- 账号标识：优先华为 user_id / domain_id，缺省用 AK 指纹
+    nickname      TEXT DEFAULT '',
+    source        TEXT DEFAULT 'oauth',   -- oauth = 浏览器授权链接登录
+    login_method  TEXT DEFAULT 'oauth',
+    credential    TEXT DEFAULT '',   -- 加密后的凭据 JSON（secret.encrypt）
+    expires_at    REAL DEFAULT 0,    -- security_token 到期时间（Unix 秒，约 2 小时一轮）
+    enabled       INTEGER DEFAULT 1,
+    is_default    INTEGER DEFAULT 0,
+    remark        TEXT DEFAULT '',
+    last_balance  REAL,
+    last_check_at REAL DEFAULT 0,
+    created_at    REAL DEFAULT 0,
+    updated_at    REAL DEFAULT 0
+);
+
+-- CodeArts 每日签到记录（按 日期 + 账号唯一，重复点击只覆盖同一行）
+CREATE TABLE IF NOT EXISTS codearts_checkin (
+    day      TEXT NOT NULL,
+    uid      TEXT NOT NULL DEFAULT '',
+    status   TEXT DEFAULT '',       -- success / already / inactive / failed
+    credit   REAL DEFAULT 0,        -- 本次领取积分（benefitAmount）
+    message  TEXT DEFAULT '',
+    source   TEXT DEFAULT '',       -- manual / auto
+    at       REAL DEFAULT 0,
+    PRIMARY KEY (day, uid)
+);
+
+-- CodeArts 积分构成快照（snap statistics/plugin 的四类积分包指标，无到期时间）
+CREATE TABLE IF NOT EXISTS codearts_packages (
+    uid        TEXT NOT NULL,
+    pid        TEXT NOT NULL,       -- 指标名（usageTotalPackageCredit 等）
+    name       TEXT DEFAULT '',     -- 展示名（总积分包 / 基础积分包…）
+    remain     REAL DEFAULT 0,
+    used       REAL DEFAULT 0,
+    size       REAL DEFAULT 0,
+    updated_at REAL DEFAULT 0,
+    PRIMARY KEY (uid, pid)
+);
 """
 
 

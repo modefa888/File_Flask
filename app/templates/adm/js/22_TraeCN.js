@@ -678,7 +678,7 @@ function trAccountBar(d) {
             '<button class="adm-btn sm ghost" data-tract="edit">编辑</button>' +
             '<button class="adm-btn sm ghost" data-tract="default"' +
             (a.is_default ? ' disabled' : '') + '>设为默认</button>' +
-            '<button class="adm-btn sm ghost" data-tract="del">移除</button>' +
+            '<button class="adm-btn sm danger" data-tract="del">移除</button>' +
             '</div></div>';
     });
     h += '</div></div>';
@@ -882,21 +882,28 @@ function trBind(el, d) {
             var act = btn.dataset.tract;
             if (!uid) return;
             if (act === 'del') {
+                // 与 WorkBuddy 同款：danger 按钮 + 按钮旁悬浮确认，取消不残留禁用态
                 var nameEl = host.querySelector('.wb-account-id b');
                 var accName = nameEl ? nameEl.textContent : uid;
-                var ok = await ADM.confirm('移除 Trae CN 账号',
-                    '将删除「' + trEsc(accName) + '」在本机保存的 Token（不影响官方账号本身），下次使用需重新填写。',
-                    '确认移除');
-                if (!ok) return;
-                btn.disabled = true;
-                try {
-                    await ADM.api('/api/traecn/accounts/delete', { method: 'POST', body: { uid: uid } });
-                    ADM.toast('账号已移除', 'ok');
-                    await trRefresh(el, '');
-                } catch (err) {
-                    ADM.toast((err && err.message) || String(err), 'err');
-                    btn.disabled = false;
-                }
+                btn.disabled = false;
+                wbConfirmPop(btn, {
+                    title: '移除该账号？',
+                    text: '将删除「' + accName + '」在本机保存的 Token（不影响官方账号本身），下次使用需重新填写。',
+                    okText: '确认移除',
+                    onCancel: function () { btn.disabled = false; },
+                    onOk: async function () {
+                        btn.disabled = true;
+                        try {
+                            await ADM.api('/api/traecn/accounts/delete',
+                                { method: 'POST', body: { uid: uid } });
+                            ADM.toast('账号已移除', 'ok');
+                            await trRefresh(el, '');
+                        } catch (err) {
+                            ADM.toast((err && err.message) || String(err), 'err');
+                            btn.disabled = false;
+                        }
+                    }
+                });
                 return;
             }
             btn.disabled = true;

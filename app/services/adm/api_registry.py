@@ -64,6 +64,7 @@ MODULE_NAMES = {
     "sshconn": "SSH 连接", "file_hints": "文件说明", "collab": "协作编辑", "adm": "后台管理",
     "workbuddy": "WorkBuddy 积分",
     "traecn": "Trae CN 积分",
+    "codearts": "CodeArts 积分",
 }
 
 # 首次登记时的默认说明（之后可在后台编辑；已编辑的不再覆盖）
@@ -128,6 +129,26 @@ RULE_DESC = {
     ("/api/traecn/accounts/delete", "POST"): "Trae CN：移除账号",
     ("/api/traecn/accounts/current", "POST"): "Trae CN：切换当前账号",
     ("/api/traecn/accounts/refresh_all", "POST"): "Trae CN：批量刷新全部账号余额",
+    ("/api/codearts/overview", "GET"): "CodeArts：积分余额 / 今日签到状态 / 最近记录汇总",
+    ("/api/codearts/config", "GET"): "CodeArts：读取配置快照（凭据脱敏）",
+    ("/api/codearts/config", "POST"): "CodeArts：保存全局配置（代理 / 超时）",
+    ("/api/codearts/test", "POST"): "CodeArts：测试连接（只查签到状态，不领取积分）",
+    ("/api/codearts/checkin", "POST"): "CodeArts：执行每日签到（幂等）",
+    ("/api/codearts/checkin/all", "POST"): "CodeArts：全部启用账号批量签到",
+    ("/api/codearts/history", "GET"): "CodeArts：签到记录（搜索 / 分页）",
+    ("/api/codearts/credits/summary", "GET"): "CodeArts：跨账号总积分 / 账号构成（本地快照）",
+    ("/api/codearts/credits/refresh", "POST"): "CodeArts：刷新积分构成快照",
+    ("/api/codearts/login/start", "POST"): "CodeArts：发起链接登录（华为云 OAuth 浏览器授权）",
+    ("/api/codearts/login/poll", "GET"): "CodeArts：轮询链接登录结果（成功后凭据加密落库）",
+    ("/api/codearts/login/cancel", "POST"): "CodeArts：放弃本次授权会话",
+    ("/api/codearts/login/logout", "POST"): "CodeArts：移除指定账号",
+    ("/api/codearts/accounts", "GET"): "CodeArts：账号列表（脱敏）与当前账号",
+    ("/api/codearts/accounts/save", "POST"): "CodeArts：编辑账号信息（昵称 / 备注 / 启用）",
+    ("/api/codearts/accounts/delete", "POST"): "CodeArts：移除账号",
+    ("/api/codearts/accounts/current", "POST"): "CodeArts：切换当前账号",
+    ("/api/codearts/accounts/refresh", "POST"): "CodeArts：手动续期 STS 临时凭据",
+    ("/api/codearts/accounts/refresh_all", "POST"): "CodeArts：批量刷新全部账号余额",
+    ("/api/codearts/models", "GET"): "CodeArts：可用模型清单与积分倍率（双源目录）",
 }
 
 # 不允许停用 / 改权限的接口：避免把登录入口或管理入口锁死

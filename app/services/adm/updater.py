@@ -462,9 +462,13 @@ def _check_api(cfg, repo, branch, local):
     cmp_url = "%s/repos/%s/compare/%s...%s" % (base, repo["slug"], local.get("sha"), remote["sha"])
     cmp_data, cmp_err = _http_json(cmp_url, cfg)
     if isinstance(cmp_data, dict):
-        result["status"] = cmp_data.get("status") or ""
-        result["ahead"] = int(cmp_data.get("ahead_by") or 0)
-        result["behind"] = int(cmp_data.get("behind_by") or 0)
+        # compare/{base}...{head} 返回的是 head（远端）视角：ahead_by 是远端多出的
+        # 提交数，behind_by 才是本地多出的未推送数，status 同理。这里要翻成本地
+        # 视角（ahead = 本地领先），与 _git_relations 的口径保持一致。
+        raw_status = cmp_data.get("status") or ""
+        result["ahead"] = int(cmp_data.get("behind_by") or 0)
+        result["behind"] = int(cmp_data.get("ahead_by") or 0)
+        result["status"] = {"ahead": "behind", "behind": "ahead"}.get(raw_status, raw_status)
         result["update_available"] = result["behind"] > 0
         commits = [_api_commit(x) for x in (cmp_data.get("commits") or [])]
         if commits:

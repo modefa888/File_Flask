@@ -1876,3 +1876,155 @@ html.theme-light .v2-view select option { background: #fff; color: #1f2328; }
   .v2v-ops .v2v-btn { min-height: 34px; }
   .v2v-ops .v2v-btn.ico { width: 36px; }
 }
+
+/* ---------- 节点列表工具行：搜索 + 排序 / 过滤分段开关 + 测速操作 ----------
+   拆出表头独立成行：左侧搜索自适应伸展，中段排序开关收进胶囊分段，
+   右侧测速操作靠右对齐；分组 tab 紧随其后单独一行。 */
+.v2v-ntool {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+/* 搜索框：在工具行里改为自适应宽度（覆盖表头内嵌时代的固定 200px） */
+.v2v-ntool input.v2v-kw {
+  flex: 1 1 180px;
+  width: auto;
+  min-width: 150px;
+  max-width: 300px;
+}
+/* 排序 / 过滤开关：胶囊分段容器 + 圆角子项，选中态整块亮起 */
+.v2v-nseg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid rgba(150, 151, 161, .18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .025);
+  flex: none;
+}
+.v2v-ngt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #9a9ca6;
+  font-size: 11.5px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .15s ease, background .15s ease;
+}
+.v2v-ngt > .bi { font-size: 12px; }
+.v2v-ngt:hover { color: #e2e3e8; background: rgba(255, 255, 255, .05); }
+.v2v-ngt.on {
+  background: rgba(53, 208, 165, .16);
+  color: #9df0d6;
+  box-shadow: inset 0 0 0 1px rgba(53, 208, 165, .28);
+}
+.v2v-ngt.on > .bi { color: #5fe3b0; }
+/* 分段组与右侧操作组之间的细分隔线 */
+.v2v-ntool-sep {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: rgba(150, 151, 161, .22);
+}
+/* 右侧测速操作组：始终靠右，窄屏换行后整组一起走 */
+.v2v-ntool-acts {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+/* 工具行下方紧跟分组 tab：贴紧一点，视觉上同属过滤区 */
+.v2v-ntool + .v2v-tabs { margin-top: 2px; }
+:where(html.theme-light) .v2v-nseg { border-color: #d8dbe2; background: #f4f5f7; }
+:where(html.theme-light) .v2v-ngt { color: #6b7280; }
+:where(html.theme-light) .v2v-ngt:hover { color: #111827; background: #e8eaee; }
+:where(html.theme-light) .v2v-ngt.on { background: #d8f3ea; color: #0c8a68; box-shadow: inset 0 0 0 1px rgba(13, 148, 112, .25); }
+:where(html.theme-light) .v2v-ngt.on > .bi { color: #0d9470; }
+:where(html.theme-light) .v2v-ntool-sep { background: #d8dbe2; }
+
+/* ---------- 节点卡勾选框（批量操作） ---------- */
+.v2v-ck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 17px;
+  height: 17px;
+  margin-top: 2px;
+  border: 1.5px solid rgba(150, 151, 161, .45);
+  border-radius: 5px;
+  background: transparent;
+  color: transparent;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease, color .12s ease;
+}
+.v2v-ck:hover { border-color: rgba(53, 208, 165, .7); }
+.v2v-ck.on {
+  border-color: rgba(53, 208, 165, .8);
+  background: rgba(53, 208, 165, .18);
+  color: #5fe3b0;
+}
+:where(html.theme-light) .v2v-ck { border-color: #b6bac4; }
+:where(html.theme-light) .v2v-ck.on { border-color: rgba(13, 148, 112, .7); background: #d8f3ea; color: #0d9470; }
+
+/* ---------- 批量操作条（勾选后出现在工具行下） ---------- */
+.v2v-batchbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 7px 12px;
+  border: 1px solid rgba(53, 208, 165, .3);
+  border-radius: 10px;
+  background: rgba(53, 208, 165, .07);
+  animation: v2vBatchIn .16s ease;
+}
+@keyframes v2vBatchIn {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.v2v-batch-n {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9df0d6;
+}
+.v2v-batch-n > .bi { font-size: 13px; }
+:where(html.theme-light) .v2v-batchbar { border-color: rgba(13, 148, 112, .3); background: #e9f8f2; }
+:where(html.theme-light) .v2v-batch-n { color: #0c8a68; }
+
+/* ---------- 自动优选 / 导出弹窗的小部件 ---------- */
+.v2v-sw-tip { font-style: normal; font-size: 10.5px; color: #7f818c; }
+.v2v-modal-sm { width: min(420px, calc(100vw - 32px)); }
+.v2v-export-opts { display: flex; flex-direction: column; gap: 9px; padding: 2px 0 4px; }
+.v2v-export-opts .v2v-btn {
+  justify-content: flex-start;
+  height: 44px;
+  padding: 0 14px;
+}
+.v2v-export-opts .v2v-btn em {
+  margin-left: 2px;
+  font-style: normal;
+  font-size: 10.5px;
+  color: #7f818c;
+}
+:where(html.theme-light) .v2v-sw-tip { color: #6b7280; }
+:where(html.theme-light) .v2v-export-opts .v2v-btn em { color: #6b7280; }

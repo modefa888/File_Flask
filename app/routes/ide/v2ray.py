@@ -7,8 +7,13 @@ POST /api/v2ray/core/download    启动后台下载任务 {url?, kind?}（kind =
 GET  /api/v2ray/core/job/<jid>/stream   SSE：任务进度（阶段 / 百分比 / 已下载字节 / 步骤日志）
 POST /api/v2ray/core/path        手动指定内核路径 {path}
 GET  /api/v2ray/nodes            节点列表 ?sub_id=
-POST /api/v2ray/nodes/add        添加节点：{links?（字符串或数组）, node?（表单参数）, sub_id?}
+POST /api/v2ray/nodes/add        添加节点：{links?（字符串 / 对象数组 / 备份文件）, node?（表单参数）, sub_id?}
 POST /api/v2ray/nodes/update     改名 / 备注 / 连接参数 {id, name?, remark?, server?, port?, fields?}
+POST /api/v2ray/nodes/batch-grp  批量移动分组 {ids:[...], grp}（grp 空 = 移出分组）
+POST /api/v2ray/nodes/dedupe     重复节点检测 / 一键清理 {apply}
+POST /api/v2ray/nodes/export     节点导出 {ids?, format: txt|json}
+POST /api/v2ray/speedtest/config 定时测速配置 {on, interval, pick, dl}
+POST /api/v2ray/speedtest/run    立即测一轮
 POST /api/v2ray/nodes/delete     批量删除 {ids:[...]}
 GET  /api/v2ray/subs             订阅列表
 POST /api/v2ray/subs/save        新建 / 更新订阅 {id?, name, url, proxy?, enabled?}
@@ -30,6 +35,7 @@ POST /api/v2ray/traffic/reset    流量统计清零
 说明：入站监听地址默认 0.0.0.0，即同网段的其他用户填 本机IP:10808 即可把本机当
 SOCKS5 代理使用；如需限制范围，可在设置里改为 127.0.0.1，或给入站加用户名密码。
 """
+import io
 import json
 import secrets
 import socket
@@ -39,7 +45,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, jsonify, request, send_file
 
 from ...log import get_logger
 from ...services.common import proxyutil, secret, transport
@@ -72,7 +78,9 @@ def _int(v, default=0):
 
 @bp.get("/api/v2ray/status")
 def v2_status():
-    return jsonify(v2raymgr.status())
+    r = v2raymgr.status()
+    r["speedtest"] = v2raymgr.speedtest_state()
+    return jsonify(r)
 
 
 @bp.route("/api/v2ray/clients", methods=["GET", "POST"])
@@ -289,10 +297,23 @@ def v2_nodes_add():
         links = [x.strip() for x in links.replace("\r", "\n").split("\n") if x.strip()]
     parsed, errors = [], []
     for ln in (links or []):
+        # 条目两种形态：纯字符串链接，或备份导入的 {link, grp?, remark?, name?} 对象
+        item = ln if isinstance(ln, dict) else {"link": ln}
+        link = str(item.get("link") or "").strip()
+        if not link:
+            continue
         try:
-            parsed.append(v2raycfg.parse_share_link(ln))
+            node = v2raycfg.parse_share_link(link)
         except ValueError as e:
-            errors.append("%s…：%s" % (str(ln)[:40], e))
+            errors.append("%s…：%s" % (link[:40], e))
+            continue
+        if str(item.get("grp") or "").strip():
+            node["__grp"] = str(item["grp"]).strip()   # 条目自带分组（备份导入），入库时按组分桶
+        if str(item.get("remark") or "").strip():
+            node["remark"] = str(item["remark"]).strip()
+        if str(item.get("name") or "").strip():
+            node["name"] = str(item["name"]).strip()
+        parsed.append(node)
     form = data.get("node")
     if isinstance(form, dict) and (form.get("server") or form.get("proto")):
         try:
@@ -301,7 +322,11 @@ def v2_nodes_add():
             errors.append("手填节点：%s" % e)
     if not parsed:
         return _fail(errors[0] if errors else "没有可添加的节点")
-    n = v2raydb.add_nodes(parsed, sub_id=sub_id, grp=grp)
+    # 条目自带分组的按组分桶入库；没带的走统一 grp（当前 tab）
+    buckets = {}
+    for node in parsed:
+        buckets.setdefault(node.pop("__grp", "") or grp, []).append(node)
+    n = sum(v2raydb.add_nodes(items, sub_id=sub_id, grp=g) for g, items in buckets.items())
     return jsonify({"ok": True, "added": n, "errors": errors})
 
 
@@ -441,6 +466,121 @@ def v2_nodes_purge():
     if ids:
         _metric_drop(ids)                                       # 彻底删除才清流量统计
     return jsonify({"ok": True, "deleted": n})
+
+
+@bp.post("/api/v2ray/nodes/batch-grp")
+def v2_nodes_batch_grp():
+    """批量移动到分组 {ids:[...], grp}：grp 为空串 = 移出分组（回到「全部」）。"""
+    data = request.get_json(silent=True) or {}
+    ids = [str(x) for x in (data.get("ids") or []) if x]
+    grp = str(data.get("grp") or "").strip()
+    if not ids:
+        return _fail("没有选择节点")
+    n = 0
+    for nid in ids:
+        if v2raydb.get_node(nid):
+            v2raydb.update_node(nid, grp=grp)
+            n += 1
+    return jsonify({"ok": True, "updated": n})
+
+
+def _node_dupe_key(n: dict) -> tuple:
+    """节点唯一性键：(proto, server, port, 凭据, 传输参数)。凭据取节点参数里的
+    uuid（vmess/vless）或 method+password（trojan/ss），缺了算空串——
+    同协议同地址同端口同凭据且传输 / 伪装参数一致才视为同一个节点；
+    参数不同（如 ws 路径不同）是两条不同配置，不算重复。"""
+    proto = str(n.get("proto") or "").lower()
+    cred = str(n.get("uuid") or n.get("password") or "")
+    if proto == "ss":
+        cred = "%s:%s" % (n.get("method") or "", n.get("password") or "")
+    params = (str(n.get("net") or ""), str(n.get("path") or ""), str(n.get("host") or ""),
+              str(n.get("sni") or ""), str(n.get("tls") or n.get("security") or ""))
+    return (proto, str(n.get("server") or "").strip().lower(),
+            _int(n.get("port")), cred) + params
+
+
+@bp.post("/api/v2ray/nodes/dedupe")
+def v2_nodes_dedupe():
+    """重复节点检测 / 一键清理 {apply: bool}。
+
+    apply=false 只统计（dry-run），apply=true 把重复项软删除进回收站。
+    每组保留一个：当前已连接的优先，否则保留最早创建的。
+    """
+    data = request.get_json(silent=True) or {}
+    active_id = str(v2raydb.all_settings().get("active_node") or "")
+    groups = {}
+    for n in v2raydb.list_nodes():
+        groups.setdefault(_node_dupe_key(n), []).append(n)
+    remove_ids, remove_names, keep_names = [], [], []
+    for rows in groups.values():
+        if len(rows) < 2:
+            continue
+        # 已连接的排最前，再按创建时间旧→新：留下的就是列表第一个
+        rows.sort(key=lambda x: (x.get("id") != active_id,
+                                 float(x.get("created_at") or 0)))
+        keep = rows[0]
+        keep_names.append("%s（保留）" % (keep.get("name") or keep.get("id")))
+        for extra in rows[1:]:
+            remove_ids.append(str(extra["id"]))
+            remove_names.append("%s（与「%s」重复）" % (extra.get("name") or extra.get("id"),
+                                                       keep.get("name") or keep.get("id")))
+    if not data.get("apply"):
+        return jsonify({"ok": True, "dup_groups": len(remove_ids),
+                        "remove_ids": remove_ids, "remove_names": remove_names[:20],
+                        "keep_names": keep_names[:10]})
+    n = v2raydb.delete_nodes(remove_ids) if remove_ids else 0
+    return jsonify({"ok": True, "deleted": n, "remove_ids": remove_ids,
+                    "dup_groups": len(remove_ids)})
+
+
+@bp.post("/api/v2ray/nodes/export")
+def v2_nodes_export():
+    """节点导出 {ids?: [...], format: "txt"|"json"}。
+
+    txt = 分享链接一行一条（可直接再导入）；json = 备份（含分组 / 备注，
+    用 /nodes/add 的对象数组 links 导回可还原分组）。ids 省略 = 全部节点。
+    """
+    data = request.get_json(silent=True) or {}
+    fmt = str(data.get("format") or "txt").lower()
+    want = {str(x) for x in (data.get("ids") or []) if x}
+    nodes = [n for n in v2raydb.list_nodes() if not want or n.get("id") in want]
+    if not nodes:
+        return _fail("没有可导出的节点")
+    stamp = time.strftime("%Y%m%d_%H%M")
+    if fmt == "json":
+        items = []
+        for n in nodes:
+            try:
+                link = v2raycfg.node_to_share(n)
+            except Exception:                  # noqa: BLE001
+                link = ""
+            if not link:
+                continue
+            items.append({"link": link, "name": n.get("name") or "", "proto": n.get("proto") or "",
+                          "server": n.get("server") or "", "port": n.get("port"),
+                          "grp": n.get("grp") or "", "remark": n.get("remark") or ""})
+        if not items:
+            return _fail("没有可导出的节点（无法生成分享链接）")
+        payload = json.dumps({"kind": "file-flask-v2ray-backup", "exported_at": int(time.time()),
+                              "count": len(items), "nodes": items},
+                             ensure_ascii=False, indent=1)
+        name = "v2ray_backup_%s.json" % stamp
+        buf = io.BytesIO(payload.encode("utf-8"))
+        return send_file(buf, as_attachment=True, download_name=name,
+                         mimetype="application/json")
+    lines = []
+    for n in nodes:
+        try:
+            link = v2raycfg.node_to_share(n)
+        except Exception:                      # noqa: BLE001
+            link = ""
+        if link:
+            lines.append(link)
+    if not lines:
+        return _fail("没有可导出的节点（无法生成分享链接）")
+    name = "v2ray_nodes_%s.txt" % stamp
+    buf = io.BytesIO("\n".join(lines).encode("utf-8"))
+    return send_file(buf, as_attachment=True, download_name=name, mimetype="text/plain")
 
 
 # ---------------------------------------------------------------------------
@@ -696,6 +836,21 @@ def v2_auto_failover():
     """开启 / 关闭「节点失效自动切换」：状态落库，并由后端看门狗线程（与网页无关）执行。"""
     data = request.get_json(silent=True) or {}
     return jsonify(v2raymgr.set_auto_failover(bool(data.get("on"))))
+
+
+@bp.post("/api/v2ray/speedtest/config")
+def v2_speedtest_config():
+    """保存「定时测速 + 自动选最快」配置：{on, interval(分钟), pick, dl}。"""
+    data = request.get_json(silent=True) or {}
+    return jsonify(v2raymgr.set_speedtest(
+        bool(data.get("on")), _int(data.get("interval"), 30),
+        bool(data.get("pick")), bool(data.get("dl"))))
+
+
+@bp.post("/api/v2ray/speedtest/run")
+def v2_speedtest_run():
+    """立即触发一轮定时测速（后台异步执行，结果看连接日志 / 节点列表刷新）。"""
+    return jsonify(v2raymgr.run_speedtest_now())
 
 
 @bp.post("/api/v2ray/ping")

@@ -19,6 +19,8 @@
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import gzip
 import json
 import os
@@ -1302,8 +1304,8 @@ def _metric_write(nid: str, ping: int) -> None:
 _NODE_FAIL_LIMIT = 2
 
 
-def _node_metric_set(nid: str, ping=None, fail=None) -> None:
-    """写节点测速台账：更新真延迟与/或连续验证失败计数。"""
+def _node_metric_set(nid: str, ping=None, fail=None, dl=None) -> None:
+    """写节点测速台账：更新真延迟与/或连续验证失败计数与/或下载测速（Mbps）。"""
     try:
         try:
             m = json.loads(v2raydb.all_settings().get("node_metrics") or "{}")
@@ -1316,6 +1318,8 @@ def _node_metric_set(nid: str, ping=None, fail=None) -> None:
             row["ping"] = int(ping)
         if fail is not None:
             row["fail"] = int(fail)
+        if dl is not None:
+            row["dl"] = round(float(dl), 2)
         row["ts"] = int(time.time())
         m[nid] = row
         v2raydb.set_setting("node_metrics", json.dumps(m, ensure_ascii=False))
@@ -1501,6 +1505,193 @@ def set_auto_failover(on: bool) -> dict:
     if on:
         _ensure_failover_thread()
     return status()
+
+
+# ---------------------------------------------------------------------------
+# 定时测速 + 自动选最快节点（后台线程；关闭状态时空转等待，不占资源）
+# ---------------------------------------------------------------------------
+_SPEEDTEST_EVENT = threading.Event()       # 「立即测一轮」唤醒信号
+_SPEEDTEST_LAST = 0.0                      # 最近一轮完成时间（epoch；重启归零，开启态会立即补跑一轮）
+_speedtest_thread = None
+_SPEEDTEST_WORKING = False                 # 一轮是否正在跑（/status 展示用）
+
+_SPEEDTEST_TOP_DL = 3                      # 开「同时测下载」时只对延迟最快的 N 个节点加测
+# 与路由层 _DL_URLS 同源的测速文件（依次回退；改这里也要同步路由层）
+_SPEEDTEST_DL_URLS = [
+    "https://speed.cloudflare.com/__down?bytes=25000000",
+    "https://proof.ovh.net/files/10Mb.dat",
+    "https://proof.ovh.net/files/100Mb.dat",
+]
+# 自动选最快的防抖阈值：新节点要比当前节点快 20% 以上才切换，避免两个差不多的节点来回跳
+_SPEEDTEST_PICK_GAIN = 0.8
+
+
+def _speedtest_cfg() -> dict:
+    """读取定时测速配置（settings 落库；键没设置过时给默认值）。"""
+    try:
+        st = v2raydb.all_settings()
+    except Exception:                      # noqa: BLE001
+        st = {}
+
+    def _on(key: str, dft: bool = False) -> bool:
+        try:
+            v = st.get(key)
+            return dft if v is None else int(v or 0) == 1
+        except Exception:                  # noqa: BLE001
+            return dft
+
+    try:
+        interval = int(st.get("speedtest_interval") or 30)
+    except Exception:                      # noqa: BLE001
+        interval = 30
+    try:
+        last = json.loads(st.get("speedtest_last") or "{}")
+    except Exception:                      # noqa: BLE001
+        last = {}
+    return {
+        "on": _on("speedtest_on"), "interval": max(5, min(1440, interval)),
+        "pick": _on("speedtest_pick"), "dl": _on("speedtest_dl"),
+        "last": last if isinstance(last, dict) else {},
+    }
+
+
+def speedtest_state() -> dict:
+    """定时测速当前配置 + 最近一轮结果（给路由 /status 组装，前端弹窗展示）。"""
+    cfg = _speedtest_cfg()
+    return {"on": cfg["on"], "interval": cfg["interval"], "pick": cfg["pick"],
+            "dl": cfg["dl"], "last": cfg["last"], "working": _SPEEDTEST_WORKING}
+
+
+def set_speedtest(on: bool, interval: int = 30, pick: bool = False, dl: bool = False) -> dict:
+    """保存定时测速配置；开启时确保后台线程已拉起。"""
+    try:
+        interval = max(5, min(1440, int(interval or 30)))
+    except (TypeError, ValueError):
+        interval = 30
+    v2raydb.set_settings({"speedtest_on": 1 if on else 0,
+                          "speedtest_interval": interval,
+                          "speedtest_pick": 1 if pick else 0,
+                          "speedtest_dl": 1 if dl else 0})
+    if on:
+        ensure_speedtest_thread()
+    return speedtest_state()
+
+
+def _speedtest_pick_best(results: dict) -> tuple | None:
+    """从本轮测速结果里挑最快的可用节点，返回 (node_id, ms)；全挂返回 None。"""
+    ok = [(nid, r["ms"]) for nid, r in results.items() if r.get("ok")]
+    return min(ok, key=lambda x: x[1]) if ok else None
+
+
+def _speedtest_round(cfg: dict | None = None) -> None:
+    """跑一轮定时测速：全量节点并发 real_ping（临时独立内核，不碰主连接）写台账；
+    可选对最快的几个加测下载；开「自动选最快」时按防抖规则切换到更快节点。"""
+    global _SPEEDTEST_LAST, _SPEEDTEST_WORKING
+    if _SPEEDTEST_WORKING:
+        return
+    _SPEEDTEST_WORKING = True
+    switched = False
+    try:
+        cfg = cfg or _speedtest_cfg()
+        nodes = v2raydb.list_nodes()
+        if not nodes:
+            return
+        _conn_log("speedtest", "定时测速开始：共 %d 个节点%s" % (
+            len(nodes), "（含下载测速）" if cfg.get("dl") else ""))
+        # 并发 8 路：与路由层 /ping-batch real 模式同口径，临时实例互不冲突
+        results = {}
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futs = {pool.submit(real_ping, n.get("id"), 8.0): n for n in nodes}
+            for fu in as_completed(futs):
+                n = futs[fu]
+                try:
+                    r = fu.result()
+                except Exception:              # noqa: BLE001
+                    r = {"ok": False, "error": "测速异常"}
+                results[n.get("id")] = r
+                _node_metric_set(n.get("id"), ping=int(r["ms"]) if r.get("ok") else -1)
+        ok_list = [(nid, r["ms"]) for nid, r in results.items() if r.get("ok")]
+        best = _speedtest_pick_best(results)
+
+        # 加测下载：只测真连通里延迟最快的几个（临时实例逐个测，别太密）
+        if cfg.get("dl") and ok_list:
+            for nid, _ms in sorted(ok_list, key=lambda x: x[1])[:_SPEEDTEST_TOP_DL]:
+                try:
+                    rd = real_dl(nid, _SPEEDTEST_DL_URLS, timeout=20.0)
+                    if rd.get("ok"):
+                        _node_metric_set(nid, dl=rd["mbps"])
+                except Exception:              # noqa: BLE001
+                    pass
+
+        # 自动选最快：当前节点测不通 → 立即换；否则要快 20% 以上才换（防抖动）
+        cur = status().get("node") or {}
+        cur_id = cur.get("id") or ""
+        if cfg.get("pick") and best and best[0] != cur_id:
+            cur_r = results.get(cur_id)
+            cur_ms = cur_r["ms"] if (cur_r and cur_r.get("ok")) else None
+            do_switch = cur_ms is None or best[1] < cur_ms * _SPEEDTEST_PICK_GAIN
+            if do_switch and _FAILOVER_BUSY.acquire(blocking=False):
+                try:
+                    best_name = (v2raydb.get_node(best[0]) or {}).get("name") or best[0]
+                    r = start(best[0], auto_probe=False)   # 测速流程自测，无需再探测
+                    if not r.get("error"):
+                        switched = True
+                        _conn_log("speedtest", "自动选最快：%s → %s（%dms%s）" % (
+                            cur.get("name") or cur_id or "（未连接）", best_name, best[1],
+                            "，原节点不可用" if cur_ms is None else "，更快"))
+                    else:
+                        _conn_log("speedtest", "自动选最快切换到 %s 失败：%s" % (best_name, r.get("error")))
+                finally:
+                    _FAILOVER_BUSY.release()
+
+        _SPEEDTEST_LAST = time.time()
+        best_name = (v2raydb.get_node(best[0]) or {}).get("name") if best else ""
+        best_ping = best[1] if best else None
+        v2raydb.set_setting("speedtest_last", json.dumps({
+            "ts": int(time.time()), "tested": len(nodes), "ok": len(ok_list),
+            "best_id": best[0] if best else "", "best_name": best_name or "",
+            "best_ping": best_ping, "switched": switched}, ensure_ascii=False))
+        _conn_log("speedtest", "定时测速完成：%d/%d 可用，最快 %s（%s）%s" % (
+            len(ok_list), len(nodes), best_name or "—",
+            ("%dms" % best_ping) if best_ping is not None else "全部不可用",
+            "，已切换到最快节点" if switched else ""))
+        _log.info("定时测速完成：%d/%d 可用，最快 %s %s", len(ok_list), len(nodes),
+                  best_name or "—", best_ping)
+    except Exception as e:                 # noqa: BLE001
+        _log.warning("定时测速异常：%s", e)
+    finally:
+        _SPEEDTEST_WORKING = False
+
+
+def _speedtest_loop():
+    """定时测速主循环：平时每 20 秒醒一次看配置；到点 / 收到「立即测一轮」信号就跑。"""
+    global _SPEEDTEST_LAST
+    while True:
+        try:
+            fired = _SPEEDTEST_EVENT.wait(timeout=20)
+            _SPEEDTEST_EVENT.clear()
+            cfg = _speedtest_cfg()
+            due = cfg["on"] and (time.time() - _SPEEDTEST_LAST) >= cfg["interval"] * 60
+            if fired or due:
+                _speedtest_round(cfg)
+        except Exception as e:             # noqa: BLE001
+            _log.warning("定时测速线程异常：%s", e)
+
+
+def ensure_speedtest_thread():
+    """确保定时测速线程在跑（守护线程，进程退出即结束）。"""
+    global _speedtest_thread
+    if _speedtest_thread is None or not _speedtest_thread.is_alive():
+        _speedtest_thread = threading.Thread(target=_speedtest_loop, daemon=True,
+                                             name="v2ray-speedtest")
+        _speedtest_thread.start()
+
+
+def run_speedtest_now() -> dict:
+    """立即触发一轮定时测速（后台异步执行；线程未起时顺手拉起）。"""
+    ensure_speedtest_thread()
+    _SPEEDTEST_EVENT.set()
+    return speedtest_state()
 
 
 # ---------------------------------------------------------------------------

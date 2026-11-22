@@ -24,7 +24,8 @@
                pick: "", selSub: null, logTimer: null, autoLog: true, log: "", logTab: "core",
                trafTimer: null, traffic: null, usage: [],
                busy: false, connPhase: "", showManual: false, nodeForm: false, exit: null, ping: {}, dl: {}, kw: "",
-               nodeTab: "__all__", sortPing: false, hideFail: false,
+               nodeTab: "__all__", sortPing: false, sortDl: false, hideFail: false,
+               sel: [], speedtest: null, speedtestBusy: false,
                subBusy: {}, subAllBusy: false, subForm: false,
                job: null, es: null, pendingUrl: "", versKind: "xray", coreKind: "",
               pathDraft: {}, instVer: "", progTimer: null, shareOpen: false,
@@ -81,11 +82,18 @@
       api("/api/v2ray/status"), api("/api/v2ray/nodes"), api("/api/v2ray/subs"),
       api("/api/v2ray/core"), api("/api/v2ray/float/status"),
     ]);
-    if (!st.error) V2.st = st;
+    if (!st.error) {
+      V2.st = st;
+      V2.speedtest = st.speedtest || null;        // 定时测速配置 + 最近一轮结果（优选按钮态）
+    }
     if (fl && !fl.error) V2.floatOn = !!fl.running;
     if (!nd.error) {
       V2.nodes = nd.nodes || [];
       V2.groups = nd.groups || [];                // 手动新建的自定义分组（可能还是空的）
+      if (V2.sel.length) {                        // 批量选择：清掉已被删除 / 不在列表里的
+        const alive = new Set(V2.nodes.map(n => n.id));
+        V2.sel = V2.sel.filter(id => alive.has(id));
+      }
       const m = nd.metrics || {};                 // 持久化的测速结果（覆盖到本地缓存）
       Object.keys(m).forEach(id => {
         if (!V2.nodes.some(n => n.id === id)) return;
@@ -494,12 +502,13 @@
   /* 打开状态持久化：刷新后自动恢复「V2Ray 代理」大页及其所在分区 */
   const LS_VIEW = "ide_v2ray_view";
 
-  /* 节点列表视图状态持久化：延迟排序 / 隐藏超时 / 分组 tab / 搜索关键词，刷新后仍在 */
+  /* 节点列表视图状态持久化：延迟 / 速度排序 / 隐藏超时 / 分组 tab / 搜索关键词，刷新后仍在 */
   const LS_NODES_VIEW = "ide_v2ray_nodes_view";
   function v2SaveNodesView() {
     try {
       localStorage.setItem(LS_NODES_VIEW, JSON.stringify({
         sortPing: !!V2.sortPing,
+        sortDl: !!V2.sortDl,
         hideFail: !!V2.hideFail,
         nodeTab: V2.nodeTab || "__all__",
         kw: V2.kw || "",
@@ -510,6 +519,7 @@
     try {
       const s = JSON.parse(localStorage.getItem(LS_NODES_VIEW) || "null") || {};
       V2.sortPing = !!s.sortPing;
+      V2.sortDl = !!s.sortDl;
       V2.hideFail = !!s.hideFail;
       V2.nodeTab = s.nodeTab || "__all__";
       V2.kw = s.kw || "";
@@ -1747,7 +1757,12 @@
     if (V2.nodeTab.indexOf("sub:") === 0) list = list.filter(n => n.sub_id === V2.nodeTab.slice(4));
     else if (V2.nodeTab.indexOf("grp:") === 0) list = list.filter(n => (n.grp || "").trim() === V2.nodeTab.slice(4));
     if (hideF) list = list.filter(n => !(V2.ping[n.id] && !V2.ping[n.id].ok));   // 隐藏超时节点
-    if (V2.sortPing) list = list.slice().sort((a, b) => {   // 按延迟升序，未测的排最后
+    if (V2.sortDl) list = list.slice().sort((a, b) => {   // 按下载测速降序，没测过 / 测失败的排最后
+      const va = V2.dl[a.id] !== undefined ? V2.dl[a.id] : -1;
+      const vb = V2.dl[b.id] !== undefined ? V2.dl[b.id] : -1;
+      return vb - va;
+    });
+    else if (V2.sortPing) list = list.slice().sort((a, b) => {   // 按延迟升序，未测的排最后
       const va = (V2.ping[a.id] && V2.ping[a.id].ok) ? V2.ping[a.id].ms : 9e9;
       const vb = (V2.ping[b.id] && V2.ping[b.id].ok) ? V2.ping[b.id].ms : 9e9;
       return va - vb;
@@ -1860,33 +1875,62 @@
     }
     if (importOpen) h += "</div>";
 
+    // 表头只留标题 + 导入 / 回收站；搜索、排序开关、测速操作拆到独立工具行，
+    // 分组 tab 再单独一行——不再全部挤在表头里换行错位
     h += '<div class="v2v-sec">' +
       v2vSecHead("bi-diagram-3", "节点列表",
         (V2.pingProg ? "并发测速中 " + V2.pingProg.done + "/" + V2.pingProg.total + " · " : "") +
         (V2.dlProg ? "下载测速中 " + V2.dlProg.done + "/" + V2.dlProg.total + " · " : "") +
         (list.length ? ("共 " + list.length + " 个节点" + ((V2.kw || "").trim() ? "（已过滤）" : "")) : "还没有可用的节点"),
-        // 导入面板默认收起，入口紧贴标题，行内其余按钮换行时它也不会跑丢
         '<button class="v2v-btn' + (V2.nodeForm ? "" : " primary") + '" data-act="node-import" title="' +
         (V2.nodeForm ? "收起导入面板" : "粘贴分享链接 / 手填参数导入节点") + '">' +
         '<i class="bi ' + (V2.nodeForm ? "bi-chevron-up" : "bi-plus-lg") + '"></i>' +
         (V2.nodeForm ? "收起导入" : "导入节点") + "</button>" +
+        '<button class="v2v-btn" data-act="nodes-export" title="把节点导出为分享链接文本 / 备份 JSON（可再导入）">' +
+        '<i class="bi bi-box-arrow-up"></i>导出</button>' +
         '<span class="v2v-flex"></span>' +
-        '<input type="text" id="v2vKw" class="v2v-kw" placeholder="搜索名称 / 地址" value="' + escA(V2.kw || "") + '">' +
-        '<button class="v2v-tab' + (V2.sortPing ? " on" : "") + '" data-act="sort-ping" title="按延迟从低到高排序">' +
-        '<i class="bi bi-sort-down"></i>延迟</button>' +
-        '<button class="v2v-tab' + (V2.hideFail ? " on" : "") + '" data-act="hide-fail" title="隐藏测速超时的节点">' +
-        '<i class="bi bi-eye-slash"></i>隐藏超时</button>' +
-        '<button class="v2v-btn" data-act="ping-all" title="测速当前列表下的全部节点（当前 tab + 搜索过滤）"' +
-        (list.length && !V2.pingProg && !V2.dlProg ? "" : " disabled") +
-        '><i class="bi bi-lightning-charge"></i>' + (V2.pingProg ? "测速中…" : "全部测速") + "</button>" +
-        '<button class="v2v-btn" data-act="dl-all" title="逐个实测当前列表里「测速可用」节点的下载速度（每个节点起临时内核实测，耗时较长）"' +
-        (list.length && !V2.pingProg && !V2.dlProg ? "" : " disabled") +
-        '><i class="bi bi-cloud-download"></i>' + (V2.dlProg ? ("测速中 " + V2.dlProg.done + "/" + V2.dlProg.total) : "测下载") + "</button>" +
-        '<button class="v2v-btn danger" data-act="del-timeout"' + (failN && !V2.pingProg ? "" : " disabled") +
-        ' title="删除所有测速超时的节点（进回收站，可恢复）"><i class="bi bi-trash"></i>删除超时' + (failN ? " " + failN : "") + "</button>" +
+        '<button class="v2v-btn" data-act="nodes-dedupe" title="找出协议 / 地址 / 端口 / 凭据完全相同的重复节点并清理（进回收站）">' +
+        '<i class="bi bi-copy"></i>去重</button>' +
         '<button class="v2v-btn' + (V2.trashOpen ? " on" : "") + '" data-act="trash" title="回收站：删除的节点可在这里恢复">' +
-        '<i class="bi bi-archive"></i>回收站' + (V2.trashN ? " " + V2.trashN : "") + "</button>" +
-        tabHtml);
+        '<i class="bi bi-archive"></i>回收站' + (V2.trashN ? " " + V2.trashN : "") + "</button>") +
+      '<div class="v2v-ntool">' +
+        '<input type="text" id="v2vKw" class="v2v-kw" placeholder="搜索名称 / 地址" value="' + escA(V2.kw || "") + '">' +
+        '<div class="v2v-nseg">' +
+          '<button class="v2v-ngt' + (V2.sortPing ? " on" : "") + '" data-act="sort-ping" title="按延迟从低到高排序">' +
+          '<i class="bi bi-lightning-charge"></i>延迟</button>' +
+          '<button class="v2v-ngt' + (V2.sortDl ? " on" : "") + '" data-act="sort-dl" title="按下载测速从高到低排序（先点「测下载」才有数据）">' +
+          '<i class="bi bi-cloud-download"></i>速度</button>' +
+          '<button class="v2v-ngt' + (V2.hideFail ? " on" : "") + '" data-act="hide-fail" title="隐藏测速超时的节点">' +
+          '<i class="bi bi-eye-slash"></i>隐藏超时</button>' +
+        "</div>" +
+        '<span class="v2v-ntool-sep"></span>' +
+        '<div class="v2v-ntool-acts">' +
+          '<button class="v2v-btn' + ((V2.speedtest && V2.speedtest.on) ? " on" : "") +
+          '" data-act="speedtest-open" title="定时测速 + 自动选最快节点：后台按间隔全量实测，可自动切换到最快可用节点">' +
+          '<i class="bi bi-stopwatch"></i>' +
+          ((V2.speedtest && V2.speedtest.working) ? "测速中…" : "优选") + "</button>" +
+          '<button class="v2v-btn" data-act="ping-all" title="测速当前列表下的全部节点（当前 tab + 搜索过滤）"' +
+          (list.length && !V2.pingProg && !V2.dlProg ? "" : " disabled") +
+          '><i class="bi bi-lightning-charge"></i>' + (V2.pingProg ? "测速中…" : "全部测速") + "</button>" +
+          '<button class="v2v-btn" data-act="dl-all" title="逐个实测当前列表里「测速可用」节点的下载速度（每个节点起临时内核实测，耗时较长）"' +
+          (list.length && !V2.pingProg && !V2.dlProg ? "" : " disabled") +
+          '><i class="bi bi-cloud-download"></i>' + (V2.dlProg ? ("测速中 " + V2.dlProg.done + "/" + V2.dlProg.total) : "测下载") + "</button>" +
+          '<button class="v2v-btn danger" data-act="del-timeout"' + (failN && !V2.pingProg ? "" : " disabled") +
+          ' title="删除所有测速超时的节点（进回收站，可恢复）"><i class="bi bi-trash"></i>删除超时' + (failN ? " " + failN : "") + "</button>" +
+        "</div>" +
+      "</div>" +
+      // 批量操作条：勾选节点后出现在工具行下，操作完即收起
+      (V2.sel.length ?
+        '<div class="v2v-batchbar">' +
+          '<span class="v2v-batch-n"><i class="bi bi-ui-checks-grid"></i>已选 ' + V2.sel.length + " 个</span>" +
+          '<span class="v2v-flex"></span>' +
+          '<button class="v2v-btn sm" data-act="batch-all" title="全选当前列表（当前 tab + 搜索过滤）">全选本页</button>' +
+          '<button class="v2v-btn sm" data-act="batch-ping">测速</button>' +
+          '<button class="v2v-btn sm" data-act="batch-dl">测下载</button>' +
+          '<button class="v2v-btn sm" data-act="batch-grp">移动分组</button>' +
+          '<button class="v2v-btn sm danger" data-act="batch-del">删除</button>' +
+          '<button class="v2v-btn sm ico" data-act="batch-clear" title="取消选择"><i class="bi bi-x-lg"></i></button>' +
+        "</div>" : "") + tabHtml;
     // 回收站面板：软删除的节点，可恢复 / 彻底删除
     if (V2.trashOpen) {
       const tr = V2.trash || [];
@@ -1935,6 +1979,8 @@
           ? '<span class="v2v-ping good" title="下载测速"><i class="bi bi-cloud-download"></i>' + dl + " Mbps</span>"
           : "";
         return '<div class="v2v-item' + (n.id === cid ? " on" : "") + '">' +
+          '<span class="v2v-ck' + (V2.sel.indexOf(n.id) >= 0 ? " on" : "") + '" data-act="node-check" data-id="' +
+          escA(n.id) + '" title="选中该节点（可批量测速 / 移分组 / 删除）"><i class="bi bi-check-lg"></i></span>' +
           '<span class="v2v-ico ' + protoCls(n.proto) + '"><i class="bi ' + protoIcon(n.proto) + '"></i></span>' +
           '<div class="v2v-info"><div class="v2v-nm">' + esc(n.name || "(未命名)") +
             (n.id === cid ? '<span class="v2v-pill on"><i class="bi bi-broadcast"></i>已连接</span>' : "") + "</div>" +
@@ -2389,7 +2435,7 @@
   }
 
   /* ---------- 连接记录渲染 ---------- */
-  const CONN_KIND_TXT = { manual: "手动", disconnect: "断开", auto: "自动切换", probe: "验证", trash: "回收站", fail: "失败" };
+  const CONN_KIND_TXT = { manual: "手动", disconnect: "断开", auto: "自动切换", probe: "验证", trash: "回收站", fail: "失败", speedtest: "优选" };
   function v2ConnRender() {
     const el = $("v2vConnLog");
     if (!el) return;
@@ -2653,6 +2699,120 @@
     });
   }
 
+  /* ---------- 批量 / 导出 / 优选 ---------- */
+
+  function v2SelToggle(id) {
+    const i = V2.sel.indexOf(id);
+    if (i >= 0) V2.sel.splice(i, 1); else V2.sel.push(id);
+  }
+
+  /* 文件下载：POST 拿 Blob → 隐藏 <a download> 触发保存（导出节点 / 备份用）。
+     文件名优先取响应头 Content-Disposition 里的 filename*，取不到用兜底名。 */
+  async function v2DownloadFile(path, body, fallbackName) {
+    const resp = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
+                                     body: JSON.stringify(body || {}) });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    let name = fallbackName || "export.txt";
+    const cd = resp.headers.get("Content-Disposition") || "";
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+    if (m && m[1]) { try { name = decodeURIComponent(m[1]); } catch (_) { name = m[1]; } }
+    const blob = await resp.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 800);
+    return name;
+  }
+
+  /* 「自动优选」配置弹窗：定时测速开关 / 间隔 / 自动切换 / 同时测下载 + 最近一轮结果 */
+  function v2SpeedtestModal() {
+    const cfg = V2.speedtest || { on: false, interval: 30, pick: false, dl: false, last: {} };
+    const last = cfg.last || {};
+    const sw = (id, label, on, tip) =>
+      '<label class="v2v-check"><input type="checkbox" id="' + id + '"' + (on ? " checked" : "") + ">" +
+      "<span>" + label + (tip ? ' <em class="v2v-sw-tip">' + tip + "</em>" : "") + "</span></label>";
+    const lastTxt = last.ts ?
+      ("最近一轮：" + new Date(last.ts * 1000).toLocaleString() + " · 测了 " + (last.tested || 0) +
+       " 个，可用 " + (last.ok || 0) + " 个" +
+       (last.best_name ? "，最快「" + last.best_name + "」" + (last.best_ping != null ? last.best_ping + "ms" : "") : "") +
+       (last.switched ? "，已自动切换" : "")) : "还没跑过一轮";
+    return new Promise((resolve) => {
+      const ov = document.createElement("div");
+      ov.className = "v2v-modal-ov";
+      ov.innerHTML =
+        '<div class="v2v-modal">' +
+          '<div class="v2v-modal-t"><i class="bi bi-stopwatch"></i>自动优选（定时测速）' +
+            '<button class="v2v-modal-x" id="v2vSTX" title="关闭"><i class="bi bi-x-lg"></i></button></div>' +
+          '<div class="v2v-modal-b">' +
+            '<div class="v2v-grid">' +
+              sw("v2vSTOn", "开启定时测速", !!cfg.on, "后台线程按间隔全量实测真延迟，关掉浏览器也继续") +
+              '<label class="v2v-field"><span>测速间隔（分钟，5~1440）</span>' +
+              '<input type="number" id="v2vSTInt" min="5" max="1440" value="' + (cfg.interval || 30) + '"></label>' +
+              sw("v2vSTPick", "测完自动切换到最快节点", !!cfg.pick, "当前节点不可用立即换；否则要快 20% 以上才换") +
+              sw("v2vSTDl", "对最快的节点加测下载速度", !!cfg.dl, "只对延迟最快的 3 个节点实测下载，比较耗时") +
+            "</div>" +
+            '<div class="v2v-hint"><i class="bi bi-clock-history"></i><div>' + esc(lastTxt) +
+            "。测速走临时独立内核实例，不中断当前连接；过程与切换都记录在「连接」页日志。</div></div>" +
+          "</div>" +
+          '<div class="v2v-modal-f"><button class="v2v-btn" id="v2vSTCancel">取消</button>' +
+            '<button class="v2v-btn" id="v2vSTRun"><i class="bi bi-lightning-charge"></i>立即测一轮</button>' +
+            '<button class="v2v-btn primary" id="v2vSTOk"><i class="bi bi-check2"></i>保存</button></div>' +
+        "</div>";
+      ($("v2View") || document.body).appendChild(ov);
+      const done = (data) => { ov.remove(); resolve(data); };
+      ov.querySelector("#v2vSTOk").onclick = () => done({
+        save: true,
+        on: ov.querySelector("#v2vSTOn").checked,
+        interval: parseInt(ov.querySelector("#v2vSTInt").value, 10) || 30,
+        pick: ov.querySelector("#v2vSTPick").checked,
+        dl: ov.querySelector("#v2vSTDl").checked,
+      });
+      ov.querySelector("#v2vSTRun").onclick = () => done({ run: true });
+      ov.querySelector("#v2vSTCancel").onclick = () => done(null);
+      ov.querySelector("#v2vSTX").onclick = () => done(null);
+      ov.addEventListener("mousedown", (e) => { if (e.target === ov) done(null); });
+      ov.addEventListener("keydown", (e) => { if (e.key === "Escape") done(null); });
+    });
+  }
+
+  /* 批量移动分组弹窗：现有分组下拉 + 新建输入（填了优先），或移出分组 */
+  function v2BatchGrpModal(n) {
+    return new Promise((resolve) => {
+      const opts = ['<option value="">（不分组）</option>']
+        .concat((V2.groups || []).map(g =>
+          '<option value="' + escA(g) + '"' + (g === n.grp ? " selected" : "") + ">" + esc(g) + "</option>")).join("");
+      const ov = document.createElement("div");
+      ov.className = "v2v-modal-ov";
+      ov.innerHTML =
+        '<div class="v2v-modal">' +
+          '<div class="v2v-modal-t"><i class="bi bi-folder-symlink"></i>移动 ' + n.count + ' 个节点到分组' +
+            '<button class="v2v-modal-x" id="v2vBGX" title="关闭"><i class="bi bi-x-lg"></i></button></div>' +
+          '<div class="v2v-modal-b"><div class="v2v-grid">' +
+            '<label class="v2v-field v2v-field-wide"><span>现有分组</span><select id="v2vBGSel">' + opts + "</select></label>" +
+            '<label class="v2v-field v2v-field-wide"><span>或新建分组（填了优先用这个）</span>' +
+            '<input type="text" id="v2vBGNew" placeholder="如：机场A / 日常"></label>' +
+          "</div></div>" +
+          '<div class="v2v-modal-f"><button class="v2v-btn danger" id="v2vBGOut"><i class="bi bi-box-arrow-right"></i>移出分组</button>' +
+            '<button class="v2v-btn" id="v2vBGCancel">取消</button>' +
+            '<button class="v2v-btn primary" id="v2vBGOk"><i class="bi bi-check2"></i>确定</button></div>' +
+        "</div>";
+      ($("v2View") || document.body).appendChild(ov);
+      v2vSelUpgrade(ov);
+      const done = (grp) => { ov.remove(); resolve(grp); };
+      const g = () => (ov.querySelector("#v2vBGNew").value.trim() || ov.querySelector("#v2vBGSel").value.trim());
+      ov.querySelector("#v2vBGOk").onclick = () => done(g());
+      ov.querySelector("#v2vBGOut").onclick = () => done("");
+      ov.querySelector("#v2vBGCancel").onclick = () => done(undefined);
+      ov.querySelector("#v2vBGX").onclick = () => done(undefined);
+      ov.addEventListener("mousedown", (e) => { if (e.target === ov) done(undefined); });
+      ov.addEventListener("keydown", (e) => { if (e.key === "Escape") done(undefined); });
+      const first = ov.querySelector("#v2vBGNew");
+      if (first) first.focus();
+    });
+  }
+
   async function v2vAction(act, ds) {
     switch (act) {
       case "refresh": await v2Reload(); toast("已刷新", "ok"); break;
@@ -2697,6 +2857,15 @@
       }
       case "sort-ping": {
         V2.sortPing = !V2.sortPing;
+        if (V2.sortPing) V2.sortDl = false;   // 延迟 / 速度排序互斥
+        V2.nodeShow = 60;
+        v2SaveNodesView();
+        if (v2vActive()) v2vRender();
+        break;
+      }
+      case "sort-dl": {
+        V2.sortDl = !V2.sortDl;
+        if (V2.sortDl) V2.sortPing = false;   // 速度 / 延迟排序互斥
         V2.nodeShow = 60;
         v2SaveNodesView();
         if (v2vActive()) v2vRender();
@@ -3101,6 +3270,189 @@
         toast("已删除 " + ids.length + " 个超时节点（可在回收站恢复）", "ok");
         v2TrashFetch().catch(() => {});
         await v2Reload();
+        break;
+      }
+
+      /* -------- 批量操作（勾选节点后出现的操作条） -------- */
+      case "node-check": {
+        v2SelToggle(ds.id);
+        if (v2vActive()) v2vRender();
+        break;
+      }
+      case "batch-all": {
+        v2NodeFilteredList({ hideFail: false }).forEach(n => {
+          if (V2.sel.indexOf(n.id) < 0) V2.sel.push(n.id);
+        });
+        if (v2vActive()) v2vRender();
+        break;
+      }
+      case "batch-clear": {
+        V2.sel = [];
+        if (v2vActive()) v2vRender();
+        break;
+      }
+      case "batch-ping": {
+        if (V2.pingProg || V2.dlProg) break;
+        const ids = V2.sel.slice();
+        if (!ids.length) { toast("没有选中节点", "warn"); break; }
+        V2.sel = [];
+        V2.pingProg = { done: 0, total: ids.length };
+        if (v2vActive()) v2vRender();
+        toast("批量测速中：" + ids.length + " 个节点", "info");
+        const CHUNK = 100, batches = [];
+        for (let i = 0; i < ids.length; i += CHUNK) batches.push(ids.slice(i, i + CHUNK));
+        let batchCursor = 0;
+        const PARALLEL = Math.min(3, batches.length);
+        const batchWorker = async () => {
+          while (batchCursor < batches.length) {
+            const batch = batches[batchCursor++];
+            const r = await post("/api/v2ray/ping-batch", { ids: batch, real: true }).catch(() => null);
+            const res = (r && r.results) || {};
+            for (const k of Object.keys(res)) V2.ping[k] = res[k];
+            if (V2.pingProg) V2.pingProg.done += batch.length;
+            if (v2vActive()) v2vRender();
+            v2SideRender();
+          }
+        };
+        await Promise.all(Array.from({ length: PARALLEL }, batchWorker));
+        V2.pingProg = null;
+        if (v2vActive()) v2vRender();
+        v2SideRender();
+        toast("批量测速完成", "ok");
+        break;
+      }
+      case "batch-dl": {
+        if (V2.dlProg || V2.pingProg) break;
+        const dlIds = V2.sel.filter(id => V2.ping[id] && V2.ping[id].ok);
+        if (!dlIds.length) { toast("选中的节点里没有「测速可用」的，请先测速", "warn"); break; }
+        V2.sel = [];
+        V2.dlProg = { done: 0, total: dlIds.length };
+        if (v2vActive()) v2vRender();
+        toast("批量下载测速中：" + dlIds.length + " 个可用节点（每个起临时内核，较耗时）", "info");
+        let dlCursor = 0;
+        const DL_PARALLEL = Math.min(3, dlIds.length);
+        const dlWorker = async () => {
+          while (dlCursor < dlIds.length) {
+            const nid = dlIds[dlCursor++];
+            const r = await post("/api/v2ray/dl-temp", { id: nid }).catch(() => null);
+            if (r && r.ok) V2.dl[nid] = r.mbps;
+            if (V2.dlProg) V2.dlProg.done++;
+            if (v2vActive()) v2vRender();
+            v2SideRender();
+          }
+        };
+        await Promise.all(Array.from({ length: DL_PARALLEL }, dlWorker));
+        V2.dlProg = null;
+        if (v2vActive()) v2vRender();
+        v2SideRender();
+        toast("批量下载测速完成", "ok");
+        break;
+      }
+      case "batch-grp": {
+        if (!V2.sel.length) { toast("没有选中节点", "warn"); break; }
+        const grp = await v2BatchGrpModal({ count: V2.sel.length, grp: "" });
+        if (grp === undefined) break;           // 取消 / 关闭（空串 = 移出分组，合法）
+        const r = await post("/api/v2ray/nodes/batch-grp", { ids: V2.sel.slice(), grp: grp });
+        if (r.error) return toast(r.error, "err");
+        toast(grp ? ("已把 " + (r.updated || 0) + " 个节点移到「" + grp + "」") :
+                    ("已把 " + (r.updated || 0) + " 个节点移出分组"), "ok");
+        V2.sel = [];
+        await v2Reload();
+        break;
+      }
+      case "batch-del": {
+        if (!V2.sel.length) { toast("没有选中节点", "warn"); break; }
+        const ids = V2.sel.filter(id => id !== curNodeId());   // 当前连接的节点排除，避免误删断网
+        if (!ids.length) { toast("选中的只有当前连接的节点，不能删", "warn"); break; }
+        const ok = await uiConfirm("批量删除节点",
+          "确定删除选中的 " + ids.length + " 个节点？删除后进入回收站，可随时恢复。", "删除", true);
+        if (!ok) break;
+        const r = await post("/api/v2ray/nodes/delete", { ids: ids });
+        if (r.error) return toast(r.error, "err");
+        toast("已删除 " + ids.length + " 个节点（可在回收站恢复）", "ok");
+        V2.sel = [];
+        v2TrashFetch().catch(() => {});
+        await v2Reload();
+        break;
+      }
+
+      /* -------- 自动优选（定时测速 + 自动选最快） -------- */
+      case "speedtest-open": {
+        const st = await api("/api/v2ray/status").catch(() => null);   // 先拉最新配置 / 运行态
+        if (st && st.speedtest) V2.speedtest = st.speedtest;
+        const act = await v2SpeedtestModal();
+        if (!act) break;
+        if (act.run) {                                                  // 立即测一轮
+          const r = await post("/api/v2ray/speedtest/run", {});
+          if (r.error) return toast(r.error, "err");
+          V2.speedtest = Object.assign({}, V2.speedtest, { working: true });
+          if (v2vActive()) v2vRender();
+          toast("已触发一轮测速：后台实测中，结果稍后写入测速台账与连接日志", "ok");
+          break;
+        }
+        const r = await post("/api/v2ray/speedtest/config", act);       // 保存配置
+        if (r.error) return toast(r.error, "err");
+        V2.speedtest = r;
+        if (v2vActive()) v2vRender();
+        toast(r.on ? ("定时测速已开启：每 " + r.interval + " 分钟一轮" +
+                     (r.pick ? "，自动切换最快节点" : "")) : "定时测速已关闭", "ok");
+        break;
+      }
+
+      /* -------- 去重 / 导出 -------- */
+      case "nodes-dedupe": {
+        const dry = await post("/api/v2ray/nodes/dedupe", { apply: false });
+        if (dry.error) return toast(dry.error, "err");
+        if (!dry.dup_groups) { toast("没有发现重复节点", "ok"); break; }
+        const ok = await uiConfirm("清理重复节点",
+          "发现 " + dry.dup_groups + " 个重复节点，将移除并进入回收站（每组保留一个：当前连接的优先，否则保留最早的）。\n" +
+          (dry.remove_names || []).slice(0, 8).join("\n") +
+          ((dry.remove_names || []).length > 8 ? "\n…等共 " + dry.remove_names.length + " 个" : ""),
+          "清理", true);
+        if (!ok) break;
+        const r = await post("/api/v2ray/nodes/dedupe", { apply: true });
+        if (r.error) return toast(r.error, "err");
+        toast("已清理 " + (r.deleted || 0) + " 个重复节点（可在回收站恢复）", "ok");
+        v2TrashFetch().catch(() => {});
+        await v2Reload();
+        break;
+      }
+      case "nodes-export": {
+        // 有勾选用勾选范围；否则导出当前过滤列表（当前 tab + 搜索词）
+        const ids = V2.sel.length ? V2.sel.slice()
+                                  : v2NodeFilteredList({ hideFail: false }).map(n => n.id);
+        if (!ids.length) { toast("没有可导出的节点", "warn"); break; }
+        const fmt = await new Promise((resolve) => {
+          const ov = document.createElement("div");
+          ov.className = "v2v-modal-ov";
+          ov.innerHTML =
+            '<div class="v2v-modal v2v-modal-sm">' +
+              '<div class="v2v-modal-t"><i class="bi bi-box-arrow-up"></i>导出节点（' + ids.length + " 个）" +
+                '<button class="v2v-modal-x" id="v2vExpX" title="关闭"><i class="bi bi-x-lg"></i></button></div>' +
+              '<div class="v2v-modal-b v2v-export-opts">' +
+                '<button class="v2v-btn" id="v2vExpTxt"><i class="bi bi-filetype-txt"></i>分享链接（.txt）' +
+                  '<em>一行一条，可直接再导入</em></button>' +
+                '<button class="v2v-btn" id="v2vExpJson"><i class="bi bi-filetype-json"></i>备份 JSON' +
+                  "<em>含分组 / 备注，导入时还原归属</em></button>" +
+              "</div>" +
+            "</div>";
+          ($("v2View") || document.body).appendChild(ov);
+          const done = (f) => { ov.remove(); resolve(f); };
+          ov.querySelector("#v2vExpTxt").onclick = () => done("txt");
+          ov.querySelector("#v2vExpJson").onclick = () => done("json");
+          ov.querySelector("#v2vExpX").onclick = () => done(null);
+          ov.addEventListener("mousedown", (e) => { if (e.target === ov) done(null); });
+          ov.addEventListener("keydown", (e) => { if (e.key === "Escape") done(null); });
+        });
+        if (!fmt) break;
+        try {
+          const name = await v2DownloadFile("/api/v2ray/nodes/export",
+                                            { ids: ids, format: fmt },
+                                            fmt === "json" ? "v2ray_backup.json" : "v2ray_nodes.txt");
+          toast("已导出：" + name, "ok");
+        } catch (e) {
+          toast("导出失败：" + (e && e.message || e), "err");
+        }
         break;
       }
 

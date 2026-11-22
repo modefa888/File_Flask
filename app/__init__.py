@@ -297,6 +297,7 @@ def _init_v2ray_traffic(app=None) -> None:
         from .services.ide import v2raymgr, v2ray_server
         v2raymgr.ensure_stats_thread()
         v2ray_server.ensure_stat_thread()
+        v2raymgr.ensure_speedtest_thread()      # 定时测速线程（关闭状态时空转等待）
     except Exception as e:                      # noqa: BLE001
         _log.warning("流量统计采样线程启动失败，继续启动: %s", e)
 

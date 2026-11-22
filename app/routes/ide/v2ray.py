@@ -43,7 +43,7 @@ from flask import Blueprint, Response, jsonify, request
 
 from ...log import get_logger
 from ...services.common import proxyutil, secret, transport
-from ...services.ide import v2raycfg, v2raydb, v2raymgr, v2rayfloat
+from ...services.ide import v2raycfg, v2raydb, v2raymgr, v2rayfloat, v2ray_server
 
 _log = get_logger()
 bp = Blueprint("v2ray", __name__)
@@ -51,7 +51,7 @@ bp = Blueprint("v2ray", __name__)
 # 允许通过设置接口写入的键（其余一律忽略）
 _SETTING_KEYS = ("core_path", "core_url", "core_kind", "socks_port", "socks_listen",
                  "socks_user", "http_port", "log_level", "sub_proxy", "auto_start",
-                 "api_port", "auth_enabled", "route_mode", "bypass_cn")
+                 "api_port", "auth_enabled", "route_mode", "bypass_cn", "shared_core")
 _LISTEN_CHOICES = ("0.0.0.0", "127.0.0.1")
 
 
@@ -358,9 +358,16 @@ def _build_from_form(f: dict) -> dict:
         link = "vmess://" + base64.b64encode(json.dumps(j, ensure_ascii=False).encode()).decode()
     elif proto in ("vless", "trojan"):
         query = {"type": net, "security": tls}
-        for k, v in (("sni", sni), ("host", host), ("path", path)):
+        for k, v in (("sni", sni), ("host", host), ("path", path),
+                     ("fp", str(f.get("fp") or "").strip()),
+                     ("pin", str(f.get("pin") or "").strip()),
+                     ("pbk", str(f.get("pbk") or "").strip()),
+                     ("sid", str(f.get("sid") or "").strip()),
+                     ("spx", str(f.get("spx") or "").strip())):
             if v:
                 query[k] = v
+        if tls == "reality" and proto == "vless" and not query.get("fp"):
+            query["fp"] = "chrome"       # REALITY 必须有客户端指纹，默认 chrome
         if proto == "vless":
             if not str(f.get("uuid") or "").strip():
                 raise ValueError("缺少 uuid")
@@ -1070,3 +1077,182 @@ def v2_float_action():
     else:
         return jsonify({"ok": False, "error": "未知操作"}), 400
     return jsonify(_float_payload())
+
+
+# ---------------------------------------------------------------------------
+# 本地服务端节点：把本机做成 v2 代理供其他设备连接（与 10808 客户端实例隔离）
+# ---------------------------------------------------------------------------
+
+@bp.get("/api/v2ray/server/status")
+def v2_server_status():
+    """本地服务端状态、配置、分享链接（供「本地节点」分区展示）。"""
+    return jsonify(v2ray_server.status())
+
+
+@bp.post("/api/v2ray/server/start")
+def v2_server_start():
+    r = v2ray_server.start()
+    if r.get("error"):
+        return _fail(r["error"], 500)
+    return jsonify(r)
+
+
+@bp.post("/api/v2ray/server/stop")
+def v2_server_stop():
+    return jsonify(v2ray_server.stop())
+
+
+@bp.post("/api/v2ray/server/save")
+def v2_server_save():
+    r = v2ray_server.save_config(request.get_json(silent=True) or {})
+    if r.get("error"):
+        return _fail(r["error"])
+    return jsonify(r)
+
+
+@bp.post("/api/v2ray/server/new-uuid")
+def v2_server_new_uuid():
+    """换一个新的客户端 UUID（旧分享链接随即失效）。"""
+    return jsonify(v2ray_server.new_uuid())
+
+
+@bp.post("/api/v2ray/server/gen-reality-keys")
+def v2_server_gen_reality_keys():
+    """生成一对 REALITY 密钥；可选 save=1 直接写入服务端私钥。"""
+    r = v2ray_server.gen_reality_keys()
+    if r.get("error"):
+        return _fail(r["error"], 500)
+    if request.get_json(silent=True) and request.get_json(silent=True).get("save"):
+        v2ray_server.save_config({"privatekey": r["privateKey"], "security": "reality"})
+    return jsonify(r)
+
+
+@bp.get("/api/v2ray/server/log")
+def v2_server_log():
+    """本地服务端运行日志末尾若干行（前端「服务端日志」刷新按钮）。"""
+    lines = _int(request.args.get("lines"), 60)
+    return jsonify({"ok": True, "log": v2ray_server.log_tail(lines)})
+
+
+@bp.post("/api/v2ray/server/log/clear")
+def v2_server_log_clear():
+    """清空本地服务端运行日志。"""
+    v2ray_server.clear_log()
+    return jsonify({"ok": True})
+
+
+@bp.get("/api/v2ray/server/preview")
+def v2_server_preview():
+    """预览将写入内核的配置（排障用）。?id= 指定本地节点。"""
+    sid = str(request.args.get("id") or "")
+    if sid:
+        row = v2raydb.get_local_server(sid)
+        if not row:
+            return _fail("节点不存在")
+        return jsonify({"ok": True, "config": v2ray_server.build_config(
+            v2ray_server._row_to_cfg(row))})
+    return jsonify(v2ray_server.preview_config())
+
+
+# --- 多节点管理 ---
+@bp.get("/api/v2ray/server/nodes")
+def v2_server_nodes():
+    return jsonify(v2ray_server.list_nodes())
+
+
+@bp.get("/api/v2ray/server/traffic")
+def v2_server_traffic():
+    """本地节点流量统计：实时网速 + 每节点累计用量 / 配额状态。"""
+    return jsonify(v2ray_server.traffic())
+
+
+@bp.post("/api/v2ray/server/traffic/reset")
+def v2_server_traffic_reset():
+    """清零本地节点流量：body.sid 指定节点，留空清全部。"""
+    data = request.get_json(silent=True) or {}
+    return jsonify(v2ray_server.reset_traffic(str(data.get("sid") or "")))
+
+
+@bp.post("/api/v2ray/server/nodes/create")
+def v2_server_node_create():
+    data = request.get_json(silent=True) or {}
+    r = v2ray_server.create_node(data, auto=bool(data.get("auto")))
+    if r.get("error"):
+        return _fail(r["error"])
+    return jsonify(r)
+
+
+@bp.post("/api/v2ray/server/nodes/<sid>/update")
+def v2_server_node_update(sid):
+    r = v2ray_server.update_node_data(sid, request.get_json(silent=True) or {})
+    if r.get("error"):
+        return _fail(r["error"])
+    return jsonify(r)
+
+
+@bp.post("/api/v2ray/server/nodes/<sid>/delete")
+def v2_server_node_delete(sid):
+    return jsonify(v2ray_server.delete_node(sid))
+
+
+@bp.post("/api/v2ray/server/nodes/<sid>/start")
+def v2_server_node_start(sid):
+    r = v2ray_server.start_node(sid)
+    if r.get("error"):
+        return _fail(r["error"], 500)
+    return jsonify(r)
+
+
+@bp.post("/api/v2ray/server/nodes/<sid>/stop")
+def v2_server_node_stop(sid):
+    return jsonify(v2ray_server.stop_node(sid))
+
+
+@bp.get("/api/v2ray/server/nodes/<sid>/log")
+def v2_server_node_log(sid):
+    lines = _int(request.args.get("lines"), 60)
+    return jsonify({"ok": True, "log": v2ray_server.node_log_tail(sid, lines)})
+
+
+@bp.post("/api/v2ray/server/nodes/<sid>/log/clear")
+def v2_server_node_log_clear(sid):
+    v2ray_server.node_clear_log(sid)
+    return jsonify({"ok": True})
+
+
+@bp.post("/api/v2ray/server/nodes/<sid>/new-uuid")
+def v2_server_node_new_uuid(sid):
+    return jsonify(v2ray_server.node_new_uuid(sid))
+
+
+@bp.post("/api/v2ray/server/nodes/<sid>/gen-keys")
+def v2_server_node_gen_keys(sid):
+    r = v2ray_server.node_gen_keys(sid)
+    if r.get("error"):
+        return _fail(r["error"], 500)
+    return jsonify(r)
+
+
+@bp.get("/api/v2ray/server/qr")
+def v2_server_qr():
+    """把分享链接编码成 PNG 二维码，手机扫一扫即可导入。"""
+    text = str(request.args.get("text") or "").strip()
+    if not text:
+        cfg = v2ray_server.get_config()
+        text = v2ray_server.share_link(cfg, str(request.args.get("host") or ""))
+    if len(text) > 4000:
+        return _fail("链接内容过长，无法生成二维码")
+    try:
+        import io
+        import qrcode
+        qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M,
+                           box_size=10, border=2)
+        qr.add_data(text)
+        qr.make(fit=True)
+        buf = io.BytesIO()
+        qr.make_image(fill_color="#0f172a", back_color="#ffffff").save(buf, format="PNG")
+    except Exception as e:                       # noqa: BLE001
+        return _fail("生成二维码失败：%s" % e, 500)
+    resp = Response(buf.getvalue(), mimetype="image/png")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp

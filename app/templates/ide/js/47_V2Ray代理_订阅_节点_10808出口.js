@@ -27,7 +27,10 @@
                nodeTab: "__all__", sortPing: false, hideFail: false,
                subBusy: {}, subAllBusy: false, subForm: false,
                job: null, es: null, pendingUrl: "", versKind: "xray", coreKind: "",
-              pathDraft: {}, instVer: "", progTimer: null, shareOpen: false };
+              pathDraft: {}, instVer: "", progTimer: null, shareOpen: false,
+              server: null, serverQr: false, serverLog: "",
+              serverNodes: [], srvCur: "", serverLanIp: "", serverCoreReady: false,
+              sharedCore: true, srvTraffic: null, srvTrafTimer: null };
 
   function escA(s) { return esc(String(s == null ? "" : s)).replace(/"/g, "&quot;"); }
   function api(path, opts) {
@@ -538,12 +541,13 @@
         // 与左侧「V2Ray 代理」活动栏图标同色（--ide-c-v2ray）
         iconHtml: '<i class="bi bi-shield-shaded" style="color:var(--ide-c-v2ray)"></i>',
       };
-      tab.onBeforeClose = () => { v2LogStop(); v2TrafStop(); v2JobClose(); v2SaveView(false); return true; };
+      tab.onBeforeClose = () => { v2LogStop(); v2TrafStop(); v2ClientsStop(); v2SrvTrafStop(); v2JobClose(); v2SaveView(false); return true; };
       tab.onActivate = () => {
         v2Reload().catch(() => {});
         if (V2.autoLog) v2LogStart();
         if (V2.sec === "overview") v2TrafStart();
         if (V2.sec === "clients") v2ClientsStart();
+        if (V2.sec === "server") { v2vServerFetch().catch(() => {}); v2SrvTrafStart(); }
       };
       tabs.push(tab);
       renderTabsAll();
@@ -566,7 +570,8 @@
     const box = $("v2View"); if (!box) return;
     const secs = [["overview", "概览", "bi-speedometer2"], ["nodes", "节点", "bi-diagram-3"],
                   ["subs", "订阅", "bi-rss"], ["settings", "设置", "bi-sliders"],
-                  ["clients", "连接", "bi-people"], ["log", "日志", "bi-journal-text"],
+                  ["clients", "连接", "bi-people"], ["server", "本地节点", "bi-hdd-rack"],
+                  ["log", "日志", "bi-journal-text"],
                   ["module", "路由分流", "bi-signpost-split"]];
     const st = V2.st || {}, running = !!st.running;
     const phase = V2.connPhase, busy = !!phase;
@@ -623,11 +628,17 @@
     else if (V2.sec === "subs") body = v2vSubs();
     else if (V2.sec === "settings") body = v2vSettings(st);
     else if (V2.sec === "clients") body = v2vClients();
+    else if (V2.sec === "server") body = v2vServer();
     else if (V2.sec === "module") body = v2vModule(st);
     else body = v2vLog();
     box.innerHTML = head + tabbar + body;
     v2ProgPaint();
     v2TrafListFit();
+    v2NodeListFit();
+    const nl = box.querySelector(".v2v-node-list");
+    if (nl) nl.addEventListener("scroll", () => {
+      if (nl.scrollTop + nl.clientHeight >= nl.scrollHeight - 24) v2MoreNodes(nl);
+    }, { passive: true });
   }
 
   function v2vBanner() {
@@ -812,6 +823,45 @@
     list.style.maxHeight = (Math.ceil(row) * 5 + gap * 4) + "px";
   }
   window.addEventListener("resize", v2TrafListFit);
+
+  /* 节点列表只露出 5 行：按实际行高计算 max-height，主题 / 窄屏下也不会写死像素跑偏 */
+  function v2NodeListFit() {
+    const list = document.querySelector("#v2View .v2v-node-list");
+    if (!list) return;
+    const first = list.querySelector(".v2v-item");
+    if (!first) { list.style.maxHeight = ""; return; }
+    const row = first.getBoundingClientRect().height || first.offsetHeight;
+    if (!row) return;                       // 标签隐藏时分不到高度，等下次渲染再算
+    const gap = parseFloat(getComputedStyle(list).rowGap) || 0;
+    list.style.maxHeight = (Math.ceil(row) * 5 + gap * 4) + "px";
+  }
+  window.addEventListener("resize", v2NodeListFit);
+
+  /* 节点列表分批渲染：滚动到底自动追加下一批，避免上千节点一次性 innerHTML 卡顿 */
+  let v2MoreLoading = false;
+  function v2MoreNodes(list) {
+    if (v2MoreLoading || !list || !list.querySelector('[data-act="nodes-more"]')) return;
+    v2MoreLoading = true;
+    try {
+      const vbox = $("v2View");
+      const outer = (function findScroll(el) {
+        while (el && el.parentElement) {
+          el = el.parentElement;
+          if (el.scrollHeight > el.clientHeight + 1) return el;
+        }
+        return null;
+      })(vbox);
+      const outerTop = outer ? outer.scrollTop : 0;
+      const innerTop = list.scrollTop;
+      V2.nodeShow = (V2.nodeShow || 60) + 150;
+      if (v2vActive()) v2vRender();
+      const nl = $("v2View") && $("v2View").querySelector(".v2v-node-list");
+      if (nl) nl.scrollTop = innerTop;
+      if (outer) outer.scrollTop = outerTop;
+    } finally {
+      v2MoreLoading = false;
+    }
+  }
 
   async function v2TrafficFetch() {
     const r = await api("/api/v2ray/traffic");
@@ -1164,6 +1214,281 @@
     if (!t) return "—";
     return new Date(t * 1000).toLocaleString("zh-CN", { hour12: false });
   }
+  /* ---------- 本地服务端节点：把本机做成 v2 代理，供其他设备连接 ---------- */
+  function v2vServerFetch() {
+    // 同时刷新主代理状态（拿 10808 当前节点）与多节点列表
+    return Promise.all([
+      api("/api/v2ray/server/nodes"),
+      api("/api/v2ray/status").catch(() => null),
+    ]).then(([r, st]) => {
+      if (st && !st.error) V2.st = st;
+      if (!r.error) {
+        V2.serverNodes = r.nodes || [];
+        V2.serverLanIp = r.lan_ip || "";
+        V2.serverCoreReady = !!r.core_ready;
+        V2.sharedCore = r.shared_core !== false;
+        // 选中项失效则回落到第一个
+        if (!V2.serverNodes.some(n => n.id === V2.srvCur)) {
+          V2.srvCur = V2.serverNodes.length ? V2.serverNodes[0].id : "";
+        }
+        if (v2vActive() && V2.sec === "server") v2vRender();
+      }
+      return r;
+    });
+  }
+
+  /* ---------- 本地节点流量统计：每 3 秒轮询 stats API 采样结果 ---------- */
+  function v2SrvTrafficFetch() {
+    return api("/api/v2ray/server/traffic").then(r => {
+      if (r.error) return r;
+      V2.srvTraffic = r;
+      // 只局部替换流量卡片，避免重绘整页打断正在编辑的配额 / 配置输入框
+      if (v2vActive() && V2.sec === "server") {
+        const ae = document.activeElement;
+        const editing = ae && (ae.id === "v2vSrvQuota" || ae.id === "v2vSrvQuotaAct");
+        const cur = (V2.serverNodes || []).find(n => n.id === V2.srvCur);
+        const box = $("v2vSrvTrafCard");
+        if (cur && box && !editing) box.outerHTML = v2vSrvTrafCard(cur);
+        else if (!cur) v2vRender();
+      }
+      return r;
+    });
+  }
+  function v2SrvTrafStart() {
+    v2SrvTrafficFetch().catch(() => {});
+    if (V2.srvTrafTimer) return;
+    V2.srvTrafTimer = setInterval(() => {
+      if (v2vActive() && V2.sec === "server") v2SrvTrafficFetch().catch(() => {});
+    }, 3000);
+  }
+  function v2SrvTrafStop() {
+    if (V2.srvTrafTimer) { clearInterval(V2.srvTrafTimer); V2.srvTrafTimer = null; }
+  }
+
+  /* 流量统计卡片：单独成函数，供整页渲染与轮询局部更新共用 */
+  function v2vSrvTrafCard(s) {
+    const traf = ((V2.srvTraffic && V2.srvTraffic.nodes) || []).find(t => t.id === s.id) || null;
+    const tf = traf || { up: 0, down: 0, speed_up: 0, speed_down: 0,
+                          quota_gb: s.quota_gb || 0, quota_bytes: 0,
+                          quota_action: s.quota_action || "stop", exceeded: false, api_ok: false };
+    const used = (tf.up || 0) + (tf.down || 0);
+    const quotaBytes = tf.quota_bytes || 0;
+    const pct = quotaBytes > 0 ? Math.min(100, Math.round(used * 100 / quotaBytes)) : 0;
+    const chip = (ico, label, value, cls) =>
+      '<div class="v2v-stat' + (cls ? " " + cls : "") + '">' +
+      '<span class="v2v-stat-ico"><i class="bi ' + ico + '"></i></span>' +
+      '<div class="v2v-stat-tx"><b>' + esc(label) + "</b><strong>" + esc(value) + "</strong></div></div>";
+    let quotaHtml = "";
+    if (quotaBytes > 0) {
+      const qcls = tf.exceeded ? "err" : (pct >= 80 ? "warn" : "");
+      quotaHtml =
+        '<div class="v2v-quota">' +
+        '<div class="v2v-quota-head"><span>配额用量</span>' +
+        '<b class="' + qcls + '">' +
+        fmtBytes(used) + " / " + esc(String(tf.quota_gb)) + " GB（" + pct + "%）</b></div>" +
+        '<div class="v2v-quota-track"><i class="' + qcls +
+        '" style="width:' + pct + '%"></i></div>' +
+        (tf.exceeded ? '<div class="v2v-quota-tip err"><i class="bi bi-exclamation-triangle"></i>' +
+          "已超流量配额，节点" + (tf.quota_action === "stop" ? "已自动停止" : "仅提示（未停止）") +
+          "。请清零流量或调高上限后重新启动。</div>" : "") +
+        "</div>";
+    }
+    return '<div class="v2v-sec" id="v2vSrvTrafCard">' +
+      v2vSecHead("bi-bar-chart-line", "流量统计 · " + esc(s.name),
+        "每个节点独立统计 · 数据落库，重启不丢",
+        '<span class="v2v-flex"></span>' +
+        '<button class="v2v-btn" data-act="server-traffic-refresh"><i class="bi bi-arrow-clockwise"></i>刷新</button>' +
+        '<button class="v2v-btn danger" data-act="server-traffic-reset" data-id="' + escA(s.id) +
+        '"><i class="bi bi-eraser"></i>清零</button>') +
+      '<div class="v2v-trow">' +
+      chip("bi-graph-up-arrow", "实时上行", fmtBytes(tf.speed_up || 0) + "/s", "up") +
+      chip("bi-graph-down-arrow", "实时下行", fmtBytes(tf.speed_down || 0) + "/s", "down") +
+      chip("bi-cloud-arrow-up", "累计上行", fmtBytes(tf.up || 0)) +
+      chip("bi-cloud-arrow-down", "累计下行", fmtBytes(tf.down || 0)) +
+      "</div>" + quotaHtml +
+      (tf.api_ok === false && s.running
+        ? '<div class="v2v-hint"><i class="bi bi-info-circle"></i>该节点统计 API 尚未就绪：确认节点已重启、统计端口未被占用后，流量数据才开始累计。</div>'
+        : "") +
+      '<div class="v2v-subhead"><span>流量配额</span></div>' +
+      '<div class="v2v-grid">' +
+      '<label class="v2v-field"><span>流量上限（GB，0 = 不限）</span>' +
+      '<input type="number" id="v2vSrvQuota" min="0" step="0.1" value="' + escA(tf.quota_gb || 0) + '"></label>' +
+      '<label class="v2v-field"><span>超限动作</span><select id="v2vSrvQuotaAct">' +
+      '<option value="stop"' + (tf.quota_action === "stop" ? " selected" : "") + '>自动停止节点</option>' +
+      '<option value="notify"' + (tf.quota_action === "notify" ? " selected" : "") + '>仅标记提示</option>' +
+      "</select></label></div>" +
+      '<div class="v2v-actions"><span class="v2v-hint" style="margin:0;border:0;padding:0;background:none">' +
+      "累计用量达上限后按所选动作处理；保存后立即生效，无需重启。</span>" +
+      '<span class="v2v-flex"></span>' +
+      '<button class="v2v-btn primary" data-act="server-quota-save"><i class="bi bi-check2"></i>保存配额</button>' +
+      "</div></div>";
+  }
+
+  function v2vServer() {
+    const nodes = V2.serverNodes || [];
+    const cur = nodes.find(n => n.id === V2.srvCur) || null;
+    const s = cur || {};
+    const running = !!s.running;
+    const uptime = s.started_at ? fmtUp(Math.max(0, Date.now() / 1000 - s.started_at)) : "-";
+    const curNode = (V2.st && V2.st.node) || null;
+    const mainOn = !!(V2.st && V2.st.running);
+    const curNodeTxt = curNode ? (curNode.name || (curNode.server + ":" + curNode.port) || "-") : "未连接节点";
+    const stat = (ico, label, value, extra, cls) =>
+      '<div class="v2v-stat' + (cls ? " " + cls : "") + '">' +
+      '<span class="v2v-stat-ico"><i class="bi ' + ico + '"></i></span>' +
+      '<div class="v2v-stat-tx"><b>' + esc(label) + "</b>" +
+      '<strong title="' + escA(value) + '">' + esc(value) + "</strong>" +
+      (extra ? '<em title="' + escA(extra) + '">' + esc(extra) + "</em>" : "") + "</div></div>";
+    const kv = (k, v, cls) =>
+      "<div><b>" + esc(k) + "</b><span" + (cls ? ' class="' + cls + '"' : "") +
+      ' title="' + escA(v) + '">' + esc(v) + "</span></div>";
+
+    let h = "";
+    // ===== 节点列表 =====
+    h += '<div class="v2v-sec">' +
+      v2vSecHead("bi-hdd-rack", "本地节点列表",
+        "共 " + nodes.length + " 个节点 · " + nodes.filter(n => n.running).length + " 个运行中",
+        '<span class="v2v-flex"></span>' +
+        '<button class="v2v-btn primary" data-act="server-auto-create" title="自动生成 UUID / 密钥 / 端口等关键配置并创建节点">' +
+        '<i class="bi bi-magic"></i>一键生成节点</button>' +
+        '<button class="v2v-btn" data-act="server-refresh"><i class="bi bi-arrow-clockwise"></i>刷新</button>') +
+      '<div class="v2v-hint"><i class="bi bi-info-circle"></i><div>' +
+      "点「一键生成节点」会自动生成 UUID、REALITY 密钥对、ShortID、空闲端口等全部关键配置，立即创建一个可用节点；" +
+      "也可在下方手动微调参数。" +
+      (V2.sharedCore
+        ? "当前为<strong>共用内核</strong>模式：所有节点并入主代理的同一内核进程，共享出口，启动节点前需先在「概览」连接主节点。"
+        : "当前为独立进程模式：每个节点独立监听端口、独立进程。") +
+      " 本机局域网 IP：<strong>" + esc(V2.serverLanIp || "未取到") + "</strong></div></div>";
+    if (!nodes.length) {
+      h += '<div class="v2v-empty"><i class="bi bi-hdd-rack"></i><b>还没有本地节点</b>' +
+        "<span>点右上角「一键生成节点」创建一个 VLESS + REALITY 节点</span></div>";
+    } else {
+      h += '<div class="v2v-list">' + nodes.map(n =>
+        '<div class="v2v-item' + (n.id === V2.srvCur ? " on" : "") + '">' +
+        '<span class="v2v-ico ' + protoCls(n.proto) + '"><i class="bi bi-hdd-rack"></i></span>' +
+        '<div class="v2v-info"><div class="v2v-nm">' + esc(n.name) +
+          '<span class="v2v-pill ' + (n.running ? "on" : (n.enabled ? "" : "off")) + '">' +
+          (n.running ? "● 运行中" : (n.enabled ? "◐ 待主内核" : "○ 未运行")) + "</span>" +
+          (n.id === V2.srvCur ? '<span class="v2v-pill"><i class="bi bi-pencil-square"></i>编辑中</span>' : "") +
+        '</div><div class="v2v-meta"><span class="v2v-pill proto">' + esc(n.proto) + "</span>" +
+          '<span class="v2v-pill">' + esc((n.security || "").toUpperCase()) + "</span>" +
+          "<em>0.0.0.0:" + esc(n.port) + "</em>" +
+          (n.security === "reality" ? "<span>SNI " + esc(n.sni) + "</span>" : "") +
+          (n.running ? "<span>" + (n.shared_core ? "共用主内核 " : "PID ") + n.pid + "</span>" : "") +
+        "</div></div>" +
+        '<div class="v2v-ops">' +
+          '<button class="v2v-btn' + (n.running ? " danger" : " primary") +
+            '" data-act="server-node-toggle" data-id="' + escA(n.id) + '"><i class="bi ' +
+            (n.running ? "bi-stop-fill" : "bi-play-fill") + '"></i>' + (n.running ? "停止" : "启动") + "</button>" +
+          '<button class="v2v-btn" data-act="server-node-select" data-id="' + escA(n.id) +
+            '" title="编辑此节点"><i class="bi bi-pencil"></i></button>' +
+          '<button class="v2v-btn ico" data-act="server-node-copy" data-id="' + escA(n.id) +
+            '" title="复制分享链接"><i class="bi bi-clipboard"></i></button>' +
+          '<button class="v2v-btn ico danger" data-act="server-node-delete" data-id="' + escA(n.id) +
+            '" title="删除节点"><i class="bi bi-trash"></i></button>' +
+        "</div></div>").join("") + "</div>";
+    }
+    h += "</div>";
+
+    if (!cur) return h;   // 没有选中节点时只显示列表
+
+    // ===== 选中节点：概览 =====
+    h += '<div class="v2v-sec">' +
+      v2vSecHead("bi-diagram-3", "节点概览 · " + esc(s.name),
+        running ? ("已运行 " + uptime) : "未运行",
+        '<span class="v2v-flex"></span>' +
+        '<button class="v2v-btn ' + (running ? "danger" : "primary") + '" data-act="server-toggle"' +
+        (!running && !V2.serverCoreReady ? ' disabled title="未找到 Xray 内核"' : "") + ">" +
+        '<i class="bi ' + (running ? "bi-stop-fill" : "bi-play-fill") + '"></i>' +
+        (running ? "停止服务" : "启动服务") + "</button>") +
+      '<div class="v2v-stats">' +
+      stat("bi-broadcast", "服务状态", running ? "运行中" : (s.enabled ? "待主内核" : "未运行"),
+        running ? ((s.shared_core ? "共用主内核 PID " : "PID ") + s.pid)
+                : (s.enabled ? "已启用，连接主节点后生效" : "等待启动"),
+        running ? "on" : (s.enabled ? "" : "off")) +
+      stat("bi-hdd-network", "入站监听", "0.0.0.0:" + (s.port || "-"),
+        (s.proto || "").toUpperCase() + " · " + (s.security === "reality" ? "REALITY" : "明文"), running ? "on" : "") +
+      stat("bi-arrow-left-right", "出站方式",
+        s.outbound === "direct" ? "本机直连外网" : "经主代理出口",
+        s.outbound === "direct" ? "需本机能直接上网"
+          : (mainOn && curNode ? ("当前节点：" + curNodeTxt) : "未连节点，需先在主界面连接"),
+        s.outbound === "direct" ? "" : (mainOn && curNode ? "on" : "bad")) +
+      "</div>" +
+      '<div class="v2v-kv">' +
+      kv("节点 ID", s.id || "-", "mono") +
+      (s.outbound !== "direct"
+        ? kv("当前连接节点", mainOn && curNode ? curNodeTxt : (curNode ? curNodeTxt + "（未运行）" : "未连接节点"),
+            mainOn && curNode ? "ok" : "err") : "") +
+      (s.security === "reality"
+        ? kv("REALITY 密钥", s.reality_ready ? "已就绪（pbk " + (s.publickey || "").slice(0, 12) + "…）" : "未生成",
+            s.reality_ready ? "ok" : "err") + kv("伪装 SNI", s.sni || "-", "mono") : "") +
+      "</div></div>";
+
+    // ===== 流量统计 / 配额 =====
+    h += v2vSrvTrafCard(s);
+
+    // ===== 节点配置（编辑选中节点） =====
+    h += '<div class="v2v-sec">' +
+      v2vSecHead("bi-sliders", "节点配置 · " + esc(s.name), "修改后需重启该节点才会生效",
+        '<span class="v2v-flex"></span>' +
+        '<button class="v2v-btn primary" data-act="server-save"><i class="bi bi-check2"></i>保存配置</button>' +
+        '<button class="v2v-btn" data-act="server-preview"><i class="bi bi-code-square"></i>预览配置</button>') +
+      '<div class="v2v-grid">' +
+      '<label class="v2v-field"><span>节点名称</span><input type="text" id="v2vSrvName" value="' + escA(s.name || "") + '"></label>' +
+      '<label class="v2v-field"><span>协议</span><select id="v2vSrvProto">' +
+      '<option value="vmess"' + (s.proto === "vmess" ? " selected" : "") + '>VMess</option>' +
+      '<option value="vless"' + (s.proto === "vless" ? " selected" : "") + '>VLESS</option></select></label>' +
+      '<label class="v2v-field"><span>监听端口</span><input type="number" id="v2vSrvPort" value="' +
+      escA(s.port || 10810) + '" min="1" max="65535"></label>' +
+      '<label class="v2v-field"><span>安全类型</span><select id="v2vSrvSec">' +
+      '<option value="reality"' + (s.security !== "none" ? " selected" : "") + '>VLESS + REALITY</option>' +
+      '<option value="none"' + (s.security === "none" ? " selected" : "") + '>明文</option></select></label>' +
+      '<label class="v2v-field"><span>出站方式</span><select id="v2vSrvOut">' +
+      '<option value="proxy"' + (s.outbound !== "direct" ? " selected" : "") + '>经本机 10808 代理</option>' +
+      '<option value="direct"' + (s.outbound === "direct" ? " selected" : "") + '>本机直连外网</option></select></label>' +
+      '<label class="v2v-field v2v-field-wide"><span>客户端 UUID</span>' +
+      '<div style="display:flex;gap:6px"><input type="text" id="v2vSrvUuid" value="' + escA(s.uuid || "") + '">' +
+      '<button class="v2v-btn" data-act="server-new-uuid"><i class="bi bi-shuffle"></i>换一个</button></div></label>' +
+      "</div>" +
+      '<div id="v2vSrvReality" style="display:' + (s.security !== "none" ? "" : "none") + '">' +
+      '<div class="v2v-subhead"><span>REALITY 参数</span></div>' +
+      '<div class="v2v-grid">' +
+      '<label class="v2v-field"><span>SNI（伪装域名）</span><input type="text" id="v2vSrvSni" value="' + escA(s.sni || "www.overleaf.com") + '"></label>' +
+      '<label class="v2v-field"><span>伪装目标 dest</span><input type="text" id="v2vSrvDest" value="' + escA(s.dest || "www.overleaf.com:443") + '"></label>' +
+      '<label class="v2v-field"><span>ShortID (sid)</span><input type="text" id="v2vSrvSid" value="' + escA(s.shortid || "") + '"></label>' +
+      '<label class="v2v-field"><span>Flow</span><input type="text" id="v2vSrvFlow" value="' + escA(s.flow || "xtls-rprx-vision") + '"></label>' +
+      '<label class="v2v-field"><span>指纹 (fp)</span><input type="text" id="v2vSrvFp" value="' + escA(s.fp || "chrome") + '"></label>' +
+      '<label class="v2v-field v2v-field-wide"><span>服务端私钥 privateKey（不要泄露）</span>' +
+      '<div style="display:flex;gap:6px"><input type="text" id="v2vSrvPriv" value="' + escA(s.privatekey || "") + '">' +
+      '<button class="v2v-btn" data-act="server-gen-keys"><i class="bi bi-key"></i>生成密钥对</button></div></label>' +
+      (s.publickey ? '<label class="v2v-field v2v-field-wide"><span>派生 PublicKey (pbk) · 已写入分享链接</span>' +
+        '<span class="v2v-code" style="word-break:break-all">' + esc(s.publickey) + "</span></label>" : "") +
+      "</div></div></div>";
+
+    // ===== 分享链接 / 二维码 =====
+    const link = s.share_url || "";
+    h += '<div class="v2v-sec">' +
+      v2vSecHead("bi-qr-code", "分享链接 / 二维码 · " + esc(s.name), "手机扫一扫或复制链接导入客户端",
+        '<span class="v2v-flex"></span>' +
+        '<button class="v2v-btn primary" data-act="server-copy"' + (link ? "" : " disabled") + '><i class="bi bi-clipboard"></i>复制链接</button>' +
+        '<button class="v2v-btn' + (V2.serverQr ? " on" : "") + '" data-act="server-qr"' + (link ? "" : " disabled") +
+        '><i class="bi bi-qr-code"></i>' + (V2.serverQr ? "收起二维码" : "显示二维码") + "</button>") +
+      '<div class="v2v-meta" style="padding:6px 0"><span class="v2v-code" style="white-space:normal;word-break:break-all;max-width:100%">' +
+      esc(link) + "</span></div>" +
+      (V2.serverQr && link ? '<div style="display:flex;justify-content:center;padding:12px;background:#fff;border-radius:10px">' +
+        '<img src="/api/v2ray/server/qr?text=' + encodeURIComponent(link) + '" alt="节点二维码" style="width:220px;height:220px"></div>' : "") +
+      "</div>";
+
+    // ===== 日志 =====
+    h += '<div class="v2v-sec">' +
+      v2vSecHead("bi-journal-text", "服务端日志 · " + esc(s.name), "该节点内核的最近输出",
+        '<span class="v2v-flex"></span>' +
+        '<button class="v2v-btn" data-act="server-log-refresh"><i class="bi bi-arrow-clockwise"></i>刷新</button>' +
+        '<button class="v2v-btn danger" data-act="server-log-clear"><i class="bi bi-eraser"></i>清空</button>') +
+      '<pre class="v2v-log">' + esc(V2.serverLog || "暂无日志") + "</pre></div>";
+    return h;
+  }
+
   function v2vUsage() {
     const rows = (V2.usage || []).filter(r => (r.up + r.down) > 0 || r.dur > 0);
     let list;
@@ -1216,6 +1541,12 @@
       const vb = (V2.ping[b.id] && V2.ping[b.id].ok) ? V2.ping[b.id].ms : 9e9;
       return va - vb;
     });
+    // 当前已连接的节点始终排到第一条（连接后 v2Reload 重绘即生效）
+    const cid = curNodeId();
+    if (cid) {
+      const i = list.findIndex(n => n.id === cid);
+      if (i > 0) list.unshift(list.splice(i, 1)[0]);
+    }
     return list;
   }
 
@@ -1296,13 +1627,24 @@
         '<label class="v2v-field"><span>传输方式</span><select id="v2vMNet">' +
           ["tcp", "ws", "grpc", "h2", "http"].map(p => '<option value="' + p + '">' + p + "</option>").join("") +
         "</select></label>" +
-        '<label class="v2v-field"><span>TLS</span><select id="v2vMTls">' +
-          '<option value="none">无</option><option value="tls">tls</option></select></label>' +
+        '<label class="v2v-field"><span>TLS / 安全</span><select id="v2vMTls">' +
+          '<option value="none">无</option><option value="tls">tls</option>' +
+          '<option value="reality">reality</option></select></label>' +
         '<label class="v2v-field"><span>Host 头</span><input type="text" id="v2vMHost"></label>' +
         '<label class="v2v-field"><span>路径 / serviceName</span><input type="text" id="v2vMPath"></label>' +
-        '<label class="v2v-field"><span>SNI</span><input type="text" id="v2vMSni"></label>' +
+        '<label class="v2v-field"><span>SNI（伪装域名）</span><input type="text" id="v2vMSni"></label>' +
+        '<label class="v2v-field"><span>Flow（vless）</span><input type="text" id="v2vMFlow" placeholder="xtls-rprx-vision"></label>' +
+        '<label class="v2v-field"><span>证书指纹 pin（可选）</span><input type="text" id="v2vMPin"></label>' +
         '<label class="v2v-field"><span>alterId（vmess）</span><input type="number" id="v2vMAid" value="0"></label>' +
       "</div>" +
+      '<div id="v2vMReality" style="display:none">' +
+        '<div class="v2v-subhead"><span>REALITY 参数（上面 TLS 选 reality 时填写）</span></div>' +
+        '<div class="v2v-grid">' +
+        '<label class="v2v-field"><span>PublicKey (pbk)</span><input type="text" id="v2vMPbk"></label>' +
+        '<label class="v2v-field"><span>ShortID (sid)</span><input type="text" id="v2vMSid"></label>' +
+        '<label class="v2v-field"><span>指纹 (fp)</span><input type="text" id="v2vMFp" value="chrome" placeholder="chrome"></label>' +
+        '<label class="v2v-field"><span>spiderX (spx)</span><input type="text" id="v2vMSpx" placeholder="/"></label>' +
+        "</div></div>" +
       '<div class="v2v-actions"><button class="v2v-btn primary" data-act="add-manual"><i class="bi bi-check2"></i>添加节点</button></div>';
     }
     if (importOpen) h += "</div>";
@@ -1369,7 +1711,7 @@
         (V2.nodes.length ? "换个关键词试试，或清空搜索框"
                          : "点右上角「导入节点」粘贴分享链接，或到「订阅」里添加一个订阅地址") + "</span></div>";
     } else {
-      h += '<div class="v2v-list">' + shown.map(n => {
+      h += '<div class="v2v-list v2v-node-list">' + shown.map(n => {
         const p = V2.ping[n.id];
         let ping = "";
         if (p !== undefined) {
@@ -1726,6 +2068,11 @@
       '<label class="v2v-field"><span>服务启动时自动连接上次的节点</span><select id="v2vSetAuto">' +
         '<option value="1"' + (Number(s.auto_start) ? " selected" : "") + ">开启</option>" +
         '<option value="0"' + (Number(s.auto_start) ? "" : " selected") + ">关闭</option></select></label>" +
+      '<label class="v2v-field"><span>本地节点共用主内核（节省资源，推荐）</span><select id="v2vSetShared">' +
+        '<option value="1"' + (s.shared_core === undefined || Number(s.shared_core) ? " selected" : "") +
+        ">开启（并入主配置同一进程）</option>" +
+        '<option value="0"' + (Number(s.shared_core) === 0 ? " selected" : "") +
+        ">关闭（每节点独立进程）</option></select></label>" +
       "</div>" +
       '<div class="v2v-actions">' +
       '<button class="v2v-btn primary" data-act="save-settings"><i class="bi bi-check2"></i>保存设置</button>' +
@@ -1881,6 +2228,7 @@
         if (V2.sec === "log") { v2LogFetch().catch(() => {}); v2ConnFetch().catch(() => {}); if (V2.autoLog) v2LogStart(); } else v2LogStop();
         if (V2.sec === "overview") v2TrafStart(); else v2TrafStop();
         if (V2.sec === "clients") { v2ClientsFetch().catch(() => {}); v2ClientsStart(); } else v2ClientsStop();
+        if (V2.sec === "server") { v2vServerFetch().catch(() => {}); v2SrvTrafStart(); } else v2SrvTrafStop();
         v2vRender();
         return;
       }
@@ -1916,18 +2264,23 @@
       }
       const btn = e.target.closest("[data-act]");
       if (!btn || btn.disabled) return;
-      // 重启 / 刷新 / 保存并重启：请求期间图标旋转并禁用，防止重复点击；
+      // 重启 / 刷新 / 保存并重启 / 本地节点启停：请求期间图标旋转并禁用，防止重复点击；
       // 连接 / 断开由 v2ToggleConnect 统一处理，两处按钮同步显示过渡态
-      const slow = { restart: 1, refresh: 1, "save-route": 1 };
+      const slow = { restart: 1, refresh: 1, "save-route": 1,
+                     "server-node-toggle": 1, "server-toggle": 1,
+                     "server-auto-create": 1 };
       if (!slow[btn.dataset.act]) { v2vAction(btn.dataset.act, btn.dataset); return; }
-      const ic = btn.querySelector("i");
+      const oldHtml = btn.innerHTML;
+      const label = (btn.textContent || "").trim();
       btn.disabled = true;
-      if (ic) ic.classList.add("spin");
+      btn.innerHTML = '<i class="v2-spin"></i>' + (label ? " " + esc(label) : "");
       try {
         await v2vAction(btn.dataset.act, btn.dataset);
       } finally {
-        btn.disabled = false;
-        if (ic) ic.classList.remove("spin");
+        if (btn.isConnected) {
+          btn.disabled = false;
+          btn.innerHTML = oldHtml;
+        }
       }
     });
     // 监听地址 / 认证开关联动：不用等保存，下拉切到哪边认证选项即时跟着变
@@ -1944,6 +2297,16 @@
         : (auth && auth.value === "0" ? "认证已停用：本机连接无需账号密码（凭据仍保留，随时可重新启用）" : "");
     };
     box.addEventListener("change", (e) => {
+      if (e.target.id === "v2vSrvSec") {
+        const r = $("v2vSrvReality");
+        if (r) r.style.display = e.target.value === "reality" ? "" : "none";
+        return;
+      }
+      if (e.target.id === "v2vMTls") {
+        const boxR = $("v2vMReality");
+        if (boxR) boxR.style.display = e.target.value === "reality" ? "" : "none";
+        return;
+      }
       if (e.target.id === "v2vSetAuth") { authNoteSync(); return; }
       if (e.target.id !== "v2vSetListen") return;
       authNoteSync();
@@ -2009,7 +2372,10 @@
           fd("v2vENSni", "SNI", n.sni, "可留空") +
           fd("v2vENPin", "证书指纹 pin（可选）", n.pin, "Xray 26 自签证书：SHA256 hex，多个用逗号分隔") +
           '<div id="v2vENReality" style="display:' + (n.tls === "reality" ? "contents" : "none") + '">' +
-          fd("v2vENPbk", "Reality publicKey", n.pbk) + fd("v2vENSid", "Reality shortId", n.sid) + "</div>";
+          fd("v2vENPbk", "Reality publicKey (pbk)", n.pbk) +
+          fd("v2vENSid", "Reality shortId (sid)", n.sid) +
+          fd("v2vENFp", "指纹 (fp)", n.fp || "chrome", "chrome") +
+          fd("v2vENSpx", "spiderX (spx)", n.spx, "/") + "</div>";
       }
       h += "</div>";
 
@@ -2055,6 +2421,8 @@
             if (data.fields.tls === "reality") {
               data.fields.pbk = g("v2vENPbk");
               data.fields.sid = g("v2vENSid");
+              data.fields.fp = g("v2vENFp");
+              data.fields.spx = g("v2vENSpx");
             }
           }
         }
@@ -2127,20 +2495,168 @@
         if (v2vActive()) v2vRender();
         break;
       }
+      case "server-auto-create": {
+        const r = await post("/api/v2ray/server/nodes/create", { auto: true });
+        if (r.error) return toast(r.error, "err");
+        toast("节点已自动生成：" + (r.node ? r.node.name + " · 端口 " + r.node.port : ""), "ok");
+        if (r.node) V2.srvCur = r.node.id;
+        V2.serverQr = false;
+        await v2vServerFetch();
+        break;
+      }
+      case "server-node-select": {
+        V2.srvCur = ds.id;
+        V2.serverQr = false;
+        V2.serverLog = "";
+        v2vRender();
+        v2vServerFetch().then(() => api("/api/v2ray/server/nodes/" + encodeURIComponent(ds.id) + "/log?lines=200")
+          .then(r => { if (!r.error) { V2.serverLog = r.log || "（空）"; if (v2vActive() && V2.sec === "server") v2vRender(); } })).catch(() => {});
+        break;
+      }
+      case "server-node-toggle": {
+        const n = (V2.serverNodes || []).find(x => x.id === ds.id) || {};
+        const r = n.running
+          ? await post("/api/v2ray/server/nodes/" + encodeURIComponent(ds.id) + "/stop", {})
+          : await post("/api/v2ray/server/nodes/" + encodeURIComponent(ds.id) + "/start", {});
+        if (r.error) return toast(r.error, "err");
+        toast(r.message || ((n.name || "节点") + (n.running ? " 已停止" : " 已启动")),
+              r.pending ? "warn" : "ok");
+        await Promise.all([v2vServerFetch(), v2SrvTrafficFetch()]);
+        break;
+      }
+      case "server-node-delete": {
+        const n = (V2.serverNodes || []).find(x => x.id === ds.id) || {};
+        const ok = await uiConfirm("删除本地节点", "确定删除「" + (n.name || ds.id) + "」？运行中的节点会先停止。", "删除", true);
+        if (!ok) return;
+        const r = await post("/api/v2ray/server/nodes/" + encodeURIComponent(ds.id) + "/delete", {});
+        if (r.error) return toast(r.error, "err");
+        toast("节点已删除", "ok");
+        if (V2.srvCur === ds.id) V2.srvCur = "";
+        await v2vServerFetch();
+        break;
+      }
+      case "server-node-copy": {
+        const n = (V2.serverNodes || []).find(x => x.id === ds.id) || {};
+        if (!n.share_url) return toast("该节点没有分享链接", "err");
+        await copyText(n.share_url);
+        toast("已复制「" + (n.name || "") + "」的分享链接", "ok");
+        break;
+      }
+      case "server-toggle": {
+        const n = (V2.serverNodes || []).find(x => x.id === V2.srvCur) || {};
+        const r = n.running
+          ? await post("/api/v2ray/server/nodes/" + encodeURIComponent(V2.srvCur) + "/stop", {})
+          : await post("/api/v2ray/server/nodes/" + encodeURIComponent(V2.srvCur) + "/start", {});
+        if (r.error) return toast(r.error, "err");
+        toast(n.running ? "服务已停止" : "服务已启动", "ok");
+        await v2vServerFetch();
+        break;
+      }
+      case "server-refresh": {
+        await Promise.all([v2vServerFetch(), v2SrvTrafficFetch()]);
+        toast("已刷新", "ok");
+        break;
+      }
+      case "server-traffic-refresh": {
+        await v2SrvTrafficFetch();
+        toast("流量数据已刷新", "ok");
+        break;
+      }
+      case "server-traffic-reset": {
+        const ok = await uiConfirm("清零流量", "确定清零该节点的流量统计？配额用量会一并归零。", "清零", true);
+        if (!ok) return;
+        const r = await post("/api/v2ray/server/traffic/reset", { sid: ds.id || V2.srvCur });
+        if (r.error) return toast(r.error, "err");
+        toast("流量已清零", "ok");
+        await Promise.all([v2vServerFetch(), v2SrvTrafficFetch()]);
+        break;
+      }
+      case "server-quota-save": {
+        const r = await post("/api/v2ray/server/nodes/" + encodeURIComponent(V2.srvCur) + "/update", {
+          quota_gb: val("v2vSrvQuota"), quota_action: val("v2vSrvQuotaAct"),
+        });
+        if (r.error) return toast(r.error, "err");
+        toast("流量配额已保存", "ok");
+        await Promise.all([v2vServerFetch(), v2SrvTrafficFetch()]);
+        break;
+      }
+      case "server-save": {
+        const sec = val("v2vSrvSec");
+        const body = {
+          name: val("v2vSrvName"), proto: val("v2vSrvProto"), port: val("v2vSrvPort"),
+          outbound: val("v2vSrvOut"), uuid: val("v2vSrvUuid"), security: sec,
+        };
+        if (sec === "reality") {
+          body.sni = val("v2vSrvSni");
+          body.dest = val("v2vSrvDest");
+          body.shortid = val("v2vSrvSid");
+          body.flow = val("v2vSrvFlow");
+          body.fp = val("v2vSrvFp");
+          body.privatekey = val("v2vSrvPriv");
+        }
+        const r = await post("/api/v2ray/server/nodes/" + encodeURIComponent(V2.srvCur) + "/update", body);
+        if (r.error) return toast(r.error, "err");
+        toast("配置已保存，重启该节点后生效", "ok");
+        await v2vServerFetch();
+        break;
+      }
+      case "server-gen-keys": {
+        const r = await post("/api/v2ray/server/nodes/" + encodeURIComponent(V2.srvCur) + "/gen-keys", {});
+        if (r.error) return toast(r.error, "err");
+        toast("密钥对已生成并保存，公钥已写入分享链接", "ok");
+        await v2vServerFetch();
+        break;
+      }
+      case "server-new-uuid": {
+        const ok = await uiConfirm("更换 UUID", "换号后旧分享链接立即失效，确定继续？", "换一个", false);
+        if (!ok) return;
+        const r = await post("/api/v2ray/server/nodes/" + encodeURIComponent(V2.srvCur) + "/new-uuid", {});
+        if (r.error) return toast(r.error, "err");
+        toast("UUID 已更换", "ok");
+        V2.serverQr = false;
+        await v2vServerFetch();
+        break;
+      }
+      case "server-copy": {
+        const n = (V2.serverNodes || []).find(x => x.id === V2.srvCur) || {};
+        if (!n.share_url) return toast("还没有分享链接", "err");
+        await copyText(n.share_url);
+        toast("分享链接已复制", "ok");
+        break;
+      }
+      case "server-qr": {
+        V2.serverQr = !V2.serverQr;
+        v2vRender();
+        break;
+      }
+      case "server-preview": {
+        const r = await api("/api/v2ray/server/preview?id=" + encodeURIComponent(V2.srvCur));
+        if (r.error) return toast(r.error, "err");
+        await uiModal({ title: "服务端配置预览", icon: "bi-code-square",
+          html: '<pre class="v2v-log">' + esc(JSON.stringify(r.config, null, 2)) + "</pre>",
+          okText: "关闭", hideCancel: true, wide: true });
+        break;
+      }
+      case "server-log-refresh": {
+        const r = await api("/api/v2ray/server/nodes/" + encodeURIComponent(V2.srvCur) + "/log?lines=200");
+        if (r.error) return toast(r.error, "err");
+        V2.serverLog = r.log || "（空）";
+        v2vRender();
+        break;
+      }
+      case "server-log-clear": {
+        const ok = await uiConfirm("清空日志", "确定清空该节点运行日志？", "清空", true);
+        if (!ok) return;
+        const r = await post("/api/v2ray/server/nodes/" + encodeURIComponent(V2.srvCur) + "/log/clear", {});
+        if (r.error) return toast(r.error, "err");
+        V2.serverLog = "";
+        v2vRender();
+        toast("日志已清空", "ok");
+        break;
+      }
       case "nodes-more": {
-        // 追加一批节点：重渲染后把滚动位置还原，避免视口跳回顶部
-        V2.nodeShow = (V2.nodeShow || 60) + 150;
-        const vbox = $("v2View");
-        const sc = (function findScroll(el) {
-          while (el && el.parentElement) {
-            el = el.parentElement;
-            if (el.scrollHeight > el.clientHeight + 1) return el;
-          }
-          return null;
-        })(vbox);
-        const stTop = sc ? sc.scrollTop : 0;
-        if (v2vActive()) v2vRender();
-        if (sc) sc.scrollTop = stTop;
+        const box = $("v2View");
+        v2MoreNodes(box && box.querySelector(".v2v-node-list"));
         break;
       }
       case "auto-fail": {
@@ -2208,7 +2724,8 @@
           proto: val("v2vMProto"), name: val("v2vMName"), server: val("v2vMServer"), port: val("v2vMPort"),
           uuid: val("v2vMUuid"), password: val("v2vMUuid"), method: val("v2vMMethod"),
           net: val("v2vMNet"), tls: val("v2vMTls"), host: val("v2vMHost"), path: val("v2vMPath"),
-          sni: val("v2vMSni"), aid: val("v2vMAid"),
+          sni: val("v2vMSni"), aid: val("v2vMAid"), flow: val("v2vMFlow"), pin: val("v2vMPin"),
+          pbk: val("v2vMPbk"), sid: val("v2vMSid"), spx: val("v2vMSpx"), fp: val("v2vMFp"),
         };
         const r = await post("/api/v2ray/nodes/add", Object.assign({ node: node }, v2AddTarget()));
         if (r.error) return toast(r.error, "err");
@@ -2595,6 +3112,7 @@
           socks_user: val("v2vSetUser"), sub_proxy: val("v2vSetSubProxy"),
           auto_start: val("v2vSetAuto") === "1" ? 1 : 0,
           auth_enabled: val("v2vSetAuth") === "0" ? 0 : 1,
+          shared_core: val("v2vSetShared") === "0" ? 0 : 1,
         };
         const pw = val("v2vSetPass");
         if (pw) body.socks_pass = (window.TP && window.TP.encrypt) ? window.TP.encrypt(pw) : pw;

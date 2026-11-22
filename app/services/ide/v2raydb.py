@@ -61,6 +61,27 @@ CREATE TABLE IF NOT EXISTS v2ray_traffic_day (
     down       INTEGER NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL DEFAULT 0
 );
+-- 本地服务端节点流量（与主代理 v2ray_traffic 隔离：不进 __total__ / 今日行，
+-- 避免本地节点转发的流量被算进「概览」的全局总流量）
+CREATE TABLE IF NOT EXISTS v2ray_srv_traffic (
+    node_id    TEXT PRIMARY KEY,
+    up         INTEGER NOT NULL DEFAULT 0,
+    down       INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL DEFAULT 0
+);
+-- 本地服务端节点（把本机做成 v2 节点供其他设备连）：每个节点一条记录
+CREATE TABLE IF NOT EXISTS v2ray_local_servers (
+    id          TEXT PRIMARY KEY,
+    name        TEXT DEFAULT '',
+    proto       TEXT DEFAULT 'vless',
+    port        INTEGER NOT NULL DEFAULT 0,
+    cfg         TEXT DEFAULT '{}',   -- 其余配置 JSON（uuid/security/sni/dest/...）
+    remark      TEXT DEFAULT '',
+    sort        INTEGER NOT NULL DEFAULT 0,
+    created_at  REAL NOT NULL DEFAULT 0,
+    updated_at  REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_v2ray_local_servers_sort ON v2ray_local_servers(sort);
 """
 
 # 模块默认设置（未落库时用这些值）
@@ -82,6 +103,7 @@ DEFAULT_SETTINGS = {
     "auth_enabled": 1,          # SOCKS5 认证开关（1 = 启用；仅本机监听时可关闭，0.0.0.0 强制启用）
     "route_mode": "rule",       # 路由模式：global 全局代理 / rule 智能分流 / direct 全局直连
     "bypass_cn": 1,             # 智能分流时过滤大陆：大陆域名 / IP 直连，其余走代理
+    "shared_core": 1,           # 本地节点共用主代理内核（1）：并入主配置同一进程；0 = 每节点独立进程
 }
 
 _LISTEN_CHOICES = ("0.0.0.0", "127.0.0.1")
@@ -105,6 +127,12 @@ def init_db():
         with store_tx() as conn:
             conn.execute("ALTER TABLE v2ray_nodes ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
             conn.execute("ALTER TABLE v2ray_nodes ADD COLUMN deleted_at REAL NOT NULL DEFAULT 0")
+    except Exception:
+        pass
+    # 旧库迁移：v2ray_local_servers 补 enabled（共用内核模式下是否并入主内核）
+    try:
+        with store_tx() as conn:
+            conn.execute("ALTER TABLE v2ray_local_servers ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0")
     except Exception:
         pass
 
@@ -224,6 +252,54 @@ def reset_traffic():
     """清零全部流量统计。"""
     with store_tx() as conn:
         conn.execute("DELETE FROM v2ray_traffic")
+
+
+# ---------------------------------------------------------------------------
+# 本地服务端节点流量统计（独立表，不与主代理流量混算）
+# ---------------------------------------------------------------------------
+
+def srv_add_traffic(node_id, up: int, down: int):
+    """累加某本地节点的流量字节（增量为 0 时忽略）。"""
+    node_id = str(node_id or "")
+    up, down = int(up or 0), int(down or 0)
+    if not node_id or (up <= 0 and down <= 0):
+        return
+    with store_tx() as conn:
+        conn.execute(
+            "INSERT INTO v2ray_srv_traffic (node_id, up, down, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(node_id) DO UPDATE SET up = up + excluded.up, "
+            "down = down + excluded.down, updated_at = excluded.updated_at",
+            (node_id, up, down, time.time()))
+
+
+def srv_traffic_rows() -> dict:
+    """全部本地节点流量：{node_id: {up, down, updated_at}}。"""
+    try:
+        conn = store_conn()
+        try:
+            return {r["node_id"]: {"up": int(r["up"] or 0), "down": int(r["down"] or 0),
+                                   "updated_at": float(r["updated_at"] or 0)}
+                    for r in conn.execute("SELECT * FROM v2ray_srv_traffic")}
+        finally:
+            conn.close()
+    except Exception as e:                      # noqa: BLE001
+        _log.warning("读取本地节点流量统计失败: %s", e)
+        return {}
+
+
+def srv_traffic_reset(node_id: str = ""):
+    """清零本地节点流量：传 node_id 只清该节点，留空清全部。"""
+    with store_tx() as conn:
+        if node_id:
+            conn.execute("DELETE FROM v2ray_srv_traffic WHERE node_id=?", (str(node_id),))
+        else:
+            conn.execute("DELETE FROM v2ray_srv_traffic")
+
+
+def srv_traffic_delete(node_id: str):
+    """删除节点时清掉其流量记录。"""
+    with store_tx() as conn:
+        conn.execute("DELETE FROM v2ray_srv_traffic WHERE node_id=?", (str(node_id),))
 
 
 # ---------------------------------------------------------------------------
@@ -492,6 +568,114 @@ def purge_nodes(ids=None):
                                % ",".join("?" * len(ids)), tuple(ids))
         else:
             cur = conn.execute("DELETE FROM v2ray_nodes WHERE deleted=1")
+        return cur.rowcount or 0
+
+
+# ---------------------------------------------------------------------------
+# 本地服务端节点（v2ray_local_servers）
+# ---------------------------------------------------------------------------
+
+_LOCAL_SERVER_FIELDS = ("uuid", "security", "sni", "dest", "shortid",
+                        "privatekey", "fp", "flow", "outbound")
+
+
+def _local_row(r):
+    if not r:
+        return None
+    d = dict(r)
+    try:
+        cfg = json.loads(d.get("cfg") or "{}")
+        if not isinstance(cfg, dict):
+            cfg = {}
+    except (TypeError, ValueError):
+        cfg = {}
+    d["cfg"] = cfg
+    d["enabled"] = bool(d.get("enabled", 0))
+    # 常用字段提到顶层，便于接口直接用
+    for k in _LOCAL_SERVER_FIELDS:
+        d[k] = cfg.get(k, "")
+    return d
+
+
+def list_local_servers() -> list:
+    """全部本地服务端节点（按 sort / 创建时间）。"""
+    conn = store_conn()
+    try:
+        rows = conn.execute("SELECT * FROM v2ray_local_servers ORDER BY sort, created_at").fetchall()
+        return [_local_row(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_local_server(sid: str):
+    conn = store_conn()
+    try:
+        r = conn.execute("SELECT * FROM v2ray_local_servers WHERE id=?", (str(sid),)).fetchone()
+        return _local_row(r)
+    finally:
+        conn.close()
+
+
+def add_local_server(name: str, proto: str, port: int, cfg: dict, remark: str = "") -> str:
+    sid = uuid.uuid4().hex[:12]
+    now = time.time()
+    with store_tx() as conn:
+        row = conn.execute("SELECT COALESCE(MAX(sort),0)+1 AS n FROM v2ray_local_servers").fetchone()
+        sort = int(row["n"] or 1)
+        conn.execute(
+            "INSERT INTO v2ray_local_servers (id,name,proto,port,cfg,remark,sort,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (sid, str(name or ""), str(proto or "vless"), int(port or 0),
+             json.dumps(cfg or {}, ensure_ascii=False), str(remark or ""), sort, now, now))
+    return sid
+
+
+def update_local_server(sid, name=None, proto=None, port=None, cfg=None, remark=None):
+    sets, args = [], []
+    if name is not None:
+        sets.append("name=?"); args.append(str(name))
+    if proto is not None:
+        sets.append("proto=?"); args.append(str(proto))
+    if port is not None:
+        sets.append("port=?"); args.append(int(port))
+    if cfg is not None:
+        # 合并而非整体覆盖：只更新传进来的键
+        cur = get_local_server(sid) or {}
+        merged = dict(cur.get("cfg") or {})
+        merged.update({k: v for k, v in cfg.items() if v is not None})
+        sets.append("cfg=?"); args.append(json.dumps(merged, ensure_ascii=False))
+    if remark is not None:
+        sets.append("remark=?"); args.append(str(remark))
+    if sets:
+        sets.append("updated_at=?"); args.append(time.time())
+        args.append(str(sid))
+        with store_tx() as conn:
+            conn.execute("UPDATE v2ray_local_servers SET " + ", ".join(sets) + " WHERE id=?", tuple(args))
+    return get_local_server(sid)
+
+
+def set_local_server_enabled(sid, enabled: bool) -> dict:
+    """设置本地节点的启用状态（共用内核模式下是否并入主内核）。"""
+    with store_tx() as conn:
+        conn.execute("UPDATE v2ray_local_servers SET enabled=?, updated_at=? WHERE id=?",
+                     (1 if enabled else 0, time.time(), str(sid)))
+    return get_local_server(sid)
+
+
+def list_enabled_local_servers() -> list:
+    """已启用的本地节点（共用内核时并入主配置）。"""
+    conn = store_conn()
+    try:
+        rows = conn.execute("SELECT * FROM v2ray_local_servers WHERE enabled=1"
+                            " ORDER BY sort, created_at").fetchall()
+        return [_local_row(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def delete_local_server(sid) -> int:
+    with store_tx() as conn:
+        cur = conn.execute("DELETE FROM v2ray_local_servers WHERE id=?", (str(sid),))
         return cur.rowcount or 0
 
 

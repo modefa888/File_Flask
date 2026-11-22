@@ -94,6 +94,10 @@ def _pid_alive(pid: int) -> bool:
         return False
     try:
         os.kill(pid, 0)
+    except PermissionError:
+        # 进程存在但属主不同（如内核以 root 运行、Flask 以普通用户运行）：
+        # kill(pid, 0) 会抛 EPERM，这恰恰说明进程活着，不能当成已死。
+        pass
     except OSError:
         return False
     try:
@@ -139,11 +143,31 @@ def _boot_check():
                  "started_at": float(st.get("started_at") or 0), "core": st.get("core", ""),
                  "external": True}
         _log.info("接管已运行的 V2Ray 内核进程 pid=%s", pid)
-    elif pid:
+        return
+    if pid:
         try:
             os.remove(_STATE_FILE)
         except OSError:
             pass
+    # state.json 丢失（父进程重启 / 上次异常退出）但内核仍在监听业务端口：
+    # 扫描该端口，若发现是本项目主代理内核，写入 state 接管，界面即可正确显示运行中，
+    # 而不是一边实际在跑、一边显示「未运行」还误报端口冲突。
+    settings = _settings()
+    port = int(settings.get("socks_port") or 10808)
+    for proc in _own_core_procs():
+        if port not in proc["ports"]:
+            continue
+        base = os.path.basename(proc["config"])
+        # 排除本地服务端节点内核（配置是 srv-*.json / server-config.json）
+        if base.startswith("srv-") or base == "server-config.json":
+            continue
+        cand = proc["pid"]
+        _meta = {"node_id": str(settings.get("active_node") or ""), "node_name": "",
+                 "started_at": time.time(), "core": "", "external": True}
+        _write_state({"pid": cand, "node_id": _meta["node_id"],
+                      "started_at": _meta["started_at"], "core": ""})
+        _log.info("state 缺失，已按配置端口接管主代理内核 pid=%s", cand)
+        break
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +187,94 @@ def _port_free(port: int) -> bool:
         return False
     finally:
         s.close()
+
+
+def _own_core_procs() -> list:
+    """扫描本机所有「本项目 data/v2ray 配置」的内核进程。
+
+    返回 [{'pid':int, 'config':str, 'ports':set(int)}]。不依赖读取 /proc/<pid>/fd
+    （非 root 读不到 root 内核的 fd），而是从进程 cmdline 里的 -c 配置文件读出
+    监听端口，因此普通权限也能准确识别自家内核占用的端口。
+    """
+    out = []
+    cfg_dir = os.path.normpath(_DIR).replace("\\", "/")
+    try:
+        names = [n for n in os.listdir("/proc") if n.isdigit()]
+    except OSError:
+        return out
+    for name in names:
+        pid = int(name)
+        if pid == os.getpid():
+            continue
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                argv = f.read().decode("utf-8", "replace").split("\0")
+        except OSError:
+            continue
+        if not any(x in " ".join(argv) for x in ("xray", "v2ray", "sing-box")):
+            continue
+        # 取 -c 指定的配置文件路径
+        config_path = ""
+        if "-c" in argv:
+            i = argv.index("-c")
+            if i + 1 < len(argv):
+                config_path = argv[i + 1]
+        if not config_path or cfg_dir not in config_path.replace("\\", "/"):
+            continue
+        # 从配置里读监听端口（inbounds[].port）
+        ports = set()
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                conf = json.load(f)
+            for ib in (conf.get("inbounds") or []):
+                p = int((ib or {}).get("port") or 0)
+                if p:
+                    ports.add(p)
+        except (OSError, ValueError, TypeError):
+            pass
+        out.append({"pid": pid, "config": config_path, "ports": ports})
+    return out
+
+
+def _is_own_core(pid: int) -> bool:
+    """PID 是否为本模块拉起的内核进程：cmdline 指向本项目 data/v2ray 下的配置。"""
+    return any(p["pid"] == pid for p in _own_core_procs())
+
+
+def _reap_orphan_cores(port: int, keep_pid: int = 0) -> list:
+    """清理占用 port 的「孤儿」内核进程（本项目内核但已失去管理记录）。
+
+    只清理满足全部条件的进程：配置里监听该端口、cmdline 指向本项目 data/v2ray、
+    且不在受管记录（state.json / 本地节点 state / keep_pid）里。返回被清理的 PID。
+    """
+    reaped = []
+    managed = set()
+    sp = int(_read_state().get("pid") or 0)
+    if sp:
+        managed.add(sp)
+    try:
+        for name in os.listdir(_DIR):
+            if name.endswith(".state.json") or name == "server-state.json":
+                try:
+                    with open(os.path.join(_DIR, name), "r", encoding="utf-8") as f:
+                        d = json.load(f)
+                    npid = int((d or {}).get("pid") or 0)
+                    if npid:
+                        managed.add(npid)
+                except (OSError, ValueError):
+                    pass
+    except OSError:
+        pass
+    if keep_pid:
+        managed.add(keep_pid)
+    for proc in _own_core_procs():
+        pid, ports = proc["pid"], proc["ports"]
+        if pid in managed or port not in ports:
+            continue
+        _log.warning("清理占用端口 %s 的孤儿内核进程 pid=%s（%s）", port, pid, proc["config"])
+        _kill(pid)
+        reaped.append(pid)
+    return reaped
 
 
 def _share_urls(port: int, listen: str, user: str, pwd: str, http_port: int = 0) -> list:
@@ -334,6 +446,32 @@ def _write_and_validate(core: str, cfg: dict) -> str:
     return _validate_config(core, _CONFIG_FILE)
 
 
+def _local_nodes_for_main(core: str, main_ports: set) -> list:
+    """收集「共用内核」模式下要并入主配置的本地服务端节点。
+
+    仅 Xray 内核支持（sing-box 的服务端入站格式不同，回退独立进程）。
+    端口与主代理端口冲突的节点跳过，避免配置校验失败。
+    """
+    if v2raycfg.core_kind(core) == "sing-box":
+        return []
+    out = []
+    for r in v2raydb.list_enabled_local_servers():
+        port = int(r.get("port") or 0)
+        if not port or port in main_ports:
+            continue
+        c = dict(r.get("cfg") or {})
+        out.append({
+            "sid": r["id"], "name": r.get("name") or "本地节点",
+            "proto": r.get("proto") or "vless", "port": port,
+            "uuid": c.get("uuid") or "", "security": c.get("security") or "none",
+            "sni": c.get("sni") or "", "dest": c.get("dest") or "",
+            "shortid": c.get("shortid") or "", "privatekey": c.get("privatekey") or "",
+            "flow": c.get("flow") or "", "fp": c.get("fp") or "",
+            "outbound": c.get("outbound") or "proxy",
+        })
+    return out
+
+
 def start(node_id: str, auto_probe: bool = True) -> dict:
     """按节点启动内核；已有进程则先停掉。返回 status()。
     auto_probe=True（手动连接 / 切换节点）时，启动成功后后台实测一次
@@ -354,12 +492,24 @@ def start(node_id: str, auto_probe: bool = True) -> dict:
 
         port = int(st.get("socks_port") or 10808)
         if _proc is None and not _port_free(port) and not _running_unmanaged():
-            return {"error": "端口 %s 已被其它进程占用，请先在设置里改端口或结束占用进程" % port}
+            # 端口被占：先尝试清理本项目遗留的孤儿内核（父进程重启后失去管理记录的），
+            # 仍被占才判定为外部程序占用，避免把自家进程误报成冲突。
+            _reap_orphan_cores(port)
+            if not _port_free(port) and not _running_unmanaged():
+                owners = [p["pid"] for p in _own_core_procs() if port in p["ports"]]
+                detail = ("（PID %s）" % ", ".join(str(p) for p in sorted(owners))) if owners else ""
+                return {"error": "端口 %s 已被其它进程占用%s，请先在设置里改端口或结束占用进程" %
+                        (port, detail)}
 
         _ensure_dir()
         kind = v2raycfg.core_kind(core)
+        # 共用内核：把已启用的本地服务端节点并入同一份配置 / 同一个内核进程
+        main_ports = {port, int(st.get("http_port") or 0),
+                      int(st.get("api_port") or 0)}
+        opts = dict(st, core_path=core)
+        opts["local_nodes"] = _local_nodes_for_main(core, main_ports)
         try:
-            cfg = v2raycfg.build_config(node, dict(st, core_path=core))
+            cfg = v2raycfg.build_config(node, opts)
         except ValueError as e:
             return {"error": "生成配置失败：%s" % e}
 

@@ -1443,6 +1443,43 @@ def _cn_route_rule(opts: dict) -> dict:
     return rule
 
 
+def build_local_server_inbound(srv: dict) -> dict:
+    """把一个「本地服务端节点」配置生成为 Xray 入站，供共用内核时并入主配置。
+
+    srv 字段：sid / proto / port / uuid / security / sni / dest / shortid /
+    privatekey / flow / fp / outbound。入站 tag 统一为 `srv-<sid>`，便于统计与路由。
+    """
+    sid = str(srv.get("sid") or srv.get("id") or "")
+    proto = str(srv.get("proto") or "vless").lower()
+    security = str(srv.get("security") or "none").lower()
+    ib = {
+        "tag": "srv-%s" % sid,
+        "listen": "0.0.0.0",
+        "port": int(srv.get("port") or 0),
+        "protocol": proto,
+        "streamSettings": {"network": "tcp"},
+    }
+    clients = [{"id": str(srv.get("uuid") or "")}]
+    if proto == "vmess":
+        clients[0]["alterId"] = 0
+    else:
+        ib["settings"] = {"decryption": "none"}
+    if proto == "vless" and security == "reality":
+        clients[0]["flow"] = srv.get("flow") or "xtls-rprx-vision"
+        ib["streamSettings"]["security"] = "reality"
+        ib["streamSettings"]["realitySettings"] = {
+            "show": False,
+            "dest": srv.get("dest") or "www.overleaf.com:443",
+            "xver": 0,
+            "serverNames": [s for s in [srv.get("sni") or "www.overleaf.com"] if s],
+            "privateKey": srv.get("privatekey") or "",
+            "shortIds": [srv.get("shortid") or ""],
+        }
+    ib["settings"] = ib.get("settings") or {}
+    ib["settings"]["clients"] = clients
+    return ib
+
+
 def _build_xray_config(node: dict, opts: dict) -> dict:
     """生成完整 Xray / V2Ray 配置（入参说明见 build_config）。"""
     port = _as_int(opts.get("socks_port") or 10808) or 10808
@@ -1514,12 +1551,32 @@ def _build_xray_config(node: dict, opts: dict) -> dict:
         },
     }
 
+    # 共用内核：把「本地服务端节点」并入同一个内核，作为额外入站，
+    # 流量直接走本配置的 proxy / direct 出站，不再链式转发到 10808。
+    local_nodes = [n for n in (opts.get("local_nodes") or []) if isinstance(n, dict)]
+    direct_tags = []
+    for srv in local_nodes:
+        ib = build_local_server_inbound(srv)
+        if not ib.get("port"):
+            continue
+        cfg["inbounds"].append(ib)
+        if str(srv.get("outbound") or "proxy").lower() == "direct":
+            direct_tags.append(ib["tag"])
+    if direct_tags:
+        # 「本机直连」的节点：其入站流量强制走 direct，不随主代理出口。
+        # 放在直连规则前，但 api-in 规则始终在最前（见下方 insert(0)）。
+        cfg["routing"]["rules"].insert(0, {"type": "field", "inboundTag": direct_tags,
+                                           "outboundTag": "direct"})
+
     if api_port:
         cfg["stats"] = {}
-        # 关键：Xray 默认不记录按 outbound 的流量计数，必须显式打开，
-        # 否则 statsquery 永远返回空、实时网速 / 流量统计全是 0
+        # 同时打开 outbound / inbound 统计：
+        #   outbound 统计 = 本机 10808 出口的实时网速 / 总流量；
+        #   inbound  统计 = 各本地服务端节点（tag = srv-xxx）的转发流量。
         cfg["policy"] = {"system": {"statsOutboundUplink": True,
-                                    "statsOutboundDownlink": True}}
+                                    "statsOutboundDownlink": True,
+                                    "statsInboundUplink": True,
+                                    "statsInboundDownlink": True}}
         cfg["api"] = {"tag": "api", "services": ["StatsService"]}
         cfg["inbounds"].append({"tag": "api-in", "listen": "127.0.0.1", "port": api_port,
                                 "protocol": "dokodemo-door",

@@ -995,28 +995,28 @@
 }
 
 /* --- 列表项 --- */
-.v2v-list { display: flex; flex-direction: column; gap: 8px; }
-/* 流量统计列表：只露出 5 行，其余滚动查看（实际高度由 v2TrafListFit 按行高计算） */
-.v2v-traf-list {
+.v2v-list { display: flex; flex-direction: column; gap: 11px; }
+/* 流量统计 / 节点列表：只露出 5 行，其余滚动查看（实际高度由 JS 按行高计算） */
+.v2v-traf-list, .v2v-node-list {
   max-height: 420px;              /* 首屏兜底；渲染后由 JS 覆盖为 5 行高度 */
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 4px;
   scrollbar-width: thin;
 }
-.v2v-traf-list::-webkit-scrollbar { width: 6px; }
-.v2v-traf-list::-webkit-scrollbar-thumb {
+.v2v-traf-list::-webkit-scrollbar, .v2v-node-list::-webkit-scrollbar { width: 6px; }
+.v2v-traf-list::-webkit-scrollbar-thumb, .v2v-node-list::-webkit-scrollbar-thumb {
   background: rgba(150, 151, 161, .35);
   border-radius: 99px;
 }
-.v2v-traf-list::-webkit-scrollbar-thumb:hover { background: rgba(150, 151, 161, .55); }
+.v2v-traf-list::-webkit-scrollbar-thumb:hover, .v2v-node-list::-webkit-scrollbar-thumb:hover { background: rgba(150, 151, 161, .55); }
 /* 「加载更多」分页按钮：节点量大时列表分批渲染，按钮居中放在列表末尾 */
 .v2v-more { display: flex; justify-content: center; padding: 12px 0 4px; }
 .v2v-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 11px 13px;
+  padding: 15px 13px;
   border: 1px solid #2d2e37;
   border-radius: 11px;
   background: rgba(255, 255, 255, .024);
@@ -1281,6 +1281,8 @@
 }
 .v2v-hint .bi { flex: none; margin-top: 2px; color: #7fb6ff; }
 .v2v-hint strong { color: #d6e8f8; }
+/* 本地节点列表：提示条与首个节点之间留出间隔 */
+.v2v-hint + .v2v-list { margin-top: 10px; }
 .v2v-hint.warn { border-color: rgba(224, 168, 74, .3); background: rgba(224, 168, 74, .08); color: #dcbb84; }
 .v2v-hint.warn .bi { color: #e0a84a; }
 .v2v-hint.err { border-color: rgba(240, 97, 109, .3); background: rgba(240, 97, 109, .08); color: #eaa2a9; }
@@ -1589,6 +1591,27 @@ html.theme-light .v2-view select option { background: #fff; color: #1f2328; }
 :where(html.theme-light) .v2v-tsp.down > .bi { color: #2563eb; }
 :where(html.theme-light) .v2v-tbar { background: rgba(15, 23, 42, .09); }
 :where(html.theme-light) .v2v-traf-list::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, .22); }
+
+/* 本地节点流量配额进度 */
+.v2v-quota { margin-top: 12px; }
+.v2v-quota-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11.5px; color: var(--v2-dim); }
+.v2v-quota-head b { font-weight: 600; color: #d7d8de; font-variant-numeric: tabular-nums; }
+.v2v-quota-head b.warn { color: #e0a84a; }
+.v2v-quota-head b.err { color: #f28d96; }
+.v2v-quota-track { height: 7px; margin-top: 7px; border-radius: 99px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+.v2v-quota-track > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #12a37e, #3b82f6); transition: width .4s ease; }
+.v2v-quota-track > i.warn { background: linear-gradient(90deg, #d9912f, #e0a84a); }
+.v2v-quota-track > i.err { background: linear-gradient(90deg, #c33a4a, #f0616d); }
+.v2v-quota-tip { display: flex; align-items: center; gap: 7px; margin-top: 9px; font-size: 11.5px; line-height: 1.6; }
+.v2v-quota-tip .bi { flex: none; }
+.v2v-quota-tip.err { color: #eaa2a9; }
+.v2v-quota-tip.err .bi { color: #f0616d; }
+:where(html.theme-light) .v2v-quota-head b { color: #23262d; }
+:where(html.theme-light) .v2v-quota-head b.warn { color: #b07714; }
+:where(html.theme-light) .v2v-quota-head b.err { color: #c02b3a; }
+:where(html.theme-light) .v2v-quota-track { background: rgba(15, 23, 42, .09); }
+:where(html.theme-light) .v2v-quota-tip.err { color: #c02b3a; }
+:where(html.theme-light) .v2v-quota-tip.err .bi { color: #c02b3a; }
 
 /* ---------- 节点编辑悬浮框（挂在 .v2-view 内，随主题走） ---------- */
 .v2v-modal-ov {

@@ -34,6 +34,7 @@ import socket
 import stat
 import subprocess
 import tarfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -116,15 +117,32 @@ def _plat_arch() -> tuple:
     return plat, arch
 
 
+_VER_CACHE = {}      # path -> ((mtime, size), 输出, 时间戳)
+_VER_TTL = 300.0     # 内核版本输出缓存 5 分钟：状态接口被高频轮询时不再反复起进程
+
+
 def _version_output(path: str) -> str:
     """跑一次 `版本` 命令，返回原始输出（失败返回空串）。"""
     if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
         return ""
     try:
+        stt = os.stat(path)
+        sig = (stt.st_mtime, stt.st_size)
+    except OSError:
+        sig = None
+    now = time.time()
+    if sig is not None:
+        hit = _VER_CACHE.get(path)
+        if hit and hit[0] == sig and now - hit[2] < _VER_TTL:
+            return hit[1]
+    try:
         p = subprocess.run([path, "version"], capture_output=True, text=True, timeout=6)
     except (OSError, subprocess.SubprocessError):
         return ""
-    return (p.stdout or "") + (p.stderr or "")
+    out = (p.stdout or "") + (p.stderr or "")
+    if sig is not None:
+        _VER_CACHE[path] = (sig, out, now)
+    return out
 
 
 def _probe(path: str) -> str:

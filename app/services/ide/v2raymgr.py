@@ -562,6 +562,8 @@ def start(node_id: str, auto_probe: bool = True) -> dict:
         else:
             _conn_log("auto", "自动切换到节点：%s" % _node_disp)
         _ensure_failover_thread()          # 连上节点即确保自动切换看门狗在跑
+        _reset_stat_prev()                 # 新内核计数从 0 开始，清掉旧基准
+        _ensure_stats_thread()             # 流量统计常驻采样：关掉页面也继续累加
         if auto_probe:
             threading.Thread(target=_probe_after_switch, args=(_meta["node_id"],),
                              daemon=True, name="v2ray-postprobe").start()
@@ -980,11 +982,15 @@ def _stats_sample():
         su = sd = 0.0
         if ok and prev and last_ts:
             dt = max(0.5, now - last_ts)
-            du = max(0, counters["uplink"] - int(prev.get("up") or 0))
-            dd = max(0, counters["downlink"] - int(prev.get("down") or 0))
-            if (du or dd) and node_id:
-                # 增量计入当前节点 + 全局总行 + 今日行（一次事务）
-                v2raydb.add_traffic_sample(node_id, du, dd)
+            pu, pd = int(prev.get("up") or 0), int(prev.get("down") or 0)
+            # 计数变小说明内核重启过（换节点 / 重启服务），本次只重置基准不记增量，
+            # 否则会一直等到新计数超过旧基准才开始累加，中间的流量全丢
+            if counters["uplink"] >= pu and counters["downlink"] >= pd:
+                du = counters["uplink"] - pu
+                dd = counters["downlink"] - pd
+                if (du or dd) and node_id and v2raydb.stats_owner():
+                    # 增量计入当前节点 + 全局总行 + 今日行（一次事务）
+                    v2raydb.add_traffic_sample(node_id, du, dd)
             su, sd = du / dt, dd / dt
         _stat.update({"speed_up": su, "speed_down": sd, "ts": now, "api_ok": ok,
                       "prev": {"up": counters.get("uplink", 0),
@@ -995,7 +1001,7 @@ def _stats_sample():
             dt = max(0.5, now - (last_ts or 0)) if last_ts else 0.0
             if dt:
                 cl = inbound_clients()
-                if cl.get("ok") and cl.get("items"):
+                if cl.get("ok") and cl.get("items") and v2raydb.stats_owner():
                     _usage_sample(cl["items"], du, dd, dt)
         except Exception:                  # noqa: BLE001
             pass
@@ -1016,6 +1022,22 @@ def _ensure_stats_thread():
         _stats_thread = threading.Thread(target=_stats_loop, daemon=True,
                                          name="v2ray-stats")
         _stats_thread.start()
+
+
+def ensure_stats_thread():
+    """确保流量采样线程在跑（应用启动 / 连接节点时调用）。
+
+    采样必须是常驻的：增量靠「本次计数 - 上次计数」算出来，一旦中间有段时间没采样，
+    那段时间的流量就永久丢了（以前只在打开「概览」页时才启动线程，关掉页面就不统计）。
+    """
+    _ensure_stats_thread()
+
+
+def _reset_stat_prev():
+    """内核重启后计数从 0 开始：清掉旧的采样基准，避免第一个窗口被当成 0 增量。"""
+    with _stat_lock:
+        _stat["prev"] = {}
+        _stat["ts"] = 0.0
 
 
 # ---------------------------------------------------------------------------

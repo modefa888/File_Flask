@@ -51,7 +51,9 @@ _DEFAULTS = {
 
 # 本地节点流量统计 / 配额限制
 _API_PORT_BASE = 16400          # 每个本地节点的统计 API 端口从此基准往上找空闲端口
-_STAT_INTERVAL = 3.0            # 采样间隔（秒）
+_STAT_INTERVAL = 1.0            # 采样间隔（秒）：越小实时速度越灵敏
+_SPEED_WINDOW = 3.0             # 实时速度 = 最近 3 秒的滑动平均（避免忽 0 / 抖动）
+_STAT_STALE = 0.8               # 距上次采样超过该时长，traffic() 主动补采一次
 _STAT_TAG = "local-server-in"   # 统计所依据的入站 tag（与 build_config 一致）
 _QUOTA_ACTIONS = ("stop", "notify")   # 配额超限动作：停止节点 / 仅提示
 _QUOTA_DEFAULT_ACTION = "stop"
@@ -987,29 +989,35 @@ def node_gen_keys(sid: str) -> dict:
 # ===========================================================================
 
 _stat_lock = threading.Lock()
+_sample_lock = threading.Lock()    # 同一时刻只允许一次采样（线程与接口补采互斥）
 _stat = {
     "prev": {},    # sid -> {"up": bytes, "down": bytes}  上次内核计数器
+    "hist": {},    # sid -> [(ts, du, dd)]                最近几次增量（滑动平均用）
     "speed": {},   # sid -> {"up": B/s, "down": B/s}      实时速度
     "ts": {},      # sid -> 上次采样时间戳
     "ok": {},      # sid -> stats API 是否可用
 }
 _stat_thread = None
+_stat_last = 0.0   # 上次采样完成的时刻
 _quota_hit = {}    # sid -> True  本进程内已触发过配额超限（避免重复停止 / 刷日志）
+# 主内核信息缓存：采样线程每秒都要用，避免每次都去跑完整的 v2raymgr.status()
+_main_info = {"ts": 0.0, "pid": 0, "api_port": 0, "core": ""}
 
 
 def _stat_reset_node(sid: str):
-    """清除某节点的采样基准（节点重启 / 删除 / 清零时调用）。"""
+    """清除某节点的采样基准与速度窗口（节点重启 / 删除 / 清零时调用）。"""
     with _stat_lock:
-        for key in ("prev", "speed", "ts", "ok"):
+        for key in ("prev", "hist", "speed", "ts", "ok"):
             _stat[key].pop(sid, None)
     _quota_hit.pop(sid, None)
 
 
-def _xray_inbound_counters(core: str, api_port: int, tag: str = None) -> dict:
-    """`xray api statsquery` 取某入站 tag 的上下行累计字节。
+def _xray_inbound_stats(core: str, api_port: int) -> dict:
+    """`xray api statsquery` 一次取回该 API 端口上所有入站的累计字节。
 
     Xray 统计名格式：inbound>>>tag>>>traffic>>>uplink / downlink。
-    tag 为空时用默认 _STAT_TAG（独立进程模式的 local-server-in）。
+    返回 {tag: {"uplink": int, "downlink": int}}。共用内核时多个节点挂在同一个
+    API 端口上，这样每个采样周期只起一个子进程，节点再多也不会成倍变慢。
     """
     try:
         p = subprocess.run([core, "api", "statsquery", "--server=127.0.0.1:%d" % api_port],
@@ -1020,12 +1028,39 @@ def _xray_inbound_counters(core: str, api_port: int, tag: str = None) -> dict:
     except (OSError, subprocess.SubprocessError, ValueError):
         return {}
     out = {}
-    prefix = "inbound>>>%s>>>traffic>>>" % (tag or _STAT_TAG)
     for it in (j.get("stat") or []):
-        name = str((it or {}).get("name") or "")
-        if name.startswith(prefix):
-            out[name.rsplit(">>>", 1)[-1]] = int(str(it.get("value") or 0) or 0)
+        parts = str((it or {}).get("name") or "").split(">>>")
+        if len(parts) != 4 or parts[0] != "inbound" or parts[2] != "traffic":
+            continue
+        tag, direction = parts[1], parts[3]
+        if direction not in ("uplink", "downlink"):
+            continue
+        try:
+            val = int(str(it.get("value") or 0) or 0)
+        except (TypeError, ValueError):
+            val = 0
+        out.setdefault(tag, {})[direction] = val
     return out
+
+
+def _main_core_info(ttl: float = 2.0) -> dict:
+    """主内核 pid / 统计 API 端口 / 内核路径（缓存 ttl 秒）。"""
+    now = time.time()
+    c = _main_info
+    if now - float(c.get("ts") or 0) < ttl:
+        return c
+    try:
+        st = v2raymgr.status()
+    except Exception:                          # noqa: BLE001
+        return c
+    s = st.get("settings") or {}
+    c.update({
+        "ts": now,
+        "pid": int(st.get("pid") or 0) if st.get("running") else 0,
+        "api_port": _int(s.get("api_port") or 0),
+        "core": str((st.get("core") or {}).get("path") or ""),
+    })
+    return c
 
 
 def _quota_bytes(cfg: dict) -> int:
@@ -1041,6 +1076,7 @@ def _quota_bytes(cfg: dict) -> int:
 
 def _stats_sample():
     """采样一次所有运行中的本地节点：增量落库 + 实时速度 + 配额检查。"""
+    global _stat_last
     core = pick_xray_core()
     if not core:
         return
@@ -1049,17 +1085,16 @@ def _stats_sample():
     # 共用内核：统计从主内核的 api_port 读，tag = srv-<sid>；进程状态取自主内核
     main_api_port = main_pid = 0
     if shared:
-        mst = v2raymgr.status()
-        main_pid = int(mst.get("pid") or 0)
-        settings = mst.get("settings") or {}
-        main_api_port = _int(settings.get("api_port") or 0)
-        mcore = str((mst.get("core") or {}).get("path") or "")
-        if mcore:
-            core = mcore
+        mi = _main_core_info()
+        main_pid, main_api_port = int(mi["pid"]), int(mi["api_port"])
+        core = mi["core"] or core
     try:
         rows = v2raydb.list_local_servers()
     except Exception:                          # noqa: BLE001
         return
+    used_rows = None            # 配额判断用的累计量：本周期只读一次库
+    stats_cache = {}            # api_port -> {tag: counters}，同一端口只查一次
+    owner = v2raydb.stats_owner()   # 多实例时只让一个进程落库，避免流量翻倍
     for row in rows:
         sid = row["id"]
         try:
@@ -1071,59 +1106,74 @@ def _stats_sample():
             else:
                 running = bool(_node_pid(sid))
                 api_port = cfg.get("api_port") or 0
-                tag = None
+                tag = _STAT_TAG
             if not running or not api_port:
                 with _stat_lock:
                     _stat["speed"][sid] = {"up": 0.0, "down": 0.0}
                     _stat["ok"][sid] = False
+                    _stat["hist"].pop(sid, None)
                 continue
-            counters = _xray_inbound_counters(core, api_port, tag)
+            if api_port not in stats_cache:
+                stats_cache[api_port] = _xray_inbound_stats(core, api_port)
+            counters = stats_cache[api_port].get(tag) or {}
             ok = "uplink" in counters and "downlink" in counters
             du = dd = 0.0
             with _stat_lock:
                 prev = _stat["prev"].get(sid) or {}
                 last_ts = float(_stat["ts"].get(sid) or 0)
-                if ok and prev and last_ts:
-                    dt = max(0.5, now - last_ts)
-                    du = max(0, counters["uplink"] - int(prev.get("up") or 0))
-                    dd = max(0, counters["downlink"] - int(prev.get("down") or 0))
-                    su, sd = du / dt, dd / dt
-                else:
-                    su = sd = 0.0
-                _stat.update({
-                    "speed": {**_stat["speed"], sid: {"up": su, "down": sd}},
-                    "ok": {**_stat["ok"], sid: ok},
-                    "prev": {**_stat["prev"], sid: {"up": counters.get("uplink", 0),
-                                                     "down": counters.get("downlink", 0)} if ok else {}},
-                    "ts": {**_stat["ts"], sid: now},
-                })
-            if (du or dd):
+                pu, pd = int(prev.get("up") or 0), int(prev.get("down") or 0)
+                # 计数变小 = 主内核重启过（节点入站是并入主内核的），本次只重置基准：
+                # 否则新计数要追上旧基准才会开始累加，这期间的流量会被吞掉
+                if ok and prev and last_ts and counters["uplink"] >= pu and counters["downlink"] >= pd:
+                    du = counters["uplink"] - pu
+                    dd = counters["downlink"] - pd
+                # 实时速度取最近 _SPEED_WINDOW 秒的滑动平均：单次增量会被窗口摊平，
+                # 不会因为某个采样点恰好空闲就掉到 0；真的没流量时窗口内全是 0，自然归零
+                hist = _stat["hist"].setdefault(sid, [])
+                hist.append((now, du, dd))
+                while len(hist) > 1 and now - hist[0][0] > _SPEED_WINDOW:
+                    hist.pop(0)
+                span = max(0.5, now - hist[0][0])
+                _stat["speed"][sid] = {"up": sum(h[1] for h in hist) / span,
+                                       "down": sum(h[2] for h in hist) / span}
+                _stat["ok"][sid] = ok
+                _stat["prev"][sid] = ({"up": counters.get("uplink", 0),
+                                       "down": counters.get("downlink", 0)} if ok else {})
+                _stat["ts"][sid] = now
+            if (du or dd) and owner:
                 v2raydb.srv_add_traffic(sid, du, dd)
             # 配额检查：累计用量超过上限时按节点配置的动作处理
             limit = _quota_bytes(cfg)
             if limit > 0:
-                used = v2raydb.srv_traffic_rows().get(sid) or {}
-                used_bytes = int(used.get("up") or 0) + int(used.get("down") or 0)
+                if used_rows is None:
+                    used_rows = v2raydb.srv_traffic_rows()
+                used = used_rows.get(sid) or {}
+                used_bytes = (int(used.get("up") or 0) + int(used.get("down") or 0)
+                              + int(du + dd if owner else 0))   # 缓存读的是本周期落库前的值
                 if used_bytes >= limit:
                     if not _quota_hit.get(sid):
                         _quota_hit[sid] = True
                         _log.warning("本地节点 %s 流量已超配额（%s / %s），执行动作：%s",
                                      cfg["name"], used_bytes, limit, cfg.get("quota_action"))
                     node_running = (bool(row.get("enabled", 0)) and bool(main_pid)) if shared else bool(_node_pid(sid))
-                    if cfg.get("quota_action") == "stop" and node_running:
+                    if cfg.get("quota_action") == "stop" and node_running and owner:
                         stop_node(sid)
                 else:
                     _quota_hit.pop(sid, None)
         except Exception:                      # noqa: BLE001
             continue
+    _stat_last = time.time()
 
 
 def _stats_loop():
     while True:
-        try:
-            _stats_sample()
-        except Exception:                      # noqa: BLE001
-            pass
+        if _sample_lock.acquire(blocking=False):
+            try:
+                _stats_sample()
+            except Exception:                  # noqa: BLE001
+                pass
+            finally:
+                _sample_lock.release()
         time.sleep(_STAT_INTERVAL)
 
 
@@ -1135,16 +1185,43 @@ def _ensure_stat_thread():
         _stat_thread.start()
 
 
+def ensure_stat_thread():
+    """确保本地节点采样线程在跑（应用启动时调用）。
+
+    本地节点流量同样是「本次 - 上次」的增量：线程只在打开页面时才启动的话，
+    页面关着的时候别人连节点用的流量就永久丢了。
+    """
+    _ensure_stat_thread()
+
+
+def _sample_if_stale():
+    """接口被轮询时如果采样已经过期，就顺手补采一次，保证返回的是新鲜速度。
+
+    采样线程没起来 / 卡住时，这里也能兜住「实时速度一直是 0」的情况。
+    """
+    if time.time() - _stat_last < _STAT_STALE:
+        return
+    if not _sample_lock.acquire(blocking=False):
+        return                                 # 采样线程正在跑，用它刚算好的结果
+    try:
+        _stats_sample()
+    except Exception:                          # noqa: BLE001
+        pass
+    finally:
+        _sample_lock.release()
+
+
 def traffic() -> dict:
     """本地节点流量统计：总量 + 每个节点的用量 / 实时速度 / 配额状态。"""
     _migrate_api_ports()
     _ensure_stat_thread()
+    _sample_if_stale()
     rows = v2raydb.srv_traffic_rows()
     with _stat_lock:
         speeds = dict(_stat["speed"])
         oks = dict(_stat["ok"])
     shared = _shared_core()
-    main_pid = int(v2raymgr.status().get("pid") or 0) if shared else 0
+    main_pid = int(_main_core_info()["pid"]) if shared else 0
     nodes = []
     total_up = total_down = 0
     for row in v2raydb.list_local_servers():

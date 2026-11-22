@@ -74,6 +74,7 @@ def create_app(test_config=None) -> Flask:
     _init_chat_engine()
     _init_index_engine()
     _init_cron_engine(app)
+    _init_v2ray_traffic(app)
     _sync_api_registry(app)
 
     return app
@@ -278,6 +279,24 @@ def _init_cron_engine(app=None) -> None:
         cronsvc.ensure_scheduler()
     except Exception as e:                      # 调度器失败不应阻断服务启动
         _log.warning("定时任务调度器启动失败，继续启动: %s", e)
+
+
+def _init_v2ray_traffic(app=None) -> None:
+    """启动流量统计采样线程（幂等）。
+
+    V2Ray 的流量是「本次内核计数 - 上次内核计数」累加到库的，采样线程必须常驻：
+    以前只在打开「概览 / 本地节点」页时才按需启动，关掉页面后这段时间的流量
+    直接永久丢失（表现为「刷了半小时视频，累计流量一点没涨」）。
+    """
+    import os as _os
+    if app is not None and getattr(app, "debug", False) and _os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        return
+    try:
+        from .services.ide import v2raymgr, v2ray_server
+        v2raymgr.ensure_stats_thread()
+        v2ray_server.ensure_stat_thread()
+    except Exception as e:                      # noqa: BLE001
+        _log.warning("流量统计采样线程启动失败，继续启动: %s", e)
 
 
 def _init_index_engine() -> None:

@@ -10,13 +10,54 @@
     list_nodes / get_node / add_nodes / update_node / delete_nodes / clear_sub_nodes
 """
 import json
+import os
 import time
 import uuid
 
+from ... import config
 from ...log import get_logger
 from ..common.store_db import store_conn, store_tx
 
 _log = get_logger()
+
+_OWNER_FD = None       # 流量累加「主进程」持有的文件锁 fd（见 stats_owner）
+
+
+def stats_owner() -> bool:
+    """本进程是否负责把流量增量落库（跨进程选主，带自动接管）。
+
+    同一个 store.db 可能被多个本服务进程共用（比如又开了一个实例）。每个进程都在
+    按「本次内核计数 - 上次计数」算增量，若都落库，累计流量会成倍虚高；这里用一把
+    文件锁选出唯一的记账进程，其余进程只算实时速度、不写库。持锁进程退出后，
+    其它进程下一次调用就会接手。
+    """
+    global _OWNER_FD
+    if _OWNER_FD is not None:
+        return True
+    try:
+        import fcntl
+    except ImportError:                        # 非 POSIX：按单实例处理
+        _OWNER_FD = -1
+        return True
+    path = os.path.join(config.DATA_ROOT, "v2ray", ".traffic-owner.lock")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError:
+        _OWNER_FD = -1                         # 拿不到锁文件就别挡功能
+        return True
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return False
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, str(os.getpid()).encode())
+    except OSError:
+        pass
+    _OWNER_FD = fd
+    return True
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS v2ray_subs (

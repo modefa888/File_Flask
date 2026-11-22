@@ -566,6 +566,183 @@
       (sub ? "<span>" + sub + "</span>" : "") + "</div>" + (extra || "") + "</div>";
   }
 
+  /* ==================================================================
+     自定义下拉框：原生 <select> 只留作数据源（.value / change / val() 全部照旧），
+     收起态与展开菜单都换成自绘样式，避开系统弹层的白底、粗边框和字体不一致。
+     ================================================================== */
+  function v2vSelSync(sel) {
+    const wrap = sel && sel._v2vWrap;
+    if (!wrap) return;
+    const opt = sel.options[sel.selectedIndex] || null;
+    const tx = wrap.querySelector(".v2v-sel-tx");
+    if (tx) tx.textContent = opt ? String(opt.textContent || "").trim() : "";
+    const dis = !!sel.disabled;
+    wrap.classList.toggle("disabled", dis);
+    const btn = wrap.querySelector(".v2v-sel-btn");
+    if (btn) { btn.disabled = dis; btn.setAttribute("aria-disabled", dis ? "true" : "false"); }
+    wrap.querySelectorAll(".v2v-sel-opt").forEach(b => {
+      const on = b.dataset.v === sel.value;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
+
+  /* 把 root 里还没处理过的 select 逐个升级成自绘下拉（幂等，可重复调用） */
+  function v2vSelUpgrade(root) {
+    const scope = root || $("v2View");
+    if (!scope || !scope.querySelectorAll) return;
+    scope.querySelectorAll("select").forEach(sel => {
+      if (sel._v2vWrap) { v2vSelSync(sel); return; }
+      const wrap = document.createElement("div");
+      wrap.className = "v2v-sel";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "v2v-sel-btn";
+      btn.setAttribute("aria-haspopup", "listbox");
+      btn.setAttribute("aria-expanded", "false");
+      btn.innerHTML = '<span class="v2v-sel-tx"></span><i class="bi bi-chevron-down"></i>';
+      const menu = document.createElement("div");
+      menu.className = "v2v-sel-menu";
+      menu.setAttribute("role", "listbox");
+      Array.from(sel.options).forEach(o => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "v2v-sel-opt";
+        b.dataset.v = o.value;
+        b.setAttribute("role", "option");
+        b.innerHTML = '<span>' + esc(String(o.textContent || "").trim()) + '</span>' +
+          '<i class="bi bi-check2"></i>';
+        if (o.disabled) b.disabled = true;
+        menu.appendChild(b);
+      });
+      wrap.appendChild(btn);
+      wrap.appendChild(menu);
+      sel.parentNode.insertBefore(wrap, sel.nextSibling);
+      sel.classList.add("v2v-sel-native");
+      sel.tabIndex = -1;                        // 隐藏后不再进 Tab 序列，焦点交给自绘按钮
+      sel._v2vWrap = wrap;
+      wrap._v2vSel = sel;
+      sel._v2vSync = () => v2vSelSync(sel);
+      sel.addEventListener("change", () => v2vSelSync(sel));
+      // 点字段标题（label）不要激活隐藏的原生 select，改成点开自绘菜单
+      const field = sel.closest("label");
+      if (field) {
+        field.classList.add("v2v-sel-field");
+        field.addEventListener("click", (e) => {
+          if (e.target.closest(".v2v-sel") || sel.disabled) return;
+          e.preventDefault();                  // 别让 label 去激活隐藏的原生 select
+          if (wrap.classList.contains("open")) v2vSelCloseOne(wrap);
+          else v2vSelOpen(wrap);
+        });
+      }
+      v2vSelSync(sel);
+    });
+  }
+
+  function v2vSelCloseOne(wrap) {
+    if (!wrap) return;
+    wrap.classList.remove("open", "up");
+    const btn = wrap.querySelector(".v2v-sel-btn");
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    wrap.querySelectorAll(".v2v-sel-opt.kb").forEach(b => b.classList.remove("kb"));
+  }
+
+  function v2vSelCloseAll(except) {
+    document.querySelectorAll(".v2v-sel.open").forEach(w => { if (w !== except) v2vSelCloseOne(w); });
+  }
+
+  function v2vSelOpen(wrap) {
+    const sel = wrap._v2vSel;
+    if (!sel || sel.disabled) return;
+    v2vSelSync(sel);                            // 打开前先跟原生对齐（防止代码改过 value）
+    v2vSelCloseAll(wrap);
+    const btn = wrap.querySelector(".v2v-sel-btn");
+    const menu = wrap.querySelector(".v2v-sel-menu");
+    wrap.classList.add("open");
+    btn.setAttribute("aria-expanded", "true");
+    // 固定定位浮层：卡片 / 弹框里都不会被 overflow 裁掉
+    const r = btn.getBoundingClientRect();
+    menu.style.width = Math.max(150, Math.round(r.width)) + "px";
+    menu.style.maxHeight = Math.min(248, window.innerHeight - 24) + "px";
+    const h = menu.offsetHeight || 0;
+    let top = r.bottom + 6, up = false;
+    if (h && top + h > window.innerHeight - 8 && r.top - 6 - h > 8) {
+      top = r.top - 6 - h;
+      up = true;
+    }
+    menu.style.left = Math.round(r.left) + "px";
+    menu.style.top = Math.round(top) + "px";
+    wrap.classList.toggle("up", up);
+    const cur = menu.querySelector(".v2v-sel-opt.on") || menu.querySelector(".v2v-sel-opt");
+    if (cur) cur.classList.add("kb");
+  }
+
+  /* 全局只需一套委托：菜单项选择 / 开关 / 点空白处收起 / 键盘操作 */
+  document.addEventListener("click", (e) => {
+    const t = e.target;
+    if (!t || !t.closest) { v2vSelCloseAll(); return; }
+    const opt = t.closest(".v2v-sel-opt");
+    if (opt && !opt.disabled) {
+      const wrap = opt.closest(".v2v-sel");
+      const sel = wrap && wrap._v2vSel;
+      if (sel) {
+        sel.value = opt.dataset.v;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+        v2vSelSync(sel);
+      }
+      v2vSelCloseOne(wrap);
+      return;
+    }
+    const btn = t.closest(".v2v-sel-btn");
+    if (btn) {
+      const wrap = btn.closest(".v2v-sel");
+      if (!wrap) return;
+      if (wrap.classList.contains("open")) v2vSelCloseOne(wrap);
+      else v2vSelOpen(wrap);
+      return;
+    }
+    // 点字段标题（label 里包着下拉）由该字段自己的处理器负责，这里别抢先收起
+    if (t.closest(".v2v-sel-field")) return;
+    if (!t.closest(".v2v-sel")) v2vSelCloseAll();
+  });
+  /* 捕获阶段处理：下拉展开时 Esc 先收起下拉，不要顺带关掉悬浮框 / 整个面板 */
+  document.addEventListener("keydown", (e) => {
+    const open = document.querySelector(".v2v-sel.open");
+    if (!open) return;
+    const opts = Array.from(open.querySelectorAll(".v2v-sel-opt:not([disabled])"));
+    const cur = open.querySelector(".v2v-sel-opt.kb");
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      v2vSelCloseOne(open);
+      const b = open.querySelector(".v2v-sel-btn");
+      if (b) b.focus();
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      let i = opts.indexOf(cur);
+      i = e.key === "ArrowDown" ? Math.min(opts.length - 1, i + 1) : Math.max(0, i - 1);
+      opts.forEach(o => o.classList.remove("kb"));
+      if (opts[i]) {
+        opts[i].classList.add("kb");
+        opts[i].scrollIntoView({ block: "nearest" });
+      }
+      return;
+    }
+    if ((e.key === "Enter" || e.key === " ") && cur) {
+      e.preventDefault();
+      cur.click();
+    }
+  }, true);
+  /* 页面 / 弹框滚动、窗口尺寸变化时浮层会跟按钮错位，直接收起 */
+  document.addEventListener("scroll", (e) => {
+    const t = e.target;
+    if (t && t.nodeType === 1 && t.closest && t.closest(".v2v-sel-menu")) return;
+    v2vSelCloseAll();
+  }, true);
+  window.addEventListener("resize", () => v2vSelCloseAll());
+
   function v2vRender() {
     const box = $("v2View"); if (!box) return;
     const secs = [["overview", "概览", "bi-speedometer2"], ["nodes", "节点", "bi-diagram-3"],
@@ -632,6 +809,7 @@
     else if (V2.sec === "module") body = v2vModule(st);
     else body = v2vLog();
     box.innerHTML = head + tabbar + body;
+    v2vSelUpgrade(box);            // 所有 <select> 升级成自绘下拉
     v2ProgPaint();
     v2TrafListFit();
     v2NodeListFit();
@@ -764,7 +942,7 @@
   function v2vTrafSecHTML() {
     const t = V2.traffic;
     return v2vSecHead("bi-bar-chart-line", "流量统计",
-      "按节点累计的上下行流量，持久化保存，重启不丢",
+      "本机所有经代理的流量（浏览器 / 视频 / 本地节点转发）按远端节点累计，重启不丢",
       '<span class="v2v-flex"></span>' +
       '<button class="v2v-btn" data-act="traffic-refresh" title="立即刷新"><i class="bi bi-arrow-clockwise"></i></button>' +
       '<button class="v2v-btn danger" data-act="traffic-reset"><i class="bi bi-eraser"></i>清零</button>') +
@@ -1237,19 +1415,24 @@
     });
   }
 
-  /* ---------- 本地节点流量统计：每 3 秒轮询 stats API 采样结果 ---------- */
+  /* ---------- 本地节点流量统计：每 1 秒轮询 stats API 采样结果 ---------- */
   function v2SrvTrafficFetch() {
     return api("/api/v2ray/server/traffic").then(r => {
       if (r.error) return r;
       V2.srvTraffic = r;
-      // 只局部替换流量卡片，避免重绘整页打断正在编辑的配额 / 配置输入框
+      // 只刷新「速度 / 累计 / 配额条」这几块数值，输入框与按钮不重建，
+      // 这样秒级刷新不会打断正在编辑的配额，也不会吃掉刚点下的按钮
       if (v2vActive() && V2.sec === "server") {
-        const ae = document.activeElement;
-        const editing = ae && (ae.id === "v2vSrvQuota" || ae.id === "v2vSrvQuotaAct");
         const cur = (V2.serverNodes || []).find(n => n.id === V2.srvCur);
-        const box = $("v2vSrvTrafCard");
-        if (cur && box && !editing) box.outerHTML = v2vSrvTrafCard(cur);
-        else if (!cur) v2vRender();
+        if (!cur) { v2vRender(); return r; }
+        const tf = v2vSrvTrafOf(cur);
+        const chips = $("v2vSrvTrafChips"), quota = $("v2vSrvTrafQuota");
+        if (chips && quota) {
+          chips.innerHTML = v2vSrvChipsHTML(tf);
+          quota.innerHTML = v2vSrvQuotaHTML(tf, cur.running);
+        } else {
+          v2vRender();
+        }
       }
       return r;
     });
@@ -1259,30 +1442,41 @@
     if (V2.srvTrafTimer) return;
     V2.srvTrafTimer = setInterval(() => {
       if (v2vActive() && V2.sec === "server") v2SrvTrafficFetch().catch(() => {});
-    }, 3000);
+    }, 1000);
   }
   function v2SrvTrafStop() {
     if (V2.srvTrafTimer) { clearInterval(V2.srvTrafTimer); V2.srvTrafTimer = null; }
   }
 
-  /* 流量统计卡片：单独成函数，供整页渲染与轮询局部更新共用 */
-  function v2vSrvTrafCard(s) {
-    const traf = ((V2.srvTraffic && V2.srvTraffic.nodes) || []).find(t => t.id === s.id) || null;
-    const tf = traf || { up: 0, down: 0, speed_up: 0, speed_down: 0,
-                          quota_gb: s.quota_gb || 0, quota_bytes: 0,
-                          quota_action: s.quota_action || "stop", exceeded: false, api_ok: false };
-    const used = (tf.up || 0) + (tf.down || 0);
-    const quotaBytes = tf.quota_bytes || 0;
-    const pct = quotaBytes > 0 ? Math.min(100, Math.round(used * 100 / quotaBytes)) : 0;
+  /* 选中节点的流量记录；接口还没返回时给一份零值，省得各处判空 */
+  function v2vSrvTrafOf(s) {
+    const hit = ((V2.srvTraffic && V2.srvTraffic.nodes) || []).find(t => t.id === s.id) || null;
+    return hit || { up: 0, down: 0, speed_up: 0, speed_down: 0,
+                    quota_gb: s.quota_gb || 0, quota_bytes: 0,
+                    quota_action: s.quota_action || "stop", exceeded: false, api_ok: false };
+  }
+
+  /* 实时 / 累计四个数值块（后端速度已是 3 秒滑动平均，这里只负责显示） */
+  function v2vSrvChipsHTML(tf) {
     const chip = (ico, label, value, cls) =>
       '<div class="v2v-stat' + (cls ? " " + cls : "") + '">' +
       '<span class="v2v-stat-ico"><i class="bi ' + ico + '"></i></span>' +
       '<div class="v2v-stat-tx"><b>' + esc(label) + "</b><strong>" + esc(value) + "</strong></div></div>";
-    let quotaHtml = "";
+    return chip("bi-graph-up-arrow", "实时上行", fmtBytes(tf.speed_up || 0) + "/s", "up") +
+      chip("bi-graph-down-arrow", "实时下行", fmtBytes(tf.speed_down || 0) + "/s", "down") +
+      chip("bi-cloud-arrow-up", "累计上行", fmtBytes(tf.up || 0)) +
+      chip("bi-cloud-arrow-down", "累计下行", fmtBytes(tf.down || 0));
+  }
+
+  /* 配额用量条 + 超限提示 */
+  function v2vSrvQuotaHTML(tf, running) {
+    const used = (tf.up || 0) + (tf.down || 0);
+    const quotaBytes = tf.quota_bytes || 0;
+    let h = "";
     if (quotaBytes > 0) {
+      const pct = Math.min(100, Math.round(used * 100 / quotaBytes));
       const qcls = tf.exceeded ? "err" : (pct >= 80 ? "warn" : "");
-      quotaHtml =
-        '<div class="v2v-quota">' +
+      h = '<div class="v2v-quota">' +
         '<div class="v2v-quota-head"><span>配额用量</span>' +
         '<b class="' + qcls + '">' +
         fmtBytes(used) + " / " + esc(String(tf.quota_gb)) + " GB（" + pct + "%）</b></div>" +
@@ -1293,22 +1487,25 @@
           "。请清零流量或调高上限后重新启动。</div>" : "") +
         "</div>";
     }
+    if (tf.api_ok === false && running) {
+      h += '<div class="v2v-hint"><i class="bi bi-info-circle"></i>该节点统计 API 尚未就绪：确认节点已重启、统计端口未被占用后，流量数据才开始累计。</div>';
+    }
+    return h;
+  }
+
+  /* 流量统计卡片：供整页渲染使用（数值区带 id，轮询时只替换这两块） */
+  function v2vSrvTrafCard(s) {
+    const tf = v2vSrvTrafOf(s);
     return '<div class="v2v-sec" id="v2vSrvTrafCard">' +
       v2vSecHead("bi-bar-chart-line", "流量统计 · " + esc(s.name),
-        "每个节点独立统计 · 数据落库，重启不丢",
+        "只统计连到本节点 0.0.0.0:" + (s.port || "-") + " 的客户端流量；" +
+        "本机 10808/10809 走的流量在「概览 → 流量统计」里",
         '<span class="v2v-flex"></span>' +
         '<button class="v2v-btn" data-act="server-traffic-refresh"><i class="bi bi-arrow-clockwise"></i>刷新</button>' +
         '<button class="v2v-btn danger" data-act="server-traffic-reset" data-id="' + escA(s.id) +
         '"><i class="bi bi-eraser"></i>清零</button>') +
-      '<div class="v2v-trow">' +
-      chip("bi-graph-up-arrow", "实时上行", fmtBytes(tf.speed_up || 0) + "/s", "up") +
-      chip("bi-graph-down-arrow", "实时下行", fmtBytes(tf.speed_down || 0) + "/s", "down") +
-      chip("bi-cloud-arrow-up", "累计上行", fmtBytes(tf.up || 0)) +
-      chip("bi-cloud-arrow-down", "累计下行", fmtBytes(tf.down || 0)) +
-      "</div>" + quotaHtml +
-      (tf.api_ok === false && s.running
-        ? '<div class="v2v-hint"><i class="bi bi-info-circle"></i>该节点统计 API 尚未就绪：确认节点已重启、统计端口未被占用后，流量数据才开始累计。</div>'
-        : "") +
+      '<div class="v2v-trow" id="v2vSrvTrafChips">' + v2vSrvChipsHTML(tf) + "</div>" +
+      '<div id="v2vSrvTrafQuota">' + v2vSrvQuotaHTML(tf, s.running) + "</div>" +
       '<div class="v2v-subhead"><span>流量配额</span></div>' +
       '<div class="v2v-grid">' +
       '<label class="v2v-field"><span>流量上限（GB，0 = 不限）</span>' +
@@ -1875,6 +2072,7 @@
       if (!el) return;
       if (el.type === "checkbox") el.checked = !!snap[id];
       else el.value = snap[id];
+      if (el._v2vSync) el._v2vSync();          // 自绘下拉的文案跟着回填
     });
   }
 
@@ -2291,6 +2489,7 @@
       if (auth) {
         auth.disabled = isLan;
         if (isLan) auth.value = "1";          // 0.0.0.0 强制启用
+        if (auth._v2vSync) auth._v2vSync();
       }
       note.textContent = isLan
         ? "0.0.0.0 模式强制启用认证：账号 / 密码留空将在连接时自动生成并保存"
@@ -2394,6 +2593,7 @@
         "</div>";
       // 挂到 .v2-view 里，输入框才能吃到模块的表单主题样式（fixed 定位不受影响）
       ($("v2View") || document.body).appendChild(ov);
+      v2vSelUpgrade(ov);            // 弹框里的下拉框同样用自绘样式
 
       const tlsSel = ov.querySelector("#v2vENTls");
       if (tlsSel) tlsSel.onchange = () => {
@@ -3145,7 +3345,10 @@
         document.querySelectorAll('#v2View [data-act="route-mode"]').forEach(b =>
           b.classList.toggle("on", b.dataset.mode === m));
         const sel = $("v2vModBypass");
-        if (sel) sel.disabled = m !== "rule";
+        if (sel) {
+          sel.disabled = m !== "rule";
+          if (sel._v2vSync) sel._v2vSync();
+        }
         const tip = $("v2vRouteTip");
         const tips = {
           global: "除本机 / 局域网外，所有流量都走代理节点",

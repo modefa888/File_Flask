@@ -1008,3 +1008,151 @@
   :where(html.theme-light) .cron-spec-pop .csp-btn:hover { background: #e8f1fb; border-color: #0969da; color: #0969da; }
   :where(html.theme-light) .cron-spec-pop .csp-btn.primary { background: #0969da; border-color: #0969da; color: #fff; }
   :where(html.theme-light) .cron-spec-pop .csp-btn.primary:hover { background: #0550ae; border-color: #0550ae; }
+
+  /* ================= 自定义下拉框（替换原生 select 弹层） ================= */
+  /* 原生 select 仅作数据源：视觉隐藏，.value / change 行为完全不变 */
+  select.cdl-sel-native {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: hidden !important;
+    clip: rect(0 0 0 0) !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    box-shadow: none !important;
+    background-image: none !important;
+  }
+  .cdl-sel { position: relative; min-width: 0; }
+  .cdl-sel-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
+    height: 30px;
+    padding: 0 9px;
+    background: #1b1b1e;
+    border: 1px solid #3c3c3c;
+    border-radius: 6px;
+    color: #d4d4d4;
+    font-size: 12px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    outline: none;
+    transition: border-color .16s, box-shadow .16s, background-color .16s;
+  }
+  .cdl-sel-btn:hover { border-color: #0a6aa8; }
+  .cdl-sel-btn:focus-visible,
+  .cdl-sel.open .cdl-sel-btn {
+    border-color: #0a6aa8;
+    box-shadow: 0 0 0 3px rgba(10, 106, 168, .2);
+  }
+  .cdl-sel-tx {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cdl-sel-btn > .bi {
+    flex: none;
+    font-size: 10px;
+    color: #9aa4b2;
+    transition: transform .2s ease, color .16s ease;
+  }
+  .cdl-sel.open .cdl-sel-btn > .bi { transform: rotate(180deg); color: #0a6aa8; }
+  .cdl-sel.disabled .cdl-sel-btn { opacity: .55; cursor: not-allowed; }
+  .cdl-sel.disabled .cdl-sel-btn:hover { border-color: #3c3c3c; }
+  /* 面板工具行里的筛选用小号尺寸，和旁边的搜索框等高 */
+  .cron-view .cdl-sel-btn { height: 26px; padding: 0 8px; font-size: 11.5px; }
+  .cron-dialog .cdl-sel-btn { height: 32px; }
+  .cron-dialog .cd-code-row .cdl-sel-btn { width: 150px; flex: none; }
+
+  /* 固定定位浮层：卡片圆角 / 滚动容器都裁不到 */
+  .cdl-sel-menu {
+    position: fixed;
+    z-index: 4000;
+    left: 0;
+    top: 0;
+    box-sizing: border-box;
+    padding: 4px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: #232326;
+    border: 1px solid #3c3c3c;
+    border-radius: 8px;
+    box-shadow: 0 16px 38px -14px rgba(0, 0, 0, .72);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px) scale(.985);
+    transform-origin: top center;
+    transition: opacity .13s ease, transform .13s ease, visibility .13s ease;
+  }
+  .cdl-sel.open .cdl-sel-menu { opacity: 1; visibility: visible; transform: none; }
+  .cdl-sel.up .cdl-sel-menu { transform-origin: bottom center; }
+  .cdl-sel-menu::-webkit-scrollbar { width: 8px; }
+  .cdl-sel-menu::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .16); border-radius: 99px; }
+  .cdl-sel-opt {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: #d4d4d4;
+    font-size: 12px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background .12s ease, color .12s ease;
+  }
+  .cdl-sel-opt > span {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cdl-sel-opt > .bi {
+    flex: none;
+    font-size: 12px;
+    color: #0a6aa8;
+    opacity: 0;
+    transition: opacity .12s ease;
+  }
+  .cdl-sel-opt:hover,
+  .cdl-sel-opt.kb { background: rgba(255, 255, 255, .07); color: #fff; }
+  .cdl-sel-opt.on { background: rgba(10, 106, 168, .22); color: #8ed0ff; }
+  .cdl-sel-opt.on > .bi { opacity: 1; }
+  .cdl-sel-opt[disabled] { opacity: .45; cursor: not-allowed; }
+
+  /* 浅色主题 */
+  html.theme-light .cdl-sel-btn { background: #ffffff; border-color: #d0d0d0; color: #1f2328; }
+  html.theme-light .cdl-sel-btn:hover { border-color: #0969da; }
+  html.theme-light .cdl-sel-btn:focus-visible,
+  html.theme-light .cdl-sel.open .cdl-sel-btn {
+    border-color: #0969da;
+    box-shadow: 0 0 0 3px rgba(9, 105, 218, .16);
+  }
+  html.theme-light .cdl-sel-btn > .bi { color: #8c959f; }
+  html.theme-light .cdl-sel.open .cdl-sel-btn > .bi { color: #0969da; }
+  html.theme-light .cdl-sel.disabled .cdl-sel-btn:hover { border-color: #d0d0d0; }
+  html.theme-light .cdl-sel-menu {
+    background: #ffffff;
+    border-color: #d0d7de;
+    box-shadow: 0 16px 36px -16px rgba(31, 35, 40, .28);
+  }
+  html.theme-light .cdl-sel-menu::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, .2); }
+  html.theme-light .cdl-sel-opt { color: #3d4450; }
+  html.theme-light .cdl-sel-opt:hover,
+  html.theme-light .cdl-sel-opt.kb { background: #f1f3f6; color: #11151b; }
+  html.theme-light .cdl-sel-opt.on { background: #e8f1fb; color: #0550ae; }
+  html.theme-light .cdl-sel-opt > .bi { color: #0969da; }

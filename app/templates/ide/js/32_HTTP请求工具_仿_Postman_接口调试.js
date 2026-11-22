@@ -25,6 +25,185 @@
 
   function apiAttr(s) { return escAttr ? escAttr(s) : esc(String(s == null ? "" : s)); }
 
+  /* ==================================================================
+     自定义下拉框：原生 <select> 留作数据源（.value / change 照旧），
+     收起态与菜单换成自绘样式；菜单按最长选项自适应宽度。
+     ================================================================== */
+  function apiSelSync(sel) {
+    const wrap = sel && sel._apiWrap;
+    if (!wrap) return;
+    const opt = sel.options[sel.selectedIndex] || null;
+    const tx = wrap.querySelector(".api-sel-tx");
+    if (tx) tx.textContent = opt ? String(opt.textContent || "").trim() : "";
+    const dis = !!sel.disabled;
+    wrap.classList.toggle("disabled", dis);
+    const btn = wrap.querySelector(".api-sel-btn");
+    if (btn) { btn.disabled = dis; btn.setAttribute("aria-disabled", dis ? "true" : "false"); }
+    wrap.querySelectorAll(".api-sel-opt").forEach(function (b) {
+      const on = b.dataset.v === sel.value;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
+  function apiSelUpgrade(root) {
+    const scope = root || document;
+    if (!scope || !scope.querySelectorAll) return;
+    scope.querySelectorAll("select").forEach(function (sel) {
+      if (sel._apiWrap) { apiSelSync(sel); return; }
+      const wrap = document.createElement("div");
+      wrap.className = "api-sel";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "api-sel-btn";
+      btn.setAttribute("aria-haspopup", "listbox");
+      btn.setAttribute("aria-expanded", "false");
+      btn.innerHTML = '<span class="api-sel-tx"></span><i class="bi bi-chevron-down"></i>';
+      const menu = document.createElement("div");
+      menu.className = "api-sel-menu";
+      menu.setAttribute("role", "listbox");
+      Array.from(sel.options).forEach(function (o) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "api-sel-opt";
+        b.dataset.v = o.value;
+        b.setAttribute("role", "option");
+        b.innerHTML = '<span>' + esc(String(o.textContent || "").trim()) + '</span>' +
+          '<i class="bi bi-check2"></i>';
+        if (o.disabled) b.disabled = true;
+        menu.appendChild(b);
+      });
+      wrap.appendChild(btn);
+      wrap.appendChild(menu);
+      sel.parentNode.insertBefore(wrap, sel.nextSibling);
+      sel.classList.add("api-sel-native");
+      sel.tabIndex = -1;
+      sel._apiWrap = wrap;
+      sel._apiSync = function () { apiSelSync(sel); };
+      wrap._apiSel = sel;
+      sel.addEventListener("change", function () { apiSelSync(sel); });
+      const field = sel.closest("label");
+      if (field) {
+        field.classList.add("api-sel-field");
+        field.addEventListener("click", function (e) {
+          if (e.target.closest(".api-sel") || sel.disabled) return;
+          e.preventDefault();
+          if (wrap.classList.contains("open")) apiSelCloseOne(wrap);
+          else apiSelOpen(wrap);
+        });
+      }
+      apiSelSync(sel);
+    });
+  }
+  function apiSelCloseOne(wrap) {
+    if (!wrap) return;
+    wrap.classList.remove("open", "up");
+    const btn = wrap.querySelector(".api-sel-btn");
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    wrap.querySelectorAll(".api-sel-opt.kb").forEach(function (b) { b.classList.remove("kb"); });
+  }
+  function apiSelCloseAll(except) {
+    document.querySelectorAll(".api-sel.open").forEach(function (w) {
+      if (w !== except) apiSelCloseOne(w);
+    });
+  }
+  function apiSelMenuWidth(menu, btnWidth) {
+    const opt = menu.querySelector(".api-sel-opt");
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (ctx && opt) ctx.font = getComputedStyle(opt).font || "13px sans-serif";
+    let w = 0;
+    menu.querySelectorAll(".api-sel-opt > span").forEach(function (sp) {
+      if (ctx) w = Math.max(w, ctx.measureText(sp.textContent || "").width);
+    });
+    const cap = Math.max(150, Math.min(360, window.innerWidth - 16));
+    return Math.min(cap, Math.max(Math.round(btnWidth), Math.ceil(w) + 76, 150));
+  }
+  function apiSelOpen(wrap) {
+    const sel = wrap._apiSel;
+    if (!sel || sel.disabled) return;
+    apiSelSync(sel);
+    apiSelCloseAll(wrap);
+    const btn = wrap.querySelector(".api-sel-btn");
+    const menu = wrap.querySelector(".api-sel-menu");
+    wrap.classList.add("open");
+    btn.setAttribute("aria-expanded", "true");
+    const r = btn.getBoundingClientRect();
+    const width = apiSelMenuWidth(menu, r.width);
+    menu.style.width = width + "px";
+    menu.style.maxHeight = Math.min(248, window.innerHeight - 24) + "px";
+    const h = menu.offsetHeight || 0;
+    let top = r.bottom + 6, up = false;
+    if (h && top + h > window.innerHeight - 8 && r.top - 6 - h > 8) {
+      top = r.top - 6 - h;
+      up = true;
+    }
+    menu.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - width - 8))) + "px";
+    menu.style.top = Math.round(top) + "px";
+    wrap.classList.toggle("up", up);
+    const cur = menu.querySelector(".api-sel-opt.on") || menu.querySelector(".api-sel-opt");
+    if (cur) cur.classList.add("kb");
+  }
+  document.addEventListener("click", function (e) {
+    const t = e.target;
+    if (!t || !t.closest) { apiSelCloseAll(); return; }
+    const opt = t.closest(".api-sel-opt");
+    if (opt && !opt.disabled) {
+      const wrap = opt.closest(".api-sel");
+      const sel = wrap && wrap._apiSel;
+      if (sel) {
+        sel.value = opt.dataset.v;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+        apiSelSync(sel);
+      }
+      apiSelCloseOne(wrap);
+      return;
+    }
+    const btn = t.closest(".api-sel-btn");
+    if (btn) {
+      const wrap = btn.closest(".api-sel");
+      if (!wrap) return;
+      if (wrap.classList.contains("open")) apiSelCloseOne(wrap);
+      else apiSelOpen(wrap);
+      return;
+    }
+    if (t.closest(".api-sel-field")) return;
+    if (!t.closest(".api-sel")) apiSelCloseAll();
+  });
+  document.addEventListener("keydown", function (e) {
+    const open = document.querySelector(".api-sel.open");
+    if (!open) return;
+    const opts = Array.from(open.querySelectorAll(".api-sel-opt:not([disabled])"));
+    const cur = open.querySelector(".api-sel-opt.kb");
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      apiSelCloseOne(open);
+      const b = open.querySelector(".api-sel-btn");
+      if (b) b.focus();
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      let i = opts.indexOf(cur);
+      i = e.key === "ArrowDown" ? Math.min(opts.length - 1, i + 1) : Math.max(0, i - 1);
+      opts.forEach(function (o) { o.classList.remove("kb"); });
+      if (opts[i]) {
+        opts[i].classList.add("kb");
+        opts[i].scrollIntoView({ block: "nearest" });
+      }
+      return;
+    }
+    if ((e.key === "Enter" || e.key === " ") && cur) {
+      e.preventDefault();
+      cur.click();
+    }
+  }, true);
+  document.addEventListener("scroll", function (e) {
+    const t = e.target;
+    if (t && t.nodeType === 1 && t.closest && t.closest(".api-sel-menu")) return;
+    apiSelCloseAll();
+  }, true);
+  window.addEventListener("resize", function () { apiSelCloseAll(); });
+
   function apiLoad() {
     if (API_REQS) return API_REQS;
     try { API_REQS = JSON.parse(localStorage.getItem(API_STORE_KEY) || "[]"); } catch (_) { API_REQS = []; }
@@ -1218,6 +1397,7 @@
         '</div>' +
       '</div>';
 
+    apiSelUpgrade(h);             // 请求栏的请求方法下拉
     tab.api.el = {
       root: h.querySelector(".api"), req: h.querySelector(".api-req"),
       method: h.querySelector(".api-method"), url: h.querySelector(".api-url"),
@@ -1659,6 +1839,7 @@
       const uu = box.querySelector(".api-auth-u"); if (uu) uu.addEventListener("input", function () { a.username = uu.value; apiPersist(); });
       const pp = box.querySelector(".api-auth-p"); if (pp) pp.addEventListener("input", function () { a.password = pp.value; apiPersist(); });
     }
+    apiSelUpgrade(box);           // 代理模式 / 认证类型下拉
     apiUpdateBadges(tab);
   }
 /*__APPEND__*/
@@ -1975,6 +2156,7 @@
         '<button class="api-find-prev" title="上一个（Shift+Enter）"><i class="bi bi-chevron-up"></i></button>' +
         '<button class="api-find-next" title="下一个（Enter）"><i class="bi bi-chevron-down"></i></button>' +
       '</span>';
+    apiSelUpgrade(el.view);       // 响应体语法语言下拉
     el.view.classList.add("on");
   }
 
@@ -2212,6 +2394,7 @@
     const p = uiModal({ title: "移动到分组 · " + (r.name || "未命名"), icon: "bi-folder-symlink", okText: "移动",
       html: '<div class="api-mv-row"><label class="api-lb">分组</label><select id="apiMvSel">' + opts + '</select></div>' });
     const sel = $("apiMvSel");     // uiModal 是同步注入 DOM 的，await 之前就能取到
+    if (sel && sel.parentNode) apiSelUpgrade(sel.parentNode);
     let pick = cur;
     // 注意：uiModal 关闭时会先清空 innerHTML 再 resolve，所以值必须在这里就记下来
     if (sel) sel.addEventListener("change", function () { pick = sel.value; });

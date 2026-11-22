@@ -1576,7 +1576,8 @@ html.theme-light body { background: #ffffff; color: #1f2328; }
 :where(html.theme-light) .dbc-bar { border-bottom-color: #e4e4e4; }
 :where(html.theme-light) .dbc-cur { color: #1f2328; }
 :where(html.theme-light) .dbc-mini { background: #f2f2f2; border-color: #cecece; color: #1f2328; }
-:where(html.theme-light) .dbc-mini:hover { background: #e4eaf2; }
+:where(html.theme-light) .dbc-mini:hover { background: #e4eaf2; border-color: #a8c8e8; color: #0b3d63; }
+:where(html.theme-light) .dbc-mini:disabled:hover { background: #f2f2f2; border-color: #cecece; color: #1f2328; }
 :where(html.theme-light) .dbc-sql { background: #f6f8fa; border-color: #d0d7de; box-shadow: 0 14px 36px rgba(0, 0, 0, .18); }
 :where(html.theme-light) .dbc-sql-head { border-bottom-color: #e4e4e4; }
 :where(html.theme-light) .dbc-sql-title { color: #005fb8; }

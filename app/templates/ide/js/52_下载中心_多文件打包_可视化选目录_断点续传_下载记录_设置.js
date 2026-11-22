@@ -29,6 +29,199 @@ if (typeof titles !== "undefined") titles.downloads = "下载中心";
 
 /* ---------------- 工具 ---------------- */
 function dlA(s) { return esc(s).replace(/"/g, "&quot;"); }
+
+/* ==================================================================
+   自定义下拉框：原生 <select> 只留作数据源（.value / change / data-cfg 全部照旧），
+   收起态与展开菜单换成自绘样式，不再出现各系统原生弹层的白底 / 粗边框。
+   ================================================================== */
+function dlcSelSync(sel) {
+  const wrap = sel && sel._dlcWrap;
+  if (!wrap) return;
+  const opt = sel.options[sel.selectedIndex] || null;
+  const tx = wrap.querySelector(".dlc-sel-tx");
+  if (tx) tx.textContent = opt ? String(opt.textContent || "").trim() : "";
+  const dis = !!sel.disabled;
+  wrap.classList.toggle("disabled", dis);
+  const btn = wrap.querySelector(".dlc-sel-btn");
+  if (btn) { btn.disabled = dis; btn.setAttribute("aria-disabled", dis ? "true" : "false"); }
+  wrap.querySelectorAll(".dlc-sel-opt").forEach(function (b) {
+    const on = b.dataset.v === sel.value;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+}
+
+/* 把 root 内还没升级过的 select 包成自绘下拉（幂等，可重复调用） */
+function dlcSelUpgrade(root) {
+  const scope = root || document.getElementById("dlCenter");
+  if (!scope || !scope.querySelectorAll) return;
+  scope.querySelectorAll("select").forEach(function (sel) {
+    if (sel._dlcWrap) { dlcSelSync(sel); return; }
+    // 弹框底部 HTML 会被缓存后整段 innerHTML 还原：里面带着旧的组件节点，
+    // 这里先摘掉，避免一个 select 套出两层自绘菜单
+    if (sel.classList.contains("dlc-sel-native")) {
+      const stale = sel.nextElementSibling;
+      if (stale && stale.classList.contains("dlc-sel")) stale.remove();
+      sel.classList.remove("dlc-sel-native");
+    }
+    const wrap = document.createElement("div");
+    wrap.className = "dlc-sel";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "dlc-sel-btn";
+    btn.setAttribute("aria-haspopup", "listbox");
+    btn.setAttribute("aria-expanded", "false");
+    btn.innerHTML = '<span class="dlc-sel-tx"></span><i class="bi bi-chevron-down"></i>';
+    const menu = document.createElement("div");
+    menu.className = "dlc-sel-menu";
+    menu.setAttribute("role", "listbox");
+    Array.from(sel.options).forEach(function (o) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "dlc-sel-opt";
+      b.dataset.v = o.value;
+      b.setAttribute("role", "option");
+      b.innerHTML = '<span>' + esc(String(o.textContent || "").trim()) + '</span>' +
+        '<i class="bi bi-check2"></i>';
+      if (o.disabled) b.disabled = true;
+      menu.appendChild(b);
+    });
+    wrap.appendChild(btn);
+    wrap.appendChild(menu);
+    sel.parentNode.insertBefore(wrap, sel.nextSibling);
+    sel.classList.add("dlc-sel-native");
+    sel.tabIndex = -1;                       // 焦点交给自绘按钮
+    sel._dlcWrap = wrap;
+    sel._dlcSync = function () { dlcSelSync(sel); };
+    wrap._dlcSel = sel;
+    sel.addEventListener("change", function () { dlcSelSync(sel); });
+    // 点字段标题（label）不要激活隐藏的原生 select
+    const field = sel.closest("label");
+    if (field) {
+      field.classList.add("dlc-sel-field");
+      field.addEventListener("click", function (e) {
+        if (e.target.closest(".dlc-sel") || sel.disabled) return;
+        e.preventDefault();
+        if (wrap.classList.contains("open")) dlcSelCloseOne(wrap);
+        else dlcSelOpen(wrap);
+      });
+    }
+    dlcSelSync(sel);
+  });
+}
+
+function dlcSelCloseOne(wrap) {
+  if (!wrap) return;
+  wrap.classList.remove("open", "up");
+  const btn = wrap.querySelector(".dlc-sel-btn");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+  wrap.querySelectorAll(".dlc-sel-opt.kb").forEach(function (b) { b.classList.remove("kb"); });
+}
+function dlcSelCloseAll(except) {
+  document.querySelectorAll(".dlc-sel.open").forEach(function (w) {
+    if (w !== except) dlcSelCloseOne(w);
+  });
+}
+/* 菜单按最长选项自适应，避免长文案被省略号截断 */
+function dlcSelMenuWidth(menu, btnWidth) {
+  const opt = menu.querySelector(".dlc-sel-opt");
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (ctx && opt) ctx.font = getComputedStyle(opt).font || "12px sans-serif";
+  let w = 0;
+  menu.querySelectorAll(".dlc-sel-opt > span").forEach(function (sp) {
+    if (ctx) w = Math.max(w, ctx.measureText(sp.textContent || "").width);
+  });
+  const cap = Math.max(150, Math.min(360, window.innerWidth - 16));
+  return Math.min(cap, Math.max(Math.round(btnWidth), Math.ceil(w) + 76, 150));
+}
+function dlcSelOpen(wrap) {
+  const sel = wrap._dlcSel;
+  if (!sel || sel.disabled) return;
+  dlcSelSync(sel);
+  dlcSelCloseAll(wrap);
+  const btn = wrap.querySelector(".dlc-sel-btn");
+  const menu = wrap.querySelector(".dlc-sel-menu");
+  wrap.classList.add("open");
+  btn.setAttribute("aria-expanded", "true");
+  const r = btn.getBoundingClientRect();
+  const width = dlcSelMenuWidth(menu, r.width);
+  menu.style.width = width + "px";
+  menu.style.maxHeight = Math.min(248, window.innerHeight - 24) + "px";
+  const h = menu.offsetHeight || 0;
+  let top = r.bottom + 6, up = false;
+  if (h && top + h > window.innerHeight - 8 && r.top - 6 - h > 8) {
+    top = r.top - 6 - h;
+    up = true;
+  }
+  menu.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - width - 8))) + "px";
+  menu.style.top = Math.round(top) + "px";
+  wrap.classList.toggle("up", up);
+  const cur = menu.querySelector(".dlc-sel-opt.on") || menu.querySelector(".dlc-sel-opt");
+  if (cur) cur.classList.add("kb");
+}
+
+document.addEventListener("click", function (e) {
+  const t = e.target;
+  if (!t || !t.closest) { dlcSelCloseAll(); return; }
+  const opt = t.closest(".dlc-sel-opt");
+  if (opt && !opt.disabled) {
+    const wrap = opt.closest(".dlc-sel");
+    const sel = wrap && wrap._dlcSel;
+    if (sel) {
+      sel.value = opt.dataset.v;
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+      dlcSelSync(sel);
+    }
+    dlcSelCloseOne(wrap);
+    return;
+  }
+  const btn = t.closest(".dlc-sel-btn");
+  if (btn) {
+    const wrap = btn.closest(".dlc-sel");
+    if (!wrap) return;
+    if (wrap.classList.contains("open")) dlcSelCloseOne(wrap);
+    else dlcSelOpen(wrap);
+    return;
+  }
+  if (t.closest(".dlc-sel-field")) return;
+  if (!t.closest(".dlc-sel")) dlcSelCloseAll();
+});
+/* 捕获阶段：下拉展开时 Esc 先收起菜单，不关掉整个弹窗 */
+document.addEventListener("keydown", function (e) {
+  const open = document.querySelector(".dlc-sel.open");
+  if (!open) return;
+  const opts = Array.from(open.querySelectorAll(".dlc-sel-opt:not([disabled])"));
+  const cur = open.querySelector(".dlc-sel-opt.kb");
+  if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    dlcSelCloseOne(open);
+    const b = open.querySelector(".dlc-sel-btn");
+    if (b) b.focus();
+    return;
+  }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    let i = opts.indexOf(cur);
+    i = e.key === "ArrowDown" ? Math.min(opts.length - 1, i + 1) : Math.max(0, i - 1);
+    opts.forEach(function (o) { o.classList.remove("kb"); });
+    if (opts[i]) {
+      opts[i].classList.add("kb");
+      opts[i].scrollIntoView({ block: "nearest" });
+    }
+    return;
+  }
+  if ((e.key === "Enter" || e.key === " ") && cur) {
+    e.preventDefault();
+    cur.click();
+  }
+}, true);
+document.addEventListener("scroll", function (e) {
+  const t = e.target;
+  if (t && t.nodeType === 1 && t.closest && t.closest(".dlc-sel-menu")) return;
+  dlcSelCloseAll();
+}, true);
+window.addEventListener("resize", function () { dlcSelCloseAll(); });
 /* 下载文件名规则：留空 = 服务端自动识别；填了就必须符合通用命名规则，
    否则保存到磁盘时会被系统 / 服务端静默改名，这里提前拦住。返回错误文案，空串=合法。 */
 function dlNameErr(name) {
@@ -914,6 +1107,7 @@ function dlRenderRecords() {
     '</div>' +
     '</div>';
   box.innerHTML = html;
+  dlcSelUpgrade(box);      // 记录视图的状态筛选下拉
 }
 
 /* ---------------- 视图三：设置 ---------------- */
@@ -1022,6 +1216,7 @@ function dlRenderSettings() {
         '提示：单文件下载直接读源文件，不复制；「已清理」指记录还在但本地文件已删除。' +
         '磁盘可用 = 当前产物目录所在分区的剩余空间，与该目录里的其它文件无关。</div>' +
     '</div>';
+  dlcSelUpgrade(box);      // 设置页里的数据配置下拉（并发 / 压缩级别 / 清理等）
   dlLoadNotify();          // 通知分区：拉配置 + 渲染可勾选的渠道账号
 }
 
@@ -2103,10 +2298,14 @@ function dlPickOpen(opts) {
     if (footEl) footEl.insertAdjacentHTML("beforebegin", '<div class="dlc-pick-urlpage" id="dlPkUrlPage" hidden></div>');
   }
 
+  dlcSelUpgrade(mask);     // 新建下载弹框：打包方式 / 压缩级别
   mask.classList.add("show");
   const cfg = DL.cfg || {};
   const lv = document.getElementById("dlPkLevel");
-  if (lv) lv.value = String(cfg.zip_level === undefined ? 6 : cfg.zip_level);
+  if (lv) {
+    lv.value = String(cfg.zip_level === undefined ? 6 : cfg.zip_level);
+    if (lv._dlcSync) lv._dlcSync();
+  }
   const st = document.getElementById("dlPkStruct");
   if (st) st.checked = cfg.keep_structure !== false;
   const hd = document.getElementById("dlPkIncHidden");
@@ -2191,8 +2390,15 @@ function dlPickFootRestore() {
   const P = DL.pick, foot = dlPickFooter();
   if (!P || !foot || !P.footHtml) return;
   foot.innerHTML = P.footHtml;
+  dlcSelUpgrade(foot);
   const v = P.footVal || {};
-  const s = function (id, val) { const el = document.getElementById(id); if (el && val) el.value = val; };
+  const s = function (id, val) {
+    const el = document.getElementById(id);
+    if (el && val) {
+      el.value = val;
+      if (el._dlcSync) el._dlcSync();
+    }
+  };
   const k = function (id, on) { const el = document.getElementById(id); if (el) el.checked = !!on; };
   s("dlPkKind", v.kind); s("dlPkName", v.name); s("dlPkLevel", v.level);
   k("dlPkStruct", v.struct); k("dlPkIncHidden", v.inc);
@@ -2216,7 +2422,7 @@ function dlPickTabSet(tab) {
   if (next === "url") {
     dlPickFootSave();
     if (body) body.style.display = "none";
-    if (page) { page.hidden = false; page.innerHTML = dlUrlPageHtml(); }
+    if (page) { page.hidden = false; page.innerHTML = dlUrlPageHtml(); dlcSelUpgrade(page); }
     if (foot) foot.innerHTML = dlUrlFootHtml();
     dlUrlNameCheck();              // 回填已有文件名时同步校验状态
   } else {

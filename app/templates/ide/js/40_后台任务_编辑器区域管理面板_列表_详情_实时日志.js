@@ -30,6 +30,185 @@ function rvRoot() { return document.getElementById("runnerView"); }
 function rvQ(sel) { const r = rvRoot(); return r ? r.querySelector(sel) : null; }
 function rvCur() { return (RUNNER.tasks || []).filter(x => String(x.id) === String(RUNVIEW.sel))[0]; }
 
+/* ==================================================================
+   自定义下拉框：原生 <select> 留作数据源（.value / change 照旧），
+   收起态与菜单换成自绘样式；菜单按最长选项自适应宽度。
+   ================================================================== */
+function rvSelSync(sel) {
+  const wrap = sel && sel._rvWrap;
+  if (!wrap) return;
+  const opt = sel.options[sel.selectedIndex] || null;
+  const tx = wrap.querySelector(".rv-sel-tx");
+  if (tx) tx.textContent = opt ? String(opt.textContent || "").trim() : "";
+  const dis = !!sel.disabled;
+  wrap.classList.toggle("disabled", dis);
+  const btn = wrap.querySelector(".rv-sel-btn");
+  if (btn) { btn.disabled = dis; btn.setAttribute("aria-disabled", dis ? "true" : "false"); }
+  wrap.querySelectorAll(".rv-sel-opt").forEach(function (b) {
+    const on = b.dataset.v === sel.value;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+}
+function rvSelUpgrade(root) {
+  const scope = root || rvRoot();
+  if (!scope || !scope.querySelectorAll) return;
+  scope.querySelectorAll("select").forEach(function (sel) {
+    if (sel._rvWrap) { rvSelSync(sel); return; }
+    const wrap = document.createElement("div");
+    wrap.className = "rv-sel";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "rv-sel-btn";
+    btn.setAttribute("aria-haspopup", "listbox");
+    btn.setAttribute("aria-expanded", "false");
+    btn.innerHTML = '<span class="rv-sel-tx"></span><i class="bi bi-chevron-down"></i>';
+    const menu = document.createElement("div");
+    menu.className = "rv-sel-menu";
+    menu.setAttribute("role", "listbox");
+    Array.from(sel.options).forEach(function (o) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "rv-sel-opt";
+      b.dataset.v = o.value;
+      b.setAttribute("role", "option");
+      b.innerHTML = '<span>' + esc(String(o.textContent || "").trim()) + '</span>' +
+        '<i class="bi bi-check2"></i>';
+      if (o.disabled) b.disabled = true;
+      menu.appendChild(b);
+    });
+    wrap.appendChild(btn);
+    wrap.appendChild(menu);
+    sel.parentNode.insertBefore(wrap, sel.nextSibling);
+    sel.classList.add("rv-sel-native");
+    sel.tabIndex = -1;
+    sel._rvWrap = wrap;
+    sel._rvSync = function () { rvSelSync(sel); };
+    wrap._rvSel = sel;
+    sel.addEventListener("change", function () { rvSelSync(sel); });
+    const field = sel.closest("label");
+    if (field) {
+      field.classList.add("rv-sel-field");
+      field.addEventListener("click", function (e) {
+        if (e.target.closest(".rv-sel") || sel.disabled) return;
+        e.preventDefault();
+        if (wrap.classList.contains("open")) rvSelCloseOne(wrap);
+        else rvSelOpen(wrap);
+      });
+    }
+    rvSelSync(sel);
+  });
+}
+function rvSelCloseOne(wrap) {
+  if (!wrap) return;
+  wrap.classList.remove("open", "up");
+  const btn = wrap.querySelector(".rv-sel-btn");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+  wrap.querySelectorAll(".rv-sel-opt.kb").forEach(function (b) { b.classList.remove("kb"); });
+}
+function rvSelCloseAll(except) {
+  document.querySelectorAll(".rv-sel.open").forEach(function (w) {
+    if (w !== except) rvSelCloseOne(w);
+  });
+}
+function rvSelMenuWidth(menu, btnWidth) {
+  const opt = menu.querySelector(".rv-sel-opt");
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (ctx && opt) ctx.font = getComputedStyle(opt).font || "11.5px sans-serif";
+  let w = 0;
+  menu.querySelectorAll(".rv-sel-opt > span").forEach(function (sp) {
+    if (ctx) w = Math.max(w, ctx.measureText(sp.textContent || "").width);
+  });
+  const cap = Math.max(120, Math.min(300, window.innerWidth - 16));
+  return Math.min(cap, Math.max(Math.round(btnWidth), Math.ceil(w) + 64, 96));
+}
+function rvSelOpen(wrap) {
+  const sel = wrap._rvSel;
+  if (!sel || sel.disabled) return;
+  rvSelSync(sel);
+  rvSelCloseAll(wrap);
+  const btn = wrap.querySelector(".rv-sel-btn");
+  const menu = wrap.querySelector(".rv-sel-menu");
+  wrap.classList.add("open");
+  btn.setAttribute("aria-expanded", "true");
+  const r = btn.getBoundingClientRect();
+  const width = rvSelMenuWidth(menu, r.width);
+  menu.style.width = width + "px";
+  menu.style.maxHeight = Math.min(248, window.innerHeight - 24) + "px";
+  const h = menu.offsetHeight || 0;
+  let top = r.bottom + 6, up = false;
+  if (h && top + h > window.innerHeight - 8 && r.top - 6 - h > 8) {
+    top = r.top - 6 - h;
+    up = true;
+  }
+  menu.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - width - 8))) + "px";
+  menu.style.top = Math.round(top) + "px";
+  wrap.classList.toggle("up", up);
+  const cur = menu.querySelector(".rv-sel-opt.on") || menu.querySelector(".rv-sel-opt");
+  if (cur) cur.classList.add("kb");
+}
+document.addEventListener("click", function (e) {
+  const t = e.target;
+  if (!t || !t.closest) { rvSelCloseAll(); return; }
+  const opt = t.closest(".rv-sel-opt");
+  if (opt && !opt.disabled) {
+    const wrap = opt.closest(".rv-sel");
+    const sel = wrap && wrap._rvSel;
+    if (sel) {
+      sel.value = opt.dataset.v;
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+      rvSelSync(sel);
+    }
+    rvSelCloseOne(wrap);
+    return;
+  }
+  const btn = t.closest(".rv-sel-btn");
+  if (btn) {
+    const wrap = btn.closest(".rv-sel");
+    if (!wrap) return;
+    if (wrap.classList.contains("open")) rvSelCloseOne(wrap);
+    else rvSelOpen(wrap);
+    return;
+  }
+  if (t.closest(".rv-sel-field")) return;
+  if (!t.closest(".rv-sel")) rvSelCloseAll();
+});
+document.addEventListener("keydown", function (e) {
+  const open = document.querySelector(".rv-sel.open");
+  if (!open) return;
+  const opts = Array.from(open.querySelectorAll(".rv-sel-opt:not([disabled])"));
+  const cur = open.querySelector(".rv-sel-opt.kb");
+  if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    rvSelCloseOne(open);
+    const b = open.querySelector(".rv-sel-btn");
+    if (b) b.focus();
+    return;
+  }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    let i = opts.indexOf(cur);
+    i = e.key === "ArrowDown" ? Math.min(opts.length - 1, i + 1) : Math.max(0, i - 1);
+    opts.forEach(function (o) { o.classList.remove("kb"); });
+    if (opts[i]) {
+      opts[i].classList.add("kb");
+      opts[i].scrollIntoView({ block: "nearest" });
+    }
+    return;
+  }
+  if ((e.key === "Enter" || e.key === " ") && cur) {
+    e.preventDefault();
+    cur.click();
+  }
+}, true);
+document.addEventListener("scroll", function (e) {
+  const t = e.target;
+  if (t && t.nodeType === 1 && t.closest && t.closest(".rv-sel-menu")) return;
+  rvSelCloseAll();
+}, true);
+window.addEventListener("resize", function () { rvSelCloseAll(); });
+
 /* ---------- 打开 / 关闭面板 ---------- */
 function openRunnerView(tid) {
   let tab = findTab(RUNNER_VIEW_PATH);
@@ -281,8 +460,10 @@ function rvBuild() {
       '</div>' +
     '</div>';
 
+  rvSelUpgrade(root);           // 状态筛选下拉（骨架只建一次，这里升级一次即可）
   const fEl = rvQ(".rv-filter");
   fEl.value = RUNVIEW.filter;
+  if (fEl._rvSync) fEl._rvSync();
   fEl.onchange = () => { RUNVIEW.filter = fEl.value; rvPaintList(); };
 
   const kEl = rvQ(".rv-search");

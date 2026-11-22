@@ -35,6 +35,195 @@
   var DBC_NAME_RE = /^[A-Za-z0-9_\u4e00-\u9fff-]{1,64}$/;   // 与后端 api_db_database 的校验保持一致
   var DBC_CHARSETS = [["utf8mb4", "utf8mb4（推荐，支持 emoji）"], ["utf8", "utf8"],
                       ["gbk", "gbk（中文）"], ["latin1", "latin1"]];
+  /* ==================================================================
+     自定义下拉框：原生 <select> 留作数据源（.value / change 照旧），
+     收起态与菜单换成自绘样式；库列表是异步拉取的，用 dbcSelRebuild 重建菜单。
+     ================================================================== */
+  function dbcSelSync(sel) {
+    const wrap = sel && sel._dbcWrap;
+    if (!wrap) return;
+    const opt = sel.options[sel.selectedIndex] || null;
+    const tx = wrap.querySelector(".dbc-sel-tx");
+    if (tx) tx.textContent = opt ? String(opt.textContent || "").trim() : "";
+    const dis = !!sel.disabled;
+    wrap.classList.toggle("disabled", dis);
+    const btn = wrap.querySelector(".dbc-sel-btn");
+    if (btn) { btn.disabled = dis; btn.setAttribute("aria-disabled", dis ? "true" : "false"); }
+    wrap.querySelectorAll(".dbc-sel-opt").forEach(function (b) {
+      const on = b.dataset.v === sel.value;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
+  function dbcSelFill(sel, menu) {
+    menu.innerHTML = "";
+    Array.from(sel.options).forEach(function (o) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "dbc-sel-opt";
+      b.dataset.v = o.value;
+      b.setAttribute("role", "option");
+      b.innerHTML = '<span>' + esc(String(o.textContent || "").trim()) + '</span>' +
+        '<i class="bi bi-check2"></i>';
+      if (o.disabled) b.disabled = true;
+      menu.appendChild(b);
+    });
+  }
+  function dbcSelRebuild(sel) {
+    const wrap = sel && sel._dbcWrap;
+    if (!wrap) return;
+    dbcSelFill(sel, wrap.querySelector(".dbc-sel-menu"));
+    dbcSelSync(sel);
+  }
+  function dbcSelUpgrade(root) {
+    const scope = root || document;
+    if (!scope || !scope.querySelectorAll) return;
+    scope.querySelectorAll("select").forEach(function (sel) {
+      if (sel._dbcWrap) { dbcSelSync(sel); return; }
+      const wrap = document.createElement("div");
+      wrap.className = "dbc-sel";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "dbc-sel-btn";
+      btn.setAttribute("aria-haspopup", "listbox");
+      btn.setAttribute("aria-expanded", "false");
+      btn.innerHTML = '<span class="dbc-sel-tx"></span><i class="bi bi-chevron-down"></i>';
+      const menu = document.createElement("div");
+      menu.className = "dbc-sel-menu";
+      menu.setAttribute("role", "listbox");
+      dbcSelFill(sel, menu);
+      wrap.appendChild(btn);
+      wrap.appendChild(menu);
+      sel.parentNode.insertBefore(wrap, sel.nextSibling);
+      sel.classList.add("dbc-sel-native");
+      sel.tabIndex = -1;
+      sel._dbcWrap = wrap;
+      sel._dbcSync = function () { dbcSelSync(sel); };
+      wrap._dbcSel = sel;
+      sel.addEventListener("change", function () { dbcSelSync(sel); });
+      const field = sel.closest("label");
+      if (field) {
+        field.classList.add("dbc-sel-field");
+        field.addEventListener("click", function (e) {
+          if (e.target.closest(".dbc-sel") || sel.disabled) return;
+          e.preventDefault();
+          if (wrap.classList.contains("open")) dbcSelCloseOne(wrap);
+          else dbcSelOpen(wrap);
+        });
+      }
+      dbcSelSync(sel);
+    });
+  }
+  function dbcSelCloseOne(wrap) {
+    if (!wrap) return;
+    wrap.classList.remove("open", "up");
+    const btn = wrap.querySelector(".dbc-sel-btn");
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    wrap.querySelectorAll(".dbc-sel-opt.kb").forEach(function (b) { b.classList.remove("kb"); });
+  }
+  function dbcSelCloseAll(except) {
+    document.querySelectorAll(".dbc-sel.open").forEach(function (w) {
+      if (w !== except) dbcSelCloseOne(w);
+    });
+  }
+  function dbcSelMenuWidth(menu, btnWidth) {
+    const opt = menu.querySelector(".dbc-sel-opt");
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (ctx && opt) ctx.font = getComputedStyle(opt).font || "12.5px sans-serif";
+    let w = 0;
+    menu.querySelectorAll(".dbc-sel-opt > span").forEach(function (sp) {
+      if (ctx) w = Math.max(w, ctx.measureText(sp.textContent || "").width);
+    });
+    const cap = Math.max(150, Math.min(360, window.innerWidth - 16));
+    return Math.min(cap, Math.max(Math.round(btnWidth), Math.ceil(w) + 76, 150));
+  }
+  function dbcSelOpen(wrap) {
+    const sel = wrap._dbcSel;
+    if (!sel || sel.disabled) return;
+    dbcSelSync(sel);
+    dbcSelCloseAll(wrap);
+    const btn = wrap.querySelector(".dbc-sel-btn");
+    const menu = wrap.querySelector(".dbc-sel-menu");
+    wrap.classList.add("open");
+    btn.setAttribute("aria-expanded", "true");
+    const r = btn.getBoundingClientRect();
+    const width = dbcSelMenuWidth(menu, r.width);
+    menu.style.width = width + "px";
+    menu.style.maxHeight = Math.min(248, window.innerHeight - 24) + "px";
+    const h = menu.offsetHeight || 0;
+    let top = r.bottom + 6, up = false;
+    if (h && top + h > window.innerHeight - 8 && r.top - 6 - h > 8) {
+      top = r.top - 6 - h;
+      up = true;
+    }
+    menu.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - width - 8))) + "px";
+    menu.style.top = Math.round(top) + "px";
+    wrap.classList.toggle("up", up);
+    const cur = menu.querySelector(".dbc-sel-opt.on") || menu.querySelector(".dbc-sel-opt");
+    if (cur) cur.classList.add("kb");
+  }
+  document.addEventListener("click", function (e) {
+    const t = e.target;
+    if (!t || !t.closest) { dbcSelCloseAll(); return; }
+    const opt = t.closest(".dbc-sel-opt");
+    if (opt && !opt.disabled) {
+      const wrap = opt.closest(".dbc-sel");
+      const sel = wrap && wrap._dbcSel;
+      if (sel) {
+        sel.value = opt.dataset.v;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+        dbcSelSync(sel);
+      }
+      dbcSelCloseOne(wrap);
+      return;
+    }
+    const btn = t.closest(".dbc-sel-btn");
+    if (btn) {
+      const wrap = btn.closest(".dbc-sel");
+      if (!wrap) return;
+      if (wrap.classList.contains("open")) dbcSelCloseOne(wrap);
+      else dbcSelOpen(wrap);
+      return;
+    }
+    if (t.closest(".dbc-sel-field")) return;
+    if (!t.closest(".dbc-sel")) dbcSelCloseAll();
+  });
+  document.addEventListener("keydown", function (e) {
+    const open = document.querySelector(".dbc-sel.open");
+    if (!open) return;
+    const opts = Array.from(open.querySelectorAll(".dbc-sel-opt:not([disabled])"));
+    const cur = open.querySelector(".dbc-sel-opt.kb");
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      dbcSelCloseOne(open);
+      const b = open.querySelector(".dbc-sel-btn");
+      if (b) b.focus();
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      let i = opts.indexOf(cur);
+      i = e.key === "ArrowDown" ? Math.min(opts.length - 1, i + 1) : Math.max(0, i - 1);
+      opts.forEach(function (o) { o.classList.remove("kb"); });
+      if (opts[i]) {
+        opts[i].classList.add("kb");
+        opts[i].scrollIntoView({ block: "nearest" });
+      }
+      return;
+    }
+    if ((e.key === "Enter" || e.key === " ") && cur) {
+      e.preventDefault();
+      cur.click();
+    }
+  }, true);
+  document.addEventListener("scroll", function (e) {
+    const t = e.target;
+    if (t && t.nodeType === 1 && t.closest && t.closest(".dbc-sel-menu")) return;
+    dbcSelCloseAll();
+  }, true);
+  window.addEventListener("resize", function () { dbcSelCloseAll(); });
+
   function dbcCanNewDb(kind) { return kind === "mysql" || kind === "postgres"; }
   function dbcNewDbBlockedTip() {
     if (!DBC.conns.length) return "还没有连接：先点上方「新建连接」添加一个 MySQL / PostgreSQL 连接";
@@ -389,6 +578,7 @@
       ov.appendChild(box);
       ov.classList.add("show");
 
+      dbcSelUpgrade(box);     // 新建数据库弹框：连接 / 字符集
       var connSel = box.querySelector(".dbc-nd-conn");
       var nameIn = box.querySelector(".dbc-nd-name");
       var csRow = box.querySelector(".dbc-nd-cs-row");
@@ -545,6 +735,7 @@
         "</div>" +
       "</div>";
 
+    dbcSelUpgrade(tab.host);  // 库选择 / 每页条数下拉
     var saved = dbcLoadState(conn.id);        // 上次的浏览状态（刷新后还原）
     var state = { db: saved.db || conn.dbname || "", table: saved.table || "",
                   schema: saved.schema || "", limit: saved.limit || 100, offset: 0,
@@ -708,6 +899,7 @@
           return '<option value="' + escAttr(x.name) + '"' + (x.current ? " selected" : "") + ">" +
             esc(x.name) + "</option>";
         }).join("") || '<option value="">（无）</option>';
+        dbcSelRebuild(dbSel);                  // 库列表是异步拉取的，菜单跟着重建
         var list = d.tables || [];
         tabsBox.innerHTML = list.length
           ? list.map(function (t) {
@@ -824,6 +1016,7 @@
           '<option value="200">200</option><option value="500">500</option></select>';
         var lim = pagerEl.querySelector(".dbc-limit");
         lim.value = String(state.limit);
+        if (lim._dbcSync) lim._dbcSync();
         lim.onchange = function () { state.limit = parseInt(lim.value, 10) || 100; loadRows(0); };
         pagerEl.querySelector(".dbc-prev").onclick = function () { loadRows(Math.max(0, state.offset - state.limit)); };
         pagerEl.querySelector(".dbc-next").onclick = function () { loadRows(state.offset + state.limit); };
@@ -1539,6 +1732,7 @@
         ov.innerHTML = "";
         ov.appendChild(box);
         ov.classList.add("show");
+        dbcSelUpgrade(box);   // 建表 / 建集合弹框里的 select 字段
         var els = box.querySelectorAll(".dbc-fm");
         var msg = box.querySelector(".dbc-msg");
         function close(v) {

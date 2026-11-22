@@ -31,6 +31,185 @@
     return out;
   }
 
+  /* ==================================================================
+     自定义下拉框：原生 <select> 留作数据源（.value / change 照旧），
+     收起态与菜单换成自绘样式；菜单宽度按最长选项自适应，长文案不会截断。
+     ================================================================== */
+  function sshSelSync(sel) {
+    const wrap = sel && sel._sshWrap;
+    if (!wrap) return;
+    const opt = sel.options[sel.selectedIndex] || null;
+    const tx = wrap.querySelector(".ssh-sel-tx");
+    if (tx) tx.textContent = opt ? String(opt.textContent || "").trim() : "";
+    const dis = !!sel.disabled;
+    wrap.classList.toggle("disabled", dis);
+    const btn = wrap.querySelector(".ssh-sel-btn");
+    if (btn) { btn.disabled = dis; btn.setAttribute("aria-disabled", dis ? "true" : "false"); }
+    wrap.querySelectorAll(".ssh-sel-opt").forEach(function (b) {
+      const on = b.dataset.v === sel.value;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
+  function sshSelUpgrade(root) {
+    const scope = root || document.getElementById("modalOverlay");
+    if (!scope || !scope.querySelectorAll) return;
+    scope.querySelectorAll("select").forEach(function (sel) {
+      if (sel._sshWrap) { sshSelSync(sel); return; }
+      const wrap = document.createElement("div");
+      wrap.className = "ssh-sel";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ssh-sel-btn";
+      btn.setAttribute("aria-haspopup", "listbox");
+      btn.setAttribute("aria-expanded", "false");
+      btn.innerHTML = '<span class="ssh-sel-tx"></span><i class="bi bi-chevron-down"></i>';
+      const menu = document.createElement("div");
+      menu.className = "ssh-sel-menu";
+      menu.setAttribute("role", "listbox");
+      Array.from(sel.options).forEach(function (o) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "ssh-sel-opt";
+        b.dataset.v = o.value;
+        b.setAttribute("role", "option");
+        b.innerHTML = '<span>' + esc(String(o.textContent || "").trim()) + '</span>' +
+          '<i class="bi bi-check2"></i>';
+        if (o.disabled) b.disabled = true;
+        menu.appendChild(b);
+      });
+      wrap.appendChild(btn);
+      wrap.appendChild(menu);
+      sel.parentNode.insertBefore(wrap, sel.nextSibling);
+      sel.classList.add("ssh-sel-native");
+      sel.tabIndex = -1;
+      sel._sshWrap = wrap;
+      sel._sshSync = function () { sshSelSync(sel); };
+      wrap._sshSel = sel;
+      sel.addEventListener("change", function () { sshSelSync(sel); });
+      const field = sel.closest("label");
+      if (field) {
+        field.classList.add("ssh-sel-field");
+        field.addEventListener("click", function (e) {
+          if (e.target.closest(".ssh-sel") || sel.disabled) return;
+          e.preventDefault();
+          if (wrap.classList.contains("open")) sshSelCloseOne(wrap);
+          else sshSelOpen(wrap);
+        });
+      }
+      sshSelSync(sel);
+    });
+  }
+  function sshSelCloseOne(wrap) {
+    if (!wrap) return;
+    wrap.classList.remove("open", "up");
+    const btn = wrap.querySelector(".ssh-sel-btn");
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    wrap.querySelectorAll(".ssh-sel-opt.kb").forEach(function (b) { b.classList.remove("kb"); });
+  }
+  function sshSelCloseAll(except) {
+    document.querySelectorAll(".ssh-sel.open").forEach(function (w) {
+      if (w !== except) sshSelCloseOne(w);
+    });
+  }
+  function sshSelMenuWidth(menu, btnWidth) {
+    const opt = menu.querySelector(".ssh-sel-opt");
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (ctx && opt) ctx.font = getComputedStyle(opt).font || "13px sans-serif";
+    let w = 0;
+    menu.querySelectorAll(".ssh-sel-opt > span").forEach(function (sp) {
+      if (ctx) w = Math.max(w, ctx.measureText(sp.textContent || "").width);
+    });
+    const cap = Math.max(150, Math.min(360, window.innerWidth - 16));
+    return Math.min(cap, Math.max(Math.round(btnWidth), Math.ceil(w) + 76, 150));
+  }
+  function sshSelOpen(wrap) {
+    const sel = wrap._sshSel;
+    if (!sel || sel.disabled) return;
+    sshSelSync(sel);
+    sshSelCloseAll(wrap);
+    const btn = wrap.querySelector(".ssh-sel-btn");
+    const menu = wrap.querySelector(".ssh-sel-menu");
+    wrap.classList.add("open");
+    btn.setAttribute("aria-expanded", "true");
+    const r = btn.getBoundingClientRect();
+    const width = sshSelMenuWidth(menu, r.width);
+    menu.style.width = width + "px";
+    menu.style.maxHeight = Math.min(248, window.innerHeight - 24) + "px";
+    const h = menu.offsetHeight || 0;
+    let top = r.bottom + 6, up = false;
+    if (h && top + h > window.innerHeight - 8 && r.top - 6 - h > 8) {
+      top = r.top - 6 - h;
+      up = true;
+    }
+    menu.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - width - 8))) + "px";
+    menu.style.top = Math.round(top) + "px";
+    wrap.classList.toggle("up", up);
+    const cur = menu.querySelector(".ssh-sel-opt.on") || menu.querySelector(".ssh-sel-opt");
+    if (cur) cur.classList.add("kb");
+  }
+  document.addEventListener("click", function (e) {
+    const t = e.target;
+    if (!t || !t.closest) { sshSelCloseAll(); return; }
+    const opt = t.closest(".ssh-sel-opt");
+    if (opt && !opt.disabled) {
+      const wrap = opt.closest(".ssh-sel");
+      const sel = wrap && wrap._sshSel;
+      if (sel) {
+        sel.value = opt.dataset.v;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+        sshSelSync(sel);
+      }
+      sshSelCloseOne(wrap);
+      return;
+    }
+    const btn = t.closest(".ssh-sel-btn");
+    if (btn) {
+      const wrap = btn.closest(".ssh-sel");
+      if (!wrap) return;
+      if (wrap.classList.contains("open")) sshSelCloseOne(wrap);
+      else sshSelOpen(wrap);
+      return;
+    }
+    if (t.closest(".ssh-sel-field")) return;
+    if (!t.closest(".ssh-sel")) sshSelCloseAll();
+  });
+  document.addEventListener("keydown", function (e) {
+    const open = document.querySelector(".ssh-sel.open");
+    if (!open) return;
+    const opts = Array.from(open.querySelectorAll(".ssh-sel-opt:not([disabled])"));
+    const cur = open.querySelector(".ssh-sel-opt.kb");
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      sshSelCloseOne(open);
+      const b = open.querySelector(".ssh-sel-btn");
+      if (b) b.focus();
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      let i = opts.indexOf(cur);
+      i = e.key === "ArrowDown" ? Math.min(opts.length - 1, i + 1) : Math.max(0, i - 1);
+      opts.forEach(function (o) { o.classList.remove("kb"); });
+      if (opts[i]) {
+        opts[i].classList.add("kb");
+        opts[i].scrollIntoView({ block: "nearest" });
+      }
+      return;
+    }
+    if ((e.key === "Enter" || e.key === " ") && cur) {
+      e.preventDefault();
+      cur.click();
+    }
+  }, true);
+  document.addEventListener("scroll", function (e) {
+    const t = e.target;
+    if (t && t.nodeType === 1 && t.closest && t.closest(".ssh-sel-menu")) return;
+    sshSelCloseAll();
+  }, true);
+  window.addEventListener("resize", function () { sshSelCloseAll(); });
+
   /* ---------- 远端当前目录：从 shell 提示符里解析 ----------
      远端 bash / zsh 的默认提示符形如 root@host:~#  或  user@host:/var/log$。
      每次收到输出就看末尾是不是新提示符，是则取路径更新状态栏；~ 用后端
@@ -950,6 +1129,7 @@
         '</div>' +
       '</div>';
     ov.classList.add("show");
+    sshSelUpgrade(ov);        // 认证方式下拉（密码 / 私钥）
 
     const authSel = ov.querySelector("#sshAuth");
     const pwdRow = ov.querySelector(".ssh-pwd-row");
@@ -1007,11 +1187,27 @@
       remark: ov.querySelector("#sshRemark").value.trim(),
     };
   }
+  /* 编辑时凭据留空 = 沿用已保存的值；只有没有已保存凭据时才算「没填」 */
+  function sshCredError(ov, body) {
+    const cur = body.id ? (SSHC.conns.find(c => c.id === body.id) || {}) : {};
+    const hasPwd = !!ov.querySelector("#sshPwd").value;
+    const hasKey = !!ov.querySelector("#sshKey").value.trim();
+    if (body.auth === "key" && !hasKey && !cur.hasKey) return "请填写私钥";
+    if (body.auth === "password" && !hasPwd && !cur.hasPassword) return "请填写密码";
+    return "";
+  }
   async function saveSsh(ov, closeModal) {
     const body = collect(ov);
     if (!body.host) { toast("请填写主机地址", "warn"); return; }
-    if (body.auth === "key" && !body.key) { toast("请填写私钥", "warn"); return; }
-    if (body.auth === "password" && !body.password) { toast("请填写密码", "warn"); return; }
+    const credErr = sshCredError(ov, body);
+    if (credErr) { toast(credErr, "warn"); return; }
+    // 后端把「显式传空串」当成清空凭据；编辑时留空必须整个字段都不传，
+    // 这样只改名称 / 主机 / 备注也不会把已保存的密码或私钥清掉
+    if (body.id) {
+      if (!ov.querySelector("#sshPwd").value) delete body.password;
+      if (!ov.querySelector("#sshKey").value.trim()) delete body.key;
+      if (!ov.querySelector("#sshKeypass").value) delete body.keypass;
+    }
     const d = await api("/api/ssh/save", { method: "POST", body: JSON.stringify(body) });
     if (d.error) { toast(d.error, "err"); return; }
     if (closeModal) closeModal();
@@ -1036,8 +1232,8 @@
       msg.querySelector("span").textContent = text;
     };
     if (!body.host) { clearMsg(); toast("请填写主机地址", "warn"); return; }
-    if (body.auth === "key" && !body.key) { clearMsg(); toast("请填写私钥", "warn"); return; }
-    if (body.auth === "password" && !body.password) { clearMsg(); toast("请填写密码", "warn"); return; }
+    const credErr = sshCredError(ov, body);
+    if (credErr) { clearMsg(); toast(credErr, "warn"); return; }
     if (!btn || btn.disabled) return;                    // 测试中：忽略重复点击
     clearMsg();
     btn.disabled = true;

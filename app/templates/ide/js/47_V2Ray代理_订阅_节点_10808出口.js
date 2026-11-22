@@ -651,6 +651,19 @@
     document.querySelectorAll(".v2v-sel.open").forEach(w => { if (w !== except) v2vSelCloseOne(w); });
   }
 
+  /* 菜单按最长选项自适应，避免长文案被省略号截断 */
+  function v2vSelMenuWidth(menu, btnWidth) {
+    const opt = menu.querySelector(".v2v-sel-opt");
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (ctx && opt) ctx.font = getComputedStyle(opt).font || "12px sans-serif";
+    let w = 0;
+    menu.querySelectorAll(".v2v-sel-opt > span").forEach(function (sp) {
+      if (ctx) w = Math.max(w, ctx.measureText(sp.textContent || "").width);
+    });
+    const cap = Math.max(150, Math.min(360, window.innerWidth - 16));
+    return Math.min(cap, Math.max(Math.round(btnWidth), Math.ceil(w) + 76, 150));
+  }
+
   function v2vSelOpen(wrap) {
     const sel = wrap._v2vSel;
     if (!sel || sel.disabled) return;
@@ -662,7 +675,8 @@
     btn.setAttribute("aria-expanded", "true");
     // 固定定位浮层：卡片 / 弹框里都不会被 overflow 裁掉
     const r = btn.getBoundingClientRect();
-    menu.style.width = Math.max(150, Math.round(r.width)) + "px";
+    const width = v2vSelMenuWidth(menu, r.width);
+    menu.style.width = width + "px";
     menu.style.maxHeight = Math.min(248, window.innerHeight - 24) + "px";
     const h = menu.offsetHeight || 0;
     let top = r.bottom + 6, up = false;
@@ -670,7 +684,7 @@
       top = r.top - 6 - h;
       up = true;
     }
-    menu.style.left = Math.round(r.left) + "px";
+    menu.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - width - 8))) + "px";
     menu.style.top = Math.round(top) + "px";
     wrap.classList.toggle("up", up);
     const cur = menu.querySelector(".v2v-sel-opt.on") || menu.querySelector(".v2v-sel-opt");

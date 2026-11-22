@@ -26,6 +26,141 @@
   border-radius: 4px; font-size: 11.5px; padding: 3px 7px; font-family: inherit; outline: none;
 }
 .rv-tools .rv-search:focus, .rv-tools .rv-filter:focus { border-color: #0a6aa8; }
+
+/* ---------- 自定义下拉框（状态筛选） ---------- */
+select.rv-sel-native {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  box-shadow: none !important;
+}
+.rv-sel { position: relative; flex: none; width: 96px; max-width: 96px; min-width: 0; }
+.rv-sel-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  box-sizing: border-box;
+  height: 23px;
+  padding: 0 4px 0 6px;
+  background: #2b2b2b;
+  color: #cccccc;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition: border-color .16s, box-shadow .16s, background-color .16s;
+}
+.rv-sel-btn:hover { border-color: #0a6aa8; }
+.rv-sel-btn:focus-visible,
+.rv-sel.open .rv-sel-btn {
+  border-color: #0a6aa8;
+  box-shadow: 0 0 0 2px rgba(10, 106, 168, .18);
+}
+.rv-sel-tx {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rv-sel-btn > .bi {
+  flex: none;
+  font-size: 9px;
+  color: #8a8a8a;
+  transition: transform .2s ease, color .16s ease;
+}
+.rv-sel.open .rv-sel-btn > .bi { transform: rotate(180deg); color: #0a6aa8; }
+.rv-sel.disabled .rv-sel-btn { opacity: .55; cursor: not-allowed; }
+.rv-sel.disabled .rv-sel-btn:hover { border-color: #3c3c3c; }
+
+.rv-sel-menu {
+  position: fixed;
+  z-index: 4000;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #2b2b2b;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  box-shadow: 0 14px 34px -14px rgba(0, 0, 0, .7);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px) scale(.985);
+  transform-origin: top center;
+  transition: opacity .13s ease, transform .13s ease, visibility .13s ease;
+}
+.rv-sel.open .rv-sel-menu { opacity: 1; visibility: visible; transform: none; }
+.rv-sel.up .rv-sel-menu { transform-origin: bottom center; }
+.rv-sel-menu::-webkit-scrollbar { width: 8px; }
+.rv-sel-menu::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .16); border-radius: 99px; }
+.rv-sel-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #cccccc;
+  font-size: 11.5px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.rv-sel-opt > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rv-sel-opt > .bi {
+  flex: none;
+  font-size: 11px;
+  color: #0a6aa8;
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+.rv-sel-opt:hover,
+.rv-sel-opt.kb { background: rgba(255, 255, 255, .08); color: #fff; }
+.rv-sel-opt.on { background: rgba(10, 106, 168, .22); color: #9ed4f8; }
+.rv-sel-opt.on > .bi { opacity: 1; }
+.rv-sel-opt[disabled] { opacity: .45; cursor: not-allowed; }
+
+html.theme-light .rv-sel-btn { background: #ffffff; color: #333333; border-color: #cecece; }
+html.theme-light .rv-sel-btn:hover { border-color: #0098ff; }
+html.theme-light .rv-sel-btn:focus-visible,
+html.theme-light .rv-sel.open .rv-sel-btn {
+  border-color: #0098ff;
+  box-shadow: 0 0 0 2px rgba(0, 152, 255, .18);
+}
+html.theme-light .rv-sel-btn > .bi { color: #8c959f; }
+html.theme-light .rv-sel.open .rv-sel-btn > .bi { color: #0098ff; }
+html.theme-light .rv-sel.disabled .rv-sel-btn:hover { border-color: #cecece; }
+html.theme-light .rv-sel-menu { background: #ffffff; border-color: #cecece; }
+html.theme-light .rv-sel-menu::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, .2); }
+html.theme-light .rv-sel-opt { color: #333333; }
+html.theme-light .rv-sel-opt:hover,
+html.theme-light .rv-sel-opt.kb { background: #f1f3f6; color: #11151b; }
+html.theme-light .rv-sel-opt.on { background: #e8f1fb; color: #0550ae; }
+html.theme-light .rv-sel-opt > .bi { color: #0098ff; }
 .rv-stat { margin-top: 6px; font-size: 11px; color: #8a8a8a; }
 .rv-stat b { color: #cccccc; }
 .rv-stat b.ok { color: #6fcf8a; }

@@ -662,6 +662,129 @@ html.theme-light .dlc-select {
     none;
 }
 
+/* ---------- 自定义下拉框（替换原生 select 弹层） ---------- */
+/* 原生 select 只当数据源：视觉隐藏，.value / change / data-cfg 行为完全不变 */
+select.dlc-sel-native {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  box-shadow: none !important;
+  background-image: none !important;
+}
+
+.dlc-sel { position: relative; min-width: 0; }
+.dlc-sel-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--dlc-line2);
+  border-radius: 10px;
+  background: var(--dlc-card2);
+  color: var(--dlc-fg2);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .15);
+  transition: border-color .18s, box-shadow .18s, background-color .18s;
+}
+.dlc-sel-btn:hover { border-color: var(--dlc-acc2); }
+.dlc-sel-btn:focus-visible,
+.dlc-sel.open .dlc-sel-btn {
+  border-color: var(--dlc-acc);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .18), 0 0 0 3px rgba(79, 193, 255, .16);
+}
+.dlc-sel-tx {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dlc-sel-btn > .bi {
+  flex: none;
+  font-size: 11px;
+  color: var(--dlc-dim);
+  transition: transform .2s ease, color .18s ease;
+}
+.dlc-sel.open .dlc-sel-btn > .bi { transform: rotate(180deg); color: var(--dlc-acc); }
+.dlc-sel.disabled .dlc-sel-btn { opacity: .48; cursor: not-allowed; }
+.dlc-sel.disabled .dlc-sel-btn:hover { border-color: var(--dlc-line2); }
+
+/* 固定定位浮层：卡片圆角 / 弹窗滚动容器都裁不到 */
+.dlc-sel-menu {
+  position: fixed;
+  z-index: 3400;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  padding: 5px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--dlc-panel);
+  border: 1px solid var(--dlc-line);
+  border-radius: 11px;
+  box-shadow: var(--dlc-shadow);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px) scale(.985);
+  transform-origin: top center;
+  transition: opacity .13s ease, transform .13s ease, visibility .13s ease;
+}
+.dlc-sel.open .dlc-sel-menu { opacity: 1; visibility: visible; transform: none; }
+.dlc-sel.up .dlc-sel-menu { transform-origin: bottom center; }
+.dlc-sel-menu::-webkit-scrollbar { width: 8px; }
+.dlc-sel-menu::-webkit-scrollbar-thumb { background: rgba(127, 127, 127, .32); border-radius: 99px; }
+.dlc-sel-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dlc-fg2);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.dlc-sel-opt > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dlc-sel-opt > .bi {
+  flex: none;
+  font-size: 12px;
+  color: var(--dlc-acc);
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+.dlc-sel-opt:hover,
+.dlc-sel-opt.kb { background: rgba(127, 127, 127, .13); color: var(--dlc-fg); }
+.dlc-sel-opt.on { background: rgba(79, 193, 255, .14); color: var(--dlc-acc); }
+.dlc-sel-opt.on > .bi { opacity: 1; }
+.dlc-sel-opt[disabled] { opacity: .45; cursor: not-allowed; }
+
 /* 记录视图下：卡片自身作为滚动容器，表头 sticky 在卡片内部，避免抖动/脱离 */
 .dlc-recscroll {
   flex: 1;

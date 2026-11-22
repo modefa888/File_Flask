@@ -266,3 +266,145 @@ html.theme-light .ssh-motd-acts button:hover { background: #eef1f4; color: #1f23
 }
 .ssh-term-ai:hover { background: rgba(56, 139, 253, .26); color: #cfe6fb; border-color: #4b8cc0; }
 .ssh-term-ai + .ssh-term-x { margin-left: 0; }
+
+/* ---------- 自定义下拉框（替换原生 select 弹层） ---------- */
+select.ssh-sel-native {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  box-shadow: none !important;
+  background-image: none !important;
+}
+.ssh-sel { position: relative; min-width: 0; }
+.ssh-sel-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid #3a3d44;
+  border-radius: 6px;
+  background: #1e1e1e;
+  color: #ddd;
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition: border-color .16s, box-shadow .16s, background-color .16s;
+}
+.ssh-sel-btn:hover { border-color: #4da3ff; }
+.ssh-sel-btn:focus-visible,
+.ssh-sel.open .ssh-sel-btn {
+  border-color: #4da3ff;
+  box-shadow: 0 0 0 3px rgba(77, 163, 255, .16);
+}
+.ssh-sel-tx {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ssh-sel-btn > .bi {
+  flex: none;
+  font-size: 11px;
+  color: #9aa;
+  transition: transform .2s ease, color .16s ease;
+}
+.ssh-sel.open .ssh-sel-btn > .bi { transform: rotate(180deg); color: #4da3ff; }
+.ssh-sel.disabled .ssh-sel-btn { opacity: .55; cursor: not-allowed; }
+.ssh-sel.disabled .ssh-sel-btn:hover { border-color: #3a3d44; }
+
+/* 固定定位浮层，弹窗滚动时不会被裁 */
+.ssh-sel-menu {
+  position: fixed;
+  z-index: 4000;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  padding: 5px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #252526;
+  border: 1px solid #3a3d44;
+  border-radius: 8px;
+  box-shadow: 0 18px 42px -14px rgba(0, 0, 0, .72);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px) scale(.985);
+  transform-origin: top center;
+  transition: opacity .13s ease, transform .13s ease, visibility .13s ease;
+}
+.ssh-sel.open .ssh-sel-menu { opacity: 1; visibility: visible; transform: none; }
+.ssh-sel.up .ssh-sel-menu { transform-origin: bottom center; }
+.ssh-sel-menu::-webkit-scrollbar { width: 8px; }
+.ssh-sel-menu::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .16); border-radius: 99px; }
+.ssh-sel-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #ddd;
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.ssh-sel-opt > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ssh-sel-opt > .bi {
+  flex: none;
+  font-size: 12px;
+  color: #4da3ff;
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+.ssh-sel-opt:hover,
+.ssh-sel-opt.kb { background: rgba(255, 255, 255, .08); color: #fff; }
+.ssh-sel-opt.on { background: rgba(77, 163, 255, .18); color: #a9d6ff; }
+.ssh-sel-opt.on > .bi { opacity: 1; }
+.ssh-sel-opt[disabled] { opacity: .45; cursor: not-allowed; }
+
+html.theme-light .ssh-sel-btn { background: #fff; border-color: #d0d0d0; color: #1f2328; }
+html.theme-light .ssh-sel-btn:hover { border-color: #0969da; }
+html.theme-light .ssh-sel-btn:focus-visible,
+html.theme-light .ssh-sel.open .ssh-sel-btn {
+  border-color: #0969da;
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, .16);
+}
+html.theme-light .ssh-sel-btn > .bi { color: #8c959f; }
+html.theme-light .ssh-sel.open .ssh-sel-btn > .bi { color: #0969da; }
+html.theme-light .ssh-sel.disabled .ssh-sel-btn:hover { border-color: #d0d0d0; }
+html.theme-light .ssh-sel-menu {
+  background: #fff;
+  border-color: #d0d7de;
+  box-shadow: 0 18px 40px -16px rgba(31, 35, 40, .28);
+}
+html.theme-light .ssh-sel-menu::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, .2); }
+html.theme-light .ssh-sel-opt { color: #3d4450; }
+html.theme-light .ssh-sel-opt:hover,
+html.theme-light .ssh-sel-opt.kb { background: #f1f3f6; color: #11151b; }
+html.theme-light .ssh-sel-opt.on { background: #e8f1fb; color: #0550ae; }
+html.theme-light .ssh-sel-opt > .bi { color: #0969da; }

@@ -52,6 +52,197 @@
     ["pushplus", "PushPlus", "bi-wechat"],
     ["web", "网页版", "bi-globe2"],
   ];
+  /* ==================================================================
+     自定义下拉框：原生 <select> 留作数据源（.value / change 全部照旧），
+     收起态与菜单换成自绘样式。弹框里的「系统动作」选项是异步填充的，
+     用 cdlSelRebuild() 重建菜单。
+     ================================================================== */
+  function cdlSelSync(sel) {
+    const wrap = sel && sel._cdlWrap;
+    if (!wrap) return;
+    const opt = sel.options[sel.selectedIndex] || null;
+    const tx = wrap.querySelector(".cdl-sel-tx");
+    if (tx) tx.textContent = opt ? String(opt.textContent || "").trim() : "";
+    const dis = !!sel.disabled;
+    wrap.classList.toggle("disabled", dis);
+    const btn = wrap.querySelector(".cdl-sel-btn");
+    if (btn) { btn.disabled = dis; btn.setAttribute("aria-disabled", dis ? "true" : "false"); }
+    wrap.querySelectorAll(".cdl-sel-opt").forEach(function (b) {
+      const on = b.dataset.v === sel.value;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
+  function cdlSelFill(sel, menu) {
+    menu.innerHTML = "";
+    Array.from(sel.options).forEach(function (o) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "cdl-sel-opt";
+      b.dataset.v = o.value;
+      b.setAttribute("role", "option");
+      b.innerHTML = '<span>' + esc(String(o.textContent || "").trim()) + '</span>' +
+        '<i class="bi bi-check2"></i>';
+      if (o.disabled) b.disabled = true;
+      menu.appendChild(b);
+    });
+  }
+  function cdlSelRebuild(sel) {
+    const wrap = sel && sel._cdlWrap;
+    if (!wrap) return;
+    cdlSelFill(sel, wrap.querySelector(".cdl-sel-menu"));
+    cdlSelSync(sel);
+  }
+  function cdlSelUpgrade(root) {
+    const scope = root || document.getElementById("cronView");
+    if (!scope || !scope.querySelectorAll) return;
+    scope.querySelectorAll("select").forEach(function (sel) {
+      if (sel._cdlWrap) { cdlSelSync(sel); return; }
+      const wrap = document.createElement("div");
+      wrap.className = "cdl-sel";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cdl-sel-btn";
+      btn.setAttribute("aria-haspopup", "listbox");
+      btn.setAttribute("aria-expanded", "false");
+      btn.innerHTML = '<span class="cdl-sel-tx"></span><i class="bi bi-chevron-down"></i>';
+      const menu = document.createElement("div");
+      menu.className = "cdl-sel-menu";
+      menu.setAttribute("role", "listbox");
+      cdlSelFill(sel, menu);
+      wrap.appendChild(btn);
+      wrap.appendChild(menu);
+      sel.parentNode.insertBefore(wrap, sel.nextSibling);
+      sel.classList.add("cdl-sel-native");
+      sel.tabIndex = -1;
+      sel._cdlWrap = wrap;
+      sel._cdlSync = function () { cdlSelSync(sel); };
+      wrap._cdlSel = sel;
+      sel.addEventListener("change", function () { cdlSelSync(sel); });
+      const field = sel.closest("label");
+      if (field) {
+        field.classList.add("cdl-sel-field");
+        field.addEventListener("click", function (e) {
+          if (e.target.closest(".cdl-sel") || sel.disabled) return;
+          e.preventDefault();
+          if (wrap.classList.contains("open")) cdlSelCloseOne(wrap);
+          else cdlSelOpen(wrap);
+        });
+      }
+      cdlSelSync(sel);
+    });
+  }
+  function cdlSelCloseOne(wrap) {
+    if (!wrap) return;
+    wrap.classList.remove("open", "up");
+    const btn = wrap.querySelector(".cdl-sel-btn");
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    wrap.querySelectorAll(".cdl-sel-opt.kb").forEach(function (b) { b.classList.remove("kb"); });
+  }
+  function cdlSelCloseAll(except) {
+    document.querySelectorAll(".cdl-sel.open").forEach(function (w) {
+      if (w !== except) cdlSelCloseOne(w);
+    });
+  }
+  /* 菜单按最长选项自适应宽度，长文案不会被省略号截断；最多 360px 且不超出屏幕 */
+  function cdlSelMenuWidth(menu, btnWidth) {
+    const opt = menu.querySelector(".cdl-sel-opt");
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (ctx && opt) ctx.font = getComputedStyle(opt).font || "12px sans-serif";
+    let w = 0;
+    menu.querySelectorAll(".cdl-sel-opt > span").forEach(function (sp) {
+      if (ctx) w = Math.max(w, ctx.measureText(sp.textContent || "").width);
+    });
+    const cap = Math.max(120, Math.min(360, window.innerWidth - 16));
+    return Math.min(cap, Math.max(Math.round(btnWidth), Math.ceil(w) + 72, 120));
+  }
+  function cdlSelOpen(wrap) {
+    const sel = wrap._cdlSel;
+    if (!sel || sel.disabled) return;
+    cdlSelSync(sel);
+    cdlSelCloseAll(wrap);
+    const btn = wrap.querySelector(".cdl-sel-btn");
+    const menu = wrap.querySelector(".cdl-sel-menu");
+    wrap.classList.add("open");
+    btn.setAttribute("aria-expanded", "true");
+    const r = btn.getBoundingClientRect();
+    const width = cdlSelMenuWidth(menu, r.width);
+    menu.style.width = width + "px";
+    menu.style.maxHeight = Math.min(248, window.innerHeight - 24) + "px";
+    const h = menu.offsetHeight || 0;
+    let top = r.bottom + 6, up = false;
+    if (h && top + h > window.innerHeight - 8 && r.top - 6 - h > 8) {
+      top = r.top - 6 - h;
+      up = true;
+    }
+    menu.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - width - 8))) + "px";
+    menu.style.top = Math.round(top) + "px";
+    wrap.classList.toggle("up", up);
+    const cur = menu.querySelector(".cdl-sel-opt.on") || menu.querySelector(".cdl-sel-opt");
+    if (cur) cur.classList.add("kb");
+  }
+  document.addEventListener("click", function (e) {
+    const t = e.target;
+    if (!t || !t.closest) { cdlSelCloseAll(); return; }
+    const opt = t.closest(".cdl-sel-opt");
+    if (opt && !opt.disabled) {
+      const wrap = opt.closest(".cdl-sel");
+      const sel = wrap && wrap._cdlSel;
+      if (sel) {
+        sel.value = opt.dataset.v;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+        cdlSelSync(sel);
+      }
+      cdlSelCloseOne(wrap);
+      return;
+    }
+    const btn = t.closest(".cdl-sel-btn");
+    if (btn) {
+      const wrap = btn.closest(".cdl-sel");
+      if (!wrap) return;
+      if (wrap.classList.contains("open")) cdlSelCloseOne(wrap);
+      else cdlSelOpen(wrap);
+      return;
+    }
+    if (t.closest(".cdl-sel-field")) return;
+    if (!t.closest(".cdl-sel")) cdlSelCloseAll();
+  });
+  document.addEventListener("keydown", function (e) {
+    const open = document.querySelector(".cdl-sel.open");
+    if (!open) return;
+    const opts = Array.from(open.querySelectorAll(".cdl-sel-opt:not([disabled])"));
+    const cur = open.querySelector(".cdl-sel-opt.kb");
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      cdlSelCloseOne(open);
+      const b = open.querySelector(".cdl-sel-btn");
+      if (b) b.focus();
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      let i = opts.indexOf(cur);
+      i = e.key === "ArrowDown" ? Math.min(opts.length - 1, i + 1) : Math.max(0, i - 1);
+      opts.forEach(function (o) { o.classList.remove("kb"); });
+      if (opts[i]) {
+        opts[i].classList.add("kb");
+        opts[i].scrollIntoView({ block: "nearest" });
+      }
+      return;
+    }
+    if ((e.key === "Enter" || e.key === " ") && cur) {
+      e.preventDefault();
+      cur.click();
+    }
+  }, true);
+  document.addEventListener("scroll", function (e) {
+    const t = e.target;
+    if (t && t.nodeType === 1 && t.closest && t.closest(".cdl-sel-menu")) return;
+    cdlSelCloseAll();
+  }, true);
+  window.addEventListener("resize", function () { cdlSelCloseAll(); });
+
   function cronTaskChannelName(key) {
     const hit = CRON_TASK_NOTIFY_CHANNELS.find(c => c[0] === key);
     return hit ? hit[1] : key;
@@ -238,6 +429,7 @@
   function cronTaskNotifySync() {
     const sel = $("cronNotifyContent");
     if (!sel) return;
+    cdlSelSync(sel);                            // 值 / 禁用态可能被代码改过，先对齐文案
     const chk = $("cronNotify");
     const on = chk ? chk.checked : true;
     const mode = sel.value;
@@ -716,7 +908,11 @@
           esc(a.label) + '</option>').join("")
           : '<option value="">（暂无可用动作）</option>';
         if (acts.some(a => a.id === curAction)) sysSel.value = curAction;
-      }).catch(() => { sysSel.innerHTML = '<option value="">（动作列表加载失败）</option>'; });
+        cdlSelRebuild(sysSel);                 // 选项是异步填进去的，菜单跟着重建
+      }).catch(() => {
+        sysSel.innerHTML = '<option value="">（动作列表加载失败）</option>';
+        cdlSelRebuild(sysSel);
+      });
     }
     // AI 提示词预设：点一下填进输入框（已有内容时追加到末尾，方便组合）
     ov.querySelectorAll("#cronAiPresets button").forEach(b => {
@@ -750,11 +946,18 @@
     const applyDraft = (d) => {
       const setV = (id, v) => {
         const el = $(id);
-        if (el && v !== undefined && v !== null && String(v) !== "") el.value = v;
+        if (el && v !== undefined && v !== null && String(v) !== "") {
+          el.value = v;
+          if (el._cdlSync) el._cdlSync();
+        }
       };
       setV("cronName", d.name);
       if (CRON_TASK_KINDS.some(k => k[0] === d.kind)) CRON.editKind = d.kind;
-      if (CRON_CODE_LANGS.some(l => l[0] === d.lang) && $("cronLang")) $("cronLang").value = d.lang;
+      if (CRON_CODE_LANGS.some(l => l[0] === d.lang) && $("cronLang")) {
+        const lg = $("cronLang");
+        lg.value = d.lang;
+        cdlSelSync(lg);
+      }
       setV("cronExpr", d.cron);
       // 内容只落到对应类型的输入框，别覆盖用户在别的类型里已经写的东西
       if (d.kind === "code") setV("cronCode", d.content);
@@ -832,6 +1035,7 @@
     };
     if (foldBtn && foldBody) foldBtn.onclick = () => setFold(!foldBody.classList.contains("folded"));
     setFold(false);                                  // 每次打开默认展开，保证能直接编辑
+    cdlSelUpgrade(ov);        // 任务编辑弹框：语言 / 系统动作 / 通知内容
     ov.querySelector(".cd-x").onclick = cronCloseModal;
     $("cronCancel").onclick = cronCloseModal;
     $("cronSave").onclick = cronSave;
@@ -2267,6 +2471,7 @@
         '</tr></thead><tbody id="cvTbody"></tbody></table></div>' +
         '<div class="cv-detail" id="cvDetail"></div>' +
       '</div>';
+    cdlSelUpgrade(box);       // 任务面板的状态筛选下拉
     cronViewBindHead();
     cronViewPaintRows();
     cronViewRenderDetail();

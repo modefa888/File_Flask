@@ -1,0 +1,83 @@
+/* ========== 后台管理：自定义下拉框主题适配 ==========
+   基础组件在 /static/css/custom-select.css，这里只做两件事：
+   1) 按后台的深色 / 浅色主题覆盖 --cs-* 变量；
+   2) 让触发器尺寸贴近 .adm-select。 */
+
+/* ---------- 深色（默认主题） ---------- */
+body.adm {
+    --cs-bg: rgba(13, 19, 36, 0.7);
+    --cs-bg-hover: rgba(22, 32, 58, 0.92);
+    --cs-panel: var(--adm-panel-2);
+    --cs-fg: var(--adm-text);
+    --cs-muted: var(--adm-text-mute);
+    --cs-border: var(--adm-border);
+    --cs-border-hover: rgba(91, 140, 255, 0.55);
+    --cs-hover: rgba(91, 140, 255, 0.14);
+    --cs-selected: rgba(91, 140, 255, 0.22);
+    --cs-brand: #7c9cff;
+    --cs-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.62), 0 2px 8px rgba(0, 0, 0, 0.35);
+    --cs-scroll-thumb: #34446a;
+    --cs-scroll-thumb-hover: #40547f;
+}
+
+/* ---------- 浅色主题 ---------- */
+html[data-theme="light"] body.adm {
+    --cs-bg: #ffffff;
+    --cs-bg-hover: #f8fafc;
+    --cs-panel: #ffffff;
+    --cs-fg: var(--adm-text);
+    --cs-muted: var(--adm-text-mute);
+    --cs-border: var(--adm-border);
+    --cs-border-hover: #b9c7e0;
+    --cs-hover: #eef3ff;
+    --cs-selected: #e8efff;
+    --cs-brand: #2f6feb;
+    --cs-shadow: 0 18px 44px -14px rgba(15, 23, 42, 0.22), 0 2px 8px rgba(15, 23, 42, 0.06);
+    --cs-scroll-thumb: #cdd6e3;
+    --cs-scroll-thumb-hover: #b6c2d3;
+}
+
+/* ---------- 尺寸对齐 .adm-select ---------- */
+body.adm .cselect-btn {
+    gap: 8px;
+    padding: 0 11px;
+    border-radius: 9px;
+    font-size: 13px;
+}
+
+body.adm .cselect-opt {
+    padding: 8px 10px;
+    border-radius: 7px;
+    font-size: 13px;
+}
+
+body.adm .cselect-menu { border-radius: 10px; }
+
+body.adm .cselect-btn:focus-visible {
+    box-shadow: 0 0 0 3px rgba(91, 140, 255, 0.28);
+}
+
+html[data-theme="light"] body.adm .cselect-btn:focus-visible {
+    box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.16);
+}
+
+body.adm .cselect-arrow { font-size: 0.72rem; }
+
+/* 表格工具栏里的「每页 N 条」更紧凑 */
+body.adm .adm-table-toolbar .cselect-btn {
+    gap: 5px;
+    padding: 0 8px;
+    border-radius: 8px;
+    font-size: 12.5px;
+}
+
+body.adm .adm-table-toolbar .cselect-arrow { font-size: 0.62rem; }
+
+/* 弹出菜单滚动条：覆盖后台全局滚动条样式，跟随明暗主题 */
+body.adm .cselect-menu::-webkit-scrollbar-thumb {
+    background: var(--cs-scroll-thumb);
+}
+
+body.adm .cselect-menu::-webkit-scrollbar-thumb:hover {
+    background: var(--cs-scroll-thumb-hover);
+}

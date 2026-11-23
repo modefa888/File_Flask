@@ -23,6 +23,7 @@
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
     <link href="/static/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/static/vendor/bootstrap-icons/bootstrap-icons.css">
+    <link rel="stylesheet" href="/static/css/custom-select.css">
     <link rel="stylesheet" href="/api/icons/ui.css">
     <style>{% include "adm/css/00_base.css" %}</style>
     <style>{% include "adm/css/01_布局.css" %}</style>
@@ -34,9 +35,11 @@
     <style>{% include "adm/css/06_下载管理.css" %}</style>
     {# WorkBuddy 积分 / 签到：余额主卡、签到日历 #}
     <style>{% include "adm/css/07_WorkBuddy.css" %}</style>
+    {# 自定义下拉框：适配后台深色 / 浅色主题 #}
+    <style>{% include "adm/css/08_自定义下拉框.css" %}</style>
 </head>
 
-<body>
+<body class="adm">
     <div class="adm-shell">
         <aside class="adm-side">
             <div class="adm-brand">
@@ -123,6 +126,7 @@
         {% include "adm/js/23_CodeArts.js" %}
         {% include "adm/js/99_初始化.js" %}
     </script>
+    <script src="/static/js/custom-select.js"></script>
 </body>
 
 </html>

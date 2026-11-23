@@ -3736,3 +3736,465 @@
     transform: none;
     vertical-align: middle;
 }
+
+/* ==================================================================
+   编辑器（美化）：顶部信息栏 / 工具栏 / 状态栏 / 查找面板 / 代码区
+   —— 只调整视觉与布局，所有 id、class 与交互逻辑保持不变
+   ================================================================== */
+
+.editor-overlay {
+    background: rgba(15, 23, 42, .45);
+    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(5px);
+    padding: 20px;
+}
+
+.editor-modal {
+    border-radius: 18px;
+    border: 1px solid rgba(15, 23, 42, .07);
+    box-shadow: 0 40px 110px -34px rgba(15, 23, 42, .55), 0 14px 34px -20px rgba(15, 23, 42, .3);
+    position: relative;
+}
+
+/* 顶部品牌色细线（与压缩包查看器一致） */
+.editor-modal::before {
+    content: "";
+    flex: none;
+    height: 3px;
+    background: linear-gradient(90deg, #2563eb 0%, #38bdf8 48%, #34d399 100%);
+    opacity: .9;
+}
+
+/* ---------- 顶部信息栏 ---------- */
+.editor-header {
+    padding: 14px 20px 12px;
+    background: linear-gradient(180deg, #fcfdff 0%, #f4f8fd 100%);
+    border-bottom: 1px solid #e8eef7;
+    color: #0f172a;
+}
+
+.editor-header .ed-title {
+    gap: 16px;
+    align-items: center;
+}
+
+.editor-header .ed-name-part {
+    gap: 11px;
+    align-items: center;
+}
+
+.editor-header .ed-icon-badge {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, #ffffff, #eef4ff);
+    border: 1px solid #dbe7ff;
+    box-shadow: inset 0 1px 0 #fff, 0 2px 6px -3px rgba(37, 99, 235, .45);
+}
+
+.editor-header .ed-icon-badge .ed-file-icon {
+    font-size: 1.45rem;
+    line-height: 1;
+}
+
+.editor-header .ed-icon-badge .seti-ic { transform: none; }
+
+.editor-header .ed-icon-badge .bi { font-size: 1.3rem; }
+
+.editor-header .ed-title-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.editor-header .ed-title .ed-filename {
+    font-size: .95rem;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.35;
+}
+
+.editor-header .ed-path {
+    padding: 0;
+    font-size: .7rem;
+    color: #8a97a8;
+    line-height: 1.35;
+    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    max-width: 52vw;
+}
+
+/* ---------- 右上工具栏 ---------- */
+.editor-header .ed-actions { gap: 8px; }
+
+.editor-header .ed-tools {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 10px;
+    background: #eef3fa;
+    border: 1px solid #e3eaf4;
+}
+
+.editor-header .ed-actions .btn {
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: .78rem;
+    font-weight: 500;
+    line-height: 1.3;
+    border: 1px solid transparent;
+    transition: background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+
+.editor-header .ed-actions .ed-tool-btn {
+    background: transparent;
+    color: #52627a;
+    padding: 5px 10px;
+}
+
+.editor-header .ed-actions .ed-tool-btn:hover {
+    background: #ffffff;
+    color: #1d4ed8;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .1);
+}
+
+.editor-header .ed-actions .btn i { font-size: .82rem; }
+
+.editor-header .ed-actions-sep {
+    width: 1px;
+    height: 22px;
+    background: #e2e8f0;
+    margin: 0 2px;
+    flex: none;
+}
+
+.editor-header .ed-actions .ed-save-btn {
+    background: linear-gradient(180deg, #10b981, #059669);
+    color: #ffffff;
+    font-weight: 600;
+    padding: 7px 16px;
+    border-radius: 9px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 6px 16px -9px rgba(5, 150, 105, .9);
+}
+
+.editor-header .ed-actions .ed-save-btn:hover:not(:disabled) {
+    background: linear-gradient(180deg, #0ea472, #047857);
+}
+
+.editor-header .ed-actions .ed-save-btn:disabled {
+    background: #eef2f7;
+    color: #a9b6c6;
+    box-shadow: none;
+    cursor: not-allowed;
+}
+
+.editor-header .ed-actions .ed-close-btn {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    border-radius: 9px;
+    background: #ffffff;
+    color: #64748b;
+    border-color: #e3e9f2;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
+}
+
+.editor-header .ed-actions .ed-close-btn i {
+    display: block;
+    line-height: 1;
+    font-size: .9rem;
+}
+
+.editor-header .ed-actions .ed-close-btn:hover {
+    background: #fef2f2;
+    color: #dc2626;
+    border-color: #fecaca;
+}
+
+/* 对比增删徽标 */
+.editor-header .ed-actions .ed-diff-badge {
+    margin-left: 1px;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: #eff6ff;
+    border: 1px solid #dbe7ff;
+    font-size: .66rem;
+    font-weight: 700;
+    line-height: 16px;
+    vertical-align: middle;
+}
+
+.ed-diff-badge .ed-badge-add { color: #15803d; }
+
+.ed-diff-badge .ed-badge-del { color: #b91c1c; margin-left: 3px; }
+
+/* ---------- 样式菜单 ---------- */
+.ed-style-menu {
+    top: 58px;
+    right: 20px;
+    border-radius: 12px;
+    border-color: #e3eaf4;
+    box-shadow: 0 20px 44px -18px rgba(15, 23, 42, .38), 0 2px 8px rgba(15, 23, 42, .06);
+    padding: 12px 14px;
+    min-width: 248px;
+    animation: modalPop .16s ease;
+}
+
+.ed-style-menu .esm-row { gap: 10px; }
+
+.ed-style-menu .esm-row > span { width: 32px; color: #7b8794; }
+
+.ed-style-menu select {
+    padding: 5px 8px;
+    border-color: #dfe7f1;
+    border-radius: 8px;
+    background: #fbfcfe;
+}
+
+.ed-style-menu select:hover { border-color: #c7d5e6; }
+
+.ed-style-menu select:focus {
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, .14);
+}
+
+/* ---------- 状态栏 ---------- */
+.editor-statusbar {
+    height: 32px;
+    padding: 0 16px;
+    gap: 8px;
+    background: #f8fafc;
+    color: #7b8794;
+    border-top: 1px solid #e8eef7;
+    font-size: .72rem;
+}
+
+.editor-statusbar #edStatusDot { font-size: .68rem; }
+
+.editor-statusbar #edStatus { color: #475569; }
+
+.editor-statusbar #edStatus[data-mode="modified"] { color: #b45309; font-weight: 600; }
+
+.editor-statusbar #edStatus[data-mode="saving"] { color: #1d4ed8; }
+
+.editor-statusbar #edStatus[data-mode="saved"] { color: #15803d; }
+
+.editor-statusbar #edStatus[data-mode="error"] { color: #b91c1c; font-weight: 600; }
+
+.editor-statusbar .esb-sep { display: none; }
+
+.editor-statusbar .esb-hint {
+    margin-left: auto;
+    color: #a8b4c4;
+    opacity: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ---------- 代码区 ---------- */
+.editor-panel-label {
+    padding: 5px 14px;
+    background: #f8fafc;
+    border-bottom: 1px solid #eef2f8;
+    color: #7b8794;
+    letter-spacing: .02em;
+}
+
+.editor-panel-label i {
+    color: #2563eb;
+    font-size: .74rem;
+}
+
+.editor-panel .CodeMirror {
+    font-family: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
+    line-height: 1.62;
+}
+
+.editor-panel .CodeMirror-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #cfd8e3 transparent;
+}
+
+.editor-panel .CodeMirror-vscrollbar::-webkit-scrollbar,
+.editor-panel .CodeMirror-hscrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.editor-panel .CodeMirror-vscrollbar::-webkit-scrollbar-thumb,
+.editor-panel .CodeMirror-hscrollbar::-webkit-scrollbar-thumb {
+    background: #cfd8e3;
+    border-radius: 999px;
+}
+
+/* 只精修默认浅色主题（cm-s-default），避免覆盖掉深色主题的背景色 */
+.editor-panel .CodeMirror.cm-s-default { background: #ffffff; color: #1e293b; }
+
+.editor-panel .CodeMirror.cm-s-default .CodeMirror-lines { padding: 10px 0 20px; }
+
+.editor-panel .CodeMirror.cm-s-default .CodeMirror-line { padding: 0 12px; }
+
+.editor-panel .CodeMirror.cm-s-default .CodeMirror-gutters {
+    background: #fbfcfe;
+    border-right: 1px solid #eef2f8;
+}
+
+.editor-panel .CodeMirror.cm-s-default .CodeMirror-linenumber { color: #b6c2d1; }
+
+.editor-panel .CodeMirror.cm-s-default .CodeMirror-selected { background: #dbeafe; }
+
+.editor-panel .CodeMirror.cm-s-default .CodeMirror-focused .CodeMirror-selected { background: #bfdbfe; }
+
+/* 光标跟随主题文字色：浅色主题深色、深色主题浅色，都不会隐形 */
+.CodeMirror-cursor { border-left-color: currentColor !important; }
+
+/* ---------- 查找 / 替换面板 ---------- */
+.ed-search-panel {
+    top: 10px;
+    right: 14px;
+    left: auto;
+    width: min(580px, calc(100% - 28px));
+    background: #ffffff;
+    color: #334155;
+    border: 1px solid #dfe7f1;
+    border-radius: 12px;
+    padding: 10px 12px;
+    gap: 8px;
+    box-shadow: 0 20px 48px -20px rgba(15, 23, 42, .4), 0 2px 8px rgba(15, 23, 42, .07);
+    border-bottom: 1px solid #dfe7f1;
+}
+
+.ed-search-row .ed-search-label { color: #94a3b8; }
+
+.ed-search-row .ed-search-input {
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid #dfe7f1;
+    background: #f8fafc;
+    color: #1e293b;
+    font-size: .8rem;
+    transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+
+.ed-search-row .ed-search-input:focus {
+    border-color: #93c5fd;
+    background: #ffffff;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, .15);
+}
+
+.ed-search-row .ed-search-input::placeholder { color: #a8b4c4; }
+
+.ed-search-info { color: #8a97a8; min-width: 72px; }
+
+.ed-search-info.error { color: #dc2626; }
+
+.ed-search-btn {
+    padding: 5px 9px;
+    border-radius: 7px;
+    border: 1px solid #e3e9f2;
+    background: #ffffff;
+    color: #475569;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.ed-search-btn:hover {
+    background: #f1f5f9;
+    border-color: #d7e0eb;
+    color: #0f172a;
+}
+
+.ed-search-btn.active {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #ffffff;
+}
+
+.ed-search-btn.danger:hover {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #dc2626;
+}
+
+.ed-search-checks { padding-left: 24px; gap: 14px; }
+
+.ed-search-checks label { color: #64748b; }
+
+/* 查找命中：浅色背景下用琥珀色更清晰 */
+.cm-search-match {
+    background: #fde68a;
+    color: #78350f;
+    border-radius: 2px;
+}
+
+.cm-search-match-cursor {
+    background: #f59e0b;
+    color: #111827;
+    font-weight: 700;
+}
+
+/* ---------- 对比视图 ---------- */
+.ed-diff-header {
+    padding: 9px 16px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e8eef7;
+    color: #475569;
+}
+
+.ed-diff-header .ed-diff-add,
+.ed-diff-header .ed-diff-del {
+    display: inline-block;
+    padding: 1px 9px;
+    border-radius: 999px;
+    font-size: .72rem;
+    font-weight: 600;
+    margin-right: 6px;
+}
+
+.ed-diff-header .ed-diff-add {
+    background: #ecfdf5;
+    color: #15803d;
+    border: 1px solid #bbf7d0;
+}
+
+.ed-diff-header .ed-diff-del {
+    background: #fef2f2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+}
+
+.ed-diff-header button {
+    padding: 5px 12px;
+    border-radius: 8px;
+    font-size: .76rem;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.ed-diff-body { background: #ffffff; }
+
+.ed-diff-line { padding: 0 14px; }
+
+.ed-diff-line.add { background: #f0fdf4; color: #166534; }
+
+.ed-diff-line.del { background: #fef2f2; color: #991b1b; }
+
+.ed-diff-line.same { color: #475569; }
+
+.ed-diff-gap { background: #f8fafc; color: #94a3b8; }
+
+/* 窄屏：工具栏只留图标，避免把文件名挤没 */
+@media (max-width: 900px) {
+    .editor-header .ed-actions .ed-btn-label { display: none; }
+    .editor-header .ed-actions .btn { padding: 6px 10px; }
+    .editor-header .ed-path { max-width: 40vw; }
+    .editor-statusbar .esb-hint { display: none; }
+}

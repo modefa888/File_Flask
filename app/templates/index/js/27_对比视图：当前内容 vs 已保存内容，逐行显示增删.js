@@ -32,7 +32,7 @@
             let addN = 0, delN = 0;
             ops.forEach(o => { if (o.t === '+') addN++; else if (o.t === '-') delN++; });
             if (addN === 0 && delN === 0) { badge.style.display = 'none'; return; }
-            badge.innerHTML = '<span style="color:#86efac;">+' + addN + '</span> <span style="color:#fca5a5;">-' + delN + '</span>';
+            badge.innerHTML = '<span class="ed-badge-add">+' + addN + '</span><span class="ed-badge-del">-' + delN + '</span>';
             badge.style.display = 'inline-block';
         }
         function _toggleDiffView() {
@@ -175,22 +175,27 @@
                     <div class="editor-header">
                         <div class="ed-title">
                             <div class="ed-name-part">
-                                <i class="bi bi-pencil-square"></i>
-                                <span class="ed-filename">${displayName}</span>
+                                <span class="ed-icon-badge">${fileIconHtml({ is_dir: false, name: fileName, ext: ext }, 'ed-file-icon')}</span>
+                                <div class="ed-title-text">
+                                    <span class="ed-filename">${_escHtml(displayName)}</span>
+                                    <span class="ed-path" title="${_escAttr(filePath)}">${_escHtml(filePath)}</span>
+                                </div>
                             </div>
                             <div class="ed-actions">
-                                <button class="btn" id="edDiffBtn" style="padding:5px 10px;border-radius:7px;font-size:0.78rem;border:none;cursor:pointer;background:#475569;color:#e2e8f0;" title="对比当前内容与已保存内容"><i class="bi bi-file-diff"></i> 对比 <span id="edDiffBadge" style="display:none;margin-left:2px;padding:0 6px;border-radius:9px;background:rgba(15,23,42,0.55);font-size:0.66rem;font-weight:700;line-height:15px;vertical-align:middle;"></span></button>
-                                <button class="btn" id="edStyleBtn" style="padding:5px 10px;border-radius:7px;font-size:0.78rem;border:none;cursor:pointer;background:#475569;color:#e2e8f0;"><i class="bi bi-palette"></i> 样式</button>
-                                <button class="btn" id="edSearchBtn" style="padding:5px 10px;border-radius:7px;font-size:0.78rem;border:none;cursor:pointer;background:#475569;color:#e2e8f0;"><i class="bi bi-search"></i> 查找</button>
-                                <button class="btn ed-save-btn" id="${saveBtnId}" disabled title="修改内容后才可保存"><i class="bi bi-check-lg"></i> 保存</button>
-                                <button class="btn ed-close-btn" id="edCloseBtn"><i class="bi bi-x-lg"></i></button>
+                                <div class="ed-tools">
+                                    <button class="btn ed-tool-btn" id="edDiffBtn" title="对比当前内容与已保存内容"><i class="bi bi-file-diff"></i><span class="ed-btn-label">对比</span><span id="edDiffBadge" class="ed-diff-badge" style="display:none;"></span></button>
+                                    <button class="btn ed-tool-btn" id="edStyleBtn" title="主题与字号"><i class="bi bi-palette"></i><span class="ed-btn-label">样式</span></button>
+                                    <button class="btn ed-tool-btn" id="edSearchBtn" title="查找 / 替换"><i class="bi bi-search"></i><span class="ed-btn-label">查找</span></button>
+                                </div>
+                                <span class="ed-actions-sep"></span>
+                                <button class="btn ed-save-btn" id="${saveBtnId}" disabled title="修改内容后才可保存"><i class="bi bi-check-lg"></i><span class="ed-btn-label">保存</span></button>
+                                <button class="btn ed-close-btn" id="edCloseBtn" title="关闭"><i class="bi bi-x-lg"></i></button>
                             </div>
+                        </div>
                         <div class="ed-style-menu" id="edStyleMenu" style="display:none;">
                             <div class="esm-row"><span>主题</span><select id="edThemeSelect">${_ED_THEMES.map(t => `<option value="${t.key}">${t.label}</option>`).join('')}</select></div>
                             <div class="esm-row"><span>字号</span><select id="edFontSelect">${[12, 13, 14, 15, 16, 18, 20].map(s => `<option value="${s}">${s} px</option>`).join('')}</select></div>
                         </div>
-                        </div>
-                        <span class="ed-path">${filePath}</span>
                     </div>
                     <div class="editor-body">
                                                  ${_editorIsMarkdown ? `
@@ -598,7 +603,7 @@
             // 新文件：文件已由后端创建（空文件），现在只需保存编辑器内容
             // 已有文件：直接覆盖保存
             const btn = document.querySelector('.ed-save-btn');
-            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split"></i> 保存中...'; }
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split"></i><span class="ed-btn-label">保存中...</span>'; }
             const statusEl = document.getElementById('edStatus');
             _setEdStatus('saving');
 
@@ -611,7 +616,7 @@
                 .then(data => {
                     if (data.error) {
                         showToast('错误', '保存失败: ' + data.error, 'danger');
-                        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i> 保存'; }
+                        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i><span class="ed-btn-label">保存</span>'; }
                         _setEdStatus('error');
                         return;
                     }
@@ -620,13 +625,13 @@
                     _editorOriginal = content;   // 保存后更新对比基准
                     _updateDiffBadge();          // 保存后徽章清零
                     _setEdStatus('saved');
-                    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-check-lg"></i> 保存'; }
+                    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-check-lg"></i><span class="ed-btn-label">保存</span>'; }
                     loadFiles(currentPath);
                     setTimeout(closeEditor, 300);   // 保存成功后退出编辑器
                 })
                 .catch(e => {
                     showToast('错误', '保存失败: ' + e.message, 'danger');
-                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i> 保存'; }
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg"></i><span class="ed-btn-label">保存</span>'; }
                     _setEdStatus('error');
                 });
         }

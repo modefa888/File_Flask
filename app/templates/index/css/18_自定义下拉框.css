@@ -1,0 +1,86 @@
+/* ========== 自定义下拉框：首页各处的尺寸贴合 ==========
+   基础组件样式在 /static/css/custom-select.css，这里只放首页特有的上下文覆盖。 */
+
+/* 编辑器「样式」菜单：主题 / 字号下拉占满剩余宽度
+   （.esm-row > span 原本是给左侧标签定的 32px，这里要盖掉，否则包裹层被压扁） */
+.ed-style-menu .cselect,
+.ed-style-menu .esm-row > span.cselect {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+}
+
+.ed-style-menu .cselect-btn {
+    border-radius: 8px;
+    background: #fbfcfe;
+    font-size: 0.8rem;
+}
+
+/* 分享对话框：与同栏输入框同宽 */
+.share-dialog .cselect { width: 100%; }
+
+.share-dialog .cselect-btn {
+    padding: 8px 10px;
+    border-radius: 9px;
+    font-size: 0.8rem;
+}
+
+/* 上传记录抽屉：30px 紧凑型 */
+#upRecDrawer .upr-tools .cselect { flex: none; }
+
+#upRecDrawer .upr-tools .cselect-btn {
+    padding: 0 8px;
+    border-radius: 7px;
+    background: #fafbfc;
+    font-size: 12.5px;
+}
+
+/* 媒体集合：设置项 / 每页条数不参与拉伸 */
+.media-settings-modal .cselect,
+.media-pager .cselect {
+    flex: none;
+}
+
+/* SQLite 预览是深色工具条：给下拉框配深色皮肤 */
+.sq-toolbar .cselect { flex: none; }
+
+.sq-toolbar .cselect-btn {
+    padding: 0 4px;
+    gap: 2px;
+    border-radius: 4px;
+    border-color: #454545;
+    background: #2d2d2d;
+    color: #c8c8c8;
+    font-size: 11.5px;
+}
+
+.sq-toolbar .cselect-btn .cselect-arrow { font-size: 0.55rem; }
+
+.sq-toolbar .cselect-btn:hover:not(:disabled) {
+    background: #333333;
+    border-color: #5a5a5a;
+    color: #e8e8e8;
+}
+
+.sq-toolbar .cselect-btn .cselect-arrow { color: #888888; }
+
+.cselect-menu.cselect-dark {
+    background: #252526;
+    border-color: #3f3f3f;
+    box-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.65);
+}
+
+.cselect-menu.cselect-dark .cselect-opt { color: #c8c8c8; }
+
+.cselect-menu.cselect-dark .cselect-opt:hover,
+.cselect-menu.cselect-dark .cselect-opt.cursor {
+    background: #2f2f31;
+    color: #ffffff;
+}
+
+.cselect-menu.cselect-dark .cselect-opt.selected {
+    background: #094771;
+    color: #ffffff;
+}
+
+.cselect-menu.cselect-dark .cselect-check { color: #6cb6ff; }

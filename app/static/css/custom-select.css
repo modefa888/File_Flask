@@ -1,0 +1,200 @@
+/* ========== 自定义下拉框（公共组件） ==========
+   原生 <select> 仍按原尺寸占位（visibility:hidden），上面的触发器与弹出菜单自绘，
+   value / options / change / disabled 全部保持原生行为。
+   主题通过 --cs-* 变量控制：首页用默认浅色，后台管理在 css/08 里按明暗主题覆盖。 */
+
+:root {
+    --cs-bg: #ffffff;
+    --cs-bg-hover: #fcfdff;
+    --cs-panel: #ffffff;
+    --cs-fg: #334155;
+    --cs-muted: #94a3b8;
+    --cs-border: #dfe7f1;
+    --cs-border-hover: #b9cbe6;
+    --cs-hover: #f1f6fe;
+    --cs-selected: #eff6ff;
+    --cs-brand: #2563eb;
+    --cs-shadow: 0 18px 44px -14px rgba(15, 23, 42, 0.35), 0 2px 8px rgba(15, 23, 42, 0.08);
+    --cs-scroll-thumb: #d7e0eb;
+    --cs-scroll-thumb-hover: #c3ccd9;
+}
+
+.cselect {
+    position: relative;
+    display: inline-block;
+    vertical-align: middle;
+    max-width: 100%;
+}
+
+.cselect > select.cselect-native {
+    visibility: hidden;
+    pointer-events: none;
+}
+
+/* 触发器：铺满原生 select 的盒子，尺寸/位置自动跟随 */
+.cselect-btn {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 0 10px;
+    border: 1px solid var(--cs-border);
+    border-radius: 8px;
+    background: var(--cs-bg);
+    color: var(--cs-fg);
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 400;
+    line-height: 1.2;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.cselect-btn:hover:not(:disabled) {
+    border-color: var(--cs-border-hover);
+    background: var(--cs-bg-hover);
+}
+
+.cselect-btn:focus-visible {
+    outline: none;
+    border-color: var(--cs-brand);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.cselect-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.cselect-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cselect-arrow {
+    flex: none;
+    font-size: 0.68rem;
+    color: var(--cs-muted);
+    transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.cselect-btn[aria-expanded="true"] .cselect-arrow {
+    transform: rotate(180deg);
+    color: var(--cs-brand);
+}
+
+/* 弹出菜单：挂在 body 上、fixed 定位，不会被面板/弹窗的 overflow 裁掉 */
+.cselect-menu {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 30000;
+    display: none;
+    min-width: 120px;
+    max-width: min(320px, calc(100vw - 16px));
+    max-height: 340px;
+    overflow-y: auto;
+    padding: 4px;
+    background: var(--cs-panel);
+    border: 1px solid var(--cs-border);
+    border-radius: 10px;
+    box-shadow: var(--cs-shadow);
+}
+
+.cselect-menu.open {
+    display: block;
+    animation: cselectIn 0.12s ease;
+}
+
+@keyframes cselectIn {
+    from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+    to   { opacity: 1; transform: none; }
+}
+
+.cselect-menu::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.cselect-menu::-webkit-scrollbar-track,
+.cselect-menu::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+.cselect-menu::-webkit-scrollbar-thumb {
+    background: var(--cs-scroll-thumb);
+    border-radius: 999px;
+}
+
+.cselect-menu::-webkit-scrollbar-thumb:hover {
+    background: var(--cs-scroll-thumb-hover);
+}
+
+/* 去掉上下箭头按钮，保持细窄的胶囊滚动条 */
+.cselect-menu::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+/* Firefox 用标准属性；Chrome 交给 ::-webkit-scrollbar 自绘（否则会退回原生带箭头的滚动条） */
+@supports not selector(::-webkit-scrollbar) {
+    .cselect-menu {
+        scrollbar-width: thin;
+        scrollbar-color: var(--cs-scroll-thumb) transparent;
+    }
+}
+
+.cselect-opt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 7px;
+    font-size: 0.82rem;
+    color: var(--cs-fg);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.cselect-opt:hover,
+.cselect-opt.cursor {
+    background: var(--cs-hover);
+    color: var(--cs-brand);
+}
+
+.cselect-opt.selected {
+    background: var(--cs-selected);
+    color: var(--cs-brand);
+    font-weight: 600;
+}
+
+.cselect-opt.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.cselect-opt-txt {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cselect-check {
+    flex: none;
+    font-size: 0.78rem;
+    color: var(--cs-brand);
+    opacity: 0;
+}
+
+.cselect-opt.selected .cselect-check { opacity: 1; }

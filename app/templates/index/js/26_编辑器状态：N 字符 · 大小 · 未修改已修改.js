@@ -25,6 +25,7 @@
             };
             const [label, icon] = map[mode] || map.unmodified;
             el.textContent = meta + ' · ' + label;
+            el.dataset.mode = mode;      // 供状态栏按状态着色（未修改 / 已修改 / 保存中 / 失败）
             if (dot) dot.textContent = icon;
             // 保存按钮：仅已修改/保存失败时可点击
             const saveBtn = document.querySelector('.ed-save-btn');

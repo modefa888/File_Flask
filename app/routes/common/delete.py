@@ -16,9 +16,12 @@ from ...services.common.trash import (
     _update_index_after_delete, _invalidate_all_dir_sizes, _DELETE_HISTORY_LOCK,
 )
 from ...services.common.thumbnail import _generate_image_thumb, _extract_video_frame
-from ...services.common.filecore import _invalidate_list_cache
+from ...services.common.filecore import (
+    _invalidate_list_cache, _DIR_SIZE_CACHE, _dir_size_cache_hit,
+)
 from ...services.common.db import _get_index_conn
 from .fileops import _guard_protected_path
+from .progress_stream import TaskCanceled, task_checkpoint
 
 
 _log = get_logger()
@@ -54,6 +57,56 @@ def _task_bump(task, files=0, bytes_=0):
         task["done_bytes"] += bytes_
 
 
+def _size_hint(path):
+    """取一个体积参考值（只读缓存，绝不触发 du），用于统计阶段估算剩余时间。"""
+    try:
+        if os.path.isfile(path) or os.path.islink(path):
+            return os.path.getsize(path)
+        entry = _DIR_SIZE_CACHE.get(path) or _DIR_SIZE_CACHE.get(path.replace("\\", "/"))
+        if not entry or not entry.get("size"):
+            return 0
+        try:
+            mtime = os.stat(path).st_mtime
+        except OSError:
+            return 0
+        if not _dir_size_cache_hit(entry, mtime):
+            return 0
+        return int(entry.get("size") or 0)
+    except OSError:
+        return 0
+
+
+def _scan_tree(task, path):
+    """统计文件数与字节数（可暂停 / 停止），并把已扫描量写进任务供前端估算剩余时间。"""
+    if os.path.islink(path) or os.path.isfile(path):
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        with _TASKS_LOCK:
+            task["scan_done"] = (task.get("scan_done") or 0) + 1
+            task["scan_bytes"] = (task.get("scan_bytes") or 0) + size
+            task["current"] = os.path.basename(path)
+        return 1, size
+    total_files, total_bytes = 0, 0
+    for root, _dirs, files in os.walk(path, onerror=lambda e: None):
+        task_checkpoint(task, _TASKS_LOCK)      # 暂停 / 停止检查点
+        dir_bytes = 0
+        for f in files:
+            try:
+                dir_bytes += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+        n = len(files)
+        total_files += n
+        total_bytes += dir_bytes
+        with _TASKS_LOCK:
+            task["current"] = root
+            task["scan_done"] = (task.get("scan_done") or 0) + n
+            task["scan_bytes"] = (task.get("scan_bytes") or 0) + dir_bytes
+    return total_files, total_bytes
+
+
 # 文件数不超过这个值时逐文件搬进回收站（能给出实时进度表），超过则整体秒移
 _PER_FILE_LIMIT = 20000
 
@@ -80,6 +133,7 @@ def _copy_file_progress(src, dst, task, rel=""):
     copied = 0
     with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
         while True:
+            task_checkpoint(task, _TASKS_LOCK)      # 暂停 / 停止检查点
             chunk = fsrc.read(256 * 1024)
             if not chunk:
                 break
@@ -127,9 +181,12 @@ def _move_tree_progress(src, dst, task, rel=""):
     if os.path.isdir(src) and not os.path.islink(src):
         os.makedirs(dst, exist_ok=True)
         for child in os.listdir(src):
+            task_checkpoint(task, _TASKS_LOCK)      # 暂停 / 停止检查点
             try:
                 _move_tree_progress(os.path.join(src, child), _fit_dst_path(dst, child), task,
                                     (name + "/" + child) if name else child)
+            except TaskCanceled:
+                raise
             except Exception as e:
                 # 单个条目失败不中断整个目录的删除
                 with _TASKS_LOCK:
@@ -162,11 +219,54 @@ def _move_tree_progress(src, dst, task, rel=""):
     _copy_file_progress(src, dst, task, name)
 
 
+def _persist_delete_result(deleted_abs, trash_items):
+    """删除任务收尾：更新索引体积、把已进回收站的条目写入历史（正常结束 / 停止都要做）"""
+    if deleted_abs:
+        try:
+            _update_index_after_delete(deleted_abs)
+            _invalidate_all_dir_sizes(deleted_abs)
+        except Exception:
+            pass
+    if trash_items:
+        try:
+            with _DELETE_HISTORY_LOCK:
+                history = _load_delete_history()
+                history.extend(trash_items)
+                if len(history) > 500:
+                    history = history[-500:]
+                _save_delete_history(history)
+        except Exception:
+            pass
+
+
 def _delete_worker(task_id, valid_paths):
     task = _DELETE_TASKS[task_id]
     deleted, errors, deleted_abs, trash_items = [], [], [], []
+    counts = {}
     try:
+        # ---- 阶段一：统计文件数 / 总大小 ----
+        # 大目录这一步要几秒到几十秒，先报「统计中 + 已扫描量」，
+        # 前端用目录大小缓存里的参考值估算剩余时间，避免弹窗一直停在「准备中…」。
         for rel_path in valid_paths:
+            task_checkpoint(task, _TASKS_LOCK)
+            target_path = os.path.abspath(os.path.normpath(rel_path))
+            try:
+                counts[target_path] = _scan_tree(task, target_path)
+            except OSError:
+                counts[target_path] = (0, 0)
+        with _TASKS_LOCK:
+            scanned_files = sum(c[0] for c in counts.values())
+            task["total_files"] = scanned_files
+            task["total_bytes"] = sum(c[1] for c in counts.values())
+            task["done_files"] = 0
+            task["done_bytes"] = 0
+            task["scan_done"] = scanned_files
+            task["phase"] = "deleting"
+            task["current"] = ""
+
+        # ---- 阶段二：搬进回收站 ----
+        for rel_path in valid_paths:
+            task_checkpoint(task, _TASKS_LOCK)      # 暂停 / 停止检查点
             target_path = os.path.abspath(os.path.normpath(rel_path))
             if not os.path.exists(target_path):
                 errors.append(f"{rel_path}: 文件不存在")
@@ -184,7 +284,7 @@ def _delete_worker(task_id, valid_paths):
                     file_size = 0 if is_dir else os.path.getsize(target_path)
                 except OSError:
                     file_size = 0
-                pf, pb = _count_tree(target_path)
+                pf, pb = counts.get(target_path) or _count_tree(target_path)
                 top = os.path.basename(target_path) or target_path
                 if is_dir and pf <= _PER_FILE_LIMIT:
                     # 逐文件搬进回收站：让前端能显示实时删除进度表
@@ -210,27 +310,14 @@ def _delete_worker(task_id, valid_paths):
                     "size": file_size,
                     "deleted_at": int(time.time()),
                 })
+            except TaskCanceled:
+                raise
             except Exception as e:
                 errors.append(f"{rel_path}: {str(e)}")
                 with _TASKS_LOCK:
                     task["errors"] = list(errors)
 
-        if deleted_abs:
-            try:
-                _update_index_after_delete(deleted_abs)
-                _invalidate_all_dir_sizes(deleted_abs)
-            except Exception:
-                pass
-        if trash_items:
-            try:
-                with _DELETE_HISTORY_LOCK:
-                    history = _load_delete_history()
-                    history.extend(trash_items)
-                    if len(history) > 500:
-                        history = history[-500:]
-                    _save_delete_history(history)
-            except Exception:
-                pass
+        _persist_delete_result(deleted_abs, trash_items)
         with _TASKS_LOCK:
             task["status"] = "done_with_errors" if errors else "done"
             task["result"] = {
@@ -238,6 +325,16 @@ def _delete_worker(task_id, valid_paths):
                 "errors": errors,
                 "trash_items": trash_items,
             }
+    except TaskCanceled:
+        # 已搬进回收站的条目必须落库，否则回收站里看不到、也无法还原
+        _persist_delete_result(deleted_abs, trash_items)
+        with _TASKS_LOCK:
+            task["status"] = "canceled"
+            task["paused"] = False
+            task["canceled"] = True
+            task["result"] = {"deleted": [os.path.basename(p) for p in deleted_abs],
+                              "errors": errors,
+                              "trash_items": trash_items}
     except Exception as e:
         with _TASKS_LOCK:
             task["status"] = "error"
@@ -268,18 +365,21 @@ def api_delete_start():
         valid.append(rel)
     if not valid:
         return jsonify({"error": "没有可删除的文件"}), 400
-    total_files = total_bytes = 0
+    # 体积参考值：只读目录大小缓存（列表里已经算过），不在这里做耗时扫描，
+    # 让接口立刻返回 task_id，统计放到 worker 里做，前端马上能看到进度与估算。
+    hint_bytes = 0
     for rel in valid:
-        f, b = _count_tree(os.path.abspath(os.path.normpath(rel)))
-        total_files += f
-        total_bytes += b
+        hint_bytes += _size_hint(os.path.abspath(os.path.normpath(rel)))
     task_id = uuid.uuid4().hex[:16]
     task = {
         "status": "running",
-        "total_files": total_files,
-        "total_bytes": total_bytes,
+        "phase": "scanning",       # scanning -> deleting
+        "total_files": 0,
+        "total_bytes": hint_bytes,
         "done_files": 0,
         "done_bytes": 0,
+        "scan_done": 0,            # 统计阶段已扫描文件数
+        "scan_bytes": 0,           # 统计阶段已扫描字节数
         "current": "",
         "recent": [],
         "errors": [],
@@ -292,7 +392,7 @@ def api_delete_start():
         _DELETE_TASKS[task_id] = task
     threading.Thread(target=_delete_worker, args=(task_id, valid), daemon=True).start()
     return jsonify({"success": True, "task_id": task_id,
-                    "total_files": total_files, "total_bytes": total_bytes})
+                    "total_files": 0, "total_bytes": hint_bytes})
 
 
 @bp.route("/api/delete/progress")
@@ -314,8 +414,10 @@ def api_delete_progress():
         percent = done_files / total_files * 100
     else:
         percent = 100 if snap["status"] != "running" else 0
+    phase = snap.get("phase") or "running"
     return jsonify({
         "status": snap["status"],
+        "phase": phase,
         "current": snap.get("current", ""),
         # 最近删除的条目（最新的在后），前端悬浮框里当进度表显示
         "recent": snap.get("recent", [])[-40:],
@@ -323,7 +425,11 @@ def api_delete_progress():
         "total_files": total_files,
         "done_bytes": done_bytes,
         "total_bytes": total_bytes,
+        # 统计阶段用「已扫描字节」估算剩余时间，删除阶段用「已删除字节」
+        "scan_done": snap.get("scan_done", 0),
+        "processed_bytes": (snap.get("scan_bytes") or 0) if phase == "scanning" else done_bytes,
         "percent": round(percent, 1),
+        "paused": bool(snap.get("paused")),
         "errors": snap.get("errors", []),
         "result": snap.get("result"),
     })

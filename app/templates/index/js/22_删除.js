@@ -46,7 +46,11 @@
                         const deletedCount = (result.deleted || []).length;
                         if (deletedCount > 0) {
                             // 本地从列表移除已删条目，不重新请求 /api/files（大目录会超时）
-                            localRemoveItems(paths);
+                            // 中途停止 / 部分失败时只移除真正删掉的条目，避免列表提前消失
+                            const doneNames = new Set(result.deleted || []);
+                            const removed = ok ? paths
+                                : paths.filter(p => doneNames.has(p.split('/').pop()));
+                            if (removed.length) localRemoveItems(removed);
                             if (ok) showToast('成功', '已删除 ' + deletedCount + ' 个（移入回收站）', 'success');
                             // 显示撤销 Toast（带倒计时）
                             if (ok && (result.trash_items || []).length > 0) showUndoToast(result.trash_items);

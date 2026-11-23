@@ -61,19 +61,24 @@
             _zipSortDir = 1;
             const isNested = !!outerPath;
             const displayName = absPath.split('/').pop();
-            const nestedHint = isNested ? `<span style="font-size:0.8rem;color:#718096;margin-left:6px;">· 嵌套在 <i class="bi bi-file-zip"></i> 内</span>` : '';
+            const nestedHint = isNested ? `<span class="zip-nested-hint"><i class="bi bi-file-zip"></i>嵌套包</span>` : '';
             container.innerHTML = `
-            <div class="preview-overlay">
-                <div class="zip-modal">
+            <div class="preview-overlay zip-overlay">
+                <div class="zip-modal zip-viewer">
                     <div class="zip-header">
                         <div class="zip-title-row">
-                            <div class="zip-title">${fileIconHtml({ is_dir: false, name: displayName, ext: (displayName.split('.').pop() || '') }, 'zip-title-icon')}<span id="zipTitleName">${_escHtml(displayName)}</span>${nestedHint}</div>
+                            <div class="zip-title-main">
+                                <span class="zip-icon-badge">${fileIconHtml({ is_dir: false, name: displayName, ext: (displayName.split('.').pop() || '') }, 'zip-title-icon')}</span>
+                                <div class="zip-title-info">
+                                    <div class="zip-title"><span id="zipTitleName">${_escHtml(displayName)}</span>${nestedHint}</div>
+                                    <span class="zip-meta" id="zipMetaLine"></span>
+                                </div>
+                            </div>
                             <div class="zip-actions">
                                 <button class="btn btn-extract" id="zipExtractBtn"><i class="bi bi-box-arrow-up"></i> 解压</button>
-                                <button class="btn btn-close-zip" id="zipCloseBtn"><i class="bi bi-x-lg"></i></button>
+                                <button class="btn btn-close-zip" id="zipCloseBtn" title="关闭"><i class="bi bi-x-lg"></i></button>
                             </div>
                         </div>
-                        <span class="zip-meta" id="zipMetaLine"></span>
                     </div>
                     <div class="zip-toolbar" id="zipBreadcrumb"></div>
                     <div class="zip-body" id="zipBody">
@@ -187,19 +192,31 @@
                 });
             }
 
-            const sortHeader = (field, label) => {
-                const cls = sortKey === field ? (sortDir === 1 ? 'sort-asc' : 'sort-desc') : '';
-                const arrow = sortKey === field ? (sortDir === 1 ? ' ↑' : ' ↓') : '';
-                return `<th class="zip-sortable ${cls}" data-sort="${field}">${label}${arrow}</th>`;
+            const sortHeader = (field, label, extraCls) => {
+                const active = sortKey === field;
+                const cls = active ? (sortDir === 1 ? 'sort-asc' : 'sort-desc') : '';
+                const arrow = active
+                    ? `<i class="bi bi-caret-${sortDir === 1 ? 'up' : 'down'}-fill"></i>`
+                    : `<i class="bi bi-arrow-down-up zip-sort-idle"></i>`;
+                return `<th class="zip-sortable ${extraCls || ''} ${cls}" data-sort="${field}"><span class="zip-th-inner">${label}${arrow}</span></th>`;
             };
 
-            let html = `<table class="zip-table"><thead><tr>
-            <th style="width:60px;">类型</th>
-            ${sortHeader('name', '名称')}
-            ${sortHeader('size', '大小')}
-            ${sortHeader('compressed', '压缩后')}
-            ${sortHeader('type', '类型')}
-            <th style="width:200px;">操作</th>
+            let html = `<table class="zip-table">
+            <colgroup>
+                <col class="zip-col-icon">
+                <col class="zip-col-name">
+                <col class="zip-col-size">
+                <col class="zip-col-compressed">
+                <col class="zip-col-type">
+                <col class="zip-col-actions">
+            </colgroup>
+            <thead><tr>
+            <th class="zip-col-icon"></th>
+            ${sortHeader('name', '名称', 'zip-col-name')}
+            ${sortHeader('size', '大小', 'zip-col-size')}
+            ${sortHeader('compressed', '压缩后', 'zip-col-compressed')}
+            ${sortHeader('type', '类型', 'zip-col-type')}
+            <th class="zip-col-actions">操作</th>
         </tr></thead><tbody>`;
             for (const e of sorted) {
                 const isDir = !!e.is_dir;
@@ -221,12 +238,12 @@
                 const typeText = isDir ? '文件夹' : (ext ? ext.toUpperCase() : '未知');
 
                 html += `<tr data-zip-entry="${entryEsc}" data-is-dir="${isDir}" data-is-empty="${isEmptyDir}">
-                <td>${icon}</td>
+                <td class="zip-col-icon">${icon}</td>
                 <td class="zip-name-cell"><span class="name ${isDir ? (isEmptyDir ? 'dir-name dir-empty' : 'dir-name') : (canPreview ? 'clickable-name' : '')}" data-zip-entry="${entryEsc}" data-ext="${ext}">${nameEsc}</span></td>
-                <td class="zip-size">${sizeStr}</td>
-                <td class="zip-size">${compStr}</td>
-                <td><span class="file-type-badge">${typeText}</span></td>
-                <td class="zip-actions-cell">
+                <td class="zip-size zip-col-size">${sizeStr}</td>
+                <td class="zip-size zip-col-compressed">${compStr}</td>
+                <td class="zip-col-type"><span class="file-type-badge${isDir ? ' dir' : ''}">${typeText}</span></td>
+                <td class="zip-actions-cell zip-col-actions">
                     ${isDir ? (isEmptyDir ? '' : `<button class="btn btn-zip-open" data-zip-entry="${entryEsc}"><i class="bi bi-folder2-open"></i> 进入</button>`) :
                         (isZipEntry ?
                             `<button class="btn btn-zip-open" data-zip-entry="${entryEsc}"><i class="bi bi-box-arrow-in-right"></i> 打开</button>
@@ -329,18 +346,14 @@
             if (!body) return;
             const name = entry.split('/').pop();
             body.innerHTML = `
-            <div style="padding:16px;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                    <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
-                        <button class="btn" style="background:#f1f5f9;color:#475569;padding:4px 10px;border-radius:6px;border:none;cursor:pointer;font-size:0.78rem;" id="zipBackBtn"><i class="bi bi-arrow-left"></i> 返回列表</button>
-                        <span style="font-weight:600;color:#1a202c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_escHtml(name)}</span>
-                        <span style="font-size:0.72rem;color:#718096;">${sizeStr || ''}</span>
-                    </div>
-                    <button class="btn" style="background:#f0fdf4;color:#059669;padding:4px 10px;border-radius:6px;border:none;cursor:pointer;font-size:0.78rem;" data-zip-entry="${_escAttr(entry)}"><i class="bi bi-download"></i> 下载</button>
+            <div class="zip-inline">
+                <div class="zip-inline-bar">
+                    <button class="btn zip-inline-back" id="zipBackBtn"><i class="bi bi-arrow-left"></i> 返回列表</button>
+                    <span class="zip-inline-name" title="${_escAttr(name)}">${_escHtml(name)}</span>
+                    <span class="zip-inline-size">${sizeStr || ''}</span>
+                    <button class="btn zip-inline-dl" data-zip-entry="${_escAttr(entry)}"><i class="bi bi-download"></i> 下载</button>
                 </div>
-                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;overflow:auto;max-height:calc(86vh - 210px);">
-                    ${inner}
-                </div>
+                <div class="zip-inline-stage">${inner}</div>
             </div>`;
             body.querySelector('#zipBackBtn').addEventListener('click', () => _renderZipList(_currentZipEntries, _currentZipEntry));
             body.querySelector('[data-zip-entry]').addEventListener('click', (e) => { e.stopPropagation(); _downloadZipEntry(entry); });
@@ -365,8 +378,9 @@
             for (let i = 0; i < parts.length; i++) {
                 cumulative += (cumulative ? '/' : '') + parts[i];
                 const isLast = i === parts.length - 1;
-                if (isLast) pathHtml += `<span class="breadcrumb-sep">/</span><span class="breadcrumb-item active">${_escHtml(parts[i])}</span>`;
-                else pathHtml += `<span class="breadcrumb-sep">/</span><span class="breadcrumb-item"><a data-zip-bc="${_escAttr(cumulative)}">${_escHtml(parts[i])}</a></span>`;
+                const sep = '<span class="breadcrumb-sep"><i class="bi bi-chevron-right"></i></span>';
+                if (isLast) pathHtml += `${sep}<span class="breadcrumb-item active">${_escHtml(parts[i])}</span>`;
+                else pathHtml += `${sep}<span class="breadcrumb-item"><a data-zip-bc="${_escAttr(cumulative)}">${_escHtml(parts[i])}</a></span>`;
             }
             if (pathHtml) html += `<span class="breadcrumb-path">${pathHtml}</span>`;
             bc.innerHTML = html;

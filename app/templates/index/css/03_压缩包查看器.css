@@ -12,12 +12,40 @@
             animation: modalPop 0.2s ease;
         }
 
+        /* 查看器专用：更宽的表格区 + 顶部品牌色细条 */
+        .zip-modal.zip-viewer {
+            max-width: 1080px;
+            height: 88vh;
+            max-height: 920px;
+            border-radius: 18px;
+            border: 1px solid rgba(15, 23, 42, 0.06);
+            box-shadow: 0 40px 100px -32px rgba(15, 23, 42, 0.55), 0 12px 32px -18px rgba(15, 23, 42, 0.28);
+            position: relative;
+        }
+
+        .zip-modal.zip-viewer::before {
+            content: "";
+            flex: none;
+            height: 3px;
+            background: linear-gradient(90deg, #2563eb 0%, #38bdf8 48%, #34d399 100%);
+            opacity: .9;
+        }
+
+        /* 查看器遮罩：轻微模糊，聚焦弹窗内容 */
+        .preview-overlay.zip-overlay {
+            background: rgba(15, 23, 42, 0.52);
+            -webkit-backdrop-filter: blur(5px);
+            backdrop-filter: blur(5px);
+        }
+
+        /* ---------- 头部 ---------- */
         .zip-header {
             display: flex;
             flex-direction: column;
-            padding: 14px 22px;
-            background: #f8fafc;
-            border-bottom: 1px solid #e2e8f0;
+            gap: 4px;
+            padding: 15px 22px 13px;
+            background: linear-gradient(180deg, #fcfdff 0%, #f4f8fd 100%);
+            border-bottom: 1px solid #e8eef7;
             flex-shrink: 0;
         }
 
@@ -25,23 +53,64 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            flex: 1;
+            gap: 16px;
             min-width: 0;
         }
 
-        .zip-header .zip-title {
-            font-size: 1.15rem;
-            font-weight: 700;
-            color: #1a202c;
+        .zip-header .zip-title-main {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
+            min-width: 0;
+            flex: 1 1 auto;
+        }
+
+        /* 标题左侧图标块 */
+        .zip-header .zip-icon-badge {
+            flex: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            background: linear-gradient(180deg, #ffffff 0%, #eef4ff 100%);
+            border: 1px solid #dbe7ff;
+            box-shadow: inset 0 1px 0 #ffffff, 0 2px 6px -3px rgba(37, 99, 235, .45);
+        }
+
+        .zip-header .zip-title-info {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            min-width: 0;
+            flex: 1 1 auto;
             overflow: hidden;
+        }
+
+        .zip-header .zip-title {
+            font-size: 1.02rem;
+            font-weight: 700;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            line-height: 1.35;
+            overflow: hidden;
+        }
+
+        .zip-header .zip-title #zipTitleName,
+        .zip-header .zip-title #zipProgTitle {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
         }
 
         /* 标题图标同样走文件管理器那套（Seti / 彩色兜底） */
         .zip-header .zip-title .zip-title-icon {
-            font-size: 1.15rem;
+            font-size: 1.5rem;
             line-height: 1;
             flex: none;
         }
@@ -50,77 +119,126 @@
             transform: none;
         }
 
-        .zip-header .zip-title i {
+        /* 进度弹窗等旧结构里图标是 .zip-title 的直接子元素 */
+        .zip-header .zip-title > i {
             font-size: 1.25rem;
             color: #2563eb;
         }
 
+        .zip-header .zip-nested-hint {
+            flex: none;
+            font-size: .72rem;
+            font-weight: 500;
+            color: #1d4ed8;
+            background: #eff6ff;
+            border: 1px solid #dbe7ff;
+            border-radius: 999px;
+            padding: 2px 9px;
+            white-space: nowrap;
+        }
+
+        .zip-header .zip-nested-hint i {
+            font-size: .72rem;
+            margin-right: 2px;
+        }
+
         .zip-header .zip-meta {
-            color: #718096;
-            font-size: 0.85rem;
-            font-family: monospace;
-            margin: 5px 0 0 28px;
             display: block;
-            min-height: 18px;
+            color: #7b8794;
+            font-size: .78rem;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: .01em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-height: 16px;
+            margin: 0;
         }
 
         .zip-header .zip-actions {
             display: flex;
             gap: 8px;
             align-items: center;
+            flex: none;
         }
 
         .zip-header .zip-actions .btn {
-            padding: 6px 14px;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            border: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-size: .84rem;
+            font-weight: 600;
+            line-height: 1.2;
+            border: 1px solid transparent;
             cursor: pointer;
+            transition: background .15s ease, color .15s ease, border-color .15s ease,
+                        box-shadow .15s ease, transform .12s ease;
+        }
+
+        .zip-header .zip-actions .btn:active {
+            transform: translateY(1px);
         }
 
         .zip-header .zip-actions .btn-extract {
-            background: #059669;
-            color: white;
+            background: linear-gradient(180deg, #10b981 0%, #059669 100%);
+            color: #ffffff;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 6px 16px -8px rgba(5, 150, 105, .9);
         }
 
         .zip-header .zip-actions .btn-extract:hover {
-            background: #047857;
+            background: linear-gradient(180deg, #0ea472 0%, #047857 100%);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 8px 20px -8px rgba(5, 150, 105, .95);
         }
 
         .zip-header .zip-actions .btn-close-zip {
-            background: #fee2e2;
-            color: #dc2626;
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            border-radius: 10px;
+            background: #ffffff;
+            color: #64748b;
+            border-color: #e3e9f2;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
         }
 
         .zip-header .zip-actions .btn-close-zip:hover {
-            background: #fecaca;
+            background: #fef2f2;
+            color: #dc2626;
+            border-color: #fecaca;
         }
 
+        /* ---------- 面包屑工具栏 ---------- */
         .zip-toolbar {
             display: flex;
             align-items: center;
-            gap: 10px;
-            padding: 9px 22px;
-            border-bottom: 1px solid #e2e8f0;
+            gap: 2px;
+            padding: 8px 20px;
+            border-bottom: 1px solid #eef2f8;
             background: #ffffff;
             flex-shrink: 0;
-            min-height: 41px;
+            min-height: 44px;
             box-sizing: border-box;
+            overflow: hidden;
         }
 
         .zip-toolbar .breadcrumb-item {
-            font-size: 0.85rem;
-            color: #718096;
+            font-size: .82rem;
+            color: #64748b;
             white-space: nowrap;
             display: inline-flex;
             align-items: center;
             gap: 4px;
             line-height: 1;
+            min-width: 0;
         }
 
-        .zip-toolbar .breadcrumb-item i {
+        .zip-toolbar .breadcrumb-item > i {
+            font-size: .85rem;
+            color: #2563eb;
             line-height: 1;
-            vertical-align: middle;
         }
 
         .zip-toolbar .breadcrumb-path {
@@ -133,28 +251,77 @@
         }
 
         .zip-toolbar .breadcrumb-item a {
-            color: #2563eb;
+            color: #475569;
             text-decoration: none;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
+            padding: 5px 8px;
+            border-radius: 7px;
+            max-width: 210px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            transition: background .15s ease, color .15s ease;
+        }
+
+        .zip-toolbar .breadcrumb-item a:hover {
+            background: #eff6ff;
+            color: #1d4ed8;
         }
 
         .zip-toolbar .breadcrumb-item.active {
-            color: #1a202c;
+            color: #0f172a;
             font-weight: 600;
+            background: #eff6ff;
+            border-radius: 7px;
+            padding: 5px 9px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 280px;
         }
 
         .zip-toolbar .breadcrumb-sep {
-            color: #cbd5e0;
+            color: #cbd5e1;
             line-height: 1;
+            font-size: .7rem;
+            margin: 0 1px;
+            flex: none;
         }
 
+        .zip-toolbar .breadcrumb-sep i {
+            font-size: .68rem;
+            vertical-align: middle;
+        }
+
+        /* ---------- 内容区 ---------- */
         .zip-body {
             flex: 1;
             overflow: auto;
             padding: 0;
+            background: #ffffff;
             scrollbar-gutter: stable;
+            scrollbar-width: thin;
+            scrollbar-color: #cfd8e3 transparent;
+        }
+
+        .zip-body::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        .zip-body::-webkit-scrollbar-track {
+            background: #ffffff;
+        }
+
+        .zip-body::-webkit-scrollbar-thumb {
+            background: #cfd8e3;
+            border: 3px solid #ffffff;
+            border-radius: 999px;
+        }
+
+        .zip-body::-webkit-scrollbar-thumb:hover {
+            background: #aebccd;
         }
 
         /* 后台任务胶囊（左下角，同移动版）：浅色玻璃胶囊 + 按任务类型着色的图标块 */
@@ -256,55 +423,130 @@
         .bg-task.done .bg-task-pct { color: #16a34a; }
         .bg-task.done::after { background: #16a34a; }
 
+        /* 暂停态：琥珀色描边 + 「暂停」字样，和运行中区分开 */
+        .bg-task.paused {
+            border-color: #fcd34d;
+            background: rgba(255, 251, 235, .96);
+        }
+
+        .bg-task.paused .bg-task-ico {
+            background: #fef3c7;
+            color: #b45309;
+        }
+
+        .bg-task.paused .bg-task-pct { color: #b45309; }
+        .bg-task.paused::after { background: #f59e0b; }
+
+        /* ---------- 文件列表 ---------- */
         .zip-table {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed;
         }
 
+        /* 列宽：图标 / 名称(自适应) / 大小 / 压缩后 / 类型 / 操作 */
+        .zip-table col.zip-col-icon { width: 54px; }
+        .zip-table col.zip-col-size { width: 104px; }
+        .zip-table col.zip-col-compressed { width: 104px; }
+        .zip-table col.zip-col-type { width: 96px; }
+        .zip-table col.zip-col-actions { width: 188px; }
+
         .zip-table thead th {
-            background: #f1f4f9;
-            font-size: 0.82rem;
-            color: #4a5568;
-            font-weight: 600;
-            padding: 10px 14px;
-            border-bottom: 1px solid #e2e8f0;
             position: sticky;
             top: 0;
             z-index: 2;
+            background: #f7f9fc;
+            font-size: .78rem;
+            color: #6b7a90;
+            font-weight: 600;
+            letter-spacing: .02em;
+            padding: 0 16px;
+            height: 40px;
             text-align: left;
+            white-space: nowrap;
+            box-shadow: inset 0 -1px 0 #e6ecf5;
+        }
+
+        .zip-table thead th.zip-col-icon {
+            padding-left: 20px;
+            padding-right: 0;
+        }
+
+        .zip-table thead th.zip-col-actions {
+            text-align: right;
+            padding-right: 20px;
         }
 
         .zip-table .zip-sortable {
             cursor: pointer;
             user-select: none;
-            transition: color 0.15s;
+            transition: color .15s ease, background .15s ease;
         }
 
         .zip-table .zip-sortable:hover {
-            color: #2563eb;
+            color: #1d4ed8;
+            background: #eef4ff;
         }
 
-        .zip-table .zip-sortable.sort-asc {
-            color: #2563eb;
-        }
-
+        /* 当前排序列：只加底部蓝色标记线，避免整块高亮抢视线 */
+        .zip-table .zip-sortable.sort-asc,
         .zip-table .zip-sortable.sort-desc {
-            color: #2563eb;
+            color: #1d4ed8;
+            box-shadow: inset 0 -2px 0 #2563eb, inset 0 -1px 0 #e6ecf5;
+            background: #f7f9fc;
+        }
+
+        .zip-table .zip-th-inner {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .zip-table .zip-th-inner i {
+            font-size: .68rem;
+        }
+
+        .zip-table .zip-sort-idle {
+            color: #cbd5e1;
+            opacity: 0;
+            transform: translateY(-1px);
+            transition: opacity .15s ease;
+        }
+
+        .zip-table .zip-sortable:hover .zip-sort-idle {
+            opacity: 1;
         }
 
         .zip-table tbody tr {
-            transition: background 0.12s;
+            transition: background .12s ease, box-shadow .12s ease;
         }
 
         .zip-table tbody tr:hover {
-            background: #f7fafc;
+            background: #f5f9ff;
         }
 
         .zip-table td {
-            padding: 9px 14px;
-            font-size: 0.92rem;
+            padding: 9px 16px;
+            font-size: .85rem;
+            color: #334155;
             border-bottom: 1px solid #f1f5f9;
             vertical-align: middle;
+            overflow: hidden;
+        }
+
+        .zip-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .zip-table td.zip-col-icon {
+            padding-left: 20px;
+            padding-right: 0;
+        }
+
+        .zip-table td.zip-col-actions {
+            text-align: right;
+            white-space: nowrap;
+            padding-right: 20px;
         }
 
         /* 图标列：与文件管理器同一套（Seti / 彩色兜底），尺寸与行高对齐 */
@@ -326,67 +568,102 @@
         }
 
         .zip-table .zip-name-cell .name {
-            display: inline-block;
+            display: block;
             max-width: 100%;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            vertical-align: middle;
             font-weight: 500;
-            color: #1a202c;
+            color: #1e293b;
             cursor: pointer;
+            transition: color .12s ease;
+        }
+
+        .zip-table .zip-name-cell .name.dir-name {
+            color: #1d4ed8;
+            font-weight: 600;
         }
 
         .zip-table .zip-name-cell .name:hover {
             color: #2563eb;
         }
 
-        .zip-table .zip-name-cell .name.dir-name {
-            color: #2b6cb0;
-        }
-
         .zip-table .zip-name-cell .name.dir-empty {
             color: #94a3b8;
+            font-weight: 500;
             cursor: default;
             font-style: italic;
         }
 
         .zip-table .zip-name-cell .name.dir-empty::after {
             content: '（空）';
-            color: #94a3b8;
-            font-size: 0.78rem;
+            color: #b6c2d1;
+            font-size: .76rem;
+            font-style: normal;
             margin-left: 4px;
         }
 
         .zip-table .zip-name-cell .name.clickable-name {
-            color: #1a202c;
-            border-bottom: 1px dashed #cbd5e0;
-            padding-bottom: 1px;
+            color: #1e293b;
+            cursor: pointer;
         }
 
         .zip-table .zip-name-cell .name.clickable-name:hover {
             color: #2563eb;
-            border-bottom-color: #2563eb;
+            text-decoration: underline;
+            text-decoration-thickness: 1px;
+            text-underline-offset: 3px;
         }
 
         .zip-table .zip-size {
-            font-family: monospace;
-            color: #4a5568;
-            font-size: 0.85rem;
+            font-family: "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
+            color: #6b7a90;
+            font-size: .78rem;
+            font-variant-numeric: tabular-nums;
             white-space: nowrap;
         }
 
-        .zip-table .zip-actions-cell {
+        /* 数值列右对齐，便于对比大小 */
+        .zip-table th.zip-col-size,
+        .zip-table th.zip-col-compressed,
+        .zip-table td.zip-col-size,
+        .zip-table td.zip-col-compressed {
             text-align: right;
+        }
+
+        .zip-table .file-type-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 999px;
+            border: 1px solid #e8edf5;
+            background: #f1f5f9;
+            color: #475569;
+            font-size: .7rem;
+            font-weight: 500;
+            line-height: 1.35;
+            letter-spacing: .02em;
             white-space: nowrap;
+        }
+
+        .zip-table .file-type-badge.dir {
+            background: #eff6ff;
+            border-color: #dbe7ff;
+            color: #1d4ed8;
         }
 
         .zip-table .zip-actions-cell .btn {
-            padding: 4px 10px;
-            font-size: 0.78rem;
-            border-radius: 6px;
-            border: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            padding: 5px 11px;
+            font-size: .76rem;
+            font-weight: 500;
+            line-height: 1.3;
+            border-radius: 8px;
+            border: 1px solid transparent;
             cursor: pointer;
+            transition: background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
         }
 
         .zip-table .zip-actions-cell .btn + .btn {
@@ -394,64 +671,211 @@
         }
 
         .zip-table .btn-zip-preview {
-            background: #f1f5f9;
-            color: #2563eb;
+            background: #f4f7fb;
+            color: #475569;
         }
 
         .zip-table .btn-zip-preview:hover {
-            background: #e2e8f0;
+            background: #e9eff7;
+            border-color: #dbe3ee;
+            color: #1e293b;
         }
 
         .zip-table .btn-zip-download {
             background: #f0fdf4;
-            color: #059669;
+            color: #047857;
         }
 
         .zip-table .btn-zip-download:hover {
             background: #dcfce7;
+            border-color: #bbf7d0;
+            box-shadow: 0 2px 6px -2px rgba(5, 150, 105, .45);
         }
 
         .zip-table .btn-zip-open {
             background: #eff6ff;
-            color: #2563eb;
+            color: #1d4ed8;
         }
 
         .zip-table .btn-zip-open:hover {
             background: #dbeafe;
+            border-color: #bfdbfe;
+            box-shadow: 0 2px 6px -2px rgba(37, 99, 235, .45);
         }
 
-        .zip-empty {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 200px;
-            color: #a0aec0;
-            flex-direction: column;
-            gap: 8px;
+        .zip-table .btn:focus-visible,
+        .zip-header .zip-actions .btn:focus-visible,
+        .zip-toolbar .breadcrumb-item a:focus-visible {
+            outline: 2px solid #93c5fd;
+            outline-offset: 2px;
         }
 
-        .zip-empty i {
-            font-size: 2.5rem;
-        }
-
-        .zip-loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 200px;
-            color: #2563eb;
-            flex-direction: column;
-            gap: 8px;
-        }
-
+        /* ---------- 空 / 加载 / 错误 ---------- */
+        .zip-empty,
+        .zip-loading,
         .zip-error {
             display: flex;
             align-items: center;
             justify-content: center;
-            height: 200px;
-            color: #dc2626;
             flex-direction: column;
-            gap: 8px;
+            gap: 10px;
+            min-height: 280px;
+            padding: 40px 20px;
+            text-align: center;
+            font-size: .85rem;
+        }
+
+        .zip-empty {
+            color: #94a3b8;
+        }
+
+        .zip-loading {
+            color: #2563eb;
+        }
+
+        .zip-error {
+            color: #b91c1c;
+        }
+
+        .zip-empty i,
+        .zip-error i {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 54px;
+            height: 54px;
+            border-radius: 16px;
+            font-size: 1.45rem;
+        }
+
+        .zip-empty i {
+            background: #f1f5f9;
+            color: #94a3b8;
+        }
+
+        .zip-error i {
+            background: #fef2f2;
+            color: #dc2626;
+        }
+
+        .zip-loading .spinner-border {
+            width: 26px;
+            height: 26px;
+            border-width: 3px;
+        }
+
+        /* ---------- 包内文件内联预览 ---------- */
+        .zip-inline {
+            padding: 16px 20px 20px;
+        }
+
+        .zip-inline-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            min-width: 0;
+        }
+
+        .zip-inline-back {
+            flex: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 11px;
+            border-radius: 8px;
+            border: 1px solid #e3e9f2;
+            background: #ffffff;
+            color: #475569;
+            font-size: .78rem;
+            cursor: pointer;
+            transition: background .15s ease, color .15s ease, border-color .15s ease;
+        }
+
+        .zip-inline-back:hover {
+            background: #f1f5f9;
+            color: #0f172a;
+            border-color: #d7e0eb;
+        }
+
+        .zip-inline-name {
+            min-width: 0;
+            flex: 1 1 auto;
+            font-size: .86rem;
+            font-weight: 600;
+            color: #0f172a;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .zip-inline-size {
+            flex: none;
+            font-size: .72rem;
+            color: #8a97a8;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .zip-inline-dl {
+            flex: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 12px;
+            border-radius: 8px;
+            border: 1px solid #bbf7d0;
+            background: #f0fdf4;
+            color: #047857;
+            font-size: .78rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background .15s ease, box-shadow .15s ease;
+        }
+
+        .zip-inline-dl:hover {
+            background: #dcfce7;
+            box-shadow: 0 2px 8px -3px rgba(5, 150, 105, .5);
+        }
+
+        .zip-inline-stage {
+            background: #f8fafc;
+            border: 1px solid #e6ecf5;
+            border-radius: 12px;
+            padding: 14px;
+            overflow: auto;
+            max-height: calc(88vh - 250px);
+            scrollbar-width: thin;
+            scrollbar-color: #cfd8e3 transparent;
+        }
+
+        .zip-inline-stage::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        .zip-inline-stage::-webkit-scrollbar-thumb {
+            background: #cfd8e3;
+            border: 3px solid #f8fafc;
+            border-radius: 999px;
+        }
+
+        .zip-inline-stage pre {
+            margin: 0;
+            font-family: "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
+            font-size: .8rem;
+            line-height: 1.65;
+            color: #334155;
+            white-space: pre;
+            tab-size: 4;
+        }
+
+        .zip-inline-stage img {
+            display: block;
+            margin: 0 auto;
+            max-width: 100%;
+            max-height: 62vh;
+            object-fit: contain;
+            border-radius: 8px;
         }
 
         /* 压缩文件输入弹窗 */
@@ -462,6 +886,7 @@
             border-radius: 8px;
             font-size: 0.9rem;
             outline: none;
+            transition: border-color .15s ease, box-shadow .15s ease;
         }
 
         .zip-name-input:focus {
@@ -532,4 +957,56 @@
 
         .view-tree {
             display: none;
+        }
+
+        /* ---------- 窄屏适配 ---------- */
+        @media (max-width: 860px) {
+            .zip-modal.zip-viewer {
+                width: 96vw;
+                height: 92vh;
+                max-height: none;
+            }
+
+            .zip-header {
+                padding: 12px 16px 11px;
+            }
+
+            .zip-header .zip-icon-badge {
+                width: 36px;
+                height: 36px;
+                border-radius: 10px;
+            }
+
+            .zip-toolbar {
+                padding: 8px 14px;
+            }
+
+            .zip-table col.zip-col-compressed { width: 0; }
+            .zip-table thead th.zip-col-compressed,
+            .zip-table td.zip-col-compressed { display: none; }
+            .zip-table col.zip-col-type { width: 82px; }
+            .zip-table col.zip-col-actions { width: 150px; }
+            .zip-table col.zip-col-size { width: 88px; }
+
+            .zip-table thead th,
+            .zip-table td {
+                padding-left: 10px;
+                padding-right: 10px;
+            }
+
+            .zip-table td.zip-col-icon {
+                padding-left: 14px;
+            }
+
+            .zip-table td.zip-col-actions {
+                padding-right: 14px;
+            }
+
+            .zip-table .zip-actions-cell .btn {
+                padding: 5px 8px;
+            }
+
+            .zip-header .zip-actions .btn-extract {
+                padding: 8px 12px;
+            }
         }

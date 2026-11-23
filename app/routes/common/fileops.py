@@ -21,6 +21,7 @@ from ...services.common.uploadlog import (
     add_record, list_records, stats as upload_stats, clear_records, mark_missing,
 )
 from ...services.ide.collab import preshare_for, COLLAB_BACKUP_DIR
+from .progress_stream import TaskCanceled, task_checkpoint
 
 
 _log = get_logger()
@@ -116,6 +117,7 @@ def _mc_copy_file_progress(src, dst, task, idx=-1, delete_src=False, key=None):
     try:
         with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
             while True:
+                task_checkpoint(task, _MOVE_COPY_LOCK)      # 暂停 / 停止检查点
                 chunk = fsrc.read(256 * 1024)
                 if not chunk:
                     break
@@ -131,6 +133,13 @@ def _mc_copy_file_progress(src, dst, task, idx=-1, delete_src=False, key=None):
             shutil.copystat(src, dst)
         except OSError:
             pass
+    except TaskCanceled:
+        # 停止：删掉写了一半的目标文件，源文件保持原样
+        try:
+            os.remove(dst)
+        except OSError:
+            pass
+        raise
     except Exception:
         ok = False
     with _MOVE_COPY_LOCK:
@@ -161,6 +170,7 @@ def _mc_copy_tree_progress(src, dst, task, idx=-1, delete_src=False, base_name=N
             target_dir = dst if rel_dir == "." else os.path.join(dst, rel_dir)
             os.makedirs(target_dir, exist_ok=True)
             for fn in files:
+                task_checkpoint(task, _MOVE_COPY_LOCK)      # 暂停 / 停止检查点
                 fp = os.path.join(root, fn)
                 rel = os.path.relpath(fp, src).replace(os.sep, "/")
                 _mc_copy_file_progress(fp, os.path.join(target_dir, fn), task, idx, delete_src,
@@ -172,7 +182,9 @@ def _mc_copy_tree_progress(src, dst, task, idx=-1, delete_src=False, base_name=N
                 shutil.copystat(src, dst)
             except OSError:
                 pass
-    except Exception:
+    except TaskCanceled:
+        # 停止：清掉本次复制出的半成品目录（源目录未删除）
+        shutil.rmtree(dst, ignore_errors=True)
         raise
 
 
@@ -199,6 +211,7 @@ def _mc_worker(task_id, mode, paths, dest_dir):
 
     try:
         for idx, src in enumerate(paths):
+            task_checkpoint(task, _MOVE_COPY_LOCK)      # 暂停 / 停止检查点
             s = os.path.abspath(os.path.normpath(src))
             it = _mc_item(task, idx) or {}
             f, b = int(it.get("files") or 0), int(it.get("size") or 0)
@@ -245,6 +258,8 @@ def _mc_worker(task_id, mode, paths, dest_dir):
                                                    key=base_name + "|" + base_name)
                 _invalidate_list_cache(os.path.dirname(s))
                 _invalidate_list_cache(dest_dir)
+            except TaskCanceled:
+                raise
             except Exception as e:
                 errors.append(f"{os.path.basename(s)}: {e}")
                 _item_set(idx, status="error", error=str(e))
@@ -254,6 +269,13 @@ def _mc_worker(task_id, mode, paths, dest_dir):
             task["status"] = "done_with_errors" if errors else "done"
             task["errors"] = errors
             task["result"] = {"done": max(len(paths) - len(errors), 0), "errors": errors}
+    except TaskCanceled:
+        with _MOVE_COPY_LOCK:
+            task["status"] = "canceled"
+            task["paused"] = False
+            task["canceled"] = True
+            task["errors"] = errors
+            task["result"] = {"done": 0, "errors": errors, "canceled": True}
     except Exception as e:
         with _MOVE_COPY_LOCK:
             task["status"] = "error"
@@ -352,7 +374,8 @@ def _mc_progress():
         "status": snap["status"], "current": snap.get("current", ""),
         "done_files": done_files, "total_files": total_files,
         "done_bytes": done_bytes, "total_bytes": total_bytes,
-        "percent": round(percent, 1), "errors": errors, "result": snap.get("result"),
+        "percent": round(percent, 1), "paused": bool(snap.get("paused")),
+        "errors": errors, "result": snap.get("result"),
         "items": items,
         "files": files,
         "detail_total": snap.get("detail_total", total_files),

@@ -16,6 +16,7 @@ from urllib.parse import quote
 from ...log import get_logger
 from ...services.common.filecore import format_size, format_size_safe, _invalidate_list_cache
 from ...services.common.archive_history import add_record as _add_archive_record
+from .progress_stream import TaskCanceled, task_checkpoint
 
 
 _log = get_logger()
@@ -31,6 +32,32 @@ _UNZIP_TASKS = {}
 _UNZIP_LOCK = threading.Lock()
 
 
+def _mark_canceled(task, lock, remove_path=None, cache_dir=None):
+    """任务被用户停止后的收尾：清掉半成品，写入 canceled 终态。
+
+    remove_path 只传本次任务自己新建的目录 / 压缩包（命名已保证不冲突），
+    不会误删用户原有文件。
+    """
+    if remove_path:
+        try:
+            if os.path.isdir(remove_path):
+                shutil.rmtree(remove_path, ignore_errors=True)
+            elif os.path.exists(remove_path):
+                os.remove(remove_path)
+        except OSError:
+            pass
+    if cache_dir:
+        try:
+            _invalidate_list_cache(cache_dir)
+        except Exception:
+            pass
+    with lock:
+        task["status"] = "canceled"
+        task["paused"] = False
+        task["canceled"] = True
+        task["result"] = None
+
+
 def _unzip_worker(task_id, zip_path, target, dest_dir):
     task = _UNZIP_TASKS.get(task_id)
     if not task:
@@ -41,6 +68,7 @@ def _unzip_worker(task_id, zip_path, target, dest_dir):
         target_prefix = target + os.sep
         with zipfile.ZipFile(zip_path, 'r') as zf:
             for info in zf.infolist():
+                task_checkpoint(task, _UNZIP_LOCK)      # 暂停 / 停止检查点
                 if info.is_dir():
                     continue
                 rel = _decode_zip_name(info).replace('\\', '/').lstrip('/')
@@ -58,6 +86,7 @@ def _unzip_worker(task_id, zip_path, target, dest_dir):
                 with zf.open(info) as src, open(dest_file, 'wb') as out:
                     remaining = size
                     while remaining > 0:
+                        task_checkpoint(task, _UNZIP_LOCK)
                         chunk = src.read(min(512 * 1024, remaining))
                         if not chunk:
                             break
@@ -75,6 +104,9 @@ def _unzip_worker(task_id, zip_path, target, dest_dir):
             task["status"] = "done"
             task["result"] = {"path": target, "name": os.path.basename(target), "files": count}
         _add_archive_record("unzip", os.path.basename(target), dest_dir, "%d 个文件" % count)
+    except TaskCanceled:
+        # 用户主动停止：删掉本次解压出的半成品目录
+        _mark_canceled(task, _UNZIP_LOCK, remove_path=target, cache_dir=dest_dir)
     except zipfile.BadZipFile:
         with _UNZIP_LOCK:
             task["status"] = "error"
@@ -99,6 +131,7 @@ def _rar_worker(task_id, rar_path, target, dest_dir, password=""):
     task = _UNZIP_TASKS.get(task_id)
     if not task:
         return
+    proc = None
     try:
         os.makedirs(target, exist_ok=True)
         cmd = _rar_cmd(rar_path, target, password)
@@ -108,6 +141,8 @@ def _rar_worker(task_id, rar_path, target, dest_dir, password=""):
                                 stdin=subprocess.DEVNULL, text=True, errors="replace")
         count = 0
         for line in proc.stdout:
+            # 暂停时此处阻塞、不再读管道，子进程写满管道缓冲后自然停下
+            task_checkpoint(task, _UNZIP_LOCK)
             line = line.strip()
             if line.startswith("Extracting") and ("OK" in line or line.endswith("...")):
                 count += 1
@@ -126,6 +161,14 @@ def _rar_worker(task_id, rar_path, target, dest_dir, password=""):
             task["done_files"] = count
             task["result"] = {"path": target, "name": os.path.basename(target), "files": count}
         _add_archive_record("unrar", os.path.basename(rar_path), dest_dir, "%d 个文件" % count)
+    except TaskCanceled:
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        _mark_canceled(task, _UNZIP_LOCK, remove_path=target, cache_dir=dest_dir)
     except Exception as e:
         with _UNZIP_LOCK:
             task["status"] = "error"
@@ -773,6 +816,7 @@ def _zip_create_worker(task_id, target, file_list, dest_dir):
         import zipfile
         with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as zf:
             for fp, arc in file_list:
+                task_checkpoint(task, _ZIP_CREATE_LOCK)     # 暂停 / 停止检查点
                 with _ZIP_CREATE_LOCK:
                     task["current"] = arc
                     base = task["done_bytes"]
@@ -802,6 +846,9 @@ def _zip_create_worker(task_id, target, file_list, dest_dir):
             task["result"] = {"path": target, "name": os.path.basename(target),
                               "files": total, "size": final_size,
                               "size_str": format_size(final_size)}
+    except TaskCanceled:
+        # 用户主动停止：删掉写了一半的 zip
+        _mark_canceled(task, _ZIP_CREATE_LOCK, remove_path=target, cache_dir=dest_dir)
     except Exception as e:
         try:
             if os.path.exists(target):
@@ -923,6 +970,7 @@ def api_zip_create_progress():
         "done_files": done_files, "total_files": total_files,
         "done_bytes": done_bytes, "total_bytes": total_bytes,
         "percent": round(percent, 1),
+        "paused": bool(snap.get("paused")),
         "errors": snap.get("errors", []) or ([snap["error"]] if snap.get("error") else []),
         "result": snap.get("result"),
     })
@@ -1093,6 +1141,7 @@ def api_zip_unzip_progress():
         "done_files": done_files, "total_files": total_files,
         "done_bytes": done_bytes, "total_bytes": total_bytes,
         "percent": round(percent, 1),
+        "paused": bool(snap.get("paused")),
         "errors": [snap["error"]] if snap.get("error") else [],
         "result": snap.get("result"),
     })
@@ -1110,6 +1159,7 @@ def _nested_unzip_worker(task_id, outer_data, member_name, target, dest_dir):
         target_prefix = target + os.sep
         with zipfile.ZipFile(io.BytesIO(outer_data), 'r') as inner:
             for info in inner.infolist():
+                task_checkpoint(task, _UNZIP_LOCK)      # 暂停 / 停止检查点
                 if info.is_dir():
                     continue
                 rel = _decode_zip_name(info).replace('\\', '/').lstrip('/')
@@ -1124,6 +1174,7 @@ def _nested_unzip_worker(task_id, outer_data, member_name, target, dest_dir):
                 with inner.open(info) as src, open(dest_file, 'wb') as out:
                     remaining = size
                     while remaining > 0:
+                        task_checkpoint(task, _UNZIP_LOCK)
                         chunk = src.read(min(512 * 1024, remaining))
                         if not chunk:
                             break
@@ -1141,6 +1192,8 @@ def _nested_unzip_worker(task_id, outer_data, member_name, target, dest_dir):
             task["status"] = "done"
             task["result"] = {"path": target, "name": os.path.basename(target), "files": count}
         _add_archive_record("unzip-nested", member_name, dest_dir, "%d 个文件" % count)
+    except TaskCanceled:
+        _mark_canceled(task, _UNZIP_LOCK, remove_path=target, cache_dir=dest_dir)
     except zipfile.BadZipFile:
         with _UNZIP_LOCK:
             task["status"] = "error"

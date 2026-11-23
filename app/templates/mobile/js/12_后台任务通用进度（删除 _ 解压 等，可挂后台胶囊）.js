@@ -11,11 +11,14 @@
   }
   function bgIco(kind) { return kind === "uz" ? "📂" : (kind === "zip" ? "📦" : (kind === "mv" ? "↔️" : (kind === "cp" ? "📄" : "🗑️"))); }
   function bgUpdateModal(d) {
-    document.getElementById("delProgBar").style.width = (d.percent || 0) + "%";
-    document.getElementById("delProgFiles").textContent =
-      d.done_files + " / " + d.total_files + " 个文件";
+    var scanning = d.phase === "scanning";   // 删除任务：先统计文件，再搬进回收站
+    document.getElementById("delProgBar").style.width = scanning ? "100%" : (d.percent || 0) + "%";
+    document.getElementById("delProgFiles").textContent = scanning
+      ? "统计中…已扫描 " + (d.scan_done || 0) + " 个文件"
+      : d.done_files + " / " + d.total_files + " 个文件";
     document.getElementById("delProgBytes").textContent =
-      fmtDelBytes(d.done_bytes) + " / " + fmtDelBytes(d.total_bytes);
+      fmtDelBytes(scanning ? (d.processed_bytes || 0) : d.done_bytes) +
+      " / " + fmtDelBytes(d.total_bytes);
     document.getElementById("delProgCur").textContent = d.current || "";
   }
   function bgOpenModal(key) {
@@ -44,8 +47,11 @@
     dock.classList.add("show");
     dock.innerHTML = ids.map(function (id) {
       var t = _bgTasks[id], d = t.last;
-      var txt = d ? (Math.round(d.percent || 0) + "% · " + fmtDelBytes(d.done_bytes) +
-        (d.total_bytes ? " / " + fmtDelBytes(d.total_bytes) : "")) : "准备中…";
+      var txt = !d ? "准备中…"
+        : (d.phase === "scanning"
+          ? ("统计中 · 已扫描 " + (d.scan_done || 0) + " 个文件")
+          : (Math.round(d.percent || 0) + "% · " + fmtDelBytes(d.done_bytes) +
+            (d.total_bytes ? " / " + fmtDelBytes(d.total_bytes) : "")));
       var fin = d && d.status !== "running";
       return '<div class="del-task' + (fin ? " done" : "") + '" data-task="' + id + '">' +
         '<span>' + bgIco(t.kind) + '</span><span class="dt-txt">' + esc(txt) + '</span></div>';

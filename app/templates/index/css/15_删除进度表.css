@@ -70,6 +70,179 @@
 .zip-prog-detail i { font-size: 0.68rem; transition: transform .15s ease; }
 .zip-prog-detail.open i { transform: rotate(180deg); }
 
+/* ========== 进度条 + 暂停 / 停止 ========== */
+.zip-prog-track {
+    height: 10px;
+    background: #e2e8f0;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+#zipProgBar {
+    height: 100%;
+    width: 0%;
+    border-radius: 6px;
+    background: linear-gradient(90deg, #2563eb, #1d4ed8);
+    transition: width .3s ease, background .2s ease;
+}
+
+/* 删除任务「统计文件」阶段：总量未知，用流动斜纹表示正在扫描 */
+.zip-prog-track.is-scanning #zipProgBar {
+    background-image: repeating-linear-gradient(45deg, #bfdbfe 0 10px, #e0edff 10px 20px);
+    background-size: 28px 28px;
+    animation: zipScanStripes .9s linear infinite;
+}
+
+@keyframes zipScanStripes {
+    from { background-position: 0 0; }
+    to { background-position: 28px 0; }
+}
+
+#zipProgOverlay .zip-modal.zip-paused .zip-prog-track.is-scanning #zipProgBar {
+    background-image: repeating-linear-gradient(45deg, #fde68a 0 10px, #fef3c7 10px 20px);
+    animation-play-state: paused;
+}
+
+/* 暂停：进度条转琥珀色，一眼看出任务没在跑 */
+#zipProgOverlay .zip-modal.zip-paused #zipProgBar {
+    background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+.zip-prog-statline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 8px;
+    font-size: 0.78rem;
+    color: #718096;
+}
+
+.zip-prog-statleft {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+#zipProgBytes {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 预计剩余时间：蓝色小胶囊，和文件计数同一行 */
+.zip-prog-eta {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: #eff6ff;
+    border: 1px solid #dbe7ff;
+    color: #1d4ed8;
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1.6;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.zip-prog-eta i { font-size: 0.68rem; }
+
+.zip-prog-eta[hidden] { display: none; }
+
+.zip-prog-pctwrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+}
+
+.zip-prog-state {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #b45309;
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    border-radius: 999px;
+    padding: 1px 8px;
+    line-height: 1.5;
+}
+
+.zip-prog-state[hidden] { display: none; }
+
+.zip-prog-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed #eef2f7;
+}
+
+.zip-prog-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px 15px;
+    border-radius: 9px;
+    border: 1px solid #dbe3ee;
+    background: #ffffff;
+    color: #475569;
+    font-size: 0.78rem;
+    font-weight: 500;
+    line-height: 1.3;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+
+.zip-prog-btn i { font-size: 0.8rem; }
+
+.zip-prog-btn:hover:not(:disabled) {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
+.zip-prog-btn:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+/* 暂停中：按钮变成「继续」，用琥珀色呼应进度条 */
+.zip-prog-btn.is-paused {
+    background: #fffbeb;
+    border-color: #fcd34d;
+    color: #b45309;
+}
+
+.zip-prog-btn.is-paused:hover:not(:disabled) {
+    background: #fef3c7;
+    border-color: #f59e0b;
+    color: #92400e;
+}
+
+.zip-prog-stop {
+    color: #b91c1c;
+    border-color: #f3d6d6;
+    background: #fffafa;
+}
+
+.zip-prog-stop:hover:not(:disabled) {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #dc2626;
+}
+
+.zip-prog-btn:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 2px;
+}
+
 /* ========== 移动 / 复制：逐条详情（每个文件的大小 + 进度条） ========== */
 .zip-prog-list:has(.bgp-item) { max-height: 240px; }
 

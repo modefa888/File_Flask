@@ -74,6 +74,7 @@
      · transcode        是否允许 ffmpeg 转码兜底，默认 true（远程文件传 false）
      · listVideos(dir)  返回 Promise<[{abs,name,size_str}]>，不传则用本地 /api/files
      · activeHost       判断快捷键是否生效的元素（默认 host 自身；远程播放器传标签根节点）
+     · fileSize         当前视频字节数（可选，用于估算「实时加载速度」；本地文件会自动取列表里的 size）
      · onSwitch(abs,name) 播放列表切歌后的回调，默认同步 IDE 标签页
      · noMark           不打 tab.isVideo（远程文件标签不能被本地视频的「复用标签」逻辑抢走） */
   function setupVideoView(tab, host, path, name, opts) {
@@ -98,6 +99,7 @@
           '<div class="vpv-title"></div>' +
           '<button class="vpv-title-toggle" title="隐藏标题"><i class="bi bi-eye"></i></button>' +
           '<video playsinline preload="metadata" src="' + streamUrl + '"></video>' +
+          '<button class="vpv-center-btn" title="播放 (空格)"><i class="bi bi-play-fill"></i></button>' +
           '<div class="vpv-poster"' + (posterUrl ? ' style="background-image:url(\'' + posterUrl + '\')"' : '') + '>' +
             '<div class="vpv-name">' + _vpvEsc(name) + '</div>' +
           '</div>' +
@@ -118,6 +120,22 @@
                 '<input type="range" class="vpv-vol-range" min="0" max="1" step="0.01" value="1" title="音量">' +
               '</div>' +
               '<div class="vpv-spacer"></div>' +
+              '<div class="vpv-netspeed-wrap">' +
+                '<button class="vpv-netspeed" title="实时加载速度 · 点击查看缓存并保存视频">' +
+                  '<i class="bi bi-arrow-down-circle"></i><em class="vpv-netspeed-val">--</em>' +
+                '</button>' +
+                '<div class="vpv-cache-pop">' +
+                  '<div class="vpv-cache-head"><i class="bi bi-hdd-stack"></i> 视频缓存</div>' +
+                  '<div class="vpv-cache-name"></div>' +
+                  '<div class="vpv-cache-meta">' +
+                    '<span class="vpv-cache-size">--</span><span class="vpv-cache-dur">--:--</span>' +
+                  '</div>' +
+                  '<div class="vpv-cache-track"><div class="vpv-cache-bar"></div></div>' +
+                  '<div class="vpv-cache-state">检测中…</div>' +
+                  '<button class="vpv-cache-save"><i class="bi bi-download"></i><span>保存视频</span></button>' +
+                  '<div class="vpv-cache-note">保存时优先复用浏览器已缓存的数据，不重复下载</div>' +
+                '</div>' +
+              '</div>' +
               '<div class="vpv-speed">' +
                 '<button class="vpv-btn vpv-speed-btn" title="倍速播放"><span class="vpv-speed-cur">1.0x</span></button>' +
                 '<div class="vpv-speed-menu">' +
@@ -132,6 +150,7 @@
               '<button class="vpv-btn vpv-mode" title="播放模式：顺序播放"><i class="bi bi-list-ol"></i></button>' +
               '<button class="vpv-btn vpv-rotate" title="旋转画面 90°"><i class="bi bi-arrow-clockwise"></i></button>' +
               '<button class="vpv-btn vpv-pip" title="画中画"><svg class="vpv-svg" viewBox="0 0 16 16" fill="currentColor" width="1em" height="1em" aria-hidden="true"><path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 2h-13zM1 3.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-9z"/><path d="M7.5 6a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h5a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-5z"/></svg></button>' +
+              '<button class="vpv-btn vpv-fillpage" title="充满页面（网页全屏）"><i class="bi bi-arrows-angle-expand"></i></button>' +
               '<button class="vpv-btn vpv-full" title="全屏 (F)"><i class="bi bi-fullscreen"></i></button>' +
             '</div>' +
           '</div>' +
@@ -231,9 +250,18 @@
 
     /* ---------- 播放/暂停：按钮 + 点画面；双击全屏 ---------- */
     const playBtn = $(".vpv-play");
-    const setPlayIcon = () => { playBtn.innerHTML = '<i class="bi ' + (video.paused ? "bi-play-fill" : "bi-pause-fill") + '"></i>'; };
+    const centerBtn = $(".vpv-center-btn"), centerIcon = centerBtn.querySelector("i");
+    const setPlayIcon = () => {
+      const paused = video.paused;
+      const icon = paused ? "bi-play-fill" : "bi-pause-fill";
+      playBtn.innerHTML = '<i class="bi ' + icon + '"></i>';
+      centerIcon.className = "bi " + icon;            // 画面中央大按钮随播放状态切换
+      stage.classList.toggle("paused", paused);
+      centerBtn.title = paused ? "播放 (空格)" : "暂停 (空格)";
+    };
     const togglePlay = () => { if (video.paused) video.play().catch(() => {}); else video.pause(); };
     playBtn.addEventListener("click", togglePlay);
+    centerBtn.addEventListener("click", togglePlay);   // 与点画面同效；冒泡到 document 顺便关掉倍速菜单
     video.addEventListener("click", togglePlay);
     video.addEventListener("dblclick", () => $(".vpv-full").click());
     video.addEventListener("play", setPlayIcon);
@@ -327,6 +355,7 @@
     const speedWrap = $(".vpv-speed"), speedCur = $(".vpv-speed-cur");
     $(".vpv-speed-btn").addEventListener("click", e => {
       e.stopPropagation();
+      host.querySelectorAll(".vpv-netspeed-wrap.open").forEach(el => el.classList.remove("open"));   // 与缓存面板互斥
       speedWrap.classList.toggle("open");
     });
     host.querySelectorAll(".vpv-speed-item").forEach(el => {
@@ -351,10 +380,75 @@
       speedCur.textContent = _initRate + "x";
     }
     const closeSpeedMenu = () => {
-      if (host.isConnected) host.querySelectorAll(".vpv-speed.open").forEach(el => el.classList.remove("open"));
+      if (!host.isConnected) return;
+      host.querySelectorAll(".vpv-speed.open").forEach(el => el.classList.remove("open"));
+      host.querySelectorAll(".vpv-netspeed-wrap.open").forEach(el => el.classList.remove("open"));
     };
     document.addEventListener("click", closeSpeedMenu);
     _vpvCleanups.push(() => document.removeEventListener("click", closeSpeedMenu));
+
+    /* ---------- 实时加载速度（控制条右侧） ----------
+       浏览器不暴露 <video> 流的实时字节数，这里用「缓冲时长增量 × 平均码率」反推：
+       平均码率 = 文件字节数 / 总时长（字节数取 /api/files 的 size，拿不到就显示 --）。
+       每 500ms 采样一次 buffered 末端，指数平滑后显示，避免数字乱跳。
+       缓冲已顶到片尾且余量充足时改显示「已缓存」（整段已下载完，速度没有意义）。 */
+    const netBox = $(".vpv-netspeed"), netIcon = netBox.querySelector("i"), netVal = netBox.querySelector(".vpv-netspeed-val");
+    let netBytes = 0;                 // 当前文件字节数（0 = 未知）
+    let netLastEnd = -1, netLastAt = 0, netEma = 0, netIdle = 0, netState = "";
+    const netFmt = bps => {
+      if (!isFinite(bps) || bps < 512) return "0 KB/s";
+      const units = ["KB/s", "MB/s", "GB/s"];
+      let v = bps / 1024, i = 0;
+      while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+      return (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + " " + units[i];
+    };
+    const netShow = (text, state, icon) => {
+      netVal.textContent = text;
+      if (state !== netState) {
+        netState = state;
+        netBox.classList.toggle("cached", state === "cached");
+        netBox.classList.toggle("idle", state === "idle");
+        netIcon.className = "bi " + (icon || (state === "cached" ? "bi-check-circle" : "bi-arrow-down-circle"));
+      }
+    };
+    const netReset = () => {
+      netLastEnd = -1; netLastAt = 0; netEma = 0; netIdle = 0; netState = "";
+      netShow("--", "unknown");
+    };
+    const netTick = () => {
+      if (!host.isConnected) return;
+      const dur = transMode ? transDur : (video.duration || 0);
+      let end = 0;
+      try { if (video.buffered.length) end = video.buffered.end(video.buffered.length - 1); } catch (_) { }
+      const now = performance.now();
+      const bytesPerSec = (netBytes > 0 && dur > 0) ? netBytes / dur : 0;
+      // 转码源是 ffmpeg 实时生成的分片流，码率与原文件无关，估算会失真 → 不显示
+      if (transMode) { netShow("--", "unknown"); netLastEnd = end; netLastAt = now; return; }
+      if (!(dur > 0) || end <= 0 || !bytesPerSec) {        // 时长或文件大小未知：无从估算
+        netShow("--", "unknown"); netLastEnd = end; netLastAt = now; return;
+      }
+      // 缓冲顶到片尾 → 整段已缓存，速度没意义
+      if (end >= dur - 0.3) {
+        netEma = 0; netShow("已缓存", "cached"); netLastEnd = end; netLastAt = now; return;
+      }
+      if (netLastEnd >= 0 && netLastAt && now - netLastAt > 60) {
+        const dEnd = Math.max(0, end - netLastEnd);         // 这段时间新下载的内容时长
+        const inst = dEnd * bytesPerSec / ((now - netLastAt) / 1000);
+        if (inst > 0) {
+          netEma = netEma > 0 ? netEma * 0.6 + inst * 0.4 : inst;
+          netIdle = 0;
+        } else {
+          netEma *= 0.5;                                    // 没有新数据：快速回落
+          if (++netIdle >= 3) netEma = 0;                   // 连续约 1.5s 停住 → 归零
+        }
+        netShow(netEma > 0 ? netFmt(netEma) : "0 KB/s", netEma > 0 ? "speed" : "idle");
+      }
+      netLastEnd = end; netLastAt = now;
+    };
+    const netTimer = setInterval(netTick, 500);
+    _vpvCleanups.push(() => clearInterval(netTimer));
+    // 列表加载前先用调用方给的 fileSize（可选），本地文件随后由 /api/files 的 size 覆盖
+    if (_o.fileSize > 0) netBytes = +_o.fileSize;
 
     /* ---------- 播放模式：顺序 → 循环 → 随机 ---------- */
     const MODES = [
@@ -414,17 +508,47 @@
       else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
     });
 
+    /* ---------- 充满页面（网页全屏）：播放器铺满整个浏览器视口，再点一次还原 ----------
+       只改变播放器自身定位（position:fixed），不进入浏览器全屏 API，
+       所以 IDE 的其它面板、系统任务栏依然可用；Esc 也能退出。 */
+    const fillBtn = $(".vpv-fillpage");
+    let pageFilled = false;
+    const applyFillPage = on => {
+      pageFilled = !!on;
+      wrap.classList.toggle("vpv-fillpage", pageFilled);
+      fillBtn.classList.toggle("active", pageFilled);
+      fillBtn.innerHTML = '<i class="bi ' + (pageFilled ? "bi-arrows-angle-contract" : "bi-arrows-angle-expand") + '"></i>';
+      fillBtn.title = pageFilled ? "还原窗口" : "充满页面（网页全屏）";
+      document.documentElement.classList.toggle("vpv-fillpage-lock", pageFilled);   // 锁住整页滚动
+      applyRotate();                                                               // 舞台尺寸变了，重算旋转缩放
+    };
+    fillBtn.addEventListener("click", () => applyFillPage(!pageFilled));
+    const onFillEsc = e => { if (pageFilled && e.key === "Escape") applyFillPage(false); };
+    document.addEventListener("keydown", onFillEsc);
+    _vpvCleanups.push(() => {
+      document.removeEventListener("keydown", onFillEsc);
+      document.documentElement.classList.remove("vpv-fillpage-lock");   // 换视频/关标签时不能把页面锁死
+    });
+
     /* ---------- 控制条自动隐藏：播放中鼠标静止 2.5s 淡出 ---------- */
     let idleTimer = null;
     const wake = () => {
       stage.classList.remove("idle");
       clearTimeout(idleTimer);
       idleTimer = setTimeout(() => {
-        if (!video.paused && !speedWrap.classList.contains("open")) stage.classList.add("idle");
+        // 倍速菜单 / 缓存面板打开时不能隐藏控制条，否则面板会跟着消失
+        if (!video.paused && !speedWrap.classList.contains("open") && !netWrap.classList.contains("open")) {
+          stage.classList.add("idle");
+        }
       }, 2500);
     };
     stage.addEventListener("mousemove", wake);
-    stage.addEventListener("mouseleave", () => { if (!video.paused) stage.classList.add("idle"); });
+    stage.addEventListener("mouseleave", () => {
+      // 缓存面板 / 倍速菜单开着时移出鼠标也不隐藏，否则用户点「保存」前面板就没了
+      if (!video.paused && !speedWrap.classList.contains("open") && !netWrap.classList.contains("open")) {
+        stage.classList.add("idle");
+      }
+    });
     video.addEventListener("pause", () => stage.classList.remove("idle"));
     wake();
 
@@ -517,6 +641,9 @@
       delete poster.dataset.played;
       rotDeg = 0; applyRotate();
       transMode = false; transStart = 0; transDur = 0; delete video.dataset.trans;   // 新文件重新走直连 → 兜底检测
+      const nextItem = plItems.find(x => x.abs === abs);                             // 换文件同步实时速度的码率基准
+      netBytes = nextItem && +nextItem.size > 0 ? +nextItem.size : 0;
+      netReset();
       video.src = urlStream(abs);
       video.addEventListener("loadedmetadata", function onMeta() {
         video.removeEventListener("loadedmetadata", onMeta);
@@ -559,7 +686,7 @@
             if (d.error) throw new Error(d.error);
             return (d.items || [])
               .filter(it => !it.is_dir && IDE_VIDEO_EXTS.indexOf((it.name || "").split(".").pop().toLowerCase()) >= 0)
-              .map(it => ({ abs: dir.replace(/\/+$/, "") + "/" + it.name, name: it.name, size_str: it.size_str || "" }));
+              .map(it => ({ abs: dir.replace(/\/+$/, "") + "/" + it.name, name: it.name, size_str: it.size_str || "", size: it.size || 0 }));
           });
     listPromise
       .then(items => {
@@ -568,6 +695,9 @@
         renderPlaylist();
         const cur = plItems.find(it => it.abs === path);
         if (cur && cur.size_str) { infoEl.textContent = cur.size_str; infoEl.style.display = ""; }
+        if (cur && +cur.size > 0 && +cur.size !== netBytes) {   // 拿到文件大小后才有码率基准
+          netBytes = +cur.size; netReset();
+        }
       })
       .catch(() => { if (host.isConnected) plList.innerHTML = '<div class="vpv-pl-empty"><i class="bi bi-wifi-off"></i> 列表加载失败</div>'; });
 
@@ -580,13 +710,149 @@
       _vpvStore.plFold = folded; _vpvSave();   // 记住收起状态，下次打开沿用
     });
 
+    /* ---------- 缓存面板：点「已缓存 / 速度」胶囊弹出，直接把当前视频保存到本地 ----------
+       面板里显示文件名、大小、时长与缓冲进度；「保存视频」优先用 cache:"force-cache"
+       复用浏览器已经下载过的媒体分片（/api/stream 带 Cache-Control），命中就不再走网络；
+       未命中则按流读取并实时显示进度，最后用 Blob 触发浏览器下载。
+       超大文件（>800MB）不塞进内存，直接交给浏览器原生下载。 */
+    const netWrap = $(".vpv-netspeed-wrap");
+    const cachePop = $(".vpv-cache-pop");
+    const cacheName = $(".vpv-cache-name"), cacheSize = $(".vpv-cache-size"), cacheDur = $(".vpv-cache-dur");
+    const cacheBar = $(".vpv-cache-bar"), cacheState = $(".vpv-cache-state");
+    const cacheSave = $(".vpv-cache-save"), cacheNote = $(".vpv-cache-note");
+    let saving = false, cacheTimer = null;
+
+    const vpvSize = n => {
+      if (!(n > 0)) return "--";
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      let v = n, i = 0;
+      while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+      return (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + " " + units[i];
+    };
+    const bufferedEnd = () => {
+      let end = 0;
+      try { if (video.buffered.length) end = video.buffered.end(video.buffered.length - 1); } catch (_) { }
+      return end;
+    };
+    const downloadBlob = (blob, fname) => {
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = href; a.download = fname; a.style.display = "none";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 60000);
+    };
+    const refreshCachePop = () => {
+      if (saving) return;                       // 保存进度不被定时刷新覆盖
+      const dur = transMode ? transDur : (video.duration || 0);
+      const pct = dur > 0 ? Math.min(100, bufferedEnd() / dur * 100) : 0;
+      cacheName.textContent = curPath.split("/").pop() || "";
+      cacheName.title = curPath;
+      cacheSize.textContent = netBytes > 0 ? vpvSize(netBytes) : "--";
+      cacheDur.textContent = dur > 0 ? _vpvFmt(dur) : "--:--";
+      cacheBar.style.width = pct + "%";
+      if (transMode) {
+        cacheState.textContent = "服务器转码播放，无法保存原文件";
+        cacheNote.textContent = "转码流由 ffmpeg 实时生成，请对源文件本身另存";
+        cacheSave.disabled = true;
+        return;
+      }
+      cacheState.textContent = pct >= 99.5 ? "已完整缓存 · 可直接保存" : "已缓存 " + pct.toFixed(0) + "%";
+      cacheNote.textContent = "保存时优先复用浏览器已缓存的数据，不重复下载";
+      cacheSave.disabled = false;
+    };
+
+    const saveCurrentVideo = async () => {
+      if (saving) return;
+      const abs = curPath;
+      const fname = abs.split("/").pop() || "video.mp4";
+      const btnText = cacheSave.querySelector("span");
+      saving = true;
+      cacheSave.disabled = true;
+      btnText.textContent = "读取中…";
+      cacheBar.style.width = "0%";
+      cacheState.textContent = "正在准备…";
+      try {
+        // 超大文件不读进内存：直接交给浏览器下载（流式写盘）
+        if (netBytes > 800 * 1024 * 1024) {
+          const a = document.createElement("a");
+          a.href = urlStream(abs); a.download = fname; a.style.display = "none";
+          document.body.appendChild(a); a.click(); a.remove();
+          cacheBar.style.width = "100%";
+          cacheState.textContent = "文件较大，已交给浏览器下载";
+          return;
+        }
+        const resp = await fetch(urlStream(abs), { cache: "force-cache" });   // 已缓存分片优先命中
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        const total = +(resp.headers.get("Content-Length") || 0) || netBytes || 0;
+        const type = resp.headers.get("Content-Type") || "video/mp4";
+        if (!resp.body || typeof resp.body.getReader !== "function") {
+          const blob = await resp.blob();
+          downloadBlob(blob, fname);
+          cacheBar.style.width = "100%";
+          cacheState.textContent = "已保存 · " + vpvSize(blob.size);
+          return;
+        }
+        const reader = resp.body.getReader();
+        const chunks = [];
+        let got = 0, lastPaint = 0;
+        for (; ;) {
+          const r = await reader.read();
+          if (r.done) break;
+          chunks.push(r.value);
+          got += r.value.length;
+          const now = performance.now();
+          if (now - lastPaint > 100) {
+            lastPaint = now;
+            const pct = total ? Math.min(100, got / total * 100) : 0;
+            if (pct) cacheBar.style.width = pct + "%";
+            cacheState.textContent = "保存中 " + (pct ? pct.toFixed(0) + "%" : "") +
+              (total ? " · " + vpvSize(got) + " / " + vpvSize(total) : " · " + vpvSize(got));
+          }
+        }
+        const blob = new Blob(chunks, { type });
+        downloadBlob(blob, fname);
+        cacheBar.style.width = "100%";
+        cacheState.textContent = "已保存 · " + vpvSize(blob.size);
+      } catch (e) {
+        cacheState.textContent = "保存失败：" + ((e && e.message) || "网络错误");
+        cacheSave.disabled = false;
+        btnText.textContent = "重试保存";
+        saving = false;
+        return;
+      }
+      saving = false;
+      cacheSave.disabled = false;
+      btnText.textContent = "保存视频";
+    };
+
+    netBox.addEventListener("click", e => {
+      e.stopPropagation();
+      host.querySelectorAll(".vpv-speed.open").forEach(el => el.classList.remove("open"));   // 与倍速菜单互斥
+      const open = netWrap.classList.toggle("open");
+      if (open) {
+        refreshCachePop();
+        clearInterval(cacheTimer);
+        cacheTimer = setInterval(refreshCachePop, 600);   // 面板开着时实时刷新缓冲进度
+      } else {
+        clearInterval(cacheTimer); cacheTimer = null;
+      }
+    });
+    cachePop.addEventListener("click", e => e.stopPropagation());   // 面板内操作不触发关闭
+    cacheSave.addEventListener("click", saveCurrentVideo);
+    _vpvCleanups.push(() => clearInterval(cacheTimer));
+    // 点面板外任意处关闭：document 上的 click 会先清掉 .open，这里顺手停刷新
+    const onDocClickStopCache = () => { clearInterval(cacheTimer); cacheTimer = null; };
+    document.addEventListener("click", onDocClickStopCache);
+    _vpvCleanups.push(() => document.removeEventListener("click", onDocClickStopCache));
+
     /* ---------- 标签被关闭（host 脱离文档）时解除全局监听并停播 ---------- */
     const cleanup = () => {
       document.removeEventListener("keydown", keyHandler, true);
       document.removeEventListener("click", closeSpeedMenu);
       document.removeEventListener("fullscreenchange", applyRotate);
       window.removeEventListener("resize", onWinResize);
-      clearTimeout(idleTimer); clearTimeout(tipTimer);
+      clearTimeout(idleTimer); clearTimeout(tipTimer); clearInterval(netTimer); clearInterval(cacheTimer);
+      document.documentElement.classList.remove("vpv-fillpage-lock");   // 关标签时解除页面滚动锁
       try { video.pause(); } catch (e) {}
     };
     // host 从编辑组移除（标签被关闭 / 被新内容覆盖）时触发一次清理

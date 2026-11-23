@@ -12,6 +12,21 @@
   background: #0d1117;
 }
 
+/* 充满页面（网页全屏）：脱离 IDE 布局，铺满整个浏览器视口，再点按钮还原 */
+.vpv-wrap.vpv-fillpage {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
+  border-radius: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+/* 充满期间锁住整页滚动，避免背后页面跟着滚 */
+html.vpv-fillpage-lock,
+html.vpv-fillpage-lock body { overflow: hidden; }
+
 /* ---------- 视频舞台 ---------- */
 .vpv-stage {
   flex: 1 1 auto;
@@ -54,15 +69,22 @@
   transform: translateX(-50%);
   z-index: 6;
   max-width: min(72%, 760px);
-  color: #e5e7eb;
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-size: 0.9rem;
+  font-weight: 700;
   line-height: 1.5;
+  letter-spacing: 0.3px;
   word-break: break-all;
   overflow-wrap: anywhere;
   text-align: center;
   pointer-events: none;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  /* 彩色渐变文字：背景裁到字形上，字色本身透明；
+     视频画面明暗不定，用深色投影 + 淡蓝光晕保证任何底色都看得清 */
+  background: linear-gradient(92deg, #7dd3fc 0%, #a78bfa 36%, #f472b6 68%, #fcd34d 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.85)) drop-shadow(0 0 10px rgba(96, 165, 250, 0.35));
 }
 .vpv-wrap.title-hidden .vpv-title { display: none; }
 
@@ -115,6 +137,42 @@
   text-overflow: ellipsis;
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
 }
+
+/* ---------- 画面中央的大播放 / 暂停按钮 ---------- */
+.vpv-center-btn {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 4;                     /* 压在封面上、控制条下 */
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.1rem;
+  line-height: 1;
+  color: #fff;
+  background: rgba(12, 16, 22, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  opacity: 0.38;                  /* 播放中：低调常驻的暂停图标 */
+  transition: opacity 0.25s ease, transform 0.18s ease, background 0.18s ease;
+}
+.vpv-center-btn:hover {
+  opacity: 1;
+  background: rgba(12, 16, 22, 0.6);
+  transform: translate(-50%, -50%) scale(1.07);
+}
+.vpv-center-btn:active { transform: translate(-50%, -50%) scale(0.96); }
+/* 暂停时全亮；播放中鼠标静止（idle）随控制条一起淡出 */
+.vpv-stage.paused .vpv-center-btn { opacity: 0.95; }
+.vpv-stage.idle .vpv-center-btn { opacity: 0; pointer-events: none; }
 
 /* ---------- 操作提示气泡 ---------- */
 .vpv-seek-tip {
@@ -220,7 +278,8 @@
   left: 0;
   width: 0;
   border-radius: 2px;
-  background: #3b82f6;
+  background: linear-gradient(90deg, #2563eb, #60a5fa);
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.45);
 }
 .vpv-knob {
   position: absolute;
@@ -232,7 +291,10 @@
   background: #fff;
   transform: translate(-50%, -50%);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  transition: width 0.15s ease, height 0.15s ease, box-shadow 0.15s ease;
 }
+.vpv-progress:hover .vpv-knob,
+.vpv-progress.dragging .vpv-knob { width: 14px; height: 14px; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.28); }
 
 /* 按钮行 */
 .vpv-row {
@@ -242,18 +304,36 @@
   margin-top: 6px;
 }
 .vpv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  box-sizing: border-box;
   background: none;
   border: none;
   color: #e5e7eb;
   font-size: 1rem;
   line-height: 1;
   cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 6px;
-  transition: background 0.15s ease, color 0.15s ease;
+  padding: 0 6px;
+  border-radius: 8px;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
 }
 .vpv-btn:hover { background: rgba(255, 255, 255, 0.14); }
+.vpv-btn:active { transform: scale(0.92); }
 .vpv-btn.active { color: #60a5fa; }
+/* 播放键：圆形实心按钮，控制条视觉重心 */
+.vpv-play {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 1.05rem;
+}
+.vpv-play:hover { background: rgba(255, 255, 255, 0.28); }
 /* 画中画图标：Bootstrap Icons v1.10.5 没有 picture-in-picture 字形，
    改用内联 SVG（与分享页播放器 .vpc-svg 同一份路径），fill=currentColor 跟随按钮颜色 */
 .vpv-svg { width: 1em; height: 1em; }
@@ -264,6 +344,123 @@
   white-space: nowrap;
 }
 .vpv-spacer { flex: 1; }
+
+/* 实时加载速度：控制条右侧的小胶囊（倍速按钮左边），可点击展开缓存面板 */
+.vpv-netspeed-wrap { position: relative; display: inline-flex; }
+.vpv-netspeed {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  box-sizing: border-box;
+  padding: 0 9px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.vpv-netspeed:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+.vpv-netspeed-wrap.open .vpv-netspeed { background: rgba(255, 255, 255, 0.24); color: #fff; }
+.vpv-netspeed i { font-size: 0.8rem; opacity: 0.85; }
+.vpv-netspeed-val {
+  font-style: normal;
+  min-width: 56px;
+  text-align: right;
+  letter-spacing: 0.2px;
+}
+/* 已缓存：整段下载完，用绿色对勾提示，不再显示速度 */
+.vpv-netspeed.cached {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.15);
+}
+/* 暂停/停滞：数字变暗，不与正常速度抢注意力 */
+.vpv-netspeed.idle { color: #94a3b8; }
+
+/* ---------- 缓存面板（点速度胶囊向上弹出）：缓存信息 + 直接保存视频 ---------- */
+.vpv-cache-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 12;
+  width: 252px;
+  box-sizing: border-box;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 18, 25, 0.97);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  color: #cbd5e1;
+  font-size: 0.74rem;
+  text-align: left;
+}
+.vpv-netspeed-wrap.open .vpv-cache-pop { display: flex; }
+.vpv-cache-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+.vpv-cache-head i { color: #60a5fa; }
+.vpv-cache-name {
+  font-size: 0.76rem;
+  color: #e5e7eb;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vpv-cache-meta {
+  display: flex;
+  justify-content: space-between;
+  color: #94a3b8;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+.vpv-cache-track {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+.vpv-cache-bar {
+  width: 0;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #2563eb, #60a5fa);
+  transition: width 0.25s ease;
+}
+.vpv-cache-state { font-size: 0.7rem; color: #9aa7b6; }
+.vpv-cache-save {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s ease, opacity 0.15s ease;
+}
+.vpv-cache-save:hover { filter: brightness(1.12); }
+.vpv-cache-save:disabled { opacity: 0.5; cursor: default; filter: none; }
+.vpv-cache-note { font-size: 0.66rem; line-height: 1.45; color: #7d8794; }
 
 /* 音量滑杆 */
 .vpv-vol { display: flex; align-items: center; gap: 2px; }
@@ -276,7 +473,16 @@
 
 /* 倍速菜单（向上弹出） */
 .vpv-speed { position: relative; }
-.vpv-speed-btn { font-size: 0.8rem; font-weight: 600; }
+.vpv-speed-btn {
+  font-size: 0.8rem;
+  font-weight: 600;
+  min-width: 46px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.vpv-speed-btn:hover { background: rgba(255, 255, 255, 0.2); }
+.vpv-speed.open .vpv-speed-btn { background: rgba(255, 255, 255, 0.24); color: #fff; }
 .vpv-speed-menu {
   position: absolute;
   right: 0;
@@ -400,6 +606,7 @@
 @media (max-width: 760px) {
   .vpv-side { display: none; }
   .vpv-side-toggle { display: none; }
+  .vpv-netspeed-wrap { display: none; }   /* 窄屏控制条放不下，优先保留播放控制 */
 }
 
 /* ================================================================
@@ -419,6 +626,33 @@
 .vpv-wrap.vpv-light .vpv-btn { color: #1f2328; }
 .vpv-wrap.vpv-light .vpv-btn:hover { background: rgba(0, 0, 0, 0.08); }
 .vpv-wrap.vpv-light .vpv-btn.active { color: #005fb8; }
+.vpv-wrap.vpv-light .vpv-play { background: rgba(0, 0, 0, 0.08); }
+.vpv-wrap.vpv-light .vpv-play:hover { background: rgba(0, 0, 0, 0.15); }
+.vpv-wrap.vpv-light .vpv-speed-btn { background: rgba(0, 0, 0, 0.06); }
+.vpv-wrap.vpv-light .vpv-speed-btn:hover { background: rgba(0, 0, 0, 0.12); }
+.vpv-wrap.vpv-light .vpv-speed.open .vpv-speed-btn { background: rgba(0, 0, 0, 0.16); color: #1f2328; }
+.vpv-wrap.vpv-light .vpv-netspeed { background: rgba(0, 0, 0, 0.06); color: #4a5563; }
+.vpv-wrap.vpv-light .vpv-netspeed:hover { background: rgba(0, 0, 0, 0.12); color: #1f2328; }
+.vpv-wrap.vpv-light .vpv-netspeed-wrap.open .vpv-netspeed { background: rgba(0, 0, 0, 0.14); color: #1f2328; }
+.vpv-wrap.vpv-light .vpv-netspeed.idle { color: #7a8694; }
+.vpv-wrap.vpv-light .vpv-netspeed.cached { color: #047857; background: rgba(4, 120, 87, 0.1); }
+
+/* 缓存面板：白底 / 深字 */
+.vpv-wrap.vpv-light .vpv-cache-pop {
+  border-color: #dcdcdc;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.18);
+  color: #333333;
+}
+.vpv-wrap.vpv-light .vpv-cache-head { color: #1f2328; }
+.vpv-wrap.vpv-light .vpv-cache-head i { color: #005fb8; }
+.vpv-wrap.vpv-light .vpv-cache-name { color: #1f2328; }
+.vpv-wrap.vpv-light .vpv-cache-meta { color: #6b7280; }
+.vpv-wrap.vpv-light .vpv-cache-track { background: rgba(0, 0, 0, 0.1); }
+.vpv-wrap.vpv-light .vpv-cache-bar { background: linear-gradient(90deg, #005fb8, #1a73e8); }
+.vpv-wrap.vpv-light .vpv-cache-state { color: #5a6572; }
+.vpv-wrap.vpv-light .vpv-cache-save { background: linear-gradient(135deg, #005fb8, #1a73e8); }
+.vpv-wrap.vpv-light .vpv-cache-note { color: #8a94a0; }
 .vpv-wrap.vpv-light .vpv-time { color: #333333; }
 .vpv-wrap.vpv-light .vpv-track { background: rgba(0, 0, 0, 0.18); }
 .vpv-wrap.vpv-light .vpv-buffered { background: rgba(0, 0, 0, 0.28); }
@@ -447,10 +681,24 @@
   color: #1f2328;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
+/* 标题：浅色皮肤换成深色系渐变（画面底色亮时依然清楚） */
 .vpv-wrap.vpv-light .vpv-title {
-  color: #1f2328;
+  background: linear-gradient(92deg, #1d4ed8 0%, #7c3aed 38%, #db2777 72%, #b45309 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.9));
   text-shadow: none;
 }
+/* 中央播放按钮：白底深色图标，与控制条同色系 */
+.vpv-wrap.vpv-light .vpv-center-btn {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(0, 0, 0, 0.14);
+  color: #1f2328;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.2);
+}
+.vpv-wrap.vpv-light .vpv-center-btn:hover { background: rgba(255, 255, 255, 0.94); }
 .vpv-wrap.vpv-light .vpv-title-toggle {
   border-color: rgba(0, 0, 0, 0.14);
   color: #1f2328;

@@ -875,10 +875,6 @@
   menu.id = 'deskie-menu';
   document.body.appendChild(menu);
 
-  var summon = document.createElement('div');
-  summon.id = 'deskie-summon';
-  document.body.appendChild(summon);
-
   var gazes = [];
   /* 重新抓取当前表情里的眼球容器（换表情会重建表情槽，必须重新取） */
   function bindGaze() { gazes = el.querySelectorAll('.dk-gaze'); }
@@ -894,8 +890,6 @@
       paintFace(stateNow().face);
       paintHue();
     }
-    summon.title = '召唤' + p.name;
-    summon.innerHTML = '<i class="bi ' + p.icon + '"></i>';
   }
 
   function renderMenu() {
@@ -1295,11 +1289,10 @@
     if (chatOpen()) chatPosition();
   });
 
-  // ---------- 隐身 / 召唤 ----------
+  // ---------- 隐身 / 显示 ----------
   function show() {
     el.classList.remove('hide');
-    summon.classList.remove('show');
-    wanderPauseUntil = Date.now() + 4000;       // 刚召唤回来先站一会儿再溜达
+    wanderPauseUntil = Date.now() + 4000;       // 刚回来先站一会儿再溜达
     try { localStorage.setItem(LS_HIDDEN, '0'); } catch (e) {}
     say('我回来啦！', 2200);
     syncDeskieBtn();
@@ -1309,15 +1302,13 @@
     el.classList.add('hide');
     bubble.classList.remove('show');
     closeMenu();
-    summon.classList.add('show');
     try { localStorage.setItem(LS_HIDDEN, '1'); } catch (e) {}
     syncDeskieBtn();
   }
-  summon.addEventListener('click', show);
-  try { if (localStorage.getItem(LS_HIDDEN) === '1') { el.classList.add('hide'); summon.classList.add('show'); } } catch (e) {}
+  try { if (localStorage.getItem(LS_HIDDEN) === '1') el.classList.add('hide'); } catch (e) {}
 
   /* 标题栏 #tbDeskie：点一下显示 / 隐藏桌宠，复用上面的 show / hide，
-     隐身状态、右下角召唤小圆钮、localStorage 记忆都保持同一套。 */
+     隐身状态和 localStorage 记忆都保持同一套。 */
   var tbDeskie = document.getElementById('tbDeskie');
   function syncDeskieBtn() {
     if (!tbDeskie) return;

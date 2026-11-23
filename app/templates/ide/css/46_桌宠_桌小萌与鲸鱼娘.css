@@ -576,28 +576,6 @@
 /* 「聊聊天」后面的小星标 */
 #deskie-menu .dk-new { margin-left: auto; font-size: 10px; color: #7fd8a8; }
 
-/* ================= 隐身召唤钮 ================= */
-#deskie-summon {
-  position: fixed;
-  right: 14px; bottom: 34px;
-  z-index: 9500;
-  width: 30px; height: 30px;
-  border-radius: 50%;
-  background: #252526;
-  border: 1px solid #454545;
-  color: #6ea8d8;
-  font-size: 14px;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
-  opacity: .55;
-  transition: opacity .15s ease, transform .15s ease;
-}
-#deskie-summon.show { display: flex; }
-#deskie-summon:hover { opacity: 1; transform: scale(1.1); }
-
 /* ---------- 桌宠头顶的「聊聊天」小按钮（hover 出现） ---------- */
 #deskie .dk-chatbtn {
   position: absolute;
@@ -1099,10 +1077,5 @@ html.theme-light #deskie-chat .dkc-body a { color: #0b6bcb; }
 html.theme-light #deskie-chat textarea { background: #ffffff; border-color: #d4d8de; color: #1f2328; }
 html.theme-light #deskie-chat .dkc-empty { color: #8a9098; }
 html.theme-light #deskie-chat .dkc-empty span { color: #a6acb4; }
-html.theme-light #deskie-summon {
-  background: #ffffff;
-  border-color: #d4d8de;
-  box-shadow: 0 4px 14px rgba(30, 40, 60, .16);
-}
 /* 浅色背景上整体投影收轻一些，彩色角色（奶龙 / 肥嘟嘟）才不会糊成一团 */
 html.theme-light #deskie { filter: drop-shadow(0 6px 14px rgba(30, 40, 60, .18)); }

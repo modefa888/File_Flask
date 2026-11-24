@@ -64,7 +64,7 @@
                     // 显示错误行到表格
                     const tbody = document.getElementById('fileBody');
                     if (tbody) {
-                        tbody.innerHTML = `<tr><td colspan="${selectMode ? 6 : 5}" style="padding:20px;text-align:center;color:#dc2626;">${_escHtml(data.error)}</td></tr>`;
+                        tbody.innerHTML = `<tr><td colspan="${selectMode ? 8 : 7}" style="padding:20px;text-align:center;color:#dc2626;">${_escHtml(data.error)}</td></tr>`;
                     }
                     return;
                 }

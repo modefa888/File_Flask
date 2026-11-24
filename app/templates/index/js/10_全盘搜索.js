@@ -2,6 +2,8 @@
         let _searchToken = null;
         let _searchPollTimer = null;
         let _searchRunning = false;
+        let _searchStartTime = 0;
+        let _searchFailCount = 0;
 
         function showSearchModal() {
             const container = document.getElementById('searchContainer');
@@ -152,9 +154,12 @@
             const root = document.getElementById('searchRootInput').value.trim();
             const typeF = document.getElementById('searchTypeFilter').value;
 
-            fetch(`/api/search?root=${encodeURIComponent(root)}&keyword=${encodeURIComponent(keyword)}&type=${encodeURIComponent(typeF)}`)
+            const ctrl = new AbortController();
+            const fetchTimer = setTimeout(() => ctrl.abort(), 20000);
+            fetch(`/api/search?root=${encodeURIComponent(root)}&keyword=${encodeURIComponent(keyword)}&type=${encodeURIComponent(typeF)}&timeout=20`, { signal: ctrl.signal })
                 .then(r => r.json())
                 .then(data => {
+                    clearTimeout(fetchTimer);
                     if (data.error) {
                         _searchPollTimer = null;
                         document.getElementById('searchStatusMeta').innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-circle"></i> 错误</span>';
@@ -177,12 +182,16 @@
                     // 异步轮询
                     _searchToken = data.token;
                     _searchRunning = true;
+                    _searchStartTime = Date.now();
+                    _searchFailCount = 0;
                     _searchPollTimer = setInterval(pollSearch, 300);
                 })
                 .catch(e => {
+                    clearTimeout(fetchTimer);
                     _searchPollTimer = null;
+                    const msg = e && e.name === 'AbortError' ? '搜索请求超时，请缩小搜索范围后重试' : `发起搜索失败: ${e.message}`;
                     document.getElementById('searchStatusMeta').innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-circle"></i> 错误</span>';
-                    document.getElementById('searchResults').innerHTML = `<div class="search-empty"><i class="bi bi-exclamation-triangle text-danger"></i><p class="mb-0">发起搜索失败: ${e.message}</p></div>`;
+                    document.getElementById('searchResults').innerHTML = `<div class="search-empty"><i class="bi bi-exclamation-triangle text-danger"></i><p class="mb-0">${msg}</p></div>`;
                     _resetSearchButtons();
                 });
         }
@@ -195,9 +204,12 @@
 
         function pollSearch() {
             if (!_searchToken || !_searchRunning) return;
+            // 兜底：后端超时未响应或轮询异常时，最多等 25 秒就结束，绝不无限转圈
+            if (Date.now() - _searchStartTime > 25000) { _finishTimeoutSearch(); return; }
             fetch(`/api/search/${_searchToken}`)
                 .then(r => r.json())
                 .then(data => {
+                    _searchFailCount = 0;
                     if (data.error) {
                         // token 失效等，静默处理
                         if (data.error === "无效或已过期的搜索任务") {
@@ -205,6 +217,7 @@
                         }
                         return;
                     }
+                    if (data.items) _searchItems = data.items;
                     const count = data.count || 0;
                     const dur = data.duration || 0;
                     document.getElementById('searchCount').textContent = count;
@@ -215,7 +228,7 @@
                         const runBtn = document.getElementById('searchRunBtn');
                         if (runBtn) { runBtn.disabled = false; runBtn.innerHTML = '<i class="bi bi-search"></i> 搜索'; }
                         if (data.error) {
-                            document.getElementById('searchStatusMeta').innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> 搜索完成（有异常）</span>';
+                            document.getElementById('searchStatusMeta').innerHTML = `<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> ${_escHtml(data.error)}</span>`;
                         } else {
                             document.getElementById('searchSource').textContent = '实时';
                             document.getElementById('searchStatusMeta').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> 搜索完成 (实时扫描)</span>';
@@ -223,7 +236,19 @@
                         _renderSearchResults(data.items || []);
                     }
                 })
-                .catch(() => { });
+                .catch(() => {
+                    if (++_searchFailCount >= 5) _finishTimeoutSearch();
+                });
+        }
+
+        function _finishTimeoutSearch() {
+            _stopPolling();
+            const progress = document.getElementById('searchProgress');
+            if (progress) progress.classList.remove('active');
+            const status = document.getElementById('searchStatusMeta');
+            if (status) status.innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> 搜索超时，已停止（可缩小搜索范围重试）</span>';
+            _resetSearchButtons();
+            _renderSearchResults(_searchItems || []);
         }
 
         function _stopPolling() {

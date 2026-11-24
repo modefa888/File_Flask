@@ -263,6 +263,21 @@
             background: #eff6ff;
         }
 
+        .file-table .file-perm {
+            font-size: .78rem;
+            color: #475569;
+            white-space: nowrap;
+        }
+
+        .file-table .file-owner {
+            font-size: .78rem;
+            color: #475569;
+            max-width: 90px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         .view-sortbar {
             background: #f7f9fc;
             border-bottom: 1px solid #e3e9f2;

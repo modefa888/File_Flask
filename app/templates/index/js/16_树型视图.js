@@ -186,7 +186,7 @@
                 tbl.classList.toggle('is-loading', loading);
                 const existing = tbl.querySelector('.fm-loading-bar');
                 if (loading && !existing) {
-                    const rows = selectMode ? 6 : 5;
+                    const rows = selectMode ? 8 : 7;
                     tbl.insertAdjacentHTML('afterbegin',
                         `<tr class="fm-loading-bar" data-fm-loading="true"><td colspan="${rows}">
                         <div style="display:flex;align-items:center;gap:8px;padding:10px 8px;color:#475569;font-size:0.85rem;">

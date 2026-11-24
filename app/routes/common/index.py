@@ -109,6 +109,16 @@ def api_search():
         _SEARCH_RESULTS[token] = {"items": [], "done": False, "error": None, "count": 0, "duration": 0, "cancelled": False}
 
     stop_event = threading.Event()
+    timed_out = threading.Event()
+
+    def _expire():
+        timed_out.set()
+        stop_event.set()
+
+    timer = threading.Timer(timeout, _expire)
+    timer.daemon = True
+    timer.start()
+
     def _run():
         try:
             t0 = time.monotonic()
@@ -121,7 +131,7 @@ def api_search():
             if status == "error:":
                 err = status
             elif status == "search_cancelled":
-                err = None
+                err = "搜索超时，已显示部分结果" if timed_out.is_set() else None
             elif status == "search_limit":
                 err = "已达到结果上限 (5000)"
             with _SEARCH_LOCK:
@@ -134,6 +144,8 @@ def api_search():
             with _SEARCH_LOCK:
                 _SEARCH_RESULTS[token]["done"] = True
                 _SEARCH_RESULTS[token]["error"] = f"error: {str(e)}"
+        finally:
+            timer.cancel()
 
     t = threading.Thread(target=_run, args=(), daemon=True)
     t.start()

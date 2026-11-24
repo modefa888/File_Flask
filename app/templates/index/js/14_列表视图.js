@@ -2,7 +2,7 @@
         function renderTable(items) {
             const tbody = document.getElementById('fileBody');
             if (!items || items.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="${selectMode ? 6 : 5}">${emptyStateHtml()}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="${selectMode ? 8 : 7}">${emptyStateHtml()}</td></tr>`;
                 return;
             }
             const html = _buildTableHtml(items);
@@ -33,6 +33,21 @@
             setTimeout(step, 0);
         }
 
+        // 把 Unix 权限串转成普通用户能看懂的中文（以所有者权限为准，原始串放 title）
+        function permLabel(perm) {
+            if (!perm || typeof perm !== 'string' || perm.length < 4 || perm === '-') return '-';
+            const isDir = perm.charAt(0) === 'd';
+            const r = perm.charAt(1) !== '-';
+            const w = perm.charAt(2) !== '-';
+            const x = perm.charAt(3) !== '-';
+            if (r && w && x) return isDir ? '可读写进入' : '可读写执行';
+            if (r && w) return '可读写';
+            if (r && x) return isDir ? '可读进入' : '可读执行';
+            if (r) return '只读';
+            if (x) return '可执行';
+            return '受限';
+        }
+
         function _buildTableHtml(items) {
             let html = '';
             for (const item of items) {
@@ -53,7 +68,10 @@
                 const moreBtn = '<button class="more-btn" data-action-path="' + absPath + '" data-is-dir="' + item.is_dir + '" title="更多操作"><i class="bi bi-three-dots"></i></button>';
                 html += `<tr class="${isSelected ? 'selected' : ''}" data-path="${absPath}">
                 <td class="checkbox-col"><input class="form-check-input item-checkbox" type="checkbox" name="files" value="${absPath}" data-path="${absPath}" ${isSelected ? 'checked' : ''} /></td>
-                <td>${nameHtml}</td><td class="text-end file-size">${item.size_str || '-'}</td>
+                <td>${nameHtml}</td>
+                <td class="file-perm" title="原始权限：${_escAttr(item.perm || '-')}">${permLabel(item.perm)}</td>
+                <td class="file-owner" title="${_escAttr(item.owner || '-')}">${_escHtml(item.owner || '-')}</td>
+                <td class="text-end file-size">${item.size_str || '-'}</td>
                 <td>${typeBadge}</td>
                 <td style="font-size:0.85rem;color:#4a5568;">${item.mtime || '-'}</td>
                 <td class="text-center">${moreBtn}</td>

@@ -78,7 +78,7 @@ def _load_caches_from_db():
                     items = json.loads(r["items"] or "[]")
                 except ValueError:
                     items = []
-                loaded[ckey] = {"v": 3, "mtime": r["mtime"], "items": items,
+                loaded[ckey] = {"v": 4, "mtime": r["mtime"], "items": items,
                                 "partial": bool(r["partial"])}
             _LIST_CACHE = loaded
         finally:
@@ -526,6 +526,15 @@ def _dir_child_counts(dir_path, dir_mtime):
     return {"n_dirs": n_dirs, "n_files": n_files}
 
 
+def _owner_name(st):
+    """文件所有者：Unix 取 pwd 用户名，Windows / 无权限时回退 uid 或 '-'。"""
+    try:
+        import pwd
+        return pwd.getpwuid(st.st_uid).pw_name
+    except Exception:
+        return str(getattr(st, "st_uid", "-"))
+
+
 def get_file_info(file_path, base_path, compute_size=True, compute_counts=False, size_budget_ms=0):
     """单个条目的信息。
 
@@ -570,6 +579,8 @@ def get_file_info(file_path, base_path, compute_size=True, compute_counts=False,
             "type": file_type,
             "mtime": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
             "ext": ext,
+            "perm": stat.filemode(st.st_mode),
+            "owner": _owner_name(st),
         }
         # 时间字段：ctime 是 inode 状态变更时间（Linux / macOS 的 st_ctime，Windows 上即创建时间），
         # 不能当创建时间展示；birth 只有系统提供 st_birthtime（macOS / BSD）时才有，前端据此决定显示与否
@@ -611,11 +622,11 @@ def list_directory(path, get_sizes=False, show_hidden=False, counts=False, size_
         return []
 
     ckey = _list_cache_key(path, show_hidden)
-    # v3：条目含 n_dirs/n_files 子项计数与 ctime；旧版本缓存视为失效
+    # v4：条目含 n_dirs/n_files 子项计数、ctime 与 perm/owner；旧版本缓存视为失效
     # 列表缓存命中即返回：目录大小由后台 du 异步补齐，无需重建列表，
     # 否则大目录（如 /home/zhangjie/Desktop）每次请求都重新遍历所有条目 + 查索引，极易超时
     cached = _LIST_CACHE.get(ckey)
-    if cached and cached.get("v") == 3 and abs(cached.get("mtime", 0) - dir_mtime) < 0.1:
+    if cached and cached.get("v") == 4 and abs(cached.get("mtime", 0) - dir_mtime) < 0.1:
         return cached["items"]
 
     items = []
@@ -641,7 +652,7 @@ def list_directory(path, get_sizes=False, show_hidden=False, counts=False, size_
     # 凡列表中仍有"计算中…/大小未知"的目录，视为不完整快照：
     # get_sizes=True 时忽略缓存重建，以补齐大小（重建仅 scandir+缓存查询，毫秒级）
     _set_list_entry(ckey, {
-        "v": 3, "mtime": dir_mtime, "items": items,
+        "v": 4, "mtime": dir_mtime, "items": items,
         "partial": any(x["is_dir"] and x.get("size_str") in ("大小未知", "计算中…") for x in items),
     })
     _save_list_cache()

@@ -14,7 +14,12 @@
                 _menuEl.id = 'cselectMenu';
                 _menuEl.className = 'cselect-menu';
                 _menuEl.setAttribute('role', 'listbox');
+                _menuEl.addEventListener('mousedown', function (e) {
+                    // 菜单挂在 body 上，别让 IDE / 面板的「点外部关闭」逻辑把当前面板关掉
+                    e.stopPropagation();
+                });
                 _menuEl.addEventListener('click', function (e) {
+                    e.stopPropagation();
                     const el = e.target.closest('.cselect-opt');
                     if (!el || el.classList.contains('disabled')) return;
                     _pick(Number(el.dataset.idx));
@@ -39,6 +44,8 @@
                 if (_cur && _cur.sel === sel && menu.classList.contains('open')) { _close(); return; }
                 _close();
                 _cur = { wrap: wrap, sel: sel, btn: btn };
+                // 打开时再量一次：有些面板是先插入 DOM、稍后才显示，插入瞬间量不到宽度
+                if (wrap._csFit) wrap._csFit();
 
                 // 每次打开都按当前 options 重建，兼容动态增删选项
                 const frag = document.createDocumentFragment();
@@ -144,19 +151,57 @@
                 if (sel.dataset.cselect === '1') return;
                 if (sel.multiple || sel.size > 1) return;        // 多选 / 列表式保持原生
                 if (sel.closest('.cselect')) return;
+                // IDE 里各模块已有自己的自绘下拉（dbc / api / cdl / ssh / rv / v2v / dlc…），不再重复包裹
+                if (/(^|\s)\S+-sel-native(\s|$)/.test(sel.className || '')) return;
+                if (sel._dbcWrap || sel._csWrap) return;
                 sel.dataset.cselect = '1';
+
+                // 设置页的 .app-select 已经自带前置图标和样式，标记一下好让 CSS 隐藏它原来的箭头
+                const appHost = sel.closest('.app-select');
+                if (appHost) appHost.classList.add('cselect-host');
 
                 const wrap = document.createElement('span');
                 wrap.className = 'cselect';
                 sel.parentNode.insertBefore(wrap, sel);
                 wrap.appendChild(sel);
                 sel.classList.add('cselect-native');
+                sel._csWrap = wrap;
 
                 // 原生 select 上写死的宽 / 最大宽同步给包裹层：
                 // 否则放进 flex 容器会被拉伸（例如后台的监听地址下拉写死了 170px）
                 if (sel.style.width) wrap.style.width = sel.style.width;
                 if (sel.style.maxWidth) wrap.style.maxWidth = sel.style.maxWidth;
                 if (sel.style.minWidth) wrap.style.minWidth = sel.style.minWidth;
+
+                // 原来是 flex:1 的下拉，包裹层要接过同样的伸缩行为
+                try {
+                    const cs = getComputedStyle(sel);
+                    if (cs.flexGrow !== '0' || cs.flexShrink !== '1' || cs.flexBasis !== 'auto') {
+                        wrap.style.flexGrow = cs.flexGrow;
+                        wrap.style.flexShrink = cs.flexShrink;
+                        wrap.style.flexBasis = cs.flexBasis;
+                    }
+                    if (cs.alignSelf !== 'auto') wrap.style.alignSelf = cs.alignSelf;
+                } catch (e) { }
+
+                // width:100% 的下拉（如 .scr-in / .notify-select）：包裹层也占满整行
+                function _fitWidth() {
+                    try {
+                        if (wrap.style.width === '100%') return;
+                        const parent = wrap.parentElement;
+                        if (!parent) return;
+                        const pcs = getComputedStyle(parent);
+                        const pr = parent.getBoundingClientRect();
+                        const sr = sel.getBoundingClientRect();
+                        const pad = (parseFloat(pcs.paddingLeft) || 0) + (parseFloat(pcs.paddingRight) || 0);
+                        if (sr.width > 0 && pr.width > 0 && sr.width >= pr.width - pad - 2) {
+                            wrap.style.width = '100%';
+                        }
+                    } catch (e) { }
+                }
+                wrap._csFit = _fitWidth;
+                _fitWidth();
+                setTimeout(_fitWidth, 80);
 
                 const btn = document.createElement('button');
                 btn.type = 'button';

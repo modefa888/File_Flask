@@ -6,6 +6,7 @@
 <title>在线项目 IDE</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💻</text></svg>">
 <link rel="stylesheet" href="/static/vendor/bootstrap-icons/bootstrap-icons.css">
+<link rel="stylesheet" href="/static/css/custom-select.css">
 <link rel="stylesheet" href="/api/icons/ui.css">
 <style>
 {% include 'ide/css/00_base.css' %}
@@ -254,6 +255,10 @@ html.theme-light .CodeMirror-foldgutter-folded:hover:after { color: #111; opacit
 <style>
 {% include 'ide/css/29_浅色主题.css' %}
 </style>
+{# 自定义下拉框主题：深色默认 + html.theme-light 覆盖，必须排在 29_ 之后 #}
+<style>
+{% include 'ide/css/63_自定义下拉框.css' %}
+</style>
 </head>
 <body>
 <script>/* 首屏按已保存的主题立即上色，避免深色闪一下再变浅；跟随系统时用 prefers-color-scheme 预判 */
@@ -381,6 +386,8 @@ try { if (localStorage.getItem('ide.sidebar.collapsed') === '1') document.docume
    自包含模块（window.Deskie API），放在最后加载 #}
 {% include 'ide/js/46_桌宠_桌小萌与鲸鱼娘.js' %}
 </script>
+{# 自定义下拉框：把 IDE 里剩下的原生 <select> 统一升级成自绘下拉（各模块自带的 *-sel-native 会跳过） #}
+<script src="/static/js/custom-select.js"></script>
 </body>
 </html>
 

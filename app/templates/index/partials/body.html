@@ -147,6 +147,12 @@
                         id="totalSize">0</span></span>
                 <button class="btn btn-outline-secondary btn-sm parent-dir-btn" id="parentDirBtn"
                     title="返回上级目录"><i class="bi bi-arrow-up"></i> 上级目录</button>
+                <span class="seq-nav" id="seqNav" style="display:none;" title="按搜索结果顺序浏览（批量打开后启用）">
+                    <button class="btn btn-outline-primary btn-sm" id="seqPrevBtn" title="上一个（←）"><i class="bi bi-chevron-left"></i> 上一个</button>
+                    <span class="seq-count" id="seqCount">0/0</span>
+                    <button class="btn btn-outline-primary btn-sm" id="seqNextBtn" title="下一个（→）">下一个 <i class="bi bi-chevron-right"></i></button>
+                    <button class="btn btn-outline-secondary btn-sm" id="seqExitBtn" title="退出顺序浏览（清空勾选，与批量条取消同一状态）"><i class="bi bi-x-lg"></i></button>
+                </span>
             </span>
         </div>
         <div class="file-table">

@@ -23,9 +23,9 @@
             toast.className = `custom-toast ${type}`;
             toast.innerHTML = `
             <span class="toast-icon">${icon}</span>
-            <div>
+            <div class="toast-content">
                 <strong>${title}</strong>
-                <div style="margin-top:2px;opacity:0.9;font-size:0.85rem;">${message.replace(/\n/g, '<br>')}</div>
+                <div class="toast-message">${message.replace(/\n/g, '<br>')}</div>
             </div>
         `;
             container.appendChild(toast);

@@ -31,6 +31,77 @@ _INDEX_DB_GENERATION = 0
 _INDEX_GEN_LOCK = threading.Lock()
 
 
+# 重建专用：先建一张不带索引 / 唯一约束的普通表，扫完再一次性建索引。
+# 逐行 INSERT 时同时维护 4 棵 B 树是重建慢的主因之一；批量建索引快很多。
+_BULK_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS index_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        abs_path TEXT NOT NULL,
+        name TEXT NOT NULL,
+        ext TEXT DEFAULT '',
+        size INTEGER DEFAULT 0,
+        mtime REAL DEFAULT 0,
+        is_dir INTEGER DEFAULT 0,
+        parent_dir TEXT DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS index_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    );
+"""
+
+
+def _init_bulk_index_db(db_path):
+    """创建重建用的临时库：无索引 + 关闭同步落盘（重建完即丢弃，不怕断电）。
+
+    仍然保留 WAL：扫描期间「索引详情」面板要并发读这个临时库做统计，
+    换成 journal_mode=OFF 的话写事务会把读连接全锁掉（界面会一直「暂无数据」）。
+    """
+    conn = sqlite3.connect(db_path, timeout=30)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=OFF")
+        conn.execute("PRAGMA cache_size=-131072")      # 128MB
+        conn.executescript(_BULK_SCHEMA)
+        conn.commit()
+    except sqlite3.OperationalError:
+        # 极端文件系统不支持 WAL：退回普通日志模式
+        conn.execute("PRAGMA journal_mode=DELETE")
+        conn.executescript(_BULK_SCHEMA)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _create_index_files_indexes(conn, on_step=None):
+    """扫描完成后一次性建索引（含 abs_path 唯一索引，保持 INSERT OR REPLACE 语义）。
+
+    顺序按「便宜 → 昂贵」排：短的 ext 先建，长路径的 parent_dir / abs_path 放最后，
+    这样 90% 这一步也能逐步看到 1/4、2/4 的进度，而不是长时间停在同一个百分比。
+    on_step(i, total, label)：每开始建一个索引回调一次（用于更新进度文案）。
+    """
+    steps = (
+        ("idx_ext", "ext"),
+        ("idx_name", "name"),
+        ("idx_parent", "parent_dir"),
+        ("idx_abs_path", "abs_path（唯一）"),
+    )
+    for i, (name, label) in enumerate(steps, 1):
+        if on_step:
+            try:
+                on_step(i, len(steps), label)
+            except Exception:
+                pass
+        if name == "idx_abs_path":
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_abs_path ON index_files(abs_path)")
+        elif name == "idx_ext":
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ext ON index_files(ext)")
+        elif name == "idx_name":
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_name ON index_files(name)")
+        else:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_parent ON index_files(parent_dir)")
+
+
 def _index_db_exists():
     """磁盘上是否存在主索引库（清空后为 False）。"""
     return os.path.exists(_INDEX_DB_FILE)

@@ -243,6 +243,41 @@
             color: #1d4ed8;
         }
 
+        /* 顺序浏览导航（批量打开后启用） */
+        .seq-nav {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: 10px;
+            padding-left: 10px;
+            border-left: 1px solid var(--fm-line);
+        }
+
+        .seq-nav .btn {
+            border-radius: 8px;
+            font-size: .8rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .seq-nav .btn:disabled {
+            opacity: .45;
+            cursor: not-allowed;
+        }
+
+        .seq-nav .seq-count {
+            font-size: .78rem;
+            font-weight: 700;
+            color: #1d4ed8;
+            background: var(--fm-accent-soft, #eff6ff);
+            border-radius: 6px;
+            padding: 3px 8px;
+            min-width: 46px;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+        }
+
         /* 文件列表：更轻的边框和更清晰的悬停/选中反馈 */
         .file-table {
             border: 1px solid #e9eef5;

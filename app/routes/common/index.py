@@ -20,6 +20,34 @@ from ...services.common.filecore import format_size
 _log = get_logger()
 bp = Blueprint("index", __name__)
 
+_SEARCH_TTL = 600.0          # 搜索记录保留 10 分钟（轮询结束 / 页面关掉后无需长留）
+_INDEX_SEARCH_CACHE = {}     # (关键字/筛选/根目录/索引代次) -> (时间, items, error)
+_INDEX_SEARCH_TTL = 180.0    # 相同条件的索引搜索结果复用 3 分钟
+_INDEX_SEARCH_MAX = 16
+
+
+def _new_search_token(source):
+    """登记一个搜索任务并返回 token（顺带清理过期记录，避免内存无限增长）。"""
+    token = uuid.uuid4().hex[:16]
+    now = time.time()
+    with _SEARCH_LOCK:
+        for k in [k for k, v in _SEARCH_RESULTS.items()
+                  if now - v.get("created", 0) > _SEARCH_TTL]:
+            _SEARCH_RESULTS.pop(k, None)
+        _SEARCH_RESULTS[token] = {
+            "items": [], "done": False, "error": None, "count": 0,
+            "duration": 0, "cancelled": False, "source": source, "created": now,
+        }
+    return token
+
+
+def _match_skip(path, skip_l):
+    """路径中是否包含需要跳过的目录（node_modules / dist …）。"""
+    if not skip_l:
+        return False
+    segs = str(path).replace("\\", "/").split("/")
+    return any(s.lower() in skip_l for s in segs)
+
 
 
 
@@ -63,35 +91,81 @@ def api_search():
     if use_index != "never" and not case_sensitive:
         meta = _get_index_meta()
         if meta["total_files"] > 0 and use_index in ("auto", "force"):
-            t0 = time.monotonic()
-            items = _query_index(keyword, ext_filter, type_filter, limit=5000,
-                                 min_size=min_size, max_size=max_size)
-            # 限定搜索根目录时，过滤索引结果
             if root:
                 root_abs = os.path.abspath(os.path.normpath(root))
                 if not os.path.isdir(root_abs):
                     return jsonify({"error": f"搜索根目录不存在: {root}"}), 400
-                root_n = os.path.normcase(root_abs)
-                prefix_n = os.path.normcase(root_abs.rstrip(os.sep) + os.sep)
-                filtered = []
-                for it in items:
-                    p = str(it.get("path", "")).rstrip(os.sep)
-                    if os.path.normcase(p) == root_n or os.path.normcase(p).startswith(prefix_n):
-                        filtered.append(it)
-                items = filtered
-            if skip_l:
-                def _has_skip(it):
-                    segs = str(it.get("path", "")).replace("\\", "/").split("/")
-                    return any(s.lower() in skip_l for s in segs)
-                items = [it for it in items if not _has_skip(it)]
-            dur = round(time.monotonic() - t0, 2)
-            return jsonify({
-                "source": "index",
-                "count": len(items),
-                "duration": dur,
-                "items": items,
-                "done": True,
-            })
+
+            # 索引库有几百万行，LIKE '%关键字%' 是整表扫描，单次可能要几十秒。
+            # 这里改成和「实时遍历」一样的任务制：先返回 token，前端轮询取结果，
+            # 避免浏览器 20 秒 AbortController 超时后误报「搜索请求超时」。
+            token = _new_search_token("index")
+
+            def _run_index():
+                t0 = time.monotonic()
+                items, err = [], None
+                last_push = [0.0]
+
+                def _on_progress(n):
+                    # 最多每 0.3 秒写一次，避免频繁抢 _SEARCH_LOCK
+                    now = time.monotonic()
+                    if now - last_push[0] < 0.3:
+                        return
+                    last_push[0] = now
+                    with _SEARCH_LOCK:
+                        rec = _SEARCH_RESULTS.get(token)
+                        if rec is not None:
+                            rec["scanned"] = n
+                            rec["duration"] = round(now - t0, 2)
+
+                def _on_tick():
+                    # 扫描期间的心跳：没有匹配项时，前端至少能看到「耗时」在走
+                    now = time.monotonic()
+                    if now - last_push[0] < 0.4:
+                        return
+                    last_push[0] = now
+                    with _SEARCH_LOCK:
+                        rec = _SEARCH_RESULTS.get(token)
+                        if rec is not None:
+                            rec["duration"] = round(now - t0, 2)
+
+                # 相同条件（同一索引代次）的搜索短时间内复用结果：
+                # 全盘扫一遍要几十秒，用户重复点「搜索」不该再等一次
+                cache_key = (keyword.lower(), ext_filter, type_filter, min_size, max_size,
+                             root, tuple(sorted(skip_l)), meta.get("total_files"))
+                try:
+                    hit = _INDEX_SEARCH_CACHE.get(cache_key)
+                    if hit and time.time() - hit[0] < _INDEX_SEARCH_TTL:
+                        items, err = hit[1], hit[2]
+                    else:
+                        # 结果上限 1000：再往上意义不大，但会把「常见关键字」拖成整表扫描
+                        items, timed_out = _query_index(
+                            keyword, ext_filter, type_filter, limit=1000,
+                            min_size=min_size, max_size=max_size,
+                            root=root, timeout=timeout, on_progress=_on_progress,
+                            on_tick=_on_tick)
+                        if skip_l:
+                            items = [it for it in items if not _match_skip(it.get("path", ""), skip_l)]
+                        if timed_out:
+                            err = "搜索超时，已显示部分结果"
+                        else:
+                            if len(_INDEX_SEARCH_CACHE) > _INDEX_SEARCH_MAX:
+                                _INDEX_SEARCH_CACHE.clear()
+                            _INDEX_SEARCH_CACHE[cache_key] = (time.time(), items, err)
+                except Exception as e:
+                    _log.warning("索引搜索失败：%s", e)
+                    err = f"error: {e}"
+                with _SEARCH_LOCK:
+                    rec = _SEARCH_RESULTS.get(token)
+                    if rec is not None:
+                        rec["items"] = items
+                        rec["count"] = len(items)
+                        rec["done"] = True
+                        rec["error"] = err
+                        rec["duration"] = round(time.monotonic() - t0, 2)
+
+            threading.Thread(target=_run_index, daemon=True).start()
+            return jsonify({"token": token, "source": "index", "status": "running"})
 
     # 回退到文件系统遍历
     if not root:
@@ -103,10 +177,7 @@ def api_search():
     if not os.path.isdir(root):
         return jsonify({"error": f"搜索根目录不存在: {root}"}), 400
 
-    import uuid
-    token = uuid.uuid4().hex[:16]
-    with _SEARCH_LOCK:
-        _SEARCH_RESULTS[token] = {"items": [], "done": False, "error": None, "count": 0, "duration": 0, "cancelled": False}
+    token = _new_search_token("walk")
 
     stop_event = threading.Event()
     timed_out = threading.Event()
@@ -162,7 +233,9 @@ def api_search_status(token):
         return jsonify({"error": "无效或已过期的搜索任务"}), 404
     return jsonify({
         "done": rec["done"],
+        "source": rec.get("source", "walk"),
         "count": rec["count"],
+        "scanned": rec.get("scanned", 0),
         "duration": rec["duration"],
         "error": rec.get("error"),
         "items": rec["items"],
@@ -195,6 +268,7 @@ def api_index_detail():
     detail["top_dirs"] = [dict(d, size_str=format_size(d["size"])) for d in cached.get("top_dirs", [])]
     detail["type_distribution"] = [dict(d, size_str=format_size(d["size"])) for d in cached.get("type_distribution", [])]
     detail["top_files"] = [dict(d, size_str=format_size(d["size"])) for d in cached.get("top_files", [])]
+    detail["size_buckets"] = [dict(d, size_str=format_size(d["size"])) for d in cached.get("size_buckets", [])]
 
     return jsonify(detail)
 

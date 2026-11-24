@@ -9,6 +9,28 @@
         // 预览「收起」后的右下角悬浮胶囊
         let _previewCollapsedBtn = null;
 
+        // ===== 外部预览队列（搜索结果顺序）=====
+        // 搜索面板点预览时注入：让「上一张/下一张/播放下一个」按搜索结果顺序切换，
+        // 而不是按文件所在目录（搜索结果常跨目录，目录列表可能还没加载，导致按钮点了没反应）。
+        let _previewQueue = null;   // { paths: [...], current: '绝对路径' }
+
+        function _setPreviewQueue(paths, current) {
+            if (!Array.isArray(paths) || !paths.length) { _previewQueue = null; return; }
+            _previewQueue = { paths: paths.slice(), current: current || '' };
+        }
+
+        // 返回队列中相对当前文件偏移 delta 的下一个路径；不在队列或无下一个时返回 null
+        function _previewQueueStep(delta) {
+            const q = _previewQueue;
+            if (!q || !q.paths.length) return null;
+            let idx = q.paths.indexOf(q.current);
+            if (idx < 0) return null;
+            const next = idx + delta;
+            if (next < 0 || next >= q.paths.length) return null;
+            return q.paths[next];
+        }
+        window._setPreviewQueue = _setPreviewQueue;
+
         function _canPreview(ext) {
             const e = (ext || '').toLowerCase();
             // 视频走 /api/stream 流式播放（支持 Range，边下边播），不会把整个文件读进内存
@@ -1209,10 +1231,20 @@
             body.querySelectorAll('.img-nav').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
+                    const d = btn.classList.contains('next') ? 1 : -1;
+                    // 优先按外部队列（搜索结果）切换；没有再退回目录图片墙
+                    const queued = _previewQueueStep(d);
+                    if (queued && _canPreviewPath(queued)) {
+                        _previewQueue.current = queued;
+                        if (_IMAGE_EXTS.has(String(queued).split('.').pop().toLowerCase())) {
+                            applyImage(queued);
+                            return;
+                        }
+                    }
                     const iw = body._iw;
                     if (!iw || !iw.imgs || iw.imgs.length < 2) return;
-                    const d = btn.classList.contains('next') ? 1 : -1;
                     const ni = ((iw.idx + d) % iw.imgs.length + iw.imgs.length) % iw.imgs.length;
+                    _previewQueue = null;   // 目录内切换后不再沿用搜索队列
                     applyImage(iw.dir + '/' + iw.imgs[ni].name);
                 });
             });
@@ -1266,11 +1298,21 @@
                 if (tag === 'input' || tag === 'textarea' || (e.target && e.target.isContentEditable)) return;
                 const iw = body._iw;
                 if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                    const d = e.key === 'ArrowRight' ? 1 : -1;
+                    // 优先按外部队列（搜索结果）切换
+                    const queued = _previewQueueStep(d);
+                    if (queued && _IMAGE_EXTS.has(String(queued).split('.').pop().toLowerCase())) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        _previewQueue.current = queued;
+                        applyImage(queued);
+                        return;
+                    }
                     if (!iw || !iw.imgs || iw.imgs.length < 2) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    const d = e.key === 'ArrowRight' ? 1 : -1;
                     const ni = ((iw.idx + d) % iw.imgs.length + iw.imgs.length) % iw.imgs.length;
+                    _previewQueue = null;
                     applyImage(iw.dir + '/' + iw.imgs[ni].name);
                 } else if (e.key === '+' || e.key === '=') {
                     e.preventDefault();
@@ -1464,6 +1506,7 @@
 
         function closePreview() {
             _closeMenus();
+            _previewQueue = null;   // 关闭预览后清除搜索队列，恢复按目录顺序
             if (_videoPreviewUnbind) {
                 try { _videoPreviewUnbind(); } catch (err) { /* ignore */ }
                 _videoPreviewUnbind = null;
@@ -1793,9 +1836,34 @@
         // 收起状态下播放下一个：按播放列表顺序，末位回到第一个
         function _playNextInPreview() {
             const container = document.getElementById('previewContainer');
+            if (!container) return;
             const body = container.querySelector('.preview-body');
+            if (!body) return;
+            // 优先按外部队列（搜索结果）切换到下一个可播放视频
+            if (_previewQueue) {
+                const cur = _previewQueue.current;
+                const paths = _previewQueue.paths;
+                let start = paths.indexOf(cur);
+                if (start < 0) start = paths.findIndex(p => p === _vpCurrentVideo);
+                for (let i = start + 1; i < paths.length; i++) {
+                    if (_VIDEO_EXTS.has(String(paths[i]).split('.').pop().toLowerCase())) {
+                        _previewQueue.current = paths[i];
+                        _switchVideoInPlace(body, paths[i]);
+                        return;
+                    }
+                }
+                // 已到队尾：回到第一个可播放视频
+                for (let i = 0; i < paths.length; i++) {
+                    if (_VIDEO_EXTS.has(String(paths[i]).split('.').pop().toLowerCase())) {
+                        _previewQueue.current = paths[i];
+                        _switchVideoInPlace(body, paths[i]);
+                        return;
+                    }
+                }
+                return;
+            }
             const items = container.querySelectorAll('.vp-item');
-            if (!body || !items.length) return;
+            if (!items.length) return;
             let idx = -1;
             items.forEach((el, i) => { if (el.classList.contains('playing')) idx = i; });
             const next = items[(idx + 1) % items.length];

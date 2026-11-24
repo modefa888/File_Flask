@@ -34,6 +34,41 @@ bp = Blueprint("git", __name__)
 _TIMEOUT = 20
 _MAX_DIFF_BYTES = 512 * 1024
 
+# ---------------------------------------------------------------------------
+# 只读命令的短缓存 + 单飞锁
+# 页面启动瞬间会同时拉 git status / git log（源代码管理面板还会定时轮询），
+# 大仓库 / NTFS 挂载盘上单次 status 可能要十几秒；并发重复执行会把磁盘和线程全占满，
+# 表现成「整页加载 10 多秒」。这里让同一仓库的并发请求合并成一次，并允许短时间复用结果。
+# 写操作（stage / commit / pull …）执行时立即清空缓存。
+# ---------------------------------------------------------------------------
+_READ_ONLY_CMDS = {"status", "log", "diff", "show", "rev-parse", "ls-files",
+                   "branch", "tag", "remote", "config", "cat-file"}
+_STATUS_TTL = 2.0
+_LOG_TTL = 4.0
+_ROOT_TTL = 30.0
+_CACHE_MAX = 32            # 缓存条目上限：超了直接整体清空，避免长期运行积累大对象
+_status_cache = {}          # (root, show_all) -> (ts, payload)
+_log_cache = {}             # (root, limit, skip, branch) -> (ts, payload)
+_root_cache = {}            # path -> (ts, root, err)
+_git_locks = {}             # key -> Lock
+_git_locks_lock = threading.Lock()
+
+
+def _key_lock(key):
+    with _git_locks_lock:
+        lk = _git_locks.get(key)
+        if lk is None:
+            lk = _git_locks[key] = threading.Lock()
+        return lk
+
+
+def _invalidate_git_cache():
+    """任何写操作之后清空只读缓存（同时清掉仓库根缓存，兼容刚刚 git init 的目录）。"""
+    with _git_locks_lock:
+        _status_cache.clear()
+        _log_cache.clear()
+        _root_cache.clear()
+
 
 _SECRET_FIELDS = ("token", "proxy_url")      # 以密文落库的字段（代理地址可能带用户名密码）
 
@@ -346,6 +381,13 @@ def _git(cwd, args, timeout=_TIMEOUT, proxy=""):
     # 禁止 Git 弹出交互式用户名/密码提示；在 Web 后端没有终端，hang 住会导致超时
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_ASKPASS"] = "false"
+    cmd = (args[0] if args else "").lower()
+    if cmd in _READ_ONLY_CMDS:
+        # 只读命令不刷新索引 / 不抢可选锁：避免和正在进行的提交争用磁盘，也少一次写
+        env["GIT_OPTIONAL_LOCKS"] = "0"
+    else:
+        # 任何写操作开始就清掉只读缓存，保证状态 / 历史立即反映最新结果
+        _invalidate_git_cache()
     conf = [exe, "-c", "safe.directory=*", "-c", "core.quotepath=false"]
     if proxy:
         conf += ["-c", "http.proxy=" + proxy, "-c", "https.proxy=" + proxy]
@@ -544,12 +586,16 @@ def _repo_root(path):
         return None, "目录不存在"
     if not _git_exe():
         return None, "未找到 git 命令，请先安装 Git"
+    now = time.time()
+    hit = _root_cache.get(path)
+    if hit and now - hit[0] < _ROOT_TTL:
+        return hit[1], hit[2]
     proc, err = _git(path, ["rev-parse", "--show-toplevel"])
     if err:
         return None, err
-    if proc.returncode != 0:
-        return None, None                      # 不是 Git 仓库
-    return proc.stdout.strip(), None
+    root = proc.stdout.strip() if proc.returncode == 0 else None
+    _root_cache[path] = (now, root, None)
+    return root, None
 
 
 def _parse_branch(line):
@@ -654,40 +700,56 @@ def api_git_status():
     if not root:
         return jsonify({"ok": True, "is_repo": False, "repo": os.path.abspath(target)})
 
-    proc, err = _git(root, ["status", "--porcelain=v1", "-z", "-b", "--untracked-files=all"])
-    if err:
-        return jsonify({"ok": False, "error": err, "is_repo": True, "repo": root})
-    if proc.returncode != 0:
-        return jsonify({"ok": False, "error": proc.stderr.strip() or "读取状态失败", "is_repo": True, "repo": root})
-
-    branch_line, files = _parse_status(proc.stdout)
-    staged, changed, untracked = [], [], []
-    for f in files:
-        x, y = f["x"], f["y"]
-        if x == "?" and y == "?":
-            untracked.append({"path": f["path"], "status": "U"})
-            continue
-        if x not in (" ", "?"):
-            staged.append({"path": f["path"], "status": x})
-        if y not in (" ", "?"):
-            changed.append({"path": f["path"], "status": y})
-    info = _parse_branch(branch_line)
     # 未跟踪项默认全部返回；传 show_all=0 时才过滤缓存/构建产物（面板上可切换）
     show_all = (request.args.get("show_all", "1") or "1").lower() not in ("0", "false", "no")
-    if show_all:
-        show_untracked, hidden = untracked, 0
-    else:
-        show_untracked = [u for u in untracked if not _noisy(u["path"])]
-        hidden = len(untracked) - len(show_untracked)
-    return jsonify({
-        "ok": True, "is_repo": True, "repo": root,
-        "branch": info["branch"], "upstream": info["upstream"],
-        "ahead": info["ahead"], "behind": info["behind"], "detached": info["detached"],
-        "staged": staged, "changed": changed, "untracked": show_untracked,
-        "hidden_untracked": hidden,
-        "counts": {"staged": len(staged), "changed": len(changed),
-                   "untracked": len(show_untracked), "hidden": hidden},
-    })
+    cache_key = (root, show_all)
+    now = time.time()
+    hit = _status_cache.get(cache_key)
+    if hit and now - hit[0] < _STATUS_TTL:
+        return jsonify(hit[1])
+
+    # 单飞：同一仓库同一时刻只跑一次 git status，后来的请求等它出结果后直接复用
+    with _key_lock("status:" + root):
+        hit = _status_cache.get(cache_key)
+        if hit and time.time() - hit[0] < _STATUS_TTL:
+            return jsonify(hit[1])
+        proc, err = _git(root, ["status", "--porcelain=v1", "-z", "-b", "--untracked-files=all"])
+        if err:
+            return jsonify({"ok": False, "error": err, "is_repo": True, "repo": root})
+        if proc.returncode != 0:
+            return jsonify({"ok": False, "error": proc.stderr.strip() or "读取状态失败",
+                            "is_repo": True, "repo": root})
+
+        branch_line, files = _parse_status(proc.stdout)
+        staged, changed, untracked = [], [], []
+        for f in files:
+            x, y = f["x"], f["y"]
+            if x == "?" and y == "?":
+                untracked.append({"path": f["path"], "status": "U"})
+                continue
+            if x not in (" ", "?"):
+                staged.append({"path": f["path"], "status": x})
+            if y not in (" ", "?"):
+                changed.append({"path": f["path"], "status": y})
+        info = _parse_branch(branch_line)
+        if show_all:
+            show_untracked, hidden = untracked, 0
+        else:
+            show_untracked = [u for u in untracked if not _noisy(u["path"])]
+            hidden = len(untracked) - len(show_untracked)
+        payload = {
+            "ok": True, "is_repo": True, "repo": root,
+            "branch": info["branch"], "upstream": info["upstream"],
+            "ahead": info["ahead"], "behind": info["behind"], "detached": info["detached"],
+            "staged": staged, "changed": changed, "untracked": show_untracked,
+            "hidden_untracked": hidden,
+            "counts": {"staged": len(staged), "changed": len(changed),
+                       "untracked": len(show_untracked), "hidden": hidden},
+        }
+        if len(_status_cache) > _CACHE_MAX:
+            _status_cache.clear()
+        _status_cache[cache_key] = (time.time(), payload)
+        return jsonify(payload)
 
 
 @bp.route("/api/git/diff")
@@ -994,27 +1056,41 @@ def api_git_log():
         return jsonify({"ok": True, "is_repo": False, "repo": os.path.abspath(repo), "commits": []})
     # %x1f 作为字段分隔符，避免提交信息中含逗号时解析出错；%d 为 ref 装饰（分支/标签）
     fmt = "%h%x1f%s%x1f%an%x1f%ad%x1f%d"
-    args = ["log", f"-{limit}", f"--skip={skip}",
-            "--date=format:%Y-%m-%d %H:%M", f"--pretty=format:{fmt}"]
     # 可选：查看指定分支的历史（只读，不切换工作区分支）
     branch = (request.args.get("branch") or "").strip()
-    if branch and not branch.startswith("-") and not re.search(r"\s", branch):
-        args.append(branch)
-    proc, err = _git(root, args)
-    if err:
-        return jsonify({"ok": False, "is_repo": True, "repo": root, "error": err, "commits": []})
-    commits = []
-    if proc.returncode == 0:
-        for line in proc.stdout.splitlines():
-            parts = line.split("\x1f")
-            if len(parts) >= 4:
-                refs = []
-                if len(parts) >= 5 and parts[4].strip():
-                    refs = [r.strip() for r in parts[4].strip().strip("()").split(",") if r.strip()]
-                commits.append({"hash": parts[0], "subject": parts[1],
-                                "author": parts[2], "date": parts[3], "refs": refs})
-    return jsonify({"ok": True, "is_repo": True, "repo": root, "commits": commits,
-                    "has_more": len(commits) >= limit})
+    cache_key = (root, limit, skip, branch)
+    hit = _log_cache.get(cache_key)
+    if hit and time.time() - hit[0] < _LOG_TTL:
+        return jsonify(hit[1])
+
+    with _key_lock("log:" + root):
+        hit = _log_cache.get(cache_key)
+        if hit and time.time() - hit[0] < _LOG_TTL:
+            return jsonify(hit[1])
+        args = ["log", f"-{limit}", f"--skip={skip}",
+                "--date=format:%Y-%m-%d %H:%M", f"--pretty=format:{fmt}"]
+        if branch and not branch.startswith("-") and not re.search(r"\s", branch):
+            args.append(branch)
+        proc, err = _git(root, args)
+        if err:
+            return jsonify({"ok": False, "is_repo": True, "repo": root, "error": err, "commits": []})
+        commits = []
+        if proc.returncode == 0:
+            for line in proc.stdout.splitlines():
+                parts = line.split("\x1f")
+                if len(parts) >= 4:
+                    refs = []
+                    if len(parts) >= 5 and parts[4].strip():
+                        refs = [r.strip() for r in parts[4].strip().strip("()").split(",") if r.strip()]
+                    commits.append({"hash": parts[0], "subject": parts[1],
+                                    "author": parts[2], "date": parts[3], "refs": refs})
+        payload = {"ok": True, "is_repo": True, "repo": root, "commits": commits,
+                   "has_more": len(commits) >= limit}
+        if proc.returncode == 0:
+            if len(_log_cache) > _CACHE_MAX:
+                _log_cache.clear()
+            _log_cache[cache_key] = (time.time(), payload)
+        return jsonify(payload)
 
 
 @bp.route("/api/git/branches")

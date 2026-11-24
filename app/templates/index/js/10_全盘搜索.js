@@ -18,7 +18,7 @@
             }
 
             container.innerHTML = `
-            <div class="custom-modal-overlay" id="searchOverlay">
+            <div class="search-float-overlay" id="searchOverlay">
                 <div class="search-modal">
                     <div class="search-header">
                         <span class="search-title"><i class="bi bi-search"></i> 全盘搜索<span class="search-subtitle">基于本地索引，毫秒级响应</span></span>
@@ -26,25 +26,35 @@
                     </div>
                     <div class="search-body">
                         <div class="search-params">
-                            <div class="search-root-input">
-                                <span class="label"><i class="bi bi-folder2-open"></i></span>
-                                <input type="text" id="searchRootInput" placeholder="搜索根目录（默认系统盘）" />
-                                <span class="label" style="margin-left:6px;"><i class="bi bi-search"></i></span>
-                                <input type="text" id="searchKeyInput" class="flex-grow-1" placeholder="搜索关键字（文件名）" style="min-width:160px;" />
+                            <div class="search-field search-field-root">
+                                <label for="searchRootInput"><i class="bi bi-folder2-open"></i> 搜索范围</label>
+                                <input type="text" id="searchRootInput" placeholder="根目录，默认系统盘 /" spellcheck="false" />
+                            </div>
+                            <div class="search-field search-field-key">
+                                <label for="searchKeyInput"><i class="bi bi-search"></i> 关键字</label>
+                                <input type="text" id="searchKeyInput" placeholder="输入文件名片段后按 Enter" spellcheck="false" />
+                            </div>
+                            <div class="search-field search-field-type">
+                                <label for="searchTypeFilter"><i class="bi bi-funnel"></i> 类型</label>
                                 <select id="searchTypeFilter">
                                     <option value="">全部</option>
                                     <option value="文件">文件</option>
                                     <option value="目录">目录</option>
                                 </select>
                             </div>
-                            <button class="btn btn-run" id="searchRunBtn"><i class="bi bi-search"></i> 搜索</button>
-                            <button class="btn btn-clear" id="searchClearBtn" title="清空输入框"><i class="bi bi-x-circle"></i></button>
+                            <div class="search-field search-field-actions">
+                                <button class="btn btn-run" id="searchRunBtn"><i class="bi bi-search"></i> 搜索</button>
+                                <button class="btn btn-clear" id="searchClearBtn" title="清空关键字与结果"><i class="bi bi-x-circle"></i> 清空</button>
+                            </div>
                         </div>
                         <div class="search-meta">
-                            <span class="meta-item" id="searchStatusMeta"><span class="text-muted">等待搜索...</span></span>
-                            <span class="meta-item"><i class="bi bi-clock"></i> 耗时: <strong id="searchDuration">--</strong> 秒</span>
-                            <span class="meta-item"><i class="bi bi-list-ul"></i> 命中: <strong id="searchCount">0</strong> 个</span>
-                            <span class="meta-item"><i class="bi bi-database"></i> 来源: <strong id="searchSource">--</strong></span>
+                            <span class="meta-item meta-status" id="searchStatusMeta"><span class="text-muted">等待搜索...</span></span>
+                            <span class="meta-sep"></span>
+                            <span class="meta-item"><i class="bi bi-clock"></i> 耗时 <strong id="searchDuration">--</strong>s</span>
+                            <span class="meta-sep"></span>
+                            <span class="meta-item"><i class="bi bi-list-ul"></i> 命中 <strong id="searchCount">0</strong></span>
+                            <span class="meta-sep"></span>
+                            <span class="meta-item"><i class="bi bi-database"></i> 来源 <strong id="searchSource">--</strong></span>
                         </div>
                     </div>
                     <div class="search-progress" id="searchProgress"><div class="search-progress-bar"></div></div>
@@ -55,7 +65,7 @@
                         </div>
                         <div class="batch-right">
                             <button class="batch-open" id="batchOpenBtn" disabled><i class="bi bi-folder2-open"></i> 批量打开所在位置</button>
-                            <button class="batch-deselect" id="batchDeselectBtn"><i class="bi bi-x-square"></i> 取消</button>
+                            <button class="batch-deselect" id="batchDeselectBtn" title="清空勾选并退出顺序浏览"><i class="bi bi-x-square"></i> 取消</button>
                         </div>
                     </div>
                     <div class="search-results" id="searchResults">
@@ -68,6 +78,22 @@
 
             const rootVal = systemInfo.root || currentPath || '/';
             document.getElementById('searchRootInput').value = rootVal;
+
+            // 索引是「上次扫描」时的快照：之后的下载 / 新建文件不在里面，搜不到不是坏了。
+            // 这里把快照时间直接写在标题下，过期就标黄提醒。
+            fetch('/api/index/meta').then(r => r.json()).then(m => {
+                const el = document.querySelector('#searchOverlay .search-subtitle');
+                if (!el || !m || !m.last_scan) return;
+                const raw = String(m.last_scan);
+                const ts = new Date(raw.replace(/-/g, '/'));
+                if (isNaN(ts.getTime())) return;
+                const days = Math.floor((Date.now() - ts.getTime()) / 86400000);
+                el.textContent = days >= 1
+                    ? '索引 ' + raw.slice(5, 16) + '（' + days + ' 天前）· 之后的新文件搜不到，需重建索引'
+                    : '索引 ' + raw.slice(5, 16) + ' · 毫秒级响应';
+                if (days >= 1) el.classList.add('stale');
+                el.title = '索引只是上次扫描时的快照，重建索引后才会包含新文件';
+            }).catch(() => {});
 
             // 事件绑定
             const ov = document.getElementById('searchOverlay');
@@ -84,24 +110,22 @@
             });
         }
 
+        function _updateCollapsedBadge() {
+            const badge = document.getElementById('searchCollapsedBadge');
+            if (!badge) return;
+            const n = _searchItems ? _searchItems.length : 0;
+            badge.textContent = n > 999 ? '999+' : String(n);
+            badge.classList.toggle('empty', n === 0);
+            badge.classList.toggle('active', _searchRunning);
+        }
+
         function _collapseSearch() {
-            cancelSearch(false);
+            // 收起只是隐藏面板，不中断后台搜索：结果回来后轮询照常更新，徽标会同步
             const overlay = document.getElementById('searchOverlay');
             if (overlay) overlay.style.display = 'none';
             const collBtn = document.getElementById('searchCollapsedBtn');
-            if (collBtn) {
-                collBtn.style.display = 'flex';
-                const badge = document.getElementById('searchCollapsedBadge');
-                if (badge) {
-                    if (_searchItems && _searchItems.length > 0) {
-                        badge.textContent = _searchItems.length;
-                        badge.classList.remove('empty');
-                    } else {
-                        badge.textContent = '0';
-                        badge.classList.add('empty');
-                    }
-                }
-            }
+            if (collBtn) collBtn.style.display = 'flex';
+            _updateCollapsedBadge();
         }
 
         function _expandSearch() {
@@ -124,6 +148,8 @@
 
         function _clearSearchResults() {
             cancelSearch(true);
+            _searchItems = [];
+            _selectedSearchPaths.clear();
             const meta = document.getElementById('searchStatusMeta');
             if (meta) meta.innerHTML = '<span class="text-muted">等待搜索...</span>';
             const dur = document.getElementById('searchDuration');
@@ -132,6 +158,10 @@
             if (cnt) cnt.textContent = '0';
             const src = document.getElementById('searchSource');
             if (src) src.textContent = '--';
+            const results = document.getElementById('searchResults');
+            if (results) results.innerHTML = '<div class="search-empty"><i class="bi bi-search"></i><p class="mb-0">在上方填写关键字后点击「搜索」</p></div>';
+            _showBatchBar(false);
+            _updateCollapsedBadge();
             document.getElementById('searchKeyInput').value = '';
             document.getElementById('searchKeyInput').focus();
         }
@@ -145,18 +175,18 @@
             document.getElementById('searchDuration').textContent = '--';
             document.getElementById('searchCount').textContent = '0';
             document.getElementById('searchSource').textContent = '--';
-            document.getElementById('searchStatusMeta').innerHTML = '<span class="meta-loading"><i class="bi bi-arrow-repeat spin" style="display:inline-block;animation:spin 1s linear infinite;"></i> 正在搜索...</span>';
+            document.getElementById('searchStatusMeta').innerHTML = '<span class="meta-loading"><span class="search-spin-ring"></span> 正在搜索...</span>';
             document.getElementById('searchProgress').classList.add('active');
-            document.getElementById('searchResults').innerHTML = '<div class="search-empty"><div class="spinner-border text-primary" role="status"></div><p class="mb-0 mt-2">搜索中，请稍候...</p></div>';
+            document.getElementById('searchResults').innerHTML = '<div class="search-empty"><span class="search-spin-ring lg"></span><p class="mb-0 mt-2">搜索中，请稍候...</p></div>';
             document.getElementById('searchRunBtn').disabled = true;
-            document.getElementById('searchRunBtn').innerHTML = '<i class="bi bi-arrow-repeat" style="display:inline-block;animation:spin 1s linear infinite;"></i> 搜索中';
+            document.getElementById('searchRunBtn').innerHTML = '<span class="search-spin-ring"></span> 搜索中';
 
             const root = document.getElementById('searchRootInput').value.trim();
             const typeF = document.getElementById('searchTypeFilter').value;
 
             const ctrl = new AbortController();
             const fetchTimer = setTimeout(() => ctrl.abort(), 20000);
-            fetch(`/api/search?root=${encodeURIComponent(root)}&keyword=${encodeURIComponent(keyword)}&type=${encodeURIComponent(typeF)}&timeout=20`, { signal: ctrl.signal })
+            fetch(`/api/search?root=${encodeURIComponent(root)}&keyword=${encodeURIComponent(keyword)}&type=${encodeURIComponent(typeF)}&timeout=60`, { signal: ctrl.signal })
                 .then(r => r.json())
                 .then(data => {
                     clearTimeout(fetchTimer);
@@ -167,16 +197,19 @@
                         _resetSearchButtons();
                         return;
                     }
-                    // 索引直接返回（无需轮询）
+                    // 兼容后端未来可能的「同步直接返回」：当前 /api/search 一律返回 token，
+                    // 正常路径都走下面的轮询；这里保留兜底以便后端改动时不至于卡在转圈。
                     if (data.done === true) {
                         document.getElementById('searchProgress').classList.remove('active');
+                        _searchToken = null;
                         document.getElementById('searchCount').textContent = data.count || 0;
-                        document.getElementById('searchDuration').textContent = data.duration || 0;
+                        document.getElementById('searchDuration').textContent = _fmtDuration(data.duration);
                         document.getElementById('searchSource').textContent = data.source === 'index' ? '索引' : '实时';
                         const sourceLabel = data.source === 'index' ? ' (索引，毫秒级)' : ' (实时扫描)';
                         document.getElementById('searchStatusMeta').innerHTML = `<span class="text-success"><i class="bi bi-check-circle"></i> 搜索完成${sourceLabel}</span>`;
                         _renderSearchResults(data.items || []);
                         _resetSearchButtons();
+                        _updateCollapsedBadge();
                         return;
                     }
                     // 异步轮询
@@ -184,6 +217,9 @@
                     _searchRunning = true;
                     _searchStartTime = Date.now();
                     _searchFailCount = 0;
+                    // 一开始就标出来源，避免用户以为又在扫文件系统
+                    if (data.source === 'index') document.getElementById('searchSource').textContent = '索引';
+                    else if (data.source === 'walk') document.getElementById('searchSource').textContent = '实时';
                     _searchPollTimer = setInterval(pollSearch, 300);
                 })
                 .catch(e => {
@@ -204,8 +240,9 @@
 
         function pollSearch() {
             if (!_searchToken || !_searchRunning) return;
-            // 兜底：后端超时未响应或轮询异常时，最多等 25 秒就结束，绝不无限转圈
-            if (Date.now() - _searchStartTime > 25000) { _finishTimeoutSearch(); return; }
+            // 兜底：后端超时未响应或轮询异常时，最多等 90 秒就结束，绝不无限转圈
+            // （索引库几百万行时整表扫描可能确实需要几十秒，后端自己也会按时限返回部分结果）
+            if (Date.now() - _searchStartTime > 90000) { _finishTimeoutSearch(); return; }
             fetch(`/api/search/${_searchToken}`)
                 .then(r => r.json())
                 .then(data => {
@@ -220,18 +257,32 @@
                     if (data.items) _searchItems = data.items;
                     const count = data.count || 0;
                     const dur = data.duration || 0;
+                    const scanned = data.scanned || 0;
                     document.getElementById('searchCount').textContent = count;
-                    document.getElementById('searchDuration').textContent = dur;
+                    document.getElementById('searchDuration').textContent = _fmtDuration(dur);
+                    if (_searchItems.length) _updateCollapsedBadge();
+                    // 索引整表扫描时给实时反馈：有匹配批次就报已扫描条数，没有就报已用秒数，
+                    // 避免几十秒只有转圈、耗时一直停在 0 秒
+                    if (!data.done) {
+                        const tip = scanned
+                            ? '已扫描 ' + Number(scanned).toLocaleString() + ' 条'
+                            : '已用 ' + Math.max(0, Math.round(dur)) + ' 秒';
+                        document.getElementById('searchStatusMeta').innerHTML =
+                            '<span class="meta-loading"><span class="search-spin-ring"></span> 正在搜索... '
+                            + tip + '</span>';
+                    }
                     if (data.done) {
                         _stopPolling();
                         document.getElementById('searchProgress').classList.remove('active');
                         const runBtn = document.getElementById('searchRunBtn');
                         if (runBtn) { runBtn.disabled = false; runBtn.innerHTML = '<i class="bi bi-search"></i> 搜索'; }
+                        const isIndex = data.source === 'index';
+                        document.getElementById('searchSource').textContent = isIndex ? '索引' : '实时';
                         if (data.error) {
                             document.getElementById('searchStatusMeta').innerHTML = `<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> ${_escHtml(data.error)}</span>`;
                         } else {
-                            document.getElementById('searchSource').textContent = '实时';
-                            document.getElementById('searchStatusMeta').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> 搜索完成 (实时扫描)</span>';
+                            document.getElementById('searchStatusMeta').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> 搜索完成'
+                                + (isIndex ? ' (索引)' : ' (实时扫描)') + '</span>';
                         }
                         _renderSearchResults(data.items || []);
                     }
@@ -259,21 +310,23 @@
         function _renderSearchResults(items) {
             _searchItems = items || [];
             _selectedSearchPaths.clear();
+            _seqStop();   // 新结果重渲染：清空勾选 = 退出顺序浏览
+            _updateCollapsedBadge();
             const el = document.getElementById('searchResults');
             _showBatchBar(false);
             if (!items || items.length === 0) {
                 el.innerHTML = '<div class="search-empty"><i class="bi bi-inbox"></i><p class="mb-0">未找到匹配的文件</p></div>';
                 return;
             }
-            const sorted = [...items].sort((a, b) => (a.is_dir ? -1 : 1) || a.name.localeCompare(b.name));
+            const sorted = _sortSearchItems(items);
             let html = `<table class="search-table"><thead><tr>
             <th class="search-cb"><input type="checkbox" class="search-checkbox" id="searchSelectAll" title="全选"/></th>
-            <th style="width:26%">名称</th>
-            <th style="width:18%">路径</th>
-            <th style="width:75px;text-align:right;">大小</th>
-            <th style="width:75px;">类型</th>
-            <th style="width:140px;">修改时间</th>
-            <th style="width:180px;">操作</th>
+            ${_sortHeader('name', '名称')}
+            ${_sortHeader('path', '路径')}
+            ${_sortHeader('size', '大小')}
+            ${_sortHeader('type', '类型')}
+            ${_sortHeader('mtime', '修改时间')}
+            <th style="width:92px;">操作</th>
         </tr></thead><tbody>`;
             for (const item of sorted) {
                 const isDir = item.is_dir;
@@ -305,18 +358,32 @@
                 <td><span class="${badgeClass}">${_escHtml(typeText)}</span></td>
                 <td class="search-when">${_escHtml(when)}</td>
                 <td class="search-actions">
-                    <button class="search-open" data-parent-path="${_escAttr(parentPath)}" title="进入所在文件夹"><i class="bi bi-folder2-open"></i> 打开</button>
-                    ${!isDir ? `<button class="search-preview" data-preview-path="${_escAttr(absPath)}" title="预览文件"><i class="bi bi-eye"></i> 预览</button>` : ''}
+                    <button class="search-open" data-parent-path="${_escAttr(parentPath)}" title="打开所在文件夹" aria-label="打开所在文件夹"><i class="bi bi-folder2-open"></i></button>
+                    ${!isDir ? `<button class="search-preview" data-preview-path="${_escAttr(absPath)}" title="预览文件" aria-label="预览文件"><i class="bi bi-eye"></i></button>` : ''}
                 </td>
             </tr>`;
             }
             html += '</tbody></table>';
             el.innerHTML = html;
-            // 「打开」按钮：跳转文件所在位置（弹窗保持打开）
+            // 表头点击排序：同列切换升降序，换列默认升序（大小/时间默认降序更符合直觉）
+            el.querySelectorAll('.search-sortable').forEach(th => {
+                th.addEventListener('click', () => {
+                    const key = th.dataset.sort;
+                    if (_searchSort.key === key) {
+                        _searchSort.asc = !_searchSort.asc;
+                    } else {
+                        _searchSort = { key, asc: key !== 'size' && key !== 'mtime' };
+                    }
+                    _renderSearchResults(_searchItems);
+                });
+            });
+            // 「打开」按钮：跳转并高亮对应文件/文件夹（弹窗保持打开）
             el.querySelectorAll('[data-parent-path]').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    navigateTo(btn.dataset.parentPath);
+                    const row = btn.closest('tr');
+                    const info = _rowPaths(row);
+                    if (info) _gotoAndHighlight(info.absPath, info.parentPath);
                 });
             });
             // 路径列：点击复制完整路径
@@ -327,19 +394,25 @@
                     _copyText(p, '路径已复制到剪贴板');
                 });
             });
-            // 行点击：跳转到文件所在目录（排除按钮和复选框）
+            // 行点击：跳转到文件所在目录并高亮（排除按钮和复选框）
             el.querySelectorAll('.search-row').forEach(row => {
                 row.addEventListener('click', (e) => {
                     if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
-                    const parentPath = row.dataset.parentPath;
-                    if (parentPath) navigateTo(parentPath);
+                    const info = _rowPaths(row);
+                    if (info) _gotoAndHighlight(info.absPath, info.parentPath);
                 });
             });
             el.querySelectorAll('[data-preview-path]').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const p = btn.dataset.previewPath;
-                    if (_canPreviewPath(p)) previewFile(p);
-                    else showToast('提示', '该文件类型不支持预览', 'warning');
+                    if (!_canPreviewPath(p)) { showToast('提示', '该文件类型不支持预览', 'warning'); return; }
+                    // 把当前搜索结果（按表格排序后的顺序）作为预览队列，
+                    // 让预览面板的「下一张/下一个」按搜索结果顺序切换，而不是按文件所在目录
+                    const queue = sorted
+                        .filter(it => !it.is_dir && _canPreviewPath(it.abs_path || it.path))
+                        .map(it => it.abs_path || it.path);
+                    if (typeof window._setPreviewQueue === 'function') window._setPreviewQueue(queue, p);
+                    previewFile(p);
                 });
             });
             const selectAll = el.querySelector('#searchSelectAll');
@@ -348,6 +421,8 @@
                     const checked = e.target.checked;
                     el.querySelectorAll('.search-item-cb').forEach(cb => {
                         cb.checked = checked;
+                        const row = cb.closest('tr');
+                        if (row) row.classList.toggle('selected', checked);
                         const p = cb.dataset.path;
                         if (checked) _selectedSearchPaths.add(p);
                         else _selectedSearchPaths.delete(p);
@@ -371,6 +446,46 @@
 
         let _searchItems = [];
         let _selectedSearchPaths = new Set();
+        // 表头排序状态：点击列切换升/降序，目录始终排在文件前面
+        let _searchSort = { key: 'name', asc: true };
+
+        function _sortSearchItems(items) {
+            const { key, asc } = _searchSort;
+            const sign = asc ? 1 : -1;
+            const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
+            return [...items].sort((a, b) => {
+                const dirDiff = Number(!!b.is_dir) - Number(!!a.is_dir);
+                if (dirDiff) return dirDiff;
+                let cmp = 0;
+                switch (key) {
+                    case 'size':
+                        cmp = (Number(a.size) || 0) - (Number(b.size) || 0);
+                        break;
+                    case 'mtime':
+                        cmp = collator.compare(String(a.mtime || ''), String(b.mtime || ''));
+                        break;
+                    case 'type':
+                        cmp = collator.compare(
+                            String(a.is_dir ? '目录' : (a.ext || a.type || '')),
+                            String(b.is_dir ? '目录' : (b.ext || b.type || '')));
+                        break;
+                    case 'path':
+                        cmp = collator.compare(String(a.abs_path || a.path || ''), String(b.abs_path || b.path || ''));
+                        break;
+                    default:
+                        cmp = collator.compare(String(a.name || ''), String(b.name || ''));
+                }
+                return cmp * sign;
+            });
+        }
+
+        function _sortHeader(key, label) {
+            const active = _searchSort.key === key;
+            const icon = active
+                ? `<i class="bi bi-arrow-${_searchSort.asc ? 'up' : 'down'}-short"></i>`
+                : '<i class="bi bi-arrow-down-up sort-hint"></i>';
+            return `<th class="search-sortable${active ? ' sorted' : ''}" data-sort="${key}" title="点击按${label}排序">${label} ${icon}</th>`;
+        }
 
         function _showBatchBar(show) {
             const bar = document.getElementById('searchBatch');
@@ -384,6 +499,7 @@
             if (countEl) countEl.textContent = count;
             if (openBtn) openBtn.disabled = count === 0;
             _showBatchBar(count > 0);
+            _seqSync();   // 勾选与顺序浏览同一状态：取消勾选即更新/退出顺序浏览
         }
 
         function _batchDeselect() {
@@ -395,38 +511,121 @@
                 el.querySelectorAll('tr.selected').forEach(r => { r.classList.remove('selected'); });
             }
             _showBatchBar(false);
+            _seqSync();   // 勾选清空 → 顺序浏览同步退出（同一状态）
+        }
+
+        // 从搜索结果行取绝对路径 / 父目录
+        function _rowPaths(row) {
+            if (!row) return null;
+            const absPath = row.dataset.absPath || '';
+            const parentPath = row.dataset.parentPath || absPath;
+            return { absPath, parentPath };
+        }
+
+        // 跳转到目标所在目录并高亮对应条目；目录高亮自身，文件高亮它在目录里的那一行。
+        // 复用收藏夹的 _pendingHighlightPath + _pollPendingHighlight（等列表渲染完再补高亮），
+        // 保险箱/上传记录也用这套，兼容列表/图标/树三种视图。
+        function _gotoAndHighlight(absPath, parentPath) {
+            if (!absPath) return;
+            if (!parentPath) {
+                const i = Math.max(absPath.lastIndexOf('/'), absPath.lastIndexOf('\\'));
+                parentPath = i > 0 ? absPath.slice(0, i) : absPath;
+            }
+            if (typeof _pendingHighlightPath !== 'undefined') {
+                _pendingHighlightPath = absPath;
+                if (typeof _pollPendingHighlight === 'function') _pollPendingHighlight();
+            }
+            navigateTo(parentPath);
+        }
+
+        // ===== 顺序浏览：与批量勾选共用同一份状态 _selectedSearchPaths =====
+        // 浏览序列 = 当前勾选的项（按搜索结果顺序）；取消勾选 / 清空勾选即退出顺序浏览。
+        let _seqIndex = -1;
+        let _seqActive = false;
+
+        // 当前勾选项按搜索结果（已排序）顺序组成的路径序列
+        function _seqPaths() {
+            const selected = new Set(_selectedSearchPaths);
+            return (_searchItems || [])
+                .map(it => it.abs_path || it.path)
+                .filter(p => selected.has(p));
+        }
+
+        function _seqGoto(idx) {
+            const paths = _seqPaths();
+            if (idx < 0 || idx >= paths.length) return;
+            _seqIndex = idx;
+            _gotoAndHighlight(paths[idx]);
+            _seqRender();
+        }
+
+        function _seqRender() {
+            const nav = document.getElementById('seqNav');
+            if (!nav) return;
+            const paths = _seqPaths();
+            if (!_seqActive || !_seqItemsExist(paths)) { nav.style.display = 'none'; return; }
+            nav.style.display = 'inline-flex';
+            if (_seqIndex < 0 || _seqIndex >= paths.length) _seqIndex = 0;
+            const cnt = document.getElementById('seqCount');
+            if (cnt) cnt.textContent = (_seqIndex + 1) + ' / ' + paths.length;
+            const prev = document.getElementById('seqPrevBtn');
+            const next = document.getElementById('seqNextBtn');
+            if (prev) prev.disabled = _seqIndex <= 0;
+            if (next) next.disabled = _seqIndex >= paths.length - 1;
+        }
+
+        function _seqItemsExist(paths) {
+            return Array.isArray(paths) && paths.length > 0;
+        }
+
+        // 勾选状态变化后同步：无勾选自动退出顺序浏览
+        function _seqSync() {
+            if (_selectedSearchPaths.size === 0) {
+                _seqStop();
+            } else {
+                _seqRender();
+            }
+        }
+
+        function _seqStart(startPath) {
+            const paths = _seqPaths();
+            if (!paths.length) return;
+            _seqActive = true;
+            _seqIndex = Math.max(0, paths.indexOf(startPath));
+            _seqRender();
+            _seqGoto(_seqIndex);
+        }
+
+        function _seqStop() {
+            _seqActive = false;
+            _seqIndex = -1;
+            _seqRender();
+        }
+
+        function _seqStep(delta) {
+            if (!_seqActive) return;
+            const idx = _seqIndex + delta;
+            const paths = _seqPaths();
+            if (idx < 0 || idx >= paths.length) return;
+            _seqGoto(idx);
         }
 
         function _batchOpenLocations() {
             if (_selectedSearchPaths.size === 0) return;
-            const paths = Array.from(_selectedSearchPaths);
-            for (const p of paths) {
-                for (const item of _searchItems) {
-                    if ((item.abs_path || item.path) === p) {
-                        const absPath = item.abs_path || item.path;
-                        let parentPath = absPath;
-                        if (absPath) {
-                            const idx = absPath.lastIndexOf('/');
-                            const idx2 = absPath.lastIndexOf(String.fromCharCode(92));
-                            const bestIdx = idx >= 0 ? (idx2 > idx ? idx2 : idx) : idx2;
-                            parentPath = bestIdx >= 0 ? absPath.substring(0, bestIdx) : absPath;
-                        }
-                        navigateTo(parentPath);
-                        if (_selectedSearchPaths.size > 1) {
-                            showToast('提示', '已跳转到第 1 个文件所在目录，其余 ' + (_selectedSearchPaths.size - 1) + ' 个项留在搜索结果中继续操作', 'info');
-                        }
-                        return;
-                    }
-                }
-            }
-        }
-
-        function _getIconForSearch(item) {
-            return item.is_dir ? '📁' : '📄';
+            const first = _seqPaths()[0] || Array.from(_selectedSearchPaths)[0];
+            // 开始顺序浏览：序列即当前勾选的项，从第一个开始跳转并高亮
+            _seqStart(first);
+            showToast('提示', '已进入顺序浏览：共 ' + _selectedSearchPaths.size + ' 项，点右上角「上一个 / 下一个」逐个查看', 'info');
         }
 
         function _getSearchIconHtml(item) {
             return fileIconHtml(item, "search-ic");   // 与 IDE 文件树 / 列表 / 图标 / 树型视图同一套 seti 图标
+        }
+
+        // 后端 walk 分支的 duration 是未取整的浮点秒数，统一保留 2 位，避免长串小数撑破元信息栏
+        function _fmtDuration(sec) {
+            const n = Number(sec);
+            return Number.isFinite(n) ? n.toFixed(2) : '--';
         }
 
         function _escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }

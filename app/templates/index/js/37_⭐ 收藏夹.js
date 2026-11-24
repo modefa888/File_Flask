@@ -875,78 +875,147 @@
         }
 
         let _idxDetailBusy = false;
-        function _loadIndexDetail() {
+        let _idxLastStatus = null;        // 上一次渲染时的状态：用于识别「扫描刚结束」
+        function _loadIndexDetail(force) {
             // 扫描期间统计由后台线程计算（可能几十秒），上一轮没回来就别重复发，
             // 否则请求会无限堆积；响应到达时面板若已关闭/重建，renderIndexDetail 会丢弃
             if (_idxDetailBusy) return;
             _idxDetailBusy = true;
             fetch('/api/index/detail')
                 .then(r => r.json())
-                .then(renderIndexDetail)
+                .then(d => renderIndexDetail(d, force === true))
                 .catch(() => { })
                 .finally(() => { _idxDetailBusy = false; });
         }
 
-        function renderIndexDetail(data) {
+        function _idxdSize(n) {
+            return (typeof formatSize === 'function') ? formatSize(n || 0) : ((n || 0) + ' B');
+        }
+
+        function _idxdEmpty(text) {
+            return `<div class="idxd-empty"><i class="bi bi-inbox"></i><p>${_escHtml(text)}</p></div>`;
+        }
+
+        function renderIndexDetail(data, force) {
             // 响应到达时面板可能已被关闭/重建（DOM 已换），元素不存在就丢弃这次结果
             if (!document.getElementById('idxFileCount') || !document.getElementById('idxStatus')) return;
+
             const status = data.status || 'idle';
             const progress = data.progress || 0;
             const totalFiles = data.total_files || 0;
             const totalDirs = data.total_dirs || 0;
+            const totalSize = data.total_size || 0;
             const totalSizeStr = data.total_size_str || '--';
             const lastScan = data.last_scan || '--';
             const statusDetail = data.status_detail || '';
             const cleared = status === 'cleared';
+            const scanning = status === 'scanning';
+            const prevStatus = _idxLastStatus;
+            _idxLastStatus = status;
 
+            // 头部副标题：上次扫描时间 / 当前扫描阶段
+            const sub = document.getElementById('idxSub');
+            if (sub) {
+                sub.textContent = scanning
+                    ? ('正在扫描 · ' + (statusDetail || (progress + '%')))
+                    : (lastScan && lastScan !== '--' ? ('上次扫描 ' + lastScan) : '基于本地索引');
+            }
+
+            // 汇总卡片
             document.getElementById('idxFileCount').textContent = totalFiles.toLocaleString();
             document.getElementById('idxDirCount').textContent = totalDirs.toLocaleString();
             document.getElementById('idxTotalSize').textContent = totalSizeStr;
-            document.getElementById('idxLastScan').textContent = lastScan;
+            document.getElementById('idxFileSub').textContent = totalFiles
+                ? ('平均 ' + _idxdSize(totalSize / totalFiles)) : '--';
+            document.getElementById('idxDirSub').textContent = totalDirs
+                ? ('文件 : 目录 = ' + (totalFiles / totalDirs).toFixed(1) + ' : 1') : '--';
+            document.getElementById('idxSizeSub').textContent = totalFiles
+                ? (totalFiles.toLocaleString() + ' 个文件') : '--';
 
-            // 状态
+            // 状态卡片：扫描中 / 就绪 / 已清空 / 失败
+            const statusCard = document.getElementById('idxStatusCard');
             const statusEl = document.getElementById('idxStatus');
+            const statusSub = document.getElementById('idxStatusSub');
+            if (statusCard) {
+                statusCard.className = 'idxd-stat ' + (scanning ? 'busy' : cleared ? 'warn'
+                    : status === 'error' ? 'bad' : 'ok');
+            }
+            if (scanning) {
+                statusEl.textContent = progress + '%';
+                statusSub.textContent = statusDetail || '正在扫描';
+            } else if (cleared) {
+                statusEl.textContent = '已清空';
+                statusSub.textContent = '待重建';
+            } else if (status === 'error') {
+                statusEl.textContent = '失败';
+                statusSub.textContent = statusDetail || '请重试';
+            } else {
+                statusEl.textContent = '就绪';
+                statusSub.textContent = '';
+            }
+
+            // 扫描进度卡片
             const progressArea = document.getElementById('idxProgressArea');
             const cancelBtn = document.getElementById('idxCancelBtn');
-            if (status === 'scanning') {
-                statusEl.textContent = '扫描中... ' + (statusDetail || '');
-                progressArea.style.display = '';
-                document.getElementById('idxProgressText').textContent = progress + '% ' + (statusDetail || '扫描中');
-                document.getElementById('idxProgressFill').style.width = progress + '%';
-                cancelBtn.style.display = '';
-            } else if (cleared) {
-                statusEl.textContent = '🗑️ 已清空 · 待重建';
-                progressArea.style.display = 'none';
-                cancelBtn.style.display = 'none';
-            } else if (status === 'error') {
-                statusEl.textContent = '❌ 失败';
-                progressArea.style.display = 'none';
-                cancelBtn.style.display = 'none';
-            } else {
-                statusEl.textContent = '✅ 就绪';
-                progressArea.style.display = 'none';
-                cancelBtn.style.display = 'none';
+            if (progressArea) progressArea.style.display = scanning ? '' : 'none';
+            if (cancelBtn) cancelBtn.style.display = scanning ? '' : 'none';
+            if (scanning) {
+                const pf = document.getElementById('idxProgressFill');
+                if (pf) pf.style.width = Math.max(2, progress) + '%';
+                const pt = document.getElementById('idxProgressText');
+                if (pt) pt.textContent = progress + '%';
+                const pd = document.getElementById('idxProgressDetail');
+                if (pd) pd.textContent = statusDetail || '正在扫描…';
+                const nums = document.getElementById('idxProgressNums');
+                if (nums) {
+                    nums.innerHTML = [
+                        '文件 ' + Number(data.scanned_files || 0).toLocaleString(),
+                        '目录 ' + Number(data.scanned_dirs || 0).toLocaleString(),
+                        '大小 ' + _idxdSize(data.scanned_size || 0),
+                    ].map(t => `<span>${t}</span>`).join('');
+                }
             }
 
             const clearBtn = document.getElementById('idxClearBtn');
             if (clearBtn) clearBtn.disabled = cleared;
-            const emptyHint = cleared ? '索引已清空，点击「重建索引」重新生成'
-                : (data.detail_computing ? '扫描期间正在后台计算实时统计，约一分钟后自动刷新…' : '暂无数据');
 
-            // Top 15 目录
+            const emptyHint = cleared ? '索引已清空，点击「重建索引」重新生成'
+                : scanning ? '扫描完成后生成详细统计'
+                : (data.detail_computing ? '正在后台计算统计，稍后自动刷新…' : '暂无数据');
+
+            // 扫描期间每 2 秒都会拉到新统计：只更新上面的进度和汇总，
+            // 列表保持上一次渲染的 DOM（不重排、不重置滚动位置），否则会一直抖动。
+            // 扫描结束的那一帧、或用户点刷新时，才把列表刷成最新结果。
+            const hasListRows = !!document.querySelector(
+                '#idxTopDirs .idxd-row, #idxTypeDist .idxd-row, #idxTopFiles .idxd-row');
+            const needLists = force === true || !scanning || !hasListRows
+                || (prevStatus === 'scanning' && !scanning);
+            if (!needLists) return;
+
+            // ---- 占用空间 Top 15 目录 ----
             const topDirsEl = document.getElementById('idxTopDirs');
             const topDirs = data.top_dirs || [];
-            if (topDirs.length === 0) {
-                topDirsEl.innerHTML = `<div class="idx-empty"><i class="bi bi-inbox"></i>${emptyHint}</div>`;
+            if (!topDirs.length) {
+                topDirsEl.innerHTML = _idxdEmpty(emptyHint);
             } else {
-                let html = '<table class="idx-table"><thead><tr><th>#</th><th>目录</th><th>文件数</th><th class="num">大小</th></tr></thead><tbody>';
-                topDirs.forEach((item, idx) => {
-                    html += `<tr><td class="num">${idx + 1}</td><td class="path-cell" data-path="${_escAttr(item.path)}">${_escHtml(item.name)}</td><td class="num">${item.file_count.toLocaleString()}</td><td class="num">${item.size_str}</td></tr>`;
-                });
-                html += '</tbody></table>';
-                topDirsEl.innerHTML = html;
-                // 路径点击导航
-                topDirsEl.querySelectorAll('.path-cell').forEach(el => {
+                const maxSize = Math.max(...topDirs.map(d => d.size || 0), 1);
+                topDirsEl.innerHTML = topDirs.map((d, i) => {
+                    const barPct = Math.max(2, Math.round((d.size || 0) / maxSize * 100));
+                    const share = totalSize > 0 ? (d.size || 0) / totalSize * 100 : 0;
+                    return `<div class="idxd-row" data-path="${_escAttr(d.path)}" title="${_escAttr(d.path)}">
+                        <span class="idxd-rank">${i + 1}</span>
+                        <div class="idxd-main">
+                            <div class="idxd-name">${_escHtml(d.name || d.path)}</div>
+                            <div class="idxd-path">${_escHtml(d.path || '')}</div>
+                        </div>
+                        <div class="idxd-nums">
+                            <b>${d.size_str || _idxdSize(d.size)}</b>
+                            <em>${Number(d.file_count || 0).toLocaleString()} 文件 · ${share.toFixed(1)}%</em>
+                        </div>
+                        <div class="idxd-bar"><i style="width:${barPct}%"></i></div>
+                    </div>`;
+                }).join('');
+                topDirsEl.querySelectorAll('.idxd-row').forEach(el => {
                     el.addEventListener('click', () => {
                         closeIndexDetail();
                         navigateTo(el.dataset.path);
@@ -954,33 +1023,69 @@
                 });
             }
 
-            // 类型分布
+            // ---- 文件类型分布 ----
             const typeDistEl = document.getElementById('idxTypeDist');
             const typeDist = data.type_distribution || [];
-            if (typeDist.length === 0) {
-                typeDistEl.innerHTML = `<div class="idx-empty"><i class="bi bi-inbox"></i>${emptyHint}</div>`;
+            const typeHint = document.getElementById('idxTypeHint');
+            if (typeHint) typeHint.textContent = totalFiles ? ('共 ' + totalFiles.toLocaleString() + ' 个文件') : '';
+            if (!typeDist.length) {
+                typeDistEl.innerHTML = _idxdEmpty(emptyHint);
             } else {
-                let html = '<table class="idx-table"><thead><tr><th>后缀</th><th>数量</th><th class="num">总大小</th></tr></thead><tbody>';
-                typeDist.forEach(item => {
-                    html += `<tr><td><span class="ext-badge">${_escHtml(item.ext)}</span></td><td class="num">${item.count.toLocaleString()}</td><td class="num">${item.size_str}</td></tr>`;
-                });
-                html += '</tbody></table>';
-                typeDistEl.innerHTML = html;
+                const maxCnt = Math.max(...typeDist.map(t => t.count || 0), 1);
+                typeDistEl.innerHTML = typeDist.map(t => {
+                    const barPct = Math.max(2, Math.round((t.count || 0) / maxCnt * 100));
+                    const share = totalFiles > 0 ? (t.count || 0) / totalFiles * 100 : 0;
+                    const sizeShare = totalSize > 0 ? (t.size || 0) / totalSize * 100 : 0;
+                    return `<div class="idxd-row">
+                        <span class="idxd-rank"><span class="idxd-badge">${_escHtml(t.ext || '无')}</span></span>
+                        <div class="idxd-main">
+                            <div class="idxd-name">${Number(t.count || 0).toLocaleString()} 个文件</div>
+                            <div class="idxd-path">占文件数 ${share.toFixed(1)}%</div>
+                        </div>
+                        <div class="idxd-nums"><b>${t.size_str || _idxdSize(t.size)}</b><em>占空间 ${sizeShare.toFixed(1)}%</em></div>
+                        <div class="idxd-bar"><i style="width:${barPct}%"></i></div>
+                    </div>`;
+                }).join('');
             }
 
-            // 最大文件 Top 10
+            // ---- 文件大小分布 ----
+            const sizeDistEl = document.getElementById('idxSizeDist');
+            const buckets = data.size_buckets || [];
+            if (sizeDistEl) {
+                if (!buckets.length) {
+                    sizeDistEl.innerHTML = _idxdEmpty(emptyHint);
+                } else {
+                    const maxCnt = Math.max(...buckets.map(b => b.count || 0), 1);
+                    sizeDistEl.innerHTML = buckets.map(b => {
+                        const barPct = Math.max(2, Math.round((b.count || 0) / maxCnt * 100));
+                        const share = totalFiles > 0 ? (b.count || 0) / totalFiles * 100 : 0;
+                        return `<div class="idxd-bucket">
+                            <div class="idxd-bucket-top">
+                                <span>${_escHtml(b.label)}</span>
+                                <em>${Number(b.count || 0).toLocaleString()} 个 · ${b.size_str || _idxdSize(b.size)} · ${share.toFixed(1)}%</em>
+                            </div>
+                            <div class="idxd-bucket-bar"><i style="width:${barPct}%"></i></div>
+                        </div>`;
+                    }).join('');
+                }
+            }
+
+            // ---- 最大文件 Top 10 ----
             const topFilesEl = document.getElementById('idxTopFiles');
             const topFiles = data.top_files || [];
-            if (topFiles.length === 0) {
-                topFilesEl.innerHTML = `<div class="idx-empty"><i class="bi bi-inbox"></i>${emptyHint}</div>`;
+            if (!topFiles.length) {
+                topFilesEl.innerHTML = _idxdEmpty(emptyHint);
             } else {
-                let html = '<table class="idx-table"><thead><tr><th>文件名</th><th>后缀</th><th class="num">大小</th></tr></thead><tbody>';
-                topFiles.forEach(item => {
-                    html += `<tr><td class="path-cell" data-path="${_escAttr(item.parent)}">${_escHtml(item.name)}</td><td><span class="ext-badge">${_escHtml(item.ext)}</span></td><td class="num">${item.size_str}</td></tr>`;
-                });
-                html += '</tbody></table>';
-                topFilesEl.innerHTML = html;
-                topFilesEl.querySelectorAll('.path-cell').forEach(el => {
+                topFilesEl.innerHTML = topFiles.map(f => `<div class="idxd-row" data-path="${_escAttr(f.parent)}"
+                        title="${_escAttr((f.parent || '') + '/' + (f.name || ''))}">
+                    <span class="idxd-rank"><span class="idxd-badge">${_escHtml(f.ext || '无')}</span></span>
+                    <div class="idxd-main">
+                        <div class="idxd-name">${_escHtml(f.name)}</div>
+                        <div class="idxd-path">${_escHtml(f.parent || '')}</div>
+                    </div>
+                    <div class="idxd-nums"><b>${f.size_str || _idxdSize(f.size)}</b></div>
+                </div>`).join('');
+                topFilesEl.querySelectorAll('.idxd-row').forEach(el => {
                     el.addEventListener('click', () => {
                         closeIndexDetail();
                         navigateTo(el.dataset.path);

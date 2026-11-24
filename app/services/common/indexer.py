@@ -3,14 +3,18 @@ import os
 import sys
 import glob
 import json
+import sqlite3
+import stat
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from ...config import _INDEX_DB_FILE, _INDEX_DB_NEW
 from ...log import get_logger
 from .db import (
-    _get_index_conn, _init_index_db, _index_has_data,
+    _get_index_conn, _init_index_db, _init_bulk_index_db,
+    _create_index_files_indexes, _index_has_data,
     _index_db_exists, _bump_index_db_generation,
 )
 from .filecore import (
@@ -32,6 +36,7 @@ _INDEX_LOCK = threading.Lock()
 _SCAN_EVENT = threading.Event()          # 触发重新扫描的信号
 _CANCEL_EVENT = threading.Event()        # 取消当前扫描的信号（与触发信号分开，避免被调度器清掉）
 _INDEX_BUILD_LOCK = threading.Lock()
+_INDEX_CREATING = threading.Event()      # 正在为临时库建索引：此阶段暂停「扫描中统计」的后台读库
 
 # 全盘搜索运行态
 _SEARCH_RESULTS = {}
@@ -78,78 +83,138 @@ def _load_index_meta():
         return False
 
 
-def _scan_root(root, stop_event, conn, max_results=2000000):
-    """遍历根目录，将结果写入索引。返回 (count, errors)。conn 由调用方传入（主 DB 或临时 DB）
-    进度更新：写入 _INDEX_META["progress"]，0-90 段（扫描阶段），由 _build_index 追加 90-100（后处理）
-    """
-    _VIRT_FS_PREFIXES = ("/proc", "/sys", "/dev", "/run", "/snap", "/boot", "/dev/shm")
-    _MAX_FILE_SIZE = 256 * 1024 * 1024 * 1024  # 超过 256GB 视为虚拟文件
+# ---- 扫描调优参数 -----------------------------------------------------------
+_SCAN_WORKERS = 8            # 并发扫目录的线程数：stat 是 I/O 等待，多线程可以重叠
+_SCAN_DIR_BATCH = 512        # 每批提交多少个目录给线程池
+_SCAN_ROW_BATCH = 20000      # 攒够多少行写一次库（临时库 synchronous=OFF，提交很快）
+_VIRT_FS_PREFIXES = ("/proc", "/sys", "/dev", "/run", "/snap", "/boot", "/dev/shm")
+_MAX_FILE_SIZE = 256 * 1024 * 1024 * 1024     # 超过 256GB 视为虚拟文件
 
+
+def _is_virtual_path(p):
+    return any(p == v or p.startswith(v + "/") for v in _VIRT_FS_PREFIXES)
+
+
+def _scan_one_dir(dirpath, stop_event):
+    """扫描单个目录，返回 (子目录列表, 待入库行列表, 错误数)。
+
+    用 os.scandir + DirEntry.stat()：每个条目只 stat 一次。
+    旧实现用 os.walk，随后又对每个文件 os.stat，在 FUSE/NTFS 上等于双倍元数据往返。
+    """
+    dirs, rows, errors = [], [], 0
+    if stop_event.is_set():
+        return dirs, rows, errors
+    try:
+        with os.scandir(dirpath) as it:
+            for e in it:
+                if stop_event.is_set():
+                    break
+                name = e.name
+                try:
+                    st = e.stat(follow_symlinks=False)
+                except OSError:
+                    errors += 1
+                    continue
+                is_link = stat.S_ISLNK(st.st_mode)
+                if is_link:
+                    # 符号链接文件：跟到目标取真实大小 / 时间（与旧实现 os.stat 一致）
+                    try:
+                        st = e.stat(follow_symlinks=True)
+                    except OSError:
+                        errors += 1
+                        continue
+                p = os.path.normpath(e.path).replace("\\", "/")
+                parent = os.path.dirname(p)
+                if stat.S_ISDIR(st.st_mode):
+                    # 目录符号链接不跟随：否则 /bin -> /usr/bin 这类会重复统计，
+                    # 甚至形成环路（os.walk 默认也不跟随，保持一致）
+                    if is_link:
+                        continue
+                    # 跳过隐藏目录与伪文件系统（与旧逻辑一致；隐藏文件仍然入库）
+                    if name.startswith(".") or _in_pseudo_fs(e.path) or _is_virtual_path(p):
+                        continue
+                    dirs.append(e.path)
+                    rows.append((p, name, "", 0, st.st_mtime, 1, parent))
+                elif stat.S_ISREG(st.st_mode):
+                    if st.st_size > _MAX_FILE_SIZE:
+                        continue
+                    ext = os.path.splitext(name)[1].lower().lstrip(".")
+                    rows.append((p, name, ext, st.st_size, st.st_mtime, 0, parent))
+    except OSError:
+        errors += 1
+    except Exception:
+        errors += 1
+    return dirs, rows, errors
+
+
+def _scan_root(root, stop_event, conn, max_results=2000000):
+    """并发遍历根目录，批量写入索引。返回 (count, err)。
+
+    进度写入 _INDEX_META["progress"]（0-90 段，扫描阶段），由 _build_index 追加 90-100。
+    并发 + 批量提交：600 万级目录树在 FUSE/NTFS 上原本要几十分钟，主要耗在逐个
+    stat 的等待和逐行维护索引；这里一次 stat 拿全信息、8 线程重叠 I/O、2 万行一次提交。
+    """
+    insert_sql = ("INSERT OR REPLACE INTO index_files "
+                  "(abs_path, name, ext, size, mtime, is_dir, parent_dir) "
+                  "VALUES (?, ?, ?, ?, ?, ?, ?)")
     count = 0          # 总项数（含目录），用于进度
     file_count = 0     # 已扫描文件数
     dir_count = 0      # 已扫描目录数
     size_sum = 0       # 已扫描文件总大小
     errors = 0
+    rows_buf = []
+
+    def _flush():
+        if not rows_buf:
+            return
+        conn.executemany(insert_sql, rows_buf)
+        rows_buf.clear()
+        conn.commit()
+        # 每 50K 项 ≈ 1% 进度；约 5M 项时到 90%（典型全盘最大）
+        _INDEX_META["progress"] = min(90, count // 50000)
+        _INDEX_META["scanned_files"] = file_count
+        _INDEX_META["scanned_dirs"] = dir_count
+        _INDEX_META["scanned_size"] = size_sum
+
     try:
         conn.execute("BEGIN")
-        for dirpath, dirnames, filenames in os.walk(root):
-            if stop_event.is_set():
-                break
-            # 跳过隐藏目录，以及 proc/sysfs/tmpfs 等伪文件系统
-            # （/proc/kcore 这种 128TB 的虚拟文件既不该入库，也不该计入总大小）
-            dirnames[:] = [
-                d for d in dirnames
-                if not d.startswith(".") and not _in_pseudo_fs(os.path.join(dirpath, d))
-            ]
-            dirpath_norm = os.path.normpath(dirpath).replace("\\", "/")
+        root_norm = os.path.normpath(root).replace("\\", "/")
+        try:
+            st = os.stat(root)
+            rows_buf.append((root_norm, os.path.basename(root_norm) or root_norm,
+                             "", 0, st.st_mtime, 1, os.path.dirname(root_norm)))
+            count += 1
+            dir_count += 1
+        except OSError:
+            errors += 1
 
-            if not sys.platform.startswith("win"):
-                is_virt = any(dirpath_norm == p or dirpath_norm.startswith(p + "/") for p in _VIRT_FS_PREFIXES)
-                if is_virt:
-                    dirnames[:] = []
-                    continue
-
-            try:
-                st = os.stat(dirpath)
-                conn.execute(
-                    "INSERT OR REPLACE INTO index_files (abs_path, name, ext, size, mtime, is_dir, parent_dir) VALUES (?, ?, '', 0, ?, 1, ?)",
-                    (dirpath_norm, os.path.basename(dirpath), st.st_mtime, os.path.dirname(dirpath_norm))
-                )
-                count += 1
-                dir_count += 1
-            except (OSError, PermissionError):
-                errors += 1
-                continue
-
-            for fname in filenames:
-                if stop_event.is_set():
-                    break
-                fpath = os.path.join(dirpath, fname)
-                fpath_norm = os.path.normpath(fpath).replace("\\", "/")
-                try:
-                    st = os.stat(fpath)
-                    if st.st_size > _MAX_FILE_SIZE:
-                        continue
-                    ext = os.path.splitext(fname)[1].lower().lstrip(".")
-                    conn.execute(
-                        "INSERT OR REPLACE INTO index_files (abs_path, name, ext, size, mtime, is_dir, parent_dir) VALUES (?, ?, ?, ?, ?, 0, ?)",
-                        (fpath_norm, fname, ext, st.st_size, st.st_mtime, os.path.dirname(fpath_norm))
-                    )
-                    count += 1
-                    file_count += 1
-                    size_sum += st.st_size or 0
-                except (OSError, PermissionError):
-                    errors += 1
-                    continue
-            # 每 5000 项更新一次进度；扫描阶段占用 0-90% 进度
-            if count % 5000 == 0:
-                conn.commit()
-                # 每 50K 项 ≈ 1% 进度；约 5M 项时到 90%（典型全盘最大）
-                _INDEX_META["progress"] = min(90, count // 50000)
-                _INDEX_META["scanned_files"] = file_count
-                _INDEX_META["scanned_dirs"] = dir_count
-                _INDEX_META["scanned_size"] = size_sum
-        conn.commit()
+        level = [root]
+        workers = max(1, min(_SCAN_WORKERS, os.cpu_count() or 4))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            while level and not stop_event.is_set():
+                nxt = []
+                for i in range(0, len(level), _SCAN_DIR_BATCH):
+                    if stop_event.is_set():
+                        break
+                    chunk = level[i:i + _SCAN_DIR_BATCH]
+                    for dirs, rows, err in ex.map(lambda d: _scan_one_dir(d, stop_event), chunk):
+                        errors += err
+                        if dirs:
+                            nxt.extend(dirs)
+                        if not rows:
+                            continue
+                        rows_buf.extend(rows)
+                        count += len(rows)
+                        for r in rows:
+                            if r[5]:
+                                dir_count += 1
+                            else:
+                                file_count += 1
+                                size_sum += r[3] or 0
+                        if len(rows_buf) >= _SCAN_ROW_BATCH:
+                            _flush()
+                level = nxt
+        _flush()
         _INDEX_META["scanned_files"] = file_count
         _INDEX_META["scanned_dirs"] = dir_count
         _INDEX_META["scanned_size"] = size_sum
@@ -162,12 +227,30 @@ def _scan_root(root, stop_event, conn, max_results=2000000):
     return count, None
 
 
-def _query_index(keyword, ext_filter, type_filter, limit=5000, min_size=0, max_size=0):
-    """从索引中查询，返回文件信息列表。
+def _like_escape(value):
+    """转义 LIKE 通配符（配合 ESCAPE '!'）：目录名里的 _ / % 不能当通配符。"""
+    return str(value).replace("!", "!!").replace("%", "!%").replace("_", "!_")
+
+
+def _query_index(keyword, ext_filter, type_filter, limit=5000, min_size=0, max_size=0,
+                 root=None, timeout=None, on_progress=None, on_tick=None):
+    """从索引中查询，返回 (items, timed_out)。
+
     min_size / max_size 为字节数，0 表示该侧不限（目录不参与大小过滤）。
+    root：限定搜索目录时下推到 SQL（abs_path 上有唯一索引，前缀条件能走索引），
+          不再把全盘几百万行取回 Python 逐个 startswith。
+    timeout：秒；超时用 SQLite progress handler 中断扫描，已取到的部分结果照常返回。
+    on_progress(n)：已扫描条数（仅在取到匹配批次时回调）。
+    on_tick()：扫描期间的「心跳」（progress handler 里调用），用于刷新耗时 / 进度，
+               没有匹配项时也能让前端看到搜索还在进行。
     """
     conn = _get_index_conn()
     try:
+        # 索引库很大（600 万条 ≈ 4GB），加大页缓存能明显减少重复页读取
+        try:
+            conn.execute("PRAGMA cache_size=-65536")      # 64MB
+        except Exception:
+            pass
         keyword_l = keyword.lower()
         ext_l = ext_filter.lower().lstrip(".") if ext_filter else ""
 
@@ -176,9 +259,10 @@ def _query_index(keyword, ext_filter, type_filter, limit=5000, min_size=0, max_s
 
         # 关键字匹配文件名（显式 LOWER 保持大小写不敏感：
         # 连接层已开启 case_sensitive_like=ON 以优化前缀查询，不能依赖 LIKE 默认行为）
+        # 关键字里的 % / _ / ! 必须转义，否则搜 "%" 会把全部文件命中、搜 "a_b" 会命中 "axb"
         if keyword:
-            where_clauses.append("(LOWER(name) LIKE ?)")
-            params.append(f"%{keyword_l}%")
+            where_clauses.append("(LOWER(name) LIKE ? ESCAPE '!')")
+            params.append("%" + _like_escape(keyword_l) + "%")
 
         # 扩展名过滤
         if ext_l:
@@ -199,13 +283,105 @@ def _query_index(keyword, ext_filter, type_filter, limit=5000, min_size=0, max_s
             where_clauses.append("(is_dir = 0 AND size <= ?)")
             params.append(int(max_size))
 
+        # 搜索根目录下推：根为 /（或空）时等于不限，不加条件
+        root_all = True
+        if root:
+            root_abs = os.path.abspath(os.path.normpath(root))
+            if root_abs not in (os.sep, "", os.altsep):
+                root_all = False
+                prefix = _like_escape(root_abs.rstrip("/\\") + os.sep) + "%"
+                where_clauses.append("(abs_path = ? OR abs_path LIKE ? ESCAPE '!')")
+                params.extend([root_abs, prefix])
+
         where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
         params.append(limit)
 
-        rows = conn.execute(
-            f"SELECT abs_path, name, ext, size, mtime, is_dir FROM index_files WHERE {where_sql} ORDER BY name LIMIT ?",
-            params
-        ).fetchall()
+        timed_out = False
+        deadline = None
+        if timeout and float(timeout) > 0:
+            deadline = time.monotonic() + float(timeout)
+
+            def _tick():
+                if time.monotonic() > deadline:
+                    return 1                 # 非 0 = 中止查询，已取到的行保留
+                if on_tick is not None:
+                    try:
+                        on_tick()
+                    except Exception:
+                        pass
+                return 0
+
+            # 每 1 万条 VM 指令检查一次：既是超时哨兵，也是搜索心跳
+            try:
+                conn.set_progress_handler(_tick, 10000)
+            except Exception:
+                deadline = None
+
+        # 只按关键字搜（无根目录 / 扩展名 / 类型 / 大小筛选）时走两段式查询：
+        #   1) 只取 rowid —— 命中 idx_name 覆盖索引，不用读整张表；
+        #   2) 用 rowid 回表取完整字段 —— 只取真正命中的少量行。
+        # 600 万行的库上，这比「整表扫描 + 每行读全字段」快一个数量级。
+        # 注意：前端「全盘」会把 root 传成 "/"，它等价于不限根目录，
+        # 这里必须用 root_all 判断，否则全盘搜索会退化成读 4GB 主表的慢查询。
+        keyword_only = (bool(keyword) and root_all and not ext_l
+                        and type_filter not in ("文件", "目录")
+                        and not (min_size and int(min_size) > 0)
+                        and not (max_size and int(max_size) > 0))
+        cols = "abs_path, name, ext, size, mtime, is_dir"
+        rows = []
+        scanned = 0
+        ids = []
+        try:
+            if keyword_only:
+                cur = conn.execute(
+                    "SELECT rowid FROM index_files WHERE LOWER(name) LIKE ? LIMIT ?",
+                    [params[0], limit])
+                while True:
+                    batch = cur.fetchmany(2000)
+                    if not batch:
+                        break
+                    ids.extend(r[0] for r in batch)
+                    scanned += len(batch)
+                    if on_progress:
+                        try:
+                            on_progress(scanned)
+                        except Exception:
+                            pass
+            else:
+                # 不加 ORDER BY：几百万行时排序会把所有命中项排一遍；前端拿到结果后本来就会排序
+                cur = conn.execute(
+                    "SELECT %s FROM index_files WHERE %s LIMIT ?" % (cols, where_sql), params)
+                while True:
+                    batch = cur.fetchmany(256)
+                    if not batch:
+                        break
+                    rows.extend(batch)
+                    scanned += len(batch)
+                    if on_progress:
+                        try:
+                            on_progress(scanned)
+                        except Exception:
+                            pass
+        except sqlite3.OperationalError as e:
+            # 超时中断：已取出的行保留，返回部分结果
+            if "interrupt" not in str(e).lower():
+                raise
+            timed_out = True
+        finally:
+            if deadline:
+                try:
+                    conn.set_progress_handler(None, 0)
+                except Exception:
+                    pass
+
+        # 两段式的第二段放在中断处理之后：即使上一段被超时打断，
+        # 已经拿到 rowid 的命中项也能正常回表，不会「扫到一半却一条都不给」。
+        if keyword_only and ids:
+            for i in range(0, len(ids), 400):
+                part = ids[i:i + 400]
+                rows.extend(conn.execute(
+                    "SELECT %s FROM index_files WHERE rowid IN (%s)"
+                    % (cols, ",".join("?" * len(part))), part).fetchall())
 
         results = []
         for row in rows:
@@ -223,7 +399,7 @@ def _query_index(keyword, ext_filter, type_filter, limit=5000, min_size=0, max_s
                 "ext": ext or "",
             }
             results.append(info)
-        return results
+        return results, timed_out
     finally:
         conn.close()
 
@@ -307,7 +483,8 @@ def _build_index(roots):
         except Exception:
             pass
 
-    _init_index_db(_INDEX_DB_NEW)
+    # 重建专用：普通表（无索引 / 唯一约束），扫完再一次性建索引
+    _init_bulk_index_db(_INDEX_DB_NEW)
     _CANCEL_EVENT.clear()        # 清掉上一轮可能残留的取消信号
     stop_event = _CANCEL_EVENT   # 与 /api/index/cancel 共用同一个信号，否则「取消扫描」不会生效
 
@@ -329,7 +506,14 @@ def _build_index(roots):
                 else:
                     roots_list = ["/"]
 
-            tconn = _get_index_conn(_INDEX_DB_NEW)
+            # 临时库是「重建完可丢弃」的：关掉同步落盘 + 加大页缓存，写 600 万行会快很多
+            # （保留 WAL，扫描期间「索引详情」面板还要并发读）
+            tconn = sqlite3.connect(_INDEX_DB_NEW, timeout=30)
+            try:
+                tconn.execute("PRAGMA synchronous=OFF")
+                tconn.execute("PRAGMA cache_size=-131072")      # 128MB
+            except Exception:
+                pass
             for root in roots_list:
                 if stop_event.is_set():
                     break
@@ -366,14 +550,40 @@ def _build_index(roots):
                 return
 
             _INDEX_META["progress"] = 90
-            _INDEX_META["status_detail"] = "正在统计文件大小..."
+            _INDEX_META["status_detail"] = "正在建立索引..."
 
-            nconn = _get_index_conn(_INDEX_DB_NEW)
+            nconn = sqlite3.connect(_INDEX_DB_NEW, timeout=30)
             try:
+                nconn.execute("PRAGMA synchronous=OFF")
+                nconn.execute("PRAGMA cache_size=-131072")
+                nconn.execute("PRAGMA temp_store=MEMORY")
+                # 重建的临时库不会再有人写：切到 OFF，索引页直接落主文件，
+                # 省掉「先写 WAL、最后再 checkpoint 一遍」的双份 I/O。
+                _INDEX_CREATING.set()
+                try:
+                    nconn.execute("PRAGMA busy_timeout=2000")
+                    nconn.execute("PRAGMA journal_mode=OFF")
+                except Exception:
+                    pass                      # 切不过去就继续用 WAL，不影响正确性
+
+                def _idx_step(i, total, label):
+                    _INDEX_META["progress"] = min(96, 90 + i * 2)
+                    _INDEX_META["status_detail"] = "正在建立索引 %d/%d：%s" % (i, total, label)
+
+                try:
+                    _create_index_files_indexes(nconn, _idx_step)
+                except sqlite3.IntegrityError:
+                    # 多个根目录相互包含时可能产生重复路径：去重后再建唯一索引
+                    _log.warning("索引中存在重复路径，去重后重建唯一索引")
+                    nconn.execute(
+                        "DELETE FROM index_files WHERE id NOT IN "
+                        "(SELECT MIN(id) FROM index_files GROUP BY abs_path)")
+                    _create_index_files_indexes(nconn, _idx_step)
+                nconn.commit()
                 _INDEX_META["status_detail"] = "正在统计文件总数..."
                 total_files = nconn.execute("SELECT COUNT(*) FROM index_files WHERE is_dir=0").fetchone()[0]
                 total_dirs = nconn.execute("SELECT COUNT(*) FROM index_files WHERE is_dir=1").fetchone()[0]
-                _INDEX_META["progress"] = 92
+                _INDEX_META["progress"] = 96
                 _INDEX_META["status_detail"] = "正在计算大小统计..."
                 total_size = nconn.execute("SELECT COALESCE(SUM(size), 0) FROM index_files WHERE is_dir=0").fetchone()[0]
                 nconn.execute("INSERT OR REPLACE INTO index_meta VALUES ('total_files', ?)", (str(total_files),))
@@ -382,7 +592,7 @@ def _build_index(roots):
                 nconn.execute("INSERT OR REPLACE INTO index_meta VALUES ('last_scan', ?)", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),))
                 nconn.commit()
 
-                _INDEX_META["progress"] = 95
+                _INDEX_META["progress"] = 97
                 _INDEX_META["status_detail"] = "正在计算文件分布..."
                 _compute_detail_stats(nconn)
 
@@ -463,6 +673,7 @@ def _build_index(roots):
             except Exception:
                 pass
         finally:
+            _INDEX_CREATING.clear()
             _INDEX_BUILD_LOCK.release()
 
     t = threading.Thread(target=_worker, daemon=True)
@@ -624,7 +835,7 @@ def _search_walk(root, keyword, ext_filter, type_filter, timeout, stop_event, ma
 def _compute_detail_stats_in_memory(db_path=None):
     """实时计算索引详情统计，返回结果字典（不写入 DB）。用于内存缓存。
     db_path 可传入临时库路径，用于扫描期间的实时统计。"""
-    result = {"top_dirs": [], "type_distribution": [], "top_files": []}
+    result = {"top_dirs": [], "type_distribution": [], "top_files": [], "size_buckets": []}
     # 虚拟文件系统前缀，统计时排除
     _VIRT_PREFIXES = "('/proc', '/sys', '/dev', '/run', '/snap', '/boot')"
     conn = _get_index_conn(db_path)
@@ -665,11 +876,50 @@ def _compute_detail_stats_in_memory(db_path=None):
             {"name": r[0], "ext": r[1], "size": r[2], "parent": r[3]}
             for r in top_files
         ]
+
+        # 体积分布只在主库（重建完成 / 老索引首次加载）时算；
+        # 扫描期间传了 db_path 就不再多扫一遍，避免和正在写入的临时库抢 I/O。
+        if db_path is None:
+            result["size_buckets"] = _size_bucket_stats(
+                conn, "AND abs_path NOT LIKE '/proc/%' AND abs_path NOT LIKE '/sys/%' "
+                      "AND abs_path NOT LIKE '/dev/%' AND abs_path NOT LIKE '/run/%'")
     except Exception as e:
         _log.error("实时计算索引详情失败: %s", e)
     finally:
         conn.close()
     return result
+
+
+# 文件体积分布区间（用于「文件大小分布」卡片）
+_SIZE_BUCKETS = (
+    ("< 1 MB", 0, 1024 * 1024),
+    ("1 - 10 MB", 1024 * 1024, 10 * 1024 * 1024),
+    ("10 - 100 MB", 10 * 1024 * 1024, 100 * 1024 * 1024),
+    ("100 MB - 1 GB", 100 * 1024 * 1024, 1024 * 1024 * 1024),
+    ("> 1 GB", 1024 * 1024 * 1024, None),
+)
+
+
+def _size_bucket_stats(conn, where_extra=""):
+    """一次扫描统计各体积区间的文件数 / 总大小。"""
+    parts = []
+    for _label, lo, hi in _SIZE_BUCKETS:
+        cond = "size >= %d" % lo
+        if hi is not None:
+            cond += " AND size < %d" % hi
+        parts.append("SUM(CASE WHEN %s THEN 1 ELSE 0 END)" % cond)
+        parts.append("SUM(CASE WHEN %s THEN size ELSE 0 END)" % cond)
+    row = conn.execute(
+        "SELECT %s FROM index_files WHERE is_dir=0 %s" % (", ".join(parts), where_extra)
+    ).fetchone()
+    out = []
+    for i, (label, _lo, _hi) in enumerate(_SIZE_BUCKETS):
+        out.append({
+            "label": label,
+            "count": int(row[i * 2] or 0),
+            "size": int(row[i * 2 + 1] or 0),
+        })
+    return out
 
 
 def _compute_detail_stats(conn):
@@ -709,15 +959,58 @@ def _compute_detail_stats(conn):
             for r in top_files
         ]
 
+        size_buckets = _size_bucket_stats(conn, _VFILT)
+
         conn.execute("INSERT OR REPLACE INTO index_meta VALUES (?, ?)", ('top_dirs', json.dumps(top_dirs_data, ensure_ascii=False)))
         conn.execute("INSERT OR REPLACE INTO index_meta VALUES (?, ?)", ('type_distribution', json.dumps(type_dist_data, ensure_ascii=False)))
         conn.execute("INSERT OR REPLACE INTO index_meta VALUES (?, ?)", ('top_files', json.dumps(top_files_data, ensure_ascii=False)))
+        conn.execute("INSERT OR REPLACE INTO index_meta VALUES (?, ?)", ('size_buckets', json.dumps(size_buckets, ensure_ascii=False)))
         conn.commit()
         _log.info("索引详情统计已更新")
         return True
     except Exception as e:
         _log.error("计算索引详情统计失败: %s", e)
         return False
+
+
+_DETAIL_BACKFILL = {"running": False}
+
+
+def _schedule_bucket_backfill():
+    """老索引没有「文件大小分布」：后台补算一次并写回 index_meta。
+
+    不在请求线程里算（600 万行要几十秒），补算完成后下次刷新即可看到；
+    进程内只跑一次，避免反复全表扫描。
+    """
+    with _INDEX_DETAIL_CACHE_LOCK:
+        if _DETAIL_BACKFILL["running"]:
+            return
+        _DETAIL_BACKFILL["running"] = True
+
+    def _run():
+        try:
+            data = _compute_detail_stats_in_memory()
+            if not data.get("size_buckets"):
+                return
+            with _INDEX_DETAIL_CACHE_LOCK:
+                _INDEX_DETAIL_MEMORY_CACHE["data"] = data
+                _INDEX_DETAIL_MEMORY_CACHE["time"] = time.time()
+            conn = _get_index_conn()
+            try:
+                for key in ("top_dirs", "type_distribution", "top_files", "size_buckets"):
+                    conn.execute("INSERT OR REPLACE INTO index_meta VALUES (?, ?)",
+                                 (key, json.dumps(data.get(key, []), ensure_ascii=False)))
+                conn.commit()
+            finally:
+                conn.close()
+            _log.info("已补算文件大小分布")
+        except Exception as e:
+            _log.warning("补算文件大小分布失败: %s", e)
+        finally:
+            with _INDEX_DETAIL_CACHE_LOCK:
+                _DETAIL_BACKFILL["running"] = False
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _load_detail_stats():
@@ -732,12 +1025,12 @@ def _load_detail_stats():
             return cached
 
     # 2. DB 预计算数据（检查是否含旧的虚拟filesystem条目）
-    result = {"top_dirs": [], "type_distribution": [], "top_files": []}
+    result = {"top_dirs": [], "type_distribution": [], "top_files": [], "size_buckets": []}
     conn = _get_index_conn()
     try:
         rows = conn.execute("SELECT key, value FROM index_meta").fetchall()
         meta = dict(rows)
-        for key in ("top_dirs", "type_distribution", "top_files"):
+        for key in ("top_dirs", "type_distribution", "top_files", "size_buckets"):
             raw = meta.get(key)
             if raw:
                 try:
@@ -761,6 +1054,8 @@ def _load_detail_stats():
             break
 
     if not _HAS_OLD_VIRT_DATA and (result["top_dirs"] or result["type_distribution"] or result["top_files"]):
+        if not result.get("size_buckets"):
+            _schedule_bucket_backfill()
         with _INDEX_DETAIL_CACHE_LOCK:
             _INDEX_DETAIL_MEMORY_CACHE["data"] = result
             _INDEX_DETAIL_MEMORY_CACHE["time"] = now
@@ -795,6 +1090,15 @@ def _load_scanning_detail_stats():
     线程里同步算，否则每次轮询都挂起几十秒，前端面板会一直显示空。
     这里只立即返回上次算好的缓存；还没有就返回空（带 detail_computing 标记，
     前端据此显示「统计计算中」），并把计算任务丢给后台线程。"""
+    # 正在给临时库建索引：此时读库会拖慢建索引，也可能和 journal_mode 切换打架，直接返回缓存
+    if _INDEX_CREATING.is_set():
+        with _INDEX_SCANNING_DETAIL_LOCK:
+            cached = _INDEX_SCANNING_DETAIL["data"] or {
+                "top_dirs": [], "type_distribution": [], "top_files": [], "size_buckets": []}
+        data = dict(cached)
+        data["detail_computing"] = True
+        return data
+
     now = time.time()
     with _INDEX_SCANNING_DETAIL_LOCK:
         cached = _INDEX_SCANNING_DETAIL["data"]

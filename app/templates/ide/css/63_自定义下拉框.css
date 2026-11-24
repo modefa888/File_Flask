@@ -1,0 +1,86 @@
+/* ============================================================================
+   63_自定义下拉框：IDE 主题适配
+   基础组件在 /static/css/custom-select.css；这里按 IDE 的深色 / 浅色主题
+   （html.theme-light）覆盖 --cs-* 变量，并让控件尺寸贴合 IDE 的输入框。
+   ============================================================================ */
+
+/* ---------- 深色（IDE 默认主题） ---------- */
+:root {
+    --cs-bg: #2f2f30;
+    --cs-bg-hover: #3a3a3b;
+    --cs-panel: #252526;
+    --cs-fg: #e2e2e2;
+    --cs-muted: #9a9a9a;
+    --cs-border: #404041;
+    --cs-border-hover: #5a5a5b;
+    --cs-hover: #37373d;
+    --cs-selected: #04395e;
+    --cs-brand: #4ea1ff;
+    --cs-shadow: 0 14px 34px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .35);
+    --cs-scroll-thumb: #454545;
+    --cs-scroll-thumb-hover: #5a5a5a;
+}
+
+/* ---------- 浅色主题 ---------- */
+html.theme-light {
+    --cs-bg: #f6f8fa;
+    --cs-bg-hover: #eef1f4;
+    --cs-panel: #ffffff;
+    --cs-fg: #1f2328;
+    --cs-muted: #7a828e;
+    --cs-border: #d0d7de;
+    --cs-border-hover: #b6c0cc;
+    --cs-hover: #eef3f8;
+    --cs-selected: #ddf4ff;
+    --cs-brand: #0969da;
+    --cs-shadow: 0 14px 34px rgba(31, 35, 40, .18), 0 2px 8px rgba(31, 35, 40, .06);
+    --cs-scroll-thumb: #c9d1d9;
+    --cs-scroll-thumb-hover: #b1bac4;
+}
+
+/* ---------- 尺寸贴近 IDE 控件 ---------- */
+.cselect-btn {
+    gap: 5px;
+    padding: 0 8px;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+.cselect-opt {
+    padding: 6px 9px;
+    border-radius: 5px;
+    font-size: 12.5px;
+}
+
+.cselect-menu { border-radius: 8px; }
+
+.cselect-arrow { font-size: .62rem; }
+
+.cselect-btn:focus-visible {
+    box-shadow: 0 0 0 2px rgba(10, 106, 168, .28);
+}
+
+html.theme-light .cselect-btn:focus-visible {
+    box-shadow: 0 0 0 2px rgba(9, 105, 218, .16);
+}
+
+/* 设置行右侧控件不参与拉伸（原本 select 上就是 flex: none） */
+.set-row .cselect,
+.app-ctl .cselect {
+    flex: none;
+}
+
+/* ---------- 设置 → 外观：.app-select 自带前置图标，保留图标、隐藏它原来的箭头 ---------- */
+.app-select.cselect-host .app-chev { display: none; }
+
+.app-select.cselect-host .cselect-btn {
+    border-radius: 8px;
+    padding-left: 32px;      /* 给左侧图标留位置 */
+}
+
+.app-select.cselect-host.no-ic .cselect-btn { padding-left: 12px; }
+
+.app-select.cselect-host.narrow .cselect-btn {
+    padding-left: 10px;
+    padding-right: 24px;
+}

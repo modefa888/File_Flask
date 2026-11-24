@@ -11,6 +11,23 @@
                 const target = document.getElementById('parentDirBtn').dataset.target;
                 if (target) navigateTo(target);
             });
+            // 顺序浏览（批量打开后启用）：上一个 / 下一个 / 退出
+            if (document.getElementById('seqPrevBtn')) {
+                document.getElementById('seqPrevBtn').addEventListener('click', () => _seqStep(-1));
+                document.getElementById('seqNextBtn').addEventListener('click', () => _seqStep(1));
+                // 与批量条的「取消」共用同一状态：清空勾选并退出顺序浏览
+                document.getElementById('seqExitBtn').addEventListener('click', () => {
+                    if (typeof _batchDeselect === 'function') _batchDeselect();
+                });
+            }
+            // 左右方向键：顺序浏览时切换上一个/下一个（输入框内不拦截）
+            document.addEventListener('keydown', (e) => {
+                if (typeof _seqActive === 'undefined' || !_seqActive) return;
+                const tag = (e.target && e.target.tagName || '').toLowerCase();
+                if (tag === 'input' || tag === 'textarea' || (e.target && e.target.isContentEditable)) return;
+                if (e.key === 'ArrowLeft') { e.preventDefault(); _seqStep(-1); }
+                else if (e.key === 'ArrowRight') { e.preventDefault(); _seqStep(1); }
+            });
             document.getElementById('selectAll').addEventListener('change', (e) => {
                 const checked = e.target.checked;
                 document.querySelectorAll('.item-checkbox:not(.parent-cb)').forEach(el => {

@@ -797,6 +797,12 @@ def _store_db_error(err):
     return RuntimeError("\n".join(hints))
 
 
+# 日志模式只需在进程内确认一次：每次连接都执行 `PRAGMA journal_mode=WAL` 会去读 / 改
+# 数据库头部并申请文件锁，在 NTFS/FUSE 挂载盘上实测单次连接要多花 25~30ms。
+# 进程内缓存结果后，后续连接只设置连接级的 synchronous（几乎无开销）。
+_JOURNAL = {"mode": None}          # None = 未探测；"wal" / "delete"
+
+
 def store_conn():
     """打开 store.db 连接（调用方负责关闭）。WAL 下读不阻塞写。
 
@@ -806,9 +812,16 @@ def store_conn():
     """
     conn = sqlite3.connect(_STORE_DB_FILE, timeout=30)
     conn.row_factory = sqlite3.Row
+    if _JOURNAL["mode"] == "delete":
+        conn.execute("PRAGMA synchronous=FULL")
+        return conn
+    if _JOURNAL["mode"] == "wal":
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return conn
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        _JOURNAL["mode"] = "wal"
     except sqlite3.OperationalError as e:
         conn.close()
         try:
@@ -816,6 +829,7 @@ def store_conn():
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=DELETE")
             conn.execute("PRAGMA synchronous=FULL")
+            _JOURNAL["mode"] = "delete"
         except sqlite3.Error as e2:
             try:
                 conn.close()

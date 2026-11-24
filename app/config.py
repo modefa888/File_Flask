@@ -284,7 +284,13 @@ AI_CONFIG_FILE = os.path.join(_STORAGE_DIR, ".file_manager_ai.json")
 GIT_CREDENTIALS_FILE = os.path.join(_STORAGE_DIR, ".file_manager_git_credentials.json")
 
 # 持久化索引数据库
-_INDEX_DB_FILE = os.path.join(_CACHE_DIR, ".file_manager_index.db")
+# 索引库在重建阶段要写几百万行并建 4 棵 B 树、做全表聚合统计；若 data/ 落在
+# ntfs-3g(FUSE) 等慢速挂载盘上，SQLite 的随机 I/O 会成为瓶颈。可用环境变量
+# INDEX_DB_DIR 指定一个快速磁盘目录（如 ext4 分区），把索引库挪出慢盘；
+# 不配置时保持原路径，行为与旧版本完全一致。
+_INDEX_DB_DIR = os.path.abspath(_env_str("INDEX_DB_DIR", "")) if _env_str("INDEX_DB_DIR", "") else _CACHE_DIR
+os.makedirs(_INDEX_DB_DIR, exist_ok=True)
+_INDEX_DB_FILE = os.path.join(_INDEX_DB_DIR, ".file_manager_index.db")
 _INDEX_DB_NEW = _INDEX_DB_FILE + ".new"
 
 # 缩略图磁盘缓存目录（视频封面等，源文件未修改时直接复用，避免重复 ffmpeg 抽帧）

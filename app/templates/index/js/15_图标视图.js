@@ -23,6 +23,9 @@
                 const sizeText = item.is_dir ? (sizeStr !== '-' ? sizeStr : '') : sizeStr;
                 const itemClass = (isSelected ? 'selected ' : '') + ((previewable || isZip) ? 'clickable ' : '') + iconSize + ' ';
                 const nameTitle = (previewable || isZip) ? '点击查看' : '';
+                const hiddenMark = String(item.name || '').startsWith('.')
+                    ? '<span class="hidden-mark" title="隐藏文件（以 . 开头）"><i class="bi bi-eye-slash"></i></span>'
+                    : '';
                 const moreBtn = `<button class="icon-more" data-action-path="${absPath}" data-is-dir="${item.is_dir}" title="更多操作"><i class="bi bi-three-dots"></i></button>`;
                 // 与 IDE 文件树同一套 seti 图标（未加载/未命中时自动回退彩色 Bootstrap 图标）
                 const iconHtml = fileIconHtml(item);
@@ -37,7 +40,7 @@
                     <input class="form-check-input item-checkbox icon-check" type="checkbox" name="files" value="${absPath}" data-path="${absPath}" ${isSelected ? 'checked' : ''} />
                     ${moreBtn}
                     ${thumbTag}
-                    <span class="icon-name" data-path="${absPath}" data-ext="${ext}" title="${nameTitle}">${item.name}</span>
+                    <span class="icon-name" data-path="${absPath}" data-ext="${ext}" title="${nameTitle}">${_escHtml(item.name)}${hiddenMark}</span>
                     <span class="icon-meta"><span class="icon-mtime">${item.mtime || ''}</span></span>
                 </div>
             `;

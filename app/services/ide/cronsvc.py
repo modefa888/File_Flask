@@ -18,6 +18,7 @@ import os
 import re
 import shlex
 import signal
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -1197,9 +1198,18 @@ def _tick():
 
 def _loop():
     global _LAST_CLEANUP
+    db_err_reported = False
     while True:
         try:
             _tick()
+            db_err_reported = False
+        except sqlite3.Error as e:
+            # 挂载盘断开 / store.db 暂时不可打开：不要每秒刷一条告警，退避等待恢复
+            if not db_err_reported:
+                _log.warning("定时调度数据库不可用：%s（每 30 秒重试一次，请检查存储挂载）", e)
+                db_err_reported = True
+            time.sleep(30)
+            continue
         except Exception as e:                         # noqa: BLE001
             _log.warning("定时调度异常：%s", e)
         try:

@@ -66,9 +66,12 @@
                     nameHtml = `${iconHtml} <span class="${nameClass}" data-path="${absPath}" data-ext="${ext}" data-zip="${isZip}" title="${previewable || isZip ? '点击查看' : '不支持预览'}">${item.name}</span>`;
                 }
                 const moreBtn = '<button class="more-btn" data-action-path="' + absPath + '" data-is-dir="' + item.is_dir + '" title="更多操作"><i class="bi bi-three-dots"></i></button>';
+                const hiddenMark = String(item.name || '').startsWith('.')
+                    ? '<span class="hidden-mark" title="隐藏文件（以 . 开头）"><i class="bi bi-eye-slash"></i></span>'
+                    : '';
                 html += `<tr class="${isSelected ? 'selected' : ''}" data-path="${absPath}">
                 <td class="checkbox-col"><input class="form-check-input item-checkbox" type="checkbox" name="files" value="${absPath}" data-path="${absPath}" ${isSelected ? 'checked' : ''} /></td>
-                <td>${nameHtml}</td>
+                <td>${nameHtml}${hiddenMark}</td>
                 <td class="file-perm" title="原始权限：${_escAttr(item.perm || '-')}">${permLabel(item.perm)}</td>
                 <td class="file-owner" title="${_escAttr(item.owner || '-')}">${_escHtml(item.owner || '-')}</td>
                 <td class="text-end file-size">${item.size_str || '-'}</td>

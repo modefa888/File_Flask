@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 
@@ -15,7 +16,11 @@ if bool(getattr(sys, "frozen", False)):
     _LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "logs")
 else:
     _LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
-os.makedirs(_LOG_DIR, exist_ok=True)
+try:
+    os.makedirs(_LOG_DIR, exist_ok=True)
+except OSError:
+    # 挂载盘断开时连建目录都会失败：仅用控制台日志，不让应用启动崩溃
+    _LOG_DIR = None
 
 
 class JsonFormatter(logging.Formatter):
@@ -41,10 +46,25 @@ class JsonFormatter(logging.Formatter):
             return super().format(record)
 
 
+class _SafeTimedRotatingFileHandler(TimedRotatingFileHandler):
+    """挂载盘断开等导致文件日志写失败时，不再打印 "--- Logging error ---" 刷屏。"""
+
+    _last_err = 0
+
+    def handleError(self, record):
+        now = time.monotonic()
+        if now - self._last_err > 60:
+            self._last_err = now
+            try:
+                sys.stderr.write("[logging] 文件日志不可写（存储挂载可能断开），已忽略该条日志\n")
+            except Exception:
+                pass
+
+
 def _open_file_handler(path):
     """创建轮转文件句柄；无法写入时返回 None（而不是让整个进程启动失败）。"""
     try:
-        handler = TimedRotatingFileHandler(
+        handler = _SafeTimedRotatingFileHandler(
             path, when="midnight", backupCount=15, encoding="utf-8",
         )
     except OSError as e:
@@ -68,10 +88,12 @@ def _build_logger(name: str = "fm") -> logging.Logger:
     # app.log 可能被别的用户（例如曾经用 sudo 启动过）创建成 root 所有，
     # 此时普通用户无法追加。降级到带用户后缀的文件，仍失败则只写控制台，
     # 绝不让「日志写不进去」把整个服务启动搞崩。
-    candidates = [
-        os.path.join(_LOG_DIR, "app.log"),
-        os.path.join(_LOG_DIR, "app_%s.log" % (os.environ.get("USER") or os.getuid())),
-    ]
+    candidates = []
+    if _LOG_DIR:
+        candidates = [
+            os.path.join(_LOG_DIR, "app.log"),
+            os.path.join(_LOG_DIR, "app_%s.log" % (os.environ.get("USER") or os.getuid())),
+        ]
     first_err = None
     for path in candidates:
         handler, err = _open_file_handler(path)

@@ -278,6 +278,19 @@
             white-space: nowrap;
         }
 
+        .hidden-mark {
+            display: inline-flex;
+            align-items: center;
+            margin-left: 6px;
+            padding: 1px 5px;
+            border-radius: 5px;
+            background: #f1f5f9;
+            color: #94a3b8;
+            font-size: .72rem;
+            vertical-align: middle;
+            cursor: help;
+        }
+
         .view-sortbar {
             background: #f7f9fc;
             border-bottom: 1px solid #e3e9f2;

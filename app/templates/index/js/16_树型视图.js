@@ -20,7 +20,10 @@
                 const lineClass = `tree-line${isSelected ? ' selected' : ''}`;
                 const nameClass = previewable ? 'tree-name clickable' : 'tree-name';
                 const toggleClass = isDir ? 'tree-toggle' : 'tree-toggle leaf';
-                const nameTag = previewable ? `<span class="${nameClass}" data-path="${absPath}" data-ext="${ext}" title="点击预览">${item.name}</span>` : `<span class="tree-name">${item.name}</span>`;
+                const hiddenMark = String(item.name || '').startsWith('.')
+                    ? '<span class="hidden-mark" title="隐藏文件（以 . 开头）"><i class="bi bi-eye-slash"></i></span>'
+                    : '';
+                const nameTag = previewable ? `<span class="${nameClass}" data-path="${absPath}" data-ext="${ext}" title="点击预览">${item.name}${hiddenMark}</span>` : `<span class="tree-name">${item.name}${hiddenMark}</span>`;
                 const moreBtn = `<button class="tree-more" data-action-path="${absPath}" data-is-dir="${item.is_dir}" title="更多操作"><i class="bi bi-three-dots"></i></button>`;
                 html += `
                 <div class="${lineClass}" data-path="${absPath}">

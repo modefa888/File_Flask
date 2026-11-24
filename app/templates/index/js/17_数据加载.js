@@ -11,16 +11,37 @@
             if (/^[A-Za-z]:$/.test(parent)) parent += '\\';
             return parent;
         }
+        // 空目录统一占位：有上级目录时附带「返回上一级」快捷按钮（列表/图标/树型视图共用）
+        function emptyStateHtml() {
+            const backBtn = parentPath
+                ? `<button type="button" class="btn btn-sm btn-outline-primary empty-parent-btn" title="返回上级目录"><i class="bi bi-arrow-up"></i> 返回上一级</button>`
+                : '';
+            return `<div class="empty-state"><i class="bi bi-folder2-open"></i><p class="mb-2">此目录为空</p>${backBtn}</div>`;
+        }
+
+        // 隐藏文件开关的视觉状态（图标 / 标题 / aria-pressed 同步）
+        function updateHiddenToggleUI() {
+            const btn = document.getElementById('hiddenToggleBtn');
+            if (!btn) return;
+            btn.classList.toggle('active', showHidden);
+            btn.setAttribute('aria-pressed', showHidden ? 'true' : 'false');
+            btn.title = showHidden ? '隐藏隐藏文件（以 . 开头）' : '显示隐藏文件（以 . 开头）';
+            const icon = btn.querySelector('i');
+            if (icon) icon.className = showHidden ? 'bi bi-eye' : 'bi bi-eye-slash';
+        }
+
         async function loadFiles(path, _fromFallback) {
             _closeMenus();
             _abortPendingFetch();
+            updateHiddenToggleUI();
             const ctrl = new AbortController();
             _currentFetchController = ctrl;
             _setLoading(true, path);
             try {
+                const hiddenParam = showHidden ? '&hidden=1' : '';
                 const url = path
-                    ? `/api/files?path=${encodeURIComponent(path)}&limit=0&offset=0`
-                    : '/api/files?limit=0&offset=0';
+                    ? `/api/files?path=${encodeURIComponent(path)}&limit=0&offset=0${hiddenParam}`
+                    : `/api/files?limit=0&offset=0${hiddenParam}`;
                 const resp = await fetch(url, { signal: ctrl.signal });
                 if (!resp.ok && resp.status !== 400) {
                     throw new Error(`请求失败 (HTTP ${resp.status})`);
@@ -65,6 +86,7 @@
                 sessionStorage.removeItem('_fmAutoReloaded');   // 服务正常，重置自动刷新标记
                 fileItems = data.items || [];
                 selectedPaths.clear();
+                updateSelectedCount();
                 // 保存当前类型筛选值，更新下拉框后恢复
                 const prevTypeVal = document.getElementById('typeFilter') ? document.getElementById('typeFilter').value : '';
                 _updateTypeFilter(fileItems);
@@ -126,33 +148,57 @@
             }
         }
 
-        function updateBreadcrumb(absPath) {
-            const breadcrumb = document.getElementById('breadcrumb');
-            const sysRoot = systemInfo.root || (navigator.platform.toLowerCase().includes('win') ? 'C:\\\\' : '/');
-            let parts = (absPath || '').split(/[\\/]/).filter(p => p);
-            // 根目录项使用真实系统根路径
+        // 路径过深时折叠中间层级，避免把右侧统计项挤到下一行
+        function _renderBreadcrumbSegments(breadcrumb, segments, sysRoot, expanded) {
             let html = `<li class="breadcrumb-item"><a href="#" data-path="${_escAttr(sysRoot)}" title="${_escAttr(sysRoot)}"><i class="bi bi-hdd"></i></a></li>`;
-            if (parts.length > 0) {
-                let cumulative = '';
-                if (navigator.platform.toLowerCase().includes('win')) {
-                    cumulative = parts[0] + '\\\\';
-                    html += `<li class="breadcrumb-item"><a href="#" data-path="${_escAttr(cumulative)}">${_escHtml(parts[0])}</a></li>`;
-                    parts = parts.slice(1);
-                } else {
-                    cumulative = '/';
-                }
-                for (let i = 0; i < parts.length; i++) {
-                    cumulative += (i === 0 && cumulative === '/') ? '' : '/';
-                    cumulative += parts[i];
-                    const isLast = i === parts.length - 1;
-                    if (isLast) html += `<li class="breadcrumb-item active">${_escHtml(parts[i])}</li>`;
-                    else html += `<li class="breadcrumb-item"><a href="#" data-path="${_escAttr(cumulative)}">${_escHtml(parts[i])}</a></li>`;
-                }
+            let shown = segments;
+            if (!expanded && segments.length > 6) {
+                shown = segments.slice(0, 2).concat(
+                    [{ collapsed: true, hiddenSegments: segments.slice(2, -3) }],
+                    segments.slice(-3)
+                );
             }
+            shown.forEach((seg) => {
+                if (seg.collapsed) {
+                    const tip = seg.hiddenSegments.map(s => s.label).join(' / ');
+                    html += `<li class="breadcrumb-item"><button type="button" class="breadcrumb-more" data-breadcrumb-expand="1" title="${_escAttr(tip)}（点击展开完整路径）">…</button></li>`;
+                } else if (seg.isLast) {
+                    html += `<li class="breadcrumb-item active" title="${_escAttr(seg.path)}">${_escHtml(seg.label)}</li>`;
+                } else {
+                    html += `<li class="breadcrumb-item"><a href="#" data-path="${_escAttr(seg.path)}" title="${_escAttr(seg.path)}">${_escHtml(seg.label)}</a></li>`;
+                }
+            });
             breadcrumb.innerHTML = html;
             breadcrumb.querySelectorAll('a[data-path]').forEach(el => {
                 el.addEventListener('click', (e) => { e.preventDefault(); navigateTo(el.dataset.path); });
             });
+            const more = breadcrumb.querySelector('[data-breadcrumb-expand]');
+            if (more) more.addEventListener('click', (e) => {
+                e.preventDefault();
+                _renderBreadcrumbSegments(breadcrumb, segments, sysRoot, true);
+            });
+        }
+
+        function updateBreadcrumb(absPath) {
+            const breadcrumb = document.getElementById('breadcrumb');
+            const isWin = navigator.platform.toLowerCase().includes('win');
+            const sysRoot = systemInfo.root || (isWin ? 'C:\\\\' : '/');
+            const parts = (absPath || '').split(/[\\/]/).filter(p => p);
+            const segments = [];
+            let cumulative = '';
+            if (parts.length > 0 && isWin) {
+                cumulative = parts[0] + '\\\\';
+                segments.push({ label: parts[0], path: cumulative });
+                parts.shift();
+            } else {
+                cumulative = '/';
+            }
+            for (let i = 0; i < parts.length; i++) {
+                cumulative += (i === 0 && cumulative === '/') ? '' : '/';
+                cumulative += parts[i];
+                segments.push({ label: parts[i], path: cumulative, isLast: i === parts.length - 1 });
+            }
+            _renderBreadcrumbSegments(breadcrumb, segments, sysRoot, false);
             _updateFavCurState();   // 目录切换后同步收藏按钮点亮状态
         }
 
@@ -186,7 +232,7 @@
                 if (dir !== currentPath) { _stopSizePoll(); return; }        // 已切到别的目录
                 if (++tries > 45) { _stopSizePoll(); return; }               // 最多轮询约 90s，之后放弃
                 try {
-                    const resp = await fetch(`/api/size-status?path=${encodeURIComponent(dir)}`);
+                    const resp = await fetch(`/api/size-status?path=${encodeURIComponent(dir)}${showHidden ? '&hidden=1' : ''}`);
                     const d = await resp.json();
                     if (!d || d.error || _sizePollPath !== dir || dir !== currentPath) return;
                     let changed = false;

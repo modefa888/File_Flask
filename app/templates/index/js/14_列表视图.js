@@ -2,7 +2,7 @@
         function renderTable(items) {
             const tbody = document.getElementById('fileBody');
             if (!items || items.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="${selectMode ? 6 : 5}"><div class="empty-state"><i class="bi bi-inbox"></i><p class="mb-0">此目录为空</p></div></td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="${selectMode ? 6 : 5}">${emptyStateHtml()}</td></tr>`;
                 return;
             }
             const html = _buildTableHtml(items);

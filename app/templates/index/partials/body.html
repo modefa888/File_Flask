@@ -73,8 +73,10 @@
                         <button class="btn btn-outline-primary" id="goPathBtn" type="button">进入</button>
                     </div>
                     <div class="d-flex gap-1">
-                        <button class="btn btn-outline-secondary btn-sm quick-btn" id="homeBtn" title="主页">🏠<span
-                                class="btn-txt"> 主页</span></button>
+                        <button class="btn btn-outline-secondary btn-sm quick-btn" id="homeBtn" title="主页"><i
+                                class="bi bi-house"></i><span class="btn-txt"> 主页</span></button>
+                        <button class="btn-hidden-toggle" id="hiddenToggleBtn" type="button"
+                            title="显示隐藏文件（以 . 开头）" aria-pressed="false"><i class="bi bi-eye-slash"></i></button>
                     </div>
                     <div class="view-toggle-group" title="切换视图">
                         <button class="btn-view active" data-view="list" title="列表视图"><i
@@ -108,15 +110,19 @@
                     <button class="btn-select-mode" id="searchBtn" title="全盘搜索"><i class="bi bi-search"></i> 搜索</button>
                     <button class="btn-select-mode ai-fm-entry" id="aiPanelBtn" title="AI 文件管理：让 AI 帮你整理 / 分析 / 操作当前目录"><i
                             class="bi bi-robot"></i> AI 助手</button>
-                    <button id="pasteFab" title="粘贴到当前目录（右键取消）">📋 <span id="pasteFabText">粘贴</span></button>
+                    <button id="pasteFab" title="粘贴到当前目录（右键取消）"><i class="bi bi-clipboard"></i> <span
+                            id="pasteFabText">粘贴</span></button>
                 </div>
             </div>
             <div class="col-md-5 d-flex gap-2 flex-wrap justify-content-md-end">
-                <input type="text" class="form-control form-control-sm filter-input" id="filterInput"
-                    placeholder="🔍 筛选文件名" />
+                <div class="filter-input-wrap">
+                    <i class="bi bi-search"></i>
+                    <input type="text" class="form-control form-control-sm filter-input" id="filterInput"
+                        placeholder="筛选文件名" />
+                </div>
                 <select class="form-select form-select-sm" id="typeFilter">
                     <option value="">所有类型</option>
-                    <option value="目录">📁 目录</option>
+                    <option value="目录">目录</option>
                 </select>
             </div>
         </div>
@@ -129,15 +135,18 @@
             <button class="fav-cur-star" id="favCurBtn" title="收藏本目录">
                 <i class="bi bi-star"></i><span class="fav-cur-txt">收藏</span>
             </button>
-            <span class="ms-auto d-flex flex-wrap align-items-center">
-                <span class="stat-item"><span class="stat-label">📄 文件</span><span class="stat-value"
+            <span class="ms-auto d-flex flex-wrap align-items-center stats-metrics">
+                <span class="stat-item"><span class="stat-label"><i
+                            class="bi bi-file-earmark text-primary"></i> 文件</span><span class="stat-value"
                         id="totalFiles">0</span></span>
-                <span class="stat-item"><span class="stat-label">📁 目录</span><span class="stat-value"
+                <span class="stat-item"><span class="stat-label"><i
+                            class="bi bi-folder text-warning"></i> 目录</span><span class="stat-value"
                         id="totalDirs">0</span></span>
-                <span class="stat-item"><span class="stat-label">💾 总大小</span><span class="stat-value"
+                <span class="stat-item" title="目录内文件大小之和，目录大小可能在后台继续计算"><span class="stat-label"><i
+                            class="bi bi-hdd text-secondary"></i> 总大小</span><span class="stat-value"
                         id="totalSize">0</span></span>
-                <button class="btn btn-outline-secondary btn-sm" id="parentDirBtn" title="返回上级目录"
-                    style="margin-left:12px;"><i class="bi bi-arrow-up"></i> 上级目录</button>
+                <button class="btn btn-outline-secondary btn-sm parent-dir-btn" id="parentDirBtn"
+                    title="返回上级目录"><i class="bi bi-arrow-up"></i> 上级目录</button>
             </span>
         </div>
         <div class="file-table">

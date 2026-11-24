@@ -6,7 +6,7 @@
                 grid.classList.add(iconSize);
             }
             if (!items || items.length === 0) {
-                grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:#a0aec0;"><i class="bi bi-inbox" style="font-size:2rem;display:block;margin-bottom:8px;"></i>此目录为空</div>`;
+                grid.innerHTML = emptyStateHtml();
                 updateSelectedCount(); updateBatchDeleteBtn();
                 return;
             }

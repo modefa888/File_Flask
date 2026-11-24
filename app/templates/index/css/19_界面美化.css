@@ -1,0 +1,376 @@
+        /* ===== 桌面文件管理器：界面美化（最后加载，统一工具栏 / 统计条 / 列表观感） ===== */
+        :root {
+            --fm-accent: #2563eb;
+            --fm-accent-soft: #eff6ff;
+            --fm-line: #e3e9f2;
+            --fm-muted: #64748b;
+        }
+
+        /* 顶部工具栏：输入框、下拉框统一边框与聚焦光圈 */
+        .topbar-row .path-input-group .form-control,
+        .topbar-row #typeFilter {
+            border-color: var(--fm-line);
+            color: #334155;
+        }
+
+        .topbar-row .path-input-group .form-control:focus,
+        .topbar-row .filter-input-wrap .form-control:focus,
+        .topbar-row #typeFilter:focus {
+            border-color: #93c5fd;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+        }
+
+        .topbar-row .path-input-group .btn {
+            border-color: var(--fm-line);
+        }
+
+        /* 筛选框：左侧搜索图标 + 圆角输入框 */
+        .filter-input-wrap {
+            position: relative;
+            width: 160px;
+            max-width: 100%;
+            flex: 0 1 auto;
+        }
+
+        .filter-input-wrap > i {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #94a3b8;
+            font-size: .82rem;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .filter-input-wrap .filter-input {
+            width: 100%;
+            max-width: none;
+            padding-left: 30px;
+            border-color: var(--fm-line);
+            border-radius: 8px;
+        }
+
+        /* 隐藏文件眼睛按钮：窄屏也能保持 30px 见方，不与同排按钮错位 */
+        .btn-hidden-toggle {
+            flex: 0 0 auto;
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--fm-line);
+            border-radius: 8px;
+            background: #fff;
+            color: var(--fm-muted);
+            font-size: .86rem;
+            line-height: 1;
+            cursor: pointer;
+            transition: background .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease;
+        }
+
+        .btn-hidden-toggle:hover {
+            background: var(--fm-accent-soft);
+            border-color: #93c5fd;
+            color: var(--fm-accent);
+        }
+
+        .btn-hidden-toggle.active {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            border-color: #2563eb;
+            color: #fff;
+            box-shadow: 0 3px 10px rgba(37, 99, 235, .28);
+        }
+
+        .btn-hidden-toggle:focus-visible {
+            outline: 2px solid rgba(37, 99, 235, .4);
+            outline-offset: 2px;
+        }
+
+        /* 分组按钮：视图切换 / 图标大小更贴合的容器底色与激活态 */
+        .view-toggle-group,
+        .icon-size-group {
+            background: #f4f7fb;
+            border: 1px solid #e8edf4;
+            box-shadow: inset 0 1px 2px rgba(16, 24, 40, .03);
+        }
+
+        .view-toggle-group .btn-view.active {
+            background: #fff;
+            color: var(--fm-accent);
+            box-shadow: 0 1px 4px rgba(37, 99, 235, .16);
+        }
+
+        .icon-size-group .icon-size-btn.active {
+            background: var(--fm-accent);
+            color: #fff;
+        }
+
+        /* 普通工具按钮：轻悬停反馈，激活态保持蓝底不被覆盖 */
+        .quick-btn,
+        .btn-select-mode {
+            transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease, box-shadow .16s ease;
+        }
+
+        .quick-btn:hover,
+        .btn-select-mode:hover {
+            border-color: #bfdbfe;
+            background: #f5f9ff;
+            color: #1d4ed8;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(15, 23, 42, .07);
+        }
+
+        .btn-select-mode.active:hover {
+            background: var(--fm-accent);
+            color: #fff;
+        }
+
+        /* 面包屑与统计条 */
+        .breadcrumb {
+            --bs-breadcrumb-divider: '›';
+            font-size: .86rem;
+            margin-bottom: 0;
+        }
+
+        .breadcrumb-item a {
+            color: #3b82f6;
+        }
+
+        .breadcrumb-more {
+            border: 0;
+            border-radius: 6px;
+            background: #eef2f7;
+            color: #475569;
+            padding: 0 8px;
+            font-size: .86rem;
+            line-height: 1.5;
+            cursor: pointer;
+        }
+
+        .breadcrumb-more:hover {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+
+        .stats-bar {
+            padding: 10px 18px;
+            border: 1px solid #e9eef5;
+            box-shadow: 0 2px 10px rgba(16, 24, 40, .04);
+        }
+
+        /* 面包屑按内容宽度占位，收藏按钮紧跟其后；长路径时只压缩面包屑，统计项仍在同一行 */
+        .stats-bar > nav[aria-label="breadcrumb"] {
+            flex: 0 1 auto;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .stats-bar .breadcrumb {
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scrollbar-width: none;
+        }
+
+        .stats-bar .breadcrumb::-webkit-scrollbar {
+            display: none;
+        }
+
+        .stats-bar .breadcrumb-item {
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .stats-bar .fav-cur-star {
+            flex: 0 0 auto;
+        }
+
+        .stats-bar .stats-metrics {
+            flex: 0 0 auto;
+            margin-left: auto !important;
+            gap: 0;
+        }
+
+        @media (min-width: 992px) {
+            .stats-bar {
+                flex-wrap: nowrap;
+            }
+        }
+
+        .stats-bar .stat-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-right: 0;
+            padding: 4px 14px;
+            border-right: 1px solid #e8edf4;
+            line-height: 1;
+            white-space: nowrap;
+        }
+
+        .stats-bar .stat-item:first-child {
+            padding-left: 0;
+        }
+
+        .stats-bar .stat-item[hidden] {
+            display: none;
+        }
+
+        .stats-bar .stat-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            line-height: 1;
+        }
+
+        .stats-bar .stat-value {
+            line-height: 1;
+        }
+
+        #parentDirBtn {
+            margin-left: 12px;
+            border-color: var(--fm-line);
+            border-radius: 8px;
+            color: #475569;
+            transition: background .16s ease, border-color .16s ease, color .16s ease;
+        }
+
+        #parentDirBtn:hover:not(:disabled) {
+            background: var(--fm-accent-soft);
+            border-color: #bfdbfe;
+            color: #1d4ed8;
+        }
+
+        /* 文件列表：更轻的边框和更清晰的悬停/选中反馈 */
+        .file-table {
+            border: 1px solid #e9eef5;
+            box-shadow: 0 3px 16px rgba(16, 24, 40, .05);
+        }
+
+        .file-table thead th {
+            background: linear-gradient(180deg, #f8fafc, #f1f5f9);
+            font-size: .82rem;
+            color: #334155;
+        }
+
+        .file-table tbody tr:hover {
+            background: #f8fbff;
+        }
+
+        .file-table tbody tr.selected {
+            background: #eff6ff;
+        }
+
+        .view-sortbar {
+            background: #f7f9fc;
+            border-bottom: 1px solid #e3e9f2;
+            border-radius: 10px;
+        }
+
+        .icon-grid {
+            gap: 12px;
+            padding: 12px 2px;
+        }
+
+        .icon-item {
+            box-shadow: 0 1px 3px rgba(15, 23, 42, .04);
+        }
+
+        .icon-item:hover {
+            border-color: #bfdbfe;
+            box-shadow: 0 8px 20px rgba(37, 99, 235, .1);
+        }
+
+        /* 底部提示条：与统计条同一浅色系 */
+        body > .container-fluid.px-4 > .mt-2 {
+            background: linear-gradient(180deg, #fff, #fbfcfe);
+        }
+
+        @media (min-width: 992px) {
+            .filter-input-wrap {
+                width: 150px;
+            }
+        }
+
+        @media (min-width: 992px) and (max-width: 1199.98px) {
+            .filter-input-wrap {
+                width: 130px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .filter-input-wrap {
+                width: 120px;
+            }
+        }
+
+        @media (max-width: 575.98px) {
+            .filter-input-wrap {
+                flex: 1 1 140px;
+                width: auto;
+            }
+        }
+
+        /* 空目录占位：列表 / 图标 / 树型视图共用，返回上一级按钮更醒目 */
+        .empty-state {
+            padding: 56px 20px;
+        }
+
+        .empty-state > i {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            background: #f1f5f9;
+            color: #94a3b8;
+            font-size: 2rem;
+            margin-bottom: 14px;
+        }
+
+        .empty-state p {
+            color: #64748b;
+            font-size: .9rem;
+        }
+
+        .empty-parent-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            margin-top: 14px;
+            padding: 9px 20px;
+            border: 1px solid #dbeafe;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #f8fbff, #eff6ff);
+            color: #2563eb;
+            font-size: .85rem;
+            font-weight: 600;
+            white-space: nowrap;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, .1);
+            transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease, box-shadow .18s ease;
+        }
+
+        .empty-parent-btn > i {
+            font-size: .95rem;
+            line-height: 1;
+            margin: 0;
+        }
+
+        .empty-parent-btn:hover {
+            background: #2563eb;
+            border-color: #2563eb;
+            color: #fff;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(37, 99, 235, .25);
+        }
+
+        .icon-grid .empty-state {
+            grid-column: 1 / -1;
+        }
+
+        .tree-view .empty-state {
+            padding: 60px 20px;
+        }

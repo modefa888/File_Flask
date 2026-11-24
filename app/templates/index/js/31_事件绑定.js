@@ -1,6 +1,11 @@
         // ========== 事件绑定 ==========
         function initEvents() {
             document.getElementById('refreshBtn').addEventListener('click', () => loadFiles(currentPath));
+            // 空目录里的「返回上一级」（动态渲染，用事件委托）
+            document.addEventListener('click', (e) => {
+                const btn = e.target.closest('.empty-parent-btn');
+                if (btn && parentPath) navigateTo(parentPath);
+            });
             // 上级目录按钮
             document.getElementById('parentDirBtn').addEventListener('click', () => {
                 const target = document.getElementById('parentDirBtn').dataset.target;
@@ -61,6 +66,14 @@
                 if (!pendingOp) return;
                 _clearPendingOp();
                 showToast('提示', '已取消待执行的移动/复制操作', 'info');
+            });
+            // 隐藏文件开关：切换后重新拉取当前目录，偏好写入本地存储
+            document.getElementById('hiddenToggleBtn').addEventListener('click', () => {
+                showHidden = !showHidden;
+                try { localStorage.setItem('fileManager_showHidden', showHidden ? '1' : '0'); } catch (e) { /* 忽略隐私模式 */ }
+                updateHiddenToggleUI();
+                showToast('提示', showHidden ? '已显示隐藏文件' : '已隐藏隐藏文件', 'info');
+                loadFiles(currentPath || '');
             });
             document.getElementById('filterInput').addEventListener('input', applyFiltersAndSort);
             document.getElementById('typeFilter').addEventListener('change', applyFiltersAndSort);

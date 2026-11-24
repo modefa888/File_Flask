@@ -2,7 +2,7 @@
         function renderTreeView(items) {
             const container = document.getElementById('treeContainer');
             if (!items || items.length === 0) {
-                container.innerHTML = `<div style="text-align:center;padding:40px;color:#a0aec0;"><i class="bi bi-inbox" style="font-size:2rem;display:block;margin-bottom:8px;"></i>此目录为空</div>`;
+                container.innerHTML = emptyStateHtml();
                 updateSelectedCount(); updateBatchDeleteBtn();
                 return;
             }

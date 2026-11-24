@@ -7,6 +7,7 @@
         let sortAsc = true;
         let viewMode = localStorage.getItem('fileManager_viewMode') || 'list';
         let selectMode = localStorage.getItem('fileManager_selectMode') === 'true';
+        let showHidden = localStorage.getItem('fileManager_showHidden') === '1';
         const STORAGE_KEY = 'fileManager_lastPath';
         const STORAGE_VIEW_KEY = 'fileManager_viewMode';
         // 缩略图缓存：path -> dataURL

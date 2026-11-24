@@ -43,6 +43,10 @@
                                 </select>
                             </div>
                             <div class="search-field search-field-actions">
+                                <div class="search-view-switch" id="searchViewSwitch">
+                                    <button class="sv-btn active" data-view="list" title="列表视图"><i class="bi bi-list"></i></button>
+                                    <button class="sv-btn" data-view="icon" title="图标视图"><i class="bi bi-grid-3x3-gap"></i></button>
+                                </div>
                                 <button class="btn btn-run" id="searchRunBtn"><i class="bi bi-search"></i> 搜索</button>
                                 <button class="btn btn-clear" id="searchClearBtn" title="清空关键字与结果"><i class="bi bi-x-circle"></i> 清空</button>
                             </div>
@@ -53,6 +57,10 @@
                             <span class="meta-item"><i class="bi bi-clock"></i> 耗时 <strong id="searchDuration">--</strong>s</span>
                             <span class="meta-sep"></span>
                             <span class="meta-item"><i class="bi bi-list-ul"></i> 命中 <strong id="searchCount">0</strong></span>
+                            <span class="meta-sep"></span>
+                            <span class="meta-item"><i class="bi bi-folder2"></i> 文件夹 <strong id="searchDirCount">0</strong></span>
+                            <span class="meta-sep"></span>
+                            <span class="meta-item"><i class="bi bi-file-earmark"></i> 文件 <strong id="searchFileCount">0</strong></span>
                             <span class="meta-sep"></span>
                             <span class="meta-item"><i class="bi bi-database"></i> 来源 <strong id="searchSource">--</strong></span>
                         </div>
@@ -102,6 +110,13 @@
             document.getElementById('searchClearBtn').addEventListener('click', _clearSearchResults);
             document.getElementById('searchCollapsedBtn').addEventListener('click', _expandSearch);
 
+            document.querySelectorAll('#searchViewSwitch .sv-btn').forEach(b => {
+                b.addEventListener('click', () => {
+                    _searchView = b.dataset.view;
+                    document.querySelectorAll('#searchViewSwitch .sv-btn').forEach(x => x.classList.toggle('active', x === b));
+                    _renderSearchResults(_searchItems);
+                });
+            });
             document.getElementById('searchRunBtn').addEventListener('click', startSearch);
             document.getElementById('batchOpenBtn').addEventListener('click', _batchOpenLocations);
             document.getElementById('batchDeselectBtn').addEventListener('click', _batchDeselect);
@@ -156,6 +171,10 @@
             if (dur) dur.textContent = '--';
             const cnt = document.getElementById('searchCount');
             if (cnt) cnt.textContent = '0';
+            const dirCnt = document.getElementById('searchDirCount');
+            if (dirCnt) dirCnt.textContent = '0';
+            const fileCnt = document.getElementById('searchFileCount');
+            if (fileCnt) fileCnt.textContent = '0';
             const src = document.getElementById('searchSource');
             if (src) src.textContent = '--';
             const results = document.getElementById('searchResults');
@@ -174,6 +193,8 @@
             cancelSearch(true);
             document.getElementById('searchDuration').textContent = '--';
             document.getElementById('searchCount').textContent = '0';
+            document.getElementById('searchDirCount').textContent = '0';
+            document.getElementById('searchFileCount').textContent = '0';
             document.getElementById('searchSource').textContent = '--';
             document.getElementById('searchStatusMeta').innerHTML = '<span class="meta-loading"><span class="search-spin-ring"></span> 正在搜索...</span>';
             document.getElementById('searchProgress').classList.add('active');
@@ -307,11 +328,64 @@
             _searchRunning = false;
         }
 
+        // 图片 / 视频走 /api/thumbnail 出封面（服务端有缓存），失败回退文件图标
+        function _searchThumbHtml(item, absPath) {
+            if (item.is_dir) return _getSearchIconHtml(item);
+            const ext = String(item.ext || (absPath.split('.').pop()) || '').toLowerCase();
+            const imgExts = ['png','jpg','jpeg','gif','svg','webp','bmp','ico'];
+            const vidExts = ['mp4','webm','mkv','avi','mov','m4v','ogg','flv'];
+            if (imgExts.includes(ext) || vidExts.includes(ext)) {
+                const fallback = _getSearchIconHtml(item);
+                // onload 把图片地址写进容器 CSS 变量：竖版封面完整显示(contain)时，
+                // 左右用同图模糊放大填充，避免出现空白边
+                return `<img class="search-thumb-img" loading="lazy" src="/api/thumbnail?path=${encodeURIComponent(absPath)}" alt="" `
+                    + `onload="this.parentElement.style.setProperty('--cover-url','url(&quot;'+this.src+'&quot;)');this.parentElement.classList.add('has-cover');" `
+                    + `onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />`
+                    + `<span class="search-thumb-fallback" style="display:none;">${fallback}</span>`;
+            }
+            return _getSearchIconHtml(item);
+        }
+
+        // 图标视图：网格卡片，复用 .search-row / data-path 让勾选与跳转逻辑通用
+        function _renderSearchIconsHtml(items) {
+            let html = `<div class="search-icon-bar"><label class="search-icon-select-all"><input type="checkbox" class="search-checkbox" id="searchSelectAll" title="全选"/> 全选</label></div><div class="search-icon-grid">`;
+            for (const item of items) {
+                const isDir = item.is_dir;
+                const absPath = item.abs_path || item.path;
+                const displayName = item.name || '(未知)';
+                const displayPath = absPath || '';
+                const sizeStr = item.size_str || (isDir ? '-' : formatSize(item.size || 0));
+                let parentPath = absPath;
+                if (absPath) {
+                    const idx = Math.max(absPath.lastIndexOf('/'), absPath.lastIndexOf('\\'));
+                    parentPath = idx >= 0 ? absPath.substring(0, idx) : absPath;
+                }
+                html += `<div class="search-icon-item search-row" data-abs-path="${_escAttr(absPath)}" data-parent-path="${_escAttr(parentPath)}" title="${_escAttr(displayPath)}">
+                    <input type="checkbox" class="search-checkbox search-item-cb" data-path="${_escAttr(absPath)}"/>
+                    <div class="search-icon-thumb">${_searchThumbHtml(item, absPath)}</div>
+                    <div class="search-icon-name" title="${_escAttr(displayName)}">${_escHtml(displayName)}</div>
+                    <div class="search-icon-meta"><span class="search-path" data-full-path="${_escAttr(displayPath)}">${_escHtml(sizeStr)}</span></div>
+                    <div class="search-icon-actions">
+                        <button class="search-open" data-parent-path="${_escAttr(parentPath)}" title="打开所在文件夹"><i class="bi bi-folder2-open"></i></button>
+                        ${!isDir ? `<button class="search-preview" data-preview-path="${_escAttr(absPath)}" title="预览文件"><i class="bi bi-eye"></i></button>` : ''}
+                    </div>
+                </div>`;
+            }
+            return html + '</div>';
+        }
+
         function _renderSearchResults(items) {
             _searchItems = items || [];
             _selectedSearchPaths.clear();
             _seqStop();   // 新结果重渲染：清空勾选 = 退出顺序浏览
             _updateCollapsedBadge();
+            // 结果里的文件夹数 / 文件数
+            const dirN = _searchItems.filter(it => it.is_dir).length;
+            const fileN = _searchItems.length - dirN;
+            const dirEl = document.getElementById('searchDirCount');
+            const fileEl = document.getElementById('searchFileCount');
+            if (dirEl) dirEl.textContent = dirN;
+            if (fileEl) fileEl.textContent = fileN;
             const el = document.getElementById('searchResults');
             _showBatchBar(false);
             if (!items || items.length === 0) {
@@ -319,6 +393,12 @@
                 return;
             }
             const sorted = _sortSearchItems(items);
+            el.classList.toggle('icon-view', _searchView === 'icon');
+            if (_searchView === 'icon') {
+                el.innerHTML = _renderSearchIconsHtml(sorted);
+                _bindSearchItemEvents(el, sorted);
+                return;
+            }
             let html = `<table class="search-table"><thead><tr>
             <th class="search-cb"><input type="checkbox" class="search-checkbox" id="searchSelectAll" title="全选"/></th>
             ${_sortHeader('name', '名称')}
@@ -377,13 +457,19 @@
                     _renderSearchResults(_searchItems);
                 });
             });
+            _bindSearchItemEvents(el, sorted);
+        }
+
+        // 列表 / 图标两种视图共用的事件绑定：勾选、跳转高亮、复制路径、预览
+        function _bindSearchItemEvents(el, sorted) {
             // 「打开」按钮：跳转并高亮对应文件/文件夹（弹窗保持打开）
             el.querySelectorAll('[data-parent-path]').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const row = btn.closest('tr');
-                    const info = _rowPaths(row);
-                    if (info) _gotoAndHighlight(info.absPath, info.parentPath);
+                    const row = btn.closest('.search-row');
+                    if (!row) return;
+                    const absPath = row.dataset.absPath;
+                    _gotoAndHighlight(absPath, btn.dataset.parentPath);
                 });
             });
             // 路径列：点击复制完整路径
@@ -398,17 +484,18 @@
             el.querySelectorAll('.search-row').forEach(row => {
                 row.addEventListener('click', (e) => {
                     if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
-                    const info = _rowPaths(row);
-                    if (info) _gotoAndHighlight(info.absPath, info.parentPath);
+                    const absPath = row.dataset.absPath;
+                    if (absPath) _gotoAndHighlight(absPath, row.dataset.parentPath);
                 });
             });
             el.querySelectorAll('[data-preview-path]').forEach(btn => {
-                btn.addEventListener('click', () => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
                     const p = btn.dataset.previewPath;
                     if (!_canPreviewPath(p)) { showToast('提示', '该文件类型不支持预览', 'warning'); return; }
-                    // 把当前搜索结果（按表格排序后的顺序）作为预览队列，
+                    // 把当前搜索结果（按排序后的顺序）作为预览队列，
                     // 让预览面板的「下一张/下一个」按搜索结果顺序切换，而不是按文件所在目录
-                    const queue = sorted
+                    const queue = (sorted || [])
                         .filter(it => !it.is_dir && _canPreviewPath(it.abs_path || it.path))
                         .map(it => it.abs_path || it.path);
                     if (typeof window._setPreviewQueue === 'function') window._setPreviewQueue(queue, p);
@@ -421,7 +508,7 @@
                     const checked = e.target.checked;
                     el.querySelectorAll('.search-item-cb').forEach(cb => {
                         cb.checked = checked;
-                        const row = cb.closest('tr');
+                        const row = cb.closest('.search-row');
                         if (row) row.classList.toggle('selected', checked);
                         const p = cb.dataset.path;
                         if (checked) _selectedSearchPaths.add(p);
@@ -433,9 +520,10 @@
             el.querySelectorAll('.search-item-cb').forEach(cb => {
                 cb.addEventListener('change', (e) => {
                     const p = cb.dataset.path;
-                    const row = cb.closest('tr');
-                    if (e.target.checked) { _selectedSearchPaths.add(p); row.classList.add('selected'); }
-                    else { _selectedSearchPaths.delete(p); row.classList.remove('selected'); }
+                    const row = cb.closest('.search-row');
+                    if (row) row.classList.toggle('selected', e.target.checked);
+                    if (e.target.checked) _selectedSearchPaths.add(p);
+                    else _selectedSearchPaths.delete(p);
                     _updateSearchBatch();
                     const total = el.querySelectorAll('.search-item-cb').length;
                     const sa = el.querySelector('#searchSelectAll');
@@ -446,6 +534,7 @@
 
         let _searchItems = [];
         let _selectedSearchPaths = new Set();
+        let _searchView = 'list';   // 'list' | 'icon'
         // 表头排序状态：点击列切换升/降序，目录始终排在文件前面
         let _searchSort = { key: 'name', asc: true };
 

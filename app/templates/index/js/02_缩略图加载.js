@@ -65,11 +65,18 @@
                 // 绝对定位铺满 .icon-thumb 取景框（span 本身只有图标大小，不能靠 100% 撑满）
                 icon.innerHTML = `<img src="${src}" alt="" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:6px;" />`;
                 icon.classList.add('has-thumb');
-                // 竖屏封面（高>宽）：切换为 contain 完整显示，不裁切
+                // 竖屏封面（高>宽）：contain 完整显示，并把图片写入容器变量，
+                // 两侧用同图模糊放大填充（虚拟背景），不留深色/空白边
                 const im = icon.querySelector('img');
-                if (im) im.addEventListener('load', () => {
-                    if (im.naturalHeight > im.naturalWidth) thumbEl.classList.add('portrait');
-                }, { once: true });
+                if (im) {
+                    const setupCover = () => {
+                        thumbEl.style.setProperty('--cover-url', 'url("' + im.src + '")');
+                        if (im.naturalHeight > im.naturalWidth) thumbEl.classList.add('portrait');
+                        thumbEl.classList.add('has-cover');
+                    };
+                    if (im.complete && im.naturalWidth) setupCover();
+                    else im.addEventListener('load', setupCover, { once: true });
+                }
             }
             // 视频卡片：异步获取时长，显示在封面左上角角标
             if (thumbEl.dataset.thumbType === 'video' && !thumbEl.querySelector('.thumb-duration')) {

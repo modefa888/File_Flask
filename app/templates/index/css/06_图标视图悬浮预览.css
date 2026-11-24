@@ -20,13 +20,39 @@
             opacity: 1;
         }
 
-        .icon-hover-preview .ihp-img {
-            width: 100%;
-            max-width: 340px;
-            max-height: 260px;
-            object-fit: contain;
+        .icon-hover-preview .ihp-stage {
+            position: relative;
+            width: 340px;
+            height: 260px;
             border-radius: 6px;
-            background: #000;
+            overflow: hidden;
+            background: #0b0f14;
+        }
+
+        /* 悬浮预览左右空白：同图模糊放大作虚拟背景 */
+        .icon-hover-preview .ihp-stage::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image: var(--cover-url, none);
+            background-size: cover;
+            background-position: center;
+            filter: blur(18px) brightness(0.72);
+            transform: scale(1.2);
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+
+        .icon-hover-preview .ihp-stage.has-cover::before { opacity: 1; }
+
+        .icon-hover-preview .ihp-img {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            height: 100%;
+            max-width: none;
+            max-height: none;
+            object-fit: contain;
             display: block;
         }
 
@@ -200,10 +226,20 @@
         }
         .icon-thumb.portrait .thumb-icon.has-thumb img {
             object-fit: contain !important;   /* 竖屏封面 100% 完整显示，不裁切 */
+            z-index: 1;
+            position: relative;
         }
-        /* 竖屏封面两侧留边区域用深色底衬托，避免浅灰大块空白 */
-        .icon-thumb.portrait[data-thumb-path] {
-            background: linear-gradient(135deg, #1e293b, #0b0f14);
+        /* 竖屏封面两侧留边：用同图模糊放大作虚拟背景，替代深色/空白边 */
+        .icon-thumb[data-thumb-path].has-cover::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image: var(--cover-url, none);
+            background-size: cover;
+            background-position: center;
+            filter: blur(12px) brightness(0.82);
+            transform: scale(1.15);
+            z-index: 0;
         }
 
         /* 目录切换加载遮罩 */
@@ -2019,6 +2055,34 @@
             gap: 8px;
         }
 
+        /* 视图切换：列表 / 图标 */
+        .search-view-switch {
+            display: inline-flex;
+            border: 1px solid #d8e0ea;
+            border-radius: 8px;
+            overflow: hidden;
+            background: white;
+            margin-right: 2px;
+        }
+
+        .search-view-switch .sv-btn {
+            width: 34px;
+            height: 36px;
+            border: none;
+            background: white;
+            color: #64748b;
+            font-size: 0.95rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+
+        .search-view-switch .sv-btn + .sv-btn { border-left: 1px solid #e2e8f0; }
+        .search-view-switch .sv-btn:hover { background: #f1f5f9; color: #2563eb; }
+        .search-view-switch .sv-btn.active { background: #2563eb; color: white; }
+
         .search-field-actions .btn {
             height: 36px;
             padding: 0 14px;
@@ -2038,6 +2102,9 @@
             background: linear-gradient(135deg, #2563eb, #1d4ed8);
             color: white;
             box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+            min-width: 96px;             /* 固定宽度：「搜索」↔「搜索中」切换时不撑开参数区 */
+            justify-content: center;
+            font-variant-numeric: tabular-nums;
         }
 
         .search-field-actions .btn-run:hover:not(:disabled) {
@@ -2083,7 +2150,7 @@
             display: flex;
             gap: 12px;
             align-items: center;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;       /* 单行显示：搜索状态变长也不换行撑高盒子 */
             font-size: 0.8rem;
             color: #4a5568;
             padding: 7px 14px;
@@ -2105,8 +2172,18 @@
         }
 
         .search-meta .meta-status {
-            flex: 1;
-            min-width: 160px;
+            flex: 1 1 auto;
+            min-width: 0;            /* 允许收缩：长状态文本省略号截断，不再把盒子撑宽 */
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .search-meta .meta-status > span {
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .search-meta .meta-sep {
@@ -2158,6 +2235,156 @@
             background: white;
             padding: 0;
         }
+
+        /* 图标视图网格 */
+        .search-icon-bar {
+            display: flex;
+            align-items: center;
+            padding: 8px 14px;
+            border-bottom: 1px solid #e2e8f0;
+            background: #f8fafc;
+            position: sticky;
+            top: 0;
+            z-index: 5;
+        }
+
+        .search-icon-select-all {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8rem;
+            color: #475569;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .search-icon-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 14px;
+            padding: 14px;
+        }
+
+        .search-icon-item {
+            position: relative;
+            border: 1px solid #e8eef5;
+            border-radius: 10px;
+            padding: 12px 8px 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .search-icon-item:hover {
+            border-color: #bfdbfe;
+            background: #f7fafc;
+            box-shadow: 0 3px 10px rgba(37, 99, 235, 0.08);
+        }
+
+        .search-icon-item.selected {
+            border-color: #2563eb;
+            background: #eff6ff;
+            box-shadow: inset 0 0 0 1px #2563eb;
+        }
+
+        .search-icon-item > .search-item-cb {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            z-index: 3;
+            width: 18px;
+            height: 18px;
+            margin: 0;
+            background: rgba(255, 255, 255, 0.92);
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+        }
+
+        .search-icon-thumb {
+            position: relative;
+            width: 100%;
+            height: 150px;          /* 封面区域占满卡片宽度并加高，100% 显示 */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f8fafc;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        /* 竖版封面完整显示时，左右用同图模糊放大填充，不留白边 */
+        .search-icon-thumb::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image: var(--cover-url, none);
+            background-size: cover;
+            background-position: center;
+            filter: blur(14px) brightness(0.85);
+            transform: scale(1.15);   /* 放大避免模糊后边缘透出 */
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .search-icon-thumb.has-cover::before { opacity: 1; }
+
+        .search-icon-thumb .search-ic {
+            font-size: 3.2rem !important;
+            width: auto;
+            height: auto;
+        }
+
+        .search-icon-thumb .search-thumb-img {
+            position: relative;   /* 置于模糊背景层之上 */
+            z-index: 1;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;  /* 完整显示封面（含竖版），左右空白由模糊背景填充 */
+            border-radius: 6px;
+        }
+
+        .search-icon-thumb .search-thumb-fallback {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+        }
+
+        .search-icon-name {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #2b6cb0;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .search-icon-meta {
+            font-size: 0.72rem;
+            color: #94a3b8;
+        }
+
+        .search-icon-meta .search-path {
+            font-size: 0.72rem;
+            max-width: 100%;
+            text-overflow: ellipsis;
+        }
+
+        .search-icon-actions {
+            display: flex;
+            gap: 6px;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+
+        .search-icon-item:hover .search-icon-actions { opacity: 1; }
 
         .search-empty {
             padding: 50px 20px;

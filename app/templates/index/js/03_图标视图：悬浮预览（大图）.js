@@ -2,7 +2,9 @@
         const _hoverPreview = document.createElement('div');
         _hoverPreview.className = 'icon-hover-preview';
         _hoverPreview.innerHTML = `
-        <img class="ihp-img" alt="" />
+        <div class="ihp-stage">
+            <img class="ihp-img" alt="" />
+        </div>
         <span class="ihp-dur" style="display:none"></span>
         <div class="ihp-meta">
             <div class="ihp-name"></div>
@@ -21,13 +23,19 @@
             // 若缩略图已缓存，立即显示
             const dataUrl = _thumbnailCache[path];
             const img = _hoverPreview.querySelector('.ihp-img');
+            const stage = _hoverPreview.querySelector('.ihp-stage');
             const nameEl = _hoverPreview.querySelector('.ihp-name');
             const sizeEl = _hoverPreview.querySelector('.ihp-size');
             const dateEl = _hoverPreview.querySelector('.ihp-date');
             _hoverPreview._path = path;
             // 内存缓存命中直接显示；否则交给浏览器 HTTP 缓存（已由服务端 ETag/强缓存处理），
             // 不再单独 fetch + FileReader，避免同一张封面被重复请求和重复解码。
-            img.src = dataUrl || _thumbUrl(path);
+            const finalSrc = dataUrl || _thumbUrl(path);
+            // 竖版封面完整显示时，左右用同图模糊放大填充（虚拟背景）
+            stage.style.setProperty('--cover-url', 'url("' + finalSrc + '")');
+            stage.classList.remove('has-cover');
+            img.onload = () => stage.classList.add('has-cover');
+            img.src = finalSrc;
             nameEl.textContent = name;
             sizeEl.textContent = sizeStr || '';
             dateEl.textContent = mtime || '';

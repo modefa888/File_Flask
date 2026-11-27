@@ -252,6 +252,121 @@ function dlUrlLines(raw) {
   });
   return urls;
 }
+/* 自动解析形如 {"title":"标题","uri":"https://..."} 的字符串：
+   支持单个对象、对象数组、多行 / 多个对象及普通链接混排；matched=false 时按普通链接处理。 */
+function dlParseLinkMeta(raw) {
+  const text = String(raw == null ? "" : raw).trim();
+  const urls = [], titles = [];
+  let matched = false;
+  if (!text) return { urls: urls, titles: titles, matched: matched };
+
+  const one = function (v) {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    const u = v.uri || v.url || v.link || v.href || v.src || v.download_url || v.downloadUrl;
+    if (typeof u !== "string" || !/^(?:https?|ftp|magnet):/i.test(u.trim())) return null;
+    const t = v.title || v.name || v.filename || v.fileName || v.file_name || v.file;
+    return { url: u.trim(), title: typeof t === "string" ? dlNameClean(t) : "" };
+  };
+  const collect = function (v) {
+    if (!v || typeof v !== "object") return;
+    const it = one(v);
+    if (it) {
+      matched = true;
+      urls.push(it.url);
+      if (it.title) titles.push(it.title);
+      return;
+    }
+    Object.keys(v).forEach(function (k) { collect(v[k]); });   // 支持 {"data":{...}} 这类嵌套
+  };
+
+  let candidates;
+  try {
+    const d = JSON.parse(text);
+    candidates = Array.isArray(d) ? d : [d];
+  } catch (_) {
+    candidates = [];
+    String(raw).split(/[\r\n]+/).forEach(function (line) {
+      const t = line.trim();
+      if (!t) return;
+      try {
+        const d = JSON.parse(t);
+        candidates = candidates.concat(Array.isArray(d) ? d : [d]);
+        return;
+      } catch (_) { }
+      const chunks = t.match(/\{[^{}]*\}/g) || [];            // 一行里夹着多个 JSON 对象
+      chunks.forEach(function (chunk) {
+        try { candidates.push(JSON.parse(chunk)); } catch (_) { }
+      });
+      if (!chunks.length) candidates.push(t);
+    });
+  }
+  candidates.forEach(function (c) {
+    if (typeof c === "string") {
+      const t = c.trim();
+      if (t.charAt(0) === "{" || t.charAt(0) === "[") {
+        try { collect(JSON.parse(t)); return; } catch (_) { }   // 字符串里又套了一层 JSON
+      }
+      if (/^(?:https?|ftp|magnet):/i.test(t)) urls.push(t);
+      return;
+    }
+    collect(c);
+  });
+  return { urls: urls, titles: titles, matched: matched };
+}
+/* 把链接框里的 JSON 规范化成纯链接；标题自动填入文件名（用户手改过则不覆盖）。 */
+function dlUrlApplyTitle(title) {
+  const P = DL.pick;
+  const t = dlNameClean(title);
+  if (!P || !t) return false;
+  if (P.urlName && P.urlName !== P.autoTitle) return false;
+  P.urlName = t;
+  P.autoTitle = t;
+  const nm = document.getElementById("dlPkUrlName");
+  if (nm) nm.value = t;
+  return true;
+}
+function dlUrlResolve() {
+  const P = DL.pick;
+  const raw = P ? (P.url || "") : "";
+  const meta = dlParseLinkMeta(raw);
+  const urls = (meta.matched && meta.urls.length) ? meta.urls : dlUrlLines(raw);
+  if (meta.matched && meta.urls.length) {
+    const norm = urls.join("\n");
+    if (P && P.url !== norm) P.url = norm;
+    const ta = document.getElementById("dlPkUrl");
+    if (ta && ta.value !== norm) ta.value = norm;
+    if (urls.length === 1) dlUrlApplyTitle(meta.titles[0] || "");
+  }
+  return { urls: urls, meta: meta };
+}
+function dlUrlParseHint(r) {
+  return '<span style="color:var(--dlc-ok)"><i class="bi bi-magic"></i> 已自动解析 ' +
+    r.urls.length + ' 个下载链接' +
+    (r.urls.length === 1 && r.meta.titles.length
+      ? '，标题「' + esc(r.meta.titles[0]) + '」已填入文件名'
+      : (r.urls.length > 1 ? '（批量下载按链接自动命名）' : '')) + '</span>';
+}
+/* 粘贴 JSON 或手动点「解析」时走这里：输入框 / 状态 / 提示一次性同步。 */
+function dlUrlParseApply(meta) {
+  const P = DL.pick;
+  if (!P || !meta || !meta.matched || !meta.urls.length) return false;
+  const norm = meta.urls.join("\n");
+  P.url = norm;
+  const ta = document.getElementById("dlPkUrl");
+  if (ta) ta.value = norm;
+  if (meta.urls.length === 1) dlUrlApplyTitle(meta.titles[0] || "");
+  const box = document.getElementById("dlPkUrlInfo");
+  const hint = dlUrlParseHint({ urls: meta.urls, meta: meta });
+  if (box) box.innerHTML = hint;
+  P.probeInfo = hint;
+  dlUrlNameCheck();
+  return true;
+}
+function dlUrlParseNow() {
+  const P = DL.pick;
+  if (!P) return;
+  if (!dlUrlParseApply(dlParseLinkMeta(P.url))) toast("未识别到 JSON 中的标题 / 链接", "warn");
+}
 function dlSize(n) {
   n = Number(n) || 0;
   if (n < 1024) return n + " B";
@@ -2210,7 +2325,7 @@ function dlPickOpen(opts) {
     path: opts.path || (typeof ROOT !== "undefined" ? ROOT : ""),
     sep: "/", parent: null, items: [], roots: [], recent: [], sel: [],
     q: "", hidden: false, adv: false,
-    url: "", urlName: "", threads: (DL.cfg || {}).threads || 2,
+    url: "", urlName: "", autoTitle: "", threads: (DL.cfg || {}).threads || 2,
     saveDir: opts.saveDir || (DL.cfg || {}).save_dir || (DL.cfg || {}).artifact_dir || "",
     referer: "", cookie: "", proxy: "", urlAdv: false,
     probe: null, probeInfo: "", footHtml: "", footVal: null,
@@ -2346,11 +2461,26 @@ function dlPickOpen(opts) {
     if (!P) return;
     const id = e.target.id;
     if (id === "dlPkQ") { P.q = e.target.value.trim().toLowerCase(); dlPickRenderList(); return; }
-    if (id === "dlPkUrl") { P.url = e.target.value; dlUrlNameCheck(); return; }
+    if (id === "dlPkUrl") {
+      P.url = e.target.value;
+      dlUrlParseApply(dlParseLinkMeta(e.target.value));   // 实时解析 JSON 字符串
+      dlUrlNameCheck();
+      return;
+    }
     if (id === "dlPkUrlName") { P.urlName = e.target.value; dlUrlNameCheck(); return; }
     if (id === "dlPkReferer") { P.referer = e.target.value; return; }
     if (id === "dlPkCookie") { P.cookie = e.target.value; return; }
     if (id === "dlPkProxy") { P.proxy = e.target.value; return; }
+  };
+  // 粘贴事件也接管一次：有些输入法 / 自动化只触发 paste 不触发 input
+  mask.onpaste = function (e) {
+    const t = e.target;
+    if (!t || t.id !== "dlPkUrl") return;
+    const txt = (e.clipboardData && e.clipboardData.getData("text")) || "";
+    const meta = dlParseLinkMeta(txt);
+    if (!meta.matched || !meta.urls.length) return;
+    e.preventDefault();
+    dlUrlParseApply(meta);
   };
   if (!DL.pickEsc) {
     DL.pickEsc = true;
@@ -2487,14 +2617,22 @@ function dlUrlPageHtml() {
     return '<option value="' + n + '"' + (n === cur ? " selected" : "") + '>' + n + ' 线程</option>';
   }).join("");
   const env = DL.env || {};
+  const demo =
+    "示例（粘贴后自动解析）：\n" +
+    '{"title":"标题","url":"https://site/a.mp4"} → 标题 + 链接\n' +
+    '{"title":"剧集","uri":"https://site/index.m3u8"} → m3u8 自动转 MP4\n' +
+    "https://site/a.mp4 → 直链（一行一个可批量）\n" +
+    "magnet:?xt=urn:btih:… → 磁力（需 aria2）\n" +
+    '[{"title":"A","url":"https://a/1.mp4"}] → 批量 JSON';
   return '<div class="dlc-url">' +
     '<div class="dlc-url-t">下载链接</div>' +
-    '<textarea id="dlPkUrl" spellcheck="false" placeholder="粘贴 http:// https:// ftp:// 链接、m3u8 视频地址（自动拼接成 MP4），或 magnet:?xt=urn:btih:… 磁力链接（一行一个，可批量）">' + esc(P.url || "") + '</textarea>' +
+    '<textarea id="dlPkUrl" spellcheck="false" placeholder="' + dlA(demo) + '">' + esc(P.url || "") + '</textarea>' +
     '<div class="dlc-urlrow">' +
       '<span class="dlc-urllab">保存到</span>' +
       '<div class="dlc-pathbox"><span><bdi>' + esc(P.saveDir || c.save_dir || c.artifact_dir || "-") + '</bdi></span></div>' +
       '<button class="dlc-btn sm" data-pk="url-dir"><i class="bi bi-folder2-open"></i>选择</button>' +
       '<button class="dlc-btn sm" data-pk="probe"><i class="bi bi-search"></i>探测</button>' +
+      '<button class="dlc-btn sm" data-pk="url-parse" title="解析粘贴的 JSON 字符串"><i class="bi bi-magic"></i>解析</button>' +
     '</div>' +
     '<div class="dlc-urlinfo" id="dlPkUrlInfo">' + (P.probeInfo ||
       '<span style="color:var(--dlc-dim)">点「探测」可先看文件大小、是否支持多线程</span>') + '</div>' +
@@ -2522,7 +2660,8 @@ async function dlPickProbe() {
   const P = DL.pick;
   if (!P) return;
   const box = document.getElementById("dlPkUrlInfo");
-  const url = (P.url || "").trim();
+  const r = dlUrlResolve();                     // 探测前先归一化 JSON 字符串，避免把整段发给后端
+  const url = r.urls[0] || "";
   if (!url) { if (box) box.innerHTML = '<span style="color:var(--dlc-warn)">先填链接再探测</span>'; return; }
   if (box) box.innerHTML = '<span>正在解析…</span>';
   const d = await dlReq("/api/dl/probe", { method: "POST", body: JSON.stringify({
@@ -2546,6 +2685,7 @@ async function dlPickProbe() {
   }
   const probed = dlNameClean(i.name);            // 探测名可能带非法字符，先净化再回填
   if (!P.urlName && probed) P.urlName = probed;
+  if (probed && P.urlName === probed) P.autoTitle = probed;
   box.innerHTML = P.probeInfo;
   const nm = document.getElementById("dlPkUrlName");
   if (nm && !nm.value && probed) nm.value = probed;
@@ -2556,9 +2696,10 @@ async function dlUrlConfirm() {
   if (!P) return;
   const raw = (P.url || "").trim();
   if (!raw) { toast("请先粘贴下载链接", "warn"); return; }
-  // 按行拆分批量；逗号只在后面紧跟新链接协议头时才算分隔符——
-  // 很多直链签名里带逗号（如 cdn77 的 secure=哈希,过期时间），不能见逗号就拆
-  const urls = dlUrlLines(raw);
+  // 先识别 {"title":...,"uri":...} 这类字符串；其余按行拆分批量。
+  // 逗号只在后面紧跟新链接协议头时才算分隔符——很多直链签名里带逗号
+  // （如 cdn77 的 secure=哈希,过期时间），不能见逗号就拆。
+  const urls = dlUrlResolve().urls;
   if (urls.length > 20) { toast("一次最多 20 个链接", "warn"); return; }
   // 文件名不符合规则时不允许提交（按钮此时也是禁用态，这里再兜一层）
   const nameErr = dlUrlNameCheck();
@@ -2662,11 +2803,34 @@ function dlPickRenderSide() {
   side.innerHTML = h;
 }
 
+/* 当前列表里真正可见的条目（跟随搜索框 / 目录模式）；全选、取消全选只作用于它们 */
+function dlPickVisibleItems() {
+  const P = DL.pick;
+  if (!P) return [];
+  const kw = P.q || "";
+  return (P.items || []).filter(function (it) {
+    if (P.mode === "dir" && !it.is_dir) return false;
+    return !kw || String(it.name || "").toLowerCase().indexOf(kw) >= 0;
+  });
+}
+function dlPickAllBtnSync() {
+  const P = DL.pick;
+  const b = document.querySelector('#dlcPickMask [data-pk="all"]');
+  if (!P || !b) return;
+  const vis = dlPickVisibleItems();
+  const selMap = {};
+  P.sel.forEach(function (s) { selMap[s.path] = 1; });
+  const all = vis.length > 0 && vis.every(function (it) { return !!selMap[it.path]; });
+  b.innerHTML = '<i class="bi ' + (all ? "bi-x-square" : "bi-check2-square") + '"></i>' +
+    (all ? "取消全选" : "全选");
+  b.title = all ? "取消勾选当前列表中的全部条目" : "勾选当前列表中的全部条目";
+}
 function dlPickRenderList() {
   const P = DL.pick;
   const list = document.getElementById("dlPkList");
   const crumb = document.getElementById("dlPkCrumb");
   if (!P || !list) return;
+  dlPickAllBtnSync();
   if (crumb) {
     let c = '<a data-pk="goto" data-path="' + dlA(P.sep) + '">' + esc(P.sep) + "</a>";
     let acc = "";
@@ -2691,7 +2855,7 @@ function dlPickRenderList() {
   list.innerHTML = items.map(function (it) {
     const sel = !!selMap[it.path];
     return '<div class="dlc-pitem' + (it.is_dir ? " dir" : "") + (sel ? " sel" : "") +
-      '" data-path="' + dlA(it.path) + '" data-dir="' + (it.is_dir ? 1 : 0) +
+      '" data-pk="pick" data-path="' + dlA(it.path) + '" data-dir="' + (it.is_dir ? 1 : 0) +
       '" data-name="' + dlA(it.name) + '" data-size="' + (it.size || 0) + '">' +
       '<span class="dlc-cb"><i class="bi bi-check"></i></span>' +
       '<i class="bi ' + (it.is_dir ? "bi-folder-fill" : dlIcon({ name: it.name }).i) + '"></i>' +
@@ -2715,6 +2879,7 @@ function dlPickItem(item) {
   item.classList.toggle("sel", i < 0);
   dlPickRenderSide();
   dlPickSum();
+  dlPickAllBtnSync();
 }
 
 function dlPickSum() {
@@ -2754,6 +2919,7 @@ async function dlPickAction(act, path) {
     if (adv) adv.classList.toggle("show", P.urlAdv);
     return;
   }
+  if (act === "url-parse") return dlUrlParseNow();
   if (act === "probe") return dlPickProbe();
   if (act === "url-ok") return dlUrlConfirm();
   if (act === "goto" || act === "enter") return dlPickLoad(path);
@@ -2764,6 +2930,18 @@ async function dlPickAction(act, path) {
     if (box) box.classList.toggle("show");
     return;
   }
+  if (act === "pick") {                              // 点整行任意位置都能勾选 / 取消
+    const i = P.sel.findIndex(function (s) { return s.path === path; });
+    if (i >= 0) P.sel.splice(i, 1);
+    else {
+      const it = (P.items || []).find(function (x) { return x.path === path; });
+      if (it) P.sel.push({ path: it.path, name: it.name, is_dir: it.is_dir, size: it.size || 0 });
+    }
+    dlPickRenderList();
+    dlPickRenderSide();
+    dlPickSum();
+    return;
+  }
   if (act === "unsel") {
     P.sel = P.sel.filter(function (s) { return s.path !== path; });
     dlPickRenderSide();
@@ -2772,14 +2950,21 @@ async function dlPickAction(act, path) {
     return;
   }
   if (act === "all") {
+    const vis = dlPickVisibleItems();
     const selMap = {};
     P.sel.forEach(function (s) { selMap[s.path] = 1; });
-    (P.items || []).forEach(function (it) {
-      if (P.mode === "dir" && !it.is_dir) return;
-      if (!selMap[it.path]) {
-        P.sel.push({ path: it.path, name: it.name, is_dir: it.is_dir, size: it.size || 0 });
-      }
-    });
+    const all = vis.length > 0 && vis.every(function (it) { return !!selMap[it.path]; });
+    if (all) {                                   // 已全选 → 取消当前列表的勾选
+      const visPaths = {};
+      vis.forEach(function (it) { visPaths[it.path] = 1; });
+      P.sel = P.sel.filter(function (s) { return !visPaths[s.path]; });
+    } else {                                     // 否则补齐勾选（不清空其它目录已选的项）
+      vis.forEach(function (it) {
+        if (!selMap[it.path]) {
+          P.sel.push({ path: it.path, name: it.name, is_dir: it.is_dir, size: it.size || 0 });
+        }
+      });
+    }
     dlPickRenderSide();
     dlPickRenderList();
     dlPickSum();

@@ -1137,14 +1137,23 @@
     video.onplay = video.onpause = setPlayIcon;
     setPlayIcon();
 
+    // buffered 是实时对象：两次读取之间区间可能被合并/回收，end(length - 1) 会越界
+    var bufferedEnd = function () {
+      try {
+        var b = video.buffered, n = b.length;
+        return n > 0 ? b.end(n - 1) : 0;
+      } catch (e) { return 0; }
+    };
+
     var updateProgress = function () {
       var dur = video.duration || 0, cur = video.currentTime;
       var pct = dur ? cur / dur * 100 : 0;
       played.style.width = pct + "%"; knob.style.left = pct + "%";
       timeCur.textContent = fmt(cur);
       timeDur.textContent = dur ? fmt(dur) : "--:--";
-      if (video.buffered.length && dur) {
-        buffered.style.width = Math.min(100, video.buffered.end(video.buffered.length - 1) / dur * 100) + "%";
+      var end = bufferedEnd();
+      if (dur && end > 0) {
+        buffered.style.width = Math.min(100, end / dur * 100) + "%";
       }
     };
     video.addEventListener("timeupdate", updateProgress);

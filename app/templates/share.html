@@ -1251,6 +1251,18 @@
             });
             if (video.readyState >= 2) hideLoading();
 
+            // 已缓冲到的最大时间点：buffered 是「实时」TimeRanges，两次读取之间区间可能被
+            // 合并/回收导致 length 变小，再拿旧下标 end(length - 1) 会抛 IndexSizeError
+            const bufferedEnd = (media) => {
+                try {
+                    const b = media.buffered;
+                    const n = b.length;          // 只读一次，避免两次取值不一致
+                    return n > 0 ? b.end(n - 1) : 0;
+                } catch (err) {
+                    return 0;                    // 区间已变化，本次跳过缓冲条更新
+                }
+            };
+
             // 进度 + 缓冲
             const updateProgress = () => {
                 const dur = video.duration || 0;
@@ -1258,9 +1270,9 @@
                 played.style.width = pct + '%';
                 knob.style.left = pct + '%';
                 timeEl.textContent = fmt(video.currentTime) + ' / ' + fmt(dur);
-                if (video.buffered.length && dur) {
-                    const end = video.buffered.end(video.buffered.length - 1);
-                    buffered.style.width = Math.min(100, end / dur * 100) + '%';
+                if (dur) {
+                    const end = bufferedEnd(video);
+                    if (end > 0) buffered.style.width = Math.min(100, end / dur * 100) + '%';
                 }
             };
             video.addEventListener('timeupdate', updateProgress);
@@ -1519,15 +1531,25 @@
             audio.addEventListener('pause', setPlayIcon);
             setPlayIcon();
 
+            // 已缓冲到的最大时间点：buffered 实时变化，length 与 end 分开读可能越界
+            const bufferedEnd = (media) => {
+                try {
+                    const b = media.buffered, n = b.length;
+                    return n > 0 ? b.end(n - 1) : 0;
+                } catch (err) {
+                    return 0;
+                }
+            };
+
             const updateProgress = () => {
                 const dur = audio.duration || 0;
                 const pct = dur ? audio.currentTime / dur * 100 : 0;
                 played.style.width = pct + '%';
                 knob.style.left = pct + '%';
                 timeEl.textContent = fmt(audio.currentTime) + ' / ' + fmt(dur);
-                if (audio.buffered.length && dur) {
-                    const end = audio.buffered.end(audio.buffered.length - 1);
-                    buffered.style.width = Math.min(100, end / dur * 100) + '%';
+                if (dur) {
+                    const end = bufferedEnd(audio);
+                    if (end > 0) buffered.style.width = Math.min(100, end / dur * 100) + '%';
                 }
             };
             audio.addEventListener('timeupdate', () => { updateProgress(); syncLyrics(); });

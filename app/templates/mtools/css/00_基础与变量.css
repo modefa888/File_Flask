@@ -218,7 +218,7 @@ button { cursor: pointer; }
   outline: none;
   transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
 }
-.fld textarea { resize: vertical; min-height: 88px; line-height: 1.55; }
+.fld textarea { resize: vertical; min-height: 120px; line-height: 1.55; }  /* 多行格式示例要完整显示 */
 .fld input:focus, .fld textarea:focus, .fld select:focus {
   border-color: var(--pri);
   background: var(--card);

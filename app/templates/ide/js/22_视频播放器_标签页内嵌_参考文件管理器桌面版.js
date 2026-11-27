@@ -275,6 +275,14 @@
     /* ---------- 进度条 + 时间 + 缓冲 ---------- */
     const timeCur = $(".vpv-time-cur"), timeDur = $(".vpv-time-dur"), progress = $(".vpv-progress");
     const played = $(".vpv-played"), buffered = $(".vpv-buffered"), knob = $(".vpv-knob");
+    // 安全取「已缓冲到的最大时间点」：buffered 是实时对象，区间数可能随时变化，
+    // 先取 length 再取 end(length - 1) 存在竞态 → IndexSizeError
+    const _vpvBufferedEnd = (media) => {
+      try {
+        const b = media.buffered, n = b.length;
+        return n > 0 ? b.end(n - 1) : 0;
+      } catch (_) { return 0; }
+    };
     const updateProgress = () => {
       // 转码模式：fMP4 流 duration 为 Infinity，用真实总时长 + ss 偏移换算显示
       const dur = transMode ? transDur : (video.duration || 0);
@@ -284,8 +292,8 @@
       knob.style.left = pct + "%";
       timeCur.textContent = _vpvFmt(cur);
       timeDur.textContent = "-" + _vpvFmt(Math.max(0, dur - cur));   // 右侧显示倒计时：还剩多少没播
-      if (video.buffered.length && dur) {
-        const end = video.buffered.end(video.buffered.length - 1) + (transMode ? transStart : 0);
+      const end = _vpvBufferedEnd(video) + (transMode ? transStart : 0);
+      if (dur && end > 0) {
         buffered.style.width = Math.min(100, end / dur * 100) + "%";
       }
     };

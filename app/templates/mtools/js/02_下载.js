@@ -298,6 +298,94 @@ function downloadCleanName(name) {
   return String(name || "").replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, "")
     .replace(/^[. ]+/, "").replace(/[. ]+$/, "").slice(0, 180);
 }
+/* 解析 {"title":"标题","url":"https://..."}：支持对象 / 数组 / 多行 / 嵌套 / 混排 */
+function downloadParseJsonLinks(raw) {
+  const text = String(raw == null ? "" : raw).trim();
+  const urls = [], titles = [];
+  let matched = false;
+  if (!text) return { urls: urls, titles: titles, matched: matched };
+  const one = function (v) {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    const u = v.uri || v.url || v.link || v.href || v.src || v.download_url || v.downloadUrl;
+    if (typeof u !== "string" || !/^(?:https?|ftp|magnet):/i.test(u.trim())) return null;
+    const t = v.title || v.name || v.filename || v.fileName || v.file_name || v.file;
+    return { url: u.trim(), title: typeof t === "string" ? downloadCleanName(t) : "" };
+  };
+  const collect = function (v) {
+    if (!v || typeof v !== "object") return;
+    const it = one(v);
+    if (it) {
+      matched = true;
+      urls.push(it.url);
+      if (it.title) titles.push(it.title);
+      return;
+    }
+    Object.keys(v).forEach(function (k) { collect(v[k]); });
+  };
+  let candidates;
+  try {
+    const d = JSON.parse(text);
+    candidates = Array.isArray(d) ? d : [d];
+  } catch (_) {
+    candidates = [];
+    String(raw).split(/[\r\n]+/).forEach(function (line) {
+      const t = line.trim();
+      if (!t) return;
+      try {
+        const d = JSON.parse(t);
+        candidates = candidates.concat(Array.isArray(d) ? d : [d]);
+        return;
+      } catch (_) { }
+      const chunks = t.match(/\{[^{}]*\}/g) || [];
+      chunks.forEach(function (chunk) {
+        try { candidates.push(JSON.parse(chunk)); } catch (_) { }
+      });
+      if (!chunks.length) candidates.push(t);
+    });
+  }
+  candidates.forEach(function (c) {
+    if (typeof c === "string") {
+      const t = c.trim();
+      if (t.charAt(0) === "{" || t.charAt(0) === "[") {
+        try { collect(JSON.parse(t)); return; } catch (_) { }
+      }
+      if (/^(?:https?|ftp|magnet):/i.test(t)) urls.push(t);
+      return;
+    }
+    collect(c);
+  });
+  return { urls: urls, titles: titles, matched: matched };
+}
+/* 把 JSON 归一化成纯链接；标题填入文件名（用户手改过则不覆盖） */
+function downloadApplyJson(meta, quiet) {
+  const ta = $("dlUrls");
+  if (!ta || !meta || !meta.matched || !meta.urls.length) return false;
+  const norm = meta.urls.join("\n");
+  ta.value = norm;
+  const nm = $("dlFilename");
+  if (nm && meta.urls.length === 1 && meta.titles.length) {
+    const t = downloadCleanName(meta.titles[0]);
+    if (!(nm.value || "").trim() || nm.dataset.autoTitle === nm.value) {
+      nm.value = t;
+      nm.dataset.autoTitle = t;
+    }
+  }
+  const hint = $("dlProbeHint");
+  if (hint && !quiet) {
+    hint.className = "hint ok";
+    hint.textContent = "已自动解析 " + meta.urls.length + " 个链接" +
+      (meta.urls.length === 1 && meta.titles.length
+        ? "，标题「" + downloadCleanName(meta.titles[0]) + "」已填入文件名"
+        : "（批量下载按链接自动命名）");
+  }
+  return true;
+}
+function downloadResolveUrls(quiet) {
+  const raw = ($("dlUrls") && $("dlUrls").value) || "";
+  const meta = downloadParseJsonLinks(raw);
+  if (downloadApplyJson(meta, quiet !== false)) return meta.urls;
+  return downloadSplitUrls(raw);
+}
 
 function downloadNewSheet() {
   const cfg = D.cfg || {};
@@ -308,11 +396,18 @@ function downloadNewSheet() {
   threadList.sort(function (a, b) { return a - b; }).forEach(function (n) {
     threadOpts += '<option value="' + n + '"' + (n === threads ? " selected" : "") + ">" + n + " 线程</option>";
   });
+  const demo =
+    "示例（粘贴后自动解析）：\n" +
+    '{"title":"标题","url":"https://site/a.mp4"} → 标题 + 链接\n' +
+    '{"title":"剧集","uri":"https://site/index.m3u8"} → m3u8 自动转 MP4\n' +
+    "https://site/a.mp4 → 直链（一行一个可批量）\n" +
+    "magnet:?xt=urn:btih:… → 磁力（需 aria2）\n" +
+    '[{"title":"A","url":"https://a/1.mp4"}] → 批量 JSON';
   const html =
     '<div class="fld"><label>下载链接' +
     '<button class="linkbtn" type="button" data-act="probe"><i class="bi bi-search"></i>解析链接</button></label>' +
-    '<textarea id="dlUrls" placeholder="支持 http / https / ftp / magnet，每行一个链接"></textarea>' +
-    '<div class="hint" id="dlProbeHint">填好后可先点「解析链接」自动识别文件名与大小。</div></div>' +
+    '<textarea id="dlUrls" placeholder="' + esc(demo) + '"></textarea>' +
+    '<div class="hint" id="dlProbeHint">支持粘贴 JSON；也可点「解析链接」识别文件名与大小。</div></div>' +
     '<div class="fld"><label>文件名（可选）</label>' +
     '<input id="dlFilename" type="text" placeholder="留空按链接 / 响应头自动识别"></div>' +
     '<div class="fld-row">' +
@@ -326,7 +421,7 @@ function downloadNewSheet() {
 
   openSheet("新建下载", html, async function (act, el) {
     if (act === "probe") {
-      const urls = downloadSplitUrls($("dlUrls").value);
+      const urls = downloadResolveUrls(false);   // 先解析 JSON，再探测真实链接
       const hint = $("dlProbeHint");
       if (!urls.length) {
         hint.className = "hint err";
@@ -357,7 +452,7 @@ function downloadNewSheet() {
     }
 
     if (act !== "submit") return;
-    const urls = downloadSplitUrls($("dlUrls").value);
+    const urls = downloadResolveUrls();           // 提交前兜底解析 JSON
     if (!urls.length) {
       $("dlProbeHint").className = "hint err";
       $("dlProbeHint").textContent = "请至少填写一个下载链接";
@@ -396,6 +491,17 @@ function downloadNewSheet() {
       toast(dup ? "已存在相同链接的任务，可勾选「覆盖旧任务」后重试" : lastErr, "err");
     }
   });
+  // openSheet 已同步写入 DOM：实时输入 / 粘贴 JSON 时立即拆出链接与标题
+  const urlsEl = $("dlUrls");
+  if (urlsEl) {
+    urlsEl.addEventListener("input", function () {
+      downloadApplyJson(downloadParseJsonLinks(urlsEl.value), false);
+    });
+    urlsEl.addEventListener("paste", function (e) {
+      const txt = (e.clipboardData && e.clipboardData.getData("text")) || "";
+      if (downloadApplyJson(downloadParseJsonLinks(txt), false)) e.preventDefault();
+    });
+  }
 }
 
 /* ==================================================================

@@ -31,6 +31,18 @@
         }
         window._setPreviewQueue = _setPreviewQueue;
 
+        // 安全取「已缓冲到的最大时间点」：media.buffered 是实时 TimeRanges，区间数随时可能
+        // 被合并/回收，先读 length 再 end(length - 1) 会抛 IndexSizeError 打断回调
+        function _bufferedEnd(media) {
+            try {
+                const b = media.buffered;
+                const n = b.length;          // 只读一次
+                return n > 0 ? b.end(n - 1) : 0;
+            } catch (err) {
+                return 0;
+            }
+        }
+
         function _canPreview(ext) {
             const e = (ext || '').toLowerCase();
             // 视频走 /api/stream 流式播放（支持 Range，边下边播），不会把整个文件读进内存
@@ -528,8 +540,8 @@
                 played.style.width = pct + '%';
                 knob.style.left = pct + '%';
                 timeEl.textContent = `${fmt(cur)} / ${fmt(dur)}`;
-                if (video.buffered.length && dur) {
-                    const end = video.buffered.end(video.buffered.length - 1) + (transMode ? transStart : 0);
+                const end = _bufferedEnd(video) + (transMode ? transStart : 0);
+                if (dur && end > 0) {
                     buffered.style.width = Math.min(100, end / dur * 100) + '%';
                 }
             };
@@ -923,8 +935,8 @@
                 knobEl.style.left = pct + '%';
                 timeEl.textContent = fmt(audio.currentTime);
                 durEl.textContent = fmt(dur);
-                if (audio.buffered.length && dur) {
-                    const end = audio.buffered.end(audio.buffered.length - 1);
+                const end = _bufferedEnd(audio);
+                if (dur && end > 0) {
                     bufferedEl.style.width = Math.min(100, end / dur * 100) + '%';
                 }
             };

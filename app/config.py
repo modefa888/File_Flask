@@ -340,6 +340,12 @@ _PREVIEW_MAX_BYTES = 50 * 1024 * 1024         # 图片等预览上限 50MB
 _TEXT_PREVIEW_MAX_BYTES = 20 * 1024 * 1024    # 文本编辑预览上限 20MB（兼容 package-lock.json 等大文件）
 _STREAM_CHUNK_SIZE = 1024 * 1024              # 视频流分块 1MB
 _THUMBNAIL_MAX_BYTES = 500 * 1024             # 缩略图 500KB
+# 视频起播优化缓存目录：moov 在尾部的 mp4 做无损 faststart 重排；浏览器解不了的
+# 编码（HEVC/10bit 等）转成 H.264/AAC faststart mp4。缓存按源文件 mtime+size 失效。
+_PLAYBACK_CACHE_DIR = os.path.join(_DATA_ROOT, ".file_manager_playback")
+os.makedirs(_PLAYBACK_CACHE_DIR, exist_ok=True)
+_PLAYBACK_CACHE_MAX_BYTES = 20 * 1024 ** 3   # 缓存总量上限 20GB
+_PLAYBACK_CACHE_MAX_FILES = 40              # 缓存文件数上限
 
 # ===== 视频缩略图（ffmpeg）=====
 # 某些环境下 PATH 中的 ffmpeg 是精简裁剪版（如 IDE 自带的静态包，缺少图片编码器，

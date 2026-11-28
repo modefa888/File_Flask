@@ -11,6 +11,7 @@ import hashlib
 import tempfile
 import subprocess
 import threading
+import time
 from collections import OrderedDict
 import mimetypes
 
@@ -459,7 +460,15 @@ def get_video_cover(file_path):
 _DUR_MEM_MAX = 500
 _DUR_MEM = OrderedDict()
 _DUR_MEM_LOCK = threading.Lock()
-_DUR_SEM = threading.Semaphore(_VIDEO_THUMB_MAX_WORKER)   # 与抽帧共用并发上限
+# ffprobe 只读文件头，开销远小于 ffmpeg 抽帧；用独立且更宽的并发上限，
+# 避免目录里几十个视频卡片同时进来时大量请求在 3 秒内拿不到槽位直接失败。
+_VIDEO_DUR_MAX_WORKER = 8
+_DUR_SEM = threading.Semaphore(_VIDEO_DUR_MAX_WORKER)
+_DUR_WAIT_TIMEOUT = 30   # 排队等待上限（秒），仅用于兜底防止永久挂起
+# 探测失败负缓存：外置盘上部分文件 ffprobe 会跑满超时，如果不缓存失败结果，
+# 悬浮/滚动一次就重探一次，几十个 20 秒探测会把磁盘 I/O 吃光、拖慢视频起播。
+_DUR_FAIL = {}
+_DUR_FAIL_TTL = 300
 
 
 def get_video_duration(video_path):
@@ -470,7 +479,12 @@ def get_video_duration(video_path):
             if key in _DUR_MEM:
                 _DUR_MEM.move_to_end(key)
                 return _DUR_MEM[key]
-    if not _DUR_SEM.acquire(timeout=3):
+            fail_until = _DUR_FAIL.get(key)
+            if fail_until:
+                if fail_until > time.monotonic():
+                    return None
+                _DUR_FAIL.pop(key, None)
+    if not _DUR_SEM.acquire(timeout=_DUR_WAIT_TIMEOUT):
         return None
     try:
         cmd = [
@@ -479,22 +493,38 @@ def get_video_duration(video_path):
             "-of", "default=noprint_wrappers=1:nokey=1",
             video_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, timeout=10)
+        # 外置盘/大文件探测可能较慢，10 秒太短容易误判为失败；放宽到 20 秒。
+        result = subprocess.run(cmd, capture_output=True, timeout=20)
         if result.returncode != 0:
             dur = None
         else:
-            try:
-                dur = float(result.stdout.decode("utf-8", "ignore").strip())
-            except ValueError:
-                dur = None
+            dur = None
+            # 兼容多行输出与 "N/A"（无时长信息的容器）：取第一个合法数字。
+            for line in result.stdout.decode("utf-8", "ignore").splitlines():
+                line = line.strip()
+                if not line or line.lower() == "n/a":
+                    continue
+                try:
+                    dur = float(line)
+                    break
+                except ValueError:
+                    continue
     except (OSError, PermissionError, subprocess.TimeoutExpired, FileNotFoundError):
         dur = None
     finally:
         _DUR_SEM.release()
-    if key and dur is not None:
+    if key:
         with _DUR_MEM_LOCK:
-            _DUR_MEM[key] = dur
-            _DUR_MEM.move_to_end(key)
-            while len(_DUR_MEM) > _DUR_MEM_MAX:
-                _DUR_MEM.popitem(last=False)
+            if dur is None:
+                _DUR_FAIL[key] = time.monotonic() + _DUR_FAIL_TTL
+                if len(_DUR_FAIL) > _DUR_MEM_MAX * 2:
+                    now = time.monotonic()
+                    for k in [k for k, exp in _DUR_FAIL.items() if exp <= now]:
+                        _DUR_FAIL.pop(k, None)
+            else:
+                _DUR_FAIL.pop(key, None)
+                _DUR_MEM[key] = dur
+                _DUR_MEM.move_to_end(key)
+                while len(_DUR_MEM) > _DUR_MEM_MAX:
+                    _DUR_MEM.popitem(last=False)
     return dur

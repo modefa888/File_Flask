@@ -261,7 +261,8 @@
                             <div class="video-poster" data-abs="${_escapeHtml(absPath)}" style="background-image:url('/api/thumbnail?path=${encodeURIComponent(absPath)}');background-color:#0b0f14;">
                                 <div class="vpp-name">${_escapeHtml(absPath.split('/').pop() || '')}</div>
                             </div>
-                            <video autoplay playsinline preload="auto" style="width:100%;height:100%;">您的浏览器不支持视频播放</video>
+                            <canvas class="video-virtual-bg" aria-hidden="true"></canvas>
+                            <video autoplay playsinline preload="metadata" style="width:100%;height:100%;">您的浏览器不支持视频播放</video>
                             <div class="video-seek-tip" style="position:absolute;bottom:92px;left:50%;transform:translate(-50%,8px);background:rgba(0,0,0,0.72);color:#fff;padding:8px 16px;border-radius:8px;font-size:0.85rem;font-weight:600;z-index:20;pointer-events:none;opacity:0;transition:opacity .2s ease,transform .2s ease;display:flex;align-items:center;gap:6px;white-space:nowrap;"></div>
                             <button class="vp-panel-toggle" title="收起播放列表"><i class="bi bi-chevron-right"></i></button>
                             <div class="video-tip" style="position:absolute;bottom:72px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:#fff;padding:4px 10px;border-radius:6px;font-size:0.72rem;z-index:10;opacity:0;transition:opacity .3s ease;pointer-events:none;">
@@ -283,6 +284,7 @@
                                     </div>
                                     <span class="vpc-time">00:00 / 00:00</span>
                                     <div class="vpc-spacer"></div>
+                                    <span class="vpc-netspeed" title="实时加载速度 · 点击查看视频缓存并保存"><i class="bi bi-arrow-down-circle"></i> <span class="vpc-netspeed-val">--</span></span>
                                     <div class="vpc-speed">
                                         <button class="vpc-btn vpc-speed-btn" title="倍速播放"><span class="vpc-speed-cur">1.0x</span></button>
                                         <div class="vpc-speed-menu">
@@ -430,23 +432,100 @@
             const stage = body.querySelector('.video-stage');
             if (!video || !stage) return null;
 
+            // ===== 虚拟背景：把当前帧画到低分辨率 canvas，CSS 放大模糊后铺满两侧黑边 =====
+            // 只用一个 video 解码源，canvas 每 50ms 取一帧，画布宽度取舞台的 1/4，开销很小。
+            const bg = body.querySelector('.video-virtual-bg');
+            const bgCtx = bg ? bg.getContext('2d', { alpha: false }) : null;
+            let bgRaf = null, bgLast = 0, bgRO = null;
+            const resizeBg = () => {
+                if (!bg) return;
+                const w = Math.max(160, Math.floor(stage.clientWidth / 4));
+                const h = Math.max(90, Math.floor(stage.clientHeight / 4));
+                if (bg.width !== w || bg.height !== h) { bg.width = w; bg.height = h; }
+            };
+            const drawVirtualBg = ts => {
+                bgRaf = requestAnimationFrame(drawVirtualBg);
+                if (!bgCtx || !bg.width || !bg.height) return;
+                if (ts - bgLast < 50 || document.hidden || video.readyState < 2 || !video.videoWidth) return;
+                bgLast = ts;
+                const cw = bg.width, ch = bg.height;
+                const vr = video.videoWidth / video.videoHeight, cr = cw / ch;
+                let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
+                if (vr > cr) { sw = video.videoHeight * cr; sx = (video.videoWidth - sw) / 2; }
+                else { sh = video.videoWidth / cr; sy = (video.videoHeight - sh) / 2; }
+                try {
+                    bgCtx.drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch);
+                    stage.classList.add('has-virtual-bg');
+                    if (video.paused) stopVirtualBg();   // 暂停后画面不变，停掉循环省电
+                } catch (_) { /* 换源瞬间可能抛错，下一帧重试即可 */ }
+            };
+            const startVirtualBg = () => {
+                resizeBg();
+                if (!bgRaf) bgRaf = requestAnimationFrame(drawVirtualBg);
+            };
+            const stopVirtualBg = () => {
+                if (bgRaf) { cancelAnimationFrame(bgRaf); bgRaf = null; }
+            };
+            const resetVirtualBg = () => {
+                stage.classList.remove('has-virtual-bg');
+                if (bgCtx && bg.width) bgCtx.clearRect(0, 0, bg.width, bg.height);
+            };
+            if (bg) {
+                resizeBg();
+                if ('ResizeObserver' in window) { bgRO = new ResizeObserver(resizeBg); bgRO.observe(stage); }
+                video.addEventListener('loadeddata', startVirtualBg);
+                video.addEventListener('play', startVirtualBg);
+                video.addEventListener('pause', stopVirtualBg);
+                video.addEventListener('ended', stopVirtualBg);
+            }
+
             // ===== 播放源状态：直连（/api/stream，支持 Range）/ 转码（/api/stream_transcode，边转边播）=====
             let curPath = startPath || _vpCurrentVideo || '';
             let transMode = false;    // 当前是否使用转码流
             let transStart = 0;       // 转码流 -ss 起播偏移（currentTime 从 0 计，显示要加回）
             let transDur = 0;         // 视频真实总时长（fMP4 流拿不到 duration）
+            let cachePollTimer = null;
             const extOf = p => (String(p || '').split('.').pop() || '').toLowerCase();
             const streamUrlOf = p => '/api/stream?path=' + encodeURIComponent(p);
             const transUrlOf = (p, ss) => '/api/stream_transcode?path=' + encodeURIComponent(p) + '&ss=' + encodeURIComponent(String(ss || 0));
+            const infoUrlOf = p => '/api/video_playback_info?path=' + encodeURIComponent(p);
+            const stopCachePoll = () => { if (cachePollTimer) { clearInterval(cachePollTimer); cachePollTimer = null; } };
+            // 探测最多等 2.5 秒，超时就先按直连起播（后面还有 error 兜底），
+            // 绝不因为探测慢让用户对着黑屏干等。
+            const fetchInfo = p => new Promise(resolve => {
+                let done = false;
+                const timer = setTimeout(() => { if (!done) { done = true; resolve(null); } }, 2500);
+                fetch(infoUrlOf(p)).then(r => r.ok ? r.json() : null)
+                    .then(info => { if (!done) { done = true; clearTimeout(timer); resolve(info); } })
+                    .catch(() => { if (!done) { done = true; clearTimeout(timer); resolve(null); } });
+            });
 
             // 拉取真实总时长：转码流 duration 为 Infinity，进度条/拖拽都靠它换算
             const fetchTransDuration = p => {
                 fetch('/api/video_duration?path=' + encodeURIComponent(p))
-                    .then(r => r.json())
+                    .then(r => r.ok ? r.json() : null)
                     .then(d => {
                         if (d && d.duration && curPath === p) { transDur = d.duration; updateProgress(); }
                     })
                     .catch(() => { /* 拿不到时长时进度条退化为未知，不影响播放 */ });
+            };
+
+            // 后台转码缓存就绪后，自动从实时转码切回可拖动的直连流
+            const watchCacheReady = p => {
+                stopCachePoll();
+                let ticks = 0;
+                cachePollTimer = setInterval(() => {
+                    if (curPath !== p || !transMode || ++ticks > 120) { stopCachePoll(); return; }
+                    fetch(infoUrlOf(p)).then(r => r.ok ? r.json() : null)
+                        .then(info => {
+                            if (!info || !info.ready || curPath !== p || !transMode) return;
+                            const at = transStart + (video.currentTime || 0);
+                            stopCachePoll();
+                            loadSource(p, { autoplay: !video.paused, seekTo: at });
+                            if (showSeekTip) showSeekTip('已生成优化副本，现在可以直接播放和拖动了', 'bi-lightning-charge');
+                        })
+                        .catch(() => {});
+                }, 5000);
             };
 
             // 切换到转码流（ss 为绝对起播秒数）
@@ -455,6 +534,7 @@
                 transMode = true;
                 curPath = p;
                 transStart = Math.max(0, +ss || 0);
+                resetVirtualBg();
                 const rate = video.playbackRate || 1;   // load() 会把倍速重置为 1，换源后手动还原
                 video.src = transUrlOf(p, transStart);
                 video.load();
@@ -468,27 +548,54 @@
             };
 
             // 加载某个视频（初始化 / 播放列表切集共用）
+            // 先用轻量接口判断是否需要转码：需要且缓存未就绪就直接走转码流，
+            // 不再让浏览器对解不了的编码空等/黑屏；缓存就绪后则直连，起播快且可拖动。
             const loadSource = (p, opts) => {
                 opts = opts || {};
                 if (!p) return;
+                const token = p;
+                stopCachePoll();
                 curPath = p;
                 transMode = false;
                 transStart = 0;
                 transDur = 0;
+                resetVirtualBg();
+                const applySeek = () => {
+                    if (opts.seekTo == null) return;
+                    const go = () => { seekAbs(opts.seekTo); video.removeEventListener('loadedmetadata', go); };
+                    if (video.readyState >= 1) go();
+                    else video.addEventListener('loadedmetadata', go);
+                };
+                const directPlay = () => {
+                    video.src = streamUrlOf(token);
+                    video.load();
+                    if (opts.autoplay !== false) video.play().catch(() => {});
+                    updateProgress();
+                    applySeek();
+                };
                 if (_VP_TRANSCODE_FIRST.has(extOf(p))) {
                     startTranscode(p, 0, opts.autoplay !== false);
+                    watchCacheReady(p);
                     return;
                 }
-                video.src = streamUrlOf(p);
-                video.load();
-                if (opts.autoplay !== false) video.play().catch(() => {});
-                updateProgress();
+                fetchInfo(p)
+                    .then(info => {
+                        if (curPath !== token) return;
+                        if (info && info.need_transcode && !info.ready) {
+                            startTranscode(token, 0, opts.autoplay !== false);
+                            watchCacheReady(token);
+                        } else {
+                            directPlay();
+                        }
+                    })
+                    .catch(directPlay);
             };
 
             // 直连源解码失败 / 出不了画面 → 自动切转码
             const fallbackToTranscode = () => {
                 if (transMode) return;
                 startTranscode(curPath, 0, !video.paused);
+                watchCacheReady(curPath);
             };
             video.addEventListener('error', () => {
                 if (transMode) {
@@ -501,6 +608,7 @@
             const checkDecodable = () => {
                 if (transMode || video.readyState < 2 || video.videoWidth !== 0) return;
                 startTranscode(curPath, 0, !video.paused);
+                watchCacheReady(curPath);
             };
             video.addEventListener('loadeddata', checkDecodable);
             video.addEventListener('playing', checkDecodable);
@@ -548,6 +656,147 @@
             video.addEventListener('timeupdate', updateProgress);
             video.addEventListener('progress', updateProgress);
             video.addEventListener('loadedmetadata', updateProgress);
+
+            // ===== 实时加载速度 =====
+            // 浏览器不暴露 video 的网络速率，用「已缓冲时长的增长 × 文件平均码率」估算。
+            // 文件大小从左上角 .video-info（切集时会同步更新）解析，无需额外请求。
+            const netEl = $('.vpc-netspeed-val');
+            const infoEl = $('.video-info');
+            let netLastEnd = 0, netLastTs = 0, netSmooth = 0;
+            const parseSizeStr = str => {
+                const m = String(str || '').match(/([\d.]+)\s*(B|KB|MB|GB|TB)\b/i);
+                if (!m) return 0;
+                const mult = { b: 1, kb: 1024, mb: 1048576, gb: 1073741824, tb: 1099511627776 }[m[2].toLowerCase()] || 1;
+                return parseFloat(m[1]) * mult;
+            };
+            const resetNetSpeed = () => {
+                netLastEnd = _bufferedEnd(video);
+                netLastTs = performance.now();
+                netSmooth = 0;
+                if (netEl) netEl.textContent = '--';
+            };
+            const netTimer = setInterval(() => {
+                if (!netEl) return;
+                const dur = (transMode ? transDur : video.duration) || 0;
+                const bytes = parseSizeStr(infoEl && infoEl.textContent);
+                if (!bytes || !(dur > 0)) { netEl.textContent = '--'; return; }
+                const end = _bufferedEnd(video);
+                const now = performance.now();
+                if (end < netLastEnd - 0.5) { resetNetSpeed(); return; }  // 换源/拖动后缓冲回退，重置基准
+                const dt = (now - netLastTs) / 1000;
+                if (dt < 0.8) return;
+                const bps = Math.max(0, end - netLastEnd) / dt * (bytes / dur);
+                netSmooth = netSmooth ? netSmooth * 0.6 + bps * 0.4 : bps;  // 平滑阶梯式缓冲的跳变
+                netEl.textContent = netSmooth >= 1048576
+                    ? (netSmooth / 1048576).toFixed(1) + ' MB/s'
+                    : Math.round(netSmooth / 1024) + ' KB/s';
+                netLastEnd = end;
+                netLastTs = now;
+            }, 1000);
+            video.addEventListener('emptied', resetNetSpeed);
+            resetNetSpeed();
+
+            // ===== 视频缓存面板：显示已缓冲比例，并可把视频保存到本地 =====
+            const netSpeedEl = $('.vpc-netspeed');
+            let cachePanel = null, cacheTimer = null, cachePanelOpen = false;
+            const updateCachePanel = () => {
+                if (!cachePanel || !cachePanelOpen) return;
+                const dur = (transMode ? transDur : video.duration) || 0;
+                const end = _bufferedEnd(video) + (transMode ? transStart : 0);
+                const pct = dur > 0 ? Math.min(100, Math.max(0, end / dur * 100)) : 0;
+                cachePanel.querySelector('.vp-cache-fill').style.width = pct.toFixed(1) + '%';
+                cachePanel.querySelector('.vp-cache-pct').textContent = '已缓存 ' + Math.round(pct) + '%';
+                cachePanel.querySelector('.vp-cache-name').textContent = (curPath || '').split('/').pop() || '视频';
+                cachePanel.querySelector('.vp-cache-size').textContent = (infoEl && infoEl.textContent) || '';
+                cachePanel.querySelector('.vp-cache-dur').textContent = fmt(dur);
+            };
+            const closeCachePanel = () => {
+                cachePanelOpen = false;
+                if (cachePanel) cachePanel.classList.remove('open');
+                if (cacheTimer) { clearInterval(cacheTimer); cacheTimer = null; }
+            };
+            const saveVideo = async () => {
+                const btn = cachePanel && cachePanel.querySelector('.vp-cache-save');
+                if (!btn || btn.disabled) return;
+                btn.disabled = true;
+                try {
+                    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> 准备中…';
+                    // 用与起播相同的 bytes=0- 区间请求，尽量命中浏览器已缓存的分片；
+                    // 若服务端不支持该区间则回退为普通 GET。
+                    let resp = await fetch(streamUrlOf(curPath), { headers: { Range: 'bytes=0-' } });
+                    if (!resp.ok && resp.status !== 206) resp = await fetch(streamUrlOf(curPath));
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    const total = parseSizeStr(infoEl && infoEl.textContent) || Number(resp.headers.get('Content-Length')) || 0;
+                    const chunks = [];
+                    let received = 0;
+                    if (resp.body && resp.body.getReader) {
+                        const reader = resp.body.getReader();
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            chunks.push(value);
+                            received += value.length;
+                            if (total) btn.innerHTML = `<i class="bi bi-hourglass-split"></i> 保存中 ${Math.round(received / total * 100)}%`;
+                        }
+                    } else {
+                        const buf = await resp.arrayBuffer();
+                        chunks.push(buf);
+                    }
+                    const blob = new Blob(chunks, { type: resp.headers.get('Content-Type') || 'video/mp4' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = (curPath || 'video').split('/').pop();
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 60000);
+                    btn.innerHTML = '<i class="bi bi-check-circle"></i> 已开始保存';
+                } catch (err) {
+                    btn.innerHTML = '<i class="bi bi-exclamation-circle"></i> 保存失败';
+                } finally {
+                    btn.disabled = false;
+                    setTimeout(() => { if (!btn.disabled) btn.innerHTML = '<i class="bi bi-download"></i> 保存视频'; }, 2500);
+                }
+            };
+            // 点击面板外部关闭：用捕获阶段，避免播放列表/控制条内部的 stopPropagation 拦截。
+            // 点面板自身或速度文本不算「外部」（速度文本自身负责切换开关）。
+            const onCacheDocClick = e => {
+                if (!cachePanelOpen) return;
+                const t = e.target;
+                if (cachePanel && cachePanel.contains(t)) return;
+                if (netSpeedEl && netSpeedEl.contains(t)) return;
+                closeCachePanel();
+            };
+            document.addEventListener('click', onCacheDocClick, true);
+
+            if (netSpeedEl) {
+                netSpeedEl.addEventListener('click', e => {
+                    e.stopPropagation();
+                    if (cachePanelOpen) { closeCachePanel(); return; }
+                    if (!cachePanel) {
+                        cachePanel = document.createElement('div');
+                        cachePanel.className = 'vp-cache-panel';
+                        cachePanel.innerHTML = `
+                            <div class="vp-cache-title"><i class="bi bi-collection-play"></i> 视频缓存</div>
+                            <div class="vp-cache-name"></div>
+                            <div class="vp-cache-meta"><span class="vp-cache-size"></span><span class="vp-cache-dur"></span></div>
+                            <div class="vp-cache-track"><div class="vp-cache-fill"></div></div>
+                            <div class="vp-cache-pct">已缓存 0%</div>
+                            <button class="vp-cache-save"><i class="bi bi-download"></i> 保存视频</button>
+                            <div class="vp-cache-hint">保存时优先复用浏览器已缓存的数据，不重复下载</div>`;
+                        cachePanel.addEventListener('click', ev => ev.stopPropagation());
+                        cachePanel.querySelector('.vp-cache-save').addEventListener('click', saveVideo);
+                        stage.appendChild(cachePanel);
+                    }
+                    cachePanelOpen = true;
+                    cachePanel.classList.add('open');
+                    stage.classList.remove('idle');
+                    updateCachePanel();
+                    if (cacheTimer) clearInterval(cacheTimer);
+                    cacheTimer = setInterval(updateCachePanel, 500);
+                });
+            }
 
             // 定位到绝对秒数：转码流不支持 Range，只能带 -ss 重新起流
             const seekAbs = sec => {
@@ -687,6 +936,8 @@
                     if (r.width > 0 && r.height > 0) scale = Math.min(1, r.height / r.width);
                 }
                 video.style.transform = deg ? `rotate(${deg}deg) scale(${scale})` : '';
+                // 虚拟背景跟随旋转，但额外放大 1.14 倍遮住模糊边缘
+                if (bg) bg.style.transform = `${video.style.transform || ''} scale(1.14)`.trim();
             };
             rotateBtn.addEventListener('click', () => {
                 rotDeg += 90;
@@ -725,7 +976,7 @@
                 stage.classList.remove('idle');
                 clearTimeout(idleTimer);
                 idleTimer = setTimeout(() => {
-                    if (!video.paused && !speedWrap.classList.contains('open')) stage.classList.add('idle');
+                    if (!video.paused && !speedWrap.classList.contains('open') && !cachePanelOpen) stage.classList.add('idle');
                 }, 2500);
             };
             stage.addEventListener('mousemove', wake);
@@ -760,10 +1011,16 @@
 
             // 清理函数：解除本视频相关的全局监听（元素本身随 innerHTML 重建自动回收）
             return () => {
+                stopCachePoll();
+                stopVirtualBg();
+                if (bgRO) bgRO.disconnect();
                 document.removeEventListener('keydown', keyHandler, true);
                 document.removeEventListener('fullscreenchange', applyRotate);
                 window.removeEventListener('resize', applyRotate);
                 clearTimeout(idleTimer);
+                clearInterval(netTimer);
+                document.removeEventListener('click', onCacheDocClick, true);
+                closeCachePanel();
                 body._vpLoadVideo = null;
                 body._vpSeekTo = null;
                 body._vpSeekBy = null;
@@ -1455,19 +1712,32 @@
                 });
                 // 播完行为按播放模式处理：顺序=播下一个（末尾停止）、循环=原生 loop、随机=随机换一个
                 const video = document.querySelector('#previewContainer video');
-                // 封面延迟加载：等主视频可播放后再请求 /api/thumbnail，
-                // 避免 ffmpeg 抽帧与视频流抢占磁盘 I/O 拖慢起播
-                const loadThumbs = () => listEl.querySelectorAll('img[data-thumb]').forEach(img => {
+                // 封面与网格共用 /api/thumbnail（磁盘/浏览器两级缓存），没必要等主视频 canplay：
+                // 之前等缓冲导致网格封面早就好了、列表还在转圈。这里改为仅加载列表可见项，
+                // 未生成封面的视频也不会一次性发起几十个 ffmpeg 抽帧请求。
+                const loadThumb = img => {
+                    if (!img.dataset.thumb) return;
                     const wrap = img.closest('.vp-thumb-wrap');
                     const clearLoading = () => { const s = wrap && wrap.querySelector('.vp-thumb-loading'); if (s) s.remove(); };
                     img.onload = clearLoading;                       // 封面就绪，停掉加载动画
                     img.onerror = () => { clearLoading(); img.remove(); };  // 失败回落胶片图标
                     img.src = img.dataset.thumb;
                     img.removeAttribute('data-thumb');
-                });
+                };
+                const thumbImgs = listEl.querySelectorAll('img[data-thumb]');
+                if ('IntersectionObserver' in window) {
+                    const thumbIO = new IntersectionObserver(entries => {
+                        entries.forEach(en => {
+                            if (!en.isIntersecting) return;
+                            thumbIO.unobserve(en.target);
+                            loadThumb(en.target);
+                        });
+                    }, { root: listEl, rootMargin: '120px 0px', threshold: 0.01 });
+                    thumbImgs.forEach(img => thumbIO.observe(img));
+                } else {
+                    thumbImgs.forEach(loadThumb);
+                }
                 if (video) {
-                    if (video.readyState >= 3) loadThumbs();
-                    else video.addEventListener('canplay', loadThumbs, { once: true });
                     video.addEventListener('ended', () => {
                         if (_vpPlayMode === 'loop') return;
                         // 当前索引必须动态取：切换视频是原位换源，不会重建列表，

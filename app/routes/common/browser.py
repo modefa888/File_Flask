@@ -10,6 +10,7 @@ import mimetypes
 import base64
 
 from flask import Blueprint, request, jsonify, send_file, render_template, Response as FlaskResponse
+from werkzeug.wsgi import FileWrapper
 from urllib.parse import quote
 
 from ...config import (
@@ -17,7 +18,7 @@ from ...config import (
     _AUDIO_EXTS,
     _PREVIEW_MAX_BYTES, _TEXT_PREVIEW_MAX_BYTES,
     _THUMB_CACHE_DIR, _TEXT_FILENAMES, _DOTFILE_TEXT_STEMS, _STORAGE_DIR,
-    FFMPEG_BIN, FFPROBE_BIN,
+    _STREAM_CHUNK_SIZE, FFMPEG_BIN, FFPROBE_BIN,
 )
 from ...log import get_logger
 from ...services.common.filecore import (
@@ -30,6 +31,7 @@ from ...services.common.thumbnail import (
     _clear_disk_cache as _clear_thumb_cache, get_video_duration, get_video_cover,
 )
 from ...services.common.store_db import store_conn, store_tx, migrate_legacy_list
+from ...services.common import video_playback
 
 
 _log = get_logger()
@@ -2106,8 +2108,22 @@ def api_video_duration():
         return jsonify({"error": "不是音视频文件"}), 400
     dur = get_video_duration(target_path)
     if dur is None:
-        return jsonify({"error": "无法获取时长"}), 404
+        # 文件存在但 ffprobe 探测失败（超时/并发排队/编码异常）不是资源不存在。
+        # 用 200 + duration:null 表示"时长未知"，避免浏览器控制台误报 404。
+        return jsonify({"duration": None})
     return jsonify({"duration": round(dur, 1)})
+
+
+@bp.route("/api/video_playback_info")
+def api_video_playback_info():
+    """播放器起播前探测：是否需要服务端转码、优化副本是否已就绪。"""
+    target_path = _get_file_path_from_request(request)
+    if target_path is None:
+        return jsonify({"error": "文件不存在"}), 404
+    ext = os.path.splitext(target_path)[1].lower().lstrip(".")
+    if ext not in _VIDEO_EXTS and ext not in _AUDIO_EXTS:
+        return jsonify({"error": "不是音视频文件"}), 400
+    return jsonify(video_playback.playback_info(target_path))
 
 
 def _thumb_cache_stats():
@@ -2226,8 +2242,8 @@ def api_image():
 
 @bp.route("/api/stream")
 def api_stream():
-    _log.info("GET /api/stream")
     """音视频流式传输，支持 HTTP Range 请求（可暂停/拖进度/缓冲播放）"""
+    _log.info("GET /api/stream")
     target_path = _get_file_path_from_request(request)
     if target_path is None:
         return jsonify({"error": "文件不存在"}), 404
@@ -2238,19 +2254,25 @@ def api_stream():
         return jsonify({"error": "该文件类型不支持流式播放"}), 400
 
     try:
-        mime_type, _ = mimetypes.guess_type(target_path)
+        # 若后台已生成 faststart / H.264 兼容副本，直接发副本：起播更快且原生支持拖动。
+        serve_path = video_playback.best_playback_path(target_path)
+        mime_type, _ = mimetypes.guess_type(serve_path)
         if not mime_type:
             mime_type = (f"audio/{ext}" if is_audio else f"video/{ext}")
 
-        # conditional=True 由 Flask/Werkzeug 标准实现处理 Range 请求：
-        # 无 Range → 200 全量；"bytes=0-" / "100-200" / "-500"（后缀区间，探测
-        # mp4 片尾 moov 用）→ 206 正确分片；非法区间 → 416。
-        # 旧手写解析不认后缀区间，导致播放器拿不到片尾数据而反复重试。
-        resp = send_file(target_path, mimetype=mime_type, conditional=True)
+        # Werkzeug 默认用 8KB 分块读文件，大视频每秒要发上百次 read。
+        # 这里把本请求的文件包装器换成 1MB 分块，保持 conditional=True 的
+        # Range 语义（含后缀区间 bytes=-N）不变，但显著减少系统调用开销。
+        request.environ["wsgi.file_wrapper"] = (
+            lambda f, buffer_size=8192: FileWrapper(f, buffer_size=_STREAM_CHUNK_SIZE)
+        )
+        resp = send_file(serve_path, mimetype=mime_type, conditional=True)
         resp.headers["Accept-Ranges"] = "bytes"
         # 允许浏览器缓存 Range 分片（同视频二次打开/回拖时命中本地缓存），
         # 减少重复 206 请求，起播更快
         resp.headers["Cache-Control"] = "public, max-age=86400"
+        if serve_path != target_path:
+            resp.headers["X-Playback-Cache"] = "1"
         return resp
 
     except (OSError, PermissionError) as e:
@@ -2298,6 +2320,10 @@ def api_stream_transcode():
     if ss is None:
         return jsonify({"error": "ss 参数非法"}), 400
 
+    # 本次用实时转码起播；同时在后台生成一份完整 H.264/faststart 缓存，
+    # 下次打开同一文件即可直接走 /api/stream（支持 Range、无需再转码）。
+    video_playback.request_optimize_async(target_path)
+
     has_audio, audio_codec = _probe_audio_codec(target_path)
     # 浏览器对 MP4 里的音频兼容性：aac / mp3 可直接透传；其它需要转码成 aac
     if not has_audio:
@@ -2339,8 +2365,6 @@ def api_stream_transcode():
                         stderr_chunks.append(chunk)
                 except Exception:
                     pass
-                finally:
-                    stderr_closed.set()
 
             stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
             stderr_thread.start()
